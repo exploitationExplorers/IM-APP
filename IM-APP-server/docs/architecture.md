@@ -1,0 +1,94 @@
+# IM 系统架构
+
+本文档描述正式环境技术栈与组件职责，依据项目根目录 `技术.png`。
+
+## 技术栈总览
+
+| 组件 | 技术 | 职责 |
+|---|---|---|
+| 移动端 | uni-app Vue3 | Android / iOS 客户端 |
+| 业务 API | Go + Gin | 用户、好友、群组、风控、文件元数据、OpenIM 桥接 |
+| 业务数据库 | PostgreSQL | 账号、好友关系、群元数据、申请/拉黑 |
+| IM 引擎 | OpenIM 私有化 | 单聊/群聊、消息同步、已读、离线（Phase 4） |
+| 消息存储 | MongoDB | OpenIM 消息数据（随 OpenIM 部署） |
+| 缓存 | Redis | 验证码限流、Session、在线状态（Phase 3） |
+| 对象存储 | MinIO / S3 | 图片、语音、文件（Phase 3） |
+| 消息队列 | Kafka | 异步群发、推送任务（Phase 5） |
+| 服务协调 | Etcd | 服务发现与配置（生产部署期） |
+
+**管理后台**（React + shadcn/ui）暂不纳入当前迭代。
+
+## 架构图
+
+```
+┌─────────────────┐     REST/JWT      ┌──────────────────┐
+│  uni-app 客户端  │ ───────────────▶ │  Go 业务服务      │
+│  IM-APP-fronend │                   │  IM-APP-server   │
+└────────┬────────┘                   └────────┬─────────┘
+         │                                     │
+         │ OpenIM SDK / WS (Phase 4)           ├── PostgreSQL（业务）
+         ▼                                     ├── Redis（缓存）
+┌─────────────────┐                            ├── MinIO（文件）
+│  OpenIM 集群     │ ◀── 用户/群同步 ───────────┘
+└────────┬────────┘
+         ├── MongoDB（消息）
+         └── Kafka（异步）
+```
+
+## 职责边界
+
+### Go 业务服务（IM-APP-server）
+
+- 多国手机号注册登录、JWT 签发
+- 用户资料、公开 ID、二维码
+- 好友申请、拉黑、通讯录
+- 群组元数据、成员关系、群设置（禁加好友等）
+- 文件上传预签名（MinIO）
+- OpenIM Token 签发与用户/群同步（Phase 4）
+- 群发任务调度入口（Phase 5，投递 Kafka）
+
+### OpenIM（Phase 4 接入）
+
+- 消息收发、历史消息、会话列表
+- 已读回执、离线消息、在线状态
+- 群聊消息与 @ 提醒
+
+### 当前阶段（Phase 1–2）
+
+- 消息暂由 Go 自研 REST + WebSocket + PostgreSQL `messages` 表承担
+- Phase 4 接入 OpenIM 后，消息层迁移，业务库保留关系与元数据
+
+## 代码分层（Go）
+
+```
+cmd/server/main.go          # 路由注册、依赖注入
+internal/
+  handler/                  # HTTP 入参校验
+  service/                  # 业务逻辑
+  repository/               # PostgreSQL 访问
+  im/                       # Phase 4: OpenIM 客户端
+  infra/                    # Phase 3+: redis, minio, kafka
+  ws/                       # 过渡态 WS（Phase 4 后弱化）
+```
+
+## 前端架构
+
+- Mock 优先：`VITE_USE_MOCK=true`，内存 Mock 与 Go API 共用契约
+- API 层：`src/api/*`，禁止页面内直接 `uni.request`
+- 状态：Pinia Setup Store
+- 规范：见仓库 `.cursor/rules/im-uniapp.mdc`
+
+## 演进阶段
+
+| 阶段 | 内容 |
+|---|---|
+| Phase 1 | 认证、资料、好友、基础单聊（已完成） |
+| Phase 2 | 建群、加群、群设置、群聊 |
+| Phase 3 | Redis + MinIO、验证码限流、文件上传 |
+| Phase 4 | OpenIM 部署、Go 桥接、前端 SDK |
+| Phase 5 | Kafka 群发、真实短信、离线推送 |
+
+## 相关文档
+
+- [api-contract.md](./api-contract.md) — REST API 契约
+- [../README.md](../README.md) — 本地启动说明

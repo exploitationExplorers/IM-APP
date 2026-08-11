@@ -1,0 +1,144 @@
+---
+description: IM 业务服务开发规范（IM-APP-server，Go + Gin + PostgreSQL）
+globs: IM-APP-server/**/*
+alwaysApply: false
+---
+
+# IM 业务服务规范 — IM-APP-server
+
+Go + Gin 是**正式业务后端**，不是联调替身。module 名 `im-app-server`，导入前缀 `im-app-server/internal/...`。
+
+## 技术栈现状
+
+Go 1.25 + Gin 1.10 + pgx/v5（原生 SQL，**无 ORM**）+ go-redis + minio-go + golang-jwt/v5 + gorilla/websocket。
+
+**当前没有**：GORM / sqlx、viper、zap / logrus、Kafka 客户端库、OpenIM Go SDK、任何测试框架。
+不要为实现某个需求顺手引入以上依赖；确需引入（如 Kafka 真实生产者）先确认。
+
+| 用途 | 命令 |
+|---|---|
+| 编译（改完必跑） | `go build ./...` |
+| 静态检查 | `go vet ./...` |
+| 启动 | `go run ./cmd/server` |
+
+## 分层职责
+
+```
+cmd/server/main.go   路由注册 + 依赖装配（唯一 wiring 处）
+internal/handler     HTTP 入参绑定、错误映射、响应
+internal/service     业务逻辑与权限判定
+internal/repository  PostgreSQL 访问
+internal/middleware  JWT 鉴权
+internal/response    统一响应体
+internal/im          OpenIM REST 桥接
+internal/infra       redis / minio / kafka
+internal/ws          过渡态 WebSocket Hub（Phase 4 后弱化）
+internal/models      数据结构
+```
+
+硬约束：
+
+- handler **不得**写 SQL、不得包含业务分支，只做绑定 + 调 service + 映射错误。
+- service **不得**依赖 `*gin.Context`，签名统一 `(ctx context.Context, ...)`。
+- repository 只做 SQL 与扫描，不做权限判断、不返回业务语义错误。
+- 跨层调用不得跳级：handler 不直连 repository。
+
+## 依赖注入
+
+在 `cmd/server/main.go` 手动装配，Repo / Service / Handler 用 struct 字段注入：
+
+```go
+userRepo := &repository.UserRepo{DB: pool}
+userSvc := &service.UserService{Users: userRepo}
+userH := &handler.UserHandler{Svc: userSvc}
+```
+
+- 禁止包级全局变量持有 DB / Redis / 配置，禁止在 `init()` 里做有副作用的初始化。
+- 基础设施类保留 `New*` 构造函数（`im.NewClient`、`infra.NewRedis` 等）。
+
+## 错误处理
+
+- service 层定义包级 sentinel error：`var ErrNotFound = errors.New("not found")`，业务语义用 error 表达，不返回 HTTP 概念。
+- handler 用 `errors.Is` 映射到 HTTP 状态码 + 中文 message：
+
+```go
+switch {
+case errors.Is(err, service.ErrForbidden):
+    response.Fail(c, http.StatusForbidden, "无权限操作")
+case errors.Is(err, service.ErrNotFound):
+    response.Fail(c, http.StatusNotFound, "记录不存在")
+}
+```
+
+- 禁止忽略 error（`_ = err`）；禁止用 panic 表达业务失败。
+
+## 统一响应
+
+- 一律经 `internal/response`，**禁止** handler 里裸写 `c.JSON`。
+- 响应体固定 `{ code, message, data }`；`code` 只有 `0`（成功）/ `1`（失败），语义由 HTTP 状态码承担：400 参数错、401 未登录、403 无权限、404 不存在、409 冲突、429 限流、500 内部错误。
+- `message` 用简体中文且面向用户，不回显 SQL、堆栈或内部字段名。
+
+## 鉴权与权限
+
+- 需登录的路由必须挂在 `api.Group("")` + `middleware.AuthRequired(cfg.JWTSecret)` 的子组内。
+- 当前用户一律取 `middleware.UserID(c)`，**禁止**从请求体 / query 读取 userId 作为身份。
+- 资源归属与角色校验（群主 / 管理员 / 成员）必须在 service 层判定，客户端隐藏入口不算校验。
+- 涉及群权限的接口都要先查成员身份，再执行动作。
+
+## 数据库
+
+- 只用 pgx 原生 SQL + `$1` 占位符，**禁止**字符串拼接 SQL，禁止引入 ORM。
+- 新增 / 变更表结构必须写迁移：`migrations/{三位序号}_{描述}.sql`（如 `005_xxx.sql`），启动时按文件名排序自动执行。
+- **已提交的迁移文件不得修改**，只能追加新文件；迁移需可重复执行（`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`）。
+- 多表写入必须开事务；查询列表接口必须有分页与上限，禁止无 `LIMIT` 的全表扫描。
+- 外部输入进 SQL 前必须校验长度与取值范围。
+
+## 配置
+
+- 配置只从环境变量读，统一在 `internal/config/config.go` 的 `Load()` 里声明并给默认值。
+- 新增配置项必须同时更新 `config.go`、`.env.example`、README（如影响启动）。
+- 禁止在代码中硬编码密钥、token、数据库口令；`.env` 不提交。
+
+## 基础设施降级
+
+Redis / MinIO / Kafka / OpenIM 未配置时必须走 dev stub 而不是启动失败或 panic：
+
+- stub 日志统一加前缀：`[kafka-dev]`、`[sms-dev]`、`[push-dev]`。
+- 新增外部依赖时同步实现 `Available()` 判断与降级分支。
+- 日志用标准库 `log`；HTTP 访问日志由 `gin.Default()` 提供，不再自建。
+
+## OpenIM 集成
+
+- 只经 `internal/im/client.go` 的 REST 桥接调用，不引入 OpenIM SDK。
+- `OPENIM_API_URL` 为空时返回 dev 占位 token，不得报错中断登录流程。
+- 用户 / 群创建变更需在 service 层调用 `SyncUser` 等同步方法，保持 OpenIM 侧一致。
+- `internal/ws` 是 Phase 1–2 过渡实现，**不要在其上扩展新消息特性**；新消息能力按 architecture.md 的 Phase 4 走 OpenIM。
+
+## 群发 / 转发（9999+）
+
+需求要求单次至少 10000 名接收人，该模块必须：
+
+- 接口只创建任务并立即返回 taskId，**禁止**在请求内同步循环发送。
+- 任务落库（`forward_tasks` 等表），投递 Kafka 异步执行，分批处理并记录成功 / 失败数。
+- 幂等：同一用户 + 同一内容 + 短时间窗内重复提交必须复用原任务，不得产生重复消息。
+- 发送前过滤已删除、被拉黑、封禁、关系失效的接收人；每个有效接收人只投一次。
+- 对单用户的群发频次做限流（Redis 计数），并留可查询的任务状态与失败原因。
+
+## 安全红线
+
+- 手机号返回前必须经 `repository.PublicUser()` 之类的脱敏，普通用户接口不得返回完整手机号、密码哈希、内部状态字段。
+- 密码只存 bcrypt 哈希；验证码必须有过期时间与错误次数上限，用后即失效；发送频次限流走 Redis（按手机号 + IP + 国家维度）。
+- 文件一律走 MinIO 预签名，不经业务服务转发文件字节流。
+- 不可按手机号搜索用户 —— 相关查询接口不得接受手机号作为检索条件。
+
+## 接口契约
+
+- 新增或修改接口必须同步 [api-contract.md](../../IM-APP-server/docs/api-contract.md)，格式保持一致：`### METHOD /path` + 是否需 JWT + Body / Response JSON 示例。
+- 路由前缀固定 `/api/v1`；路径用小写复数 kebab-case（`/forward-tasks`）；JSON 字段用 camelCase。
+- 变更已有字段属于破坏性改动，需先确认前端同步。
+
+## 代码组织
+
+- 一个业务域一个文件；单文件超过约 400 行或塞入第三个 Handler 时拆分（现有 `handler/user.go` 含多个 Handler，属待拆历史遗留，新域不要跟随）。
+- 导出类型和方法写一行中文注释说明用途；私有辅助函数不强制。
+- 当前无测试基线，不要为凑覆盖率写空测试；如需为群发幂等、权限判定等关键逻辑补测试，先确认。

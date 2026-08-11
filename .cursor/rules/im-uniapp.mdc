@@ -1,0 +1,138 @@
+---
+description: IM 客户端开发规范（IM-APP-fronend，uni-app + Vue 3 + TS）
+globs: IM-APP-fronend/**/*
+alwaysApply: false
+---
+
+# IM 客户端规范 — IM-APP-fronend
+
+## 技术栈现状
+
+uni-app 3.0 + Vue 3.4 + TypeScript（strict）+ Vite 5 + Pinia 2 + Sass。
+
+**当前没有**：UI 组件库、UnoCSS、ESLint / Prettier、Pinia 持久化插件、OpenIM SDK。
+不要为了实现某个需求顺手引入以上依赖，需要时先确认。
+
+| 用途 | 命令 |
+|---|---|
+| 本地开发 | `npm run dev:h5` |
+| 类型检查（改完必跑） | `npm run type-check` |
+
+## 数据流分层
+
+```
+pages / components  →  stores  →  api  →  utils/request  →  Go API
+                                    └→  mock/handlers    →  mock/store
+```
+
+- **禁止**在 `pages/` 或 `components/` 内直接调用 `uni.request`，一律经 `src/api/*`。
+- 页面只做编排与展示；跨页面共享的状态放 store，单页复杂逻辑抽 `composables/useXxx.ts`。
+- `api/` 不写业务判断，只做请求与 Mock 分支；`stores/` 不直接拼 URL。
+
+## 目录约定
+
+```
+src/
+  api/          # 按业务域拆分，每个函数 Mock/Real 双分支
+  stores/       # Pinia Setup Store：user / chat / contact / group
+  composables/  # 可复用逻辑，useXxx.ts
+  components/   # 通用组件，业务组件用 Im 前缀
+  pages/        # 路由页面，与 pages.json 一一对应
+  types/        # 按域拆分，禁止一个大 index 承载全部类型
+  utils/        # request / websocket / openim / format
+  mock/         # seed（静态数据）+ store（内存态）+ handlers（行为）
+  styles/       # common.scss / auth.scss
+  config.ts     # 环境变量统一出口，禁止组件内读 import.meta.env
+```
+
+## Vue 与 TypeScript
+
+- 一律 `<script setup lang="ts">`，禁止 Options API 与 `defineComponent`。
+- SFC 顺序：`<script>` → `<template>` → `<style scoped lang="scss">`。
+- 类型导入必须 `import type`（tsconfig 开启 `importsNotUsedAsValues: error`）。
+- 路径一律用别名 `@/`，禁止 `../../` 跨层相对路径。
+- 禁止 `any` 与 `as any`；对象形状放 `types/`，接口返回类型必须与 api-contract 对齐。
+- props 用 `defineProps<T>()` 泛型声明，事件用 `defineEmits<T>()`。
+- 生命周期用 `@dcloudio/uni-app` 导出的 `onShow` / `onLoad`，不要混用 Vue 的 `onMounted` 做页面级时机判断。
+- 详细写法参考 `.agents/skills/vue-best-practices/`、`.agents/skills/pinia/`。
+
+## Pinia
+
+- 只用 Setup Store：`defineStore('name', () => { ... return {...} })`。
+- 页面解构状态必须 `storeToRefs()`；action 可直接解构。
+- store 内不做页面跳转以外的 UI 操作（`showToast` 留给页面）。
+- 只有 token 持久化（`utils/request.ts` 写 `im_token`）；其余状态内存态，靠 `bootstrap()` / `onShow` 重新拉取。
+
+## 请求与鉴权
+
+- 统一走 [request.ts](../../IM-APP-fronend/src/utils/request.ts)。`request<T>()` **已解包 `data`**，直接拿业务对象；失败以 `throw Error(message)` 表达，调用方用 `try/catch`。
+- Token：`uni.setStorageSync('im_token')`，请求头 `Authorization: Bearer`；401 由 `request` 统一清 token 并 `reLaunch` 登录页，业务代码不要重复处理 401。
+- 登录 / 注册 / 短信类接口显式传 `auth: false`。
+- 需登录的页面首行调用 `useAuthGuard()`。
+
+新增接口按此模式写：
+
+```typescript
+export async function fetchProfile(): Promise<UserInfo> {
+  if (APP_CONFIG.useMock) return mockFetchProfile()
+  return request<UserInfo>({ url: '/me', method: 'GET' })
+}
+```
+
+## Mock 模式
+
+- 开关：`.env` 的 `VITE_USE_MOCK`，只有显式 `'true'` 才走 Mock；代码里统一读 `APP_CONFIG.useMock`。
+- Mock 是纯内存（`mock/store.ts`），刷新即重置；改数据用 `mutateMockState()`。
+- **Mock 行为必须与 Go 后端一致**：字段名、校验顺序、错误文案、失败分支都要对齐 api-contract，不允许 Mock 通过而真实接口失败。
+- 实时消息：Mock 用 `mock/ws.ts` 的 `mockWs`，真实用 `utils/websocket.ts` 的 `wsClient`；两条路径都要实现，不能只做一边。
+
+## WebSocket
+
+- 只用 `wsClient` 单例（心跳 25s、断线 3s 重连），禁止页面内 `uni.connectSocket`。
+- `wsClient.on()` 返回取消函数，**必须**在 `onUnmounted` / `onUnload` 调用，否则重复订阅导致消息重复渲染。
+- 消息协议固定 `{ event: string, data: unknown }`。
+- `utils/openim.ts` 是 Phase 4 占位，未接入 SDK 前不要在业务代码里依赖它。
+
+## 大列表与 9999+ 群发
+
+对应需求「单次可选至少 10000 名好友」，好友选择与转发相关页面：
+
+- 必须分页 / 分片加载或虚拟列表，禁止一次性 `v-for` 渲染全量好友。
+- 选中态用 `Set<string>` 或 id Map，禁止数组 `includes` 判断选中。
+- 「全选」只提交筛选条件或 id 集合，不要把上万条完整对象塞进请求体或 store。
+- 提交后进入任务态页面（进度、成功 / 失败数），禁止在前端循环逐个调用发送接口。
+- 提交按钮必须防重复点击并做二次确认。
+
+## 样式
+
+- 尺寸用 **rpx**；新代码颜色取 `uni.scss` / `styles/common.scss` 的变量，不再新增硬编码色值。
+- 主色 `#2b5cff`，页面底色 `#f5f6f8`，正文 `#1a1a1a`。
+- 组件样式一律 `scoped`；全局样式只放 `styles/common.scss`。
+- 平台差异用条件编译 `#ifdef APP-PLUS` / `#ifdef H5`。
+- 组件命名：业务组件 `ImXxx`（如 `ImCountryPicker`）；已有 `AppSearchBar` 等历史命名保持不动。
+
+## 加载与反馈
+
+- 列表 / 首屏：区分「加载中 / 空态 / 失败可重试」三态，空态用 `EmptyState`。
+- 短操作（提交、发送）：`uni.showLoading` + `finally` 里 `hideLoading`。
+- 错误提示用后端返回的 `message`，不要吞掉异常只打 `console.log`。
+
+## 业务域速查
+
+| 模块 | 页面 | store | api |
+|---|---|---|---|
+| 认证 | `pages/auth/` | `stores/user` | `api/auth` |
+| 会话 / 聊天 | `pages/chat/` | `stores/chat` | `api/chat` |
+| 通讯录 / 好友 | `pages/contacts/` | `stores/contact` | `api/contact` |
+| 群组 | `pages/group/` | `stores/group` | `api/group` |
+| 我的 / 资料 | `pages/mine/` | `stores/user` | `api/user` |
+| 文件 / 转发 | — | — | `api/file`、`api/forward` |
+
+## 改完必验
+
+```bash
+cd IM-APP-fronend
+npm run type-check
+```
+
+类型检查不通过不算完成。新增页面必须同步注册到 `pages.json`。

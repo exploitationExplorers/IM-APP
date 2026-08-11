@@ -1,0 +1,74 @@
+# OpenIM 私有化部署（Phase 4）
+# 启动：docker compose -f deploy/openim/docker-compose.yml up -d
+# 配置 Go 服务环境变量：OPENIM_API_URL=http://127.0.0.1:10002
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: im-openim-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - openim_mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: im-openim-redis
+    ports:
+      - "6380:6379"
+
+  etcd:
+    image: bitnami/etcd:3.5
+    container_name: im-openim-etcd
+    environment:
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+    ports:
+      - "2379:2379"
+
+  kafka:
+    image: bitnami/kafka:3.6
+    container_name: im-openim-kafka
+    environment:
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_LISTENERS_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:9092
+    ports:
+      - "9092:9092"
+
+  minio:
+    image: minio/minio:latest
+    container_name: im-openim-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    volumes:
+      - openim_minio_data:/data
+
+  # OpenIM 核心服务镜像版本请按官方文档锁定；此处为占位，便于后续替换
+  openim-api:
+    image: openim/openim-server:latest
+    container_name: im-openim-api
+    depends_on:
+      - mongodb
+      - redis
+      - etcd
+      - kafka
+      - minio
+    ports:
+      - "10002:10002"
+    environment:
+      OPENIM_API_PORT: "10002"
+    restart: unless-stopped
+
+volumes:
+  openim_mongo_data:
+  openim_minio_data:

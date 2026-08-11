@@ -1,0 +1,187 @@
+{
+  "pages": [
+    {
+      "path": "pages/auth/sign-in",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "登录"
+      }
+    },
+    {
+      "path": "pages/auth/sign-up",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "注册"
+      }
+    },
+    {
+      "path": "pages/auth/forgot-password",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "忘记密码"
+      }
+    },
+    {
+      "path": "pages/auth/agreement",
+      "style": {
+        "navigationBarTitleText": "用户协议"
+      }
+    },
+    {
+      "path": "pages/auth/privacy",
+      "style": {
+        "navigationBarTitleText": "隐私权政策"
+      }
+    },
+    {
+      "path": "pages/contacts/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "通讯录"
+      }
+    },
+    {
+      "path": "pages/chat/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "聊天"
+      }
+    },
+    {
+      "path": "pages/mine/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "我的"
+      }
+    },
+    {
+      "path": "pages/chat/room",
+      "style": {
+        "navigationBarTitleText": "聊天",
+        "navigationBarBackgroundColor": "#FFFFFF"
+      }
+    },
+    {
+      "path": "pages/contacts/new-friends",
+      "style": {
+        "navigationBarTitleText": "新的朋友"
+      }
+    },
+    {
+      "path": "pages/contacts/add-friend",
+      "style": {
+        "navigationBarTitleText": "添加朋友"
+      }
+    },
+    {
+      "path": "pages/contacts/user-profile",
+      "style": {
+        "navigationBarTitleText": "用户资料"
+      }
+    },
+    {
+      "path": "pages/contacts/tags",
+      "style": {
+        "navigationBarTitleText": "标签"
+      }
+    },
+    {
+      "path": "pages/contacts/groups",
+      "style": {
+        "navigationBarTitleText": "群聊天"
+      }
+    },
+    {
+      "path": "pages/group/create",
+      "style": {
+        "navigationBarTitleText": "创建群聊"
+      }
+    },
+    {
+      "path": "pages/group/detail",
+      "style": {
+        "navigationBarTitleText": "群资料"
+      }
+    },
+    {
+      "path": "pages/mine/profile",
+      "style": {
+        "navigationBarTitleText": "编辑资料"
+      }
+    },
+    {
+      "path": "pages/mine/qrcode",
+      "style": {
+        "navigationBarTitleText": "我的二维码"
+      }
+    },
+    {
+      "path": "pages/mine/favorites",
+      "style": {
+        "navigationBarTitleText": "我的收藏"
+      }
+    },
+    {
+      "path": "pages/mine/notifications",
+      "style": {
+        "navigationBarTitleText": "通知设置"
+      }
+    },
+    {
+      "path": "pages/mine/chat-settings",
+      "style": {
+        "navigationBarTitleText": "聊天设置"
+      }
+    },
+    {
+      "path": "pages/mine/privacy",
+      "style": {
+        "navigationBarTitleText": "隐私"
+      }
+    },
+    {
+      "path": "pages/mine/security",
+      "style": {
+        "navigationBarTitleText": "安全"
+      }
+    },
+    {
+      "path": "pages/mine/general",
+      "style": {
+        "navigationBarTitleText": "通用"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "Chat",
+    "navigationBarBackgroundColor": "#FFFFFF",
+    "backgroundColor": "#F5F6F8"
+  },
+  "tabBar": {
+    "color": "#999999",
+    "selectedColor": "#2B5CFF",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/contacts/index",
+        "text": "通讯录",
+        "iconPath": "static/tab/contacts.png",
+        "selectedIconPath": "static/tab/contacts-active.png"
+      },
+      {
+        "pagePath": "pages/chat/index",
+        "text": "聊天",
+        "iconPath": "static/tab/chat.png",
+        "selectedIconPath": "static/tab/chat-active.png"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的",
+        "iconPath": "static/tab/mine.png",
+        "selectedIconPath": "static/tab/mine-active.png"
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+# 依赖
+.DS_Store
+.env
+bin/
+tmp/
+*.exe

@@ -1,0 +1,21 @@
+/* 全局主题覆盖 */
+$uni-color-primary: #2b5cff;
+$uni-color-error: #e54d42;
+$uni-bg-color-grey: #f5f6f8;
+$uni-text-color: #1a1a1a;
+$uni-text-color-grey: #999999;
+$uni-border-color: #eeeeee;
+
+page {
+  background-color: #f5f6f8;
+  color: #1a1a1a;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue',
+    'Microsoft YaHei', sans-serif;
+  font-size: 28rpx;
+  box-sizing: border-box;
+}
+
+.safe-bottom {
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
