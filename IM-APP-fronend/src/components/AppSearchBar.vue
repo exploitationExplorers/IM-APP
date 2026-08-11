@@ -7,6 +7,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', v: string): void
   (e: 'confirm', v: string): void
+  (e: 'click'): void
 }>()
 
 function onInput(e: Event) {
@@ -21,7 +22,7 @@ function onConfirm(e: Event) {
 </script>
 
 <template>
-  <view class="search-bar">
+  <view class="search-bar" @click="emit('click')">
     <text class="search-icon">⌕</text>
     <input
       class="search-input"
@@ -40,26 +41,26 @@ function onConfirm(e: Event) {
 .search-bar {
   display: flex;
   align-items: center;
-  background: #f2f2f2;
-  border-radius: 16rpx;
+  background: #f3f4f7;
+  border-radius: 999rpx;
   height: 72rpx;
-  padding: 0 24rpx;
-  margin: 0 24rpx 16rpx;
+  padding: 0 28rpx;
+  margin: 0 28rpx 8rpx;
 }
 
 .search-icon {
-  color: #999;
-  font-size: 32rpx;
+  color: #8a8f9c;
+  font-size: 30rpx;
   margin-right: 12rpx;
 }
 
 .search-input {
   flex: 1;
   font-size: 28rpx;
-  color: #333;
+  color: #212121;
 }
 
 .search-placeholder {
-  color: #999;
+  color: #8a8f9c;
 }
 </style>

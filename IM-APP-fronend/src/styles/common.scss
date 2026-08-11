@@ -1,16 +1,29 @@
-/* 全局主题覆盖 */
-$uni-color-primary: #2b5cff;
+/* 对齐参考站移动端主题 https://qwa.11skrmx6.net */
+
+$uni-color-primary: #0a2fc2;
 $uni-color-error: #e54d42;
 $uni-bg-color-grey: #f5f6f8;
-$uni-text-color: #1a1a1a;
-$uni-text-color-grey: #999999;
+$uni-text-color: #212121;
+$uni-text-color-grey: #8a8f9c;
 $uni-border-color: #eeeeee;
 
+$im-primary: #0a2fc2;
+$im-primary-soft: #3b5bdb;
+$im-bg: #f5f6f8;
+$im-surface: #ffffff;
+$im-text: #212121;
+$im-text-secondary: #636e86;
+$im-text-tertiary: #8a8f9c;
+$im-divider: #f0f1f4;
+$im-search-bg: #f3f4f7;
+$im-danger: #e54d42;
+$im-hero: #4a5568;
+
 page {
-  background-color: #f5f6f8;
-  color: #1a1a1a;
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue',
-    'Microsoft YaHei', sans-serif;
+  background-color: $im-bg;
+  color: $im-text;
+  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Helvetica Neue', 'Microsoft YaHei', sans-serif;
   font-size: 28rpx;
   box-sizing: border-box;
 }
@@ -18,4 +31,65 @@ page {
 .safe-bottom {
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 通用列表行 */
+.im-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 104rpx;
+  padding: 28rpx 32rpx;
+  background: $im-surface;
+  box-sizing: border-box;
+}
+
+.im-cell-label {
+  font-size: 30rpx;
+  color: $im-text;
+  line-height: 1.4;
+}
+
+.im-cell-value {
+  font-size: 28rpx;
+  color: $im-text-secondary;
+}
+
+.im-cell-arrow {
+  color: #c8ccd6;
+  font-size: 32rpx;
+  margin-left: 8rpx;
+}
+
+.im-section-title {
+  padding: 24rpx 32rpx 12rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: $im-text;
+}
+
+.im-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 28rpx 16rpx;
+  background: $im-surface;
+}
+
+.im-page-title {
+  font-size: 44rpx;
+  font-weight: 700;
+  color: $im-text;
+  line-height: 1.2;
+}
+
+.im-icon-btn {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 44rpx;
+  color: $im-text;
+  line-height: 1;
 }

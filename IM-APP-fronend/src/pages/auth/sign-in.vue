@@ -131,7 +131,7 @@ function goForgot() {
             <view class="auth-eye-btn" @click="showPassword = !showPassword">
               <image
                 class="auth-eye-icon"
-                :src="showPassword ? '/static/auth/icon-eye.png' : '/static/auth/icon-eye-off.png'"
+                :src="showPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
                 mode="aspectFit"
               />
             </view>

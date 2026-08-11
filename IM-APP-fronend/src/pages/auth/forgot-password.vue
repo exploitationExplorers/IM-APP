@@ -2,7 +2,9 @@
 import { ref } from 'vue'
 import { resetPassword, sendSmsCode } from '@/api/auth'
 import { APP_CONFIG } from '@/config'
+import ImCountryPicker from '@/components/ImCountryPicker.vue'
 
+const countryCode = ref(APP_CONFIG.defaultCountryCode)
 const phone = ref('')
 const code = ref('')
 const password = ref('')
@@ -68,10 +70,7 @@ function goBack() {
 
       <view class="auth-form">
         <view class="auth-row">
-          <view class="auth-code-box">
-            <text class="auth-code-text">{{ APP_CONFIG.defaultCountryCode }}</text>
-            <image class="auth-code-chevron" src="/static/auth/icon-chevron-down.png" mode="aspectFit" />
-          </view>
+          <ImCountryPicker v-model="countryCode" />
           <view class="auth-input-box">
             <input
               class="auth-input"
@@ -112,7 +111,7 @@ function goBack() {
             <view class="auth-eye-btn" @click="showPassword = !showPassword">
               <image
                 class="auth-eye-icon"
-                :src="showPassword ? '/static/auth/icon-eye.png' : '/static/auth/icon-eye-off.png'"
+                :src="showPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
                 mode="aspectFit"
               />
             </view>
@@ -123,7 +122,7 @@ function goBack() {
 
         <view class="auth-actions">
           <view class="auth-back-btn" @click="goBack">
-            <image class="auth-back-icon" src="/static/auth/icon-back.png" mode="aspectFit" />
+            <text class="back-chevron">‹</text>
           </view>
           <button class="auth-primary-btn" :loading="loading" @click="onSubmit">确认重置</button>
         </view>
@@ -134,4 +133,11 @@ function goBack() {
 
 <style lang="scss">
 @import '@/styles/auth.scss';
+
+.back-chevron {
+  font-size: 48rpx;
+  color: #fff;
+  line-height: 1;
+  font-weight: 300;
+}
 </style>

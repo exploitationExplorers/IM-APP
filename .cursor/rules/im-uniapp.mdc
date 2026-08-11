@@ -106,7 +106,7 @@ export async function fetchProfile(): Promise<UserInfo> {
 ## 样式
 
 - 尺寸用 **rpx**；新代码颜色取 `uni.scss` / `styles/common.scss` 的变量，不再新增硬编码色值。
-- 主色 `#2b5cff`，页面底色 `#f5f6f8`，正文 `#1a1a1a`。
+- 主色 `#0a2fc2`，页面底色 `#f5f6f8`，正文 `#212121`。
 - 组件样式一律 `scoped`；全局样式只放 `styles/common.scss`。
 - 平台差异用条件编译 `#ifdef APP-PLUS` / `#ifdef H5`。
 - 组件命名：业务组件 `ImXxx`（如 `ImCountryPicker`）；已有 `AppSearchBar` 等历史命名保持不动。

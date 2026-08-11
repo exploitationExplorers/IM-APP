@@ -33,6 +33,7 @@ async function onReject(id: string) {
 
 <template>
   <view class="page">
+    <view class="section-title">近期请求</view>
     <view
       v-for="item in contactStore.friendRequests"
       :key="item.id"
@@ -48,14 +49,21 @@ async function onReject(id: string) {
         <text class="accept" @click="onAccept(item.id)">接受</text>
       </view>
     </view>
-    <EmptyState v-if="loaded && !contactStore.friendRequests.length" text="暂无新的朋友" />
+    <EmptyState v-if="loaded && !contactStore.friendRequests.length" text="" />
   </view>
 </template>
 
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background: #f5f6f8;
+  background: #fff;
+}
+
+.section-title {
+  padding: 28rpx 32rpx 12rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #212121;
 }
 
 .row {
@@ -63,7 +71,6 @@ async function onReject(id: string) {
   align-items: center;
   background: #fff;
   padding: 24rpx 28rpx;
-  border-bottom: 1rpx solid #f0f0f0;
 }
 
 .avatar {
@@ -82,14 +89,14 @@ async function onReject(id: string) {
 .name {
   display: block;
   font-size: 30rpx;
-  color: #222;
+  color: #212121;
 }
 
 .msg {
   display: block;
   margin-top: 8rpx;
   font-size: 24rpx;
-  color: #999;
+  color: #8a8f9c;
 }
 
 .btns {
@@ -98,15 +105,15 @@ async function onReject(id: string) {
 }
 
 .accept {
-  color: #2b5cff;
+  color: #0a2fc2;
   font-size: 26rpx;
   padding: 10rpx 20rpx;
-  border: 1rpx solid #2b5cff;
+  border: 1rpx solid #0a2fc2;
   border-radius: 8rpx;
 }
 
 .reject {
-  color: #999;
+  color: #8a8f9c;
   font-size: 26rpx;
   padding: 10rpx 20rpx;
 }

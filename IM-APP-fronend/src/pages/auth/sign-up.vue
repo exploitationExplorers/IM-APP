@@ -116,7 +116,7 @@ function goPrivacy() {
 
         <view class="auth-actions">
           <view class="auth-back-btn" @click="goBack">
-            <image class="auth-back-icon" src="/static/auth/icon-back.png" mode="aspectFit" />
+            <text class="back-chevron">‹</text>
           </view>
           <button class="auth-primary-btn" :loading="loading" @click="onRegister">注册</button>
         </view>
@@ -136,4 +136,11 @@ function goPrivacy() {
 
 <style lang="scss">
 @import '@/styles/auth.scss';
+
+.back-chevron {
+  font-size: 48rpx;
+  color: #fff;
+  line-height: 1;
+  font-weight: 300;
+}
 </style>

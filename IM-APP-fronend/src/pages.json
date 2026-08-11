@@ -64,7 +64,7 @@
     {
       "path": "pages/contacts/new-friends",
       "style": {
-        "navigationBarTitleText": "新的朋友"
+        "navigationBarTitleText": "好友申请"
       }
     },
     {
@@ -159,8 +159,8 @@
     "backgroundColor": "#F5F6F8"
   },
   "tabBar": {
-    "color": "#999999",
-    "selectedColor": "#2B5CFF",
+    "color": "#8A8F9C",
+    "selectedColor": "#0A2FC2",
     "backgroundColor": "#FFFFFF",
     "borderStyle": "black",
     "list": [

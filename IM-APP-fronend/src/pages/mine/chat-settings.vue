@@ -1,38 +1,71 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+
+const enterToSend = ref(false)
+
+function onEnterChange(e: Event) {
+  enterToSend.value = (e as unknown as { detail: { value: boolean } }).detail.value
+}
+
+function onClear() {
+  uni.showModal({
+    title: '清除聊天记录',
+    content: '确定清除全部聊天记录吗？此操作不可恢复。',
+    success: (res) => {
+      if (res.confirm) {
+        uni.showToast({ title: '已清除', icon: 'none' })
+      }
+    },
+  })
+}
+
+function goPlaceholder(title: string) {
+  uni.showToast({ title: `${title}开发中`, icon: 'none' })
+}
+</script>
+
 <template>
   <view class="page">
     <view class="cell">
-      <text>聊天背景</text>
-      <text class="right">默认 ›</text>
+      <text class="label">回车键送出消息</text>
+      <switch :checked="enterToSend" color="#0A2FC2" @change="onEnterChange" />
     </view>
-    <view class="cell">
-      <text>聊天记录备份</text>
-      <text class="right">›</text>
+    <view class="cell" @click="goPlaceholder('群发助手')">
+      <text class="label">群发助手</text>
+      <text class="arrow">›</text>
     </view>
-    <view class="tip">设置项为占位，后续对接后端配置。</view>
+    <view class="cell" @click="goPlaceholder('我的表情')">
+      <text class="label">我的表情</text>
+      <text class="arrow">›</text>
+    </view>
+    <view class="cell" @click="onClear">
+      <text class="label">清除聊天记录</text>
+    </view>
   </view>
 </template>
 
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background: #f5f6f8;
-  padding-top: 16rpx;
-}
-.cell {
   background: #fff;
-  padding: 28rpx;
+}
+
+.cell {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1rpx solid #f0f0f0;
+  padding: 28rpx 32rpx;
+  min-height: 96rpx;
+  box-sizing: border-box;
+}
+
+.label {
   font-size: 30rpx;
+  color: #212121;
 }
-.right {
-  color: #999;
-}
-.tip {
-  color: #999;
-  font-size: 24rpx;
-  padding: 24rpx 28rpx;
+
+.arrow {
+  color: #c8ccd6;
+  font-size: 32rpx;
 }
 </style>

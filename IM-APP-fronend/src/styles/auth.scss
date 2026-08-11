@@ -1,8 +1,8 @@
-/* 对齐 https://pwa.6cchh6.com/auth 视觉 */
+/* 对齐 https://qwa.11skrmx6.net/auth/sign-in 蓝渐变登录（用户提供截图） */
 
 $auth-primary: #0a2fc2;
-$auth-input-bg: #f3f4f7;
-$auth-input-border: #e1e3ea;
+$auth-input-bg: #ffffff;
+$auth-input-border: transparent;
 $auth-placeholder: #636e86;
 $auth-body: #212121;
 $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 93.13%);
@@ -83,10 +83,10 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
 
 .auth-code-box {
   flex-shrink: 0;
-  width: 180rpx;
+  width: 160rpx;
   height: 96rpx;
   background: $auth-input-bg;
-  border: 2rpx solid $auth-input-border;
+  border: none;
   border-radius: 8rpx;
   display: flex;
   align-items: center;
@@ -97,14 +97,21 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
 
 .auth-code-text {
   color: $auth-body;
-  font-size: 32rpx;
+  font-size: 30rpx;
   font-weight: 600;
   line-height: 1;
 }
 
 .auth-code-chevron {
-  width: 28rpx;
-  height: 28rpx;
+  width: 24rpx;
+  height: 24rpx;
+  flex-shrink: 0;
+}
+
+.auth-code-caret {
+  color: #8a8f9c;
+  font-size: 20rpx;
+  line-height: 1;
 }
 
 .auth-input-box {
@@ -112,7 +119,7 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
   min-width: 0;
   height: 96rpx;
   background: $auth-input-bg;
-  border: 2rpx solid $auth-input-border;
+  border: none;
   border-radius: 8rpx;
   display: flex;
   align-items: center;
@@ -143,15 +150,15 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
 }
 
 .auth-eye-icon {
-  width: 48rpx;
-  height: 48rpx;
+  width: 44rpx;
+  height: 44rpx;
 }
 
 .auth-sms-btn {
   color: $auth-primary;
   font-size: 28rpx;
   font-weight: 600;
-  padding: 0 16rpx;
+  padding: 0 8rpx 0 16rpx;
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -173,7 +180,7 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
 .auth-primary-btn {
   width: 100%;
   height: 96rpx;
-  background: #fff !important;
+  background: #ffffff !important;
   color: $auth-primary !important;
   border-radius: 8rpx;
   font-size: 28rpx;
@@ -221,6 +228,7 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
   height: 96rpx;
   border-radius: 50%;
   border: 2rpx solid rgba(255, 255, 255, 0.85);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -229,8 +237,8 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
 }
 
 .auth-back-icon {
-  width: 48rpx;
-  height: 48rpx;
+  width: 40rpx;
+  height: 40rpx;
 }
 
 .auth-agree {

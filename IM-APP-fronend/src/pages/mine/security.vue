@@ -1,38 +1,74 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
+const phoneDisplay = computed(() => {
+  const p = userStore.profile
+  if (!p) return ''
+  const code = (p.countryCode || '86').replace(/^\+/, '')
+  return `${code} ${p.phone || ''}`
+})
+
+function goNext() {
+  uni.showToast({ title: '修改密码开发中', icon: 'none' })
+}
+</script>
+
 <template>
   <view class="page">
     <view class="cell">
-      <text>修改密码</text>
-      <text class="right">›</text>
+      <text class="label">手机号码</text>
+      <text class="value">{{ phoneDisplay }}</text>
     </view>
-    <view class="cell">
-      <text>账号安全中心</text>
-      <text class="right">›</text>
+    <view class="cell" @click="goNext">
+      <text class="label">旧密码</text>
+      <view class="right">
+        <text class="next">下一步</text>
+        <text class="arrow">›</text>
+      </view>
     </view>
-    <view class="tip">设置项为占位，后续对接后端配置。</view>
   </view>
 </template>
 
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background: #f5f6f8;
-  padding-top: 16rpx;
-}
-.cell {
   background: #fff;
-  padding: 28rpx;
+}
+
+.cell {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1rpx solid #f0f0f0;
+  padding: 28rpx 32rpx;
+  min-height: 96rpx;
+  box-sizing: border-box;
+}
+
+.label {
   font-size: 30rpx;
+  color: #212121;
 }
+
+.value {
+  font-size: 28rpx;
+  color: #636e86;
+}
+
 .right {
-  color: #999;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
 }
-.tip {
-  color: #999;
-  font-size: 24rpx;
-  padding: 24rpx 28rpx;
+
+.next {
+  font-size: 28rpx;
+  color: #636e86;
+}
+
+.arrow {
+  color: #c8ccd6;
+  font-size: 32rpx;
 }
 </style>
