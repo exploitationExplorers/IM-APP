@@ -116,15 +116,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function syncTabBadge() {
-    const n = totalUnread.value
-    if (n > 0) {
-      uni.setTabBarBadge({
-        index: 1,
-        text: n > 99 ? '99+' : String(n),
-      })
-    } else {
-      uni.removeTabBarBadge({ index: 1 })
-    }
+    // 自定义底栏 ImTabBar 直接读 totalUnread，系统 tabBar 已隐藏
   }
 
   return {

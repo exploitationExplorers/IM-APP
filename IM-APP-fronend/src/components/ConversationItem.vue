@@ -38,7 +38,7 @@ const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
 <style scoped lang="scss">
 .conv {
   display: flex;
-  padding: 24rpx 28rpx;
+  padding: 24rpx 40rpx;
   background: #fff;
 }
 
@@ -54,7 +54,7 @@ const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
 .body {
   flex: 1;
   min-width: 0;
-  border-bottom: 1rpx solid #f0f0f0;
+  border-bottom: 1rpx solid #f0f1f4;
   padding-bottom: 24rpx;
 }
 

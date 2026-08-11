@@ -3,11 +3,14 @@ import { ref, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ConversationItem from '@/components/ConversationItem.vue'
+import ImTabBar from '@/components/ImTabBar.vue'
 import { useChatStore } from '@/stores/chat'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { useTabBar } from '@/composables/useTabBar'
 import type { Conversation } from '@/types'
 
 useAuthGuard()
+useTabBar()
 
 const chatStore = useChatStore()
 const keyword = ref('')
@@ -69,10 +72,14 @@ function closeMenus() {
     <view class="header">
       <text class="title">聊天</text>
       <view class="add-wrap" @click.stop="onAdd">
-        <text class="icon-btn">＋</text>
+        <text class="icon-plus">＋</text>
         <view v-if="showAddMenu" class="popup-menu">
-          <view class="popup-item" @click="go('/pages/group/create')">发起群聊</view>
-          <view class="popup-item" @click="go('/pages/contacts/add-friend')">添加朋友</view>
+          <view class="popup-item" @click="go('/pages/contacts/add-friend')">
+            <text>添加朋友</text>
+          </view>
+          <view class="popup-item" @click="go('/pages/group/create')">
+            <text>创建群聊</text>
+          </view>
         </view>
       </view>
     </view>
@@ -82,7 +89,7 @@ function closeMenus() {
     <view class="filter-row">
       <view class="filter-wrap" @click.stop="showFilter = !showFilter">
         <text class="filter">{{ filterLabel }}</text>
-        <text class="filter-caret">▾</text>
+        <view class="filter-caret" />
         <view v-if="showFilter" class="popup-menu filter-menu">
           <view
             class="popup-item"
@@ -107,6 +114,8 @@ function closeMenus() {
       />
       <view v-if="!filtered.length" class="empty">无聊天消息</view>
     </scroll-view>
+
+    <ImTabBar current="chat" />
   </view>
 </template>
 
@@ -116,57 +125,67 @@ function closeMenus() {
   background: #fff;
   display: flex;
   flex-direction: column;
+  padding-bottom: calc(144rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24rpx 28rpx 16rpx;
+  padding: 16rpx 40rpx 8rpx;
 }
 
 .title {
-  font-size: 44rpx;
+  font-size: 48rpx;
   font-weight: 700;
   color: #212121;
+  line-height: 64rpx;
 }
 
 .add-wrap {
   position: relative;
-}
-
-.icon-btn {
   width: 64rpx;
   height: 64rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.icon-plus {
   font-size: 44rpx;
   color: #212121;
   line-height: 1;
+  font-weight: 300;
 }
 
 .popup-menu {
   position: absolute;
   top: 72rpx;
   right: 0;
-  min-width: 220rpx;
+  min-width: 288rpx;
+  padding: 16rpx;
   background: #fff;
-  border-radius: 12rpx;
-  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.12);
+  border-radius: 16rpx;
+  box-shadow: 0 20rpx 30rpx -6rpx rgba(0, 0, 0, 0.1), 0 8rpx 12rpx -8rpx rgba(0, 0, 0, 0.1);
   z-index: 30;
-  overflow: hidden;
 }
 
 .filter-menu {
   top: 48rpx;
+  min-width: 200rpx;
+  right: 0;
 }
 
 .popup-item {
-  padding: 28rpx 32rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 16rpx 32rpx;
   font-size: 28rpx;
   color: #212121;
   white-space: nowrap;
+  border-radius: 8rpx;
 }
 
 .popup-item.active {
@@ -176,7 +195,7 @@ function closeMenus() {
 .filter-row {
   display: flex;
   justify-content: flex-end;
-  padding: 0 28rpx 8rpx;
+  padding: 0 40rpx 8rpx;
 }
 
 .filter-wrap {
@@ -186,10 +205,19 @@ function closeMenus() {
   gap: 4rpx;
 }
 
-.filter,
-.filter-caret {
+.filter {
   color: #636e86;
   font-size: 24rpx;
+  line-height: 40rpx;
+}
+
+.filter-caret {
+  width: 0;
+  height: 0;
+  border-left: 8rpx solid transparent;
+  border-right: 8rpx solid transparent;
+  border-top: 10rpx solid #636e86;
+  margin-left: 4rpx;
 }
 
 .list {
@@ -199,8 +227,8 @@ function closeMenus() {
 
 .empty {
   text-align: center;
-  color: #8a8f9c;
-  padding: 160rpx 40rpx;
-  font-size: 28rpx;
+  color: #212121;
+  padding: 80rpx 40rpx;
+  font-size: 32rpx;
 }
 </style>

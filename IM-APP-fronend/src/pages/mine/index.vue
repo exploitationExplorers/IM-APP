@@ -2,20 +2,23 @@
 import { computed, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { useTabBar } from '@/composables/useTabBar'
+import ImTabBar from '@/components/ImTabBar.vue'
 
 useAuthGuard()
+useTabBar()
 const userStore = useUserStore()
 
 const nickname = computed(() => userStore.profile?.nickname || '未登录')
 const avatar = computed(() => userStore.profile?.avatar || '/static/avatar-me.png')
 
 const menus = [
-  { title: '我的收藏', icon: '☆', url: '/pages/mine/favorites' },
-  { title: '通知设置', icon: '🔔', url: '/pages/mine/notifications' },
-  { title: '聊天设置', icon: '💬', url: '/pages/mine/chat-settings' },
-  { title: '隐私', icon: '🔒', url: '/pages/mine/privacy' },
-  { title: '安全', icon: '🛡', url: '/pages/mine/security' },
-  { title: '通用', icon: '⚙', url: '/pages/mine/general' },
+  { title: '我的收藏', icon: '/static/mine/icon-favorites.svg', url: '/pages/mine/favorites' },
+  { title: '通知设置', icon: '/static/mine/icon-notifications.svg', url: '/pages/mine/notifications' },
+  { title: '聊天设置', icon: '/static/mine/icon-chat-settings.svg', url: '/pages/mine/chat-settings' },
+  { title: '隐私', icon: '/static/mine/icon-privacy.svg', url: '/pages/mine/privacy' },
+  { title: '安全', icon: '/static/mine/icon-security.svg', url: '/pages/mine/security' },
+  { title: '通用', icon: '/static/mine/icon-general.svg', url: '/pages/mine/general' },
 ]
 
 onMounted(() => {
@@ -47,8 +50,18 @@ function onLogout() {
         <image class="avatar" :src="avatar" mode="aspectFill" />
         <text class="nickname">{{ nickname }}</text>
         <view class="hero-actions">
-          <view class="hero-btn" @click="go('/pages/mine/profile')">✎</view>
-          <view class="hero-btn" @click="go('/pages/mine/qrcode')">▦</view>
+          <image
+            class="hero-btn"
+            src="/static/mine/icon-edit.svg"
+            mode="aspectFit"
+            @click="go('/pages/mine/profile')"
+          />
+          <image
+            class="hero-btn"
+            src="/static/mine/icon-qrcode.svg"
+            mode="aspectFit"
+            @click="go('/pages/mine/qrcode')"
+          />
         </view>
       </view>
     </view>
@@ -60,16 +73,18 @@ function onLogout() {
         class="menu-item"
         @click="go(m.url)"
       >
-        <text class="menu-icon">{{ m.icon }}</text>
+        <image class="menu-icon" :src="m.icon" mode="aspectFit" />
         <text class="menu-text">{{ m.title }}</text>
-        <text class="arrow">›</text>
+        <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
       </view>
     </view>
 
     <view class="logout" @click="onLogout">
-      <text class="logout-icon">⎋</text>
+      <image class="logout-icon" src="/static/mine/icon-logout.svg" mode="aspectFit" />
       <text class="logout-text">退出</text>
     </view>
+
+    <ImTabBar current="mine" />
   </view>
 </template>
 
@@ -77,21 +92,30 @@ function onLogout() {
 .page {
   min-height: 100vh;
   background: #f5f6f8;
+  padding-bottom: calc(144rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
 }
 
 .hero {
-  background: #4a5568;
-  padding: 32rpx 32rpx 48rpx;
+  position: relative;
+  background-color: #0a2fc2;
+  background-image: url('/static/mine/hero-bg.webp');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  padding: 32rpx 48rpx 48rpx;
   color: #fff;
 }
 
 .hero-title {
-  font-size: 36rpx;
-  font-weight: 600;
+  font-size: 48rpx;
+  font-weight: 700;
+  line-height: 64rpx;
+  color: #fff;
 }
 
 .profile {
-  margin-top: 40rpx;
+  margin-top: 48rpx;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -99,35 +123,38 @@ function onLogout() {
 }
 
 .avatar {
-  width: 128rpx;
-  height: 128rpx;
+  width: 160rpx;
+  height: 160rpx;
   border-radius: 50%;
-  border: 4rpx solid rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.2);
+  border: 4rpx solid #ffffff;
+  background: #f3f4f7;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.12);
 }
 
 .nickname {
-  margin-top: 20rpx;
-  font-size: 34rpx;
-  font-weight: 600;
+  margin-top: 16rpx;
+  font-size: 32rpx;
+  font-weight: 700;
+  line-height: 48rpx;
+  color: #fff;
+  max-width: 420rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hero-actions {
   position: absolute;
   right: 0;
-  top: 16rpx;
+  top: 24rpx;
   display: flex;
-  gap: 20rpx;
+  align-items: center;
+  gap: 32rpx;
 }
 
 .hero-btn {
-  width: 56rpx;
-  height: 56rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32rpx;
-  color: #fff;
+  width: 40rpx;
+  height: 40rpx;
 }
 
 .menu-card {
@@ -137,45 +164,49 @@ function onLogout() {
 .menu-item {
   display: flex;
   align-items: center;
-  padding: 30rpx 28rpx;
+  height: 96rpx;
+  padding: 0 32rpx;
+  gap: 16rpx;
 }
 
 .menu-icon {
-  width: 48rpx;
-  margin-right: 20rpx;
-  font-size: 32rpx;
-  color: #636e86;
-  text-align: center;
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
 
 .menu-text {
   flex: 1;
-  font-size: 30rpx;
+  font-size: 32rpx;
   color: #212121;
+  line-height: 48rpx;
 }
 
 .arrow {
-  color: #c8ccd6;
-  font-size: 36rpx;
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
 
 .logout {
   margin-top: 16rpx;
   background: #fff;
-  padding: 30rpx 28rpx;
+  height: 96rpx;
+  padding: 0 32rpx;
   display: flex;
   align-items: center;
-}
-
-.logout-icon,
-.logout-text {
-  color: #e54d42;
-  font-size: 30rpx;
+  gap: 16rpx;
 }
 
 .logout-icon {
-  width: 48rpx;
-  margin-right: 20rpx;
-  text-align: center;
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
+}
+
+.logout-text {
+  color: #dc2828;
+  font-size: 32rpx;
+  line-height: 48rpx;
 }
 </style>

@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import AppSearchBar from '@/components/AppSearchBar.vue'
+import ImTabBar from '@/components/ImTabBar.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { useTabBar } from '@/composables/useTabBar'
 import type { Contact } from '@/types'
 
 useAuthGuard()
+useTabBar()
+
 const contactStore = useContactStore()
 const keyword = ref('')
 const sortKey = ref<'recent' | 'name' | 'chat'>('recent')
@@ -63,7 +67,7 @@ function closeMenus() {
     <view class="header">
       <text class="title">通讯录</text>
       <view class="add-wrap" @click.stop="onAdd">
-        <text class="icon-btn">＋</text>
+        <text class="icon-plus">＋</text>
         <view v-if="showAddMenu" class="popup-menu">
           <view class="popup-item" @click="go('/pages/contacts/add-friend')">添加朋友</view>
           <view class="popup-item" @click="go('/pages/group/create')">创建群聊</view>
@@ -76,23 +80,17 @@ function closeMenus() {
     <scroll-view scroll-y class="body">
       <view class="menu-list">
         <view class="menu-item" @click="go('/pages/contacts/new-friends')">
-          <view class="menu-icon orange">
-            <text class="menu-icon-text">＋</text>
-          </view>
+          <image class="menu-icon" src="/static/icons/menu-new-friend.svg" mode="aspectFit" />
           <text class="menu-text">新的朋友</text>
           <text class="arrow">›</text>
         </view>
         <view class="menu-item" @click="go('/pages/contacts/tags')">
-          <view class="menu-icon pink">
-            <text class="menu-icon-text">🏷</text>
-          </view>
+          <image class="menu-icon" src="/static/icons/menu-tag.svg" mode="aspectFit" />
           <text class="menu-text">标签</text>
           <text class="arrow">›</text>
         </view>
         <view class="menu-item" @click="go('/pages/contacts/groups')">
-          <view class="menu-icon blue">
-            <text class="menu-icon-text">👥</text>
-          </view>
+          <image class="menu-icon" src="/static/icons/menu-group.svg" mode="aspectFit" />
           <text class="menu-text">群聊天</text>
           <text class="arrow">›</text>
         </view>
@@ -104,7 +102,7 @@ function closeMenus() {
         <text class="section-count">联络人 ({{ filteredContacts.length }})</text>
         <view class="sort-wrap" @click.stop="showSort = !showSort">
           <text class="sort">{{ sortLabel }}</text>
-          <text class="sort-caret">▾</text>
+          <view class="sort-caret" />
           <view v-if="showSort" class="popup-menu sort-menu">
             <view
               class="popup-item"
@@ -135,6 +133,8 @@ function closeMenus() {
         <text class="name">{{ c.nickname }}</text>
       </view>
     </scroll-view>
+
+    <ImTabBar current="contacts" />
   </view>
 </template>
 
@@ -144,60 +144,66 @@ function closeMenus() {
   background: #fff;
   display: flex;
   flex-direction: column;
+  padding-bottom: calc(144rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24rpx 28rpx 16rpx;
+  padding: 16rpx 40rpx 8rpx;
   background: #fff;
 }
 
 .title {
-  font-size: 44rpx;
+  font-size: 48rpx;
   font-weight: 700;
   color: #212121;
+  line-height: 64rpx;
 }
 
 .add-wrap {
   position: relative;
-}
-
-.icon-btn {
   width: 64rpx;
   height: 64rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.icon-plus {
   font-size: 44rpx;
   color: #212121;
   line-height: 1;
+  font-weight: 300;
 }
 
 .popup-menu {
   position: absolute;
   top: 72rpx;
   right: 0;
-  min-width: 240rpx;
+  min-width: 288rpx;
+  padding: 16rpx;
   background: #fff;
-  border-radius: 12rpx;
-  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.12);
+  border-radius: 16rpx;
+  box-shadow: 0 20rpx 30rpx -6rpx rgba(0, 0, 0, 0.1), 0 8rpx 12rpx -8rpx rgba(0, 0, 0, 0.1);
   z-index: 30;
-  overflow: hidden;
 }
 
 .sort-menu {
   right: 0;
   left: auto;
   top: 48rpx;
+  min-width: 280rpx;
 }
 
 .popup-item {
-  padding: 28rpx 32rpx;
+  padding: 16rpx 32rpx;
   font-size: 28rpx;
   color: #212121;
   white-space: nowrap;
+  border-radius: 8rpx;
 }
 
 .popup-item.active {
@@ -216,56 +222,49 @@ function closeMenus() {
 .menu-item {
   display: flex;
   align-items: center;
-  padding: 24rpx 28rpx;
+  gap: 16rpx;
+  height: 96rpx;
+  padding: 0 40rpx;
 }
 
 .menu-icon {
-  width: 80rpx;
-  height: 80rpx;
-  border-radius: 50%;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 24rpx;
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
-
-.menu-icon-text {
-  font-size: 32rpx;
-  line-height: 1;
-}
-
-.orange { background: #ff8a3d; }
-.pink { background: #ff6b9d; }
-.blue { background: #3b7bff; }
 
 .menu-text {
   flex: 1;
-  font-size: 30rpx;
+  font-size: 32rpx;
   color: #212121;
+  line-height: 48rpx;
 }
 
 .arrow {
   color: #c8ccd6;
   font-size: 36rpx;
+  line-height: 1;
 }
 
 .section-divider {
-  height: 16rpx;
-  background: #f5f6f8;
+  height: 48rpx;
+  margin: 0 0 16rpx;
+  background: #f3f4f7;
 }
 
 .section-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20rpx 28rpx;
+  height: 48rpx;
+  margin: 16rpx 40rpx 16rpx;
 }
 
 .section-count {
   color: #212121;
   font-size: 28rpx;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 48rpx;
 }
 
 .sort-wrap {
@@ -275,16 +274,26 @@ function closeMenus() {
   gap: 4rpx;
 }
 
-.sort,
-.sort-caret {
+.sort {
   color: #8a8f9c;
   font-size: 24rpx;
+  line-height: 40rpx;
+}
+
+.sort-caret {
+  width: 0;
+  height: 0;
+  border-left: 8rpx solid transparent;
+  border-right: 8rpx solid transparent;
+  border-top: 10rpx solid #8a8f9c;
+  margin-left: 4rpx;
 }
 
 .contact-row {
   display: flex;
   align-items: center;
-  padding: 20rpx 28rpx;
+  gap: 16rpx;
+  padding: 16rpx 40rpx;
   background: #fff;
 }
 
@@ -292,13 +301,13 @@ function closeMenus() {
   width: 80rpx;
   height: 80rpx;
   border-radius: 50%;
-  margin-right: 20rpx;
   background: #eee;
+  flex-shrink: 0;
 }
 
 .name {
   flex: 1;
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: #212121;
   overflow: hidden;
   text-overflow: ellipsis;

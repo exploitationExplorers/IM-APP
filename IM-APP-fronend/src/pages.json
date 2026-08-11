@@ -159,10 +159,11 @@
     "backgroundColor": "#F5F6F8"
   },
   "tabBar": {
-    "color": "#8A8F9C",
+    "custom": true,
+    "color": "#212121",
     "selectedColor": "#0A2FC2",
     "backgroundColor": "#FFFFFF",
-    "borderStyle": "black",
+    "borderStyle": "white",
     "list": [
       {
         "pagePath": "pages/contacts/index",
