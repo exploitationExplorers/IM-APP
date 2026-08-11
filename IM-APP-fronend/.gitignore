@@ -19,3 +19,6 @@ dist
 *.njsproj
 *.sln
 *.sw?
+
+# 参考站抓取截图（本地对照用，不入库）
+design-ref/
