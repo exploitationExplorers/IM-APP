@@ -95,9 +95,17 @@ function formatTime(ts: number) {
 function renderSummary(r: (typeof list.value)[number]) {
   const c = r.content
   if (c.type === 'text') return c.text || ''
-  if (c.type === 'image') return '[图片]'
+  if (c.type === 'image') {
+    const names = c.imageNames
+    if (names && names.length) {
+      if (names.length === 1) return `[图片] ${names[0]}`
+      return `[图片] ${names[0]} 等${names.length}个文件`
+    }
+    const count = (c.images || []).length
+    return count > 1 ? `[图片] 共${count}张` : '[图片]'
+  }
   if (c.type === 'audio') return '[语音]'
-  if (c.type === 'file') return '[文件]'
+  if (c.type === 'file') return c.fileName ? `[文件] ${c.fileName}` : '[文件]'
   return '[收藏]'
 }
 
