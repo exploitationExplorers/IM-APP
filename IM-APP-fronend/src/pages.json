@@ -134,43 +134,9 @@
       }
     },
     {
-      "path": "pages/mine/mass-assistant",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "群发助手"
-      }
-    },
-    {
-      "path": "pages/mine/mass-select-contacts",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "选择联系人"
-      }
-    },
-    {
-      "path": "pages/mine/mass-compose",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "群发"
-      }
-    },
-    {
-      "path": "pages/mine/mass-targets",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "群发对象"
-      }
-    },
-    {
       "path": "pages/mine/privacy",
       "style": {
         "navigationBarTitleText": "隐私"
-      }
-    },
-    {
-      "path": "pages/mine/blacklist",
-      "style": {
-        "navigationBarTitleText": "黑名单"
       }
     },
     {
@@ -183,13 +149,6 @@
       "path": "pages/mine/general",
       "style": {
         "navigationBarTitleText": "通用"
-      }
-    },
-    {
-      "path": "pages/mine/emotions",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "我的表情"
       }
     }
   ],
