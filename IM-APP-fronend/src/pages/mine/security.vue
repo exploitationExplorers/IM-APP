@@ -114,6 +114,12 @@ function onNext() {
 </template>
 
 <style scoped lang="scss">
+$primary: #0a2fc2;
+$text: #212121;
+$muted: #8a93a6;
+$border: #d8dce6;
+$btn-disabled-bg: #c5cddc;
+
 .page {
   min-height: 100vh;
   background: #fff;
