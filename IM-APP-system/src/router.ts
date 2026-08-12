@@ -1,0 +1,45 @@
+import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
+import { useAuthStore } from "./stores/auth";
+
+const routes: RouteRecordRaw[] = [
+  { path: "/", redirect: "/home" },
+  {
+    path: "/login",
+    component: () => import("./views/LoginView.vue"),
+    meta: { public: true, title: "登录" },
+  },
+  {
+    path: "/",
+    component: () => import("./layouts/AppShell.vue"),
+    children: [
+      {
+        path: "home",
+        component: () => import("./views/HomeView.vue"),
+        meta: { title: "首页" },
+      },
+      {
+        path: "system/users",
+        component: () => import("./views/UserManagementView.vue"),
+        meta: { title: "用户管理" },
+      },
+      {
+        path: "system/logs",
+        component: () => import("./views/OperationLogsView.vue"),
+        meta: { title: "操作日志" },
+      },
+    ],
+  },
+  { path: "/:pathMatch(.*)*", redirect: "/home" },
+];
+
+const router = createRouter({ history: createWebHistory(), routes });
+
+router.beforeEach((to) => {
+  const auth = useAuthStore();
+  document.title = `${String(to.meta.title ?? "IM-APP 管理系统")} | IM-APP 管理系统`;
+  if (!to.meta.public && !auth.isLoggedIn) return "/login";
+  if (to.path === "/login" && auth.isLoggedIn) return "/home";
+  return true;
+});
+
+export default router;
