@@ -42,6 +42,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import("./views/OperationLogsView.vue"),
         meta: { title: "操作日志" },
       },
+      {
+        path: "forward-group-send",
+        component: () => import("./views/forwardGroupSend/ForwardGroupSendView.vue"),
+        meta: { title: "转发和群发管理" },
+      },
+      {
+        path: "sms-operation-config",
+        component: () => import("./views/smsOperationConfig/SmsOperationConfigView.vue"),
+        meta: { title: "短信和运营配置" },
+      },
     ],
   },
   { path: "/:pathMatch(.*)*", redirect: "/home" },
