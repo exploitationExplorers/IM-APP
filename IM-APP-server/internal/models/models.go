@@ -56,10 +56,24 @@ type Contact struct {
 	Remark   string `json:"remark,omitempty"`
 }
 
+// PublicProfile 他人可见的公开资料（不含手机号）
+type PublicProfile struct {
+	ID        string `json:"id"`
+	PublicID  string `json:"publicId"`
+	Nickname  string `json:"nickname"`
+	Avatar    string `json:"avatar"`
+	Bio       string `json:"bio,omitempty"`
+	Status    string `json:"status,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
+	Relation  string `json:"relation,omitempty"` // self|none|pending|friend|blocked
+}
+
 type GroupPreview struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Avatar string `json:"avatar"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Avatar         string `json:"avatar"`
+	Role           string `json:"role,omitempty"`
+	ConversationID string `json:"conversationId,omitempty"`
 }
 
 type FriendRequest struct {

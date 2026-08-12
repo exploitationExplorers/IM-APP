@@ -1,11 +1,26 @@
 import { request } from '@/utils/request'
-import type { UserQrcodeResult, UpdateProfileInput, UserInfo } from '@/types'
+import { parseQrcodePayload } from '@/utils/qrcode'
+import type { UserQrcodeResult, UpdateProfileInput, UserInfo, UserQrcodeResolveResult } from '@/types'
 
 export async function searchUserByPublicId(publicId: string): Promise<UserInfo | null> {
   return request<UserInfo | null>({
     url: '/users/search',
     method: 'GET',
     data: { publicId },
+  })
+}
+
+export async function resolveUserQRCode(tokenOrPayload: string): Promise<UserQrcodeResolveResult> {
+  const parsed = parseQrcodePayload(tokenOrPayload)
+  const token = parsed.token || tokenOrPayload
+  return request<UserQrcodeResolveResult>({
+    url: '/users/qrcode/resolve',
+    method: 'POST',
+    data: {
+      token,
+      payload: tokenOrPayload,
+      qrcode: tokenOrPayload.startsWith('http') ? tokenOrPayload : undefined,
+    },
   })
 }
 

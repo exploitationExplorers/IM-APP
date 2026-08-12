@@ -1,17 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { fetchGroups } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
 
 const contactStore = useContactStore()
 const tab = ref<'created' | 'joined'>('created')
 
-const visibleGroups = computed(() => {
-  // mock 暂无 created/joined 字段，先按当前列表展示；后续接后端再拆分
-  return contactStore.groups
-})
+const visibleGroups = computed(() => contactStore.groups)
+
+async function loadGroups() {
+  const role = tab.value === 'created' ? 'owner' : 'member'
+  contactStore.groups = await fetchGroups(role)
+}
 
 onMounted(() => {
   contactStore.loadAll()
+  void loadGroups()
+})
+
+watch(tab, () => {
+  void loadGroups()
 })
 
 function openGroup(id: string) {

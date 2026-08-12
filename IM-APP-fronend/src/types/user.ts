@@ -13,8 +13,6 @@ export interface UserInfo {
   bio?: string
   hasPassword?: boolean
   status?: 'active' | 'blocked' | 'banned'
-  /** 是否已在安全设置中设置过密码 */
-  hasPassword?: boolean
   createdAt?: string
 }
 
@@ -53,6 +51,12 @@ export interface UserQrcodeResult {
   payload: string
   expiresAt?: string
   user: UserSummary
+}
+
+/** POST /users/qrcode/resolve 响应 */
+export interface UserQrcodeResolveResult {
+  user: UserInfo & { relation?: string }
+  relation: string
 }
 
 /** @deprecated 使用 UserQrcodeResult */

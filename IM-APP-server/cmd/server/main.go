@@ -71,13 +71,14 @@ func main() {
 
 	userRepo := &repository.UserRepo{DB: pool}
 	contactRepo := &repository.ContactRepo{DB: pool}
+	contactTagRepo := &repository.ContactTagRepo{DB: pool}
 	chatRepo := &repository.ChatRepo{DB: pool}
 	fileRepo := &repository.FileRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool}
 
-	userSvc := &service.UserService{Users: userRepo, Files: fileRepo}
-	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo}
+	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo}
+	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo, Tags: contactTagRepo}
 	chatSvc := &service.ChatService{Chat: chatRepo, Hub: hub}
 	groupSvc := &service.GroupService{Groups: groupRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
@@ -126,7 +127,9 @@ func main() {
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
+			auth.PUT("/me/password", userH.ChangePassword)
 			auth.GET("/me/qrcode", userH.Qrcode)
+			auth.POST("/users/qrcode/resolve", userH.ResolveUserQRCode)
 			auth.GET("/users/search", userH.Search)
 			auth.GET("/users/:id", userH.GetUser)
 
@@ -136,18 +139,39 @@ func main() {
 			auth.POST("/conversations/:id/messages", chatH.SendMessage)
 
 			auth.GET("/contacts", contactH.ListContacts)
+			auth.GET("/contacts/:id", contactH.GetContact)
+			auth.PATCH("/contacts/:id", contactH.UpdateContact)
 			auth.GET("/contacts/:id/conversation", contactH.GetConversation)
 			auth.DELETE("/contacts/:id", contactH.DeleteContact)
 			auth.POST("/contacts/:id/block", contactH.BlockContact)
 			auth.DELETE("/contacts/:id/block", contactH.UnblockContact)
 
+			auth.GET("/contact-tags", contactH.ListTags)
+			auth.POST("/contact-tags", contactH.CreateTag)
+			auth.PATCH("/contact-tags/:tagId", contactH.UpdateTag)
+			auth.DELETE("/contact-tags/:tagId", contactH.DeleteTag)
+			auth.GET("/contact-tags/:tagId/members", contactH.ListTagMembers)
+			auth.PUT("/contact-tags/:tagId/members", contactH.SetTagMembers)
+
 			auth.GET("/groups", contactH.ListGroups)
 			auth.POST("/groups", groupH.Create)
+			auth.POST("/groups/qrcode/resolve", groupH.ResolveQRCode)
 			auth.GET("/groups/:id", groupH.Detail)
 			auth.GET("/groups/:id/members", groupH.Members)
+			auth.GET("/groups/:id/qrcode", groupH.Qrcode)
 			auth.POST("/groups/:id/join", groupH.Join)
+			auth.POST("/groups/:id/invitations", groupH.InviteMembers)
+			auth.POST("/groups/:id/join-requests", groupH.CreateJoinRequest)
+			auth.GET("/groups/:id/join-requests", groupH.ListJoinRequests)
+			auth.POST("/groups/:id/join-requests/:requestId/approve", groupH.ApproveJoinRequest)
+			auth.POST("/groups/:id/join-requests/:requestId/reject", groupH.RejectJoinRequest)
+			auth.PUT("/groups/:id/members/:userId/role", groupH.UpdateMemberRole)
+			auth.PUT("/groups/:id/members/:userId/mute", groupH.MuteMember)
+			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
 			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
 			auth.POST("/groups/:id/leave", groupH.Leave)
+			auth.DELETE("/groups/:id", groupH.Dissolve)
+			auth.POST("/group-invitations/:token/accept", groupH.AcceptInvitation)
 			auth.GET("/friend-requests", contactH.ListFriendRequests)
 			auth.POST("/friend-requests", contactH.CreateFriendRequest)
 			auth.POST("/friend-requests/:id/accept", contactH.AcceptFriendRequest)

@@ -5,8 +5,11 @@ export async function fetchContacts(): Promise<Contact[]> {
   return request<Contact[]>({ url: '/contacts', method: 'GET' })
 }
 
-export async function fetchGroups(): Promise<GroupPreview[]> {
-  return request<GroupPreview[]>({ url: '/groups', method: 'GET' })
+export async function fetchGroups(role?: 'owner' | 'member'): Promise<GroupPreview[]> {
+  const data: Record<string, string> = {}
+  if (role === 'owner') data.role = 'owner'
+  else if (role === 'member') data.role = 'member'
+  return request<GroupPreview[]>({ url: '/groups', method: 'GET', data })
 }
 
 export async function fetchFriendRequests(): Promise<FriendRequest[]> {

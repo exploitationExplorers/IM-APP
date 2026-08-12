@@ -11,6 +11,7 @@ export type {
   SendSMSResult,
   UserSummary,
   UserQrcodeResult,
+  UserQrcodeResolveResult,
   QrcodePayload,
   UpdateProfileInput,
 } from './user'

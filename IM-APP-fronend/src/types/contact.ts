@@ -13,6 +13,8 @@ export interface GroupPreview {
   id: string
   name: string
   avatar: string
+  role?: string
+  conversationId?: string
 }
 
 export interface FriendRequest {

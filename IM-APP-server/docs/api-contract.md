@@ -219,9 +219,28 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/users/search?publicId=chat10002`
 
-按公开 ID 搜索用户。**不支持手机号搜索。**
+按公开 ID 搜索用户。**不支持手机号搜索。** 响应不含 `phone` 字段。
 
 未找到返回 `data: null`。
+
+### POST `/api/v1/users/qrcode/resolve`
+
+解析个人二维码 token（扫码加好友）。
+
+**Body**
+```json
+{ "token": "uuid", "payload": "{\"token\":\"...\",\"type\":\"user\"}" }
+```
+
+**Response**
+```json
+{
+  "user": { "id": "uuid", "publicId": "chat10002", "nickname": "用户", "avatar": "", "relation": "none" },
+  "relation": "none"
+}
+```
+
+`relation`: `self|none|pending|friend|blocked`
 
 ### GET `/api/v1/users/:id`
 
@@ -235,20 +254,42 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 好友列表。
 
-### GET `/api/v1/groups`
+### GET `/api/v1/contacts/:id`
 
-当前用户所在群列表。
+好友详情（含备注）。
 
-### GET `/api/v1/friend-requests`
+### PATCH `/api/v1/contacts/:id`
 
-收到的好友申请（pending）。
+修改好友备注。
+
+**Body**
+```json
+{ "remark": "备注名" }
+```
+
+### GET `/api/v1/groups?role=owner|member|admin`
+
+当前用户群列表。`role=owner` 为「我建立的」，`role=member` 为「我加入的」。
+
+**Response 项含** `role`、`conversationId`。
+
+### GET `/api/v1/friend-requests?direction=received|sent`
+
+好友申请列表（默认 `received`）。
 
 ### POST `/api/v1/friend-requests`
 
 **Body**
 ```json
-{ "toUserId": "uuid", "message": "验证说明" }
+{
+  "toUserId": "uuid",
+  "message": "验证说明",
+  "source": "public_id|user_qrcode|group",
+  "sourceGroupId": "uuid"
+}
 ```
+
+`source=group` 时服务端校验该群 `allowMemberAddFriend`。
 
 ### POST `/api/v1/friend-requests/:id/accept`
 
@@ -269,6 +310,24 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ### GET `/api/v1/contacts/:id/conversation`
 
 获取或创建与该好友的私聊会话 ID。
+
+### GET `/api/v1/contact-tags`
+
+标签列表。
+
+### POST `/api/v1/contact-tags`
+
+**Body** `{ "name": "同事" }`
+
+### PATCH `/api/v1/contact-tags/:tagId`
+
+### DELETE `/api/v1/contact-tags/:tagId`
+
+### GET `/api/v1/contact-tags/:tagId/members`
+
+### PUT `/api/v1/contact-tags/:tagId/members`
+
+**Body** `{ "userIds": ["uuid1", "uuid2"] }`
 
 ---
 
@@ -295,7 +354,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
-## 群组（Phase 2）
+## 群组（需 JWT）
 
 ### POST `/api/v1/groups`
 
@@ -303,17 +362,24 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 **Body**
 ```json
-{ "name": "群名称", "memberIds": [2, 3] }
+{ "name": "群名称", "memberIds": ["uuid2", "uuid3"] }
 ```
 
 **Response**
 ```json
-{ "id": 1, "name": "群名称", "ownerId": 1, "memberCount": 3, "allowAddFriend": true }
+{
+  "id": "uuid",
+  "name": "群名称",
+  "ownerId": "uuid",
+  "memberCount": 3,
+  "allowMemberAddFriend": true,
+  "conversationId": "uuid"
+}
 ```
 
 ### GET `/api/v1/groups`
 
-当前用户加入的群列表。
+见通讯录章节（支持 `role` 筛选）。
 
 ### GET `/api/v1/groups/:id`
 
@@ -323,9 +389,51 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 群成员列表。
 
+### GET `/api/v1/groups/:id/qrcode`
+
+群主/管理员获取群二维码。
+
+### POST `/api/v1/groups/qrcode/resolve`
+
+解析群二维码。
+
+**Body** `{ "token": "..." }`
+
 ### POST `/api/v1/groups/:id/join`
 
-加入群聊（公开群或邀请）。
+直接加入群聊（公开群）。
+
+### POST `/api/v1/groups/:id/invitations`
+
+邀请好友入群。**Body** `{ "userIds": ["uuid"] }`
+
+### POST `/api/v1/group-invitations/:token/accept`
+
+接受群邀请。
+
+### POST `/api/v1/groups/:id/join-requests`
+
+提交入群申请。**Body** `{ "remark": "申请说明" }`
+
+### GET `/api/v1/groups/:id/join-requests`
+
+入群申请列表（群主/管理员）。
+
+### POST `/api/v1/groups/:id/join-requests/:requestId/approve`
+
+### POST `/api/v1/groups/:id/join-requests/:requestId/reject`
+
+### PUT `/api/v1/groups/:id/members/:userId/role`
+
+**Body** `{ "role": "admin|member" }`
+
+### PUT `/api/v1/groups/:id/members/:userId/mute`
+
+**Body** `{ "mutedUntil": "2026-08-12T12:00:00Z" }`（空字符串解除禁言）
+
+### DELETE `/api/v1/groups/:id/members/:userId`
+
+移除群成员。
 
 ### PUT `/api/v1/groups/:id/settings`
 
@@ -333,12 +441,21 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 **Body**
 ```json
-{ "name": "新名称", "allowAddFriend": false }
+{
+  "announcement": "公告",
+  "allowMemberAddFriend": false,
+  "joinMode": "open|approval",
+  "allMuted": false
+}
 ```
 
 ### POST `/api/v1/groups/:id/leave`
 
 退出群聊。
+
+### DELETE `/api/v1/groups/:id`
+
+解散群聊（仅群主）。
 
 ---
 

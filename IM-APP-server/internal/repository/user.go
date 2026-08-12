@@ -91,7 +91,20 @@ func (r *UserRepo) Create(ctx context.Context, phone, countryCode, passwordHash,
 
 func PublicUser(u models.User) models.User {
 	u.PasswordHash = ""
+	u.Phone = ""
 	return u
+}
+
+func ToPublicProfile(u models.User) models.PublicProfile {
+	return models.PublicProfile{
+		ID:        u.ID,
+		PublicID:  u.PublicID,
+		Nickname:  u.Nickname,
+		Avatar:    u.Avatar,
+		Bio:       u.Bio,
+		Status:    u.Status,
+		CreatedAt: u.CreatedAt.UTC().Format(time.RFC3339),
+	}
 }
 
 func (r *UserRepo) QrcodePayload(u models.User) models.QrcodePayload {
@@ -107,7 +120,33 @@ func (r *UserRepo) QrcodePayload(u models.User) models.QrcodePayload {
 	}
 }
 
-// EnsureQRCode 返回该用户有效二维码；无则生成唯一 token 并落库（注册成功即调用）
+// ResolveUserQRCode 按 token 解析用户二维码
+func (r *UserRepo) ResolveUserQRCode(ctx context.Context, token string) (models.User, error) {
+	var u models.User
+	err := r.DB.QueryRow(ctx, `
+		SELECT u.id::text, u.phone, u.country_code, COALESCE(u.public_id,''), '',
+			u.nickname, u.avatar, u.bio, COALESCE(u.status,'active'), u.created_at
+		FROM user_qrcodes q
+		JOIN users u ON u.id = q.user_id
+		WHERE q.token=$1 AND q.revoked_at IS NULL
+		  AND (q.expires_at IS NULL OR q.expires_at > NOW())`, token,
+	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
+	return u, err
+}
+
+// UpdatePassword 更新登录密码
+func (r *UserRepo) UpdatePassword(ctx context.Context, userID, passwordHash string) error {
+	tag, err := r.DB.Exec(ctx, `
+		UPDATE users SET password_hash=$1, updated_at=NOW() WHERE id=$2::uuid`, passwordHash, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
 func (r *UserRepo) EnsureQRCode(ctx context.Context, userID string) (models.UserQR, error) {
 	var token string
 	var expiresAt *time.Time
