@@ -27,7 +27,7 @@ export function clearToken() {
 
 interface RequestOptions {
   url: string
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   data?: Record<string, unknown> | unknown
   auth?: boolean
   header?: Record<string, string>
@@ -40,7 +40,7 @@ export async function request<T>(options: RequestOptions): Promise<T> {
   return new Promise((resolve, reject) => {
     uni.request({
       url: url.startsWith('http') ? url : `${APP_CONFIG.apiBaseUrl}${url}`,
-      method,
+      method: method as UniApp.RequestOptions['method'],
       data: data as UniApp.RequestOptions['data'],
       header: {
         'Content-Type': 'application/json',

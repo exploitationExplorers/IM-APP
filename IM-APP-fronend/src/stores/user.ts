@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { AuthResult, UserInfo } from '@/types'
+import type { AuthResult, UpdateProfileInput, UserInfo } from '@/types'
 import {
   loginByPassword,
   loginBySms,
@@ -60,7 +60,7 @@ export const useUserStore = defineStore('user', () => {
     profile.value = await fetchProfile()
   }
 
-  async function saveProfile(input: { nickname?: string; avatar?: string; bio?: string }) {
+  async function saveProfile(input: UpdateProfileInput) {
     profile.value = await updateProfile(input)
   }
 

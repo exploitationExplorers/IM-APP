@@ -9,11 +9,16 @@ export async function searchUserByPublicId(publicId: string): Promise<UserInfo |
   })
 }
 
+/** PATCH /me：nickname、avatarFileId、bio 均需传入 */
 export async function updateProfile(input: UpdateProfileInput): Promise<UserInfo> {
   return request<UserInfo>({
     url: '/me',
-    method: 'PUT',
-    data: input,
+    method: 'PATCH',
+    data: {
+      nickname: input.nickname,
+      avatarFileId: input.avatarFileId,
+      bio: input.bio ?? '',
+    },
   })
 }
 
