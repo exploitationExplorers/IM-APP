@@ -16,62 +16,152 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
-## 认证（无需 JWT）
+## 认证（无需 JWT，除标注外）
 
 ### POST `/api/v1/auth/sms/send`
 
-**Body**
-```json
-{ "phone": "13800138000", "countryCode": "+86", "scene": "login|register|reset" }
-```
+发送短信验证码。`scene`: `register` | `login` | `reset`。
 
-**Response**
-```json
-{ "ok": true, "tip": "开发环境验证码：123456" }
-```
-
-### POST `/api/v1/auth/login`
+限流：同一手机号 1 分钟 1 条、IP 每小时 5 条、号码每日 10 条，超限返回 `code=1`。
 
 **Body**
 ```json
-{ "phone": "13800138000", "password": "123456", "countryCode": "+86" }
+{
+  "countryCode": "+86",
+  "phone": "13800138000",
+  "scene": "register",
+  "deviceId": "test-device"
+}
 ```
 
 **Response**
 ```json
 {
-  "token": "jwt...",
+  "retryAfterSec": 60,
+  "expiresIn": 600,
+  "devCode": "123456"
+}
+```
+
+`devCode` 仅开发环境返回。
+
+### POST `/api/v1/auth/register`
+
+手机号 + 验证码 + 密码注册（密码至少 6 位）。成功返回 `accessToken` / `refreshToken` / `user`。
+
+**Body**
+```json
+{
+  "countryCode": "+86",
+  "phone": "13900000001",
+  "code": "123456",
+  "password": "test123456",
+  "deviceId": "test-device"
+}
+```
+
+**Response**
+```json
+{
+  "accessToken": "jwt...",
+  "refreshToken": "rt...",
+  "expiresIn": 604800,
   "user": {
     "id": "uuid",
-    "phone": "13800138000",
+    "phoneMasked": "139****0001",
     "countryCode": "+86",
-    "publicId": "chat10001",
-    "nickname": "张三",
+    "publicId": "chat10005",
+    "nickname": "用户0001",
     "avatar": "",
-    "bio": ""
+    "bio": "",
+    "status": "active"
   }
 }
 ```
 
-### POST `/api/v1/auth/login/sms`
+### POST `/api/v1/auth/login`
+
+手机号 + 密码登录。演示账号 `13800138000` / `123456`。
 
 **Body**
 ```json
-{ "phone": "13800138000", "code": "123456", "countryCode": "+86" }
+{
+  "countryCode": "+86",
+  "phone": "13800138000",
+  "password": "123456",
+  "deviceId": "test-device"
+}
 ```
 
-### POST `/api/v1/auth/register`
+**Response**：同注册，`AuthResult`。
+
+### POST `/api/v1/auth/login/sms`
+
+手机号 + 验证码登录。验证码需先通过 `/auth/sms/send`（`scene=login`）获取。
+
+未注册手机号返回失败（禁止静默注册）。
 
 **Body**
 ```json
-{ "phone": "13800138000", "code": "123456", "countryCode": "+86", "password": "123456" }
+{
+  "countryCode": "+86",
+  "phone": "13800138000",
+  "code": "123456",
+  "deviceId": "test-device"
+}
+```
+
+### POST `/api/v1/auth/token/refresh`
+
+用 `refreshToken` 换取新的 `accessToken` + `refreshToken`（旧 refreshToken 立即失效）。
+
+**Body**
+```json
+{
+  "refreshToken": "rt...",
+  "deviceId": "test-device"
+}
+```
+
+**Response**
+```json
+{
+  "accessToken": "jwt...",
+  "refreshToken": "rt-new...",
+  "expiresIn": 604800
+}
 ```
 
 ### POST `/api/v1/auth/password/reset`
 
+通过验证码重置密码（`scene=reset`）。
+
 **Body**
 ```json
-{ "phone": "13800138000", "code": "123456", "password": "newpass", "countryCode": "+86" }
+{
+  "countryCode": "+86",
+  "phone": "13800138000",
+  "code": "123456",
+  "password": "newpassword123"
+}
+```
+
+### POST `/api/v1/auth/logout`
+
+撤销当前设备会话（该 refreshToken 失效）。无需 JWT。
+
+**Body**
+```json
+{ "refreshToken": "rt..." }
+```
+
+### POST `/api/v1/auth/logout-all`
+
+撤销当前用户所有设备会话。**需 JWT**（`Authorization: Bearer accessToken`）。
+
+**Body**
+```json
+{}
 ```
 
 ---
@@ -84,20 +174,35 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### PUT `/api/v1/me`
 
-**Body**（字段可选）
+**Body**（字段可选，旧版）
 ```json
 { "nickname": "新昵称", "avatar": "url", "bio": "签名" }
 ```
 
+### PATCH `/api/v1/me`
+
+修改本人资料。**nickname、avatarFileId、bio 均需传入**（bio 无内容传空字符串）。头像 `avatarFileId` 须先走文件上传流程（接口 12 → PUT → 接口 13）。
+
+**Body**
+```json
+{ "nickname": "新昵称", "avatarFileId": "file-uuid", "bio": "" }
+```
+
 ### GET `/api/v1/me/qrcode`
+
+需 JWT。注册成功后后端自动生成唯一二维码 token；前端用 `payload` 渲染二维码。
 
 **Response**
 ```json
 {
-  "publicId": "chat10001",
-  "nickname": "张三",
-  "avatar": "",
-  "payload": "{\"type\":\"user\",\"publicId\":\"chat10001\"}"
+  "payload": "{\"token\":\"...\",\"type\":\"user\"}",
+  "expiresAt": "2027-08-12T04:18:22Z",
+  "user": {
+    "id": "uuid",
+    "publicId": "chat10006",
+    "nickname": "用户0003",
+    "avatar": ""
+  }
 }
 ```
 
@@ -226,9 +331,50 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
-## 文件上传（Phase 3）
+## 文件上传（需 JWT）
 
-### POST `/api/v1/files/presign`
+### POST `/api/v1/files/uploads`
+
+创建上传任务，获取预签名 PUT 地址。
+
+**Body**
+```json
+{
+  "purpose": "avatar",
+  "fileName": "avatar.jpg",
+  "contentType": "image/jpeg",
+  "size": 102400
+}
+```
+
+**Response**
+```json
+{
+  "file": { "id": "uuid", "status": "pending" },
+  "uploadUrl": "https://...",
+  "headers": {},
+  "expiresIn": 900
+}
+```
+
+客户端 PUT 二进制到 `uploadUrl` 后，调用完成接口。
+
+### POST `/api/v1/files/uploads/:fileId/complete`
+
+确认上传完成。
+
+**Body**
+```json
+{ "etag": "optional" }
+```
+
+**Response**：`FileInfo`（含 `url`、`status` 等）。
+
+### GET `/api/v1/files/:fileId`
+
+查询文件信息。
+
+### POST `/api/v1/files/presign`（旧版 / 兼容）
 
 获取 MinIO 预签名上传 URL（MinIO 未配置时返回 dev 占位 URL）。
 

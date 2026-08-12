@@ -130,7 +130,7 @@ function switchTo(url: string) {
   height: 32rpx;
   padding: 0 8rpx;
   border-radius: 16rpx;
-  background: #e54d42;
+  background: #ef4343;
   display: flex;
   align-items: center;
   justify-content: center;

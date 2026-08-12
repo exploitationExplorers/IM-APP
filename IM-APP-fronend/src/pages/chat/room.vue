@@ -4,6 +4,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
+import { useChatSettingsStore } from '@/stores/chatSettings'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -18,6 +19,9 @@ const showPlusPanel = ref(false)
 const messages = computed(() => chatStore.messagesMap[conversationId.value] || [])
 const myId = computed(() => userStore.profile?.id || 'u_me')
 const myAvatar = computed(() => userStore.profile?.avatar || '/static/avatar-me.png')
+const settingsStore = useChatSettingsStore()
+const enterToSend = computed(() => settingsStore.enterToSend)
+const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 
 onLoad(async (query) => {
   conversationId.value = String(query?.id || '')
@@ -47,6 +51,11 @@ async function onSend() {
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }
+}
+
+function onConfirmSend() {
+  if (!enterToSend.value) return
+  onSend()
 }
 
 function onVoice() {
@@ -110,10 +119,10 @@ function pickImage() {
           <input
             class="input"
             v-model="input"
-            confirm-type="send"
+            :confirm-type="confirmType"
             placeholder="输入消息"
             placeholder-style="color:#B0B0B0"
-            @confirm="onSend"
+            @confirm="onConfirmSend"
           />
           <text class="emoji" @click="onEmoji">☺</text>
         </view>

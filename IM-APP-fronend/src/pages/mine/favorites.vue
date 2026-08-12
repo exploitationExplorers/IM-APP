@@ -97,7 +97,7 @@ const updateMenuPosition = (item: any, event: any) => {
       );
 
       menuStyle.value = {
-        top: `${topRpx + 60}rpx`,
+        top: `${topRpx}rpx`,
         left: `${leftRpx}rpx`,
         maxHeight: `${maxHeightRpx}rpx`,
       };
