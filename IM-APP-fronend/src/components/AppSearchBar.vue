@@ -50,6 +50,9 @@ function onConfirm(e: Event) {
 }
 
 .search-icon {
+  color: #626e8d;
+  font-size: 30rpx;
+  line-height: 1;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -64,6 +67,6 @@ function onConfirm(e: Event) {
 }
 
 .search-placeholder {
-  color: #8a8f9c;
+  color: #626e8d;
 }
 </style>

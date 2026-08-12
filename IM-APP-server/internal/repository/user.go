@@ -3,10 +3,14 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"im-app-server/internal/models"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -101,4 +105,34 @@ func (r *UserRepo) QrcodePayload(u models.User) models.QrcodePayload {
 		Avatar:   u.Avatar,
 		Payload:  string(payload),
 	}
+}
+
+// EnsureQRCode 返回该用户有效二维码；无则生成唯一 token 并落库（注册成功即调用）
+func (r *UserRepo) EnsureQRCode(ctx context.Context, userID string) (models.UserQR, error) {
+	var token string
+	var expiresAt *time.Time
+	err := r.DB.QueryRow(ctx, `
+		SELECT token, expires_at FROM user_qrcodes
+		WHERE user_id=$1::uuid AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > NOW())
+		ORDER BY created_at DESC LIMIT 1`, userID,
+	).Scan(&token, &expiresAt)
+	if err == nil {
+		exp := time.Time{}
+		if expiresAt != nil {
+			exp = *expiresAt
+		}
+		return models.UserQR{Token: token, ExpiresAt: exp}, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return models.UserQR{}, err
+	}
+	token = uuid.NewString()
+	exp := time.Now().Add(365 * 24 * time.Hour)
+	if _, err := r.DB.Exec(ctx, `
+		INSERT INTO user_qrcodes(user_id, token, expires_at) VALUES($1::uuid,$2,$3)
+		ON CONFLICT (token) DO NOTHING`, userID, token, exp); err != nil {
+		return models.UserQR{}, err
+	}
+	return models.UserQR{Token: token, ExpiresAt: exp}, nil
 }

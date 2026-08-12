@@ -4,7 +4,13 @@ export type { ApiResponse } from './api'
 
 export type {
   UserInfo,
+  TokenPair,
+  AuthResult,
   LoginResult,
+  SmsScene,
+  SendSMSResult,
+  UserSummary,
+  UserQrcodeResult,
   QrcodePayload,
   UpdateProfileInput,
 } from './user'

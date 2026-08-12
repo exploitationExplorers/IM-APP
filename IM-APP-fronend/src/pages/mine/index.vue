@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
+import { APP_CONFIG } from '@/config'
 import ImTabBar from '@/components/ImTabBar.vue'
 
 useAuthGuard()
@@ -10,7 +11,9 @@ useTabBar()
 const userStore = useUserStore()
 
 const nickname = computed(() => userStore.profile?.nickname || '未登录')
-const avatar = computed(() => userStore.profile?.avatar || '/static/avatar-me.png')
+const avatarSrc = computed(
+  () => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl,
+)
 
 const menus = [
   { title: '我的收藏', icon: '/static/mine/icon-favorites.svg', url: '/pages/mine/favorites' },
@@ -44,25 +47,28 @@ function onLogout() {
 
 <template>
   <view class="page">
-    <view class="hero">
-      <text class="hero-title">个人中心</text>
-      <view class="profile">
-        <image class="avatar" :src="avatar" mode="aspectFill" />
-        <text class="nickname">{{ nickname }}</text>
-        <view class="hero-actions">
-          <image
-            class="hero-btn"
-            src="/static/mine/icon-edit.svg"
-            mode="aspectFit"
-            @click="go('/pages/mine/profile')"
-          />
-          <image
-            class="hero-btn"
-            src="/static/mine/icon-qrcode.svg"
-            mode="aspectFit"
-            @click="go('/pages/mine/qrcode')"
-          />
+    <view class="mine-header">
+      <view class="mine-hero-card">
+        <view class="mine-profile">
+          <view class="mine-avatar-ring">
+            <image class="mine-avatar" :src="avatarSrc" mode="aspectFill" />
+          </view>
+          <text class="mine-nickname">{{ nickname }}</text>
         </view>
+
+        <view class="mine-actions">
+          <view class="mine-action-btn" @click="go('/pages/mine/profile')">
+            <image class="mine-action-icon" src="/static/mine/icon-edit.svg" mode="aspectFit" />
+          </view>
+          <view class="mine-action-btn" @click="go('/pages/mine/qrcode')">
+            <image class="mine-action-icon" src="/static/mine/icon-qrcode.svg" mode="aspectFit" />
+          </view>
+        </view>
+      </view>
+
+      <view class="mine-nav">
+        <text class="mine-nav-title">个人中心</text>
+        <view class="mine-nav-spacer" />
       </view>
     </view>
 
@@ -89,72 +95,129 @@ function onLogout() {
 </template>
 
 <style scoped lang="scss">
+$page-bg: #f5f6f8;
+$primary: #0a2fc2;
+
 .page {
   min-height: 100vh;
-  background: #f5f6f8;
+  background: $page-bg;
   padding-bottom: calc(144rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
-.hero {
+.mine-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+/* flex items-center justify-between pt-18 pb-6 px-6 */
+.mine-hero-card {
   position: relative;
-  background-color: #0a2fc2;
-  background-image: url('/static/mine/hero-bg.webp');
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(144rpx + env(safe-area-inset-top)) 48rpx 48rpx;
+  background-color: $primary;
+  background-image: url('/static/mine/my-title.webp');
   background-size: cover;
-  background-position: center;
   background-repeat: no-repeat;
-  padding: 32rpx 48rpx 48rpx;
-  color: #fff;
+  background-position: center;
+  background-blend-mode: luminosity;
+  box-sizing: border-box;
 }
 
-.hero-title {
-  font-size: 48rpx;
-  font-weight: 700;
-  line-height: 64rpx;
-  color: #fff;
-}
-
-.profile {
-  margin-top: 48rpx;
-  position: relative;
+/* 左侧：头像 + 昵称，不撑满整行 */
+.mine-profile {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  gap: 8rpx;
+  flex-shrink: 0;
 }
 
-.avatar {
+.mine-avatar-ring {
   width: 160rpx;
   height: 160rpx;
   border-radius: 50%;
+  overflow: hidden;
   border: 4rpx solid #ffffff;
-  background: #f3f4f7;
   box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.12);
+  background: #f3f4f7;
+  box-sizing: border-box;
 }
 
-.nickname {
-  margin-top: 16rpx;
+.mine-avatar {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.mine-nickname {
+  width: 160rpx;
   font-size: 32rpx;
   font-weight: 700;
   line-height: 48rpx;
   color: #fff;
-  max-width: 420rpx;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.hero-actions {
-  position: absolute;
-  right: 0;
-  top: 24rpx;
+/* 右侧：编辑 / 二维码 */
+.mine-actions {
   display: flex;
   align-items: center;
-  gap: 32rpx;
+  gap: 4rpx;
+  flex-shrink: 0;
+  align-self: center;
 }
 
-.hero-btn {
+.mine-action-btn {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mine-action-icon {
   width: 40rpx;
   height: 40rpx;
+}
+
+.mine-nav {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  height: calc(96rpx + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 40rpx 0;
+  box-sizing: border-box;
+  background: transparent;
+  pointer-events: none;
+}
+
+.mine-nav-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 48rpx;
+  font-weight: 700;
+  line-height: 64rpx;
+  color: #fff;
+  text-align: left;
+}
+
+.mine-nav-spacer {
+  width: 96rpx;
+  height: 96rpx;
+  flex-shrink: 0;
+  visibility: hidden;
 }
 
 .menu-card {

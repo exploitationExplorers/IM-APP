@@ -35,6 +35,29 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
   display: block;
 }
 
+.auth-logo.is-sign-up {
+  margin-top: 48rpx;
+}
+
+.auth-inner.is-sign-up {
+  padding-top: 24rpx;
+}
+
+.auth-top-back {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.auth-top-back-icon {
+  color: #fff;
+  font-size: 64rpx;
+  font-weight: 300;
+  line-height: 1;
+}
+
 .auth-title {
   color: #fff;
   font-size: 48rpx;
@@ -242,14 +265,21 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
 }
 
 .auth-agree {
-  color: rgba(255, 255, 255, 0.9);
+  color: #ffffff;
   font-size: 24rpx;
   text-align: center;
   line-height: 1.7;
-  padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
+  padding: 32rpx 0 calc(40rpx + env(safe-area-inset-bottom));
+}
+
+.auth-agree-links {
+  display: flex;
+  justify-content: center;
+  gap: 8rpx;
+  flex-wrap: wrap;
 }
 
 .auth-agree-link {
-  color: #fff;
+  color: #ffffff !important;
   text-decoration: underline;
 }
