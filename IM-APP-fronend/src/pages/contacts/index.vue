@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
 import { useContactStore } from '@/stores/contact'
@@ -11,6 +12,7 @@ useAuthGuard()
 useTabBar()
 
 const contactStore = useContactStore()
+const { contacts, groups } = storeToRefs(contactStore)
 const keyword = ref('')
 const sortKey = ref<'recent' | 'name' | 'chat'>('recent')
 const showSort = ref(false)
@@ -22,8 +24,10 @@ const sortLabel = computed(() => {
   return '最近加入(默认)'
 })
 
+const featuredGroup = computed(() => groups.value[0] ?? null)
+
 const filteredContacts = computed(() => {
-  let list = [...contactStore.contacts]
+  let list = [...contacts.value]
   const k = keyword.value.trim()
   if (k) list = list.filter((c) => c.nickname.includes(k))
   if (sortKey.value === 'name') {
@@ -44,6 +48,12 @@ function go(url: string) {
 
 function openContact(c: Contact) {
   contactStore.openChatWithContact(c.id, c.nickname, c.avatar)
+}
+
+function openFeaturedGroup() {
+  const g = featuredGroup.value
+  if (!g) return
+  go(`/pages/contacts/groups`)
 }
 
 function onAdd() {
@@ -67,10 +77,20 @@ function closeMenus() {
     <view class="header">
       <text class="title">通讯录</text>
       <view class="add-wrap" @click.stop="onAdd">
-        <text class="icon-plus">＋</text>
+        <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
         <view v-if="showAddMenu" class="popup-menu">
-          <view class="popup-item" @click="go('/pages/contacts/add-friend')">添加朋友</view>
-          <view class="popup-item" @click="go('/pages/group/create')">创建群聊</view>
+          <view class="popup-item" @click="go('/pages/contacts/add-friend')">
+            <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
+            <text>添加朋友</text>
+          </view>
+          <view class="popup-item" @click="go('/pages/contacts/scan')">
+            <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
+            <text>添加群聊</text>
+          </view>
+          <view class="popup-item" @click="go('/pages/group/create')">
+            <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
+            <text>创建群聊</text>
+          </view>
         </view>
       </view>
     </view>
@@ -82,27 +102,33 @@ function closeMenus() {
         <view class="menu-item" @click="go('/pages/contacts/new-friends')">
           <image class="menu-icon" src="/static/icons/menu-new-friend.svg" mode="aspectFit" />
           <text class="menu-text">新的朋友</text>
-          <text class="arrow">›</text>
+          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
         </view>
         <view class="menu-item" @click="go('/pages/contacts/tags')">
           <image class="menu-icon" src="/static/icons/menu-tag.svg" mode="aspectFit" />
           <text class="menu-text">标签</text>
-          <text class="arrow">›</text>
+          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
         </view>
         <view class="menu-item" @click="go('/pages/contacts/groups')">
           <image class="menu-icon" src="/static/icons/menu-group.svg" mode="aspectFit" />
           <text class="menu-text">群聊天</text>
-          <text class="arrow">›</text>
+          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
         </view>
       </view>
 
-      <view class="section-divider" />
+      <view v-if="featuredGroup" class="featured-band">
+        <view class="featured-card" @click="openFeaturedGroup">
+          <image class="featured-avatar" :src="featuredGroup.avatar" mode="aspectFill" />
+          <text class="featured-name">{{ featuredGroup.name }}</text>
+        </view>
+      </view>
+      <view v-else class="section-divider" />
 
       <view class="section-head">
         <text class="section-count">联络人 ({{ filteredContacts.length }})</text>
         <view class="sort-wrap" @click.stop="showSort = !showSort">
           <text class="sort">{{ sortLabel }}</text>
-          <view class="sort-caret" />
+          <image class="sort-caret" src="/static/icons/icon-caret.svg" mode="aspectFit" />
           <view v-if="showSort" class="popup-menu sort-menu">
             <view
               class="popup-item"
@@ -152,8 +178,10 @@ function closeMenus() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16rpx 40rpx 8rpx;
+  height: 96rpx;
+  padding: 0 40rpx;
   background: #fff;
+  box-sizing: border-box;
 }
 
 .title {
@@ -165,23 +193,21 @@ function closeMenus() {
 
 .add-wrap {
   position: relative;
-  width: 64rpx;
-  height: 64rpx;
+  width: 48rpx;
+  height: 48rpx;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .icon-plus {
-  font-size: 44rpx;
-  color: #212121;
-  line-height: 1;
-  font-weight: 300;
+  width: 48rpx;
+  height: 48rpx;
 }
 
 .popup-menu {
   position: absolute;
-  top: 72rpx;
+  top: 64rpx;
   right: 0;
   min-width: 288rpx;
   padding: 16rpx;
@@ -195,15 +221,25 @@ function closeMenus() {
   right: 0;
   left: auto;
   top: 48rpx;
-  min-width: 280rpx;
+  min-width: 320rpx;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.1);
 }
 
 .popup-item {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
   padding: 16rpx 32rpx;
   font-size: 28rpx;
   color: #212121;
   white-space: nowrap;
   border-radius: 8rpx;
+}
+
+.popup-icon {
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
 
 .popup-item.active {
@@ -225,6 +261,7 @@ function closeMenus() {
   gap: 16rpx;
   height: 96rpx;
   padding: 0 40rpx;
+  box-sizing: border-box;
 }
 
 .menu-icon {
@@ -235,15 +272,49 @@ function closeMenus() {
 
 .menu-text {
   flex: 1;
-  font-size: 32rpx;
+  font-size: 34rpx;
   color: #212121;
   line-height: 48rpx;
 }
 
 .arrow {
-  color: #c8ccd6;
-  font-size: 36rpx;
-  line-height: 1;
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
+}
+
+.featured-band {
+  background: #f3f4f7;
+  padding: 16rpx 40rpx;
+  margin-bottom: 16rpx;
+}
+
+.featured-card {
+  display: flex;
+  align-items: center;
+  gap: 32rpx;
+  padding: 8rpx;
+  background: #fff;
+  border-radius: 8rpx;
+  box-sizing: border-box;
+}
+
+.featured-avatar {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: #f3f4f7;
+  flex-shrink: 0;
+}
+
+.featured-name {
+  flex: 1;
+  font-size: 34rpx;
+  color: #212121;
+  line-height: 48rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-divider {
@@ -257,7 +328,7 @@ function closeMenus() {
   justify-content: space-between;
   align-items: center;
   height: 48rpx;
-  margin: 16rpx 40rpx 16rpx;
+  margin: 0 40rpx 16rpx;
 }
 
 .section-count {
@@ -275,40 +346,39 @@ function closeMenus() {
 }
 
 .sort {
-  color: #8a8f9c;
+  color: #626e8d;
   font-size: 24rpx;
   line-height: 40rpx;
 }
 
 .sort-caret {
-  width: 0;
-  height: 0;
-  border-left: 8rpx solid transparent;
-  border-right: 8rpx solid transparent;
-  border-top: 10rpx solid #8a8f9c;
-  margin-left: 4rpx;
+  width: 16rpx;
+  height: 16rpx;
 }
 
 .contact-row {
   display: flex;
   align-items: center;
-  gap: 16rpx;
-  padding: 16rpx 40rpx;
+  gap: 32rpx;
+  height: 128rpx;
+  padding: 0 40rpx;
   background: #fff;
+  box-sizing: border-box;
 }
 
 .avatar {
-  width: 80rpx;
-  height: 80rpx;
+  width: 96rpx;
+  height: 96rpx;
   border-radius: 50%;
-  background: #eee;
+  background: #f3f4f7;
   flex-shrink: 0;
 }
 
 .name {
   flex: 1;
-  font-size: 32rpx;
+  font-size: 34rpx;
   color: #212121;
+  line-height: 48rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
