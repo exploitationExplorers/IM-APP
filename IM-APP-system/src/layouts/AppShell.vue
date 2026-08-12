@@ -24,7 +24,7 @@ function toggleCollapse(): void {
               :default-active="activeMenu"
               :collapse="isCollapse"
               :collapse-transition="false"
-              :default-openeds="['/system']"
+              :default-openeds="['/system', '/forward-group-send', '/sms-operation-config']"
               router
             >
               <el-menu-item index="/home">
@@ -43,6 +43,26 @@ function toggleCollapse(): void {
                 <el-menu-item index="/system/logs">
                   <el-icon><Document /></el-icon>
                   <template #title>操作日志</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="/forward-group-send">
+                <template #title>
+                  <el-icon><Promotion /></el-icon>
+                  <span>转发和群发管理</span>
+                </template>
+                <el-menu-item index="/forward-group-send">
+                  <el-icon><List /></el-icon>
+                  <template #title>任务列表</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="/sms-operation-config">
+                <template #title>
+                  <el-icon><Message /></el-icon>
+                  <span>短信和运营配置</span>
+                </template>
+                <el-menu-item index="/sms-operation-config">
+                  <el-icon><Operation /></el-icon>
+                  <template #title>配置管理</template>
                 </el-menu-item>
               </el-sub-menu>
             </el-menu>
