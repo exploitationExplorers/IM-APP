@@ -70,7 +70,22 @@
     {
       "path": "pages/contacts/add-friend",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "添加朋友"
+      }
+    },
+    {
+      "path": "pages/contacts/scan",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "扫二维码"
+      }
+    },
+    {
+      "path": "pages/contacts/scan-result",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "扫码结果"
       }
     },
     {
@@ -94,6 +109,7 @@
     {
       "path": "pages/group/create",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "创建群聊"
       }
     },

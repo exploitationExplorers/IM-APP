@@ -18,9 +18,24 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "首页" },
       },
       {
+        path: "app/users",
+        component: () => import("./views/AppUserManagementView.vue"),
+        meta: { title: "用户管理" },
+      },
+      {
+        path: "app/groups",
+        component: () => import("./views/GroupManagementView.vue"),
+        meta: { title: "群组管理" },
+      },
+      {
         path: "system/users",
         component: () => import("./views/UserManagementView.vue"),
-        meta: { title: "用户管理" },
+        meta: { title: "平台用户管理" },
+      },
+      {
+        path: "system/roles",
+        component: () => import("./views/RolePermissionView.vue"),
+        meta: { title: "角色权限" },
       },
       {
         path: "system/logs",
