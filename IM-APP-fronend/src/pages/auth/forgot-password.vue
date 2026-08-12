@@ -24,23 +24,25 @@ function validatePhoneInput() {
   return true
 }
 
+function startCountdown(seconds: number) {
+  countdown.value = seconds > 0 ? seconds : 60
+  if (timer) clearInterval(timer)
+  timer = setInterval(() => {
+    countdown.value -= 1
+    if (countdown.value <= 0 && timer) {
+      clearInterval(timer)
+      timer = null
+    }
+  }, 1000)
+}
+
 async function onSendCode() {
   if (countdown.value > 0) return
   if (!validatePhoneInput()) return
   try {
-    const res = await sendSmsCode(phone.value, 'reset')
-    uni.showToast({
-      title: (res as { tip?: string }).tip || '验证码已发送',
-      icon: 'none',
-    })
-    countdown.value = 60
-    timer = setInterval(() => {
-      countdown.value -= 1
-      if (countdown.value <= 0 && timer) {
-        clearInterval(timer)
-        timer = null
-      }
-    }, 1000)
+    const res = await sendSmsCode(phone.value, 'reset', countryCode.value)
+    uni.showToast({ title: '验证码已发送', icon: 'none' })
+    startCountdown(res.retryAfterSec || 60)
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }
@@ -62,7 +64,7 @@ async function onSubmit() {
   }
   loading.value = true
   try {
-    await resetPassword(phone.value, code.value, password.value)
+    await resetPassword(phone.value, code.value, password.value, countryCode.value)
     uni.showToast({ title: '密码已重置', icon: 'success' })
     setTimeout(() => {
       uni.redirectTo({ url: '/pages/auth/sign-in' })
@@ -161,22 +163,6 @@ function goBack() {
 
 <style lang="scss">
 @import '@/styles/auth.scss';
-
-.auth-top-back {
-  width: 72rpx;
-  height: 72rpx;
-  margin-top: 24rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.auth-top-back-icon {
-  color: #fff;
-  font-size: 64rpx;
-  font-weight: 300;
-  line-height: 1;
-}
 
 .auth-logo.is-forgot {
   margin-top: 48rpx;

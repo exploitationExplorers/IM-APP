@@ -23,7 +23,7 @@ function onConfirm(e: Event) {
 
 <template>
   <view class="search-bar" @click="emit('click')">
-    <text class="search-icon">⌕</text>
+    <icon type="search" size="16" color="#8a8f9c" class="search-icon" />
     <input
       class="search-input"
       type="text"
@@ -54,6 +54,8 @@ function onConfirm(e: Event) {
   font-size: 30rpx;
   line-height: 1;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .search-input {

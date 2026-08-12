@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed } from 'vue'
+import { useChatSettingsStore } from '@/stores/chatSettings'
 
-const enterToSend = ref(false)
+const settingsStore = useChatSettingsStore()
+const enterToSend = computed(() => settingsStore.enterToSend)
 
 function onEnterChange(e: Event) {
-  enterToSend.value = (e as unknown as { detail: { value: boolean } }).detail.value
+  const v = (e as unknown as { detail: { value: boolean } }).detail.value
+  settingsStore.setEnterToSend(!!v)
 }
 
 function onClear() {
@@ -22,19 +25,29 @@ function onClear() {
 function goPlaceholder(title: string) {
   uni.showToast({ title: `${title}开发中`, icon: 'none' })
 }
+
+function goMassAssistant() {
+  uni.navigateTo({ url: '/pages/mine/mass-assistant' })
+}
+
+function goEmotions() {
+  uni.navigateTo({
+    url: '/pages/mine/emotions'
+  })
+}
 </script>
 
 <template>
   <view class="page">
     <view class="cell">
       <text class="label">回车键送出消息</text>
-      <switch :checked="enterToSend" color="#0A2FC2" @change="onEnterChange" />
+      <switch :checked="enterToSend" color="#0A2FC2" @change="onEnterChange" style="transform:scale(0.6)" />
     </view>
-    <view class="cell" @click="goPlaceholder('群发助手')">
+    <view class="cell" @click="goMassAssistant">
       <text class="label">群发助手</text>
       <text class="arrow">›</text>
     </view>
-    <view class="cell" @click="goPlaceholder('我的表情')">
+    <view class="cell" @click="goEmotions">
       <text class="label">我的表情</text>
       <text class="arrow">›</text>
     </view>
@@ -54,8 +67,8 @@ function goPlaceholder(title: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 28rpx 32rpx;
-  min-height: 96rpx;
+  padding: 20rpx 32rpx;
+  // min-height: 96rpx;
   box-sizing: border-box;
 }
 

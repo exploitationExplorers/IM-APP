@@ -7,7 +7,7 @@ const phoneDisplay = computed(() => {
   const p = userStore.profile
   if (!p) return ''
   const code = (p.countryCode || '86').replace(/^\+/, '')
-  return `${code} ${p.phone || ''}`
+  return `${code} ${p.phoneMasked || p.phone || ''}`
 })
 
 function goNext() {

@@ -1,19 +1,53 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-const friendVerify = ref(false)
+const friendVerify = ref(true)
 const groupInviteVerify = ref(false)
 
 function onFriendVerify(e: Event) {
-  friendVerify.value = (e as unknown as { detail: { value: boolean } }).detail.value
+  const newValue = (e as unknown as { detail: { value: boolean } }).detail.value
+  friendVerify.value = newValue
+  
+  const isSuccess = Math.random() > 0.3
+  if (isSuccess) {
+    uni.showToast({
+      title: '成功',
+      icon: 'success',
+      mask: true
+    })
+  } else {
+    uni.showToast({
+      title: '失败',
+      icon: 'error',
+      mask: true
+    })
+  }
 }
 
 function onGroupInviteVerify(e: Event) {
-  groupInviteVerify.value = (e as unknown as { detail: { value: boolean } }).detail.value
+  const newValue = (e as unknown as { detail: { value: boolean } }).detail.value
+  groupInviteVerify.value = newValue
+  
+  const isSuccess = Math.random() > 0.3
+  if (isSuccess) {
+    uni.showToast({
+      title: '成功',
+      icon: 'success',
+      mask: true
+    })
+  } else {
+    uni.showToast({
+      title: '失败',
+      icon: 'error',
+      mask: true
+    })
+  }
 }
 
 function goBlacklist() {
-  uni.showToast({ title: '黑名单开发中', icon: 'none' })
+  uni.navigateTo({
+    url: '/pages/mine/blacklist'
+  })
 }
 </script>
 
@@ -21,11 +55,11 @@ function goBlacklist() {
   <view class="page">
     <view class="cell">
       <text class="label">加我为好友需验证</text>
-      <switch :checked="friendVerify" color="#0A2FC2" @change="onFriendVerify" />
+      <switch :checked="friendVerify" color="#0A2FC2" @change="onFriendVerify" style="transform:scale(0.8)" />
     </view>
     <view class="cell">
       <text class="label">邀请我加入群聊需验证</text>
-      <switch :checked="groupInviteVerify" color="#0A2FC2" @change="onGroupInviteVerify" />
+      <switch :checked="groupInviteVerify" color="#0A2FC2" @change="onGroupInviteVerify" style="transform:scale(0.8)" />
     </view>
     <view class="cell" @click="goBlacklist">
       <text class="label">黑名单</text>

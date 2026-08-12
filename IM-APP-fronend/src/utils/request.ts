@@ -2,6 +2,7 @@ import { APP_CONFIG } from '@/config'
 import type { ApiResponse } from '@/types'
 
 const TOKEN_KEY = 'im_token'
+const REFRESH_TOKEN_KEY = 'im_refresh_token'
 
 export function getToken(): string {
   return uni.getStorageSync(TOKEN_KEY) || ''
@@ -11,8 +12,17 @@ export function setToken(token: string) {
   uni.setStorageSync(TOKEN_KEY, token)
 }
 
+export function getRefreshToken(): string {
+  return uni.getStorageSync(REFRESH_TOKEN_KEY) || ''
+}
+
+export function setRefreshToken(token: string) {
+  uni.setStorageSync(REFRESH_TOKEN_KEY, token)
+}
+
 export function clearToken() {
   uni.removeStorageSync(TOKEN_KEY)
+  uni.removeStorageSync(REFRESH_TOKEN_KEY)
 }
 
 interface RequestOptions {
