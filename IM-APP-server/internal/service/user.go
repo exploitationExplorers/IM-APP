@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"time"
 
 	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
@@ -58,10 +60,28 @@ func (s *UserService) GetPublicProfile(ctx context.Context, userID string) (mode
 	return repository.PublicUser(u), nil
 }
 
-func (s *UserService) Qrcode(ctx context.Context, uid string) (models.QrcodePayload, error) {
+func (s *UserService) Qrcode(ctx context.Context, uid string) (models.UserQRCodeResult, error) {
 	u, err := s.Users.FindByID(ctx, uid)
 	if err != nil {
-		return models.QrcodePayload{}, ErrNotFound
+		return models.UserQRCodeResult{}, ErrNotFound
 	}
-	return s.Users.QrcodePayload(u), nil
+	// 返回该用户唯一二维码（无则生成）
+	qr, err := s.Users.EnsureQRCode(ctx, uid)
+	if err != nil {
+		return models.UserQRCodeResult{}, err
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"type":  "user",
+		"token": qr.Token,
+	})
+	return models.UserQRCodeResult{
+		Payload:   string(payload),
+		ExpiresAt: qr.ExpiresAt.UTC().Format(time.RFC3339),
+		User: models.UserSummary{
+			ID:       u.ID,
+			PublicID: u.PublicID,
+			Nickname: u.Nickname,
+			Avatar:   u.Avatar,
+		},
+	}, nil
 }

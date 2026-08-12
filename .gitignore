@@ -1,3 +1,4 @@
 # 本地临时抓取产物
 .tmp-ref-home.html
 .tmp-*
+.idea
