@@ -470,10 +470,10 @@ func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, passwor
 	var u models.User
 	err := h.DB.QueryRow(ctx, `
 		INSERT INTO users(phone, country_code, phone_e164, password_hash, nickname, avatar, public_id)
-		VALUES($1,$2,$3,$4,$5,'',$6)
+		VALUES($1,$2,$3,$4,$5,$7,$6)
 		RETURNING id::text, phone, country_code, COALESCE(public_id,''), password_hash,
 			nickname, avatar, bio, COALESCE(status,'active'), created_at`,
-		local, cc, e164, hash, nickname, publicID,
+		local, cc, e164, hash, nickname, publicID, models.DefaultAvatar,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
 		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
 	if err == nil {
