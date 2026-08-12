@@ -2,27 +2,58 @@
 
 export interface UserInfo {
   id: string
-  phone: string
+  /** 完整手机号仅 Mock / 本人安全页使用；真实接口通常不返回 */
+  phone?: string
+  /** 脱敏手机号，如 138****8000 */
+  phoneMasked?: string
   countryCode: string
   publicId: string
   nickname: string
   avatar: string
   bio?: string
   status?: 'active' | 'blocked' | 'banned'
+  createdAt?: string
 }
 
-export interface LoginResult {
-  token: string
+export interface TokenPair {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+}
+
+/** 登录 / 注册成功响应（对齐 AuthResult） */
+export interface AuthResult extends TokenPair {
   user: UserInfo
 }
 
-export interface QrcodePayload {
+/** @deprecated 使用 AuthResult */
+export type LoginResult = AuthResult
+
+export type SmsScene = 'login' | 'register' | 'reset'
+
+export interface SendSMSResult {
+  retryAfterSec: number
+  expiresIn: number
+  /** 仅开发环境返回 */
+  devCode?: string
+}
+
+export interface UserSummary {
+  id: string
   publicId: string
   nickname: string
   avatar: string
-  /** 二维码内容，扫描后可解析 */
-  payload: string
 }
+
+/** GET /me/qrcode 响应 */
+export interface UserQrcodeResult {
+  payload: string
+  expiresAt?: string
+  user: UserSummary
+}
+
+/** @deprecated 使用 UserQrcodeResult */
+export type QrcodePayload = UserQrcodeResult
 
 export interface UpdateProfileInput {
   nickname?: string

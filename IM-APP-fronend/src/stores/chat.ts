@@ -6,16 +6,13 @@ import {
   fetchMessages,
   markAllRead,
   sendMessage as apiSendMessage,
-  subscribeChatMessages,
 } from '@/api/chat'
 import { wsClient } from '@/utils/websocket'
-import { APP_CONFIG } from '@/config'
 
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
   const messagesMap = ref<Record<string, ChatMessage[]>>({})
   const loading = ref(false)
-  let unsubMock: (() => void) | null = null
   let unsubWs: (() => void) | null = null
 
   const totalUnread = computed(() =>
@@ -37,18 +34,12 @@ export const useChatStore = defineStore('chat', () => {
 
   function subscribeRealtime() {
     unsubscribeRealtime()
-    if (APP_CONFIG.useMock) {
-      unsubMock = subscribeChatMessages(handleIncomingMessage)
-    } else {
-      const handler = (data: unknown) => handleIncomingMessage(data as ChatMessage)
-      unsubWs = wsClient.on('chat.message', handler)
-    }
+    const handler = (data: unknown) => handleIncomingMessage(data as ChatMessage)
+    unsubWs = wsClient.on('chat.message', handler)
   }
 
   function unsubscribeRealtime() {
-    unsubMock?.()
     unsubWs?.()
-    unsubMock = null
     unsubWs = null
   }
 
