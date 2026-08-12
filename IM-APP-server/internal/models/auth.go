@@ -11,8 +11,6 @@ type SendSMSRequest struct {
 	Phone       string `json:"phone"`
 	Scene       string `json:"scene"` // register|login|reset
 	DeviceID    string `json:"deviceId"`
-	Ticket      string `json:"ticket"`  // 腾讯云图形验证码 ticket
-	Randstr     string `json:"randstr"` // 腾讯云图形验证码 randstr
 }
 
 type SendSMSResult struct {
@@ -81,4 +79,11 @@ type MeProfile struct {
 	Bio         string `json:"bio"`
 	Status      string `json:"status"`
 	CreatedAt   string `json:"createdAt"`
+}
+
+// UpdateProfileRequest 修改本人资料（指针字段，传了才更新）
+type UpdateProfileRequest struct {
+	Nickname     *string `json:"nickname,omitempty"`
+	AvatarFileID *string `json:"avatarFileId,omitempty"`
+	Bio          *string `json:"bio,omitempty"`
 }

@@ -16,9 +16,9 @@ type UserHandler struct {
 }
 
 type updateProfileReq struct {
-	Nickname *string `json:"nickname"`
-	Avatar   *string `json:"avatar"`
-	Bio      *string `json:"bio"`
+	Nickname     *string `json:"nickname"`
+	AvatarFileID *string `json:"avatarFileId"`
+	Bio          *string `json:"bio"`
 }
 
 func (h *UserHandler) Profile(c *gin.Context) {
@@ -28,7 +28,7 @@ func (h *UserHandler) Profile(c *gin.Context) {
 		response.Fail(c, http.StatusNotFound, "用户不存在")
 		return
 	}
-	response.OK(c, u)
+	response.OK(c, toMeProfile(u))
 }
 
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
@@ -38,12 +38,12 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	u, err := h.Svc.UpdateProfile(c.Request.Context(), uid, req.Nickname, req.Avatar, req.Bio)
+	u, err := h.Svc.UpdateProfile(c.Request.Context(), uid, req.Nickname, req.AvatarFileID, req.Bio)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.OK(c, u)
+	response.OK(c, toMeProfile(u))
 }
 
 func (h *UserHandler) Qrcode(c *gin.Context) {

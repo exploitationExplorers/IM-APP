@@ -72,27 +72,33 @@ func main() {
 	userRepo := &repository.UserRepo{DB: pool}
 	contactRepo := &repository.ContactRepo{DB: pool}
 	chatRepo := &repository.ChatRepo{DB: pool}
+	fileRepo := &repository.FileRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool}
 
-	userSvc := &service.UserService{Users: userRepo}
+	userSvc := &service.UserService{Users: userRepo, Files: fileRepo}
 	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo}
 	chatSvc := &service.ChatService{Chat: chatRepo, Hub: hub}
 	groupSvc := &service.GroupService{Groups: groupRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
 
-	captchaVerifier := &service.CaptchaVerifier{
-		AppID:        cfg.Captcha.AppID,
-		AppSecretKey: cfg.Captcha.AppSecretKey,
-		SecretID:     cfg.Captcha.SecretID,
-		SecretKey:    cfg.Captcha.SecretKey,
+	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
+	var smsGateway service.SMSGateway = service.DevSMSGateway{}
+	if cfg.SMS.SignName != "" && cfg.SMS.TemplateCode != "" {
+		smsGateway = &service.AliyunSMSGateway{
+			AccessKeyID:     cfg.SMS.AccessKeyID,
+			AccessKeySecret: cfg.SMS.AccessKeySecret,
+			SignName:        cfg.SMS.SignName,
+			TemplateCode:    cfg.SMS.TemplateCode,
+			RegionID:        cfg.SMS.RegionID,
+		}
 	}
-	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient, Captcha: captchaVerifier}
+	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient, SMS: smsGateway}
 	userH := &handler.UserHandler{Svc: userSvc}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
-	fileH := &handler.FileHandler{MinIO: minioClient}
+	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Client: imClient}
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
 
@@ -119,7 +125,7 @@ func main() {
 		{
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
-			auth.PUT("/me", userH.UpdateProfile)
+			auth.PATCH("/me", userH.UpdateProfile)
 			auth.GET("/me/qrcode", userH.Qrcode)
 			auth.GET("/users/search", userH.Search)
 			auth.GET("/users/:id", userH.GetUser)
@@ -152,6 +158,9 @@ func main() {
 			} else {
 				auth.POST("/files/presign", handler.DevPresign)
 			}
+			auth.POST("/files/uploads", fileH.Uploads)
+			auth.POST("/files/uploads/:fileId/complete", fileH.Complete)
+			auth.GET("/files/:fileId", fileH.Get)
 
 			auth.POST("/im/token", imH.Token)
 			auth.POST("/forward-tasks", forwardH.Create)
@@ -185,7 +194,7 @@ func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return

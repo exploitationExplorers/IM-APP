@@ -34,10 +34,10 @@ const (
 )
 
 type AuthHandler struct {
-	DB      *pgxpool.Pool
-	Cfg     config.Config
-	Redis   *infra.Redis
-	Captcha *service.CaptchaVerifier
+	DB    *pgxpool.Pool
+	Cfg   config.Config
+	Redis *infra.Redis
+	SMS   service.SMSGateway
 }
 
 // ---- 短信验证码 ----
@@ -63,14 +63,6 @@ func (h *AuthHandler) SendSMS(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
-	// 图形验证码校验（未配置腾讯云凭据时跳过，保证开发环境可用）
-	if h.Captcha != nil {
-		if err := h.Captcha.Verify(ctx, req.Ticket, req.Randstr, c.ClientIP()); err != nil {
-			response.Fail(c, http.StatusBadRequest, "图形验证码校验失败")
-			return
-		}
-	}
-
 	// 限流：每分钟 1 条 / 每 IP 每小时 5 条 / 每号每日 10 条
 	if h.Redis != nil && h.Redis.Available() {
 		if !h.smsRateAllow(ctx, e164, c.ClientIP()) {
@@ -95,9 +87,18 @@ func (h *AuthHandler) SendSMS(c *gin.Context) {
 	}
 	_, _ = h.DB.Exec(ctx, `
 		INSERT INTO sms_send_logs(phone_e164, country_code, scene, provider, device_id)
-		VALUES($1,$2,$3,'dev',$4)`,
+		VALUES($1,$2,$3,'aliyun',$4)`,
 		e164, req.CountryCode, req.Scene, req.DeviceID,
 	)
+	// 真正发送短信（未配置阿里云短信时用 dev 网关，仅记日志）
+	if h.SMS != nil {
+		local := digitsOnly(req.Phone)
+		if err := h.SMS.Send(ctx, local, req.CountryCode, code, req.Scene); err != nil {
+			log.Printf("send sms failed: %v", err)
+			response.Fail(c, http.StatusInternalServerError, "短信发送失败")
+			return
+		}
+	}
 	result := models.SendSMSResult{
 		RetryAfterSec: 60,
 		ExpiresIn:     int(smsCodeTTL.Seconds()),
