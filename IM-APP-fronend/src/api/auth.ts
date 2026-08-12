@@ -1,82 +1,132 @@
 import { APP_CONFIG } from '@/config'
-import { request } from '@/utils/request'
-import type { LoginResult, UserInfo } from '@/types'
-import {
-  mockFetchProfile,
-  mockLoginByPassword,
-  mockLoginBySms,
-  mockRegisterBySms,
-  mockResetPassword,
-  mockSendSmsCode,
-} from '@/mock/handlers/auth'
+import { getDeviceId } from '@/utils/device'
+import { getRefreshToken, request } from '@/utils/request'
+import type { AuthResult, SendSMSResult, SmsScene, TokenPair, UserInfo } from '@/types'
 
-export async function loginByPassword(phone: string, password: string): Promise<LoginResult> {
-  if (APP_CONFIG.useMock) {
-    return mockLoginByPassword(phone, password)
-  }
-  return request<LoginResult>({
+export async function loginByPassword(
+  phone: string,
+  password: string,
+  countryCode = APP_CONFIG.defaultCountryCode,
+): Promise<AuthResult> {
+  return request<AuthResult>({
     url: '/auth/login',
     method: 'POST',
     auth: false,
-    data: { phone, password, countryCode: APP_CONFIG.defaultCountryCode },
+    data: {
+      phone,
+      password,
+      countryCode,
+      deviceId: getDeviceId(),
+    },
   })
 }
 
-export async function loginBySms(phone: string, code: string): Promise<LoginResult> {
-  if (APP_CONFIG.useMock) {
-    return mockLoginBySms(phone, code)
-  }
-  return request<LoginResult>({
+export async function loginBySms(
+  phone: string,
+  code: string,
+  countryCode = APP_CONFIG.defaultCountryCode,
+): Promise<AuthResult> {
+  return request<AuthResult>({
     url: '/auth/login/sms',
     method: 'POST',
     auth: false,
-    data: { phone, code, countryCode: APP_CONFIG.defaultCountryCode },
+    data: {
+      phone,
+      code,
+      countryCode,
+      deviceId: getDeviceId(),
+    },
   })
 }
 
 export async function registerBySms(
   phone: string,
   code: string,
-  countryCode?: string,
-): Promise<LoginResult> {
-  if (APP_CONFIG.useMock) {
-    return mockRegisterBySms(phone, code, countryCode || APP_CONFIG.defaultCountryCode)
-  }
-  return request<LoginResult>({
+  password: string,
+  countryCode = APP_CONFIG.defaultCountryCode,
+): Promise<AuthResult> {
+  return request<AuthResult>({
     url: '/auth/register',
     method: 'POST',
     auth: false,
-    data: { phone, code, countryCode: countryCode || APP_CONFIG.defaultCountryCode },
+    data: {
+      phone,
+      code,
+      password,
+      countryCode,
+      deviceId: getDeviceId(),
+    },
   })
 }
 
-export async function sendSmsCode(phone: string, scene: 'login' | 'register' | 'reset') {
-  if (APP_CONFIG.useMock) {
-    return mockSendSmsCode(phone)
-  }
-  return request<{ ok: boolean; tip?: string }>({
+export async function sendSmsCode(
+  phone: string,
+  scene: SmsScene,
+  countryCode = APP_CONFIG.defaultCountryCode,
+): Promise<SendSMSResult> {
+  return request<SendSMSResult>({
     url: '/auth/sms/send',
     method: 'POST',
     auth: false,
-    data: { phone, scene, countryCode: APP_CONFIG.defaultCountryCode },
+    data: {
+      phone,
+      scene,
+      countryCode,
+      deviceId: getDeviceId(),
+    },
   })
 }
 
-export async function resetPassword(phone: string, code: string, password: string) {
-  if (APP_CONFIG.useMock) {
-    return mockResetPassword(phone, code, password)
-  }
-  return request<{ ok: boolean }>({
+export async function resetPassword(
+  phone: string,
+  code: string,
+  password: string,
+  countryCode = APP_CONFIG.defaultCountryCode,
+): Promise<{ ok?: boolean } | null> {
+  return request<{ ok?: boolean } | null>({
     url: '/auth/password/reset',
     method: 'POST',
     auth: false,
-    data: { phone, code, password, countryCode: APP_CONFIG.defaultCountryCode },
+    data: {
+      phone,
+      code,
+      password,
+      countryCode,
+    },
+  })
+}
+
+export async function refreshAuthToken(): Promise<TokenPair> {
+  return request<TokenPair>({
+    url: '/auth/token/refresh',
+    method: 'POST',
+    auth: false,
+    data: {
+      refreshToken: getRefreshToken(),
+      deviceId: getDeviceId(),
+    },
+  })
+}
+
+export async function logoutCurrentDevice(): Promise<void> {
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) return
+  await request<null>({
+    url: '/auth/logout',
+    method: 'POST',
+    auth: false,
+    data: { refreshToken },
+  })
+}
+
+export async function logoutAllDevices(): Promise<void> {
+  await request<null>({
+    url: '/auth/logout-all',
+    method: 'POST',
+    data: {},
   })
 }
 
 export async function fetchProfile(): Promise<UserInfo> {
-  if (APP_CONFIG.useMock) {
-    return mockFetchProfile()
-  }
   return request<UserInfo>({ url: '/me', method: 'GET' })
 }

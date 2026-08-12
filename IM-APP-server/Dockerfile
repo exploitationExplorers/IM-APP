@@ -3,6 +3,8 @@
 FROM golang:1.25-alpine AS builder
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates
+# 国内加速：Go 模块走 goproxy.cn，避免 proxy.golang.org 超时
+ENV GOPROXY=https://goproxy.cn,direct
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

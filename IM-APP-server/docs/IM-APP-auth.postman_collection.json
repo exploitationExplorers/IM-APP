@@ -1,0 +1,290 @@
+{
+  "info": {
+    "_postman_id": "7c2a1f4e-9b3d-4f6a-8e5d-2a1b3c4d5e6f",
+    "name": "IM-APP 后端 · 认证接口",
+    "description": "按 GOAL-APP 接口清单实现的认证模块（登录 / 注册 / 短信 / Token）。\n\n使用说明：\n1) 导入 Apifox：创建项目 → 导入数据 → Postman → 选本文件。\n2) 顶部环境变量 baseUrl 默认正式环境 http://8.210.72.157:8080/api/v1；本机联调可改为 http://localhost:8080/api/v1。\n3) 短信验证码：开发环境不真发，万能验证码 123456（/auth/sms/send 响应 data.devCode 也是它）；阿里云短信开通并配置签名/模板后正式真发。\n4) 演示账号：手机号 13800138000 / 密码 123456 / 公开ID chat10001。\n5) 登录类接口会自动把 accessToken / refreshToken 写入集合变量，后续接口可直接用。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://8.210.72.157:8080/api/v1", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "fileId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "健康检查",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://8.210.72.157:8080/health",
+        "description": "存活检查，期望 {\"status\":\"ok\"}"
+      },
+      "response": []
+    },
+    {
+      "name": "1. 发送短信验证码",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"countryCode\": \"+86\",\n  \"phone\": \"13800138000\",\n  \"scene\": \"register\",\n  \"deviceId\": \"test-device\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/sms/send",
+        "description": "发送短信验证码。\nscene: register | login | reset\n\n短信：开发环境不真发，返回万能验证码 123456（data.devCode 也是它）；阿里云短信开通并配置 SMS_SIGN_NAME/SMS_TEMPLATE_CODE 后正式真发。\n注册/登录时填 code=123456 即可通过。\n限流：同一手机号 1 分钟 1 条、IP 每小时 5 条、号码每日 10 条，超限返回 code=1。"
+      },
+      "response": []
+    },
+    {
+      "name": "2. 手机号注册",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"countryCode\": \"+86\",\n  \"phone\": \"13900000001\",\n  \"code\": \"123456\",\n  \"password\": \"test123456\",\n  \"deviceId\": \"test-device\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/register",
+        "description": "手机号 + 验证码 + 密码注册（密码至少 6 位）。\n成功返回 accessToken/refreshToken/user，且注册成功即自动生成唯一二维码（调「9. 获取个人二维码」查看）；已注册返回 code=1。\n会自动把 accessToken / refreshToken 存入集合变量。"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.code === 0 && json.data) {",
+              "  if (json.data.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+              "  if (json.data.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. 密码登录",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"countryCode\": \"+86\",\n  \"phone\": \"13800138000\",\n  \"password\": \"123456\",\n  \"deviceId\": \"test-device\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/login",
+        "description": "手机号 + 密码登录。演示账号 13800138000 / 123456。\n失败（账号不存在或密码错误）统一返回 code=1，避免泄露账号是否存在。\n会自动把 accessToken / refreshToken 存入集合变量。"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.code === 0 && json.data) {",
+              "  if (json.data.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+              "  if (json.data.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. 短信验证码登录",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"countryCode\": \"+86\",\n  \"phone\": \"13800138000\",\n  \"code\": \"123456\",\n  \"deviceId\": \"test-device\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/login/sms",
+        "description": "手机号 + 验证码登录。验证码需先通过 /auth/sms/send(scene=login) 获取。\n未注册手机号返回 404（禁止静默注册）。\n会自动把 accessToken / refreshToken 存入集合变量。"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.code === 0 && json.data) {",
+              "  if (json.data.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+              "  if (json.data.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. 刷新 Token",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\",\n  \"deviceId\": \"test-device\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/token/refresh",
+        "description": "用 refreshToken 换取新的 accessToken + refreshToken（旧 refreshToken 立即失效，轮换机制）。\n会自动把新 token 存入集合变量。"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.code === 0 && json.data) {",
+              "  if (json.data.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+              "  if (json.data.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. 重置密码",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"countryCode\": \"+86\",\n  \"phone\": \"13800138000\",\n  \"code\": \"123456\",\n  \"password\": \"newpassword123\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/password/reset",
+        "description": "通过验证码重置密码（scene=reset）。需先 /auth/sms/send(scene=reset) 获取验证码。"
+      },
+      "response": []
+    },
+    {
+      "name": "7. 退出当前设备",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/logout",
+        "description": "撤销当前设备的会话（该 refreshToken 失效，无法再刷新）。"
+      },
+      "response": []
+    },
+    {
+      "name": "8. 退出全部设备",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+        ],
+        "body": { "mode": "raw", "raw": "{}" },
+        "url": "{{baseUrl}}/auth/logout-all",
+        "description": "撤销当前用户所有设备的会话。需要登录态（Authorization: Bearer accessToken）。"
+      },
+      "response": []
+    },
+    {
+      "name": "9. 获取个人二维码（用户资料）",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+        "url": "{{baseUrl}}/me/qrcode",
+        "description": "获取当前用户的个人二维码（注册成功时后端已自动生成唯一二维码）。\n需要登录态。\n\n响应 data 示例：\n{\n  \"payload\": \"{\\\"token\\\":\\\"c0e92ae4-53ed-4f32-afd4-adfeebab845b\\\",\\\"type\\\":\\\"user\\\"}\",\n  \"expiresAt\": \"2027-08-12T04:18:22Z\",\n  \"user\": {\n    \"id\": \"bd4ab311-c5d2-40c5-8b68-7cf88211745e\",\n    \"publicId\": \"chat10006\",\n    \"nickname\": \"用户0003\",\n    \"avatar\": \"\"\n  }\n}\npayload 为二维码内容（每个用户唯一 token），前端据此渲染二维码图片。"
+      },
+      "response": []
+    },
+    {
+      "name": "10. 获取本人资料",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+        "url": "{{baseUrl}}/me",
+        "description": "获取本人资料，返回 MeProfile（手机号脱敏为 phoneMasked）。\n需要登录态。\n\n响应 data：{ id, phoneMasked, countryCode, publicId, nickname, avatar, bio, status, createdAt }"
+      },
+      "response": []
+    },
+    {
+      "name": "11. 修改本人资料",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nickname\": \"新昵称\",\n  \"avatarFileId\": \"先通过接口12上传头像拿到 fileId\",\n  \"bio\": \"个性签名\"\n}"
+        },
+        "url": "{{baseUrl}}/me",
+        "description": "修改本人资料：前端传了哪个字段就改哪个（部分更新），未传的保持原值。\n需要登录态。\n\n字段：nickname / avatarFileId / bio\n- avatarFileId：先调接口12创建上传任务拿 fileId，再调接口13确认完成\n返回 MeProfile。"
+      },
+      "response": []
+    },
+    {
+      "name": "12. 创建上传任务",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"purpose\": \"avatar\",\n  \"fileName\": \"avatar.png\",\n  \"contentType\": \"image/png\",\n  \"size\": 1024\n}"
+        },
+        "url": "{{baseUrl}}/files/uploads",
+        "description": "创建上传任务：返回 fileId + 预签名上传地址 uploadUrl。\n需要登录态。\npurpose: avatar|image|voice|file|sticker\n会自动把 data.file.id 存入集合变量 fileId，供接口13/14使用。"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json.code === 0 && json.data && json.data.file) {",
+              "  pm.collectionVariables.set('fileId', json.data.file.id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. 确认上传完成",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+        ],
+        "body": { "mode": "raw", "raw": "{}" },
+        "url": "{{baseUrl}}/files/uploads/{{fileId}}/complete",
+        "description": "确认文件上传完成（文件转 ready），之后才能用于头像/消息。\n需要登录态。\n先跑接口12会自动写入 fileId 变量。"
+      },
+      "response": []
+    },
+    {
+      "name": "14. 查询文件",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+        "url": "{{baseUrl}}/files/{{fileId}}",
+        "description": "查询已完成文件信息（fileId 来自接口12写入的变量）。需要登录态。"
+      },
+      "response": []
+    }
+  ]
+}

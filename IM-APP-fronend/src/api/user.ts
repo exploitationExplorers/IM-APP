@@ -1,17 +1,7 @@
-import { APP_CONFIG } from '@/config'
 import { request } from '@/utils/request'
-import type { QrcodePayload, UpdateProfileInput, UserInfo } from '@/types'
-import {
-  mockFetchQrcode,
-  mockFetchUserProfile,
-  mockSearchUserByPublicId,
-  mockUpdateProfile,
-} from '@/mock/handlers/user'
+import type { UserQrcodeResult, UpdateProfileInput, UserInfo } from '@/types'
 
 export async function searchUserByPublicId(publicId: string): Promise<UserInfo | null> {
-  if (APP_CONFIG.useMock) {
-    return mockSearchUserByPublicId(publicId)
-  }
   return request<UserInfo | null>({
     url: '/users/search',
     method: 'GET',
@@ -19,27 +9,35 @@ export async function searchUserByPublicId(publicId: string): Promise<UserInfo |
   })
 }
 
+/** PATCH /me：nickname、avatarFileId、bio 均需传入 */
 export async function updateProfile(input: UpdateProfileInput): Promise<UserInfo> {
-  if (APP_CONFIG.useMock) {
-    return mockUpdateProfile(input)
-  }
   return request<UserInfo>({
     url: '/me',
-    method: 'PUT',
-    data: input,
+    method: 'PATCH',
+    data: {
+      nickname: input.nickname,
+      avatarFileId: input.avatarFileId ?? '',
+      bio: input.bio ?? '',
+    },
   })
 }
 
-export async function fetchQrcode(): Promise<QrcodePayload> {
-  if (APP_CONFIG.useMock) {
-    return mockFetchQrcode()
-  }
-  return request<QrcodePayload>({ url: '/me/qrcode', method: 'GET' })
+export async function fetchQrcode(): Promise<UserQrcodeResult> {
+  return request<UserQrcodeResult>({ url: '/me/qrcode', method: 'GET' })
 }
 
 export async function fetchUserProfile(userId: string): Promise<UserInfo> {
-  if (APP_CONFIG.useMock) {
-    return mockFetchUserProfile(userId)
-  }
   return request<UserInfo>({ url: `/users/${userId}`, method: 'GET' })
+}
+
+/** PUT /me/password：登录态下设置/修改密码 */
+export async function changePassword(password: string, oldPassword?: string): Promise<void> {
+  const data: Record<string, string> = { password }
+  if (oldPassword) data.oldPassword = oldPassword
+
+  await request<null>({
+    url: '/me/password',
+    method: 'PUT',
+    data,
+  })
 }

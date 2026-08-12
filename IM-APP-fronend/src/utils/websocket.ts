@@ -11,7 +11,6 @@ class WebsocketClient {
   private manuallyClosed = false
 
   connect() {
-    if (APP_CONFIG.useMock) return
     const token = getToken()
     if (!token) return
 
