@@ -61,7 +61,7 @@ async function onRegister() {
   loading.value = true
   try {
     await userStore.register(phone.value, code.value, genTempPassword(), countryCode.value)
-    uni.switchTab({ url: '/pages/chat/index' })
+    uni.redirectTo({ url: '/pages/auth/onboarding' })
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   } finally {

@@ -29,3 +29,13 @@ export type {
 } from './contact'
 
 export type { GroupInfo, GroupMember } from './group'
+
+export type {
+  UploadPurpose,
+  CreateUploadInput,
+  UploadInitResult,
+  CompleteUploadInput,
+  FileObject,
+  FileInfo,
+  PresignResult,
+} from './file'

@@ -174,9 +174,18 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### PUT `/api/v1/me`
 
-**Body**（字段可选）
+**Body**（字段可选，旧版）
 ```json
 { "nickname": "新昵称", "avatar": "url", "bio": "签名" }
+```
+
+### PATCH `/api/v1/me`
+
+修改本人资料。**nickname、avatarFileId、bio 均需传入**（bio 无内容传空字符串）。头像 `avatarFileId` 须先走文件上传流程（接口 12 → PUT → 接口 13）。
+
+**Body**
+```json
+{ "nickname": "新昵称", "avatarFileId": "file-uuid", "bio": "" }
 ```
 
 ### GET `/api/v1/me/qrcode`
@@ -322,9 +331,50 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
-## 文件上传（Phase 3）
+## 文件上传（需 JWT）
 
-### POST `/api/v1/files/presign`
+### POST `/api/v1/files/uploads`
+
+创建上传任务，获取预签名 PUT 地址。
+
+**Body**
+```json
+{
+  "purpose": "avatar",
+  "fileName": "avatar.jpg",
+  "contentType": "image/jpeg",
+  "size": 102400
+}
+```
+
+**Response**
+```json
+{
+  "file": { "id": "uuid", "status": "pending" },
+  "uploadUrl": "https://...",
+  "headers": {},
+  "expiresIn": 900
+}
+```
+
+客户端 PUT 二进制到 `uploadUrl` 后，调用完成接口。
+
+### POST `/api/v1/files/uploads/:fileId/complete`
+
+确认上传完成。
+
+**Body**
+```json
+{ "etag": "optional" }
+```
+
+**Response**：`FileInfo`（含 `url`、`status` 等）。
+
+### GET `/api/v1/files/:fileId`
+
+查询文件信息。
+
+### POST `/api/v1/files/presign`（旧版 / 兼容）
 
 获取 MinIO 预签名上传 URL（MinIO 未配置时返回 dev 占位 URL）。
 

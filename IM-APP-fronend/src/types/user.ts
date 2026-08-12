@@ -56,7 +56,7 @@ export interface UserQrcodeResult {
 export type QrcodePayload = UserQrcodeResult
 
 export interface UpdateProfileInput {
-  nickname?: string
-  avatar?: string
+  nickname: string
+  avatarFileId: string
   bio?: string
 }

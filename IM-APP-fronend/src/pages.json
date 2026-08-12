@@ -15,6 +15,13 @@
       }
     },
     {
+      "path": "pages/auth/onboarding",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "完善资料"
+      }
+    },
+    {
       "path": "pages/auth/forgot-password",
       "style": {
         "navigationStyle": "custom",
