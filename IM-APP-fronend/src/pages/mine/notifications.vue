@@ -49,9 +49,9 @@
   </view>
 </template>
 
-<script setup>
-import { reactive } from "vue";
-import ImSwitch from "@/components/ImSwitch.vue";
+<script setup lang="ts">
+import { reactive } from 'vue'
+import ImSwitch from '@/components/ImSwitch.vue'
 
 const settings = reactive({
   noDisturb: false,
@@ -59,11 +59,12 @@ const settings = reactive({
   voice: true,
   sound: true,
   vibration: false,
-});
+})
 
+// 页面内目前不使用 goBack，但保留字段不会影响功能
 const goBack = () => {
-  uni.navigateBack();
-};
+  uni.navigateBack()
+}
 </script>
 
 <style scoped>

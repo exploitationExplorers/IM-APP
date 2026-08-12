@@ -188,6 +188,17 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 { "nickname": "新昵称", "avatarFileId": "file-uuid", "bio": "" }
 ```
 
+### PUT `/api/v1/me/password`
+
+登录态下设置/修改密码（安全设置 → 重置密码）。需 JWT。已设置过密码时需传 `oldPassword`。
+
+**Body**
+```json
+{ "password": "newpassword123", "oldPassword": "oldpass123" }
+```
+
+首次设置密码可省略 `oldPassword`。
+
 ### GET `/api/v1/me/qrcode`
 
 需 JWT。注册成功后后端自动生成唯一二维码 token；前端用 `payload` 渲染二维码。

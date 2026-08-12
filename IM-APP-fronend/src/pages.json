@@ -134,6 +134,20 @@
       }
     },
     {
+      "path": "pages/mine/edit-nickname",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "修改昵称"
+      }
+    },
+    {
+      "path": "pages/mine/edit-bio",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "修改个性签名"
+      }
+    },
+    {
       "path": "pages/mine/qrcode",
       "style": {
         "navigationStyle": "custom",
@@ -202,7 +216,15 @@
     {
       "path": "pages/mine/security",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "安全"
+      }
+    },
+    {
+      "path": "pages/mine/reset-password",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "重置密码"
       }
     },
     {

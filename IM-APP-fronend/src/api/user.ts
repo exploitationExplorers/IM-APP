@@ -16,7 +16,7 @@ export async function updateProfile(input: UpdateProfileInput): Promise<UserInfo
     method: 'PATCH',
     data: {
       nickname: input.nickname,
-      avatarFileId: input.avatarFileId,
+      avatarFileId: input.avatarFileId ?? '',
       bio: input.bio ?? '',
     },
   })
@@ -28,4 +28,16 @@ export async function fetchQrcode(): Promise<UserQrcodeResult> {
 
 export async function fetchUserProfile(userId: string): Promise<UserInfo> {
   return request<UserInfo>({ url: `/users/${userId}`, method: 'GET' })
+}
+
+/** PUT /me/password：登录态下设置/修改密码 */
+export async function changePassword(password: string, oldPassword?: string): Promise<void> {
+  const data: Record<string, string> = { password }
+  if (oldPassword) data.oldPassword = oldPassword
+
+  await request<null>({
+    url: '/me/password',
+    method: 'PUT',
+    data,
+  })
 }
