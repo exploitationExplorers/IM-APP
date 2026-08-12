@@ -17,6 +17,7 @@ export interface MassContent {
   type: MassContentType
   text?: string
   images?: string[]
+  imageNames?: string[]
   filePath?: string
   fileName?: string
   audioPath?: string

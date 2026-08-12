@@ -118,6 +118,7 @@
     {
       "path": "pages/mine/favorites",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "我的收藏"
       }
     },

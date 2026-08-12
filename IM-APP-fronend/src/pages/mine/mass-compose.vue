@@ -38,6 +38,15 @@ function backToAssistant() {
   uni.redirectTo({ url: '/pages/mine/mass-assistant' })
 }
 
+function goFavorites() {
+  uni.navigateTo({ url: '/pages/mine/favorites?mode=pick' })
+}
+
+function onFavoritePicked(item: unknown) {
+  if (!item) return
+  uni.showToast({ title: '已选择收藏内容', icon: 'success' })
+}
+
 function mockSend(content: ComposerContent) {
   if (sending.value) return
   sending.value = true
@@ -50,6 +59,10 @@ function mockSend(content: ComposerContent) {
     backToAssistant()
   }, 600)
 }
+
+defineExpose({
+  onFavoritePicked,
+})
 </script>
 
 <template>
@@ -77,7 +90,7 @@ function mockSend(content: ComposerContent) {
 
     <view class="space"></view>
 
-    <ImMessageComposer placeholder="输入消息" @submit="mockSend" />
+    <ImMessageComposer placeholder="输入消息" @submit="mockSend" @open-favorites="goFavorites" />
   </view>
 </template>
 

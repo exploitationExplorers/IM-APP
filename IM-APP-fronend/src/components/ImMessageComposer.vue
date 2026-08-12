@@ -8,6 +8,7 @@ export interface ComposerContent {
   type: ComposerContentType
   text?: string
   images?: string[]
+  imageNames?: string[]
   filePath?: string
   fileName?: string
   audioPath?: string
@@ -20,6 +21,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'submit', content: ComposerContent): void
+  (e: 'openFavorites'): void
 }>()
 
 type PanelType = 'plus' | 'emoji' | null
@@ -521,13 +523,24 @@ async function pickImages() {
   uni.chooseImage({
     count: 9,
     success: async (res) => {
-      const raw = (res as unknown as { tempFilePaths?: string[] | string }).tempFilePaths
+      const anyRes = res as unknown as {
+        tempFilePaths?: string[] | string
+        tempFiles?: Array<{ path: string; name?: string }>
+      }
+      const raw = anyRes.tempFilePaths
       const images = Array.isArray(raw) ? raw : raw ? [raw] : []
+      const tempFiles = anyRes.tempFiles || []
+      const imageNames = images.map((p, i) => {
+        const tf = tempFiles[i]
+        if (tf?.name) return tf.name
+        const idx = p.lastIndexOf('/')
+        return idx >= 0 ? p.slice(idx + 1) : `图片${i + 1}`
+      })
       if (!images.length) return
       closePanel()
       const ok = await requestConfirm('确认发送图片吗？')
       if (!ok) return
-      emit('submit', { type: 'image', images })
+      emit('submit', { type: 'image', images, imageNames })
     },
   })
 }
@@ -576,11 +589,9 @@ async function pickFile() {
   uni.showToast({ title: '当前平台暂不支持选择文件', icon: 'none' })
 }
 
-async function pickFavorite() {
-  const ok = await requestConfirm('确认发送收藏内容吗？')
-  if (!ok) return
+function pickFavorite() {
   closePanel()
-  emit('submit', { type: 'favorite', text: '收藏内容（Mock）' })
+  emit('openFavorites')
 }
 
 function getRecorder() {
