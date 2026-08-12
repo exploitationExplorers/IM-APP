@@ -81,7 +81,13 @@ func main() {
 	groupSvc := &service.GroupService{Groups: groupRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
 
-	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient}
+	captchaVerifier := &service.CaptchaVerifier{
+		AppID:        cfg.Captcha.AppID,
+		AppSecretKey: cfg.Captcha.AppSecretKey,
+		SecretID:     cfg.Captcha.SecretID,
+		SecretKey:    cfg.Captcha.SecretKey,
+	}
+	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient, Captcha: captchaVerifier}
 	userH := &handler.UserHandler{Svc: userSvc}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
@@ -104,11 +110,14 @@ func main() {
 		api.POST("/auth/login", authH.Login)
 		api.POST("/auth/login/sms", authH.LoginSMS)
 		api.POST("/auth/register", authH.Register)
+		api.POST("/auth/token/refresh", authH.RefreshToken)
 		api.POST("/auth/password/reset", authH.ResetPassword)
+		api.POST("/auth/logout", authH.Logout)
 
 		auth := api.Group("")
 		auth.Use(middleware.AuthRequired(cfg.JWTSecret))
 		{
+			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
 			auth.PUT("/me", userH.UpdateProfile)
 			auth.GET("/me/qrcode", userH.Qrcode)
