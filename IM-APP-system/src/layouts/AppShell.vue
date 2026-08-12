@@ -31,6 +31,14 @@ function toggleCollapse(): void {
                 <el-icon><House /></el-icon>
                 <template #title>首页</template>
               </el-menu-item>
+              <el-menu-item index="/app/users">
+                <el-icon><UserFilled /></el-icon>
+                <template #title>用户管理</template>
+              </el-menu-item>
+              <el-menu-item index="/app/groups">
+                <el-icon><ChatSquare /></el-icon>
+                <template #title>群组管理</template>
+              </el-menu-item>
               <el-sub-menu index="/system">
                 <template #title>
                   <el-icon><Setting /></el-icon>
@@ -38,7 +46,11 @@ function toggleCollapse(): void {
                 </template>
                 <el-menu-item index="/system/users">
                   <el-icon><User /></el-icon>
-                  <template #title>用户管理</template>
+                  <template #title>平台用户管理</template>
+                </el-menu-item>
+                <el-menu-item index="/system/roles">
+                  <el-icon><Lock /></el-icon>
+                  <template #title>角色权限</template>
                 </el-menu-item>
                 <el-menu-item index="/system/logs">
                   <el-icon><Document /></el-icon>
