@@ -130,6 +130,38 @@ func (r *ContactRepo) CreateFriendRequest(ctx context.Context, fromID, toID, mes
 	return id, err
 }
 
+// AddFriendDirect 对方无需验证时直接互加好友，并记一条已通过申请
+func (r *ContactRepo) AddFriendDirect(ctx context.Context, fromID, toID, message, source, sourceGroupID string) (string, error) {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	var groupID *string
+	if sourceGroupID != "" {
+		groupID = &sourceGroupID
+	}
+	var id string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO friend_requests(from_user, to_user, message, status, source, source_group_id)
+		VALUES($1,$2,$3,'accepted',$4,$5)
+		RETURNING id::text`, fromID, toID, message, source, groupID).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO friendships(user_id, friend_id) VALUES($1::uuid,$2::uuid),($2::uuid,$1::uuid)
+		ON CONFLICT DO NOTHING`, fromID, toID)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // IsGroupAddFriendAllowed 检查从某群加好友是否被允许
 func (r *ContactRepo) IsGroupAddFriendAllowed(ctx context.Context, uid, toUserID, groupID string) (bool, error) {
 	var allow bool

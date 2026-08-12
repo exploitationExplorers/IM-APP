@@ -1,5 +1,5 @@
 import { request } from '@/utils/request'
-import type { Contact, FriendRequest, GroupPreview } from '@/types'
+import type { Contact, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 
 export async function fetchContacts(): Promise<Contact[]> {
   return request<Contact[]>({ url: '/contacts', method: 'GET' })
@@ -16,8 +16,8 @@ export async function fetchFriendRequests(): Promise<FriendRequest[]> {
   return request<FriendRequest[]>({ url: '/friend-requests', method: 'GET' })
 }
 
-export async function sendFriendRequest(toUserId: string, message: string) {
-  return request<{ ok: boolean; id: string }>({
+export async function sendFriendRequest(toUserId: string, message: string): Promise<SendFriendResult> {
+  return request<SendFriendResult>({
     url: '/friend-requests',
     method: 'POST',
     data: { toUserId, message },

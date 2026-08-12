@@ -1,6 +1,12 @@
 import { request } from '@/utils/request'
 import { parseQrcodePayload } from '@/utils/qrcode'
-import type { UserQrcodeResult, UpdateProfileInput, UserInfo, UserQrcodeResolveResult } from '@/types'
+import type {
+  UserQrcodeResult,
+  UpdateProfileInput,
+  UserInfo,
+  UserQrcodeResolveResult,
+  PrivacySettings,
+} from '@/types'
 
 export async function searchUserByPublicId(publicId: string): Promise<UserInfo | null> {
   return request<UserInfo | null>({
@@ -54,5 +60,17 @@ export async function changePassword(password: string, oldPassword?: string): Pr
     url: '/me/password',
     method: 'PUT',
     data,
+  })
+}
+
+export async function fetchPrivacySettings(): Promise<PrivacySettings> {
+  return request<PrivacySettings>({ url: '/me/privacy-settings', method: 'GET' })
+}
+
+export async function updatePrivacySettings(settings: PrivacySettings): Promise<PrivacySettings> {
+  return request<PrivacySettings>({
+    url: '/me/privacy-settings',
+    method: 'PUT',
+    data: settings,
   })
 }

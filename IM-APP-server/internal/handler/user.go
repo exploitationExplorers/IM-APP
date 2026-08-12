@@ -61,6 +61,31 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	response.OK(c, gin.H{"ok": true})
 }
 
+func (h *UserHandler) GetPrivacySettings(c *gin.Context) {
+	uid := middleware.UserID(c)
+	s, err := h.Svc.GetPrivacySettings(c.Request.Context(), uid)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "获取隐私设置失败")
+		return
+	}
+	response.OK(c, s)
+}
+
+func (h *UserHandler) UpdatePrivacySettings(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.PrivacySettings
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	s, err := h.Svc.UpdatePrivacySettings(c.Request.Context(), uid, req)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "更新隐私设置失败")
+		return
+	}
+	response.OK(c, s)
+}
+
 func (h *UserHandler) ResolveUserQRCode(c *gin.Context) {
 	uid := middleware.UserID(c)
 	var req models.ResolveQRCodeRequest
@@ -172,7 +197,7 @@ func (h *ContactHandler) CreateFriendRequest(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	id, err := h.Svc.SendFriendRequest(c.Request.Context(), uid, req.ToUserID, req.Message, req.Source, req.SourceGroupID)
+	result, err := h.Svc.SendFriendRequest(c.Request.Context(), uid, req.ToUserID, req.Message, req.Source, req.SourceGroupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSelfAction):
@@ -188,7 +213,7 @@ func (h *ContactHandler) CreateFriendRequest(c *gin.Context) {
 		}
 		return
 	}
-	response.OK(c, gin.H{"ok": true, "id": id})
+	response.OK(c, result)
 }
 
 func (h *ContactHandler) AcceptFriendRequest(c *gin.Context) {

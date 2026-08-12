@@ -188,6 +188,25 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 { "nickname": "新昵称", "avatarFileId": "file-uuid", "bio": "" }
 ```
 
+### GET `/api/v1/me/privacy-settings`
+
+获取当前用户隐私设置。
+
+**Response**
+```json
+{
+  "requireFriendApproval": false,
+  "requireGroupApproval": true
+}
+```
+
+- `requireFriendApproval`：加我为好友需验证。**默认 `false`**（对齐参考站，关闭后对方加好友立即通过）。
+- `requireGroupApproval`：邀请我入群需验证。默认 `true`。
+
+### PUT `/api/v1/me/privacy-settings`
+
+修改隐私设置。Body 同 Response 结构。
+
 ### PUT `/api/v1/me/password`
 
 登录态下设置/修改密码（安全设置 → 重置密码）。需 JWT。已设置过密码时需传 `oldPassword`。
@@ -290,6 +309,19 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ```
 
 `source=group` 时服务端校验该群 `allowMemberAddFriend`。
+
+若对方 `requireFriendApproval=false`，服务端直接互加好友，不再进入待审核。
+
+**Response**
+```json
+{
+  "ok": true,
+  "id": "uuid",
+  "status": "pending"
+}
+```
+
+`status`：`pending`（待对方同意）| `accepted`（已直接成为好友）。
 
 ### POST `/api/v1/friend-requests/:id/accept`
 

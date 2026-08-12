@@ -21,6 +21,7 @@ type UserService struct {
 	Users    *repository.UserRepo
 	Files    *repository.FileRepo
 	Contacts *repository.ContactRepo
+	Privacy  *repository.PrivacyRepo
 }
 
 func (s *UserService) GetProfile(ctx context.Context, uid string) (models.User, error) {
@@ -166,4 +167,21 @@ func withRelationProfile(u models.User, relation string) models.PublicProfile {
 	p := repository.ToPublicProfile(u)
 	p.Relation = relation
 	return p
+}
+
+func (s *UserService) GetPrivacySettings(ctx context.Context, uid string) (models.PrivacySettings, error) {
+	if s.Privacy == nil {
+		return models.PrivacySettings{
+			RequireFriendApproval: false,
+			RequireGroupApproval:  true,
+		}, nil
+	}
+	return s.Privacy.Get(ctx, uid)
+}
+
+func (s *UserService) UpdatePrivacySettings(ctx context.Context, uid string, in models.PrivacySettings) (models.PrivacySettings, error) {
+	if s.Privacy == nil {
+		return in, errors.New("隐私设置不可用")
+	}
+	return s.Privacy.Update(ctx, uid, in)
 }

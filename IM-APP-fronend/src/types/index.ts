@@ -27,6 +27,8 @@ export type {
   GroupPreview,
   FriendRequest,
   FriendRequestAction,
+  PrivacySettings,
+  SendFriendResult,
 } from './contact'
 
 export type { GroupInfo, GroupMember } from './group'

@@ -83,3 +83,16 @@ type FriendRequest struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"createdAt"`
 }
+
+// PrivacySettings 对齐参考站：默认加好友无需验证
+type PrivacySettings struct {
+	RequireFriendApproval bool `json:"requireFriendApproval"`
+	RequireGroupApproval  bool `json:"requireGroupApproval"`
+}
+
+// SendFriendResult status: pending|accepted
+type SendFriendResult struct {
+	OK     bool   `json:"ok"`
+	ID     string `json:"id,omitempty"`
+	Status string `json:"status"`
+}

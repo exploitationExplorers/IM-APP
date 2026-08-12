@@ -69,8 +69,14 @@ async function onPrimary() {
     return
   }
   try {
-    await contactStore.addFriend(user.value.id, '你好，我想加你为好友')
-    uni.showToast({ title: '已发送好友申请', icon: 'success' })
+    const res = await contactStore.addFriend(user.value.id, '你好，我想加你为好友')
+    if (res.status === 'accepted') {
+      relation.value = 'friend'
+      uni.showToast({ title: '已添加好友', icon: 'success' })
+    } else {
+      relation.value = 'pending'
+      uni.showToast({ title: '已发送好友申请', icon: 'success' })
+    }
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }

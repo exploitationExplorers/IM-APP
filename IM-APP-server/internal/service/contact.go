@@ -12,6 +12,7 @@ type ContactService struct {
 	Contacts *repository.ContactRepo
 	Users    *repository.UserRepo
 	Tags     *repository.ContactTagRepo
+	Privacy  *repository.PrivacyRepo
 }
 
 func (s *ContactService) ListContacts(ctx context.Context, uid string) ([]models.Contact, error) {
@@ -29,20 +30,21 @@ func (s *ContactService) ListFriendRequests(ctx context.Context, uid, direction 
 	return s.Contacts.ListFriendRequests(ctx, uid, direction)
 }
 
-func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, message, source, sourceGroupID string) (string, error) {
+func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, message, source, sourceGroupID string) (models.SendFriendResult, error) {
+	empty := models.SendFriendResult{}
 	if uid == toUserID {
-		return "", ErrSelfAction
+		return empty, ErrSelfAction
 	}
 	if _, err := s.Users.FindByID(ctx, toUserID); err != nil {
-		return "", ErrNotFound
+		return empty, ErrNotFound
 	}
 	blocked, _ := s.Contacts.IsBlocked(ctx, toUserID, uid)
 	if blocked {
-		return "", ErrForbidden
+		return empty, ErrForbidden
 	}
 	ok, _ := s.Contacts.IsFriend(ctx, uid, toUserID)
 	if ok {
-		return "", ErrAlreadyFriend
+		return empty, ErrAlreadyFriend
 	}
 	if source == "" {
 		source = "public_id"
@@ -50,10 +52,31 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 	if source == "group" && sourceGroupID != "" {
 		allowed, err := s.Contacts.IsGroupAddFriendAllowed(ctx, uid, toUserID, sourceGroupID)
 		if err != nil || !allowed {
-			return "", ErrForbidden
+			return empty, ErrForbidden
 		}
 	}
-	return s.Contacts.CreateFriendRequest(ctx, uid, toUserID, message, source, sourceGroupID)
+
+	// 对方未开启「加我为好友需验证」时直接成为好友（参考站默认关闭）
+	needApproval := true
+	if s.Privacy != nil {
+		ps, err := s.Privacy.Get(ctx, toUserID)
+		if err == nil {
+			needApproval = ps.RequireFriendApproval
+		}
+	}
+	if !needApproval {
+		id, err := s.Contacts.AddFriendDirect(ctx, uid, toUserID, message, source, sourceGroupID)
+		if err != nil {
+			return empty, err
+		}
+		return models.SendFriendResult{OK: true, ID: id, Status: "accepted"}, nil
+	}
+
+	id, err := s.Contacts.CreateFriendRequest(ctx, uid, toUserID, message, source, sourceGroupID)
+	if err != nil {
+		return empty, err
+	}
+	return models.SendFriendResult{OK: true, ID: id, Status: "pending"}, nil
 }
 
 func (s *ContactService) AcceptFriendRequest(ctx context.Context, uid, requestID string) error {

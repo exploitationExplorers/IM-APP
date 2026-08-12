@@ -72,13 +72,14 @@ func main() {
 	userRepo := &repository.UserRepo{DB: pool}
 	contactRepo := &repository.ContactRepo{DB: pool}
 	contactTagRepo := &repository.ContactTagRepo{DB: pool}
+	privacyRepo := &repository.PrivacyRepo{DB: pool}
 	chatRepo := &repository.ChatRepo{DB: pool}
 	fileRepo := &repository.FileRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool}
 
-	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo}
-	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo, Tags: contactTagRepo}
+	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo}
+	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo}
 	chatSvc := &service.ChatService{Chat: chatRepo, Hub: hub}
 	groupSvc := &service.GroupService{Groups: groupRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
@@ -128,6 +129,8 @@ func main() {
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
 			auth.PUT("/me/password", userH.ChangePassword)
+			auth.GET("/me/privacy-settings", userH.GetPrivacySettings)
+			auth.PUT("/me/privacy-settings", userH.UpdatePrivacySettings)
 			auth.GET("/me/qrcode", userH.Qrcode)
 			auth.POST("/users/qrcode/resolve", userH.ResolveUserQRCode)
 			auth.GET("/users/search", userH.Search)
