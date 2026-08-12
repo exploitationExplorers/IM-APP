@@ -64,6 +64,7 @@
     {
       "path": "pages/chat/room",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "聊天",
         "navigationBarBackgroundColor": "#FFFFFF"
       }
@@ -123,6 +124,7 @@
     {
       "path": "pages/group/detail",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "群资料"
       }
     },
