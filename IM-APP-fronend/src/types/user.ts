@@ -11,6 +11,7 @@ export interface UserInfo {
   nickname: string
   avatar: string
   bio?: string
+  /** 是否已设置密码 */
   hasPassword?: boolean
   status?: 'active' | 'blocked' | 'banned'
   createdAt?: string

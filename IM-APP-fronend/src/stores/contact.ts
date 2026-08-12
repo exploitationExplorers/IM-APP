@@ -49,7 +49,7 @@ export const useContactStore = defineStore('contact', () => {
       return
     }
     uni.navigateTo({
-      url: `/pages/chat/room?id=${convId}&title=${encodeURIComponent(nickname)}&avatar=${encodeURIComponent(avatar)}`,
+      url: `/pages/chat/room?id=${convId}&title=${encodeURIComponent(nickname)}&avatar=${encodeURIComponent(avatar)}&type=private&peerUserId=${encodeURIComponent(contactId)}&targetId=${encodeURIComponent(contactId)}&code=private`,
     })
   }
 
