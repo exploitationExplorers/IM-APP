@@ -17,7 +17,8 @@ import {
   setRefreshToken,
   setToken,
 } from '@/utils/request'
-import { wsClient } from '@/utils/websocket'
+import { initOpenIM, logoutOpenIM } from '@/utils/openim'
+import { useChatStore } from '@/stores/chat'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(getToken())
@@ -32,7 +33,8 @@ export const useUserStore = defineStore('user', () => {
     profile.value = res.user
     setToken(res.accessToken)
     setRefreshToken(res.refreshToken)
-    wsClient.connect()
+    // IM 登录失败不应挡住业务登录，进聊天页时还会再试一次
+    initOpenIM().catch(() => undefined)
   }
 
   async function loginPassword(phone: string, password: string, countryCode?: string) {
@@ -84,7 +86,8 @@ export const useUserStore = defineStore('user', () => {
     refreshToken.value = ''
     profile.value = null
     clearToken()
-    wsClient.disconnect()
+    useChatStore().reset()
+    await logoutOpenIM().catch(() => undefined)
     uni.reLaunch({ url: '/pages/auth/sign-in' })
   }
 
@@ -97,7 +100,7 @@ export const useUserStore = defineStore('user', () => {
       return
     }
     if (token.value) {
-      wsClient.connect()
+      initOpenIM().catch(() => undefined)
       loadProfile().catch(() => undefined)
     }
   }

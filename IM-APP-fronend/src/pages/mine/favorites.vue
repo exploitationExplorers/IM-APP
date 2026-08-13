@@ -142,7 +142,6 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
 
 <template>
   <view class="page">
-<<<<<<< HEAD
     <view class="nav-bar-wrap">
       <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
       <view class="nav-bar">
@@ -157,9 +156,6 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
     </view>
 
     <scroll-view scroll-x class="tabs">
-=======
-    <view class="tab-list">
->>>>>>> 7ae3a80 (feat: 修改收藏、通知设置页面，components增加一个switch组件)
       <view
         v-for="item in tabs"
         :key="item.key"
@@ -169,8 +165,9 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
       >
         {{ item.label }}
       </view>
-    </view>
-    <!-- <EmptyState text="无收藏" /> -->
+    </scroll-view>
+
+    <EmptyState v-if="!list.length" text="无收藏" />
 
     <!-- 内容滚动区域 -->
     <scroll-view class="content-scroll" scroll-y :show-scrollbar="false">
@@ -274,9 +271,6 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
       </view>
     </scroll-view>
 
-<<<<<<< HEAD
-    <EmptyState text="无收藏" />
-=======
     <view
       v-if="activeMenuItem && menuStyle.top"
       class="menu-mask"
@@ -305,7 +299,6 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
         </button>
       </view>
     </view>
->>>>>>> 7ae3a80 (feat: 修改收藏、通知设置页面，components增加一个switch组件)
   </view>
 </template>
 
@@ -355,40 +348,23 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
   color: #111;
 }
 
-<<<<<<< HEAD
 .tabs {
   white-space: nowrap;
   padding: 8rpx 20rpx 0;
-  border-bottom: 1rpx solid #f0f1f4;
+  border-bottom: 2rpx solid #f2f2f2;
   background: #fff;
 }
 
-.tab {
-  display: inline-block;
-  padding: 20rpx 24rpx;
-  margin-right: 8rpx;
-  font-size: 30rpx;
-  color: #636e86;
-  position: relative;
-=======
-.tab-list {
-  height: 68rpx;
-  display: flex;
-  justify-content: space-evenly;
-  align-items: stretch;
-  border-bottom: 2rpx solid #f2f2f2;
-  margin: 32rpx 0;
-}
-
+/* 横向滚动容器里的 tab 必须是 inline，否则会被挤成一列 */
 .tab-item {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
   height: 68rpx;
   box-sizing: border-box;
+  padding: 0 24rpx;
+  margin-right: 8rpx;
   border-bottom: 4rpx solid transparent;
-
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: center;
   color: $uni-text-color;
   font-size: 30rpx;
   line-height: 60rpx;
@@ -439,7 +415,6 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
   font-size: 28rpx;
   line-height: 48rpx;
   color: #333;
->>>>>>> 7ae3a80 (feat: 修改收藏、通知设置页面，components增加一个switch组件)
 }
 
 .collection-date {
@@ -778,14 +753,4 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
   line-height: 36rpx;
 }
 
-.tab.active::after {
-  content: '';
-  position: absolute;
-  left: 24rpx;
-  right: 24rpx;
-  bottom: 0;
-  height: 4rpx;
-  background: #0a2fc2;
-  border-radius: 2rpx;
-}
 </style>

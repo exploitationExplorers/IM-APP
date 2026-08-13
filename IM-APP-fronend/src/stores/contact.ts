@@ -6,7 +6,6 @@ import {
   fetchContacts,
   fetchFriendRequests,
   fetchGroups,
-  getContactConversationId,
   rejectFriendRequest,
   sendFriendRequest,
 } from '@/api/contact'
@@ -46,14 +45,10 @@ export const useContactStore = defineStore('contact', () => {
     return result
   }
 
-  async function openChatWithContact(contactId: string, nickname: string, avatar: string) {
-    const convId = await getContactConversationId(contactId)
-    if (!convId) {
-      uni.showToast({ title: '无法打开会话', icon: 'none' })
-      return
-    }
+  // 只带业务好友 ID，OpenIM 会话 ID 由聊天页向后端换取
+  function openChatWithContact(contactId: string, nickname: string, avatar: string) {
     uni.navigateTo({
-      url: `/pages/chat/room?id=${convId}&title=${encodeURIComponent(nickname)}&avatar=${encodeURIComponent(avatar)}&type=private&peerUserId=${encodeURIComponent(contactId)}&targetId=${encodeURIComponent(contactId)}&code=private`,
+      url: `/pages/chat/room?type=private&targetId=${encodeURIComponent(contactId)}&title=${encodeURIComponent(nickname)}&avatar=${encodeURIComponent(avatar)}`,
     })
   }
 

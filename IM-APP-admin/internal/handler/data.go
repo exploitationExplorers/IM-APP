@@ -108,6 +108,13 @@ func (h *DataHandler) UpdateGroupStatus(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
+	// 业务侧只认 active，其余值一律视为群不可用，不能放任意字符串进来
+	switch req.Status {
+	case "active", "banned", "dismissed":
+	default:
+		response.Fail(c, http.StatusBadRequest, "群状态只能是 active、banned 或 dismissed")
+		return
+	}
 	if err := h.Data.UpdateGroupStatus(c.Request.Context(), c.Param("id"), req.Status); err != nil {
 		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
 		return

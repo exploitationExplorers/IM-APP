@@ -156,6 +156,11 @@ func (r *ContactRepo) AddFriendDirect(ctx context.Context, fromID, toID, message
 	if err != nil {
 		return "", err
 	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendAccepted, toID, map[string]string{
+		"friendUserId": fromID,
+	}); err != nil {
+		return "", err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err
 	}
@@ -245,6 +250,11 @@ func (r *ContactRepo) AcceptFriendRequest(ctx context.Context, requestID, uid st
 	if err != nil {
 		return err
 	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendAccepted, toID, map[string]string{
+		"friendUserId": fromID,
+	}); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -262,11 +272,24 @@ func (r *ContactRepo) RejectFriendRequest(ctx context.Context, requestID, uid st
 }
 
 func (r *ContactRepo) DeleteFriend(ctx context.Context, uid, friendID string) error {
-	_, err := r.DB.Exec(ctx, `
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `
 		DELETE FROM friendships
 		WHERE (user_id=$1 AND friend_id=$2) OR (user_id=$2 AND friend_id=$1)`,
 		uid, friendID)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendDeleted, uid, map[string]string{
+		"friendUserId": friendID,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *ContactRepo) BlockUser(ctx context.Context, uid, blockedID string) error {
@@ -285,13 +308,36 @@ func (r *ContactRepo) BlockUser(ctx context.Context, uid, blockedID string) erro
 	if err != nil {
 		return err
 	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendDeleted, uid, map[string]string{
+		"friendUserId": blockedID,
+	}); err != nil {
+		return err
+	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventBlockAdded, uid, map[string]string{
+		"blockedUserId": blockedID,
+	}); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
 func (r *ContactRepo) UnblockUser(ctx context.Context, uid, blockedID string) error {
-	_, err := r.DB.Exec(ctx, `
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `
 		DELETE FROM user_blocks WHERE user_id=$1 AND blocked_id=$2`, uid, blockedID)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventBlockRemoved, uid, map[string]string{
+		"blockedUserId": blockedID,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *ContactRepo) IsBlocked(ctx context.Context, uid, otherID string) (bool, error) {

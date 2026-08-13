@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ConversationItem from '@/components/ConversationItem.vue'
@@ -30,21 +30,18 @@ const filtered = computed(() => {
   return list.filter((c) => c.title.includes(k) || c.lastMessage.includes(k))
 })
 
-onMounted(() => {
-  chatStore.loadConversations()
-})
-
+// 会话变化平时由 SDK 事件推送，每次进入页面再兜底拉一次
 onShow(() => {
-  chatStore.syncTabBadge()
+  chatStore.loadConversations().catch((e: Error) => {
+    uni.showToast({ title: e?.message || '会话加载失败', icon: 'none' })
+  })
 })
 
 function openConversation(item: Conversation) {
   showAddMenu.value = false
   showFilter.value = false
-  const navType = item.type === 'group' ? 'group' : 'private'
-  const targetId = navType === 'group' ? item.id : (item.peerUserId || item.id)
   uni.navigateTo({
-    url: `/pages/chat/room?id=${item.id}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}&type=${navType}&targetId=${encodeURIComponent(targetId)}&peerUserId=${encodeURIComponent(item.peerUserId || '')}&code=${encodeURIComponent(navType)}`,
+    url: `/pages/chat/room?conversationId=${encodeURIComponent(item.id)}&type=${item.type}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}`,
   })
 }
 

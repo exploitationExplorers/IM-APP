@@ -82,6 +82,6 @@ CREATE INDEX IF NOT EXISTS idx_error_logs_created ON error_logs(created_at DESC)
 
 -- ============ 扩展 APP 表，支撑管理后台功能 ============
 ALTER TABLE users        ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ;
-ALTER TABLE groups       ADD COLUMN IF NOT EXISTS status       VARCHAR(16) NOT NULL DEFAULT 'normal';
+ALTER TABLE groups       ADD COLUMN IF NOT EXISTS status       VARCHAR(16) NOT NULL DEFAULT 'active';
 ALTER TABLE groups       ADD COLUMN IF NOT EXISTS all_muted    BOOLEAN     NOT NULL DEFAULT false;
 ALTER TABLE group_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ;

@@ -24,6 +24,8 @@ export interface Conversation {
   /** 如 [有新公告] */
   highlightTag?: string
   pinned?: boolean
-  /** 私聊对方用户 ID */
+  /** 私聊对方的 OpenIM 用户 ID */
   peerUserId?: string
+  /** 群聊的 OpenIM 群 ID */
+  groupId?: string
 }

@@ -3,7 +3,6 @@ package handler
 import (
 	"errors"
 	"net/http"
-	"time"
 
 	"im-app-server/internal/middleware"
 	"im-app-server/internal/models"
@@ -27,6 +26,10 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	}
 	g, err := h.Svc.Create(c.Request.Context(), uid, req.Name, req.MemberIDs)
 	if err != nil {
+		if errors.Is(err, repository.ErrInvalidGroupOperation) {
+			response.Fail(c, http.StatusBadRequest, "创建群聊至少需要 3 名有效成员（包含群主）")
+			return
+		}
 		response.Fail(c, http.StatusInternalServerError, "创建失败")
 		return
 	}
@@ -207,24 +210,6 @@ func (h *GroupHandler) RejectJoinRequest(c *gin.Context) {
 	response.OK(c, gin.H{"ok": true})
 }
 
-func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {
-	uid := middleware.UserID(c)
-	var req models.UpdateMemberRoleReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.Role == "" {
-		response.Fail(c, http.StatusBadRequest, "参数错误")
-		return
-	}
-	if err := h.Svc.UpdateMemberRole(c.Request.Context(), c.Param("id"), uid, c.Param("userId"), req.Role); err != nil {
-		if errors.Is(err, repository.ErrForbidden) {
-			response.Fail(c, http.StatusForbidden, "无权限")
-			return
-		}
-		response.Fail(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	response.OK(c, gin.H{"ok": true})
-}
-
 func (h *GroupHandler) RemoveMember(c *gin.Context) {
 	uid := middleware.UserID(c)
 	if err := h.Svc.RemoveMember(c.Request.Context(), c.Param("id"), uid, c.Param("userId")); err != nil {
@@ -238,41 +223,50 @@ func (h *GroupHandler) RemoveMember(c *gin.Context) {
 	response.OK(c, gin.H{"ok": true})
 }
 
-func (h *GroupHandler) Dissolve(c *gin.Context) {
-	uid := middleware.UserID(c)
-	if err := h.Svc.Dissolve(c.Request.Context(), c.Param("id"), uid); err != nil {
-		if errors.Is(err, repository.ErrForbidden) {
-			response.Fail(c, http.StatusForbidden, "无权限")
-			return
-		}
-		response.Fail(c, http.StatusInternalServerError, "操作失败")
-		return
-	}
-	response.OK(c, gin.H{"ok": true})
-}
-
-func (h *GroupHandler) MuteMember(c *gin.Context) {
-	uid := middleware.UserID(c)
-	var req models.MuteMemberReq
+func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {
+	var req models.UpdateGroupMemberRoleReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	var until *time.Time
-	if req.MutedUntil != "" {
-		t, err := time.Parse(time.RFC3339, req.MutedUntil)
-		if err != nil {
-			response.Fail(c, http.StatusBadRequest, "时间格式错误")
-			return
-		}
-		until = &t
+	err := h.Svc.UpdateMemberRole(c.Request.Context(), c.Param("id"), middleware.UserID(c), c.Param("userId"), req.Role)
+	h.handleModerationResult(c, err)
+}
+
+func (h *GroupHandler) UpdateMemberMute(c *gin.Context) {
+	var req models.UpdateGroupMemberMuteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
 	}
-	if err := h.Svc.MuteMember(c.Request.Context(), c.Param("id"), uid, c.Param("userId"), until); err != nil {
-		if errors.Is(err, repository.ErrForbidden) {
+	err := h.Svc.UpdateMemberMute(c.Request.Context(), c.Param("id"), middleware.UserID(c), c.Param("userId"), req.MutedSeconds)
+	h.handleModerationResult(c, err)
+}
+
+func (h *GroupHandler) UpdateMute(c *gin.Context) {
+	var req models.UpdateGroupMuteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	err := h.Svc.UpdateGroupMute(c.Request.Context(), c.Param("id"), middleware.UserID(c), req.Muted)
+	h.handleModerationResult(c, err)
+}
+
+func (h *GroupHandler) Dismiss(c *gin.Context) {
+	h.handleModerationResult(c, h.Svc.Dismiss(c.Request.Context(), c.Param("id"), middleware.UserID(c)))
+}
+
+func (h *GroupHandler) handleModerationResult(c *gin.Context, err error) {
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrForbidden):
 			response.Fail(c, http.StatusForbidden, "无权限")
-			return
+		case errors.Is(err, repository.ErrInvalidGroupOperation):
+			response.Fail(c, http.StatusBadRequest, "群操作参数错误")
+		default:
+			response.Fail(c, http.StatusInternalServerError, "群操作失败")
 		}
-		response.Fail(c, http.StatusBadRequest, "操作失败")
 		return
 	}
 	response.OK(c, gin.H{"ok": true})

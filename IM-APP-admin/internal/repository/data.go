@@ -94,7 +94,7 @@ func (r *DataRepo) ListGroups(ctx context.Context, keyword string, limit, offset
 	q := `
 		SELECT g.id::text, g.name, g.avatar, g.owner_id::text,
 		       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
-		       COALESCE(g.status,'normal'), g.created_at
+		       COALESCE(g.status,'active'), g.created_at
 		FROM groups g`
 	args := []any{limit, offset}
 	if keyword != "" {
@@ -335,7 +335,7 @@ func (r *DataRepo) GetGroupDetail(ctx context.Context, groupID string) (*models.
 	err := r.DB.QueryRow(ctx, `
 		SELECT g.id::text, g.name, g.avatar, g.owner_id::text,
 		       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
-		       COALESCE(g.status,'normal'), g.created_at,
+		       COALESCE(g.status,'active'), g.created_at,
 		       COALESCE(g.join_mode,'direct'), COALESCE(g.allow_member_add_friend,true),
 		       COALESCE(g.all_muted,false), COALESCE(g.announcement,'')
 		FROM groups g WHERE g.id=$1::uuid`, groupID,
