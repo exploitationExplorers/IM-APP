@@ -11,6 +11,8 @@ export interface UserInfo {
   nickname: string
   avatar: string
   bio?: string
+  /** 是否已设置密码 */
+  hasPassword?: boolean
   status?: 'active' | 'blocked' | 'banned'
   createdAt?: string
 }
@@ -52,11 +54,18 @@ export interface UserQrcodeResult {
   user: UserSummary
 }
 
+/** POST /users/qrcode/resolve 响应 */
+export interface UserQrcodeResolveResult {
+  user: UserInfo & { relation?: string }
+  relation: string
+}
+
 /** @deprecated 使用 UserQrcodeResult */
 export type QrcodePayload = UserQrcodeResult
 
 export interface UpdateProfileInput {
-  nickname?: string
-  avatar?: string
+  nickname: string
+  /** 不修改头像时传空字符串 */
+  avatarFileId?: string
   bio?: string
 }

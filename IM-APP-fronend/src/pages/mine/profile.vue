@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG, THEME } from '@/config'
+import { uploadAvatarForProfile } from '@/utils/file-upload'
+import { consumeProfileSaveSuccess } from '@/utils/profile-feedback'
+import ImSuccessToast from '@/components/ImSuccessToast.vue'
 
 useAuthGuard()
 const userStore = useUserStore()
+const successVisible = ref(false)
 
 const nickname = computed(() => userStore.profile?.nickname || '')
 const bio = computed(() => userStore.profile?.bio || '')
@@ -23,11 +28,18 @@ const phoneDisplay = computed(() => {
   return number ? `${code} ${number}` : code
 })
 
-onMounted(() => {
+onShow(() => {
   if (userStore.isLoggedIn) {
     userStore.loadProfile().catch(() => undefined)
   }
+  if (consumeProfileSaveSuccess()) {
+    successVisible.value = true
+  }
 })
+
+function showSaveSuccess() {
+  successVisible.value = true
+}
 
 function goBack() {
   uni.navigateBack()
@@ -35,6 +47,14 @@ function goBack() {
 
 function goQrcode() {
   uni.navigateTo({ url: '/pages/mine/qrcode' })
+}
+
+function goEditNickname() {
+  uni.navigateTo({ url: '/pages/mine/edit-nickname' })
+}
+
+function goEditBio() {
+  uni.navigateTo({ url: '/pages/mine/edit-bio' })
 }
 
 function onCopyPublicId() {
@@ -48,8 +68,34 @@ function onCopyPublicId() {
   })
 }
 
-function onComingSoon(feature: string) {
-  uni.showToast({ title: `${feature}功能开发中`, icon: 'none' })
+async function onChooseAvatar() {
+  uni.chooseImage({
+    count: 1,
+    sizeType: ['compressed'],
+    sourceType: ['album', 'camera'],
+    success: async (res) => {
+      const anyRes = res as unknown as {
+        tempFilePaths?: string[] | string
+      }
+      const paths = anyRes.tempFilePaths
+      const path = Array.isArray(paths) ? paths[0] : paths
+      if (!path) return
+      uni.showLoading({ title: '上传中…' })
+      try {
+        const fileId = await uploadAvatarForProfile(path, undefined)
+        await userStore.saveProfile({
+          nickname: nickname.value || '我',
+          avatarFileId: fileId,
+          bio: bio.value || '',
+        })
+        showSaveSuccess()
+      } catch (e) {
+        uni.showToast({ title: (e as Error).message || '上传失败', icon: 'none' })
+      } finally {
+        uni.hideLoading()
+      }
+    },
+  })
 }
 
 function onDeleteAccount() {
@@ -77,20 +123,20 @@ function onDeleteAccount() {
       <view class="nav-spacer" />
     </view>
 
-    <view class="avatar-row" @click="onComingSoon('更换头像')">
+    <view class="avatar-row" @click="onChooseAvatar">
       <image class="avatar" :src="avatarSrc" mode="aspectFill" />
       <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
     </view>
 
     <view class="section">
-      <view class="cell cell-link" @click="onComingSoon('修改昵称')">
+      <view class="cell cell-link" @click="goEditNickname">
         <text class="label">昵称</text>
         <view class="cell-right">
           <text v-if="nickname" class="value">{{ nickname }}</text>
           <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
         </view>
       </view>
-      <view class="cell cell-link" @click="onComingSoon('修改个性签名')">
+      <view class="cell cell-link" @click="goEditBio">
         <text class="label">个性签名</text>
         <view class="cell-right">
           <text v-if="bio" class="value">{{ bio }}</text>
@@ -126,6 +172,8 @@ function onDeleteAccount() {
         <text class="danger-text">注销帐号</text>
       </view>
     </view>
+
+    <ImSuccessToast :visible="successVisible" @close="successVisible = false" />
   </view>
 </template>
 

@@ -4,6 +4,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { fetchQrcode } from '@/api/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { buildQrcodeDataUrl } from '@/utils/qrcode'
+import { buildQrcodeCardDataUrl, saveBase64ImageToAlbum } from '@/utils/qrcode-card'
 import type { UserQrcodeResult } from '@/types'
 
 useAuthGuard()
@@ -65,16 +66,39 @@ async function onShare() {
   })
 }
 
-function onSave() {
+async function onSave() {
   if (!qrImageUrl.value) return
-  // #ifdef H5
-  const link = document.createElement('a')
-  link.href = qrImageUrl.value
-  link.download = `${nickname.value || 'qrcode'}.png`
-  link.click()
-  return
-  // #endif
-  uni.showToast({ title: '请长按图片保存', icon: 'none' })
+  uni.showLoading({ title: '保存中...', mask: true })
+  try {
+    const cardUrl = await buildQrcodeCardDataUrl({
+      nickname: nickname.value,
+      nicknameInitial: nicknameInitial.value,
+      avatarUrl: avatarUrl.value || undefined,
+      qrDataUrl: qrImageUrl.value,
+      brandLogoUrl: '/static/auth/logo-full.png',
+    })
+
+    // #ifdef H5
+    const link = document.createElement('a')
+    link.href = cardUrl
+    link.download = `${nickname.value || 'qrcode'}.png`
+    link.click()
+    uni.showToast({ title: '已保存', icon: 'success' })
+    return
+    // #endif
+
+    // #ifdef APP-PLUS
+    await saveBase64ImageToAlbum(cardUrl)
+    uni.showToast({ title: '已保存到相册', icon: 'success' })
+    return
+    // #endif
+
+    uni.showToast({ title: '请长按图片保存', icon: 'none' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error).message || '保存失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
 }
 </script>
 
@@ -107,7 +131,7 @@ function onSave() {
           <text class="avatar-text">{{ nicknameInitial }}</text>
         </view>
         <text class="nickname">{{ nickname }}</text>
-        <image class="brand-logo" src="/static/auth/logo.png" mode="aspectFit" />
+        <image class="brand-logo" src="/static/auth/logo-full.png" mode="aspectFit" />
       </view>
 
       <view class="qr-wrap">

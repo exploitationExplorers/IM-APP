@@ -11,6 +11,7 @@ export type {
   SendSMSResult,
   UserSummary,
   UserQrcodeResult,
+  UserQrcodeResolveResult,
   QrcodePayload,
   UpdateProfileInput,
 } from './user'
@@ -23,9 +24,22 @@ export type {
 
 export type {
   Contact,
+  ContactTagItem,
   GroupPreview,
   FriendRequest,
   FriendRequestAction,
+  PrivacySettings,
+  SendFriendResult,
 } from './contact'
 
 export type { GroupInfo, GroupMember } from './group'
+
+export type {
+  UploadPurpose,
+  CreateUploadInput,
+  UploadInitResult,
+  CompleteUploadInput,
+  FileObject,
+  FileInfo,
+  PresignResult,
+} from './file'

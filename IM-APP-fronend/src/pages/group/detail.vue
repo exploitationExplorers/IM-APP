@@ -1,234 +1,372 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { storeToRefs } from 'pinia'
-import { useGroupStore } from '@/stores/group'
-import { useUserStore } from '@/stores/user'
-
-const groupStore = useGroupStore()
-const userStore = useUserStore()
-const { currentGroup, members } = storeToRefs(groupStore)
 
 const groupId = ref('')
-const announcement = ref('')
-const allowAddFriend = ref(true)
-const loading = ref(true)
+const code = ref('group')
+const groupName = ref('观赏世界的窗')
+const avatar = ref('/static/avatar-1.png')
 
-const isOwner = computed(() => currentGroup.value?.ownerId === userStore.profile?.id)
+const memberList = [
+  { id: '1', name: 'bug001', avatar: '/static/avatar-1.png' },
+  { id: '2', name: '妲己把茶…', avatar: '/static/avatar-1.png' },
+  { id: '3', name: '勿忘国耻', avatar: '/static/avatar-1.png' },
+  { id: '4', name: '月薪3.8k', avatar: '/static/avatar-1.png' },
+]
 
 onLoad((query) => {
-  groupId.value = (query?.id as string) || ''
+  groupId.value = String(query?.id || '')
+  code.value = String(query?.code || 'group')
 })
 
-onMounted(async () => {
-  if (!groupId.value) return
-  try {
-    await userStore.loadProfile()
-    await groupStore.loadDetail(groupId.value)
-    announcement.value = currentGroup.value?.announcement || ''
-    allowAddFriend.value = currentGroup.value?.allowMemberAddFriend ?? true
-  } catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' })
-  } finally {
-    loading.value = false
-  }
+onMounted(() => {
+  console.log('detail page mounted', groupId.value, code.value)
 })
 
-function openChat() {
-  const g = currentGroup.value
-  if (!g?.conversationId) {
-    uni.showToast({ title: '暂无群会话', icon: 'none' })
-    return
-  }
-  uni.navigateTo({
-    url: `/pages/chat/room?id=${g.conversationId}&title=${encodeURIComponent(g.name)}`,
-  })
+function goBack() {
+  uni.navigateBack()
 }
 
-async function onSaveSettings() {
-  if (!isOwner.value) return
-  uni.showLoading({ title: '保存中...', mask: true })
-  try {
-    await groupStore.updateSettings(groupId.value, {
-      announcement: announcement.value,
-      allowMemberAddFriend: allowAddFriend.value,
-    })
-    uni.showToast({ title: '已保存', icon: 'success' })
-  } catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' })
-  } finally {
-    uni.hideLoading()
-  }
-}
-
-function onAllowAddFriendChange(e: any) {
-  allowAddFriend.value = e.detail.value as boolean
-}
-
-async function onLeave() {
-  uni.showModal({
-    title: '提示',
-    content: '确定退出该群聊吗？',
-    success: async (res) => {
-      if (!res.confirm) return
-      await groupStore.leave(groupId.value)
-      uni.navigateBack()
-    },
+function copyGroupId() {
+  uni.setClipboardData({
+    data: '338495',
+    success: () => uni.showToast({ title: '已复制', icon: 'none' }),
   })
 }
 </script>
 
 <template>
   <view class="page">
-    <view v-if="currentGroup && !loading" class="card">
-      <image class="avatar" :src="currentGroup.avatar || '/static/group-1.png'" mode="aspectFill" />
-      <text class="name">{{ currentGroup.name }}</text>
-      <text class="meta">{{ currentGroup.memberCount }} 人</text>
-      <button class="btn primary" @click="openChat">进入群聊</button>
+    <view class="header">
+      <view class="back-btn" @click="goBack">‹</view>
+      <text class="title">群详细</text>
+      <view class="header-spacer" />
     </view>
 
-    <view v-if="currentGroup && !loading" class="section">
-      <text class="section-title">群公告</text>
-      <textarea
-        class="textarea"
-        v-model="announcement"
-        :disabled="!isOwner"
-        placeholder="暂无公告"
-      />
-    </view>
-
-    <view v-if="currentGroup && isOwner && !loading" class="section row-switch">
-      <text>允许成员互加好友</text>
-      <switch :checked="allowAddFriend" @change="onAllowAddFriendChange" />
-    </view>
-
-    <view v-if="isOwner && !loading" class="actions">
-      <button class="btn" @click="onSaveSettings">保存设置</button>
-    </view>
-
-    <view v-if="members.length && !loading" class="section">
-      <text class="section-title">群成员（{{ members.length }}）</text>
-      <view v-for="m in members" :key="m.id" class="member-row">
-        <image class="m-avatar" :src="m.avatar || '/static/avatar-me.png'" mode="aspectFill" />
-        <text class="m-name">{{ m.nickname }}</text>
-        <text class="role">{{ m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '' }}</text>
+    <view class="members-wrap">
+      <view class="member-row">
+        <view v-for="member in memberList" :key="member.id" class="member-item">
+          <image class="member-avatar" :src="member.avatar" mode="aspectFill" />
+          <text class="member-name">{{ member.name }}</text>
+        </view>
+        <view class="add-member">
+          <view class="add-circle">＋</view>
+        </view>
       </view>
     </view>
 
-    <button v-if="!loading" class="btn danger" @click="onLeave">退出群聊</button>
+    <view class="group-row section-row">
+      <text class="label">群组成员</text>
+      <view class="row-right">
+        <text class="muted">共5人</text>
+        <text class="arrow">›</text>
+      </view>
+    </view>
+
+    <view class="info-list">
+      <view class="info-row">
+        <text class="label">群组名称</text>
+        <text class="value">{{ groupName }}</text>
+      </view>
+
+      <view class="info-row">
+        <text class="label">群头像</text>
+        <view class="avatar-box">
+          <image class="current-avatar" :src="avatar" mode="aspectFill" />
+        </view>
+      </view>
+
+      <view class="info-row">
+        <text class="label">群ID</text>
+        <view class="row-right id-box">
+          <text class="value id-value">338495</text>
+          <view class="copy-btn" @click="copyGroupId">复制</view>
+        </view>
+      </view>
+
+      <view class="info-row nav-row">
+        <text class="label">群公告</text>
+        <text class="arrow">›</text>
+      </view>
+
+      <view class="info-row nav-row">
+        <text class="label">群二维码</text>
+        <text class="arrow">›</text>
+      </view>
+
+      <view class="info-row nav-row">
+        <text class="label">我在本群的昵称</text>
+        <text class="arrow">›</text>
+      </view>
+
+      <view class="info-row nav-row">
+        <text class="label">图片与视频</text>
+        <text class="arrow">›</text>
+      </view>
+
+      <view class="info-row nav-row">
+        <text class="label">搜索聊天记录</text>
+        <text class="arrow">›</text>
+      </view>
+
+      <view class="info-row nav-row last-nav">
+        <text class="label">清除聊天记录</text>
+        <text class="arrow">›</text>
+      </view>
+
+      <view class="switch-row">
+        <text class="label">消息免打扰</text>
+        <view class="switch-track">
+          <view class="switch-knob" />
+        </view>
+      </view>
+
+      <view class="switch-row">
+        <text class="label">置顶聊天</text>
+        <view class="switch-track">
+          <view class="switch-knob" />
+        </view>
+      </view>
+
+      <view class="action-row">
+        <text class="label">检举</text>
+        <text class="arrow">›</text>
+      </view>
+    </view>
   </view>
 </template>
 
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background: #f5f6f8;
-  padding-bottom: 48rpx;
+  background: #f5f5f5;
 }
 
-.card {
-  background: #fff;
-  margin: 24rpx;
-  border-radius: 16rpx;
-  padding: 40rpx;
+.header {
   display: flex;
-  flex-direction: column;
   align-items: center;
-}
-
-.avatar {
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 16rpx;
-  background: #eee;
-}
-
-.name {
-  margin-top: 20rpx;
-  font-size: 34rpx;
-  font-weight: 600;
-}
-
-.meta {
-  margin-top: 8rpx;
-  color: #999;
-  font-size: 24rpx;
-}
-
-.section {
-  background: #fff;
-  margin: 0 24rpx 16rpx;
-  border-radius: 16rpx;
-  padding: 24rpx;
-}
-
-.section-title {
-  font-size: 26rpx;
-  color: #666;
-  margin-bottom: 16rpx;
-  display: block;
-}
-
-.textarea {
-  width: 100%;
-  min-height: 120rpx;
-  font-size: 28rpx;
-}
-
-.row-switch {
-  display: flex;
   justify-content: space-between;
+  height: 96rpx;
+  padding: 0 26rpx;
+  background: #ffffff;
+}
+
+.back-btn {
+  width: 52rpx;
+  height: 52rpx;
+  display: flex;
   align-items: center;
-  font-size: 28rpx;
+  justify-content: center;
+  font-size: 54rpx;
+  color: #1b1b1b;
+}
+
+.title {
+  flex: 1;
+  text-align: center;
+  font-size: 40rpx;
+  font-weight: 700;
+  color: #1f1f1f;
+}
+
+.header-spacer {
+  width: 52rpx;
+  height: 52rpx;
+}
+
+.members-wrap {
+  background: #fff;
+  padding: 20rpx 22rpx 18rpx;
 }
 
 .member-row {
   display: flex;
-  align-items: center;
-  padding: 16rpx 0;
-  border-bottom: 1rpx solid #f3f3f3;
+  align-items: flex-start;
+  gap: 18rpx;
 }
 
-.m-avatar {
+.member-item {
+  width: 112rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.member-avatar {
+  width: 92rpx;
+  height: 92rpx;
+  border-radius: 50%;
+  background: #eaeaea;
+}
+
+.member-name {
+  font-size: 22rpx;
+  color: #555;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-member {
+  width: 112rpx;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.add-circle {
+  width: 90rpx;
+  height: 90rpx;
+  border-radius: 50%;
+  border: 2rpx dashed #b8b8b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 50rpx;
+  color: #8a8a8a;
+}
+
+.section-row {
+  margin-top: 18rpx;
+  border-top: 1rpx solid #f0f0f0;
+  border-bottom: 1rpx solid #f0f0f0;
+}
+
+.group-row {
+  background: #fff;
+  padding: 28rpx 30rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.label {
+  font-size: 30rpx;
+  color: #1d1d1d;
+}
+
+.row-right {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.muted {
+  font-size: 28rpx;
+  color: #666;
+}
+
+.arrow {
+  font-size: 40rpx;
+  color: #999;
+}
+
+.info-list {
+  margin-top: 8rpx;
+  background: #fff;
+}
+
+.info-row {
+  min-height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 30rpx;
+  border-bottom: 1rpx solid #f0f0f0;
+}
+
+.value {
+  font-size: 30rpx;
+  color: #666;
+  max-width: 50%;
+}
+
+.avatar-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 64rpx;
   height: 64rpx;
   border-radius: 50%;
-  margin-right: 16rpx;
+  background: #e9f2ff;
 }
 
-.m-name {
-  flex: 1;
-  font-size: 28rpx;
+.current-avatar {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 50%;
+  background: #d8eaff;
 }
 
-.role {
-  color: #2b5cff;
-  font-size: 22rpx;
+.id-box {
+  gap: 18rpx;
 }
 
-.btn {
-  margin-top: 24rpx;
+.id-value {
+  color: #444;
+}
+
+.copy-btn {
+  min-width: 100rpx;
+  height: 52rpx;
+  padding: 0 22rpx;
   border-radius: 12rpx;
-  width: 100%;
-}
-
-.btn.primary {
-  background: #2b5cff;
+  background: #1e88ff;
   color: #fff;
+  font-size: 26rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.btn.danger {
-  margin: 24rpx;
+.nav-row {
+  cursor: pointer;
+}
+
+.last-nav {
+  border-bottom: 1rpx solid #f0f0f0;
+}
+
+.switch-row {
+  min-height: 100rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 30rpx;
   background: #fff;
-  color: #e54d42;
-  border: 1rpx solid #e54d42;
+  border-bottom: 1rpx solid #f0f0f0;
 }
 
-.btn::after {
-  border: none;
+.switch-track {
+  width: 76rpx;
+  height: 40rpx;
+  border-radius: 24rpx;
+  background: #d9d9d9;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 4rpx;
 }
 
-.actions {
-  padding: 0 24rpx;
+.switch-knob {
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.16);
+  position: absolute;
+  left: 6rpx;
+}
+
+.action-row {
+  min-height: 100rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 30rpx;
+  background: #fff;
 }
 </style>

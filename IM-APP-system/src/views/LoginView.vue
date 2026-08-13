@@ -58,7 +58,7 @@ async function submit(): Promise<void> {
       <section class="login-form">
         <div class="login-logo">
           <img class="login-icon" :src="logo" alt="IM-APP" />
-          <h1 class="logo-text">IM-APP 管理系统</h1>
+          <h1 class="logo-text">IM-APP</h1>
         </div>
         <el-form ref="formRef" :model="form" :rules="rules" size="large" @submit.prevent="submit">
           <el-form-item prop="username"

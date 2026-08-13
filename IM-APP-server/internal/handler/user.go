@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"im-app-server/internal/middleware"
+	"im-app-server/internal/models"
 	"im-app-server/internal/response"
 	"im-app-server/internal/service"
 
@@ -16,9 +17,9 @@ type UserHandler struct {
 }
 
 type updateProfileReq struct {
-	Nickname *string `json:"nickname"`
-	Avatar   *string `json:"avatar"`
-	Bio      *string `json:"bio"`
+	Nickname     *string `json:"nickname"`
+	AvatarFileID *string `json:"avatarFileId"`
+	Bio          *string `json:"bio"`
 }
 
 func (h *UserHandler) Profile(c *gin.Context) {
@@ -28,7 +29,7 @@ func (h *UserHandler) Profile(c *gin.Context) {
 		response.Fail(c, http.StatusNotFound, "用户不存在")
 		return
 	}
-	response.OK(c, u)
+	response.OK(c, toMeProfile(u))
 }
 
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
@@ -38,12 +39,77 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	u, err := h.Svc.UpdateProfile(c.Request.Context(), uid, req.Nickname, req.Avatar, req.Bio)
+	u, err := h.Svc.UpdateProfile(c.Request.Context(), uid, req.Nickname, req.AvatarFileID, req.Bio)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.OK(c, u)
+	response.OK(c, toMeProfile(u))
+}
+
+func (h *UserHandler) ChangePassword(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Password == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := h.Svc.ChangePassword(c.Request.Context(), uid, req.Password, req.OldPassword); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
+func (h *UserHandler) GetPrivacySettings(c *gin.Context) {
+	uid := middleware.UserID(c)
+	s, err := h.Svc.GetPrivacySettings(c.Request.Context(), uid)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "获取隐私设置失败")
+		return
+	}
+	response.OK(c, s)
+}
+
+func (h *UserHandler) UpdatePrivacySettings(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.PrivacySettings
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	s, err := h.Svc.UpdatePrivacySettings(c.Request.Context(), uid, req)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "更新隐私设置失败")
+		return
+	}
+	response.OK(c, s)
+}
+
+func (h *UserHandler) ResolveUserQRCode(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.ResolveQRCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	token := req.Token
+	if token == "" && req.QRCode != "" {
+		token = extractQRToken(req.QRCode)
+	}
+	if token == "" && req.Payload != "" {
+		token = extractQRToken(req.Payload)
+	}
+	result, err := h.Svc.ResolveUserQRCode(c.Request.Context(), uid, token)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "二维码无效或已过期")
+			return
+		}
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, result)
 }
 
 func (h *UserHandler) Qrcode(c *gin.Context) {
@@ -97,7 +163,8 @@ func (h *ContactHandler) ListContacts(c *gin.Context) {
 
 func (h *ContactHandler) ListGroups(c *gin.Context) {
 	uid := middleware.UserID(c)
-	list, err := h.Svc.ListGroups(c.Request.Context(), uid)
+	role := c.Query("role")
+	list, err := h.Svc.ListGroups(c.Request.Context(), uid, role)
 	if err != nil {
 		response.OK(c, []interface{}{})
 		return
@@ -107,7 +174,8 @@ func (h *ContactHandler) ListGroups(c *gin.Context) {
 
 func (h *ContactHandler) ListFriendRequests(c *gin.Context) {
 	uid := middleware.UserID(c)
-	list, err := h.Svc.ListFriendRequests(c.Request.Context(), uid)
+	direction := c.Query("direction")
+	list, err := h.Svc.ListFriendRequests(c.Request.Context(), uid, direction)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "查询失败")
 		return
@@ -116,8 +184,10 @@ func (h *ContactHandler) ListFriendRequests(c *gin.Context) {
 }
 
 type friendRequestReq struct {
-	ToUserID string `json:"toUserId"`
-	Message  string `json:"message"`
+	ToUserID      string `json:"toUserId"`
+	Message       string `json:"message"`
+	Source        string `json:"source"`
+	SourceGroupID string `json:"sourceGroupId"`
 }
 
 func (h *ContactHandler) CreateFriendRequest(c *gin.Context) {
@@ -127,7 +197,7 @@ func (h *ContactHandler) CreateFriendRequest(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	id, err := h.Svc.SendFriendRequest(c.Request.Context(), uid, req.ToUserID, req.Message)
+	result, err := h.Svc.SendFriendRequest(c.Request.Context(), uid, req.ToUserID, req.Message, req.Source, req.SourceGroupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSelfAction):
@@ -143,7 +213,7 @@ func (h *ContactHandler) CreateFriendRequest(c *gin.Context) {
 		}
 		return
 	}
-	response.OK(c, gin.H{"ok": true, "id": id})
+	response.OK(c, result)
 }
 
 func (h *ContactHandler) AcceptFriendRequest(c *gin.Context) {
@@ -203,6 +273,111 @@ func (h *ContactHandler) GetConversation(c *gin.Context) {
 		return
 	}
 	response.OK(c, convID)
+}
+
+func (h *ContactHandler) GetContact(c *gin.Context) {
+	uid := middleware.UserID(c)
+	cid := c.Param("id")
+	item, err := h.Svc.GetContact(c.Request.Context(), uid, cid)
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, "好友不存在")
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *ContactHandler) UpdateContact(c *gin.Context) {
+	uid := middleware.UserID(c)
+	cid := c.Param("id")
+	var req models.UpdateContactReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	item, err := h.Svc.UpdateContact(c.Request.Context(), uid, cid, req.Remark, req.TagIDs)
+	if err != nil {
+		if err.Error() == "标签功能不可用" {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.Fail(c, http.StatusNotFound, "好友不存在")
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *ContactHandler) ListTags(c *gin.Context) {
+	uid := middleware.UserID(c)
+	list, err := h.Svc.ListTags(c.Request.Context(), uid)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	response.OK(c, list)
+}
+
+func (h *ContactHandler) CreateTag(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.SaveContactTagReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	item, err := h.Svc.CreateTag(c.Request.Context(), uid, req.Name)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *ContactHandler) UpdateTag(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.SaveContactTagReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	item, err := h.Svc.UpdateTag(c.Request.Context(), uid, c.Param("tagId"), req.Name)
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, "标签不存在")
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *ContactHandler) DeleteTag(c *gin.Context) {
+	uid := middleware.UserID(c)
+	if err := h.Svc.DeleteTag(c.Request.Context(), uid, c.Param("tagId")); err != nil {
+		response.Fail(c, http.StatusNotFound, "标签不存在")
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
+func (h *ContactHandler) SetTagMembers(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.SetTagMembersReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	item, err := h.Svc.SetTagMembers(c.Request.Context(), uid, c.Param("tagId"), req.UserIDs)
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, "标签不存在")
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *ContactHandler) ListTagMembers(c *gin.Context) {
+	uid := middleware.UserID(c)
+	list, err := h.Svc.ListTagMembers(c.Request.Context(), uid, c.Param("tagId"))
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, "标签不存在")
+		return
+	}
+	response.OK(c, list)
 }
 
 type ChatHandler struct {

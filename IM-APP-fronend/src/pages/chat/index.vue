@@ -41,8 +41,10 @@ onShow(() => {
 function openConversation(item: Conversation) {
   showAddMenu.value = false
   showFilter.value = false
+  const navType = item.type === 'group' ? 'group' : 'private'
+  const targetId = navType === 'group' ? item.id : (item.peerUserId || item.id)
   uni.navigateTo({
-    url: `/pages/chat/room?id=${item.id}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}`,
+    url: `/pages/chat/room?id=${item.id}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}&type=${navType}&targetId=${encodeURIComponent(targetId)}&peerUserId=${encodeURIComponent(item.peerUserId || '')}&code=${encodeURIComponent(navType)}`,
   })
 }
 

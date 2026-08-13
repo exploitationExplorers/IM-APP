@@ -1,0 +1,510 @@
+{
+  "info": {
+    "_postman_id": "a8f3c2e1-4b5d-6e7f-8a9b-0c1d2e3f4a5b",
+    "name": "IM-APP 后端 · 业务接口",
+    "description": "对齐 api-contract.md 的业务接口（用户 / 隐私 / 通讯录 / 好友详情 / 标签 / 群组 / 聊天 / 文件）。\n\n认证接口见「IM-APP 后端 · 认证接口」集合。\n\n导入 Apifox：\n1) 打开 https://app.apifox.com/project/8705473\n2) 项目设置 → 导入数据 → Postman → 选本文件\n3) 建议「智能合并」，避免覆盖已有认证接口\n4) 环境变量 baseUrl 默认 http://8.210.72.157:8080/api/v1；本机改 localhost:8080\n5) 先跑认证集合登录，再把 accessToken 填到本集合变量，或在 Apifox 里共用环境变量",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://8.210.72.157:8080/api/v1", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "contactId", "value": "", "type": "string" },
+    { "key": "groupId", "value": "", "type": "string" },
+    { "key": "conversationId", "value": "", "type": "string" },
+    { "key": "tagId", "value": "", "type": "string" },
+    { "key": "fileId", "value": "", "type": "string" },
+    { "key": "friendRequestId", "value": "", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "用户",
+      "item": [
+        {
+          "name": "获取当前用户资料",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me",
+            "description": "需 JWT。返回当前用户资料（手机号脱敏）。"
+          },
+          "response": []
+        },
+        {
+          "name": "修改资料 PATCH",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nickname\": \"新昵称\",\n  \"avatarFileId\": \"\",\n  \"bio\": \"\"\n}"
+            },
+            "url": "{{baseUrl}}/me",
+            "description": "nickname、avatarFileId、bio 均需传入；bio 无内容传空字符串。头像须先走文件上传拿到 fileId。"
+          },
+          "response": []
+        },
+        {
+          "name": "获取隐私设置",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me/privacy-settings",
+            "description": "requireFriendApproval 默认 false（加好友无需验证）；requireGroupApproval 默认 true。"
+          },
+          "response": []
+        },
+        {
+          "name": "修改隐私设置",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requireFriendApproval\": false,\n  \"requireGroupApproval\": true\n}"
+            },
+            "url": "{{baseUrl}}/me/privacy-settings",
+            "description": "修改当前用户隐私设置。"
+          },
+          "response": []
+        },
+        {
+          "name": "修改/设置密码",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"newpassword123\",\n  \"oldPassword\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/me/password",
+            "description": "已设置过密码需传 oldPassword；首次设置可省略。"
+          },
+          "response": []
+        },
+        {
+          "name": "获取个人二维码",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/me/qrcode",
+            "description": "返回 payload 供前端渲染二维码。"
+          },
+          "response": []
+        },
+        {
+          "name": "按公开 ID 搜索用户",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/search?publicId=chat10002",
+            "description": "不可按手机号搜索。未找到 data=null。"
+          },
+          "response": []
+        },
+        {
+          "name": "解析个人二维码",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"uuid\",\n  \"payload\": \"{\\\"token\\\":\\\"...\\\",\\\"type\\\":\\\"user\\\"}\"\n}"
+            },
+            "url": "{{baseUrl}}/users/qrcode/resolve",
+            "description": "relation: self|none|pending|friend|blocked"
+          },
+          "response": []
+        },
+        {
+          "name": "查看用户公开资料",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{contactId}}",
+            "description": "不含完整手机号。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "通讯录",
+      "item": [
+        {
+          "name": "好友列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contacts",
+            "description": "当前用户好友列表。"
+          },
+          "response": []
+        },
+        {
+          "name": "好友详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contacts/{{contactId}}",
+            "description": "含 remark、tags、commonGroups（共同群组）。对齐参考站好友详情页。"
+          },
+          "response": []
+        },
+        {
+          "name": "修改好友备注/标签",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"remark\": \"备注名\",\n  \"tagIds\": []\n}"
+            },
+            "url": "{{baseUrl}}/contacts/{{contactId}}",
+            "description": "remark 可选；tagIds 省略不改标签，传数组则覆盖该好友所属标签。"
+          },
+          "response": []
+        },
+        {
+          "name": "获取/创建私聊会话",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contacts/{{contactId}}/conversation",
+            "description": "返回会话 ID，用于跳转聊天。"
+          },
+          "response": []
+        },
+        {
+          "name": "删除好友",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/contacts/{{contactId}}",
+            "description": "双向解除好友关系。"
+          },
+          "response": []
+        },
+        {
+          "name": "拉黑",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/contacts/{{contactId}}/block",
+            "description": "拉黑并删除好友关系。"
+          },
+          "response": []
+        },
+        {
+          "name": "解除拉黑",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/contacts/{{contactId}}/block",
+            "description": "解除拉黑。"
+          },
+          "response": []
+        },
+        {
+          "name": "好友申请列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/friend-requests?direction=received",
+            "description": "direction=received|sent，默认 received。"
+          },
+          "response": []
+        },
+        {
+          "name": "发送好友申请",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toUserId\": \"{{contactId}}\",\n  \"message\": \"你好，想加你为好友\",\n  \"source\": \"public_id\"\n}"
+            },
+            "url": "{{baseUrl}}/friend-requests",
+            "description": "若对方 requireFriendApproval=false，直接互加，status=accepted；否则 pending。source=group 时需 sourceGroupId 且校验群内禁止互加。"
+          },
+          "response": []
+        },
+        {
+          "name": "同意好友申请",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/friend-requests/{{friendRequestId}}/accept",
+            "description": "同意后双向成为好友。"
+          },
+          "response": []
+        },
+        {
+          "name": "拒绝好友申请",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/friend-requests/{{friendRequestId}}/reject",
+            "description": "拒绝好友申请。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "标签",
+      "item": [
+        {
+          "name": "标签列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contact-tags",
+            "description": "当前用户标签列表，含 memberCount。"
+          },
+          "response": []
+        },
+        {
+          "name": "创建标签",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"同事\"\n}"
+            },
+            "url": "{{baseUrl}}/contact-tags",
+            "description": "创建标签。"
+          },
+          "response": []
+        },
+        {
+          "name": "重命名标签",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"朋友\"\n}"
+            },
+            "url": "{{baseUrl}}/contact-tags/{{tagId}}",
+            "description": "修改标签名。"
+          },
+          "response": []
+        },
+        {
+          "name": "删除标签",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/contact-tags/{{tagId}}",
+            "description": "删除标签及其成员关联。"
+          },
+          "response": []
+        },
+        {
+          "name": "标签成员列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contact-tags/{{tagId}}/members",
+            "description": "标签下的好友列表。"
+          },
+          "response": []
+        },
+        {
+          "name": "覆盖设置标签成员",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userIds\": [\"{{contactId}}\"]\n}"
+            },
+            "url": "{{baseUrl}}/contact-tags/{{tagId}}/members",
+            "description": "覆盖该标签成员集合。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "聊天",
+      "item": [
+        {
+          "name": "会话列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/conversations",
+            "description": "当前用户会话列表。"
+          },
+          "response": []
+        },
+        {
+          "name": "全部已读",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/read-all",
+            "description": "全部会话标记已读。"
+          },
+          "response": []
+        },
+        {
+          "name": "消息历史",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages",
+            "description": "最多 200 条；读后清零该会话未读。"
+          },
+          "response": []
+        },
+        {
+          "name": "发送消息",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"text\",\n  \"content\": \"你好\"\n}"
+            },
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages",
+            "description": "type: text|image|voice|file"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "群组",
+      "item": [
+        {
+          "name": "群列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups?role=member",
+            "description": "role=owner|member|admin。"
+          },
+          "response": []
+        },
+        {
+          "name": "创建群聊",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"观察世界的窗口\",\n  \"memberIds\": [\"{{contactId}}\"]\n}"
+            },
+            "url": "{{baseUrl}}/groups",
+            "description": "创建群聊，返回 conversationId。"
+          },
+          "response": []
+        },
+        {
+          "name": "群详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}",
+            "description": "需为群成员。"
+          },
+          "response": []
+        },
+        {
+          "name": "群成员列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members",
+            "description": "群成员列表。"
+          },
+          "response": []
+        },
+        {
+          "name": "修改群设置",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"announcement\": \"公告\",\n  \"allowMemberAddFriend\": false,\n  \"joinMode\": \"open\",\n  \"allMuted\": false\n}"
+            },
+            "url": "{{baseUrl}}/groups/{{groupId}}/settings",
+            "description": "群主/管理员。allowMemberAddFriend=false 时禁止从该群加好友。"
+          },
+          "response": []
+        },
+        {
+          "name": "退出群聊",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/leave",
+            "description": "退出群聊。"
+          },
+          "response": []
+        },
+        {
+          "name": "解散群聊",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}",
+            "description": "仅群主。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "文件",
+      "item": [
+        {
+          "name": "创建上传任务",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"purpose\": \"avatar\",\n  \"fileName\": \"avatar.jpg\",\n  \"contentType\": \"image/jpeg\",\n  \"size\": 102400\n}"
+            },
+            "url": "{{baseUrl}}/files/uploads",
+            "description": "返回 uploadUrl，客户端 PUT 二进制后再调 complete。"
+          },
+          "response": []
+        },
+        {
+          "name": "完成上传",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"etag\": \"\"\n}"
+            },
+            "url": "{{baseUrl}}/files/uploads/{{fileId}}/complete",
+            "description": "确认上传完成，返回 FileInfo（含 url）。"
+          },
+          "response": []
+        },
+        {
+          "name": "查询文件信息",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/files/{{fileId}}",
+            "description": "查询文件信息。"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

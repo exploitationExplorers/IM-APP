@@ -20,12 +20,12 @@
   },
   "devDependencies": {
     "@types/qs": "^6.15.1",
-    "@vitejs/plugin-vue": "^5.2.3",
-    "@vue/language-core": "^2.2.12",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/language-core": "^3.3.9",
     "picomatch": "^4.0.5",
     "sass": "^1.87.0",
     "typescript": "^5.8.3",
-    "vite": "^6.3.2",
-    "vue-tsc": "^2.2.8"
+    "vite": "^8.2.1",
+    "vue-tsc": "^3.3.9"
   }
 }
