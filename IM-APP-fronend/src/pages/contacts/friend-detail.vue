@@ -158,8 +158,14 @@ function onDelete() {
       <view class="nav-btn" @click.stop="onMore">
         <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
         <view v-if="showMore" class="more-menu">
-          <view class="more-item" @click.stop="onBlock">加入黑名单</view>
-          <view class="more-item danger" @click.stop="onDelete">删除联络人</view>
+          <view class="more-item" @click.stop="onBlock">
+            <image class="more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
+            <text>加入黑名单</text>
+          </view>
+          <view class="more-item danger" @click.stop="onDelete">
+            <image class="more-icon" src="/static/icons/icon-profile-remove.svg" mode="aspectFit" />
+            <text>删除联络人</text>
+          </view>
         </view>
       </view>
     </view>
@@ -321,20 +327,29 @@ function onDelete() {
   position: absolute;
   top: 72rpx;
   right: 0;
-  min-width: 260rpx;
+  min-width: 320rpx;
   background: #fff;
-  border-radius: 16rpx;
+  border-radius: 32rpx;
   box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.12);
   overflow: hidden;
   z-index: 30;
 }
 
 .more-item {
-  padding: 28rpx 32rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 24rpx 32rpx;
   font-size: 28rpx;
   color: #212121;
   white-space: nowrap;
   text-align: left;
+}
+
+.more-icon {
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
 
 .more-item.danger {
