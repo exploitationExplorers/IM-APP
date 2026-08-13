@@ -6,16 +6,13 @@ import {
   fetchMessages,
   markAllRead,
   sendMessage as apiSendMessage,
-  subscribeChatMessages,
 } from '@/api/chat'
 import { wsClient } from '@/utils/websocket'
-import { APP_CONFIG } from '@/config'
 
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
   const messagesMap = ref<Record<string, ChatMessage[]>>({})
   const loading = ref(false)
-  let unsubMock: (() => void) | null = null
   let unsubWs: (() => void) | null = null
 
   const totalUnread = computed(() =>
@@ -37,18 +34,12 @@ export const useChatStore = defineStore('chat', () => {
 
   function subscribeRealtime() {
     unsubscribeRealtime()
-    if (APP_CONFIG.useMock) {
-      unsubMock = subscribeChatMessages(handleIncomingMessage)
-    } else {
-      const handler = (data: unknown) => handleIncomingMessage(data as ChatMessage)
-      unsubWs = wsClient.on('chat.message', handler)
-    }
+    const handler = (data: unknown) => handleIncomingMessage(data as ChatMessage)
+    unsubWs = wsClient.on('chat.message', handler)
   }
 
   function unsubscribeRealtime() {
-    unsubMock?.()
     unsubWs?.()
-    unsubMock = null
     unsubWs = null
   }
 
@@ -109,6 +100,48 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function sendVoice(
+    conversationId: string,
+    path: string,
+    duration: number,
+    senderId: string,
+  ) {
+    const payload = JSON.stringify({ path, duration })
+    const temp: ChatMessage = {
+      id: `local_voice_${Date.now()}`,
+      conversationId,
+      senderId,
+      type: 'voice',
+      content: payload,
+      createdAt: new Date().toISOString(),
+      status: 'sending',
+    }
+    const list = messagesMap.value[conversationId] || []
+    messagesMap.value = {
+      ...messagesMap.value,
+      [conversationId]: [...list, temp],
+    }
+
+    try {
+      const saved = await apiSendMessage(conversationId, 'voice', payload)
+      const next = (messagesMap.value[conversationId] || []).map((m) =>
+        m.id === temp.id ? { ...saved, status: 'sent' as const } : m,
+      )
+      messagesMap.value = { ...messagesMap.value, [conversationId]: next }
+      const conv = conversations.value.find((c) => c.id === conversationId)
+      if (conv) {
+        conv.lastMessage = '[语音]'
+        conv.lastMessageAt = saved.createdAt
+      }
+    } catch {
+      const next = (messagesMap.value[conversationId] || []).map((m) =>
+        m.id === temp.id ? { ...m, status: 'failed' as const } : m,
+      )
+      messagesMap.value = { ...messagesMap.value, [conversationId]: next }
+      throw new Error('语音发送失败')
+    }
+  }
+
   async function markAllAsRead() {
     await markAllRead()
     conversations.value = conversations.value.map((c) => ({ ...c, unreadCount: 0 }))
@@ -127,6 +160,7 @@ export const useChatStore = defineStore('chat', () => {
     loadConversations,
     loadMessages,
     sendText,
+    sendVoice,
     markAllAsRead,
     syncTabBadge,
     unsubscribeRealtime,

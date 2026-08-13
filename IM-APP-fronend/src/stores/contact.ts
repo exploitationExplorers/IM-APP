@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Contact, FriendRequest, GroupPreview } from '@/types'
+import type { Contact, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 import {
   acceptFriendRequest,
   fetchContacts,
@@ -38,8 +38,12 @@ export const useContactStore = defineStore('contact', () => {
     friendRequests.value = friendRequests.value.filter((fr) => fr.id !== id)
   }
 
-  async function addFriend(toUserId: string, message: string) {
-    await sendFriendRequest(toUserId, message)
+  async function addFriend(toUserId: string, message: string): Promise<SendFriendResult> {
+    const result = await sendFriendRequest(toUserId, message)
+    if (result.status === 'accepted') {
+      await loadAll()
+    }
+    return result
   }
 
   async function openChatWithContact(contactId: string, nickname: string, avatar: string) {
@@ -49,7 +53,7 @@ export const useContactStore = defineStore('contact', () => {
       return
     }
     uni.navigateTo({
-      url: `/pages/chat/room?id=${convId}&title=${encodeURIComponent(nickname)}&avatar=${encodeURIComponent(avatar)}`,
+      url: `/pages/chat/room?id=${convId}&title=${encodeURIComponent(nickname)}&avatar=${encodeURIComponent(avatar)}&type=private&peerUserId=${encodeURIComponent(contactId)}&targetId=${encodeURIComponent(contactId)}&code=private`,
     })
   }
 

@@ -9,17 +9,8 @@ export interface OpenIMTokenResult {
   devMode?: boolean
 }
 
-/** Phase 4：OpenIM SDK 接入入口；Mock 模式返回占位 token */
+/** Phase 4：OpenIM SDK 接入入口 */
 export async function fetchOpenIMToken(platformId = 5): Promise<OpenIMTokenResult> {
-  if (APP_CONFIG.useMock) {
-    return {
-      token: 'mock-openim-token',
-      expireSec: 7 * 24 * 3600,
-      platform: platformId,
-      userId: 'mock-user',
-      devMode: true,
-    }
-  }
   const base = APP_CONFIG.apiBaseUrl.replace(/\/api\/v1$/, '')
   const jwt = getToken()
   const res = await fetch(`${base}/api/v1/im/token`, {
@@ -37,7 +28,7 @@ export async function fetchOpenIMToken(platformId = 5): Promise<OpenIMTokenResul
 
 /** 是否应使用 OpenIM SDK 替代自研 WebSocket（Phase 4 完成后启用） */
 export function shouldUseOpenIM(): boolean {
-  return !APP_CONFIG.useMock && Boolean(import.meta.env.VITE_OPENIM_ENABLED === 'true')
+  return Boolean(import.meta.env.VITE_OPENIM_ENABLED === 'true')
 }
 
 /**

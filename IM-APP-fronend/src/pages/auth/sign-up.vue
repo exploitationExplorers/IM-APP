@@ -23,23 +23,30 @@ function validatePhoneInput() {
   return true
 }
 
+function startCountdown(seconds: number) {
+  countdown.value = seconds > 0 ? seconds : 60
+  if (timer) clearInterval(timer)
+  timer = setInterval(() => {
+    countdown.value -= 1
+    if (countdown.value <= 0 && timer) {
+      clearInterval(timer)
+      timer = null
+    }
+  }, 1000)
+}
+
+/** 参考站注册页不收集密码；接口仍要求 password，提交时生成临时密码，可之后在安全设置 / 忘记密码中修改 */
+function genTempPassword() {
+  return `Im${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+}
+
 async function onSendCode() {
   if (countdown.value > 0) return
   if (!validatePhoneInput()) return
   try {
-    const res = await sendSmsCode(phone.value, 'register')
-    uni.showToast({
-      title: (res as { tip?: string }).tip || '验证码已发送',
-      icon: 'none',
-    })
-    countdown.value = 60
-    timer = setInterval(() => {
-      countdown.value -= 1
-      if (countdown.value <= 0 && timer) {
-        clearInterval(timer)
-        timer = null
-      }
-    }, 1000)
+    const res = await sendSmsCode(phone.value, 'register', countryCode.value)
+    uni.showToast({ title: '验证码已发送', icon: 'none' })
+    startCountdown(res.retryAfterSec || 60)
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }
@@ -53,8 +60,8 @@ async function onRegister() {
   }
   loading.value = true
   try {
-    await userStore.register(phone.value, code.value, countryCode.value)
-    uni.switchTab({ url: '/pages/chat/index' })
+    await userStore.register(phone.value, code.value, genTempPassword(), countryCode.value)
+    uni.redirectTo({ url: '/pages/auth/onboarding' })
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   } finally {
@@ -77,8 +84,12 @@ function goPrivacy() {
 
 <template>
   <view class="auth-page">
-    <view class="auth-inner">
-      <image class="auth-logo" src="/static/auth/logo.png" mode="aspectFit" />
+    <view class="auth-inner is-sign-up">
+      <view class="auth-top-back" @click="goBack">
+        <text class="auth-top-back-icon">‹</text>
+      </view>
+
+      <image class="auth-logo is-sign-up" src="/static/auth/logo.png" mode="aspectFit" />
       <view class="auth-title">注册</view>
 
       <view class="auth-form">
@@ -114,19 +125,13 @@ function goPrivacy() {
 
         <view class="auth-spacer" />
 
-        <view class="auth-actions">
-          <view class="auth-back-btn" @click="goBack">
-            <text class="back-chevron">‹</text>
-          </view>
-          <button class="auth-primary-btn" :loading="loading" @click="onRegister">注册</button>
-        </view>
+        <button class="auth-primary-btn" :loading="loading" @click="onRegister">注册</button>
       </view>
 
       <view class="auth-agree">
         <text>点击注册代表您已阅读并同意</text>
-        <view>
+        <view class="auth-agree-links">
           <text class="auth-agree-link" @click="goAgreement">用户协议</text>
-          <text> </text>
           <text class="auth-agree-link" @click="goPrivacy">隐私权政策</text>
         </view>
       </view>
@@ -136,11 +141,4 @@ function goPrivacy() {
 
 <style lang="scss">
 @import '@/styles/auth.scss';
-
-.back-chevron {
-  font-size: 48rpx;
-  color: #fff;
-  line-height: 1;
-  font-weight: 300;
-}
 </style>

@@ -41,8 +41,10 @@ onShow(() => {
 function openConversation(item: Conversation) {
   showAddMenu.value = false
   showFilter.value = false
+  const navType = item.type === 'group' ? 'group' : 'private'
+  const targetId = navType === 'group' ? item.id : (item.peerUserId || item.id)
   uni.navigateTo({
-    url: `/pages/chat/room?id=${item.id}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}`,
+    url: `/pages/chat/room?id=${item.id}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}&type=${navType}&targetId=${encodeURIComponent(targetId)}&peerUserId=${encodeURIComponent(item.peerUserId || '')}&code=${encodeURIComponent(navType)}`,
   })
 }
 
@@ -72,12 +74,18 @@ function closeMenus() {
     <view class="header">
       <text class="title">聊天</text>
       <view class="add-wrap" @click.stop="onAdd">
-        <text class="icon-plus">＋</text>
+        <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
         <view v-if="showAddMenu" class="popup-menu">
           <view class="popup-item" @click="go('/pages/contacts/add-friend')">
+            <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
             <text>添加朋友</text>
           </view>
+          <view class="popup-item" @click="go('/pages/contacts/scan')">
+            <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
+            <text>添加群聊</text>
+          </view>
           <view class="popup-item" @click="go('/pages/group/create')">
+            <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
             <text>创建群聊</text>
           </view>
         </view>
@@ -153,10 +161,8 @@ function closeMenus() {
 }
 
 .icon-plus {
-  font-size: 44rpx;
-  color: #212121;
-  line-height: 1;
-  font-weight: 300;
+  width: 48rpx;
+  height: 48rpx;
 }
 
 .popup-menu {
@@ -186,6 +192,12 @@ function closeMenus() {
   color: #212121;
   white-space: nowrap;
   border-radius: 8rpx;
+}
+
+.popup-icon {
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
 
 .popup-item.active {

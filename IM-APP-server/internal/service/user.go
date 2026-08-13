@@ -18,8 +18,10 @@ var (
 )
 
 type UserService struct {
-	Users *repository.UserRepo
-	Files *repository.FileRepo
+	Users    *repository.UserRepo
+	Files    *repository.FileRepo
+	Contacts *repository.ContactRepo
+	Privacy  *repository.PrivacyRepo
 }
 
 func (s *UserService) GetProfile(ctx context.Context, uid string) (models.User, error) {
@@ -52,7 +54,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, nickname, a
 	return repository.PublicUser(u), nil
 }
 
-func (s *UserService) SearchByPublicID(ctx context.Context, uid, publicID string) (*models.User, error) {
+func (s *UserService) SearchByPublicID(ctx context.Context, uid, publicID string) (*models.PublicProfile, error) {
 	u, err := s.Users.FindByPublicID(ctx, publicID)
 	if err != nil {
 		return nil, nil
@@ -60,16 +62,16 @@ func (s *UserService) SearchByPublicID(ctx context.Context, uid, publicID string
 	if u.ID == uid {
 		return nil, errors.New("cannot search self")
 	}
-	pub := repository.PublicUser(u)
+	pub := repository.ToPublicProfile(u)
 	return &pub, nil
 }
 
-func (s *UserService) GetPublicProfile(ctx context.Context, userID string) (models.User, error) {
+func (s *UserService) GetPublicProfile(ctx context.Context, userID string) (models.PublicProfile, error) {
 	u, err := s.Users.FindByID(ctx, userID)
 	if err != nil {
-		return u, ErrNotFound
+		return models.PublicProfile{}, ErrNotFound
 	}
-	return repository.PublicUser(u), nil
+	return repository.ToPublicProfile(u), nil
 }
 
 func (s *UserService) Qrcode(ctx context.Context, uid string) (models.UserQRCodeResult, error) {
@@ -96,4 +98,90 @@ func (s *UserService) Qrcode(ctx context.Context, uid string) (models.UserQRCode
 			Avatar:   u.Avatar,
 		},
 	}, nil
+}
+
+func (s *UserService) ChangePassword(ctx context.Context, uid, newPassword, oldPassword string) error {
+	if len(newPassword) < 6 {
+		return errors.New("密码至少 6 位")
+	}
+	u, err := s.Users.FindByID(ctx, uid)
+	if err != nil {
+		return ErrNotFound
+	}
+	if u.PasswordHash != "" {
+		if oldPassword == "" {
+			return errors.New("请输入旧密码")
+		}
+		if err := serviceComparePassword(u.PasswordHash, oldPassword); err != nil {
+			return errors.New("旧密码不正确")
+		}
+	}
+	hash, err := serviceHashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	return s.Users.UpdatePassword(ctx, uid, hash)
+}
+
+func (s *UserService) ResolveUserQRCode(ctx context.Context, uid, token string) (models.UserQRCodeResolveResult, error) {
+	if token == "" {
+		return models.UserQRCodeResolveResult{}, errors.New("无效的二维码")
+	}
+	u, err := s.Users.ResolveUserQRCode(ctx, token)
+	if err != nil {
+		return models.UserQRCodeResolveResult{}, ErrNotFound
+	}
+	relation, _ := s.relationWith(ctx, uid, u.ID)
+	return models.UserQRCodeResolveResult{
+		User:     withRelationProfile(u, relation),
+		Relation: relation,
+	}, nil
+}
+
+func (s *UserService) relationWith(ctx context.Context, uid, otherID string) (string, error) {
+	if uid == otherID {
+		return "self", nil
+	}
+	if s.Contacts != nil {
+		blocked, _ := s.Contacts.IsBlocked(ctx, uid, otherID)
+		if blocked {
+			return "blocked", nil
+		}
+		blockedBy, _ := s.Contacts.IsBlocked(ctx, otherID, uid)
+		if blockedBy {
+			return "blocked", nil
+		}
+		ok, _ := s.Contacts.IsFriend(ctx, uid, otherID)
+		if ok {
+			return "friend", nil
+		}
+		pending, _ := s.Contacts.HasPendingRequest(ctx, uid, otherID)
+		if pending {
+			return "pending", nil
+		}
+	}
+	return "none", nil
+}
+
+func withRelationProfile(u models.User, relation string) models.PublicProfile {
+	p := repository.ToPublicProfile(u)
+	p.Relation = relation
+	return p
+}
+
+func (s *UserService) GetPrivacySettings(ctx context.Context, uid string) (models.PrivacySettings, error) {
+	if s.Privacy == nil {
+		return models.PrivacySettings{
+			RequireFriendApproval: false,
+			RequireGroupApproval:  true,
+		}, nil
+	}
+	return s.Privacy.Get(ctx, uid)
+}
+
+func (s *UserService) UpdatePrivacySettings(ctx context.Context, uid string, in models.PrivacySettings) (models.PrivacySettings, error) {
+	if s.Privacy == nil {
+		return in, errors.New("隐私设置不可用")
+	}
+	return s.Privacy.Update(ctx, uid, in)
 }

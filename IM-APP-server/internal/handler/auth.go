@@ -179,6 +179,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if _, err := qrRepo.EnsureQRCode(ctx, u.ID); err != nil {
 		log.Printf("generate qrcode failed: %v", err)
 	}
+	privacyRepo := &repository.PrivacyRepo{DB: h.DB}
+	if err := privacyRepo.Ensure(ctx, u.ID); err != nil {
+		log.Printf("ensure privacy settings failed: %v", err)
+	}
 	h.respondAuth(c, u, req.DeviceID)
 }
 

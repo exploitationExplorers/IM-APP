@@ -15,6 +15,13 @@
       }
     },
     {
+      "path": "pages/auth/onboarding",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "完善资料"
+      }
+    },
+    {
       "path": "pages/auth/forgot-password",
       "style": {
         "navigationStyle": "custom",
@@ -51,12 +58,13 @@
       "path": "pages/mine/index",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "我的"
+        "navigationBarTitleText": "个人中心"
       }
     },
     {
       "path": "pages/chat/room",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "聊天",
         "navigationBarBackgroundColor": "#FFFFFF"
       }
@@ -70,7 +78,22 @@
     {
       "path": "pages/contacts/add-friend",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "添加朋友"
+      }
+    },
+    {
+      "path": "pages/contacts/scan",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "扫二维码"
+      }
+    },
+    {
+      "path": "pages/contacts/scan-result",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "扫码结果"
       }
     },
     {
@@ -94,30 +117,49 @@
     {
       "path": "pages/group/create",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "创建群聊"
       }
     },
     {
       "path": "pages/group/detail",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "群资料"
       }
     },
     {
       "path": "pages/mine/profile",
       "style": {
-        "navigationBarTitleText": "编辑资料"
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "个人资料"
+      }
+    },
+    {
+      "path": "pages/mine/edit-nickname",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "修改昵称"
+      }
+    },
+    {
+      "path": "pages/mine/edit-bio",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "修改个性签名"
       }
     },
     {
       "path": "pages/mine/qrcode",
       "style": {
-        "navigationBarTitleText": "我的二维码"
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "二维码"
       }
     },
     {
       "path": "pages/mine/favorites",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "我的收藏"
       }
     },
@@ -134,21 +176,85 @@
       }
     },
     {
+      "path": "pages/mine/mass-assistant",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群发助手"
+      }
+    },
+    {
+      "path": "pages/mine/mass-select-contacts",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "选择联系人"
+      }
+    },
+    {
+      "path": "pages/mine/mass-compose",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群发"
+      }
+    },
+    {
+      "path": "pages/mine/mass-targets",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群发对象"
+      }
+    },
+    {
       "path": "pages/mine/privacy",
       "style": {
         "navigationBarTitleText": "隐私"
       }
     },
     {
+      "path": "pages/mine/blacklist",
+      "style": {
+        "navigationBarTitleText": "黑名单"
+      }
+    },
+    {
       "path": "pages/mine/security",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "安全"
+      }
+    },
+    {
+      "path": "pages/mine/reset-password",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "重置密码"
       }
     },
     {
       "path": "pages/mine/general",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "通用"
+      }
+    },
+    {
+      "path": "pages/mine/feedback",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "意见反馈"
+      }
+    },
+    {
+      "path": "pages/mine/about",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "关于我们"
+      }
+    },
+    {
+      "path": "pages/mine/emotions",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "我的表情"
       }
     }
   ],
