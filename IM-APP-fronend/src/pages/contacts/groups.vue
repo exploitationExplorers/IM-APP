@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { fetchGroups } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
+import { APP_CONFIG } from '@/config'
 
 const contactStore = useContactStore()
 const tab = ref<'created' | 'joined'>('created')
@@ -52,7 +53,11 @@ function goCreate() {
       class="row"
       @click="openGroup(g.id)"
     >
-      <image class="avatar" :src="g.avatar || '/static/group-1.png'" mode="aspectFill" />
+      <image
+        class="avatar"
+        :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
+        mode="aspectFill"
+      />
       <text class="name">{{ g.name }}</text>
       <text class="arrow">›</text>
     </view>

@@ -9,6 +9,8 @@ export const APP_CONFIG = {
   /** 参考站默认头像 */
   defaultAvatarUrl:
     env.VITE_DEFAULT_AVATAR_URL || 'https://nxbf.yuntsy.com/contents/headimg.jpg',
+  /** 群未设头像时的占位，形状与参考站一致（蓝底双气泡） */
+  defaultGroupAvatarUrl: '/static/group-default.svg',
 }
 
 export const THEME = {

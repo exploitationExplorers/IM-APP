@@ -352,11 +352,14 @@ export function targetOf(conversation: ConversationItem | Conversation): IMTarge
 }
 
 export function toConversation(item: ConversationItem): Conversation {
+  const isGroup = item.conversationType !== SessionType.Single
   return {
     id: item.conversationID,
-    type: item.conversationType === SessionType.Single ? 'private' : 'group',
+    type: isGroup ? 'group' : 'private',
     title: item.showName,
-    avatar: item.faceURL || APP_CONFIG.defaultAvatarUrl,
+    avatar:
+      item.faceURL ||
+      (isGroup ? APP_CONFIG.defaultGroupAvatarUrl : APP_CONFIG.defaultAvatarUrl),
     lastMessage: summarize(item.latestMsg),
     lastMessageAt: toISOTime(item.latestMsgSendTime),
     unreadCount: item.unreadCount || 0,

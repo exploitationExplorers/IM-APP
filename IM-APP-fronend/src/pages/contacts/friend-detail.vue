@@ -218,7 +218,7 @@ function onDelete() {
           >
             <image
               class="group-avatar"
-              :src="g.avatar || APP_CONFIG.defaultAvatarUrl"
+              :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
               mode="aspectFill"
             />
             <text class="group-name">{{ g.name }}</text>
