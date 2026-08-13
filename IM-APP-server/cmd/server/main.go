@@ -84,7 +84,7 @@ func main() {
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
 
 	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo}
-	imSvc := &service.IMService{Client: imClient, Users: userRepo, Access: imAccessRepo, Config: cfg.OpenIM}
+	imSvc := &service.IMService{Client: imClient, Users: userRepo, Access: imAccessRepo, Config: cfg.OpenIM, TokenCache: redisClient}
 	imAdminSvc := &service.IMAdminService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Outbox: imOutboxRepo,
 	}

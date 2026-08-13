@@ -314,6 +314,7 @@ paths:
       summary: 获取当前业务用户的 OpenIM Token 和连接地址
       description: |
         该接口在签发 Token 前会兜底确保用户已经存在于 OpenIM。
+        相同业务用户和 platformId 在 Token 刷新时间到达前会返回同一份 Token，重复或并发调用不会反复踢掉 WebSocket 登录。
         客户端使用返回的 userId、token、wsAddr 初始化 OpenIM SDK；聊天 WebSocket 不连接 Go 后端。
       operationId: getOpenIMToken
       x-change-type: optimized
