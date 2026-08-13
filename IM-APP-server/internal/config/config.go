@@ -56,6 +56,8 @@ type SMSConfig struct {
 }
 
 func Load() Config {
+	loadDotEnv(".env")
+
 	return Config{
 		HTTPAddr:          getenv("HTTP_ADDR", ":8080"),
 		DatabaseURL:       getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
@@ -94,6 +96,34 @@ func Load() Config {
 			TemplateCode:    getenv("SMS_TEMPLATE_CODE", ""),
 			RegionID:        getenv("SMS_REGION_ID", "cn-hangzhou"),
 		},
+	}
+}
+
+// loadDotEnv 读取工作目录下的 .env，让 `go run ./cmd/server` 与 README 描述一致。
+// 已存在的进程环境变量优先，docker compose 注入的值不会被文件覆盖。
+func loadDotEnv(path string) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+
+	for _, raw := range strings.Split(string(content), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(strings.TrimPrefix(key, "\ufeff"))
+		if key == "" {
+			continue
+		}
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		_ = os.Setenv(key, strings.Trim(strings.TrimSpace(value), `"'`))
 	}
 }
 

@@ -27,7 +27,9 @@ cp .env.example .env
 go run ./cmd/server
 ```
 
-`.env.example` 默认 `127.0.0.1:5433`，对应 docker compose 的端口映射；直连本机原生 PostgreSQL 时改回 `5432`。
+`.env` 从工作目录读取，已存在的进程环境变量优先。`.env.example` 默认 `127.0.0.1:5433`，对应 docker compose 的端口映射；直连本机原生 PostgreSQL 时改回 `5432`。
+
+聊天要能用，`.env` 里这四项必须填：`OPENIM_API_URL`（后端调 OpenIM 的地址）、`OPENIM_SECRET`、`OPENIM_PUBLIC_API_URL` 与 `OPENIM_PUBLIC_WS_URL`（下发给客户端，前端不再自行配置）。任一为空时 `POST /api/v1/im/token` 返回 503。
 
 ## API 文档
 
