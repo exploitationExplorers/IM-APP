@@ -47,7 +47,7 @@ function go(url: string) {
 }
 
 function openContact(c: Contact) {
-  contactStore.openChatWithContact(c.id, c.nickname, c.avatar)
+  go(`/pages/contacts/friend-detail?id=${c.id}`)
 }
 
 function openFeaturedGroup() {

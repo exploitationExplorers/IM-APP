@@ -1,28 +1,49 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { searchUserByPublicId, fetchUserProfile } from '@/api/user'
+import { searchUserByPublicId, fetchUserProfile, resolveUserQRCode } from '@/api/user'
 import { useContactStore } from '@/stores/contact'
 import type { UserInfo } from '@/types'
 
 const contactStore = useContactStore()
 const user = ref<UserInfo | null>(null)
+const relation = ref<'self' | 'none' | 'pending' | 'friend' | 'blocked'>('none')
 const loading = ref(true)
 
 const isFriend = computed(() => {
+  if (relation.value === 'friend') return true
   if (!user.value) return false
   return contactStore.contacts.some((c) => c.id === user.value!.id)
 })
+
+const primaryLabel = computed(() => {
+  if (isFriend.value) return '聊天'
+  if (relation.value === 'pending') return '已发送申请'
+  if (relation.value === 'blocked') return '无法添加'
+  return '加好友'
+})
+
+const primaryDisabled = computed(
+  () => relation.value === 'pending' || relation.value === 'blocked' || relation.value === 'self',
+)
 
 const avatarSrc = computed(() => user.value?.avatar || '/static/avatar-me.png')
 
 onLoad(async (query) => {
   const publicId = (query?.publicId as string) || ''
   const id = (query?.id as string) || ''
+  const token = (query?.token as string) || ''
   loading.value = true
   try {
     await contactStore.loadAll()
-    if (publicId) {
+    if (token) {
+      const result = await resolveUserQRCode(token)
+      relation.value = (result.relation || result.user.relation || 'none') as typeof relation.value
+      user.value = {
+        ...result.user,
+        countryCode: result.user.countryCode || '+86',
+      }
+    } else if (publicId) {
       user.value = await searchUserByPublicId(publicId)
     } else if (id) {
       user.value = await fetchUserProfile(id)
@@ -42,14 +63,20 @@ function goBack() {
 }
 
 async function onPrimary() {
-  if (!user.value) return
+  if (!user.value || primaryDisabled.value) return
   if (isFriend.value) {
     await contactStore.openChatWithContact(user.value.id, user.value.nickname, user.value.avatar)
     return
   }
   try {
-    await contactStore.addFriend(user.value.id, '你好，我想加你为好友')
-    uni.showToast({ title: '已发送好友申请', icon: 'success' })
+    const res = await contactStore.addFriend(user.value.id, '你好，我想加你为好友')
+    if (res.status === 'accepted') {
+      relation.value = 'friend'
+      uni.showToast({ title: '已添加好友', icon: 'success' })
+    } else {
+      relation.value = 'pending'
+      uni.showToast({ title: '已发送好友申请', icon: 'success' })
+    }
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }
@@ -75,9 +102,9 @@ async function onPrimary() {
     </view>
 
     <view v-if="user" class="footer">
-      <view class="chat-btn" @click="onPrimary">
+      <view class="chat-btn" :class="{ disabled: primaryDisabled }" @click="onPrimary">
         <image class="chat-icon" src="/static/icons/icon-chat-white.svg" mode="aspectFit" />
-        <text class="chat-text">{{ isFriend ? '聊天' : '加好友' }}</text>
+        <text class="chat-text">{{ primaryLabel }}</text>
       </view>
     </view>
   </view>
@@ -182,6 +209,10 @@ async function onPrimary() {
   align-items: center;
   justify-content: center;
   gap: 16rpx;
+}
+
+.chat-btn.disabled {
+  opacity: 0.55;
 }
 
 .chat-icon {

@@ -1,52 +1,72 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { fetchPrivacySettings, updatePrivacySettings } from '@/api/user'
+import type { PrivacySettings } from '@/types'
 
-const friendVerify = ref(true)
-const groupInviteVerify = ref(false)
+/** 对齐参考站：加好友默认无需验证 */
+const friendVerify = ref(false)
+const groupInviteVerify = ref(true)
+const saving = ref(false)
+
+onMounted(async () => {
+  try {
+    const s = await fetchPrivacySettings()
+    friendVerify.value = s.requireFriendApproval
+    groupInviteVerify.value = s.requireGroupApproval
+  } catch (e) {
+    uni.showToast({ title: (e as Error).message || '加载失败', icon: 'none' })
+  }
+})
+
+async function persist(next: PrivacySettings, rollback: () => void) {
+  if (saving.value) return
+  saving.value = true
+  try {
+    const s = await updatePrivacySettings(next)
+    friendVerify.value = s.requireFriendApproval
+    groupInviteVerify.value = s.requireGroupApproval
+    uni.showToast({ title: '已保存', icon: 'success' })
+  } catch (e) {
+    rollback()
+    uni.showToast({ title: (e as Error).message || '保存失败', icon: 'none' })
+  } finally {
+    saving.value = false
+  }
+}
 
 function onFriendVerify(e: Event) {
   const newValue = (e as unknown as { detail: { value: boolean } }).detail.value
+  const prev = friendVerify.value
   friendVerify.value = newValue
-  
-  const isSuccess = Math.random() > 0.3
-  if (isSuccess) {
-    uni.showToast({
-      title: '成功',
-      icon: 'success',
-      mask: true
-    })
-  } else {
-    uni.showToast({
-      title: '失败',
-      icon: 'error',
-      mask: true
-    })
-  }
+  void persist(
+    {
+      requireFriendApproval: newValue,
+      requireGroupApproval: groupInviteVerify.value,
+    },
+    () => {
+      friendVerify.value = prev
+    },
+  )
 }
 
 function onGroupInviteVerify(e: Event) {
   const newValue = (e as unknown as { detail: { value: boolean } }).detail.value
+  const prev = groupInviteVerify.value
   groupInviteVerify.value = newValue
-  
-  const isSuccess = Math.random() > 0.3
-  if (isSuccess) {
-    uni.showToast({
-      title: '成功',
-      icon: 'success',
-      mask: true
-    })
-  } else {
-    uni.showToast({
-      title: '失败',
-      icon: 'error',
-      mask: true
-    })
-  }
+  void persist(
+    {
+      requireFriendApproval: friendVerify.value,
+      requireGroupApproval: newValue,
+    },
+    () => {
+      groupInviteVerify.value = prev
+    },
+  )
 }
 
 function goBlacklist() {
   uni.navigateTo({
-    url: '/pages/mine/blacklist'
+    url: '/pages/mine/blacklist',
   })
 }
 </script>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { searchUserByPublicId, fetchUserProfile } from '@/api/user'
+import { decodeQrcodeFromImage, parseQrcodePayload } from '@/utils/qrcode'
 
 function goBack() {
   uni.navigateBack()
@@ -9,40 +9,64 @@ function goMyQrcode() {
   uni.navigateTo({ url: '/pages/mine/qrcode' })
 }
 
-function openScanResult(publicId: string) {
+function openScanResultByToken(token: string) {
+  uni.navigateTo({
+    url: `/pages/contacts/scan-result?token=${encodeURIComponent(token)}`,
+  })
+}
+
+function openScanResultByPublicId(publicId: string) {
   uni.navigateTo({
     url: `/pages/contacts/scan-result?publicId=${encodeURIComponent(publicId)}`,
   })
 }
 
-async function resolveDemoUser() {
-  // H5 / Mock：相册无法真识码，用可搜到的示例聊天号演示成功页
-  const candidates = ['chat10002', 'chat10003', 'chat10004']
-  for (const id of candidates) {
-    try {
-      const user = await searchUserByPublicId(id)
-      if (user) {
-        openScanResult(user.publicId)
-        return
-      }
-    } catch {
-      // try next
-    }
+async function handleScanRaw(raw: string) {
+  const parsed = parseQrcodePayload(raw)
+  if (parsed.type === 'group' && parsed.token) {
+    uni.showToast({ title: '请使用添加群聊扫描群二维码', icon: 'none' })
+    return
   }
-  try {
-    const user = await fetchUserProfile('u_1')
-    openScanResult(user.publicId)
-  } catch (e) {
-    uni.showToast({ title: (e as Error).message || '未识别到有效二维码', icon: 'none' })
+  if (parsed.token) {
+    openScanResultByToken(parsed.token)
+    return
   }
+  if (parsed.publicId) {
+    openScanResultByPublicId(parsed.publicId)
+    return
+  }
+  uni.showToast({ title: '未识别到有效二维码', icon: 'none' })
+}
+
+function startScan() {
+  uni.scanCode({
+    onlyFromCamera: true,
+    scanType: ['qrCode'],
+    success: (res) => {
+      void handleScanRaw(res.result)
+    },
+    fail: () => {
+      uni.showToast({ title: '扫码取消', icon: 'none' })
+    },
+  })
 }
 
 function chooseFromAlbum() {
   uni.chooseImage({
     count: 1,
     sourceType: ['album'],
-    success: () => {
-      void resolveDemoUser()
+    success: async (res) => {
+      const path = res.tempFilePaths[0]
+      if (!path) return
+      uni.showLoading({ title: '识别中...', mask: true })
+      try {
+        const raw = await decodeQrcodeFromImage(path)
+        await handleScanRaw(raw)
+      } catch (e) {
+        uni.showToast({ title: (e as Error).message || '未识别到有效二维码', icon: 'none' })
+      } finally {
+        uni.hideLoading()
+      }
     },
   })
 }
@@ -55,8 +79,8 @@ function chooseFromAlbum() {
     </view>
 
     <view class="scan-area">
-      <view class="scan-frame" @longpress="resolveDemoUser" />
-      <text class="hint">将二维码放入框内，即可自动扫描</text>
+      <view class="scan-frame" @click="startScan" />
+      <text class="hint">将二维码放入框内，点击取景框开始扫描</text>
     </view>
 
     <view class="actions">

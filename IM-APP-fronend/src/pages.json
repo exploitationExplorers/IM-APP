@@ -64,6 +64,7 @@
     {
       "path": "pages/chat/room",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "聊天",
         "navigationBarBackgroundColor": "#FFFFFF"
       }
@@ -102,6 +103,27 @@
       }
     },
     {
+      "path": "pages/contacts/friend-detail",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "好友详情"
+      }
+    },
+    {
+      "path": "pages/contacts/friend-remark",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "备注名"
+      }
+    },
+    {
+      "path": "pages/contacts/friend-tags",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "设置标签"
+      }
+    },
+    {
       "path": "pages/contacts/tags",
       "style": {
         "navigationBarTitleText": "标签"
@@ -123,6 +145,7 @@
     {
       "path": "pages/group/detail",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "群资料"
       }
     },
@@ -131,6 +154,20 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "个人资料"
+      }
+    },
+    {
+      "path": "pages/mine/edit-nickname",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "修改昵称"
+      }
+    },
+    {
+      "path": "pages/mine/edit-bio",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "修改个性签名"
       }
     },
     {
@@ -202,13 +239,36 @@
     {
       "path": "pages/mine/security",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "安全"
+      }
+    },
+    {
+      "path": "pages/mine/reset-password",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "重置密码"
       }
     },
     {
       "path": "pages/mine/general",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "通用"
+      }
+    },
+    {
+      "path": "pages/mine/feedback",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "意见反馈"
+      }
+    },
+    {
+      "path": "pages/mine/about",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "关于我们"
       }
     },
     {

@@ -53,6 +53,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-5020320260806002",
     "@dcloudio/uni-mp-xhs": "3.0.0-5020320260806002",
     "@dcloudio/uni-quickapp-webview": "3.0.0-5020320260806002",
+    "jsqr": "^1.4.0",
     "pinia": "^2.1.7",
     "qrcode": "^1.5.4",
     "vue": "^3.4.21",

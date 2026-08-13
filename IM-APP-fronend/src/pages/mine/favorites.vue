@@ -50,6 +50,12 @@ const toDesignUnit = (value: number) => {
   return (value * 750) / windowWidth;
 };
 
+// 用于兼容模板中可能存在的状态栏布局分支
+const statusBarHeight = uni.getSystemInfoSync()?.statusBarHeight || 0;
+const goBack = () => {
+  uni.navigateBack();
+};
+
 const closeMenu = () => {
   activeMenuId.value = null;
   activeMenuItem.value = null;

@@ -63,7 +63,8 @@ const listGroups = computed<MassTarget[]>(() =>
 const listTags = computed<MassTarget[]>(() => {
   const tagSet = new Set<string>()
   contactStore.contacts.forEach((c) => {
-    ;(c.tags || []).forEach((t) => tagSet.add(t))
+    ;(c.tags || []).forEach((t) => tagSet.add(t.name))
+    ;(c.tagNames || []).forEach((t) => tagSet.add(t))
   })
   const tags = Array.from(tagSet)
   if (!tags.length) {
