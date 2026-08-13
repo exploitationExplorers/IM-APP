@@ -248,7 +248,7 @@ func main() {
 			}
 
 			// 收藏
-			auth.GET("/favorites", favH.List)
+			auth.POST("/favorites/list", favH.List)
 			auth.POST("/favorites", favH.Create)
 			auth.DELETE("/favorites/:favoriteId", favH.Delete)
 		}

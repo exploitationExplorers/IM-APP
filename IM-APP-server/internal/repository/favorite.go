@@ -39,16 +39,20 @@ func (r *FavoriteRepo) Create(ctx context.Context, userID, messageID, msgType, c
 }
 
 // List 查询收藏（msgType 为空=全部类型）
-func (r *FavoriteRepo) List(ctx context.Context, userID, msgType string, limit, offset int) ([]models.Favorite, error) {
-	q := `SELECT id::text, message_id::text, msg_type, content,
+// List 查询收藏；types 为空=全部类型，否则按类型集合过滤
+func (r *FavoriteRepo) List(ctx context.Context, userID string, types []string, limit, offset int) ([]models.Favorite, error) {
+	base := `SELECT id::text, message_id::text, msg_type, content,
 			COALESCE(sender_id::text,''), conversation_id::text, created_at
-	      FROM favorites WHERE user_id=$1`
-	args := []any{userID, limit, offset}
-	if msgType != "" {
-		q += ` AND msg_type=$2`
-		args = []any{userID, msgType, limit, offset}
+	      FROM favorites WHERE user_id=$1::uuid`
+	var q string
+	var args []any
+	if len(types) == 0 {
+		q = base + ` ORDER BY created_at DESC LIMIT $2::int OFFSET $3::int`
+		args = []any{userID, limit, offset}
+	} else {
+		q = base + ` AND msg_type = ANY($2) ORDER BY created_at DESC LIMIT $3::int OFFSET $4::int`
+		args = []any{userID, types, limit, offset}
 	}
-	q += ` ORDER BY created_at DESC LIMIT $3 OFFSET $4`
 	rows, err := r.DB.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
