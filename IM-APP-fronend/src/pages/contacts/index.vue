@@ -61,7 +61,9 @@ function openContact(c: Contact) {
 function openFeaturedGroup() {
   const g = featuredGroup.value
   if (!g) return
-  go(`/pages/contacts/groups`)
+  uni.navigateTo({
+    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(g.id)}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || '/static/icons/menu-group.svg')}`,
+  })
 }
 
 function onAdd() {
