@@ -124,3 +124,13 @@ func (r *ChatRepo) ListConversationMemberIDs(ctx context.Context, convID string)
 	}
 	return ids, nil
 }
+
+// GetMessage 按 ID 查询单条消息
+func (r *ChatRepo) GetMessage(ctx context.Context, messageID string) (models.Message, error) {
+	var m models.Message
+	err := r.DB.QueryRow(ctx, `
+		SELECT id::text, conversation_id::text, sender_id::text, type, content, created_at
+		FROM messages WHERE id=$1::uuid`, messageID,
+	).Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Content, &m.CreatedAt)
+	return m, err
+}
