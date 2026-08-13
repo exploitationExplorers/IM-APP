@@ -667,6 +667,46 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
+## 收藏
+
+收藏消息快照（文字 / 表情 / 图片 / 视频 / 文件 / 语音）。创建时按业务库 `messages` 校验消息存在且当前用户是会话成员；同一用户对同一消息幂等。
+
+> 说明：当前实现依赖 PostgreSQL `messages` 表。OpenIM 主路径下的消息尚未落该表时，创建可能返回「消息不存在」；列表 / 删除不受影响。
+
+### POST `/api/v1/favorites`
+
+收藏一条消息。
+
+**Body**
+```json
+{ "messageId": "uuid" }
+```
+
+**Response**
+```json
+{
+  "id": "uuid",
+  "messageId": "uuid",
+  "type": "text",
+  "content": "消息内容或文件地址/JSON",
+  "senderId": "uuid",
+  "conversationId": "uuid",
+  "createdAt": "2026-08-13T12:00:00Z"
+}
+```
+
+### GET `/api/v1/favorites?type=image&page=1&limit=20`
+
+收藏列表。`type` 可选：`text` | `emoji` | `image` | `video` | `file` | `voice`；不传则全部。`page` 默认 1，`limit` 默认 20（最大 100）。
+
+**Response**：收藏对象数组（字段同创建响应）。
+
+### DELETE `/api/v1/favorites/:favoriteId`
+
+取消收藏（仅本人）。成功返回 `{ "ok": true }`；不存在返回 404。
+
+---
+
 ## WebSocket
 
 唯一生产聊天连接是 `/api/v1/im/token` 返回的 OpenIM `wsAddr`。Go 后端不代理 OpenIM WebSocket。

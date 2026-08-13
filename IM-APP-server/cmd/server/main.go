@@ -93,6 +93,8 @@ func main() {
 	if cfg.LegacyChatEnabled {
 		chatSvc.Hub = hub
 	}
+	favRepo := &repository.FavoriteRepo{DB: pool}
+	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
 	groupSvc := &service.GroupService{Groups: groupRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
 
@@ -119,6 +121,7 @@ func main() {
 		imAccessRepo, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs,
 	)
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
+	favH := &handler.FavoriteHandler{Svc: favSvc}
 
 	r := gin.New()
 	loggerConfig := gin.LoggerConfig{}
@@ -243,6 +246,11 @@ func main() {
 				auth.POST("/forward-tasks", forwardH.Create)
 				auth.GET("/forward-tasks/:id", forwardH.Get)
 			}
+
+			// 收藏
+			auth.GET("/favorites", favH.List)
+			auth.POST("/favorites", favH.Create)
+			auth.DELETE("/favorites/:favoriteId", favH.Delete)
 		}
 	}
 
