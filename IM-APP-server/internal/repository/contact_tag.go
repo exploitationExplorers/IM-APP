@@ -118,6 +118,79 @@ func (r *ContactTagRepo) SetMembers(ctx context.Context, uid, tagID string, frie
 	return item, nil
 }
 
+// ListByFriend 当前用户打在某好友上的标签
+func (r *ContactTagRepo) ListByFriend(ctx context.Context, uid, friendID string) ([]models.ContactTagItem, error) {
+	rows, err := r.DB.Query(ctx, `
+		SELECT t.id::text, t.name,
+			(SELECT COUNT(*) FROM contact_tag_members m2 WHERE m2.tag_id=t.id)
+		FROM contact_tags t
+		JOIN contact_tag_members m ON m.tag_id=t.id AND m.friend_id=$2::uuid
+		WHERE t.user_id=$1::uuid
+		ORDER BY t.created_at ASC`, uid, friendID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := make([]models.ContactTagItem, 0)
+	for rows.Next() {
+		var item models.ContactTagItem
+		if err := rows.Scan(&item.ID, &item.Name, &item.MemberCount); err != nil {
+			return nil, err
+		}
+		list = append(list, item)
+	}
+	return list, nil
+}
+
+// SetFriendTags 覆盖某好友所属标签集合（仅限当前用户自有标签）
+func (r *ContactTagRepo) SetFriendTags(ctx context.Context, uid, friendID string, tagIDs []string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var isFriend bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM friendships WHERE user_id=$1::uuid AND friend_id=$2::uuid)`,
+		uid, friendID).Scan(&isFriend); err != nil {
+		return err
+	}
+	if !isFriend {
+		return errors.New("not found")
+	}
+
+	_, err = tx.Exec(ctx, `
+		DELETE FROM contact_tag_members m
+		USING contact_tags t
+		WHERE m.tag_id=t.id AND t.user_id=$1::uuid AND m.friend_id=$2::uuid`, uid, friendID)
+	if err != nil {
+		return err
+	}
+
+	for _, tagID := range tagIDs {
+		if tagID == "" {
+			continue
+		}
+		var owned bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM contact_tags WHERE id=$2::uuid AND user_id=$1::uuid)`,
+			uid, tagID).Scan(&owned); err != nil {
+			return err
+		}
+		if !owned {
+			continue
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO contact_tag_members(tag_id, friend_id) VALUES($1::uuid, $2::uuid)
+			ON CONFLICT DO NOTHING`, tagID, friendID)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 func (r *ContactTagRepo) ListMembers(ctx context.Context, uid, tagID string) ([]models.Contact, error) {
 	rows, err := r.DB.Query(ctx, `
 		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, f.remark

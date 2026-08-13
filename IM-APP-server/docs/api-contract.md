@@ -275,15 +275,28 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/contacts/:id`
 
-好友详情（含备注）。
+好友详情（含备注、标签、共同群组）。
+
+**Response**
+```json
+{
+  "id": "uuid",
+  "publicId": "j8afsqh",
+  "nickname": "bug001",
+  "avatar": "https://...",
+  "remark": "",
+  "tags": [{ "id": "uuid", "name": "同事", "memberCount": 3 }],
+  "commonGroups": [{ "id": "uuid", "name": "观察世界的窗口", "avatar": "", "conversationId": "uuid" }]
+}
+```
 
 ### PATCH `/api/v1/contacts/:id`
 
-修改好友备注。
+修改好友备注与/或标签集合。`tagIds` 省略则不改标签；传数组则覆盖该好友所属标签。
 
 **Body**
 ```json
-{ "remark": "备注名" }
+{ "remark": "备注名", "tagIds": ["uuid1", "uuid2"] }
 ```
 
 ### GET `/api/v1/groups?role=owner|member|admin`

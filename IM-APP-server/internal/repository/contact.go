@@ -201,6 +201,29 @@ func (r *ContactRepo) GetContact(ctx context.Context, uid, friendID string) (mod
 	return item, err
 }
 
+// ListCommonGroups 双方共同所在的群
+func (r *ContactRepo) ListCommonGroups(ctx context.Context, uid, friendID string) ([]models.GroupPreview, error) {
+	rows, err := r.DB.Query(ctx, `
+		SELECT g.id::text, g.name, g.avatar, COALESCE(g.conversation_id::text, '')
+		FROM groups g
+		JOIN group_members gm1 ON gm1.group_id=g.id AND gm1.user_id=$1::uuid
+		JOIN group_members gm2 ON gm2.group_id=g.id AND gm2.user_id=$2::uuid
+		ORDER BY g.created_at DESC`, uid, friendID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := make([]models.GroupPreview, 0)
+	for rows.Next() {
+		var item models.GroupPreview
+		if err := rows.Scan(&item.ID, &item.Name, &item.Avatar, &item.ConversationID); err != nil {
+			return nil, err
+		}
+		list = append(list, item)
+	}
+	return list, nil
+}
+
 func (r *ContactRepo) AcceptFriendRequest(ctx context.Context, requestID, uid string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
