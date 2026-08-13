@@ -2,197 +2,143 @@ package models
 
 import "time"
 
-// ===== 管理员与权限 =====
-type Admin struct {
+// ===== 管理员与 RBAC（清单 01，表：admin_users/admin_roles/...） =====
+
+type AdminAccount struct {
 	ID          string     `json:"id"`
 	Username    string     `json:"username"`
 	Nickname    string     `json:"nickname"`
-	RoleID      string     `json:"roleId"`
-	RoleName    string     `json:"roleName"`
-	Status      string     `json:"status"`
+	Status      string     `json:"status"` // active|disabled
+	RoleNames   []string   `json:"roleNames,omitempty"`
+	RoleIDs     []string   `json:"roleIds,omitempty"`
+	MFAEnabled  bool       `json:"mfaEnabled"`
 	LastLoginAt *time.Time `json:"lastLoginAt,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"`
 }
 
-type Role struct {
+type AdminRole struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	Code        string    `json:"code"`
 	Description string    `json:"description"`
+	Status      string    `json:"status"` // active|disabled
 	Permissions []string  `json:"permissions,omitempty"`
+	UserCount   int64     `json:"userCount,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
-type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+type AdminPermission struct {
+	ID          string `json:"id"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Module      string `json:"module"`
+	Description string `json:"description"`
+}
+
+type AdminSession struct {
+	ID        string     `json:"id"`
+	AdminID   string     `json:"adminId"`
+	Device    string     `json:"device"`
+	IP        string     `json:"ip"`
+	UserAgent string     `json:"userAgent,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ExpiresAt time.Time  `json:"expiresAt"`
+	RevokedAt *time.Time `json:"revokedAt,omitempty"`
 }
 
 type LoginResult struct {
-	Token string `json:"token"`
-	Admin Admin  `json:"admin"`
+	Token        string       `json:"token,omitempty"`
+	RefreshToken string       `json:"refreshToken,omitempty"`
+	Admin        AdminAccount `json:"admin"`
+	MFAChallenge string       `json:"mfaChallenge,omitempty"` // 启用 MFA 时返回的挑战 token
 }
 
-type AdminRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Nickname string `json:"nickname"`
-	RoleID   string `json:"roleId"`
-	Status   string `json:"status"`
+type MeResult struct {
+	Admin       AdminAccount `json:"admin"`
+	Permissions []string     `json:"permissions"`
 }
 
-type OperationLog struct {
+// ===== 审计与登录日志（清单 10，表：admin_audit_logs/admin_login_logs） =====
+
+type AuditLog struct {
 	ID         int64     `json:"id"`
-	AdminID    string    `json:"adminId"`
-	AdminName  string    `json:"adminName"`
+	AdminID    string    `json:"adminId,omitempty"`
+	AdminName  string    `json:"adminName,omitempty"`
 	Action     string    `json:"action"`
-	TargetType string    `json:"targetType"`
-	TargetID   string    `json:"targetId"`
-	DetailJSON string    `json:"detailJson"`
+	Resource   string    `json:"resource"`
+	ResourceID string    `json:"resourceId"`
+	Reason     string    `json:"reason,omitempty"`
+	Before     string    `json:"beforeValue,omitempty"`
+	After      string    `json:"afterValue,omitempty"`
 	IP         string    `json:"ip"`
+	UserAgent  string    `json:"userAgent,omitempty"`
+	RequestID  string    `json:"requestId"`
+	Result     string    `json:"result"` // success|denied|failed
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
-// ===== 用户管理（复用 APP users 表） =====
-type AdminUser struct {
-	ID          string    `json:"id"`
-	PhoneMasked string    `json:"phoneMasked"`
-	CountryCode string    `json:"countryCode"`
-	PublicID    string    `json:"publicId"`
-	Nickname    string    `json:"nickname"`
-	Avatar      string    `json:"avatar"`
-	Status      string    `json:"status"`
-	FriendCount int64     `json:"friendCount"`
-	GroupCount  int64     `json:"groupCount"`
-	CreatedAt   time.Time `json:"createdAt"`
+type LoginLog struct {
+	ID         int64     `json:"id"`
+	AdminID    string    `json:"adminId,omitempty"`
+	AdminName  string    `json:"adminName,omitempty"`
+	Success    bool      `json:"success"`
+	FailReason string    `json:"failReason,omitempty"`
+	IP         string    `json:"ip"`
+	UserAgent  string    `json:"userAgent,omitempty"`
+	RequestID  string    `json:"requestId"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
-type AdminUserDetail struct {
-	AdminUser
-	Bio         string `json:"bio"`
-	ReportCount int64  `json:"reportCount"`
+// ===== 请求模型 =====
+
+type LoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
 }
 
-type UpdateUserStatusRequest struct {
-	Status string `json:"status"` // active|restricted|banned|canceled
+type RefreshRequest struct {
+	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
-type ReportRecord struct {
-	ID          string    `json:"id"`
-	TargetType  string    `json:"targetType"`
-	Reason      string    `json:"reason"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"createdAt"`
+type MFAResetRequest struct {
+	Reason string `json:"reason"`
 }
 
-// ===== 群组管理（复用 APP groups 表） =====
-type AdminGroup struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Avatar      string    `json:"avatar"`
-	OwnerID     string    `json:"ownerId"`
-	MemberCount int64     `json:"memberCount"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"createdAt"`
+type AdminCreateRequest struct {
+	Username string   `json:"username" binding:"required"`
+	Password string   `json:"password" binding:"required,min=6"`
+	Nickname string   `json:"nickname"`
+	RoleIDs  []string `json:"roleIds"`
+	Status   string   `json:"status"`
 }
 
-type AdminGroupDetail struct {
-	AdminGroup
-	JoinMode             string `json:"joinMode"`             // direct|approval
-	AllowMemberAddFriend bool   `json:"allowMemberAddFriend"` // 是否允许成员互加好友
-	AllMuted             bool   `json:"allMuted"`             // 全员禁言
-	Announcement         string `json:"announcement"`
+type AdminUpdateRequest struct {
+	Password string   `json:"password"`
+	Nickname string   `json:"nickname"`
+	RoleIDs  []string `json:"roleIds"`
+	Status   string   `json:"status"`
 }
 
-type AdminGroupMember struct {
-	UserID     string `json:"userId"`
-	Nickname   string `json:"nickname"`
-	Role       string `json:"role"`
-	MutedUntil string `json:"mutedUntil,omitempty"`
-	JoinedAt   string `json:"joinedAt"`
+type AdminStatusRequest struct {
+	Status string `json:"status" binding:"required,oneof=active disabled"`
+	Reason string `json:"reason"`
 }
 
-type RecallLog struct {
-	ID        string    `json:"id"`
-	GroupID   string    `json:"groupId"`
-	Operator  string    `json:"operator"`
-	MessageID string    `json:"messageId"`
-	Reason    string    `json:"reason"`
-	CreatedAt time.Time `json:"createdAt"`
+type ChangePasswordRequest struct {
+	OldPassword string `json:"oldPassword" binding:"required"`
+	NewPassword string `json:"newPassword" binding:"required,min=6"`
 }
 
-type UpdateGroupStatusRequest struct {
-	Status string `json:"status"` // normal|banned|dissolved
+type RoleCreateRequest struct {
+	Name        string   `json:"name" binding:"required"`
+	Code        string   `json:"code" binding:"required"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
 }
 
-// UpdateGroupSettingsRequest 群公共设置（传哪个改哪个）
-type UpdateGroupSettingsRequest struct {
-	JoinMode             *string `json:"joinMode,omitempty"`             // direct|approval
-	AllowMemberAddFriend *bool   `json:"allowMemberAddFriend,omitempty"` // 是否允许成员互加好友
-	AllMuted             *bool   `json:"allMuted,omitempty"`             // 全员禁言
-}
-
-// ===== 转发任务管理（复用 APP forward_tasks 表） =====
-type AdminForwardTask struct {
-	ID           string     `json:"id"`
-	UserID       string     `json:"userId"`
-	SourceMsgID  string     `json:"sourceMessageId"`
-	Status       string     `json:"status"`
-	TargetCount  int64      `json:"targetCount"`
-	SuccessCount int64      `json:"successCount"`
-	FailedCount  int64      `json:"failedCount"`
-	SkippedCount int64      `json:"skippedCount"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	FinishedAt   *time.Time `json:"finishedAt,omitempty"`
-}
-
-// ===== 短信记录（复用 APP sms_send_logs 表） =====
-type SmsLog struct {
-	ID          int64     `json:"id"`
-	PhoneE164   string    `json:"phoneE164"`
-	CountryCode string    `json:"countryCode"`
-	Scene       string    `json:"scene"`
-	Status      string    `json:"status"`
-	ErrorCode   string    `json:"errorCode"`
-	CreatedAt   time.Time `json:"createdAt"`
-}
-
-type Country struct {
-	Code     string `json:"code"`
-	DialCode string `json:"dialCode"`
-	CNName   string `json:"cnName"`
-	ENName   string `json:"enName"`
-	Enabled  bool   `json:"enabled"`
-}
-
-type UpdateCountryRequest struct {
-	Enabled *bool `json:"enabled"`
-}
-
-// ===== 运营配置 =====
-type AppVersion struct {
-	ID           string    `json:"id"`
-	Platform     string    `json:"platform"`
-	Version      string    `json:"version"`
-	Description  string    `json:"description"`
-	DownloadURL  string    `json:"downloadUrl"`
-	ForceUpgrade bool      `json:"forceUpgrade"`
-	CreatedAt    time.Time `json:"createdAt"`
-}
-
-type AppPolicy struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	Version   string    `json:"version"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type SensitiveWord struct {
-	ID        string    `json:"id"`
-	Word      string    `json:"word"`
-	Category  string    `json:"category"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
+type RoleUpdateRequest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Status      string   `json:"status"` // active|disabled
+	Permissions []string `json:"permissions"`
 }
