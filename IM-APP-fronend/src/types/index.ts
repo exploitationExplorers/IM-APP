@@ -24,6 +24,7 @@ export type {
 
 export type {
   Contact,
+  ContactTagItem,
   GroupPreview,
   FriendRequest,
   FriendRequestAction,
