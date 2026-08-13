@@ -19,7 +19,8 @@ const contact = ref<Contact | null>(null)
 const loading = ref(false)
 const showMore = ref(false)
 
-const displayName = computed(
+const nickname = computed(() => contact.value?.nickname || '')
+const listName = computed(
   () => contact.value?.remark?.trim() || contact.value?.nickname || '',
 )
 const tagText = computed(() =>
@@ -78,19 +79,15 @@ async function onMessage() {
   if (!contact.value) return
   await contactStore.openChatWithContact(
     contact.value.id,
-    displayName.value,
+    listName.value,
     contact.value.avatar || APP_CONFIG.defaultAvatarUrl,
   )
 }
 
 function openGroup(g: GroupPreview) {
-  if (g.conversationId) {
-    uni.navigateTo({
-      url: `/pages/chat/room?id=${g.conversationId}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || '')}&type=group&targetId=${encodeURIComponent(g.id)}&code=group`,
-    })
-    return
-  }
-  uni.navigateTo({ url: `/pages/group/detail?id=${g.id}` })
+  uni.navigateTo({
+    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(g.id)}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || APP_CONFIG.defaultGroupAvatarUrl)}`,
+  })
 }
 
 function onMore() {
@@ -128,7 +125,7 @@ function onDelete() {
   if (!contact.value) return
   uni.showModal({
     title: '删除联络人',
-    content: `确定删除「${displayName.value}」吗？`,
+    content: `确定删除「${listName.value}」吗？`,
     confirmText: '删除',
     confirmColor: THEME.danger,
     success: async (res) => {
@@ -177,7 +174,7 @@ function onDelete() {
               mode="aspectFill"
             />
             <view class="profile-meta">
-              <text class="name">{{ displayName }}</text>
+              <text class="name">{{ nickname }}</text>
             </view>
           </view>
 

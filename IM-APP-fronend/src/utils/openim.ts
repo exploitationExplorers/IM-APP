@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import IMSDK, {
   IMEvents,
   IMMethods,
+  LoginStatus,
   MessageStatus,
   MessageType,
   Platform,
@@ -23,6 +24,9 @@ export interface IMTarget {
 }
 
 const env = (import.meta as ImportMeta & { env: Record<string, string> }).env
+
+/** OpenIM：同一 SDK 实例上重复 Login 会返回这个错误，语义是已登录而不是失败 */
+const LOGIN_REPEAT_CODE = 10102
 
 /** app 端走原生插件，web / 小程序端走 @openim/client-sdk，两者初始化方式不同 */
 const isAppPlatform = uni.getSystemInfoSync().uniPlatform === 'app'
@@ -74,6 +78,35 @@ function toIMError(raw: unknown, method: IMMethods): Error {
   return new Error(errMsg ? `${errMsg}（${detail}）` : `IM 调用失败（${detail}）`)
 }
 
+function isLoginRepeat(raw: unknown): boolean {
+  if (raw && typeof raw === 'object' && 'errCode' in raw) {
+    return (raw as { errCode?: number }).errCode === LOGIN_REPEAT_CODE
+  }
+  return raw instanceof Error && (raw.message.includes('10102') || raw.message.includes('login repeat'))
+}
+
+async function getSdkLoginStatus(): Promise<LoginStatus> {
+  try {
+    return await imCall<LoginStatus>(IMMethods.GetLoginStatus)
+  } catch {
+    return LoginStatus.Logout
+  }
+}
+
+async function getSdkLoginUserId(): Promise<string> {
+  try {
+    return (await imCall<string>(IMMethods.GetLoginUserID)) || ''
+  } catch {
+    return ''
+  }
+}
+
+function rememberLogin(imToken: IMTokenResult): string {
+  imUserId.value = imToken.userId
+  tokenExpireAt = Date.now() + Math.max(0, imToken.expireSec - 300) * 1000
+  return imUserId.value
+}
+
 /**
  * 登录成功只代表连上了，SDK 还要异步从服务端拉会话与消息。
  * 这期间查历史会拿到空列表，所以要等同步结束；超时兜底，避免同步事件丢失时卡死。
@@ -109,21 +142,31 @@ async function doLogin(): Promise<string> {
     })
   }
 
+  const status = await getSdkLoginStatus()
+  if (status === LoginStatus.Logged) {
+    const loggedUserId = await getSdkLoginUserId()
+    if (!loggedUserId || loggedUserId === imToken.userId) {
+      return rememberLogin(imToken)
+    }
+    await imCall(IMMethods.Logout).catch(() => undefined)
+  }
+
   // 先挂监听再登录，否则同步很快结束时会错过事件
   const synced = waitForSync()
-  await imCall(IMMethods.Login, {
-    userID: imToken.userId,
-    token: imToken.token,
-    platformID: imToken.platform,
-    apiAddr: imToken.apiAddr,
-    wsAddr: imToken.wsAddr,
-  })
+  try {
+    await imCall(IMMethods.Login, {
+      userID: imToken.userId,
+      token: imToken.token,
+      platformID: imToken.platform,
+      apiAddr: imToken.apiAddr,
+      wsAddr: imToken.wsAddr,
+    })
+  } catch (e) {
+    if (!isLoginRepeat(e)) throw e
+    return rememberLogin(imToken)
+  }
   await synced
-
-  imUserId.value = imToken.userId
-  // 提前 5 分钟过期，避免正在聊天时 token 失效
-  tokenExpireAt = Date.now() + Math.max(0, imToken.expireSec - 300) * 1000
-  return imUserId.value
+  return rememberLogin(imToken)
 }
 
 /** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */

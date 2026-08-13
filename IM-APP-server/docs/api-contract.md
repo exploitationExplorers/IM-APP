@@ -271,7 +271,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/contacts`
 
-好友列表。
+好友列表。每项含 `remark`（无备注时为空字符串）。通讯录展示优先用备注，没有则用昵称。
 
 ### GET `/api/v1/contacts/:id`
 
