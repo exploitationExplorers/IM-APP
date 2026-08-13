@@ -41,8 +41,12 @@ func SecurityHeaders() gin.HandlerFunc {
 // 本地 localhost 来源一律放行（开发友好）；显式白名单优先；
 // 其他来源不带 CORS 头放行（浏览器按同源策略拦截跨域读取，服务端不主动 403，避免误伤 vite 代理等场景）
 func CORS(origins []string) gin.HandlerFunc {
+	allowAll := false
 	allowMap := make(map[string]bool, len(origins)+8)
 	for _, o := range origins {
+		if o == "*" {
+			allowAll = true // 配置 ADMIN_CORS_ORIGINS=* 时放行所有来源
+		}
 		allowMap[o] = true
 	}
 	// 本地开发常用来源默认放行
@@ -55,17 +59,15 @@ func CORS(origins []string) gin.HandlerFunc {
 	}
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		if origin != "" {
-			if allowMap[origin] || isLocalhostOrigin(origin) {
-				c.Header("Access-Control-Allow-Origin", origin)
-				c.Header("Vary", "Origin")
-				c.Header("Access-Control-Allow-Credentials", "true")
-				c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id")
-				c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				c.Header("Access-Control-Max-Age", "600")
-			}
-			// 非白名单来源：不写 CORS 头，浏览器会拦截跨域读取
+		if origin != "" && (allowAll || allowMap[origin] || isLocalhostOrigin(origin)) {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+			c.Header("Access-Control-Allow-Credentials", "true")
+			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			c.Header("Access-Control-Max-Age", "600")
 		}
+		// 非放行来源：不写 CORS 头，浏览器会拦截跨域读取
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
