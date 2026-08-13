@@ -5,6 +5,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
+  
   (e: 'update:modelValue', v: string): void
   (e: 'confirm', v: string): void
   (e: 'click'): void
