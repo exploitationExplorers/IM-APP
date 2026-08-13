@@ -49,13 +49,29 @@ function currentPlatformId(): number {
 /**
  * 统一 asyncApi 的返回形态：多数方法返回 { errCode, data } 信封，
  * createXxxMessage 这类同步方法直接返回结果本身。
+ * 失败时 polyfill reject 的是 { errCode, errMsg } 裸对象，转成 Error 才能带到 UI。
  */
 async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
-  const raw = await IMSDK.asyncApi(method, IMSDK.uuid(), ...args)
-  if (raw && typeof raw === 'object' && 'errCode' in raw && 'data' in raw) {
-    return (raw as { data: T }).data
+  let raw: unknown
+  try {
+    raw = await IMSDK.asyncApi(method, IMSDK.uuid(), ...args)
+  } catch (e) {
+    throw toIMError(e, method)
+  }
+  if (raw && typeof raw === 'object' && 'errCode' in raw) {
+    const envelope = raw as { errCode: number; errMsg?: string; data?: T }
+    if (envelope.errCode !== 0) throw toIMError(envelope, method)
+    if ('data' in envelope) return envelope.data as T
   }
   return raw as T
+}
+
+function toIMError(raw: unknown, method: IMMethods): Error {
+  if (raw instanceof Error) return raw
+  if (typeof raw === 'string') return new Error(`${raw}（${method}）`)
+  const { errCode, errMsg } = (raw || {}) as { errCode?: number; errMsg?: string }
+  const detail = `${method} errCode=${errCode ?? 'unknown'}`
+  return new Error(errMsg ? `${errMsg}（${detail}）` : `IM 调用失败（${detail}）`)
 }
 
 async function doLogin(): Promise<string> {
@@ -169,8 +185,14 @@ export async function getHistoryMessages(
   )
 }
 
+/** 会话已全部读完时 OpenIM 报 hasReadSeq equal max，对调用方等价于成功 */
 export async function markConversationRead(conversationID: string): Promise<void> {
-  await imCall(IMMethods.MarkConversationMessageAsRead, conversationID)
+  try {
+    await imCall(IMMethods.MarkConversationMessageAsRead, conversationID)
+  } catch (e) {
+    if ((e as Error)?.message?.includes('hasReadSeq equal max')) return
+    throw e
+  }
 }
 
 export async function revokeMessage(conversationID: string, clientMsgID: string): Promise<void> {

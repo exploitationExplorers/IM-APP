@@ -58,7 +58,8 @@ onLoad(async (query) => {
     await nextTick()
     scrollToBottom()
   } catch (e) {
-    uni.showToast({ title: (e as Error)?.message || '会话打开失败', icon: 'none' })
+    console.error('[chat] 打开会话失败', e)
+    uni.showToast({ title: (e as Error)?.message || '会话打开失败', icon: 'none', duration: 4000 })
   }
 })
 

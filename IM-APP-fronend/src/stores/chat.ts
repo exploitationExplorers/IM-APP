@@ -172,8 +172,13 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
+  /** 已读是副作用，标记失败不该挡住会话展示；未读数下次拉列表会自愈 */
   async function markAsRead(conversationId: string) {
-    await markConversationRead(conversationId)
+    try {
+      await markConversationRead(conversationId)
+    } catch (e) {
+      console.warn('[chat] 标记已读失败', e)
+    }
     const conv = conversations.value.find((c) => c.id === conversationId)
     if (conv) conv.unreadCount = 0
   }
@@ -265,7 +270,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function markAllAsRead() {
-    await Promise.all(conversations.value.map((c) => markConversationRead(c.id)))
+    await Promise.all(conversations.value.map((c) => markAsRead(c.id)))
     conversations.value = conversations.value.map((c) => ({ ...c, unreadCount: 0 }))
   }
 
