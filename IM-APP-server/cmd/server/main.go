@@ -81,6 +81,8 @@ func main() {
 	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo}
 	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo}
 	chatSvc := &service.ChatService{Chat: chatRepo, Hub: hub}
+	favRepo := &repository.FavoriteRepo{DB: pool}
+	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
 	groupSvc := &service.GroupService{Groups: groupRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
 
@@ -103,6 +105,7 @@ func main() {
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Client: imClient}
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
+	favH := &handler.FavoriteHandler{Svc: favSvc}
 
 	r := gin.Default()
 	r.Use(corsMiddleware())
@@ -192,6 +195,11 @@ func main() {
 			auth.POST("/im/token", imH.Token)
 			auth.POST("/forward-tasks", forwardH.Create)
 			auth.GET("/forward-tasks/:id", forwardH.Get)
+
+			// 收藏
+			auth.GET("/favorites", favH.List)
+			auth.POST("/favorites", favH.Create)
+			auth.DELETE("/favorites/:favoriteId", favH.Delete)
 		}
 	}
 

@@ -1,15 +1,14 @@
-// 请求响应参数（不包含data）
 export interface Result {
-  code: string;
-  msg: string;
+  code: number;
+  message?: string;
+  msg?: string;
+  requestId?: string;
 }
 
-// 请求响应参数（包含data）
 export interface ResultData<T = any> extends Result {
   data: T;
 }
 
-// 分页响应参数
 export interface ResPage<T> {
   list: T[];
   pageNum: number;
@@ -17,20 +16,52 @@ export interface ResPage<T> {
   total: number;
 }
 
-// 分页请求参数
+export interface AdminPage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface ReqPage {
   pageNum: number;
   pageSize: number;
 }
 
-// 文件上传模块
 export namespace Upload {
   export interface ResFileUrl {
     fileUrl: string;
   }
 }
 
-// 登录模块
+export namespace Auth {
+  export interface ReqLoginForm {
+    username: string;
+    password: string;
+  }
+
+  export interface ReqRefreshForm {
+    refreshToken: string;
+  }
+
+  export interface AdminInfo {
+    id: string;
+    username: string;
+    nickname: string;
+    status: string;
+    roleNames: string[];
+    mfaEnabled?: boolean;
+    lastLoginAt?: string;
+    createdAt?: string;
+  }
+
+  export interface ResLogin {
+    token: string;
+    refreshToken: string;
+    admin: AdminInfo;
+  }
+}
+
 export namespace Login {
   export interface ReqLoginForm {
     username: string;
@@ -44,7 +75,24 @@ export namespace Login {
   }
 }
 
-// 用户管理模块
+export namespace Moderation {
+  export interface ReqHitsParams {
+    page?: number;
+    size?: number;
+  }
+
+  export interface HitItem {
+    id: number;
+    userId: string;
+    field: string;
+    content: string;
+    matchedWord: string;
+    category: string;
+    disposition: string;
+    createdAt: string;
+  }
+}
+
 export namespace User {
   export interface ReqUserParams extends ReqPage {
     username: string;
