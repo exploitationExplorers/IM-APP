@@ -307,7 +307,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/friend-requests?direction=received|sent`
 
-好友申请列表（默认 `received`）。
+好友申请列表（默认 `received`）。只返回 `pending`，按时间倒序，最多 100 条。
 
 ### POST `/api/v1/friend-requests`
 

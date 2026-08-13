@@ -110,7 +110,7 @@ function onBlock() {
       if (!res.confirm || !contact.value) return
       try {
         await blockContact(contact.value.id)
-        await contactStore.loadAll()
+        await contactStore.loadDirectory()
         uni.showToast({ title: '已拉黑', icon: 'success' })
         setTimeout(() => uni.navigateBack(), 400)
       } catch (e) {
@@ -132,7 +132,7 @@ function onDelete() {
       if (!res.confirm || !contact.value) return
       try {
         await deleteContact(contact.value.id)
-        await contactStore.loadAll()
+        await contactStore.loadDirectory()
         uni.showToast({ title: '已删除', icon: 'success' })
         setTimeout(() => uni.navigateBack(), 400)
       } catch (e) {

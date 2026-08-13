@@ -70,9 +70,10 @@ func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]model
 	return list, nil
 }
 
+const friendRequestListLimit = 100
+
 func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction string) ([]models.FriendRequest, error) {
 	var query string
-	var arg string
 	if direction == "sent" {
 		query = `
 			SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
@@ -80,8 +81,8 @@ func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction str
 			FROM friend_requests fr
 			JOIN users u ON u.id = fr.to_user
 			WHERE fr.from_user=$1 AND fr.status='pending'
-			ORDER BY fr.created_at DESC`
-		arg = uid
+			ORDER BY fr.created_at DESC
+			LIMIT $2`
 	} else {
 		query = `
 			SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
@@ -89,10 +90,10 @@ func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction str
 			FROM friend_requests fr
 			JOIN users u ON u.id = fr.from_user
 			WHERE fr.to_user=$1 AND fr.status='pending'
-			ORDER BY fr.created_at DESC`
-		arg = uid
+			ORDER BY fr.created_at DESC
+			LIMIT $2`
 	}
-	rows, err := r.DB.Query(ctx, query, arg)
+	rows, err := r.DB.Query(ctx, query, uid, friendRequestListLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,7 @@ func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction str
 		}
 		list = append(list, fr)
 	}
-	return list, nil
+	return list, rows.Err()
 }
 
 func (r *ContactRepo) IsFriend(ctx context.Context, uid, friendID string) (bool, error) {

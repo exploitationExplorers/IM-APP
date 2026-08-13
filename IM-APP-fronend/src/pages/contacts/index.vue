@@ -45,7 +45,7 @@ function listName(c: Contact) {
 
 // tabBar 页会常驻，onMounted 只跑一次，切回来必须重新拉才能看到新加的好友
 onShow(() => {
-  contactStore.loadAll()
+  contactStore.loadDirectory()
 })
 
 function go(url: string) {

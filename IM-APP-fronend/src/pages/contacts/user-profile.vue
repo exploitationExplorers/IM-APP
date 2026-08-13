@@ -16,7 +16,7 @@ onLoad((query) => {
 })
 
 onMounted(async () => {
-  await contactStore.loadAll()
+  await contactStore.loadDirectory()
   if (!userId.value) return
   loading.value = true
   try {

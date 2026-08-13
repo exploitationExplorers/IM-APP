@@ -52,7 +52,7 @@ const memberPreview = computed(() => {
 })
 
 onMounted(() => {
-  contactStore.loadAll()
+  contactStore.loadDirectory()
   if (!userStore.profile) userStore.bootstrap()
 })
 
