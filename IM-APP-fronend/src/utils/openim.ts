@@ -74,6 +74,27 @@ function toIMError(raw: unknown, method: IMMethods): Error {
   return new Error(errMsg ? `${errMsg}（${detail}）` : `IM 调用失败（${detail}）`)
 }
 
+/**
+ * 登录成功只代表连上了，SDK 还要异步从服务端拉会话与消息。
+ * 这期间查历史会拿到空列表，所以要等同步结束；超时兜底，避免同步事件丢失时卡死。
+ */
+function waitForSync(timeoutMs = 8000): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      offFinish()
+      offFailed()
+      resolve()
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    const offFinish = onIMEvent(IMEvents.OnSyncServerFinish, finish)
+    const offFailed = onIMEvent(IMEvents.OnSyncServerFailed, finish)
+  })
+}
+
 async function doLogin(): Promise<string> {
   const imToken: IMTokenResult = await fetchIMToken(currentPlatformId())
 
@@ -88,6 +109,8 @@ async function doLogin(): Promise<string> {
     })
   }
 
+  // 先挂监听再登录，否则同步很快结束时会错过事件
+  const synced = waitForSync()
   await imCall(IMMethods.Login, {
     userID: imToken.userId,
     token: imToken.token,
@@ -95,6 +118,7 @@ async function doLogin(): Promise<string> {
     apiAddr: imToken.apiAddr,
     wsAddr: imToken.wsAddr,
   })
+  await synced
 
   imUserId.value = imToken.userId
   // 提前 5 分钟过期，避免正在聊天时 token 失效

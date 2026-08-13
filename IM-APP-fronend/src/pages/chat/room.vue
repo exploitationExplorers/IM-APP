@@ -30,7 +30,12 @@ let recorder: any = null
 let browserRecorder: { stream: MediaStream; mediaRecorder: MediaRecorder } | null = null
 let recordingTimer: ReturnType<typeof setInterval> | null = null
 
-const messages = computed(() => chatStore.messagesMap[conversationId.value] || [])
+// OpenIM 的通知类消息取不到可显示内容，直接跳过，否则会渲染成空气泡
+const messages = computed(() =>
+  (chatStore.messagesMap[conversationId.value] || []).filter(
+    (m) => m.type !== 'system' || !!m.content,
+  ),
+)
 // 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
 const myId = computed(() => imUserId.value)
 const myAvatar = computed(() => userStore.profile?.avatar || '/static/avatar-me.png')
@@ -386,7 +391,7 @@ function pickImage() {
         </view>
 
         <view class="voice-actions">
-          <view class="send-gray-btn" @click="recording ? stopVoiceRecord() : sendVoiceDraft">
+          <view class="send-gray-btn" @click="recording ? stopVoiceRecord() : sendVoiceDraft()">
             <text>{{ recording ? '结束' : '发送' }}</text>
           </view>
           <view class="send-icon-btn" @click="sendVoiceDraft">↑</view>
