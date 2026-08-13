@@ -404,6 +404,14 @@ func (c *Client) SetGroupMemberRole(ctx context.Context, groupID, userID string,
 	}, nil)
 }
 
+func (c *Client) SetGroupMemberNickname(ctx context.Context, groupID, userID, nickname string) error {
+	return c.postWithAdmin(ctx, "/group/set_group_member_info", map[string]any{
+		"members": []map[string]any{{
+			"groupID": groupID, "userID": userID, "nickName": nickname,
+		}},
+	}, nil)
+}
+
 func (c *Client) SetGroupMemberMute(ctx context.Context, groupID, userID string, mutedSeconds int64) error {
 	path := "/group/mute_group_member"
 	request := map[string]any{"groupID": groupID, "userID": userID, "mutedSeconds": mutedSeconds}

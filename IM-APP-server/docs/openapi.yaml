@@ -192,6 +192,55 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
 
+  /api/v1/groups/{id}/qrcode:
+    get:
+      tags: [Group Sync]
+      summary: 获取群二维码字符串
+      description: 所有有效群成员可获取；前端使用 payload 生成二维码图片。
+      operationId: getGroupQRCodePayload
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/groups/qrcode/resolve:
+    post:
+      tags: [Group Sync]
+      summary: 只读解析群二维码
+      operationId: resolveGroupQRCode
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QRCodeRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/groups/qrcode/join:
+    post:
+      tags: [Group Sync]
+      summary: 按二维码直接入群或提交审核申请
+      operationId: joinGroupByQRCode
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JoinGroupByQRCodeRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
   /api/v1/groups/{id}/settings:
     put:
       tags: [Group Sync]
@@ -212,6 +261,44 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}/me/nickname:
+    put:
+      tags: [Group Sync]
+      summary: 修改我在本群的昵称
+      operationId: updateMyGroupNickname
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateMyGroupNicknameRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/GroupResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/groups/{id}/reports:
+    post:
+      tags: [Group Sync]
+      summary: 举报群聊
+      operationId: reportGroup
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateGroupReportRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
 
   /api/v1/groups/{id}/leave:
     post:
@@ -816,7 +903,7 @@ components:
 
     GroupInfo:
       type: object
-      required: [id, name, avatar, ownerId, memberCount, allowMemberAddFriend]
+      required: [id, name, avatar, ownerId, memberCount, allowMemberAddFriend, joinMode, allMuted]
       properties:
         id: {type: string, pattern: '^[0-9]+$', example: '100001'}
         name: {type: string}
@@ -825,6 +912,19 @@ components:
         memberCount: {type: integer}
         announcement: {type: string}
         allowMemberAddFriend: {type: boolean}
+        myRole: {type: string, enum: [owner, admin, member]}
+        myNickname: {type: string}
+        joinMode: {type: string, enum: [open, approval]}
+        allMuted: {type: boolean}
+        permissions:
+          type: object
+          properties:
+            canEditProfile: {type: boolean}
+            canEditAnnouncement: {type: boolean}
+            canViewQRCode: {type: boolean}
+            canManageMembers: {type: boolean}
+            canEditMyNickname: {type: boolean}
+            canReport: {type: boolean}
         conversationId:
           type: string
           description: 仅旧 Go 聊天模式可能返回
@@ -838,10 +938,12 @@ components:
 
     GroupMember:
       type: object
-      required: [id, nickname, avatar, role]
+      required: [id, nickname, groupNickname, displayName, avatar, role]
       properties:
         id: {$ref: '#/components/schemas/UUID'}
         nickname: {type: string}
+        groupNickname: {type: string}
+        displayName: {type: string}
         avatar: {type: string}
         role: {type: string, enum: [owner, admin, member]}
 
@@ -857,8 +959,41 @@ components:
     UpdateGroupSettingsRequest:
       type: object
       properties:
-        announcement: {type: string}
+        name: {type: string, minLength: 1, maxLength: 100}
+        avatarFileId: {$ref: '#/components/schemas/UUID'}
+        announcement: {type: string, maxLength: 2000}
         allowMemberAddFriend: {type: boolean}
+        joinMode: {type: string, enum: [open, approval]}
+        allMuted: {type: boolean}
+
+    QRCodeRequest:
+      type: object
+      properties:
+        token: {type: string}
+        payload: {type: string}
+        qrcode: {type: string}
+
+    JoinGroupByQRCodeRequest:
+      allOf:
+        - $ref: '#/components/schemas/QRCodeRequest'
+        - type: object
+          properties:
+            remark: {type: string, maxLength: 500}
+
+    UpdateMyGroupNicknameRequest:
+      type: object
+      required: [nickname]
+      properties:
+        nickname: {type: string, maxLength: 32}
+
+    CreateGroupReportRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          enum: [spam, fraud, pornography, violence, harassment, other]
+        description: {type: string, maxLength: 1000}
 
     UpdateGroupMemberRoleRequest:
       type: object

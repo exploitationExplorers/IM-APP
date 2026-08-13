@@ -13,6 +13,7 @@ import (
 
 type GroupService struct {
 	Groups *repository.GroupRepo
+	Files  *repository.FileRepo
 }
 
 func (s *GroupService) internalGroupID(ctx context.Context, publicID string) (string, error) {
@@ -71,12 +72,39 @@ func (s *GroupService) Join(ctx context.Context, groupID, uid string) (models.Gr
 	return s.Groups.Join(ctx, internalID, uid)
 }
 
-func (s *GroupService) UpdateSettings(ctx context.Context, groupID, uid string, announcement *string, allow *bool, joinMode *string, allMuted *bool) error {
+func (s *GroupService) UpdateSettings(ctx context.Context, groupID, uid string, name, avatarFileID, announcement *string, allow *bool, joinMode *string, allMuted *bool) error {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
 		return err
 	}
-	return s.Groups.UpdateSettings(ctx, internalID, uid, announcement, allow, joinMode, allMuted)
+	if name != nil {
+		trimmed := strings.TrimSpace(*name)
+		if trimmed == "" || len([]rune(trimmed)) > 100 {
+			return repository.ErrInvalidGroupOperation
+		}
+		name = &trimmed
+	}
+	if announcement != nil && len([]rune(*announcement)) > 2000 {
+		return repository.ErrInvalidGroupOperation
+	}
+	if joinMode != nil && *joinMode != "open" && *joinMode != "approval" {
+		return repository.ErrInvalidGroupOperation
+	}
+	var avatarURL *string
+	if avatarFileID != nil {
+		if s.Files == nil || strings.TrimSpace(*avatarFileID) == "" {
+			return repository.ErrInvalidGroupOperation
+		}
+		if _, err := uuid.Parse(*avatarFileID); err != nil {
+			return repository.ErrInvalidGroupOperation
+		}
+		file, err := s.Files.FindReadyAvatarByID(ctx, *avatarFileID, uid)
+		if err != nil || file.URL == "" {
+			return repository.ErrInvalidGroupOperation
+		}
+		avatarURL = &file.URL
+	}
+	return s.Groups.UpdateSettings(ctx, internalID, uid, name, avatarURL, announcement, allow, joinMode, allMuted)
 }
 
 func (s *GroupService) Leave(ctx context.Context, groupID, uid string) error {
@@ -106,6 +134,44 @@ func (s *GroupService) ResolveQRCode(ctx context.Context, uid, token string) (mo
 	return s.Groups.ResolveQRCode(ctx, uid, token)
 }
 
+func (s *GroupService) JoinByQRCode(ctx context.Context, uid, token, remark string) (models.JoinGroupByQRCodeResult, error) {
+	token = strings.TrimSpace(token)
+	remark = strings.TrimSpace(remark)
+	if token == "" || len([]rune(remark)) > 500 {
+		return models.JoinGroupByQRCodeResult{}, repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.JoinByQRCode(ctx, uid, token, remark)
+}
+
+func (s *GroupService) UpdateMyNickname(ctx context.Context, groupID, uid, nickname string) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	nickname = strings.TrimSpace(nickname)
+	if len([]rune(nickname)) > 32 {
+		return repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.UpdateMyNickname(ctx, internalID, uid, nickname)
+}
+
+func (s *GroupService) CreateReport(ctx context.Context, groupID, uid, reason, description string) (models.GroupReportResult, error) {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return models.GroupReportResult{}, err
+	}
+	reason = strings.TrimSpace(reason)
+	description = strings.TrimSpace(description)
+	validReasons := map[string]bool{
+		"spam": true, "fraud": true, "pornography": true,
+		"violence": true, "harassment": true, "other": true,
+	}
+	if !validReasons[reason] || len([]rune(description)) > 1000 {
+		return models.GroupReportResult{}, repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.CreateReport(ctx, internalID, uid, reason, description)
+}
+
 func (s *GroupService) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (int, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
@@ -122,6 +188,10 @@ func (s *GroupService) CreateJoinRequest(ctx context.Context, groupID, uid, rema
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
 		return models.GroupJoinRequestItem{}, err
+	}
+	remark = strings.TrimSpace(remark)
+	if len([]rune(remark)) > 500 {
+		return models.GroupJoinRequestItem{}, repository.ErrInvalidGroupOperation
 	}
 	return s.Groups.CreateJoinRequest(ctx, internalID, uid, remark)
 }

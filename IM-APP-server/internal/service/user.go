@@ -40,7 +40,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, nickname, a
 	}
 	var avatarURL *string
 	if avatarFileID != nil && *avatarFileID != "" {
-		f, err := s.Files.FindByID(ctx, *avatarFileID)
+		f, err := s.Files.FindReadyAvatarByID(ctx, *avatarFileID, uid)
 		if err != nil {
 			return models.User{}, errors.New("头像文件不存在")
 		}

@@ -453,23 +453,31 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 群相关对外接口中的 `:id` 均为纯数字群号（例如 `100001`）。服务端会映射为内部 UUID；数据库关联和 OpenIM 对接仍使用原 UUID 映射，前端不再传群 UUID。
 
+响应包含 `myRole`、`myNickname`、`joinMode`、`allMuted` 以及 `permissions`，前端据此展示群资料编辑、二维码、成员管理和举报入口。
+
 ### GET `/api/v1/groups/:id/members`
 
 群成员列表。
 
 ### GET `/api/v1/groups/:id/qrcode`
 
-群主/管理员获取群二维码。
+所有有效群成员获取群二维码字符串。前端使用响应 `payload` 生成二维码图片。
 
 ### POST `/api/v1/groups/qrcode/resolve`
 
-解析群二维码。
+只读解析群二维码，返回 `joined`、`joinMode` 和 `nextAction=enter|join|apply`。
 
 **Body** `{ "token": "..." }`
 
+### POST `/api/v1/groups/qrcode/join`
+
+用户确认后按二维码加入群：已是成员返回 `enter`；公开群直接加入并返回 `joined`；审核群创建/复用申请并返回 `pending_approval`。
+
+**Body** `{ "token": "...", "remark": "申请说明" }`，也支持传完整 `payload`。
+
 ### POST `/api/v1/groups/:id/join`
 
-直接加入群聊（公开群）。
+直接加入公开群。审核群返回 HTTP 409，必须提交入群申请。
 
 ### POST `/api/v1/groups/:id/invitations`
 
@@ -521,12 +529,28 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 **Body**
 ```json
 {
+  "name": "新群名称",
+  "avatarFileId": "已完成上传的本人图片 fileId",
   "announcement": "公告",
   "allowMemberAddFriend": false,
   "joinMode": "open|approval",
   "allMuted": false
 }
 ```
+
+群名称、头像和公告仅群主/管理员可修改。`avatarFileId` 必须属于操作者本人，且文件为 `ready + purpose=avatar + image/*`。
+
+### PUT `/api/v1/groups/:id/me/nickname`
+
+修改“我在本群的昵称”。空字符串恢复全局昵称，最长 32 个 Unicode 字符。
+
+**Body** `{ "nickname": "群内昵称" }`
+
+### POST `/api/v1/groups/:id/reports`
+
+举报当前群聊，仅群成员可提交；同一用户对同一群的待处理举报幂等。
+
+**Body** `{ "reason": "spam|fraud|pornography|violence|harassment|other", "description": "补充说明" }`
 
 ### POST `/api/v1/groups/:id/leave`
 
