@@ -29,7 +29,8 @@ func (s *UserService) GetProfile(ctx context.Context, uid string) (models.User, 
 	if err != nil {
 		return u, ErrNotFound
 	}
-	return repository.PublicUser(u), nil
+	u.PasswordHash = ""
+	return u, nil
 }
 
 // UpdateProfile 部分更新：传了哪个字段就更新哪个；avatarFileID 解析为头像 URL
@@ -51,7 +52,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, nickname, a
 	if err != nil {
 		return u, err
 	}
-	return repository.PublicUser(u), nil
+	u.PasswordHash = ""
+	return u, nil
 }
 
 func (s *UserService) SearchByPublicID(ctx context.Context, uid, publicID string) (*models.PublicProfile, error) {
@@ -100,6 +102,23 @@ func (s *UserService) Qrcode(ctx context.Context, uid string) (models.UserQRCode
 	}, nil
 }
 
+func (s *UserService) VerifyPassword(ctx context.Context, uid, oldPassword string) error {
+	if oldPassword == "" {
+		return errors.New("请输入旧密码")
+	}
+	u, err := s.Users.FindByID(ctx, uid)
+	if err != nil {
+		return ErrNotFound
+	}
+	if !u.PasswordSet {
+		return errors.New("尚未设置密码")
+	}
+	if err := serviceComparePassword(u.PasswordHash, oldPassword); err != nil {
+		return errors.New("旧密码不正确")
+	}
+	return nil
+}
+
 func (s *UserService) ChangePassword(ctx context.Context, uid, newPassword, oldPassword string) error {
 	if len(newPassword) < 6 {
 		return errors.New("密码至少 6 位")
@@ -108,7 +127,7 @@ func (s *UserService) ChangePassword(ctx context.Context, uid, newPassword, oldP
 	if err != nil {
 		return ErrNotFound
 	}
-	if u.PasswordHash != "" {
+	if u.PasswordSet {
 		if oldPassword == "" {
 			return errors.New("请输入旧密码")
 		}

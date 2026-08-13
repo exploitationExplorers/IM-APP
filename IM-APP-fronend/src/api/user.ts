@@ -51,6 +51,15 @@ export async function fetchUserProfile(userId: string): Promise<UserInfo> {
   return request<UserInfo>({ url: `/users/${userId}`, method: 'GET' })
 }
 
+/** POST /me/password/verify：安全页校验旧密码 */
+export async function verifyPassword(oldPassword: string): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: '/me/password/verify',
+    method: 'POST',
+    data: { oldPassword },
+  })
+}
+
 /** PUT /me/password：登录态下设置/修改密码 */
 export async function changePassword(password: string, oldPassword?: string): Promise<void> {
   const data: Record<string, string> = { password }

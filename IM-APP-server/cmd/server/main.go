@@ -175,6 +175,7 @@ func main() {
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
+			auth.POST("/me/password/verify", userH.VerifyPassword)
 			auth.PUT("/me/password", userH.ChangePassword)
 			auth.GET("/me/privacy-settings", userH.GetPrivacySettings)
 			auth.PUT("/me/privacy-settings", userH.UpdatePrivacySettings)

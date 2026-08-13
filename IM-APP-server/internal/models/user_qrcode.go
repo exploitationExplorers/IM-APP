@@ -27,6 +27,10 @@ type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword,omitempty"`
 }
 
+type VerifyPasswordRequest struct {
+	OldPassword string `json:"oldPassword"`
+}
+
 type UserQRCodeResolveResult struct {
 	User     PublicProfile `json:"user"`
 	Relation string        `json:"relation"`

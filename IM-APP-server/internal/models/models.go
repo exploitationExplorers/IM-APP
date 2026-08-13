@@ -8,6 +8,7 @@ type User struct {
 	CountryCode  string    `json:"countryCode"`
 	PublicID     string    `json:"publicId"`
 	PasswordHash string    `json:"-"`
+	PasswordSet  bool      `json:"-"`
 	Nickname     string    `json:"nickname"`
 	Avatar       string    `json:"avatar"`
 	Bio          string    `json:"bio"`

@@ -72,6 +72,20 @@
           "response": []
         },
         {
+          "name": "校验旧密码",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"oldPassword\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/me/password/verify",
+            "description": "安全页点下一步时校验旧密码，成功后再进入设新密页。"
+          },
+          "response": []
+        },
+        {
           "name": "修改/设置密码",
           "request": {
             "method": "PUT",

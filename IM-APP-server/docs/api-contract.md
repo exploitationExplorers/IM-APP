@@ -47,7 +47,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### POST `/api/v1/auth/register`
 
-手机号 + 验证码 + 密码注册（密码至少 6 位）。成功返回 `accessToken` / `refreshToken` / `user`。
+手机号 + 验证码注册。密码可选；不传则只支持验证码登录，之后在安全设置里设初始密码。若传密码则至少 6 位。
 
 **Body**
 ```json
@@ -55,7 +55,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
   "countryCode": "+86",
   "phone": "13900000001",
   "code": "123456",
-  "password": "test123456",
+  "password": "",
   "deviceId": "test-device"
 }
 ```
@@ -74,7 +74,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
     "nickname": "用户0001",
     "avatar": "",
     "bio": "",
-    "status": "active"
+    "status": "active",
+    "hasPassword": false
   }
 }
 ```
@@ -170,7 +171,9 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/me`
 
-当前用户资料。
+当前用户资料。含 `hasPassword`：是否已设置过登录密码。未设置时安全页走「设初始密码」，不要求旧密码。
+
+只返回脱敏号 `phoneMasked`，**不返回明文手机号**。安全页完整号由客户端用登录时输入的本地号展示。他人资料接口同样不返回明文手机号。
 
 ### PUT `/api/v1/me`
 
@@ -207,16 +210,30 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 修改隐私设置。Body 同 Response 结构。
 
+### POST `/api/v1/me/password/verify`
+
+登录态下校验旧密码（安全页点「下一步」）。需 JWT。未设置密码或旧密码不正确返回 400。
+
+**Body**
+```json
+{ "oldPassword": "oldpass123" }
+```
+
+**Response**
+```json
+{ "ok": true }
+```
+
 ### PUT `/api/v1/me/password`
 
-登录态下设置/修改密码（安全设置 → 重置密码）。需 JWT。已设置过密码时需传 `oldPassword`。
+登录态下设置/修改密码（安全设置 → 重置密码）。需 JWT。仅当 `hasPassword=true` 时必须传 `oldPassword`。
 
 **Body**
 ```json
 { "password": "newpassword123", "oldPassword": "oldpass123" }
 ```
 
-首次设置密码可省略 `oldPassword`。
+首次设置密码可省略 `oldPassword`。历史验证码注册写入的临时密码不算已设密码。
 
 ### GET `/api/v1/me/qrcode`
 
