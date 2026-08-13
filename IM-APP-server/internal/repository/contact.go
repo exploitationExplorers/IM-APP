@@ -156,6 +156,11 @@ func (r *ContactRepo) AddFriendDirect(ctx context.Context, fromID, toID, message
 	if err != nil {
 		return "", err
 	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendAccepted, toID, map[string]string{
+		"friendUserId": fromID,
+	}); err != nil {
+		return "", err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err
 	}
@@ -201,6 +206,29 @@ func (r *ContactRepo) GetContact(ctx context.Context, uid, friendID string) (mod
 	return item, err
 }
 
+// ListCommonGroups 双方共同所在的群
+func (r *ContactRepo) ListCommonGroups(ctx context.Context, uid, friendID string) ([]models.GroupPreview, error) {
+	rows, err := r.DB.Query(ctx, `
+		SELECT g.id::text, g.name, g.avatar, COALESCE(g.conversation_id::text, '')
+		FROM groups g
+		JOIN group_members gm1 ON gm1.group_id=g.id AND gm1.user_id=$1::uuid
+		JOIN group_members gm2 ON gm2.group_id=g.id AND gm2.user_id=$2::uuid
+		ORDER BY g.created_at DESC`, uid, friendID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := make([]models.GroupPreview, 0)
+	for rows.Next() {
+		var item models.GroupPreview
+		if err := rows.Scan(&item.ID, &item.Name, &item.Avatar, &item.ConversationID); err != nil {
+			return nil, err
+		}
+		list = append(list, item)
+	}
+	return list, nil
+}
+
 func (r *ContactRepo) AcceptFriendRequest(ctx context.Context, requestID, uid string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -222,6 +250,11 @@ func (r *ContactRepo) AcceptFriendRequest(ctx context.Context, requestID, uid st
 	if err != nil {
 		return err
 	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendAccepted, toID, map[string]string{
+		"friendUserId": fromID,
+	}); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -239,11 +272,24 @@ func (r *ContactRepo) RejectFriendRequest(ctx context.Context, requestID, uid st
 }
 
 func (r *ContactRepo) DeleteFriend(ctx context.Context, uid, friendID string) error {
-	_, err := r.DB.Exec(ctx, `
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `
 		DELETE FROM friendships
 		WHERE (user_id=$1 AND friend_id=$2) OR (user_id=$2 AND friend_id=$1)`,
 		uid, friendID)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendDeleted, uid, map[string]string{
+		"friendUserId": friendID,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *ContactRepo) BlockUser(ctx context.Context, uid, blockedID string) error {
@@ -262,13 +308,36 @@ func (r *ContactRepo) BlockUser(ctx context.Context, uid, blockedID string) erro
 	if err != nil {
 		return err
 	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendDeleted, uid, map[string]string{
+		"friendUserId": blockedID,
+	}); err != nil {
+		return err
+	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventBlockAdded, uid, map[string]string{
+		"blockedUserId": blockedID,
+	}); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
 func (r *ContactRepo) UnblockUser(ctx context.Context, uid, blockedID string) error {
-	_, err := r.DB.Exec(ctx, `
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `
 		DELETE FROM user_blocks WHERE user_id=$1 AND blocked_id=$2`, uid, blockedID)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventBlockRemoved, uid, map[string]string{
+		"blockedUserId": blockedID,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *ContactRepo) IsBlocked(ctx context.Context, uid, otherID string) (bool, error) {

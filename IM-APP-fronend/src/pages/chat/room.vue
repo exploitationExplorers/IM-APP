@@ -6,6 +6,7 @@ import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
+import { imUserId } from '@/utils/openim'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -14,8 +15,8 @@ const conversationId = ref('')
 const title = ref('聊天')
 const peerAvatar = ref('/static/avatar-1.png')
 const chatType = ref<'private' | 'group'>('group')
-const peerUserId = ref('')
-const targetId = ref('')
+/** 业务侧的好友 / 群 ID，仅用于跳资料页 */
+const businessId = ref('')
 const input = ref('')
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
@@ -29,27 +30,52 @@ let recorder: any = null
 let browserRecorder: { stream: MediaStream; mediaRecorder: MediaRecorder } | null = null
 let recordingTimer: ReturnType<typeof setInterval> | null = null
 
-const messages = computed(() => chatStore.messagesMap[conversationId.value] || [])
-const myId = computed(() => userStore.profile?.id || 'u_me')
+// OpenIM 的通知类消息取不到可显示内容，直接跳过，否则会渲染成空气泡
+const messages = computed(() =>
+  (chatStore.messagesMap[conversationId.value] || []).filter(
+    (m) => m.type !== 'system' || !!m.content,
+  ),
+)
+// 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
+const myId = computed(() => imUserId.value)
 const myAvatar = computed(() => userStore.profile?.avatar || '/static/avatar-me.png')
 const settingsStore = useChatSettingsStore()
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 
 onLoad(async (query) => {
-  conversationId.value = String(query?.id || '')
   title.value = decodeURIComponent(String(query?.title || '聊天'))
   peerAvatar.value = decodeURIComponent(String(query?.avatar || '/static/avatar-1.png'))
-  const modeCode = String(query?.type || query?.chatType || 'group')
-  chatType.value = modeCode === 'private' ? 'private' : 'group'
-  peerUserId.value = String(query?.peerUserId || '')
-  targetId.value = String(query?.targetId || query?.groupId || conversationId.value || '')
+  chatType.value = String(query?.type || 'group') === 'private' ? 'private' : 'group'
+  businessId.value = String(query?.targetId || '')
   uni.setNavigationBarTitle({ title: '' })
   uni.hideNavigationBarLoading?.()
-  await chatStore.loadMessages(conversationId.value)
-  await nextTick()
-  scrollToBottom()
+
+  try {
+    const conv = await chatStore.enterConversation({
+      conversationId: String(query?.conversationId || ''),
+      type: chatType.value,
+      businessId: businessId.value,
+    })
+    conversationId.value = conv.id
+    if (!query?.title) title.value = conv.title
+    await chatStore.loadMessages(conv.id)
+    await nextTick()
+    scrollToBottom()
+  } catch (e) {
+    console.error('[chat] 打开会话失败', e)
+    uni.showToast({ title: (e as Error)?.message || '会话打开失败', icon: 'none', duration: 4000 })
+  }
 })
+
+async function onScrollToUpper() {
+  if (!conversationId.value) return
+  const anchor = messages.value[0]?.id
+  const added = await chatStore.loadMoreMessages(conversationId.value)
+  if (!added || !anchor) return
+  await nextTick()
+  scrollInto.value = `msg_${anchor}`
+}
 
 function formatDuration(seconds: number) {
   const total = Math.max(0, Math.ceil(seconds))
@@ -103,9 +129,9 @@ function goBack() {
 }
 
 function goToProfile() {
-  const target = targetId.value || conversationId.value || 'detail-default'
+  if (!businessId.value) return
   uni.navigateTo({
-    url: `/pages/group/detail?id=${encodeURIComponent(target)}&code=${encodeURIComponent(chatType.value || 'group')}`,
+    url: `/pages/group/detail?id=${encodeURIComponent(businessId.value)}&code=${encodeURIComponent(chatType.value)}`,
   })
 }
 
@@ -312,17 +338,14 @@ function pickImage() {
   uni.chooseImage({
     count: 1,
     success: async (res) => {
-      const path = res.tempFilePaths[0]
       showPlusPanel.value = false
-      const { sendMessage } = await import('@/api/chat')
-      const saved = await sendMessage(conversationId.value, 'image', path)
-      const list = chatStore.messagesMap[conversationId.value] || []
-      chatStore.messagesMap = {
-        ...chatStore.messagesMap,
-        [conversationId.value]: [...list, saved],
+      try {
+        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], myId.value)
+        await nextTick()
+        scrollToBottom()
+      } catch (e) {
+        uni.showToast({ title: (e as Error).message, icon: 'none' })
       }
-      await nextTick()
-      scrollToBottom()
     },
   })
 }
@@ -343,6 +366,7 @@ function pickImage() {
       class="msg-list"
       :scroll-into-view="scrollInto"
       scroll-with-animation
+      @scrolltoupper="onScrollToUpper"
     >
       <view
         v-for="m in messages"
@@ -367,7 +391,7 @@ function pickImage() {
         </view>
 
         <view class="voice-actions">
-          <view class="send-gray-btn" @click="recording ? stopVoiceRecord() : sendVoiceDraft">
+          <view class="send-gray-btn" @click="recording ? stopVoiceRecord() : sendVoiceDraft()">
             <text>{{ recording ? '结束' : '发送' }}</text>
           </view>
           <view class="send-icon-btn" @click="sendVoiceDraft">↑</view>

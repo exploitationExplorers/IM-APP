@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useContactStore } from '@/stores/contact'
 import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
+import { APP_CONFIG } from '@/config'
 
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
@@ -213,9 +214,7 @@ async function onCreate() {
 
       <scroll-view scroll-y class="create-body">
         <view class="avatar-picker">
-          <view class="group-avatar">
-            <text class="avatar-plus">＋</text>
-          </view>
+          <image class="group-avatar" :src="APP_CONFIG.defaultGroupAvatarUrl" mode="aspectFit" />
         </view>
 
         <view class="name-field">
@@ -511,20 +510,9 @@ async function onCreate() {
 }
 
 .group-avatar {
-  width: 144rpx;
-  height: 144rpx;
-  border-radius: 24rpx;
-  background: #f3f4f7;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.avatar-plus {
-  font-size: 56rpx;
-  color: #626e8d;
-  font-weight: 300;
-  line-height: 1;
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: 50%;
 }
 
 .name-field {

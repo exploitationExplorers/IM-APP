@@ -1,0 +1,1079 @@
+openapi: 3.0.3
+info:
+  title: IM-APP OpenIM 对接增量接口
+  version: 1.0.0
+  description: |
+    仅包含本次 OpenIM 对接开发中新增或实际优化过的 Go 后端接口。
+    不包含未改动的普通登录、短信、用户查询、文件上传和旧 Go 对话接口。
+
+    PostgreSQL 保存业务身份、好友、群组、同步任务和审计元数据；
+    OpenIM + MongoDB 负责消息、会话、历史记录和 WebSocket。
+servers:
+  - url: http://127.0.0.1:8080
+    description: 本地开发
+  - url: http://8.210.72.157:8080
+    description: 服务器示例（按实际部署修改）
+tags:
+  - name: Auth Sync
+    description: 注册及资料同步到 OpenIM
+  - name: Contact Sync
+    description: 好友、黑名单关系及 OpenIM 同步
+  - name: Group Sync
+    description: 群资料、成员、权限及 OpenIM 同步
+  - name: OpenIM Client
+    description: 客户端连接 OpenIM 所需接口
+  - name: OpenIM Internal
+    description: 仅供可信后端和运维调用
+  - name: OpenIM Webhook
+    description: 仅供 OpenIM Server 回调
+
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Auth Sync]
+      summary: 注册业务用户并创建 OpenIM 同步任务
+      description: 原注册接口已优化，前端不需要额外调用同步接口。
+      operationId: registerAndSyncOpenIM
+      x-change-type: optimized
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegisterRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AuthResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/me:
+    patch:
+      tags: [Auth Sync]
+      summary: 更新用户资料并同步 OpenIM
+      operationId: updateProfileAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateProfileRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/MeResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/contacts/{id}:
+    delete:
+      tags: [Contact Sync]
+      summary: 删除好友并同步 OpenIM
+      operationId: deleteFriendAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/contacts/{id}/block:
+    post:
+      tags: [Contact Sync]
+      summary: 拉黑用户、解除好友关系并同步 OpenIM
+      operationId: blockUserAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    delete:
+      tags: [Contact Sync]
+      summary: 解除拉黑并同步 OpenIM
+      operationId: unblockUserAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/friend-requests/{id}/accept:
+    post:
+      tags: [Contact Sync]
+      summary: 接受好友申请并同步 OpenIM
+      operationId: acceptFriendRequestAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups:
+    get:
+      tags: [Group Sync]
+      summary: 查询当前用户的有效群聊
+      description: 已优化为排除解散状态的群。
+      operationId: listActiveGroups
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {$ref: '#/components/responses/GroupsResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    post:
+      tags: [Group Sync]
+      summary: 创建业务群并同步到 OpenIM
+      description: 至少需要 3 名有效成员（包含群主），memberIds 不包含群主本人也可以。
+      operationId: createGroupAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateGroupRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/GroupResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}:
+    get:
+      tags: [Group Sync]
+      summary: 查询有效群详情
+      operationId: getActiveGroup
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200': {$ref: '#/components/responses/GroupResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/groups/{id}/members:
+    get:
+      tags: [Group Sync]
+      summary: 查询有效群成员
+      operationId: listActiveGroupMembers
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200': {$ref: '#/components/responses/GroupMembersResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}/join:
+    post:
+      tags: [Group Sync]
+      summary: 加入群并同步 OpenIM
+      operationId: joinGroupAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200': {$ref: '#/components/responses/GroupResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /api/v1/groups/{id}/settings:
+    put:
+      tags: [Group Sync]
+      summary: 更新群设置并同步 OpenIM
+      operationId: updateGroupSettingsAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateGroupSettingsRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}/leave:
+    post:
+      tags: [Group Sync]
+      summary: 退出群并同步 OpenIM
+      description: 群主不能直接退出，应先转让群主或解散群。
+      operationId: leaveGroupAndSyncOpenIM
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}/members/{userId}/role:
+    put:
+      tags: [Group Sync]
+      summary: 设置或取消群管理员
+      operationId: updateGroupMemberRole
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MemberUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateGroupMemberRoleRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}/members/{userId}/mute:
+    put:
+      tags: [Group Sync]
+      summary: 设置或解除群成员禁言
+      operationId: updateGroupMemberMute
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MemberUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateGroupMemberMuteRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}/mute:
+    put:
+      tags: [Group Sync]
+      summary: 开启或关闭全员禁言
+      operationId: updateGroupMute
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateGroupMuteRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}/dismiss:
+    post:
+      tags: [Group Sync]
+      summary: 解散群并同步 OpenIM
+      operationId: dismissGroup
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/im/token:
+    post:
+      tags: [OpenIM Client]
+      summary: 获取当前业务用户的 OpenIM Token 和连接地址
+      description: |
+        该接口在签发 Token 前会兜底确保用户已经存在于 OpenIM。
+        客户端使用返回的 userId、token、wsAddr 初始化 OpenIM SDK；聊天 WebSocket 不连接 Go 后端。
+      operationId: getOpenIMToken
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OpenIMTokenRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OpenIMTokenResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /api/v1/im/peers/{businessUserId}:
+    get:
+      tags: [OpenIM Client]
+      summary: 解析单聊目标并校验聊天权限
+      operationId: resolveOpenIMPeer
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/BusinessUserId'
+      responses:
+        '200': {$ref: '#/components/responses/OpenIMPeerResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/im/groups/{businessGroupId}:
+    get:
+      tags: [OpenIM Client]
+      summary: 解析群聊目标并校验聊天权限
+      operationId: resolveOpenIMGroup
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/BusinessGroupId'
+      responses:
+        '200': {$ref: '#/components/responses/OpenIMGroupResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /internal/im/messages:
+    post:
+      tags: [OpenIM Internal]
+      summary: 发送幂等的系统消息或业务通知
+      operationId: sendInternalOpenIMMessage
+      x-change-type: new
+      security: [{internalApiKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IMSystemMessageRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/IMSystemMessageResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/InternalUnauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /internal/im/health:
+    get:
+      tags: [OpenIM Internal]
+      summary: 检查 OpenIM、管理员 Token 和同步任务状态
+      operationId: getInternalOpenIMHealth
+      x-change-type: new
+      security: [{internalApiKey: []}]
+      responses:
+        '200': {$ref: '#/components/responses/IMHealthResponse'}
+        '401': {$ref: '#/components/responses/InternalUnauthorized'}
+
+  /internal/im/reconcile:
+    post:
+      tags: [OpenIM Internal]
+      summary: 创建全量 OpenIM 对账同步任务
+      operationId: reconcileOpenIM
+      x-change-type: new
+      security: [{internalApiKey: []}]
+      responses:
+        '200': {$ref: '#/components/responses/IMReconcileResponse'}
+        '401': {$ref: '#/components/responses/InternalUnauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /internal/im/outbox:
+    get:
+      tags: [OpenIM Internal]
+      summary: 查询 OpenIM 同步任务
+      operationId: listOpenIMOutbox
+      x-change-type: new
+      security: [{internalApiKey: []}]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, retry, completed, dead]
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+      responses:
+        '200': {$ref: '#/components/responses/IMOutboxResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/InternalUnauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /internal/im/outbox/{id}/replay:
+    post:
+      tags: [OpenIM Internal]
+      summary: 重放 OpenIM 死信同步任务
+      operationId: replayOpenIMOutbox
+      x-change-type: new
+      security: [{internalApiKey: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        '200': {$ref: '#/components/responses/ReplayResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/InternalUnauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /internal/openim/webhooks/{secret}/callbackBeforeSendSingleMsgCommand:
+    post:
+      tags: [OpenIM Webhook]
+      summary: OpenIM 单聊发送前权限检查
+      operationId: beforeSendSingleMessage
+      x-change-type: new
+      parameters:
+        - $ref: '#/components/parameters/WebhookSecret'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OpenIMWebhookMessage'}
+      responses:
+        '200': {$ref: '#/components/responses/WebhookResponse'}
+        '400': {$ref: '#/components/responses/WebhookResponse'}
+        '404': {description: 密钥或来源 IP 不通过时隐藏接口}
+
+  /internal/openim/webhooks/{secret}/callbackBeforeSendGroupMsgCommand:
+    post:
+      tags: [OpenIM Webhook]
+      summary: OpenIM 群聊发送前权限和禁言检查
+      operationId: beforeSendGroupMessage
+      x-change-type: new
+      parameters:
+        - $ref: '#/components/parameters/WebhookSecret'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OpenIMWebhookMessage'}
+      responses:
+        '200': {$ref: '#/components/responses/WebhookResponse'}
+        '400': {$ref: '#/components/responses/WebhookResponse'}
+        '404': {description: 密钥或来源 IP 不通过时隐藏接口}
+
+  /internal/openim/webhooks/{secret}/callbackAfterSendSingleMsgCommand:
+    post:
+      tags: [OpenIM Webhook]
+      summary: OpenIM 单聊发送后审计回调
+      operationId: afterSendSingleMessage
+      x-change-type: new
+      parameters:
+        - $ref: '#/components/parameters/WebhookSecret'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OpenIMWebhookMessage'}
+      responses:
+        '200': {$ref: '#/components/responses/WebhookResponse'}
+        '400': {$ref: '#/components/responses/WebhookResponse'}
+        '404': {description: 密钥或来源 IP 不通过时隐藏接口}
+        '500': {$ref: '#/components/responses/WebhookResponse'}
+
+  /internal/openim/webhooks/{secret}/callbackAfterSendGroupMsgCommand:
+    post:
+      tags: [OpenIM Webhook]
+      summary: OpenIM 群聊发送后审计回调
+      operationId: afterSendGroupMessage
+      x-change-type: new
+      parameters:
+        - $ref: '#/components/parameters/WebhookSecret'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OpenIMWebhookMessage'}
+      responses:
+        '200': {$ref: '#/components/responses/WebhookResponse'}
+        '400': {$ref: '#/components/responses/WebhookResponse'}
+        '404': {description: 密钥或来源 IP 不通过时隐藏接口}
+        '500': {$ref: '#/components/responses/WebhookResponse'}
+
+  /internal/openim/webhooks/{secret}/callbackBeforeAfterMsgCommand:
+    post:
+      tags: [OpenIM Webhook]
+      summary: OpenIM 撤回前后审计回调
+      operationId: afterRevokeMessage
+      x-change-type: new
+      parameters:
+        - $ref: '#/components/parameters/WebhookSecret'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OpenIMWebhookMessage'}
+      responses:
+        '200': {$ref: '#/components/responses/WebhookResponse'}
+        '400': {$ref: '#/components/responses/WebhookResponse'}
+        '404': {description: 密钥或来源 IP 不通过时隐藏接口}
+        '500': {$ref: '#/components/responses/WebhookResponse'}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    internalApiKey:
+      type: apiKey
+      in: header
+      name: X-Internal-API-Key
+
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/UUID'}
+    MemberUserId:
+      name: userId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/UUID'}
+    RequestId:
+      name: id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/UUID'}
+    GroupId:
+      name: id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/UUID'}
+    BusinessUserId:
+      name: businessUserId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/UUID'}
+    BusinessGroupId:
+      name: businessGroupId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/UUID'}
+    WebhookSecret:
+      name: secret
+      in: path
+      required: true
+      schema: {type: string, format: password}
+
+  responses:
+    OKResponse:
+      description: 操作成功
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OKEnvelope'}
+    AuthResponse:
+      description: 注册成功
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AuthEnvelope'}
+    MeResponse:
+      description: 用户资料
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/MeEnvelope'}
+    GroupsResponse:
+      description: 群列表
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GroupsEnvelope'}
+    GroupResponse:
+      description: 群详情
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GroupEnvelope'}
+    GroupMembersResponse:
+      description: 群成员列表
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GroupMembersEnvelope'}
+    OpenIMTokenResponse:
+      description: OpenIM 登录信息
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OpenIMTokenEnvelope'}
+    OpenIMPeerResponse:
+      description: 单聊目标与权限
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OpenIMPeerEnvelope'}
+    OpenIMGroupResponse:
+      description: 群聊目标与权限
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OpenIMGroupEnvelope'}
+    IMSystemMessageResponse:
+      description: 消息发送结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/IMSystemMessageEnvelope'}
+    IMHealthResponse:
+      description: OpenIM 健康状态
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/IMHealthEnvelope'}
+    IMReconcileResponse:
+      description: 对账任务统计
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/IMReconcileEnvelope'}
+    IMOutboxResponse:
+      description: 同步任务列表
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/IMOutboxEnvelope'}
+    ReplayResponse:
+      description: 重放成功
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ReplayEnvelope'}
+    WebhookResponse:
+      description: OpenIM 回调响应
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OpenIMWebhookResponse'}
+    BadRequest:
+      description: 参数错误
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+    Unauthorized:
+      description: JWT 无效或缺失
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+    InternalUnauthorized:
+      description: 内部 API Key 无效或缺失
+      content: {application/json: {schema: {$ref: '#/components/schemas/InternalAuthError'}}}
+    Forbidden:
+      description: 无权限
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+    NotFound:
+      description: 资源不存在
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+    Conflict:
+      description: 状态冲突或幂等键冲突
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+    InternalError:
+      description: 服务内部错误
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+    BadGateway:
+      description: OpenIM 上游调用失败
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+    ServiceUnavailable:
+      description: OpenIM 未配置或不可用
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+
+  schemas:
+    UUID:
+      type: string
+      format: uuid
+
+    BaseEnvelope:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {type: integer, example: 0}
+        message: {type: string, example: ok}
+        data: {}
+
+    ErrorEnvelope:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {type: integer, example: 400}
+        message: {type: string, example: 参数错误}
+        data: {nullable: true}
+
+    InternalAuthError:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: integer, example: 401}
+        message: {type: string, example: internal authentication required}
+
+    OKData:
+      type: object
+      required: [ok]
+      properties:
+        ok: {type: boolean, example: true}
+
+    OKEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/OKData'}
+
+    RegisterRequest:
+      type: object
+      required: [phone, password]
+      properties:
+        phone: {type: string, example: '13800138000'}
+        countryCode: {type: string, example: '+86'}
+        password: {type: string, format: password, minLength: 6}
+        code: {type: string, example: '123456'}
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        nickname: {type: string, maxLength: 100}
+        avatar: {type: string}
+        avatarFileId: {type: string, format: uuid}
+        bio: {type: string, maxLength: 500}
+
+    MeProfile:
+      type: object
+      required: [id, publicId, nickname, avatar, bio, status, createdAt]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        phone: {type: string}
+        countryCode: {type: string}
+        publicId: {type: string, example: chat10001}
+        nickname: {type: string}
+        avatar: {type: string}
+        bio: {type: string}
+        status: {type: string, example: active}
+        createdAt: {type: string, format: date-time}
+
+    AuthResult:
+      type: object
+      required: [user, accessToken, refreshToken]
+      properties:
+        user: {$ref: '#/components/schemas/MeProfile'}
+        accessToken: {type: string}
+        refreshToken: {type: string}
+
+    AuthEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/AuthResult'}
+
+    MeEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/MeProfile'}
+
+    GroupPreview:
+      type: object
+      required: [id, name, avatar]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        name: {type: string}
+        avatar: {type: string}
+
+    GroupsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/GroupPreview'}
+
+    CreateGroupRequest:
+      type: object
+      required: [name, memberIds]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        memberIds:
+          type: array
+          minItems: 2
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/UUID'}
+
+    GroupInfo:
+      type: object
+      required: [id, name, avatar, ownerId, memberCount, allowMemberAddFriend]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        name: {type: string}
+        avatar: {type: string}
+        ownerId: {$ref: '#/components/schemas/UUID'}
+        memberCount: {type: integer}
+        announcement: {type: string}
+        allowMemberAddFriend: {type: boolean}
+        conversationId:
+          type: string
+          description: 仅旧 Go 聊天模式可能返回
+
+    GroupEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/GroupInfo'}
+
+    GroupMember:
+      type: object
+      required: [id, nickname, avatar, role]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        nickname: {type: string}
+        avatar: {type: string}
+        role: {type: string, enum: [owner, admin, member]}
+
+    GroupMembersEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/GroupMember'}
+
+    UpdateGroupSettingsRequest:
+      type: object
+      properties:
+        announcement: {type: string}
+        allowMemberAddFriend: {type: boolean}
+
+    UpdateGroupMemberRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role: {type: string, enum: [admin, member]}
+
+    UpdateGroupMemberMuteRequest:
+      type: object
+      required: [mutedSeconds]
+      properties:
+        mutedSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 2592000
+          description: 0 表示解除禁言，最大 30 天
+
+    UpdateGroupMuteRequest:
+      type: object
+      required: [muted]
+      properties:
+        muted: {type: boolean}
+
+    OpenIMTokenRequest:
+      type: object
+      properties:
+        platformId:
+          type: integer
+          minimum: 0
+          maximum: 11
+          default: 5
+          description: 省略或传 0 时按 uni-app 默认平台 5 处理
+
+    OpenIMToken:
+      type: object
+      required: [userId, token, platform, expireSec, apiAddr, wsAddr]
+      properties:
+        userId: {type: string, example: u_550e8400-e29b-41d4-a716-446655440000}
+        token: {type: string}
+        platform: {type: integer, example: 5}
+        expireSec: {type: integer, example: 86400}
+        apiAddr: {type: string, example: 'http://8.210.72.157:10002'}
+        wsAddr: {type: string, example: 'ws://8.210.72.157:10001'}
+
+    OpenIMTokenEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/OpenIMToken'}
+
+    OpenIMPeer:
+      type: object
+      required: [businessUserId, imUserId, nickname, avatar, canChat, denyReason]
+      properties:
+        businessUserId: {$ref: '#/components/schemas/UUID'}
+        imUserId: {type: string}
+        nickname: {type: string}
+        avatar: {type: string}
+        canChat: {type: boolean}
+        denyReason:
+          type: string
+          enum: ['', self, sender_inactive, account_inactive, blocked, not_friend]
+
+    OpenIMPeerEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/OpenIMPeer'}
+
+    OpenIMGroupTarget:
+      type: object
+      required: [businessGroupId, imGroupId, name, avatar, role, canChat, denyReason]
+      properties:
+        businessGroupId: {$ref: '#/components/schemas/UUID'}
+        imGroupId: {type: string}
+        name: {type: string}
+        avatar: {type: string}
+        role: {type: string, enum: [owner, admin, member]}
+        canChat: {type: boolean}
+        denyReason:
+          type: string
+          enum: ['', group_inactive, member_muted, group_muted]
+        mutedUntil: {type: string, format: date-time, nullable: true}
+
+    OpenIMGroupEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/OpenIMGroupTarget'}
+
+    IMSystemMessageRequest:
+      type: object
+      required: [idempotencyKey, receiverType, receiverBusinessId, messageType, guaranteed]
+      properties:
+        idempotencyKey: {type: string, minLength: 1, maxLength: 128}
+        receiverType: {type: string, enum: [user, group]}
+        receiverBusinessId: {$ref: '#/components/schemas/UUID'}
+        messageType: {type: string, enum: [text, custom]}
+        text: {type: string, description: messageType=text 时必填}
+        key: {type: string, description: messageType=custom 时必填}
+        data: {type: object, additionalProperties: true, description: messageType=custom 时必填}
+        guaranteed: {type: boolean}
+
+    IMSystemMessageResult:
+      type: object
+      required: [idempotencyKey, status]
+      properties:
+        idempotencyKey: {type: string}
+        status: {type: string, enum: [pending, sent, failed]}
+        serverMsgId: {type: string}
+        clientMsgId: {type: string}
+
+    IMSystemMessageEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/IMSystemMessageResult'}
+
+    IMHealth:
+      type: object
+      required: [configured, apiReachable, adminTokenAvailable, outboxPending, outboxDead]
+      properties:
+        configured: {type: boolean}
+        apiReachable: {type: boolean}
+        adminTokenAvailable: {type: boolean}
+        outboxPending: {type: integer, format: int64}
+        outboxDead: {type: integer, format: int64}
+
+    IMHealthEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/IMHealth'}
+
+    IMReconcileResult:
+      type: object
+      required: [users, friendships, blocks, groups, total]
+      properties:
+        users: {type: integer, format: int64}
+        friendships: {type: integer, format: int64}
+        blocks: {type: integer, format: int64}
+        groups: {type: integer, format: int64}
+        total: {type: integer, format: int64}
+
+    IMReconcileEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/IMReconcileResult'}
+
+    IMOutboxItem:
+      type: object
+      required: [id, aggregateType, aggregateId, eventType, payload, status, attemptCount, lastError, nextAttemptAt, updatedAt]
+      properties:
+        id: {type: integer, format: int64}
+        aggregateType: {type: string}
+        aggregateId: {type: string}
+        eventType: {type: string}
+        payload: {type: object, additionalProperties: true}
+        status: {type: string, enum: [pending, processing, retry, completed, dead]}
+        attemptCount: {type: integer}
+        lastError: {type: string}
+        nextAttemptAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
+    IMOutboxEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/IMOutboxItem'}
+
+    ReplayEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [replayed]
+              properties:
+                replayed: {type: boolean, example: true}
+
+    OpenIMWebhookMessage:
+      type: object
+      properties:
+        callbackCommand: {type: string}
+        serverMsgID: {type: string}
+        clientMsgID: {type: string}
+        conversationID: {type: string}
+        sendID: {type: string}
+        userID: {type: string}
+        recvID: {type: string}
+        groupID: {type: string}
+        contentType: {type: integer}
+        seq: {type: integer, format: int64}
+        sendTime: {type: integer, format: int64}
+        atUserList:
+          type: array
+          items: {type: string}
+
+    OpenIMWebhookResponse:
+      type: object
+      required: [actionCode, errCode, errMsg, errDlt, nextCode]
+      properties:
+        actionCode: {type: integer, example: 0}
+        errCode: {type: integer, example: 0}
+        errMsg: {type: string}
+        errDlt: {type: string}
+        nextCode: {type: integer, enum: [0, 1], example: 0}

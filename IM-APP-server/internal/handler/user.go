@@ -294,8 +294,12 @@ func (h *ContactHandler) UpdateContact(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	item, err := h.Svc.UpdateContact(c.Request.Context(), uid, cid, req.Remark)
+	item, err := h.Svc.UpdateContact(c.Request.Context(), uid, cid, req.Remark, req.TagIDs)
 	if err != nil {
+		if err.Error() == "标签功能不可用" {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		response.Fail(c, http.StatusNotFound, "好友不存在")
 		return
 	}

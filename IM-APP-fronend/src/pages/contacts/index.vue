@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
@@ -36,7 +37,8 @@ const filteredContacts = computed(() => {
   return list
 })
 
-onMounted(() => {
+// tabBar 页会常驻，onMounted 只跑一次，切回来必须重新拉才能看到新加的好友
+onShow(() => {
   contactStore.loadAll()
 })
 
@@ -47,7 +49,7 @@ function go(url: string) {
 }
 
 function openContact(c: Contact) {
-  contactStore.openChatWithContact(c.id, c.nickname, c.avatar)
+  go(`/pages/contacts/friend-detail?id=${c.id}`)
 }
 
 function openFeaturedGroup() {

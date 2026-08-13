@@ -10,7 +10,9 @@ alwaysApply: false
 
 uni-app 3.0 + Vue 3.4 + TypeScript（strict）+ Vite 5 + Pinia 2 + Sass。
 
-**当前没有**：UI 组件库、UnoCSS、ESLint / Prettier、Pinia 持久化插件、OpenIM SDK、本地 Mock。
+聊天能力由 OpenIM SDK 提供：`openim-uniapp-polyfill`（app 端走原生插件，web / 小程序端转发到 `@openim/client-sdk`）。
+
+**当前没有**：UI 组件库、UnoCSS、ESLint / Prettier、Pinia 持久化插件、本地 Mock。
 不要为了实现某个需求顺手引入以上依赖，需要时先确认。
 
 | 用途 | 命令 |
@@ -39,7 +41,7 @@ src/
   components/   # 通用组件，业务组件用 Im 前缀
   pages/        # 路由页面，与 pages.json 一一对应
   types/        # 按域拆分，禁止一个大 index 承载全部类型
-  utils/        # request / websocket / openim / format / device
+  utils/        # request / openim / format / device
   styles/       # common.scss / auth.scss
   config.ts     # 环境变量统一出口，禁止组件内读 import.meta.env
 ```
@@ -78,12 +80,17 @@ export async function fetchProfile(): Promise<UserInfo> {
 }
 ```
 
-## WebSocket
+## 聊天通道（OpenIM）
 
-- 只用 `wsClient` 单例（心跳 25s、断线 3s 重连），禁止页面内 `uni.connectSocket`。
-- `wsClient.on()` 返回取消函数，**必须**在 `onUnmounted` / `onUnload` 调用，否则重复订阅导致消息重复渲染。
-- 消息协议固定 `{ event: string, data: unknown }`。
-- `utils/openim.ts` 是 Phase 4 占位，未接入 SDK 前不要在业务代码里依赖它。
+自研 WebSocket 通道（`utils/websocket.ts`、`api/chat.ts`）已删除，聊天一律走 OpenIM SDK。
+
+- SDK 只在 [openim.ts](../../IM-APP-fronend/src/utils/openim.ts) 里调用，业务代码不直接 `import` SDK。
+- 连接地址由 `POST /im/token` 下发（`apiAddr` / `wsAddr`），**禁止**在前端硬编码或写进 `.env`。
+- 进聊天前调 `ensureIMLogin()`；token 约 24h，过期会自动重新取。
+- 消息、会话、未读、已读、历史全部来自 SDK；业务后端只提供 token 与业务 ID → OpenIM ID 的映射（`/im/peers/:id`、`/im/groups/:id`）。
+- 群聊 `sessionType=3` 必须填 `groupID`，填 `recvID` 会被 OpenIM 拒绝。
+- 事件订阅集中在 `stores/chat` 的 `subscribeRealtime()`；`onIMEvent()` 返回取消函数，重复订阅前必须先取消。
+- 历史消息只能由 SDK 拉，后端 REST 没有 `get_history_msgs`。
 
 ## 大列表与 9999+ 群发
 
@@ -114,7 +121,7 @@ export async function fetchProfile(): Promise<UserInfo> {
 | 模块 | 页面 | store | api |
 |---|---|---|---|
 | 认证 | `pages/auth/` | `stores/user` | `api/auth` |
-| 会话 / 聊天 | `pages/chat/` | `stores/chat` | `api/chat` |
+| 会话 / 聊天 | `pages/chat/` | `stores/chat` | `api/im` + `utils/openim`（SDK） |
 | 通讯录 / 好友 | `pages/contacts/` | `stores/contact` | `api/contact` |
 | 群组 | `pages/group/` | `stores/group` | `api/group` |
 | 我的 / 资料 | `pages/mine/` | `stores/user` | `api/user` |

@@ -103,6 +103,27 @@
       }
     },
     {
+      "path": "pages/contacts/friend-detail",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "好友详情"
+      }
+    },
+    {
+      "path": "pages/contacts/friend-remark",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "备注名"
+      }
+    },
+    {
+      "path": "pages/contacts/friend-tags",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "设置标签"
+      }
+    },
+    {
       "path": "pages/contacts/tags",
       "style": {
         "navigationBarTitleText": "标签"

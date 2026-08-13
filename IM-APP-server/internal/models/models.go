@@ -49,11 +49,13 @@ type Message struct {
 }
 
 type Contact struct {
-	ID       string `json:"id"`
-	PublicID string `json:"publicId,omitempty"`
-	Nickname string `json:"nickname"`
-	Avatar   string `json:"avatar"`
-	Remark   string `json:"remark,omitempty"`
+	ID           string           `json:"id"`
+	PublicID     string           `json:"publicId,omitempty"`
+	Nickname     string           `json:"nickname"`
+	Avatar       string           `json:"avatar"`
+	Remark       string           `json:"remark,omitempty"`
+	Tags         []ContactTagItem `json:"tags,omitempty"`
+	CommonGroups []GroupPreview   `json:"commonGroups,omitempty"`
 }
 
 // PublicProfile 他人可见的公开资料（不含手机号）

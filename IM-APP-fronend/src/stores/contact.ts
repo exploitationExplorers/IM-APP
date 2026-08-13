@@ -6,7 +6,6 @@ import {
   fetchContacts,
   fetchFriendRequests,
   fetchGroups,
-  getContactConversationId,
   rejectFriendRequest,
   sendFriendRequest,
 } from '@/api/contact'
@@ -31,6 +30,7 @@ export const useContactStore = defineStore('contact', () => {
   async function acceptRequest(id: string) {
     await acceptFriendRequest(id)
     await loadAll()
+    goToContacts()
   }
 
   async function rejectRequest(id: string) {
@@ -38,22 +38,25 @@ export const useContactStore = defineStore('contact', () => {
     friendRequests.value = friendRequests.value.filter((fr) => fr.id !== id)
   }
 
+  /** 只有真正成为好友才回通讯录；仅发出申请时留在原页面等对方通过 */
   async function addFriend(toUserId: string, message: string): Promise<SendFriendResult> {
     const result = await sendFriendRequest(toUserId, message)
     if (result.status === 'accepted') {
       await loadAll()
+      goToContacts()
     }
     return result
   }
 
-  async function openChatWithContact(contactId: string, nickname: string, avatar: string) {
-    const convId = await getContactConversationId(contactId)
-    if (!convId) {
-      uni.showToast({ title: '无法打开会话', icon: 'none' })
-      return
-    }
+  /** 通讯录是 tabBar 页，只能用 switchTab；跳转前列表已经拉过最新的 */
+  function goToContacts() {
+    uni.switchTab({ url: '/pages/contacts/index' })
+  }
+
+  // 只带业务好友 ID，OpenIM 会话 ID 由聊天页向后端换取
+  function openChatWithContact(contactId: string, nickname: string, avatar: string) {
     uni.navigateTo({
-      url: `/pages/chat/room?id=${convId}&title=${encodeURIComponent(nickname)}&avatar=${encodeURIComponent(avatar)}&type=private&peerUserId=${encodeURIComponent(contactId)}&targetId=${encodeURIComponent(contactId)}&code=private`,
+      url: `/pages/chat/room?type=private&targetId=${encodeURIComponent(contactId)}&title=${encodeURIComponent(nickname)}&avatar=${encodeURIComponent(avatar)}`,
     })
   }
 
@@ -70,6 +73,7 @@ export const useContactStore = defineStore('contact', () => {
     acceptRequest,
     rejectRequest,
     addFriend,
+    goToContacts,
     openChatWithContact,
     toggleGroupsExpanded,
   }

@@ -112,12 +112,34 @@ func (s *ContactService) GetContact(ctx context.Context, uid, contactID string) 
 	if err != nil {
 		return c, ErrNotFound
 	}
+	if s.Tags != nil {
+		tags, err := s.Tags.ListByFriend(ctx, uid, contactID)
+		if err != nil {
+			return c, err
+		}
+		c.Tags = tags
+	} else {
+		c.Tags = []models.ContactTagItem{}
+	}
+	groups, err := s.Contacts.ListCommonGroups(ctx, uid, contactID)
+	if err != nil {
+		return c, err
+	}
+	c.CommonGroups = groups
 	return c, nil
 }
 
-func (s *ContactService) UpdateContact(ctx context.Context, uid, contactID string, remark *string) (models.Contact, error) {
+func (s *ContactService) UpdateContact(ctx context.Context, uid, contactID string, remark *string, tagIDs []string) (models.Contact, error) {
 	if remark != nil {
 		if err := s.Contacts.UpdateContactRemark(ctx, uid, contactID, *remark); err != nil {
+			return models.Contact{}, ErrNotFound
+		}
+	}
+	if tagIDs != nil {
+		if s.Tags == nil {
+			return models.Contact{}, errors.New("标签功能不可用")
+		}
+		if err := s.Tags.SetFriendTags(ctx, uid, contactID, tagIDs); err != nil {
 			return models.Contact{}, ErrNotFound
 		}
 	}
