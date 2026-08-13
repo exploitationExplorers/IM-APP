@@ -60,6 +60,12 @@ export const useContactStore = defineStore('contact', () => {
     })
   }
 
+  function openChatWithGroup(groupId: string, groupName: string, avatar: string) {
+    uni.navigateTo({
+      url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId)}&title=${encodeURIComponent(groupName)}&avatar=${encodeURIComponent(avatar)}`,
+    })
+  }
+
   function toggleGroupsExpanded() {
     groupsExpanded.value = !groupsExpanded.value
   }
@@ -75,6 +81,7 @@ export const useContactStore = defineStore('contact', () => {
     addFriend,
     goToContacts,
     openChatWithContact,
+    openChatWithGroup,
     toggleGroupsExpanded,
   }
 })
