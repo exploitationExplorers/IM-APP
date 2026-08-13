@@ -1,49 +1,88 @@
 <script setup lang="ts">
-import { getCurrentInstance, ref } from "vue";
+import { getCurrentInstance, shallowRef } from "vue";
+import { onShow } from "@dcloudio/uni-app";
+import {
+  FavoriteListType,
+  fetchFavorites,
+  deleteFavorite,
+} from "@/api/favorites";
+import type { FavoriteItem } from "@/api/favorites";
 import EmptyState from "@/components/EmptyState.vue";
 
-const tab = ref<"all" | "text" | "media" | "file" | "voice">("all");
+const VOICE_WAVE_HEIGHTS = [3.4, 11, 3.7, 7.4, 12.4, 4.1, 13.9, 19.3];
+const PAGE_SIZE = 20;
+
+const tab = shallowRef<FavoriteListType>(FavoriteListType.All);
 const tabs = [
-  { key: "all" as const, label: "全部" },
-  { key: "text" as const, label: "文字" },
-  { key: "media" as const, label: "图片与视频" },
-  { key: "file" as const, label: "文件" },
-  { key: "voice" as const, label: "语音" },
+  { type: FavoriteListType.All, label: "全部" },
+  { type: FavoriteListType.Text, label: "文字" },
+  { type: FavoriteListType.Media, label: "图片与视频" },
+  { type: FavoriteListType.File, label: "文件" },
+  { type: FavoriteListType.Voice, label: "语音" },
 ];
 
-const list = ref([
-  {
-    id: 192657,
-    type: "text",
-    content: "你是谁",
-  },
-  {
-    id: 192815,
-    type: "file",
-    name: "Activation Import Template.xlsx",
-    size: "14.7KB",
-  },
-  {
-    id: 192656,
-    type: "voice",
-    duration: "0:02",
-    wave: [3.4, 11, 3.7, 7.4, 12.4, 4.1, 13.9, 19.3],
-  },
-  {
-    id: 192655,
-    type: "image",
-    url: "https://mo6if.ey3177.com/66CHAT/1786500774509/3244/png_445609_20260812101254.png?h=1200&w=800",
-  },
-]);
+const favorites = shallowRef<FavoriteItem[]>([]);
+const loading = shallowRef(false);
+const noMore = shallowRef(false);
+let page = 1;
 
-const activeMenuId = ref<number | null>(null);
-const activeMenuItem = ref<any | null>(null);
-const menuStyle = ref<Record<string, string>>({});
+const activeMenuId = shallowRef<string | null>(null);
+const activeMenuItem = shallowRef<FavoriteItem | null>(null);
+const menuStyle = shallowRef<Record<string, string>>({});
 const instance = getCurrentInstance();
 
 const MENU_WIDTH_RPX = 176;
 const MENU_OFFSET_RPX = 8;
 const VIEWPORT_PADDING_RPX = 16;
+
+async function loadFavorites(type: FavoriteListType, reset = false) {
+  if (loading.value && !reset) return;
+
+  if (reset) {
+    page = 1;
+    favorites.value = [];
+    noMore.value = false;
+  }
+
+  const currentPage = page;
+  loading.value = true;
+  try {
+    const items = await fetchFavorites({
+      type,
+      page: currentPage,
+      size: PAGE_SIZE,
+    });
+
+    if (tab.value !== type) return;
+    favorites.value = reset ? items : [...favorites.value, ...items];
+    noMore.value = items.length < PAGE_SIZE;
+    page = currentPage + 1;
+  } catch (error) {
+    if (tab.value !== type) return;
+    uni.showToast({
+      title: error instanceof Error ? error.message : "收藏加载失败",
+      icon: "none",
+    });
+  } finally {
+    if (tab.value === type) loading.value = false;
+  }
+}
+
+function selectTab(type: FavoriteListType) {
+  if (tab.value === type) return;
+  tab.value = type;
+  closeMenu();
+  void loadFavorites(type, true);
+}
+
+function loadMore() {
+  if (loading.value || noMore.value) return;
+  void loadFavorites(tab.value);
+}
+
+onShow(() => {
+  void loadFavorites(tab.value, true);
+});
 
 const toDesignUnit = (value: number) => {
   const { windowWidth } = uni.getSystemInfoSync();
@@ -71,7 +110,7 @@ const getEventPoint = (event: any) => {
   };
 };
 
-const updateMenuPosition = (item: any, event: any) => {
+const updateMenuPosition = (item: FavoriteItem, event: any) => {
   const { windowWidth, windowHeight } = uni.getSystemInfoSync();
   const viewportWidthRpx = toDesignUnit(windowWidth);
   const viewportHeightRpx = toDesignUnit(windowHeight);
@@ -111,7 +150,7 @@ const updateMenuPosition = (item: any, event: any) => {
     .exec();
 };
 
-const handleClick = (item: any) => {
+const handleClick = (item: FavoriteItem) => {
   closeMenu();
   console.log("点击：", item);
 
@@ -121,7 +160,7 @@ const handleClick = (item: any) => {
   // })
 };
 
-const handleMore = (item: any, event: any) => {
+const handleMore = (item: FavoriteItem, event: any) => {
   if (activeMenuId.value === item.id) {
     closeMenu();
     return;
@@ -134,45 +173,110 @@ const handleMore = (item: any, event: any) => {
   console.log("更多操作：", item);
 };
 
-const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
+async function handleDeleteFavorite(item: FavoriteItem) {
+  try {
+    await deleteFavorite(item.id);
+    favorites.value = favorites.value.filter(
+      (favorite) => favorite.id !== item.id,
+    );
+    uni.showToast({ title: "删除成功", icon: "none" });
+  } catch (error) {
+    uni.showToast({
+      title: error instanceof Error ? error.message : "删除失败",
+      icon: "none",
+    });
+  }
+}
+
+const handleAction = (
+  type: "forward" | "copy" | "delete",
+  item: FavoriteItem,
+) => {
   closeMenu();
+
+  if (type === "delete") {
+    uni.showModal({
+      title: "提示",
+      content: "确定删除该收藏吗？",
+      confirmColor: "#ff4d4f",
+      success: (res) => {
+        if (res.confirm) void handleDeleteFavorite(item);
+      },
+    });
+    return;
+  }
+
   console.log("菜单操作：", type, item);
 };
 </script>
 
 <template>
   <view class="page">
+    <view class="navbar">
+      <!-- 返回按钮 -->
+      <button class="back-btn" @click="goBack">
+        <view class="icon">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+          >
+            <path
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-miterlimit="10"
+              stroke-width="1.5"
+              d="M15 19.92L8.48 13.4c-.77-.77-.77-2.03 0-2.8L15 4.08"
+            />
+          </svg>
+        </view>
+      </button>
+      <!-- 标题 -->
+      <view class="title-wrapper">
+        <text class="title">我的收藏</text>
+      </view>
+      <!-- 占位，保证标题居中 -->
+      <view class="placeholder"></view>
+    </view>
+
     <view class="tab-list">
       <view
         v-for="item in tabs"
-        :key="item.key"
+        :key="item.type"
         class="tab-item"
-        :class="{ active: tab === item.key }"
-        @click="tab = item.key"
+        :class="{ active: tab === item.type }"
+        @click="selectTab(item.type)"
       >
         {{ item.label }}
       </view>
     </view>
-    <!-- <EmptyState text="无收藏" /> -->
+    <EmptyState v-if="!loading && favorites.length === 0" text="无收藏" />
 
     <!-- 内容滚动区域 -->
-    <scroll-view class="content-scroll" scroll-y :show-scrollbar="false">
+    <scroll-view v-else class="content-scroll" scroll-y :show-scrollbar="false">
       <view class="content">
         <!-- 分组 -->
         <view class="collection-section">
           <!-- 标题 -->
-          <view class="collection-header">
-            <text class="collection-title"> 妲己把茶倒你嘴你 </text>
-            <text class="collection-date"> 今日 </text>
+          <view v-if="favorites.length" class="collection-header">
+            <text class="collection-title">我的收藏</text>
           </view>
           <!-- 横向滚动 -->
-          <scroll-view class="card-scroll" scroll-x :show-scrollbar="false">
+          <scroll-view
+            class="card-scroll"
+            scroll-x
+            :show-scrollbar="false"
+            @scrolltolower="loadMore"
+          >
             <view class="card-list">
               <!-- 文字卡片 -->
               <view
+                v-for="item in favorites"
+                :key="item.id"
                 class="card"
-                v-for="(item, index) in list"
-                :key="index"
                 @click="handleClick(item)"
               >
                 <!-- 右上角更多 -->
@@ -185,7 +289,7 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
                 </view>
 
                 <!-- 文字 -->
-                <template v-if="item.type === 'text'">
+                <template v-if="item.type === 'text' || item.type === 'emoji'">
                   <view class="text-card">
                     <text class="text-content">
                       {{ item.content }}
@@ -204,10 +308,7 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
 
                     <view class="file-content">
                       <text class="file-name">
-                        {{ item.name }}
-                      </text>
-                      <text class="file-size">
-                        {{ item.size }}
+                        {{ item.content }}
                       </text>
                     </view>
                   </view>
@@ -224,7 +325,7 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
                       <!-- 波形 -->
                       <view class="wave">
                         <view
-                          v-for="(height, i) in item.wave"
+                          v-for="(height, i) in VOICE_WAVE_HEIGHTS"
                           :key="i"
                           class="wave-line"
                           :style="{ height: height * 2 + 'rpx' }"
@@ -232,21 +333,25 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
                       </view>
 
                       <!-- 时长 -->
-                      <text class="voice-time">
-                        {{ item.duration }}
-                      </text>
+                      <text class="voice-time"> 0:00 </text>
                     </view>
                   </view>
                 </template>
 
-                <!-- 图片 -->
-                <template v-else-if="item.type === 'image'">
+                <!-- 图片与视频 -->
+                <template
+                  v-else-if="item.type === 'image' || item.type === 'video'"
+                >
                   <view class="image-card">
-                    <image class="image" :src="item.url" mode="aspectFill" />
+                    <image
+                      class="image"
+                      :src="item.content"
+                      mode="aspectFill"
+                    />
 
-                    <!-- 图片类型图标 -->
+                    <!-- 媒体类型图标 -->
                     <view class="image-icon">
-                      <text>▧</text>
+                      <text>{{ item.type === "video" ? "▶" : "▧" }}</text>
                     </view>
                   </view>
                 </template>
@@ -271,6 +376,9 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
         </button>
 
         <button
+          v-if="
+            activeMenuItem.type === 'text' || activeMenuItem.type === 'emoji'
+          "
           class="menu-item"
           @click.stop="handleAction('copy', activeMenuItem)"
         >
@@ -300,7 +408,7 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
   justify-content: space-evenly;
   align-items: stretch;
   border-bottom: 2rpx solid #f2f2f2;
-  margin: 32rpx 0;
+  margin: 28rpx 0;
 }
 
 .tab-item {
@@ -396,8 +504,8 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
 .card {
   position: relative;
   flex-shrink: 0;
-  width: 246rpx;
-  height: 246rpx;
+  width: 262rpx;
+  height: 262rpx;
   border-radius: 8rpx;
   background: #f3f4f7;
   overflow: hidden;
@@ -511,11 +619,8 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
 
   width: 100%;
   height: 100%;
-
   box-sizing: border-box;
-
   padding: 32rpx;
-
   display: flex;
   align-items: center;
   justify-content: center;
@@ -525,17 +630,13 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
 
 .voice-icon {
   position: absolute;
-
   left: 0;
   bottom: 0;
-
   width: 56rpx;
   height: 56rpx;
-
   display: flex;
   align-items: center;
   justify-content: center;
-
   font-size: 40rpx;
 }
 
@@ -544,19 +645,13 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
 .voice-player {
   width: 100%;
   max-width: 400rpx;
-
   box-sizing: border-box;
-
   padding: 24rpx 32rpx;
-
   display: flex;
   align-items: center;
   justify-content: space-between;
-
   background: #fff;
-
   border-radius: 32rpx;
-
   border: 2rpx solid #eeeeee;
 }
 
@@ -564,24 +659,16 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
 
 .wave {
   display: inline-flex;
-
   align-items: center;
-
   gap: 4rpx;
-
   height: 40rpx;
 }
-
 .wave-line {
   width: 4rpx;
-
   flex-shrink: 0;
-
   border-radius: 1998rpx;
-
   background: #888;
 }
-
 /* 时长 */
 
 .voice-time {
@@ -591,11 +678,9 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
   color: #333;
   white-space: nowrap;
 }
-
 /* =========================
    图片卡片
 ========================= */
-
 .image-card {
   position: relative;
   width: 100%;
@@ -698,5 +783,82 @@ const handleAction = (type: "forward" | "copy" | "delete", item: any) => {
   color: #333;
   font-size: 26rpx;
   line-height: 36rpx;
+}
+
+.navbar {
+  width: 100%;
+  height: 96rpx;
+  min-height: 80rpx;
+  padding: 0 40rpx;
+  box-sizing: border-box;
+
+  display: flex;
+  align-items: center;
+  gap: 32rpx;
+
+  background-color: #fff;
+  color: #333;
+}
+
+/* 返回按钮 */
+.back-btn {
+  flex: none;
+  width: 72rpx;
+  height: 72rpx;
+  padding: 0;
+  margin: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: none;
+  background: transparent;
+  color: #333;
+}
+
+/* 去掉 button 默认样式 */
+.back-btn::after {
+  border: none;
+}
+
+.icon {
+  width: 48rpx;
+  height: 48rpx;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 标题区域 */
+.title-wrapper {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+}
+
+.title {
+  display: block;
+  width: 100%;
+
+  font-size: 36rpx;
+  font-weight: 700;
+  line-height: 1.4;
+
+  text-align: left;
+  color: #333;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 右侧占位 */
+.placeholder {
+  width: 96rpx;
+  height: 96rpx;
+  flex: none;
+  visibility: hidden;
 }
 </style>
