@@ -266,13 +266,15 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 解除拉黑。
 
-### GET `/api/v1/contacts/:id/conversation`
+### GET `/api/v1/contacts/:id/conversation`（旧链路）
 
-获取或创建与该好友的私聊会话 ID。
+仅 `LEGACY_CHAT_ENABLED=true` 时注册。默认关闭，OpenIM 模式使用 `/im/peers/:businessUserId` 获取聊天目标。
 
 ---
 
-## 聊天（需 JWT）
+## 旧聊天链路（默认关闭）
+
+以下 PostgreSQL 消息接口仅 `LEGACY_CHAT_ENABLED=true` 时注册。生产 OpenIM 模式必须保持 `false`，普通消息、会话、历史、未读、已读和撤回均由 OpenIM SDK + OpenIM WebSocket 完成。
 
 ### GET `/api/v1/conversations`
 
@@ -292,6 +294,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ```json
 { "type": "text|image|voice|file", "content": "..." }
 ```
+
+默认关闭时以上路由均返回 404，且不会向 PostgreSQL `messages` 写入新消息。
 
 ---
 
@@ -339,6 +343,30 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ### POST `/api/v1/groups/:id/leave`
 
 退出群聊。
+
+### PUT `/api/v1/groups/:id/members/:userId/role`
+
+仅群主可设置管理员或普通成员。Body：`{"role":"admin|member"}`。
+
+### PUT `/api/v1/groups/:id/members/:userId/mute`
+
+群主/管理员禁言普通成员，群主可禁言管理员。`mutedSeconds=0` 表示解除；最大 30 天。
+
+```json
+{ "mutedSeconds": 3600 }
+```
+
+### PUT `/api/v1/groups/:id/mute`
+
+群主/管理员设置全员禁言。普通成员不能发言，群主/管理员仍可发送。
+
+```json
+{ "muted": true }
+```
+
+### POST `/api/v1/groups/:id/dismiss`
+
+仅群主可解散。业务群状态变为 `dismissed`，后台 Outbox 同步解散 OpenIM 群。
 
 ---
 
@@ -410,7 +438,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### POST `/api/v1/im/token`
 
-为当前用户签发 OpenIM Token（未部署 OpenIM 时返回 dev 占位 token）。
+沿用原接口，为当前业务用户签发 OpenIM Token。业务用户由注册接口在后端自动同步到 OpenIM，调用方不需要增加 OpenIM 注册接口。
 
 **Body**
 ```json
@@ -419,12 +447,59 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 **Response**
 ```json
-{ "token": "...", "expireSec": 604800, "platform": 5, "userId": "..." }
+{
+  "userId": "...",
+  "token": "...",
+  "platform": 5,
+  "expireSec": 7776000,
+  "apiAddr": "http://8.210.72.157:10002",
+  "wsAddr": "ws://8.210.72.157:10001"
+}
 ```
+
+兼容约束：`token`、`expireSec`、`platform`、`userId` 是原接口字段，保持名称和含义不变；`apiAddr`、`wsAddr` 是向后兼容的扩展字段。请求体为空、`platformId` 不传或传 `0` 时仍按原逻辑使用 Web 平台 `5`。
+
+### GET `/api/v1/im/peers/:businessUserId`
+
+把业务用户 UUID 解析为稳定的 OpenIM userID，并返回 `canChat/denyReason`。校验双方账号、好友关系和双向拉黑状态，不创建 PostgreSQL 会话。
+
+### GET `/api/v1/im/groups/:businessGroupId`
+
+把业务群 UUID 解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
+
+## OpenIM 内部接口
+
+所有 `/internal/im/*` 必须携带 `X-Internal-API-Key`，密钥来自 `IM_INTERNAL_API_KEY`，不得下发给普通客户端。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /internal/im/messages` | 幂等发送服务端文本或 custom 系统通知 |
+| `GET /internal/im/health` | OpenIM API、管理 Token、Outbox 状态 |
+| `POST /internal/im/reconcile` | 将当前用户、好友和群状态重新排入对账任务 |
+| `GET /internal/im/outbox?status=dead&limit=100` | 查询同步任务/死信 |
+| `POST /internal/im/outbox/:id/replay` | 仅重放指定 dead 任务 |
+
+系统消息示例：
+
+```json
+{
+  "idempotencyKey": "group-approved:request-id",
+  "receiverType": "user",
+  "receiverBusinessId": "业务用户UUID",
+  "messageType": "custom",
+  "key": "group_join_approved",
+  "data": {"requestId":"uuid"},
+  "guaranteed": true
+}
+```
+
+同一幂等键和相同请求返回第一次的消息 ID，不重复发送；同一键换内容返回 409。
 
 ---
 
 ## 消息转发（Phase 5）
+
+这是旧 PostgreSQL 消息链路能力，仅 `LEGACY_CHAT_ENABLED=true` 时注册；OpenIM 模式默认返回 404。普通用户消息转发应由 OpenIM SDK 完成。
 
 ### POST `/api/v1/forward-tasks`
 
@@ -443,7 +518,9 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ## WebSocket
 
-连接：`GET /ws?token=<jwt>`
+唯一生产聊天连接是 `/api/v1/im/token` 返回的 OpenIM `wsAddr`。Go 后端不代理 OpenIM WebSocket。
+
+`GET /ws?token=<jwt>` 仅旧链路开关启用时存在，默认返回 404。
 
 | 事件 | 方向 | 说明 |
 |---|---|---|
@@ -453,7 +530,4 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
-## 后续 TODO
-
-- 消息撤回 / 已读回执（OpenIM 能力）
-- 真实短信网关 / 离线推送（Phase 5 生产接入）
+消息撤回、已读回执、历史、会话与离线补偿使用 OpenIM SDK，不增加第二套 Go 消息接口。

@@ -3,18 +3,22 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
-	HTTPAddr    string
-	DatabaseURL string
-	JWTSecret   string
-	DevSMSCode  string
-	RedisURL    string
-	MinIO       MinIOConfig
-	OpenIM      OpenIMConfig
-	Kafka       KafkaConfig
-	SMS         SMSConfig
+	HTTPAddr          string
+	DatabaseURL       string
+	JWTSecret         string
+	DevSMSCode        string
+	RedisURL          string
+	MinIO             MinIOConfig
+	OpenIM            OpenIMConfig
+	IMInternalAPIKey  string
+	LegacyChatEnabled bool
+	SeedDemo          bool
+	Kafka             KafkaConfig
+	SMS               SMSConfig
 }
 
 type MinIOConfig struct {
@@ -28,9 +32,13 @@ type MinIOConfig struct {
 }
 
 type OpenIMConfig struct {
-	APIURL    string
-	Secret    string
-	AdminUser string
+	APIURL            string
+	PublicAPIURL      string
+	PublicWSURL       string
+	Secret            string
+	AdminUser         string
+	WebhookSecret     string
+	WebhookAllowCIDRs []string
 }
 
 type KafkaConfig struct {
@@ -49,11 +57,14 @@ type SMSConfig struct {
 
 func Load() Config {
 	return Config{
-		HTTPAddr:    getenv("HTTP_ADDR", ":8080"),
-		DatabaseURL: getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
-		JWTSecret:   getenv("JWT_SECRET", "im-local-dev-secret-change-me"),
-		DevSMSCode:  getenv("DEV_SMS_CODE", "123456"),
-		RedisURL:    getenv("REDIS_URL", ""),
+		HTTPAddr:          getenv("HTTP_ADDR", ":8080"),
+		DatabaseURL:       getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5432/im_app?sslmode=disable"),
+		JWTSecret:         getenv("JWT_SECRET", "im-local-dev-secret-change-me"),
+		IMInternalAPIKey:  getenv("IM_INTERNAL_API_KEY", ""),
+		LegacyChatEnabled: getenvBool("LEGACY_CHAT_ENABLED", false),
+		SeedDemo:          getenvBool("SEED_DEMO", false),
+		DevSMSCode:        getenv("DEV_SMS_CODE", "123456"),
+		RedisURL:          getenv("REDIS_URL", ""),
 		MinIO: MinIOConfig{
 			Endpoint:   getenv("MINIO_ENDPOINT", ""),
 			AccessKey:  getenv("MINIO_ACCESS_KEY", "minioadmin"),
@@ -64,9 +75,13 @@ func Load() Config {
 			PublicRead: getenv("MINIO_PUBLIC_READ", "false") == "true",
 		},
 		OpenIM: OpenIMConfig{
-			APIURL:    getenv("OPENIM_API_URL", ""),
-			Secret:    getenv("OPENIM_SECRET", ""),
-			AdminUser: getenv("OPENIM_ADMIN_USER", "imAdmin"),
+			APIURL:            getenv("OPENIM_API_URL", ""),
+			PublicAPIURL:      getenv("OPENIM_PUBLIC_API_URL", ""),
+			PublicWSURL:       getenv("OPENIM_PUBLIC_WS_URL", ""),
+			Secret:            getenv("OPENIM_SECRET", ""),
+			AdminUser:         getenv("OPENIM_ADMIN_USER", "imAdmin"),
+			WebhookSecret:     getenv("OPENIM_WEBHOOK_SECRET", ""),
+			WebhookAllowCIDRs: splitCSV(getenv("OPENIM_WEBHOOK_ALLOW_CIDRS", "")),
 		},
 		Kafka: KafkaConfig{
 			Brokers: getenv("KAFKA_BROKERS", ""),
@@ -80,6 +95,32 @@ func Load() Config {
 			RegionID:        getenv("SMS_REGION_ID", "cn-hangzhou"),
 		},
 	}
+}
+
+func getenvBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func splitCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if item := strings.TrimSpace(part); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func getenv(key, fallback string) string {

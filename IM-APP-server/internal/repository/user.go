@@ -52,8 +52,13 @@ func (r *UserRepo) FindByPublicID(ctx context.Context, publicID string) (models.
 }
 
 func (r *UserRepo) UpdateProfile(ctx context.Context, id string, nickname, avatar, bio *string) (models.User, error) {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return models.User{}, err
+	}
+	defer tx.Rollback(ctx)
 	var u models.User
-	err := r.DB.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE users SET
 			nickname = COALESCE($2, nickname),
 			avatar = COALESCE($3, avatar),
@@ -65,7 +70,18 @@ func (r *UserRepo) UpdateProfile(ctx context.Context, id string, nickname, avata
 		id, nickname, avatar, bio,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
 		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
-	return u, err
+	if err != nil {
+		return u, err
+	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventUserProfileUpdated, u.ID, map[string]string{
+		"nickname": u.Nickname, "avatar": u.Avatar,
+	}); err != nil {
+		return models.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.User{}, err
+	}
+	return u, nil
 }
 
 func (r *UserRepo) NextPublicID(ctx context.Context) (string, error) {

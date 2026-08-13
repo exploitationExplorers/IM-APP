@@ -9,7 +9,7 @@
 | 移动端 | uni-app Vue3 | Android / iOS 客户端 |
 | 业务 API | Go + Gin | 用户、好友、群组、风控、文件元数据、OpenIM 桥接 |
 | 业务数据库 | PostgreSQL | 账号、好友关系、群元数据、申请/拉黑 |
-| IM 引擎 | OpenIM 私有化 | 单聊/群聊、消息同步、已读、离线（Phase 4） |
+| IM 引擎 | OpenIM 私有化 | 单聊/群聊、消息同步、已读、离线 |
 | 消息存储 | MongoDB | OpenIM 消息数据（随 OpenIM 部署） |
 | 缓存 | Redis | 验证码限流、Session、在线状态（Phase 3） |
 | 对象存储 | MinIO / S3 | 图片、语音、文件（Phase 3） |
@@ -44,19 +44,20 @@
 - 好友申请、拉黑、通讯录
 - 群组元数据、成员关系、群设置（禁加好友等）
 - 文件上传预签名（MinIO）
-- OpenIM Token 签发与用户/群同步（Phase 4）
-- 群发任务调度入口（Phase 5，投递 Kafka）
+- OpenIM Token 签发、对象解析、用户/关系/群 Outbox 同步
+- OpenIM 发送前权限 Webhook、发送后元数据审计和内部系统消息
 
-### OpenIM（Phase 4 接入）
+### OpenIM
 
 - 消息收发、历史消息、会话列表
 - 已读回执、离线消息、在线状态
 - 群聊消息与 @ 提醒
 
-### 当前阶段（Phase 1–2）
+### 当前消息链路
 
-- 消息暂由 Go 自研 REST + WebSocket + PostgreSQL `messages` 表承担
-- Phase 4 接入 OpenIM 后，消息层迁移，业务库保留关系与元数据
+- OpenIM + MongoDB 是唯一的新消息、会话、历史和实时连接主链。
+- Go 不直连 OpenIM MongoDB，不保存新消息正文，只保留业务关系、同步任务和回调审计元数据。
+- 旧 Go `/ws`、PostgreSQL 消息 REST 和旧转发任务默认关闭；只可通过 `LEGACY_CHAT_ENABLED=true` 临时回滚。
 
 ## 代码分层（Go）
 
@@ -66,17 +67,10 @@ internal/
   handler/                  # HTTP 入参校验
   service/                  # 业务逻辑
   repository/               # PostgreSQL 访问
-  im/                       # Phase 4: OpenIM 客户端
+  im/                       # OpenIM 管理 REST 客户端
   infra/                    # Phase 3+: redis, minio, kafka
-  ws/                       # 过渡态 WS（Phase 4 后弱化）
+  ws/                       # 旧 WS，仅回滚开关启用
 ```
-
-## 前端架构
-
-- Mock 优先：`VITE_USE_MOCK=true`，内存 Mock 与 Go API 共用契约
-- API 层：`src/api/*`，禁止页面内直接 `uni.request`
-- 状态：Pinia Setup Store
-- 规范：见仓库 `.cursor/rules/im-uniapp.mdc`
 
 ## 演进阶段
 
@@ -85,10 +79,12 @@ internal/
 | Phase 1 | 认证、资料、好友、基础单聊（已完成） |
 | Phase 2 | 建群、加群、群设置、群聊 |
 | Phase 3 | Redis + MinIO、验证码限流、文件上传 |
-| Phase 4 | OpenIM 部署、Go 桥接、前端 SDK |
+| Phase 4 | OpenIM 部署和 Go 后端桥接（已实现） |
 | Phase 5 | Kafka 群发、真实短信、离线推送 |
 
 ## 相关文档
 
 - [api-contract.md](./api-contract.md) — REST API 契约
+- [OpenIM对话后端接口与WebSocket开发规划.md](./OpenIM对话后端接口与WebSocket开发规划.md) — 后端实现与验收
+- [OpenIM服务器Webhook部署步骤.md](./OpenIM服务器Webhook部署步骤.md) — OpenIM 服务器回调启用步骤
 - [../README.md](../README.md) — 本地启动说明

@@ -464,12 +464,18 @@ func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, passwor
 	cc := "+" + dial
 	local := strings.TrimPrefix(strings.TrimPrefix(e164, "+"), dial)
 	nickname := "用户" + local[max(0, len(local)-4):]
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		return models.User{}, err
+	}
+	defer tx.Rollback(ctx)
+
 	var count int
-	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	_ = tx.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
 	publicID := fmt.Sprintf("chat%d", 10000+count+1)
 
 	var u models.User
-	err := h.DB.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO users(phone, country_code, phone_e164, password_hash, nickname, avatar, public_id)
 		VALUES($1,$2,$3,$4,$5,$7,$6)
 		RETURNING id::text, phone, country_code, COALESCE(public_id,''), password_hash,
@@ -477,10 +483,19 @@ func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, passwor
 		local, cc, e164, hash, nickname, publicID, models.DefaultAvatar,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
 		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
-	if err == nil {
-		u.PasswordHash = ""
+	if err != nil {
+		return models.User{}, err
 	}
-	return u, err
+	if err := repository.EnqueueIMSyncTx(ctx, tx, repository.IMEventUserRegistered, u.ID, map[string]string{
+		"nickname": u.Nickname, "avatar": u.Avatar,
+	}); err != nil {
+		return models.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.User{}, err
+	}
+	u.PasswordHash = ""
+	return u, nil
 }
 
 func toMeProfile(u models.User) models.MeProfile {
