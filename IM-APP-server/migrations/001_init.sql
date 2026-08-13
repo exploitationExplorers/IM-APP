@@ -68,10 +68,21 @@ CREATE TABLE IF NOT EXISTS friend_requests (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 面向客户端的纯数字群号；groups.id UUID 继续作为内部主键。
+CREATE SEQUENCE IF NOT EXISTS group_public_id_seq
+    START WITH 100001
+    MINVALUE 100001;
+
 CREATE TABLE IF NOT EXISTS groups (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    public_id  VARCHAR(20) NOT NULL
+               DEFAULT nextval('group_public_id_seq'::regclass)::TEXT
+               CONSTRAINT groups_public_id_numeric_check
+               CHECK (public_id ~ '^[0-9]+$'),
     name       VARCHAR(128) NOT NULL,
     avatar     TEXT NOT NULL DEFAULT '',
     owner_id   UUID NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_public_id ON groups(public_id);

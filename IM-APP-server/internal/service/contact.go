@@ -10,6 +10,7 @@ import (
 
 type ContactService struct {
 	Contacts *repository.ContactRepo
+	Groups   *repository.GroupRepo
 	Users    *repository.UserRepo
 	Tags     *repository.ContactTagRepo
 	Privacy  *repository.PrivacyRepo
@@ -50,10 +51,15 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 		source = "public_id"
 	}
 	if source == "group" && sourceGroupID != "" {
-		allowed, err := s.Contacts.IsGroupAddFriendAllowed(ctx, uid, toUserID, sourceGroupID)
+		internalID, err := s.Groups.InternalIDByPublicID(ctx, sourceGroupID)
+		if err != nil {
+			return empty, ErrForbidden
+		}
+		allowed, err := s.Contacts.IsGroupAddFriendAllowed(ctx, uid, toUserID, internalID)
 		if err != nil || !allowed {
 			return empty, ErrForbidden
 		}
+		sourceGroupID = internalID
 	}
 
 	// 对方未开启「加我为好友需验证」时直接成为好友（参考站默认关闭）

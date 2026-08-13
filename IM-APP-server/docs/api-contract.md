@@ -334,7 +334,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
   "toUserId": "uuid",
   "message": "验证说明",
   "source": "public_id|user_qrcode|group",
-  "sourceGroupId": "uuid"
+  "sourceGroupId": "100001"
 }
 ```
 
@@ -434,7 +434,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 **Response**
 ```json
 {
-  "id": "uuid",
+  "id": "100001",
   "name": "群名称",
   "ownerId": "uuid",
   "memberCount": 3,
@@ -450,6 +450,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ### GET `/api/v1/groups/:id`
 
 群详情（需为群成员）。
+
+群相关对外接口中的 `:id` 均为纯数字群号（例如 `100001`）。服务端会映射为内部 UUID；数据库关联和 OpenIM 对接仍使用原 UUID 映射，前端不再传群 UUID。
 
 ### GET `/api/v1/groups/:id/members`
 
@@ -633,7 +635,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/im/groups/:businessGroupId`
 
-把业务群 UUID 解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
+把纯数字业务群号解析为内部 UUID，再解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
 
 ## OpenIM 内部接口
 

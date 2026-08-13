@@ -18,6 +18,16 @@ type GroupRepo struct {
 	LegacyChatEnabled bool
 }
 
+// InternalIDByPublicID resolves the short numeric ID used by clients to the
+// UUID used by database relations and the existing OpenIM mapping.
+func (r *GroupRepo) InternalIDByPublicID(ctx context.Context, publicID string) (string, error) {
+	var groupID string
+	err := r.DB.QueryRow(ctx, `
+		SELECT id::text FROM groups WHERE public_id=$1`, publicID,
+	).Scan(&groupID)
+	return groupID, err
+}
+
 func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs []string) (models.GroupInfo, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -97,7 +107,7 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 	var g models.GroupInfo
 	var allow bool
 	err := r.DB.QueryRow(ctx, `
-		SELECT g.id::text, g.name, g.avatar, g.owner_id::text,
+		SELECT g.public_id, g.name, g.avatar, g.owner_id::text,
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
 			g.announcement, g.allow_member_add_friend, COALESCE(g.conversation_id::text,'')
 		FROM groups g
@@ -473,7 +483,7 @@ func (r *GroupRepo) GetByIDPublic(ctx context.Context, groupID string) (models.G
 	var g models.GroupInfo
 	var allow bool
 	err := r.DB.QueryRow(ctx, `
-		SELECT g.id::text, g.name, g.avatar, g.owner_id::text,
+		SELECT g.public_id, g.name, g.avatar, g.owner_id::text,
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
 			g.announcement, g.allow_member_add_friend, COALESCE(g.conversation_id::text,'')
 		FROM groups g

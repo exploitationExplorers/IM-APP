@@ -571,7 +571,7 @@ components:
       name: id
       in: path
       required: true
-      schema: {$ref: '#/components/schemas/UUID'}
+      schema: {type: string, pattern: '^[0-9]+$', example: '100001'}
     BusinessUserId:
       name: businessUserId
       in: path
@@ -581,7 +581,7 @@ components:
       name: businessGroupId
       in: path
       required: true
-      schema: {$ref: '#/components/schemas/UUID'}
+      schema: {type: string, pattern: '^[0-9]+$', example: '100001'}
     WebhookSecret:
       name: secret
       in: path
@@ -790,7 +790,7 @@ components:
       type: object
       required: [id, name, avatar]
       properties:
-        id: {$ref: '#/components/schemas/UUID'}
+        id: {type: string, pattern: '^[0-9]+$', example: '100001'}
         name: {type: string}
         avatar: {type: string}
 
@@ -818,7 +818,7 @@ components:
       type: object
       required: [id, name, avatar, ownerId, memberCount, allowMemberAddFriend]
       properties:
-        id: {$ref: '#/components/schemas/UUID'}
+        id: {type: string, pattern: '^[0-9]+$', example: '100001'}
         name: {type: string}
         avatar: {type: string}
         ownerId: {$ref: '#/components/schemas/UUID'}
@@ -935,7 +935,7 @@ components:
       type: object
       required: [businessGroupId, imGroupId, name, avatar, role, canChat, denyReason]
       properties:
-        businessGroupId: {$ref: '#/components/schemas/UUID'}
+        businessGroupId: {type: string, pattern: '^[0-9]+$', example: '100001'}
         imGroupId: {type: string}
         name: {type: string}
         avatar: {type: string}

@@ -59,6 +59,7 @@ type imTokenKeyLock struct {
 type IMService struct {
 	Client     *im.Client
 	Users      *repository.UserRepo
+	Groups     *repository.GroupRepo
 	Access     *repository.IMAccessRepo
 	Config     config.OpenIMConfig
 	TokenCache IMTokenCache
@@ -83,14 +84,19 @@ func (s *IMService) ResolvePeer(ctx context.Context, requesterID, targetID strin
 }
 
 func (s *IMService) ResolveGroup(ctx context.Context, userID, groupID string) (models.IMGroupTarget, error) {
-	imGroupID, err := im.UserIDFromBusinessID(groupID)
+	internalID, err := s.Groups.InternalIDByPublicID(ctx, groupID)
+	if err != nil {
+		return models.IMGroupTarget{}, repository.ErrIMTargetNotFound
+	}
+	imGroupID, err := im.UserIDFromBusinessID(internalID)
 	if err != nil {
 		return models.IMGroupTarget{}, err
 	}
-	group, err := s.Access.ResolveGroup(ctx, userID, groupID)
+	group, err := s.Access.ResolveGroup(ctx, userID, internalID)
 	if err != nil {
 		return group, err
 	}
+	group.BusinessGroupID = groupID
 	group.IMGroupID = imGroupID
 	return group, nil
 }
