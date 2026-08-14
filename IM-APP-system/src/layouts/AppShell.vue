@@ -11,12 +11,17 @@ const isCollapse = shallowRef(false);
 const activeMenu = computed(() => route.path);
 const meta = shallowRef<Auth.ResMeta | null>(null);
 
+const featureLabels: Record<string, string> = {
+  mfa: "MFA 多因素认证",
+  report: "举报功能",
+};
+
 const metaSummary = computed(() => {
   const data = meta.value;
   if (!data) return "IM-APP 管理系统";
   const parts = ["IM-APP 管理系统"];
   if (data.version) parts.push(`v${data.version}`);
-  if (data.commit) parts.push(data.commit.slice(0, 8));
+  if (data.commit) parts.push(data.commit);
   return parts.join(" · ");
 });
 
@@ -24,14 +29,18 @@ const featureEntries = computed(() => {
   const features = meta.value?.features;
   if (!features || typeof features !== "object") return [];
   return Object.entries(features).map(([key, value]) => ({
-    key,
+    key: featureLabels[key] || key,
     value: typeof value === "boolean" ? (value ? "开启" : "关闭") : String(value ?? "-"),
   }));
 });
 
 function formatBuildTime(value?: string): string {
   if (!value) return "-";
-  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+  return value
+    .replace("T", " ")
+    .replace(/\.\d+/, "")
+    .replace(/Z$/, " UTC")
+    .replace(/\+08:00$/, "");
 }
 
 function toggleCollapse(): void {
