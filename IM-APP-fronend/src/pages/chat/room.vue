@@ -6,12 +6,14 @@ import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
-import { imUserId } from '@/utils/openim'
+import { businessUserIdFromIM, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
+import { useContactStore } from '@/stores/contact'
 import type { ChatMessage } from '@/types'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
+const contactStore = useContactStore()
 
 const conversationId = ref('')
 const title = ref('聊天')
@@ -159,6 +161,38 @@ function goToProfile() {
   uni.navigateTo({
     url: `/pages/group/detail?id=${encodeURIComponent(businessId.value)}&code=${encodeURIComponent(chatType.value)}`,
   })
+}
+
+function resolveSenderBusinessId(message: ChatMessage): string {
+  if (chatType.value === 'private' && businessId.value) return businessId.value
+  return businessUserIdFromIM(message.senderId)
+}
+
+async function onAvatarClick(message: ChatMessage) {
+  if (message.senderId === myId.value) return
+  const userId = resolveSenderBusinessId(message)
+  if (!userId) {
+    uni.showToast({ title: '无法打开资料', icon: 'none' })
+    return
+  }
+
+  if (chatType.value === 'private') {
+    uni.navigateTo({ url: `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}` })
+    return
+  }
+
+  if (!contactStore.contacts.length) {
+    try {
+      await contactStore.loadDirectory()
+    } catch {
+      // 通讯录拉失败时按非好友打开资料页
+    }
+  }
+  const isFriend = contactStore.contacts.some((c) => c.id === userId)
+  const path = isFriend
+    ? `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}`
+    : `/pages/contacts/user-profile?id=${encodeURIComponent(userId)}`
+  uni.navigateTo({ url: path })
 }
 
 function requestAudioPermission(): Promise<boolean> {
@@ -407,6 +441,7 @@ function pickImage() {
           :message="m"
           :mine="m.senderId === myId"
           :avatar="avatarOf(m)"
+          @avatar-click="onAvatarClick(m)"
         />
       </view>
     </scroll-view>

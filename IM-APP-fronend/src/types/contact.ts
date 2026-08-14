@@ -4,6 +4,7 @@ export interface ContactTagItem {
   id: string
   name: string
   memberCount: number
+  memberNames?: string[]
 }
 
 export interface Contact {

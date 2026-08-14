@@ -1,7 +1,21 @@
 <script setup lang="ts">
-import { computed, reactive, shallowRef } from "vue";
+import { computed, onMounted, reactive, shallowRef, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { RefreshLeft, Search, View, Plus, Delete, Edit } from "@element-plus/icons-vue";
+import { RefreshLeft, Search, View, Plus, Edit } from "@element-plus/icons-vue";
+import {
+  getModerationHits,
+  getModerationProfiles,
+  rejectModerationProfile,
+  approveModerationProfile,
+  restoreModerationProfile,
+  getSensitiveWords,
+  createSensitiveWord,
+  importSensitiveWords,
+  updateSensitiveWord,
+  updateSensitiveWordStatus,
+  getSmsProvidersHealth,
+} from "@/api/modules/admin";
+import type { Moderation, SensitiveWords, Sms } from "@/api/interface";
 
 const activeTab = shallowRef("region");
 
@@ -129,6 +143,24 @@ function resetSmsResultFilters(): void {
 }
 
 /* ============================================================
+ *  Tab: 短信供应商健康
+ * ============================================================ */
+const smsProviderHealthLoading = shallowRef(false);
+const smsProviderHealthItems = shallowRef<Sms.ProviderHealthItem[]>([]);
+
+async function loadSmsProvidersHealth(): Promise<void> {
+  smsProviderHealthLoading.value = true;
+  try {
+    const res = await getSmsProvidersHealth();
+    smsProviderHealthItems.value = Array.isArray(res.data) ? res.data : [];
+  } catch {
+    smsProviderHealthItems.value = [];
+  } finally {
+    smsProviderHealthLoading.value = false;
+  }
+}
+
+/* ============================================================
  *  Tab 4: APP 版本管理
  * ============================================================ */
 interface AppVersion {
@@ -190,76 +222,548 @@ async function savePrivacy(): Promise<void> {
 /* ============================================================
  *  Tab 6: 敏感词配置
  * ============================================================ */
-interface SensitiveWord {
-  id: number;
-  word: string;
-  category: "政治" | "色情" | "暴力" | "广告" | "其他";
-  createdAt: string;
-}
+type SensitiveWordCategory = "政治" | "色情" | "暴力" | "广告" | "其他";
 
 const sensitiveWordFilters = reactive({ keyword: "" });
 const sensitiveWordPage = shallowRef(1);
-const sensitiveWordSize = shallowRef(10);
+const sensitiveWordSize = shallowRef(20);
+const sensitiveWordTotal = shallowRef(0);
+const sensitiveWordLoading = shallowRef(false);
+const sensitiveWordItems = shallowRef<SensitiveWords.WordItem[]>([]);
 const newWordInput = shallowRef("");
-const newWordCategory = shallowRef<SensitiveWord["category"]>("其他");
+const newWordCategory = shallowRef<SensitiveWordCategory>("其他");
 
-const sensitiveWords = shallowRef<SensitiveWord[]>([
-  { id: 1, word: "赌博", category: "其他", createdAt: "2026-07-01" },
-  { id: 2, word: "传销", category: "广告", createdAt: "2026-07-01" },
-  { id: 3, word: "枪支", category: "暴力", createdAt: "2026-07-15" },
-  { id: 4, word: "假证", category: "广告", createdAt: "2026-07-20" },
-  { id: 5, word: "代孕", category: "其他", createdAt: "2026-08-01" },
-  { id: 6, word: "发票代开", category: "广告", createdAt: "2026-08-05" },
-]);
+async function loadSensitiveWords(): Promise<void> {
+  sensitiveWordLoading.value = true;
+  try {
+    const res = await getSensitiveWords({
+      page: sensitiveWordPage.value,
+      size: sensitiveWordSize.value,
+      keyword: sensitiveWordFilters.keyword.trim() || undefined,
+    });
+    const list = Array.isArray(res.data) ? res.data : [];
+    sensitiveWordItems.value = list;
+    sensitiveWordTotal.value = list.length;
+  } catch {
+    sensitiveWordItems.value = [];
+    sensitiveWordTotal.value = 0;
+  } finally {
+    sensitiveWordLoading.value = false;
+  }
+}
 
-const filteredSensitiveWords = computed(() => {
-  const kw = sensitiveWordFilters.keyword.trim().toLowerCase();
-  return sensitiveWords.value.filter((w) => !kw || w.word.toLowerCase().includes(kw));
-});
-
-const pageSensitiveWords = computed(() => {
-  const s = (sensitiveWordPage.value - 1) * sensitiveWordSize.value;
-  return filteredSensitiveWords.value.slice(s, s + sensitiveWordSize.value);
-});
+function searchSensitiveWords(): void {
+  sensitiveWordPage.value = 1;
+  void loadSensitiveWords();
+}
 
 function resetSensitiveWordFilters(): void {
   sensitiveWordFilters.keyword = "";
   sensitiveWordPage.value = 1;
+  void loadSensitiveWords();
 }
 
-function addSensitiveWord(): void {
+function formatSensitiveWordTime(row: SensitiveWords.WordItem): string {
+  return formatHitTime(String(row.createdAt ?? ""));
+}
+
+const createWordSubmitting = shallowRef(false);
+
+async function submitCreateSensitiveWord(): Promise<void> {
   const word = newWordInput.value.trim();
   if (!word) {
     ElMessage.warning("请输入敏感词");
     return;
   }
-  const exists = sensitiveWords.value.some((w) => w.word === word);
-  if (exists) {
-    ElMessage.warning("该敏感词已存在");
-    return;
+  if (createWordSubmitting.value) return;
+
+  createWordSubmitting.value = true;
+  try {
+    await createSensitiveWord({
+      word,
+      category: newWordCategory.value,
+    });
+    ElMessage.success("敏感词已添加");
+    newWordInput.value = "";
+    await loadSensitiveWords();
+  } catch {
+  } finally {
+    createWordSubmitting.value = false;
   }
-  const id = Math.max(...sensitiveWords.value.map((w) => w.id), 0) + 1;
-  sensitiveWords.value = [
-    ...sensitiveWords.value,
-    { id, word, category: newWordCategory.value, createdAt: new Date().toISOString().slice(0, 10) },
-  ];
-  newWordInput.value = "";
-  ElMessage.success("敏感词已添加");
 }
 
-async function deleteSensitiveWord(row: SensitiveWord): Promise<void> {
+const importWordDialogVisible = shallowRef(false);
+const importWordSubmitting = shallowRef(false);
+const importWordForm = reactive({
+  text: "",
+  category: "其他" as SensitiveWordCategory,
+  reason: "",
+});
+
+function parseImportWords(text: string): string[] {
+  const seen = new Set<string>();
+  const words: string[] = [];
+  for (const part of text.split(/[\n,，;；]+/)) {
+    const word = part.trim();
+    if (!word || seen.has(word)) continue;
+    seen.add(word);
+    words.push(word);
+  }
+  return words;
+}
+
+function openImportWordDialog(): void {
+  importWordForm.text = "";
+  importWordForm.category = newWordCategory.value;
+  importWordForm.reason = "";
+  importWordDialogVisible.value = true;
+}
+
+function closeImportWordDialog(): void {
+  importWordDialogVisible.value = false;
+  importWordForm.text = "";
+  importWordForm.category = "其他";
+  importWordForm.reason = "";
+}
+
+async function submitImportSensitiveWords(): Promise<void> {
+  const words = parseImportWords(importWordForm.text);
+  const reason = importWordForm.reason.trim();
+  if (!words.length) {
+    ElMessage.warning("请输入要导入的敏感词");
+    return;
+  }
+  if (!reason) {
+    ElMessage.warning("请填写操作原因");
+    return;
+  }
+  if (importWordSubmitting.value) return;
+
+  importWordSubmitting.value = true;
   try {
-    await ElMessageBox.confirm(`确定删除敏感词「${row.word}」吗？`, "删除确认", {
-      type: "warning",
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
+    await importSensitiveWords({
+      words,
+      category: importWordForm.category,
+      reason,
     });
-    sensitiveWords.value = sensitiveWords.value.filter((w) => w.id !== row.id);
-    ElMessage.success("已删除");
+    ElMessage.success(`已提交导入 ${words.length} 个敏感词`);
+    closeImportWordDialog();
+    await loadSensitiveWords();
   } catch {
-    // cancelled
+  } finally {
+    importWordSubmitting.value = false;
   }
 }
+
+const editWordDialogVisible = shallowRef(false);
+const editWordSubmitting = shallowRef(false);
+const editWordTargetId = shallowRef("");
+const editWordForm = reactive({
+  word: "",
+  category: "其他",
+  status: "active",
+});
+
+function openEditWordDialog(row: SensitiveWords.WordItem): void {
+  editWordTargetId.value = row.id;
+  editWordForm.word = row.word;
+  editWordForm.category = row.category || "其他";
+  editWordForm.status = row.status || "active";
+  editWordDialogVisible.value = true;
+}
+
+function closeEditWordDialog(): void {
+  editWordDialogVisible.value = false;
+  editWordTargetId.value = "";
+  editWordForm.word = "";
+  editWordForm.category = "其他";
+  editWordForm.status = "active";
+}
+
+async function submitEditSensitiveWord(): Promise<void> {
+  const id = editWordTargetId.value;
+  const word = editWordForm.word.trim();
+  if (!id) {
+    ElMessage.warning("缺少敏感词 ID");
+    return;
+  }
+  if (!word) {
+    ElMessage.warning("请输入敏感词");
+    return;
+  }
+  if (editWordSubmitting.value) return;
+
+  editWordSubmitting.value = true;
+  try {
+    await updateSensitiveWord(id, {
+      word,
+      category: editWordForm.category,
+      status: editWordForm.status,
+    });
+    ElMessage.success("敏感词已修改");
+    closeEditWordDialog();
+    await loadSensitiveWords();
+  } catch {
+  } finally {
+    editWordSubmitting.value = false;
+  }
+}
+
+const statusUpdatingIds = shallowRef<Set<string>>(new Set());
+
+async function toggleSensitiveWordStatus(row: SensitiveWords.WordItem): Promise<void> {
+  if (!row.id || statusUpdatingIds.value.has(row.id)) return;
+  const nextStatus = row.status === "active" ? "disabled" : "active";
+  const nextSet = new Set(statusUpdatingIds.value);
+  nextSet.add(row.id);
+  statusUpdatingIds.value = nextSet;
+  try {
+    await updateSensitiveWordStatus(row.id, { status: nextStatus });
+    ElMessage.success(nextStatus === "active" ? "已启用" : "已停用");
+    await loadSensitiveWords();
+  } catch {
+  } finally {
+    const doneSet = new Set(statusUpdatingIds.value);
+    doneSet.delete(row.id);
+    statusUpdatingIds.value = doneSet;
+  }
+}
+
+const hitPage = shallowRef(1);
+const hitSize = shallowRef(20);
+const hitTotal = shallowRef(0);
+const hitLoading = shallowRef(false);
+const hitItems = shallowRef<Moderation.HitItem[]>([]);
+
+const hitFieldLabels: Record<string, string> = {
+  nickname: "昵称",
+  group_name: "群名",
+  announcement: "群公告",
+};
+
+const hitDispositionLabels: Record<string, string> = {
+  intercept: "已拦截",
+  pending_review: "待审核",
+};
+
+function formatHitField(field: string): string {
+  return hitFieldLabels[field] ?? field;
+}
+
+function formatHitDisposition(disposition: string): string {
+  return hitDispositionLabels[disposition] ?? disposition;
+}
+
+function formatHitTime(value: string): string {
+  if (!value) return "-";
+  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+}
+
+async function loadModerationHits(): Promise<void> {
+  hitLoading.value = true;
+  try {
+    const res = await getModerationHits({
+      page: hitPage.value,
+      size: hitSize.value,
+    });
+    hitItems.value = res.data?.items ?? [];
+    hitTotal.value = res.data?.total ?? 0;
+  } catch {
+    hitItems.value = [];
+    hitTotal.value = 0;
+  } finally {
+    hitLoading.value = false;
+  }
+}
+
+const profileFilters = reactive({ status: "" });
+const profilePage = shallowRef(1);
+const profileSize = shallowRef(20);
+const profileTotal = shallowRef(0);
+const profileLoading = shallowRef(false);
+const profileItems = shallowRef<Moderation.ProfileItem[]>([]);
+
+const profileStatusLabels: Record<string, string> = {
+  pending: "待审核",
+  rejected: "已驳回",
+  approved: "已同意",
+  restored: "已恢复",
+};
+
+const profileStatusTagTypes: Record<string, "warning" | "danger" | "success" | "info"> = {
+  pending: "warning",
+  rejected: "danger",
+  approved: "success",
+  restored: "info",
+};
+
+const profileFieldLabels: Record<string, string> = {
+  nickname: "昵称",
+  avatar: "头像",
+};
+
+function formatProfileStatus(status?: string): string {
+  if (!status) return "-";
+  return profileStatusLabels[status] ?? status;
+}
+
+function formatProfileStatusType(status?: string): "warning" | "danger" | "success" | "info" {
+  if (!status) return "info";
+  return profileStatusTagTypes[status] ?? "info";
+}
+
+function formatProfileField(field?: string): string {
+  if (!field) return "-";
+  return profileFieldLabels[field] ?? field;
+}
+
+function formatProfileValue(value?: string): string {
+  return value ? value : "-";
+}
+
+function profileUserId(row: Moderation.ProfileItem): string {
+  return row.userId || "-";
+}
+
+function profileDisplayValue(row: Moderation.ProfileItem): string {
+  return row.newValue || row.oldValue || "-";
+}
+
+function profileHandledTime(row: Moderation.ProfileItem): string {
+  return formatHitTime(String(row.handledAt ?? ""));
+}
+
+async function loadModerationProfiles(): Promise<void> {
+  profileLoading.value = true;
+  try {
+    const res = await getModerationProfiles({
+      page: profilePage.value,
+      size: profileSize.value,
+      status: profileFilters.status || undefined,
+    });
+    profileItems.value = res.data?.items ?? [];
+    profileTotal.value = res.data?.total ?? 0;
+  } catch {
+    profileItems.value = [];
+    profileTotal.value = 0;
+  } finally {
+    profileLoading.value = false;
+  }
+}
+
+function resetProfileFilters(): void {
+  profileFilters.status = "";
+  profilePage.value = 1;
+  void loadModerationProfiles();
+}
+
+function searchProfiles(): void {
+  profilePage.value = 1;
+  void loadModerationProfiles();
+}
+
+const rejectDialogVisible = shallowRef(false);
+const rejectSubmitting = shallowRef(false);
+const rejectTarget = shallowRef<Moderation.ProfileItem | null>(null);
+const rejectForm = reactive({
+  reason: "",
+});
+
+function openRejectDialog(row: Moderation.ProfileItem): void {
+  const userId = profileUserId(row);
+  if (!userId || userId === "-") {
+    ElMessage.warning("缺少用户 ID，无法驳回");
+    return;
+  }
+  if (!row.field) {
+    ElMessage.warning("缺少审核字段，无法驳回");
+    return;
+  }
+  rejectTarget.value = row;
+  rejectForm.reason = "";
+  rejectDialogVisible.value = true;
+}
+
+function closeRejectDialog(): void {
+  rejectDialogVisible.value = false;
+  rejectTarget.value = null;
+  rejectForm.reason = "";
+}
+
+async function submitRejectProfile(): Promise<void> {
+  const target = rejectTarget.value;
+  const userId = target ? profileUserId(target) : "";
+  const field = target?.field?.trim() ?? "";
+  const reason = rejectForm.reason.trim();
+  if (!userId || userId === "-") {
+    ElMessage.warning("缺少用户 ID，无法驳回");
+    return;
+  }
+  if (!field) {
+    ElMessage.warning("缺少审核字段，无法驳回");
+    return;
+  }
+  if (!reason) {
+    ElMessage.warning("请填写驳回原因");
+    return;
+  }
+  if (rejectSubmitting.value) return;
+
+  rejectSubmitting.value = true;
+  try {
+    await rejectModerationProfile(userId, { field, reason });
+    ElMessage.success("已驳回");
+    closeRejectDialog();
+    await loadModerationProfiles();
+  } catch {
+  } finally {
+    rejectSubmitting.value = false;
+  }
+}
+
+const approveDialogVisible = shallowRef(false);
+const approveSubmitting = shallowRef(false);
+const approveTarget = shallowRef<Moderation.ProfileItem | null>(null);
+const approveForm = reactive({
+  reason: "",
+});
+
+function openApproveDialog(row: Moderation.ProfileItem): void {
+  const userId = profileUserId(row);
+  if (!userId || userId === "-") {
+    ElMessage.warning("缺少用户 ID，无法同意");
+    return;
+  }
+  if (!row.field) {
+    ElMessage.warning("缺少审核字段，无法同意");
+    return;
+  }
+  approveTarget.value = row;
+  approveForm.reason = "";
+  approveDialogVisible.value = true;
+}
+
+function closeApproveDialog(): void {
+  approveDialogVisible.value = false;
+  approveTarget.value = null;
+  approveForm.reason = "";
+}
+
+async function submitApproveProfile(): Promise<void> {
+  const target = approveTarget.value;
+  const userId = target ? profileUserId(target) : "";
+  const field = target?.field?.trim() ?? "";
+  const reason = approveForm.reason.trim();
+  if (!userId || userId === "-") {
+    ElMessage.warning("缺少用户 ID，无法同意");
+    return;
+  }
+  if (!field) {
+    ElMessage.warning("缺少审核字段，无法同意");
+    return;
+  }
+  if (!reason) {
+    ElMessage.warning("请填写同意原因");
+    return;
+  }
+  if (approveSubmitting.value) return;
+
+  approveSubmitting.value = true;
+  try {
+    await approveModerationProfile(userId, { field, reason });
+    ElMessage.success("已同意");
+    closeApproveDialog();
+    await loadModerationProfiles();
+  } catch {
+  } finally {
+    approveSubmitting.value = false;
+  }
+}
+
+const restoreDialogVisible = shallowRef(false);
+const restoreSubmitting = shallowRef(false);
+const restoreTarget = shallowRef<Moderation.ProfileItem | null>(null);
+const restoreForm = reactive({
+  reason: "",
+});
+
+function openRestoreDialog(row: Moderation.ProfileItem): void {
+  const userId = profileUserId(row);
+  if (!userId || userId === "-") {
+    ElMessage.warning("缺少用户 ID，无法恢复到待审核");
+    return;
+  }
+  if (!row.field) {
+    ElMessage.warning("缺少审核字段，无法恢复到待审核");
+    return;
+  }
+  restoreTarget.value = row;
+  restoreForm.reason = "";
+  restoreDialogVisible.value = true;
+}
+
+function closeRestoreDialog(): void {
+  restoreDialogVisible.value = false;
+  restoreTarget.value = null;
+  restoreForm.reason = "";
+}
+
+async function submitRestoreProfile(): Promise<void> {
+  const target = restoreTarget.value;
+  const userId = target ? profileUserId(target) : "";
+  const field = target?.field?.trim() ?? "";
+  const reason = restoreForm.reason.trim();
+  if (!userId || userId === "-") {
+    ElMessage.warning("缺少用户 ID，无法恢复到待审核");
+    return;
+  }
+  if (!field) {
+    ElMessage.warning("缺少审核字段，无法恢复到待审核");
+    return;
+  }
+  if (!reason) {
+    ElMessage.warning("请填写操作原因");
+    return;
+  }
+  if (restoreSubmitting.value) return;
+
+  restoreSubmitting.value = true;
+  try {
+    await restoreModerationProfile(userId, { field, reason });
+    ElMessage.success("已恢复到待审核");
+    closeRestoreDialog();
+    await loadModerationProfiles();
+  } catch {
+  } finally {
+    restoreSubmitting.value = false;
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === "sensitiveWord") void loadSensitiveWords();
+  if (tab === "sensitiveHit") void loadModerationHits();
+  if (tab === "profileReview") void loadModerationProfiles();
+  if (tab === "smsProviderHealth") void loadSmsProvidersHealth();
+});
+
+watch([sensitiveWordPage, sensitiveWordSize], () => {
+  if (activeTab.value === "sensitiveWord") void loadSensitiveWords();
+});
+
+watch([hitPage, hitSize], () => {
+  if (activeTab.value === "sensitiveHit") void loadModerationHits();
+});
+
+watch([profilePage, profileSize], () => {
+  if (activeTab.value === "profileReview") void loadModerationProfiles();
+});
+
+onMounted(() => {
+  if (activeTab.value === "sensitiveWord") void loadSensitiveWords();
+  if (activeTab.value === "sensitiveHit") void loadModerationHits();
+  if (activeTab.value === "profileReview") void loadModerationProfiles();
+  if (activeTab.value === "smsProviderHealth") void loadSmsProvidersHealth();
+});
 
 /* ============================================================
  *  Tab 7: 运行错误记录
@@ -505,6 +1009,38 @@ function openErrorDetail(log: ErrorLog): void {
           </div>
         </el-tab-pane>
 
+        <el-tab-pane label="短信供应商健康" name="smsProviderHealth">
+          <div class="tab-search">
+            <div class="search-operation">
+              <el-button :icon="RefreshLeft" :loading="smsProviderHealthLoading" @click="loadSmsProvidersHealth">
+                刷新
+              </el-button>
+            </div>
+          </div>
+          <el-table v-loading="smsProviderHealthLoading" :data="smsProviderHealthItems" style="width: 100%">
+            <el-table-column label="供应商" min-width="180">
+              <template #default="{ row }">{{ row.provider || "-" }}</template>
+            </el-table-column>
+            <el-table-column label="健康状态" min-width="120">
+              <template #default="{ row }">
+                <el-tag :type="row.healthy ? 'success' : 'danger'" effect="light" round>
+                  {{ row.healthy ? "正常" : "异常" }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="延迟(ms)" min-width="120">
+              <template #default="{ row }">
+                {{ typeof row.latencyMs === "number" ? row.latencyMs : "-" }}
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty
+            v-if="!smsProviderHealthLoading && !smsProviderHealthItems.length"
+            description="暂无供应商健康数据"
+            :image-size="64"
+          />
+        </el-tab-pane>
+
         <!-- ==================== Tab 4: APP 版本管理 ==================== -->
         <el-tab-pane label="APP版本管理" name="appVersion">
           <el-table :data="appVersions" style="width: 100%">
@@ -588,13 +1124,17 @@ function openErrorDetail(log: ErrorLog): void {
                       clearable
                       placeholder="搜索敏感词"
                       :prefix-icon="Search"
-                      @clear="sensitiveWordPage = 1"
+                      @clear="searchSensitiveWords"
+                      @keyup.enter="searchSensitiveWords"
                     />
                   </el-form-item>
                 </div>
                 <div class="search-operation">
-                  <el-button type="primary" :icon="Search" @click="sensitiveWordPage = 1">搜索</el-button>
+                  <el-button type="primary" :icon="Search" @click="searchSensitiveWords">搜索</el-button>
                   <el-button :icon="RefreshLeft" @click="resetSensitiveWordFilters">重置</el-button>
+                  <el-button :icon="RefreshLeft" :loading="sensitiveWordLoading" @click="loadSensitiveWords">
+                    刷新
+                  </el-button>
                 </div>
               </div>
             </el-form>
@@ -614,20 +1154,37 @@ function openErrorDetail(log: ErrorLog): void {
               <el-option label="广告" value="广告" />
               <el-option label="其他" value="其他" />
             </el-select>
-            <el-button type="primary" :icon="Plus" @click="addSensitiveWord">添加</el-button>
+            <el-button type="primary" :icon="Plus" :loading="createWordSubmitting" @click="submitCreateSensitiveWord">
+              添加
+            </el-button>
+            <el-button @click="openImportWordDialog">批量导入</el-button>
           </div>
 
-          <el-table :data="pageSensitiveWords" style="width: 100%">
+          <el-table v-loading="sensitiveWordLoading" :data="sensitiveWordItems" style="width: 100%">
             <el-table-column prop="word" label="敏感词" min-width="150" />
             <el-table-column label="分类" min-width="100">
               <template #default="{ row }">
-                <el-tag effect="plain" round>{{ row.category }}</el-tag>
+                <el-tag effect="plain" round>{{ row.category || "-" }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="createdAt" label="添加时间" min-width="130" />
+            <el-table-column label="状态" min-width="120">
+              <template #default="{ row }">
+                <el-switch
+                  :model-value="row.status === 'active'"
+                  :loading="statusUpdatingIds.has(row.id)"
+                  inline-prompt
+                  active-text="启"
+                  inactive-text="停"
+                  @change="toggleSensitiveWordStatus(row)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="添加时间" min-width="170">
+              <template #default="{ row }">{{ formatSensitiveWordTime(row) }}</template>
+            </el-table-column>
             <el-table-column label="操作" width="100" fixed="right">
               <template #default="{ row }">
-                <el-button link type="danger" :icon="Delete" @click="deleteSensitiveWord(row)">删除</el-button>
+                <el-button link type="primary" :icon="Edit" @click="openEditWordDialog(row)">修改</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -637,9 +1194,152 @@ function openErrorDetail(log: ErrorLog): void {
               background
               v-model:current-page="sensitiveWordPage"
               v-model:page-size="sensitiveWordSize"
-              :page-sizes="[10, 25, 50, 100]"
+              :page-sizes="[10, 20, 50, 100]"
               layout="total, sizes, prev, pager, next, jumper"
-              :total="filteredSensitiveWords.length"
+              :total="sensitiveWordTotal"
+            />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="敏感词命中记录" name="sensitiveHit">
+          <div class="tab-search">
+            <div class="search-grid">
+              <div class="search-operation">
+                <el-button type="primary" :icon="RefreshLeft" :loading="hitLoading" @click="loadModerationHits">
+                  刷新
+                </el-button>
+              </div>
+            </div>
+          </div>
+
+          <el-table v-loading="hitLoading" :data="hitItems" style="width: 100%">
+            <el-table-column prop="matchedWord" label="命中词" min-width="120" />
+            <el-table-column prop="category" label="分类" min-width="90">
+              <template #default="{ row }">
+                <el-tag effect="plain" round>{{ row.category }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="字段" min-width="100">
+              <template #default="{ row }">{{ formatHitField(row.field) }}</template>
+            </el-table-column>
+            <el-table-column prop="content" label="原文内容" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
+            <el-table-column label="处理结果" min-width="110">
+              <template #default="{ row }">
+                <el-tag
+                  :type="row.disposition === 'intercept' ? 'danger' : 'warning'"
+                  effect="plain"
+                  round
+                >
+                  {{ formatHitDisposition(row.disposition) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="时间" min-width="170">
+              <template #default="{ row }">{{ formatHitTime(row.createdAt) }}</template>
+            </el-table-column>
+          </el-table>
+
+          <div class="table-footer">
+            <el-pagination
+              background
+              v-model:current-page="hitPage"
+              v-model:page-size="hitSize"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next, jumper"
+              :total="hitTotal"
+            />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="待审核头像/昵称" name="profileReview">
+          <div class="tab-search">
+            <el-form :model="profileFilters" @submit.prevent>
+              <div class="search-grid">
+                <div class="search-item">
+                  <el-form-item>
+                    <el-select v-model="profileFilters.status" clearable placeholder="状态筛选">
+                      <el-option label="待审核" value="pending" />
+                      <el-option label="已驳回" value="rejected" />
+                      <el-option label="已同意" value="approved" />
+                      <el-option label="已恢复" value="restored" />
+                    </el-select>
+                  </el-form-item>
+                </div>
+                <div class="search-operation">
+                  <el-button type="primary" :icon="Search" @click="searchProfiles">搜索</el-button>
+                  <el-button :icon="RefreshLeft" @click="resetProfileFilters">重置</el-button>
+                  <el-button :icon="RefreshLeft" :loading="profileLoading" @click="loadModerationProfiles">
+                    刷新
+                  </el-button>
+                </div>
+              </div>
+            </el-form>
+          </div>
+
+          <el-table v-loading="profileLoading" :data="profileItems" style="width: 100%">
+            <el-table-column label="类型" min-width="90">
+              <template #default="{ row }">{{ formatProfileField(row.field) }}</template>
+            </el-table-column>
+            <el-table-column label="原值" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">{{ formatProfileValue(row.oldValue) }}</template>
+            </el-table-column>
+            <el-table-column label="新值" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">{{ formatProfileValue(row.newValue) }}</template>
+            </el-table-column>
+            <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
+            <el-table-column label="状态" min-width="100">
+              <template #default="{ row }">
+                <el-tag :type="formatProfileStatusType(row.status)" effect="plain" round>
+                  {{ formatProfileStatus(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reason" label="原因" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.reason || "-" }}</template>
+            </el-table-column>
+            <el-table-column label="处理时间" min-width="170">
+              <template #default="{ row }">{{ profileHandledTime(row) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="160" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.status === 'pending'"
+                  link
+                  type="success"
+                  @click="openApproveDialog(row)"
+                >
+                  同意
+                </el-button>
+                <el-button
+                  v-if="row.status === 'pending'"
+                  link
+                  type="danger"
+                  @click="openRejectDialog(row)"
+                >
+                  驳回
+                </el-button>
+                <el-button
+                  v-if="row.status === 'rejected' || row.status === 'approved'"
+                  link
+                  type="primary"
+                  @click="openRestoreDialog(row)"
+                >
+                  恢复待审
+                </el-button>
+                <span v-if="row.status === 'restored'">-</span>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="table-footer">
+            <el-pagination
+              background
+              v-model:current-page="profilePage"
+              v-model:page-size="profileSize"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next, jumper"
+              :total="profileTotal"
             />
           </div>
         </el-tab-pane>
@@ -708,6 +1408,190 @@ function openErrorDetail(log: ErrorLog): void {
         </el-tab-pane>
       </el-tabs>
     </section>
+
+    <el-dialog
+      v-model="importWordDialogVisible"
+      title="批量导入敏感词"
+      width="520px"
+      destroy-on-close
+      @closed="closeImportWordDialog"
+    >
+      <el-form label-width="88px" @submit.prevent>
+        <el-form-item label="敏感词" required>
+          <el-input
+            v-model="importWordForm.text"
+            type="textarea"
+            :rows="8"
+            placeholder="每行一个，也可用逗号分隔"
+          />
+        </el-form-item>
+        <el-form-item label="分类">
+          <el-select v-model="importWordForm.category" style="width: 160px">
+            <el-option label="政治" value="政治" />
+            <el-option label="色情" value="色情" />
+            <el-option label="暴力" value="暴力" />
+            <el-option label="广告" value="广告" />
+            <el-option label="其他" value="其他" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="操作原因" required>
+          <el-input
+            v-model="importWordForm.reason"
+            type="textarea"
+            :rows="3"
+            maxlength="200"
+            show-word-limit
+            placeholder="请输入操作原因"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeImportWordDialog">取消</el-button>
+        <el-button type="primary" :loading="importWordSubmitting" @click="submitImportSensitiveWords">
+          确认导入
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="editWordDialogVisible"
+      title="修改敏感词"
+      width="480px"
+      destroy-on-close
+      @closed="closeEditWordDialog"
+    >
+      <el-form label-width="88px" @submit.prevent>
+        <el-form-item label="敏感词" required>
+          <el-input v-model="editWordForm.word" clearable placeholder="请输入敏感词" />
+        </el-form-item>
+        <el-form-item label="分类">
+          <el-select v-model="editWordForm.category" style="width: 160px">
+            <el-option label="政治" value="政治" />
+            <el-option label="色情" value="色情" />
+            <el-option label="暴力" value="暴力" />
+            <el-option label="广告" value="广告" />
+            <el-option label="赌博" value="赌博" />
+            <el-option label="违法" value="违法" />
+            <el-option label="游戏违规" value="游戏违规" />
+            <el-option label="其他" value="其他" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="editWordForm.status" style="width: 160px">
+            <el-option label="启用" value="active" />
+            <el-option label="停用" value="disabled" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeEditWordDialog">取消</el-button>
+        <el-button type="primary" :loading="editWordSubmitting" @click="submitEditSensitiveWord">
+          确认修改
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="rejectDialogVisible"
+      title="驳回头像/昵称"
+      width="480px"
+      destroy-on-close
+      @closed="closeRejectDialog"
+    >
+      <el-form label-width="88px" @submit.prevent>
+        <el-form-item label="用户">
+          <span>{{ rejectTarget ? profileDisplayValue(rejectTarget) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="类型">
+          <span>{{ rejectTarget ? formatProfileField(rejectTarget.field) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="用户 ID">
+          <span>{{ rejectTarget ? profileUserId(rejectTarget) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="驳回原因" required>
+          <el-input
+            v-model="rejectForm.reason"
+            type="textarea"
+            :rows="4"
+            maxlength="200"
+            show-word-limit
+            placeholder="请输入驳回原因"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeRejectDialog">取消</el-button>
+        <el-button type="danger" :loading="rejectSubmitting" @click="submitRejectProfile">确认驳回</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="approveDialogVisible"
+      title="同意头像/昵称"
+      width="480px"
+      destroy-on-close
+      @closed="closeApproveDialog"
+    >
+      <el-form label-width="88px" @submit.prevent>
+        <el-form-item label="用户">
+          <span>{{ approveTarget ? profileDisplayValue(approveTarget) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="类型">
+          <span>{{ approveTarget ? formatProfileField(approveTarget.field) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="用户 ID">
+          <span>{{ approveTarget ? profileUserId(approveTarget) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="同意原因" required>
+          <el-input
+            v-model="approveForm.reason"
+            type="textarea"
+            :rows="4"
+            maxlength="200"
+            show-word-limit
+            placeholder="请输入同意原因"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeApproveDialog">取消</el-button>
+        <el-button type="success" :loading="approveSubmitting" @click="submitApproveProfile">确认同意</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="restoreDialogVisible"
+      title="恢复到待审核"
+      width="480px"
+      destroy-on-close
+      @closed="closeRestoreDialog"
+    >
+      <el-form label-width="88px" @submit.prevent>
+        <el-form-item label="用户">
+          <span>{{ restoreTarget ? profileDisplayValue(restoreTarget) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="类型">
+          <span>{{ restoreTarget ? formatProfileField(restoreTarget.field) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="用户 ID">
+          <span>{{ restoreTarget ? profileUserId(restoreTarget) : "-" }}</span>
+        </el-form-item>
+        <el-form-item label="操作原因" required>
+          <el-input
+            v-model="restoreForm.reason"
+            type="textarea"
+            :rows="4"
+            maxlength="200"
+            show-word-limit
+            placeholder="请输入操作原因"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeRestoreDialog">取消</el-button>
+        <el-button type="primary" :loading="restoreSubmitting" @click="submitRestoreProfile">确认恢复</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 错误日志详情弹窗 -->
     <el-dialog v-model="errorDetailVisible" title="错误详情" width="min(640px, calc(100% - 32px))">

@@ -28,6 +28,11 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "群组管理" },
       },
       {
+        path: "app/reports",
+        component: () => import("./views/ReportManagementView.vue"),
+        meta: { title: "举报管理" },
+      },
+      {
         path: "system/users",
         component: () => import("./views/UserManagementView.vue"),
         meta: { title: "平台用户管理" },

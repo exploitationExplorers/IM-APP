@@ -85,4 +85,9 @@ CREATE TABLE IF NOT EXISTS groups (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 兼容旧库：groups 表已存在但没有 public_id 列时补上（幂等）
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS public_id VARCHAR(20)
+    DEFAULT nextval('group_public_id_seq'::regclass)::TEXT
+    CONSTRAINT groups_public_id_numeric_check CHECK (public_id ~ '^[0-9]+$');
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_public_id ON groups(public_id);
