@@ -47,7 +47,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### POST `/api/v1/auth/register`
 
-手机号 + 验证码 + 密码注册（密码至少 6 位）。成功返回 `accessToken` / `refreshToken` / `user`。
+手机号 + 验证码注册。密码可选；不传则只支持验证码登录，之后在安全设置里设初始密码。若传密码则至少 6 位。
 
 **Body**
 ```json
@@ -55,7 +55,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
   "countryCode": "+86",
   "phone": "13900000001",
   "code": "123456",
-  "password": "test123456",
+  "password": "",
   "deviceId": "test-device"
 }
 ```
@@ -74,7 +74,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
     "nickname": "用户0001",
     "avatar": "",
     "bio": "",
-    "status": "active"
+    "status": "active",
+    "hasPassword": false
   }
 }
 ```
@@ -170,7 +171,9 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/me`
 
-当前用户资料。
+当前用户资料。含 `hasPassword`：是否已设置过登录密码。未设置时安全页走「设初始密码」，不要求旧密码。
+
+只返回脱敏号 `phoneMasked`，**不返回明文手机号**。安全页完整号由客户端用登录时输入的本地号展示。他人资料接口同样不返回明文手机号。
 
 ### PUT `/api/v1/me`
 
@@ -207,16 +210,30 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 修改隐私设置。Body 同 Response 结构。
 
+### POST `/api/v1/me/password/verify`
+
+登录态下校验旧密码（安全页点「下一步」）。需 JWT。未设置密码或旧密码不正确返回 400。
+
+**Body**
+```json
+{ "oldPassword": "oldpass123" }
+```
+
+**Response**
+```json
+{ "ok": true }
+```
+
 ### PUT `/api/v1/me/password`
 
-登录态下设置/修改密码（安全设置 → 重置密码）。需 JWT。已设置过密码时需传 `oldPassword`。
+登录态下设置/修改密码（安全设置 → 重置密码）。需 JWT。仅当 `hasPassword=true` 时必须传 `oldPassword`。
 
 **Body**
 ```json
 { "password": "newpassword123", "oldPassword": "oldpass123" }
 ```
 
-首次设置密码可省略 `oldPassword`。
+首次设置密码可省略 `oldPassword`。历史验证码注册写入的临时密码不算已设密码。
 
 ### GET `/api/v1/me/qrcode`
 
@@ -271,7 +288,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/contacts`
 
-好友列表。
+好友列表。每项含 `remark`（无备注时为空字符串）。通讯录展示优先用备注，没有则用昵称。
 
 ### GET `/api/v1/contacts/:id`
 
@@ -307,7 +324,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/friend-requests?direction=received|sent`
 
-好友申请列表（默认 `received`）。
+好友申请列表（默认 `received`）。只返回 `pending`，按时间倒序，最多 100 条。
 
 ### POST `/api/v1/friend-requests`
 
@@ -317,7 +334,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
   "toUserId": "uuid",
   "message": "验证说明",
   "source": "public_id|user_qrcode|group",
-  "sourceGroupId": "uuid"
+  "sourceGroupId": "100001"
 }
 ```
 
@@ -417,7 +434,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 **Response**
 ```json
 {
-  "id": "uuid",
+  "id": "100001",
   "name": "群名称",
   "ownerId": "uuid",
   "memberCount": 3,
@@ -434,23 +451,33 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 群详情（需为群成员）。
 
+群相关对外接口中的 `:id` 均为纯数字群号（例如 `100001`）。服务端会映射为内部 UUID；数据库关联和 OpenIM 对接仍使用原 UUID 映射，前端不再传群 UUID。
+
+响应包含 `myRole`、`myNickname`、`joinMode`、`allMuted` 以及 `permissions`，前端据此展示群资料编辑、二维码、成员管理和举报入口。
+
 ### GET `/api/v1/groups/:id/members`
 
 群成员列表。
 
 ### GET `/api/v1/groups/:id/qrcode`
 
-群主/管理员获取群二维码。
+所有有效群成员获取群二维码字符串。前端使用响应 `payload` 生成二维码图片。
 
 ### POST `/api/v1/groups/qrcode/resolve`
 
-解析群二维码。
+只读解析群二维码，返回 `joined`、`joinMode` 和 `nextAction=enter|join|apply`。
 
 **Body** `{ "token": "..." }`
 
+### POST `/api/v1/groups/qrcode/join`
+
+用户确认后按二维码加入群：已是成员返回 `enter`；公开群直接加入并返回 `joined`；审核群创建/复用申请并返回 `pending_approval`。
+
+**Body** `{ "token": "...", "remark": "申请说明" }`，也支持传完整 `payload`。
+
 ### POST `/api/v1/groups/:id/join`
 
-直接加入群聊（公开群）。
+直接加入公开群。审核群返回 HTTP 409，必须提交入群申请。
 
 ### POST `/api/v1/groups/:id/invitations`
 
@@ -502,12 +529,28 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 **Body**
 ```json
 {
+  "name": "新群名称",
+  "avatarFileId": "已完成上传的本人图片 fileId",
   "announcement": "公告",
   "allowMemberAddFriend": false,
   "joinMode": "open|approval",
   "allMuted": false
 }
 ```
+
+群名称、头像和公告仅群主/管理员可修改。`avatarFileId` 必须属于操作者本人，且文件为 `ready + purpose=avatar + image/*`。
+
+### PUT `/api/v1/groups/:id/me/nickname`
+
+修改“我在本群的昵称”。空字符串恢复全局昵称，最长 32 个 Unicode 字符。
+
+**Body** `{ "nickname": "群内昵称" }`
+
+### POST `/api/v1/groups/:id/reports`
+
+举报当前群聊，仅群成员可提交；同一用户对同一群的待处理举报幂等。
+
+**Body** `{ "reason": "spam|fraud|pornography|violence|harassment|other", "description": "补充说明" }`
 
 ### POST `/api/v1/groups/:id/leave`
 
@@ -616,7 +659,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/im/groups/:businessGroupId`
 
-把业务群 UUID 解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
+把纯数字业务群号解析为内部 UUID，再解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
 
 ## OpenIM 内部接口
 

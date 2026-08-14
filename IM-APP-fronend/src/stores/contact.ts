@@ -16,15 +16,18 @@ export const useContactStore = defineStore('contact', () => {
   const friendRequests = ref<FriendRequest[]>([])
   const groupsExpanded = ref(false)
 
-  async function loadAll() {
-    const [c, g, fr] = await Promise.all([
-      fetchContacts(),
-      fetchGroups(),
-      fetchFriendRequests(),
-    ])
+  async function loadDirectory() {
+    const [c, g] = await Promise.all([fetchContacts(), fetchGroups()])
     contacts.value = c
     groups.value = g
-    friendRequests.value = fr
+  }
+
+  async function loadFriendRequests() {
+    friendRequests.value = await fetchFriendRequests()
+  }
+
+  async function loadAll() {
+    await Promise.all([loadDirectory(), loadFriendRequests()])
   }
 
   async function acceptRequest(id: string) {
@@ -42,7 +45,7 @@ export const useContactStore = defineStore('contact', () => {
   async function addFriend(toUserId: string, message: string): Promise<SendFriendResult> {
     const result = await sendFriendRequest(toUserId, message)
     if (result.status === 'accepted') {
-      await loadAll()
+      await loadDirectory()
       goToContacts()
     }
     return result
@@ -60,6 +63,12 @@ export const useContactStore = defineStore('contact', () => {
     })
   }
 
+  function openChatWithGroup(groupId: string, groupName: string, avatar: string) {
+    uni.navigateTo({
+      url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId)}&title=${encodeURIComponent(groupName)}&avatar=${encodeURIComponent(avatar)}`,
+    })
+  }
+
   function toggleGroupsExpanded() {
     groupsExpanded.value = !groupsExpanded.value
   }
@@ -70,11 +79,14 @@ export const useContactStore = defineStore('contact', () => {
     friendRequests,
     groupsExpanded,
     loadAll,
+    loadDirectory,
+    loadFriendRequests,
     acceptRequest,
     rejectRequest,
     addFriend,
     goToContacts,
     openChatWithContact,
+    openChatWithGroup,
     toggleGroupsExpanded,
   }
 })

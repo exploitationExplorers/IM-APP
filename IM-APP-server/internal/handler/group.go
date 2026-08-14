@@ -64,6 +64,10 @@ func (h *GroupHandler) Join(c *gin.Context) {
 	uid := middleware.UserID(c)
 	g, err := h.Svc.Join(c.Request.Context(), c.Param("id"), uid)
 	if err != nil {
+		if errors.Is(err, repository.ErrApprovalRequired) {
+			response.Fail(c, http.StatusConflict, "该群需要管理员审核，请提交入群申请")
+			return
+		}
 		response.Fail(c, http.StatusBadRequest, "加入失败")
 		return
 	}
@@ -78,9 +82,14 @@ func (h *GroupHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.UpdateSettings(c.Request.Context(), c.Param("id"), uid,
-		req.Announcement, req.AllowMemberAddFriend, req.JoinMode, req.AllMuted); err != nil {
+		req.Name, req.AvatarFileID, req.Announcement,
+		req.AllowMemberAddFriend, req.JoinMode, req.AllMuted); err != nil {
 		if errors.Is(err, repository.ErrForbidden) {
 			response.Fail(c, http.StatusForbidden, "无权限")
+			return
+		}
+		if errors.Is(err, repository.ErrInvalidGroupOperation) {
+			response.Fail(c, http.StatusBadRequest, "群设置参数错误")
 			return
 		}
 		response.Fail(c, http.StatusInternalServerError, "更新失败")
@@ -128,9 +137,85 @@ func (h *GroupHandler) ResolveQRCode(c *gin.Context) {
 	if token == "" && req.Payload != "" {
 		token = extractQRToken(req.Payload)
 	}
+	if token == "" && req.QRCode != "" {
+		token = extractQRToken(req.QRCode)
+	}
 	result, err := h.Svc.ResolveQRCode(c.Request.Context(), uid, token)
 	if err != nil {
 		response.Fail(c, http.StatusNotFound, "二维码无效或已过期")
+		return
+	}
+	response.OK(c, result)
+}
+
+func (h *GroupHandler) JoinByQRCode(c *gin.Context) {
+	var req models.JoinGroupByQRCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	token := req.Token
+	if token == "" && req.Payload != "" {
+		token = extractQRToken(req.Payload)
+	}
+	if token == "" && req.QRCode != "" {
+		token = extractQRToken(req.QRCode)
+	}
+	result, err := h.Svc.JoinByQRCode(c.Request.Context(), middleware.UserID(c), token, req.Remark)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrInvalidGroupOperation):
+			response.Fail(c, http.StatusBadRequest, "参数错误")
+		default:
+			response.Fail(c, http.StatusNotFound, "二维码无效、已过期或群不可加入")
+		}
+		return
+	}
+	response.OK(c, result)
+}
+
+func (h *GroupHandler) UpdateMyNickname(c *gin.Context) {
+	var req models.UpdateMyGroupNicknameReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	err := h.Svc.UpdateMyNickname(c.Request.Context(), c.Param("id"), middleware.UserID(c), req.Nickname)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, "不是有效群成员")
+		case errors.Is(err, repository.ErrInvalidGroupOperation):
+			response.Fail(c, http.StatusBadRequest, "群昵称最多 32 个字")
+		default:
+			response.Fail(c, http.StatusInternalServerError, "更新失败")
+		}
+		return
+	}
+	g, err := h.Svc.GetDetail(c.Request.Context(), c.Param("id"), middleware.UserID(c))
+	if err != nil {
+		response.OK(c, gin.H{"ok": true})
+		return
+	}
+	response.OK(c, g)
+}
+
+func (h *GroupHandler) CreateReport(c *gin.Context) {
+	var req models.CreateGroupReportReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	result, err := h.Svc.CreateReport(c.Request.Context(), c.Param("id"), middleware.UserID(c), req.Reason, req.Description)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, "不是有效群成员")
+		case errors.Is(err, repository.ErrInvalidGroupOperation):
+			response.Fail(c, http.StatusBadRequest, "举报参数错误")
+		default:
+			response.Fail(c, http.StatusInternalServerError, "举报提交失败")
+		}
 		return
 	}
 	response.OK(c, result)

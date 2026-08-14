@@ -84,18 +84,20 @@ func main() {
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
 
 	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo}
-	imSvc := &service.IMService{Client: imClient, Users: userRepo, Access: imAccessRepo, Config: cfg.OpenIM}
+	imSvc := &service.IMService{
+		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Config: cfg.OpenIM, TokenCache: redisClient,
+	}
 	imAdminSvc := &service.IMAdminService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Outbox: imOutboxRepo,
 	}
-	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo}
+	contactSvc := &service.ContactService{Contacts: contactRepo, Groups: groupRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo}
 	chatSvc := &service.ChatService{Chat: chatRepo}
 	if cfg.LegacyChatEnabled {
 		chatSvc.Hub = hub
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
 	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
-	groupSvc := &service.GroupService{Groups: groupRepo}
+	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
@@ -175,6 +177,7 @@ func main() {
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
+			auth.POST("/me/password/verify", userH.VerifyPassword)
 			auth.PUT("/me/password", userH.ChangePassword)
 			auth.GET("/me/privacy-settings", userH.GetPrivacySettings)
 			auth.PUT("/me/privacy-settings", userH.UpdatePrivacySettings)
@@ -208,6 +211,7 @@ func main() {
 			auth.GET("/groups", contactH.ListGroups)
 			auth.POST("/groups", groupH.Create)
 			auth.POST("/groups/qrcode/resolve", groupH.ResolveQRCode)
+			auth.POST("/groups/qrcode/join", groupH.JoinByQRCode)
 			auth.GET("/groups/:id", groupH.Detail)
 			auth.GET("/groups/:id/members", groupH.Members)
 			auth.GET("/groups/:id/qrcode", groupH.Qrcode)
@@ -220,7 +224,9 @@ func main() {
 			auth.PUT("/groups/:id/members/:userId/role", groupH.UpdateMemberRole)
 			auth.PUT("/groups/:id/members/:userId/mute", groupH.UpdateMemberMute)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
+			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
 			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
+			auth.POST("/groups/:id/reports", groupH.CreateReport)
 			auth.PUT("/groups/:id/mute", groupH.UpdateMute)
 			auth.POST("/groups/:id/leave", groupH.Leave)
 			auth.POST("/groups/:id/dismiss", groupH.Dismiss)

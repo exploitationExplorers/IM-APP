@@ -94,6 +94,7 @@ func (w *IMSyncWorker) syncEvent(ctx context.Context, event repository.IMSyncEve
 	case repository.IMEventGroupCreated, repository.IMEventGroupUpdated,
 		repository.IMEventGroupMemberJoined, repository.IMEventGroupMemberLeft,
 		repository.IMEventGroupMemberRole, repository.IMEventGroupMemberMute,
+		repository.IMEventGroupMemberProfile,
 		repository.IMEventGroupMute, repository.IMEventGroupDismissed:
 		return w.syncGroup(ctx, event)
 	default:
@@ -276,6 +277,9 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 			return err
 		}
 		for memberID, member := range memberByID {
+			if err := w.Client.SetGroupMemberNickname(ctx, groupID, memberID, member.GroupNickname); err != nil {
+				return err
+			}
 			if member.Role == "owner" {
 				continue
 			}
@@ -334,6 +338,13 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 			return nil
 		}
 		return w.Client.SetGroupMemberMute(ctx, groupID, memberID, remainingMuteSeconds(member.MutedUntil))
+	}
+	if event.EventType == repository.IMEventGroupMemberProfile {
+		member, exists := memberByID[memberID]
+		if !exists {
+			return nil
+		}
+		return w.Client.SetGroupMemberNickname(ctx, groupID, memberID, member.GroupNickname)
 	}
 	if _, exists := memberByID[memberID]; exists {
 		return w.Client.InviteGroupMember(ctx, groupID, []string{memberID})

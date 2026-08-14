@@ -24,6 +24,7 @@ const (
 	IMEventGroupMemberLeft    = "group.member.left"
 	IMEventGroupMemberRole    = "group.member.role_changed"
 	IMEventGroupMemberMute    = "group.member.mute_changed"
+	IMEventGroupMemberProfile = "group.member.profile_changed"
 	IMEventGroupMute          = "group.mute_changed"
 	IMEventGroupDismissed     = "group.dismissed"
 )

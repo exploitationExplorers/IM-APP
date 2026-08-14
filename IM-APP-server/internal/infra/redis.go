@@ -34,6 +34,30 @@ func (r *Redis) Available() bool {
 	return r != nil && r.Client != nil
 }
 
+// CacheGet reads an optional application cache entry. A missing key is not an
+// error so callers can transparently fall back to their source of truth.
+func (r *Redis) CacheGet(ctx context.Context, key string) (string, bool, error) {
+	if !r.Available() {
+		return "", false, nil
+	}
+	value, err := r.Client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return value, true, nil
+}
+
+// CacheSet stores an application cache entry with a bounded lifetime.
+func (r *Redis) CacheSet(ctx context.Context, key, value string, ttl time.Duration) error {
+	if !r.Available() {
+		return nil
+	}
+	return r.Client.Set(ctx, key, value, ttl).Err()
+}
+
 // AllowSMS checks per-phone SMS send rate (1/min). Returns false if limited.
 func (r *Redis) AllowSMS(ctx context.Context, phone string) (bool, error) {
 	if !r.Available() {

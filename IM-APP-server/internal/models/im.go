@@ -38,12 +38,13 @@ type IMGroupSyncState struct {
 }
 
 type IMGroupSyncMember struct {
-	ID         string
-	Nickname   string
-	Avatar     string
-	Status     string
-	Role       string
-	MutedUntil *time.Time
+	ID            string
+	Nickname      string
+	GroupNickname string
+	Avatar        string
+	Status        string
+	Role          string
+	MutedUntil    *time.Time
 }
 
 type IMSystemMessageRequest struct {

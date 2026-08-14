@@ -16,7 +16,7 @@ type ContactRepo struct {
 
 func (r *ContactRepo) ListContacts(ctx context.Context, uid string) ([]models.Contact, error) {
 	rows, err := r.DB.Query(ctx, `
-		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, f.remark
+		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, COALESCE(f.remark,'')
 		FROM friendships f
 		JOIN users u ON u.id = f.friend_id
 		WHERE f.user_id=$1
@@ -41,7 +41,7 @@ func (r *ContactRepo) ListContacts(ctx context.Context, uid string) ([]models.Co
 
 func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]models.GroupPreview, error) {
 	query := `
-		SELECT g.id::text, g.name, g.avatar, gm.role, COALESCE(g.conversation_id::text,'')
+		SELECT g.public_id, g.name, g.avatar, gm.role, COALESCE(g.conversation_id::text,'')
 		FROM groups g
 		JOIN group_members gm ON gm.group_id = g.id
 		WHERE gm.user_id=$1 AND COALESCE(g.status,'active')='active'`
@@ -70,9 +70,10 @@ func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]model
 	return list, nil
 }
 
+const friendRequestListLimit = 100
+
 func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction string) ([]models.FriendRequest, error) {
 	var query string
-	var arg string
 	if direction == "sent" {
 		query = `
 			SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
@@ -80,8 +81,8 @@ func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction str
 			FROM friend_requests fr
 			JOIN users u ON u.id = fr.to_user
 			WHERE fr.from_user=$1 AND fr.status='pending'
-			ORDER BY fr.created_at DESC`
-		arg = uid
+			ORDER BY fr.created_at DESC
+			LIMIT $2`
 	} else {
 		query = `
 			SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
@@ -89,10 +90,10 @@ func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction str
 			FROM friend_requests fr
 			JOIN users u ON u.id = fr.from_user
 			WHERE fr.to_user=$1 AND fr.status='pending'
-			ORDER BY fr.created_at DESC`
-		arg = uid
+			ORDER BY fr.created_at DESC
+			LIMIT $2`
 	}
-	rows, err := r.DB.Query(ctx, query, arg)
+	rows, err := r.DB.Query(ctx, query, uid, friendRequestListLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,7 @@ func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction str
 		}
 		list = append(list, fr)
 	}
-	return list, nil
+	return list, rows.Err()
 }
 
 func (r *ContactRepo) IsFriend(ctx context.Context, uid, friendID string) (bool, error) {
@@ -198,7 +199,7 @@ func (r *ContactRepo) UpdateContactRemark(ctx context.Context, uid, friendID, re
 func (r *ContactRepo) GetContact(ctx context.Context, uid, friendID string) (models.Contact, error) {
 	var item models.Contact
 	err := r.DB.QueryRow(ctx, `
-		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, f.remark
+		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, COALESCE(f.remark,'')
 		FROM friendships f
 		JOIN users u ON u.id = f.friend_id
 		WHERE f.user_id=$1 AND f.friend_id=$2`, uid, friendID,
@@ -209,10 +210,11 @@ func (r *ContactRepo) GetContact(ctx context.Context, uid, friendID string) (mod
 // ListCommonGroups 双方共同所在的群
 func (r *ContactRepo) ListCommonGroups(ctx context.Context, uid, friendID string) ([]models.GroupPreview, error) {
 	rows, err := r.DB.Query(ctx, `
-		SELECT g.id::text, g.name, g.avatar, COALESCE(g.conversation_id::text, '')
+		SELECT g.public_id, g.name, COALESCE(g.avatar,''), COALESCE(g.conversation_id::text, '')
 		FROM groups g
 		JOIN group_members gm1 ON gm1.group_id=g.id AND gm1.user_id=$1::uuid
 		JOIN group_members gm2 ON gm2.group_id=g.id AND gm2.user_id=$2::uuid
+		WHERE COALESCE(g.status,'active')='active'
 		ORDER BY g.created_at DESC`, uid, friendID)
 	if err != nil {
 		return nil, err

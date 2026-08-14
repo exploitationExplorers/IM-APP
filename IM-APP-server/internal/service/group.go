@@ -13,6 +13,15 @@ import (
 
 type GroupService struct {
 	Groups *repository.GroupRepo
+	Files  *repository.FileRepo
+}
+
+func (s *GroupService) internalGroupID(ctx context.Context, publicID string) (string, error) {
+	publicID = strings.TrimSpace(publicID)
+	if publicID == "" || strings.IndexFunc(publicID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return "", repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.InternalIDByPublicID(ctx, publicID)
 }
 
 func (s *GroupService) Create(ctx context.Context, uid, name string, memberIDs []string) (models.GroupInfo, error) {
@@ -40,27 +49,82 @@ func (s *GroupService) Create(ctx context.Context, uid, name string, memberIDs [
 }
 
 func (s *GroupService) GetDetail(ctx context.Context, groupID, uid string) (models.GroupInfo, error) {
-	return s.Groups.GetByID(ctx, groupID, uid)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	return s.Groups.GetByID(ctx, internalID, uid)
 }
 
 func (s *GroupService) ListMembers(ctx context.Context, groupID, uid string) ([]models.GroupMember, error) {
-	return s.Groups.ListMembers(ctx, groupID, uid)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Groups.ListMembers(ctx, internalID, uid)
 }
 
 func (s *GroupService) Join(ctx context.Context, groupID, uid string) (models.GroupInfo, error) {
-	return s.Groups.Join(ctx, groupID, uid)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	return s.Groups.Join(ctx, internalID, uid)
 }
 
-func (s *GroupService) UpdateSettings(ctx context.Context, groupID, uid string, announcement *string, allow *bool, joinMode *string, allMuted *bool) error {
-	return s.Groups.UpdateSettings(ctx, groupID, uid, announcement, allow, joinMode, allMuted)
+func (s *GroupService) UpdateSettings(ctx context.Context, groupID, uid string, name, avatarFileID, announcement *string, allow *bool, joinMode *string, allMuted *bool) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if name != nil {
+		trimmed := strings.TrimSpace(*name)
+		if trimmed == "" || len([]rune(trimmed)) > 100 {
+			return repository.ErrInvalidGroupOperation
+		}
+		name = &trimmed
+	}
+	if announcement != nil && len([]rune(*announcement)) > 2000 {
+		return repository.ErrInvalidGroupOperation
+	}
+	if joinMode != nil && *joinMode != "open" && *joinMode != "approval" {
+		return repository.ErrInvalidGroupOperation
+	}
+	var avatarURL *string
+	if avatarFileID != nil {
+		if s.Files == nil || strings.TrimSpace(*avatarFileID) == "" {
+			return repository.ErrInvalidGroupOperation
+		}
+		if _, err := uuid.Parse(*avatarFileID); err != nil {
+			return repository.ErrInvalidGroupOperation
+		}
+		file, err := s.Files.FindReadyAvatarByID(ctx, *avatarFileID, uid)
+		if err != nil || file.URL == "" {
+			return repository.ErrInvalidGroupOperation
+		}
+		avatarURL = &file.URL
+	}
+	return s.Groups.UpdateSettings(ctx, internalID, uid, name, avatarURL, announcement, allow, joinMode, allMuted)
 }
 
 func (s *GroupService) Leave(ctx context.Context, groupID, uid string) error {
-	return s.Groups.Leave(ctx, groupID, uid)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.Leave(ctx, internalID, uid)
 }
 
 func (s *GroupService) Qrcode(ctx context.Context, groupID, uid string) (models.GroupQRCodeResult, error) {
-	return s.Groups.EnsureQRCode(ctx, groupID, uid)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return models.GroupQRCodeResult{}, err
+	}
+	result, err := s.Groups.EnsureQRCode(ctx, internalID, uid)
+	if err == nil {
+		result.GroupID = groupID
+	}
+	return result, err
 }
 
 func (s *GroupService) ResolveQRCode(ctx context.Context, uid, token string) (models.GroupQRCodeResolveResult, error) {
@@ -70,8 +134,50 @@ func (s *GroupService) ResolveQRCode(ctx context.Context, uid, token string) (mo
 	return s.Groups.ResolveQRCode(ctx, uid, token)
 }
 
+func (s *GroupService) JoinByQRCode(ctx context.Context, uid, token, remark string) (models.JoinGroupByQRCodeResult, error) {
+	token = strings.TrimSpace(token)
+	remark = strings.TrimSpace(remark)
+	if token == "" || len([]rune(remark)) > 500 {
+		return models.JoinGroupByQRCodeResult{}, repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.JoinByQRCode(ctx, uid, token, remark)
+}
+
+func (s *GroupService) UpdateMyNickname(ctx context.Context, groupID, uid, nickname string) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	nickname = strings.TrimSpace(nickname)
+	if len([]rune(nickname)) > 32 {
+		return repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.UpdateMyNickname(ctx, internalID, uid, nickname)
+}
+
+func (s *GroupService) CreateReport(ctx context.Context, groupID, uid, reason, description string) (models.GroupReportResult, error) {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return models.GroupReportResult{}, err
+	}
+	reason = strings.TrimSpace(reason)
+	description = strings.TrimSpace(description)
+	validReasons := map[string]bool{
+		"spam": true, "fraud": true, "pornography": true,
+		"violence": true, "harassment": true, "other": true,
+	}
+	if !validReasons[reason] || len([]rune(description)) > 1000 {
+		return models.GroupReportResult{}, repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.CreateReport(ctx, internalID, uid, reason, description)
+}
+
 func (s *GroupService) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (int, error) {
-	return s.Groups.InviteMembers(ctx, groupID, uid, userIDs)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	return s.Groups.InviteMembers(ctx, internalID, uid, userIDs)
 }
 
 func (s *GroupService) AcceptInvitation(ctx context.Context, uid, token string) (models.GroupInfo, error) {
@@ -79,37 +185,77 @@ func (s *GroupService) AcceptInvitation(ctx context.Context, uid, token string) 
 }
 
 func (s *GroupService) CreateJoinRequest(ctx context.Context, groupID, uid, remark string) (models.GroupJoinRequestItem, error) {
-	return s.Groups.CreateJoinRequest(ctx, groupID, uid, remark)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return models.GroupJoinRequestItem{}, err
+	}
+	remark = strings.TrimSpace(remark)
+	if len([]rune(remark)) > 500 {
+		return models.GroupJoinRequestItem{}, repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.CreateJoinRequest(ctx, internalID, uid, remark)
 }
 
 func (s *GroupService) ListJoinRequests(ctx context.Context, groupID, uid string) ([]models.GroupJoinRequestItem, error) {
-	return s.Groups.ListJoinRequests(ctx, groupID, uid)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Groups.ListJoinRequests(ctx, internalID, uid)
 }
 
 func (s *GroupService) ApproveJoinRequest(ctx context.Context, groupID, uid, requestID string) (models.GroupInfo, error) {
-	return s.Groups.ApproveJoinRequest(ctx, groupID, uid, requestID)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	return s.Groups.ApproveJoinRequest(ctx, internalID, uid, requestID)
 }
 
 func (s *GroupService) RejectJoinRequest(ctx context.Context, groupID, uid, requestID string) error {
-	return s.Groups.RejectJoinRequest(ctx, groupID, uid, requestID)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.RejectJoinRequest(ctx, internalID, uid, requestID)
 }
 
 func (s *GroupService) RemoveMember(ctx context.Context, groupID, uid, targetID string) error {
-	return s.Groups.RemoveMember(ctx, groupID, uid, targetID)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.RemoveMember(ctx, internalID, uid, targetID)
 }
 
 func (s *GroupService) UpdateMemberRole(ctx context.Context, groupID, operatorID, memberID, role string) error {
-	return s.Groups.UpdateMemberRole(ctx, groupID, operatorID, memberID, role)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.UpdateMemberRole(ctx, internalID, operatorID, memberID, role)
 }
 
 func (s *GroupService) UpdateMemberMute(ctx context.Context, groupID, operatorID, memberID string, mutedSeconds int64) error {
-	return s.Groups.UpdateMemberMute(ctx, groupID, operatorID, memberID, mutedSeconds)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.UpdateMemberMute(ctx, internalID, operatorID, memberID, mutedSeconds)
 }
 
 func (s *GroupService) UpdateGroupMute(ctx context.Context, groupID, operatorID string, muted bool) error {
-	return s.Groups.UpdateGroupMute(ctx, groupID, operatorID, muted)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.UpdateGroupMute(ctx, internalID, operatorID, muted)
 }
 
 func (s *GroupService) Dismiss(ctx context.Context, groupID, operatorID string) error {
-	return s.Groups.Dismiss(ctx, groupID, operatorID)
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.Dismiss(ctx, internalID, operatorID)
 }

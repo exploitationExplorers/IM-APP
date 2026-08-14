@@ -15,7 +15,6 @@ async function loadGroups() {
 }
 
 onMounted(() => {
-  contactStore.loadAll()
   void loadGroups()
 })
 

@@ -18,6 +18,7 @@ import {
   setToken,
 } from '@/utils/request'
 import { initOpenIM, logoutOpenIM } from '@/utils/openim'
+import { applyLoginPhone, clearLoginPhone, saveLoginPhone } from '@/utils/login-phone'
 import { useChatStore } from '@/stores/chat'
 
 export const useUserStore = defineStore('user', () => {
@@ -27,10 +28,11 @@ export const useUserStore = defineStore('user', () => {
 
   const isLoggedIn = computed(() => !!token.value)
 
-  function afterLogin(res: AuthResult) {
+  function afterLogin(res: AuthResult, phone: string, countryCode?: string) {
+    saveLoginPhone(countryCode || '+86', phone)
     token.value = res.accessToken
     refreshToken.value = res.refreshToken
-    profile.value = res.user
+    profile.value = applyLoginPhone(res.user)
     setToken(res.accessToken)
     setRefreshToken(res.refreshToken)
     // IM 登录失败不应挡住业务登录，进聊天页时还会再试一次
@@ -39,12 +41,12 @@ export const useUserStore = defineStore('user', () => {
 
   async function loginPassword(phone: string, password: string, countryCode?: string) {
     const res = await loginByPassword(phone, password, countryCode)
-    afterLogin(res)
+    afterLogin(res, phone, countryCode)
   }
 
   async function loginSms(phone: string, code: string, countryCode?: string) {
     const res = await loginBySms(phone, code, countryCode)
-    afterLogin(res)
+    afterLogin(res, phone, countryCode)
   }
 
   async function register(
@@ -54,16 +56,16 @@ export const useUserStore = defineStore('user', () => {
     countryCode?: string,
   ) {
     const res = await registerBySms(phone, code, password, countryCode)
-    afterLogin(res)
+    afterLogin(res, phone, countryCode)
   }
 
   async function loadProfile() {
     if (!token.value) return
-    profile.value = await fetchProfile()
+    profile.value = applyLoginPhone(await fetchProfile())
   }
 
   async function saveProfile(input: UpdateProfileInput) {
-    profile.value = await updateProfile(input)
+    profile.value = applyLoginPhone(await updateProfile(input))
   }
 
   async function tryRefreshToken() {
@@ -85,6 +87,7 @@ export const useUserStore = defineStore('user', () => {
     token.value = ''
     refreshToken.value = ''
     profile.value = null
+    clearLoginPhone()
     clearToken()
     useChatStore().reset()
     await logoutOpenIM().catch(() => undefined)
@@ -96,6 +99,7 @@ export const useUserStore = defineStore('user', () => {
       token.value = ''
       refreshToken.value = ''
       profile.value = null
+      clearLoginPhone()
       clearToken()
       return
     }

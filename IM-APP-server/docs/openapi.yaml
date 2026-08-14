@@ -192,6 +192,55 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
 
+  /api/v1/groups/{id}/qrcode:
+    get:
+      tags: [Group Sync]
+      summary: 获取群二维码字符串
+      description: 所有有效群成员可获取；前端使用 payload 生成二维码图片。
+      operationId: getGroupQRCodePayload
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200': {$ref: '#/components/responses/GroupQRCodeResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/groups/qrcode/resolve:
+    post:
+      tags: [Group Sync]
+      summary: 只读解析群二维码
+      operationId: resolveGroupQRCode
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QRCodeRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/GroupQRCodeResolveResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/groups/qrcode/join:
+    post:
+      tags: [Group Sync]
+      summary: 按二维码直接入群或提交审核申请
+      operationId: joinGroupByQRCode
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JoinGroupByQRCodeRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/JoinGroupByQRCodeResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
   /api/v1/groups/{id}/settings:
     put:
       tags: [Group Sync]
@@ -207,11 +256,49 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/UpdateGroupSettingsRequest'}
       responses:
-        '200': {$ref: '#/components/responses/OKResponse'}
+        '200': {$ref: '#/components/responses/GroupResponse'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/groups/{id}/me/nickname:
+    put:
+      tags: [Group Sync]
+      summary: 修改我在本群的昵称
+      operationId: updateMyGroupNickname
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateMyGroupNicknameRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/GroupResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/groups/{id}/reports:
+    post:
+      tags: [Group Sync]
+      summary: 举报群聊
+      operationId: reportGroup
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateGroupReportRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/GroupReportResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
 
   /api/v1/groups/{id}/leave:
     post:
@@ -314,6 +401,7 @@ paths:
       summary: 获取当前业务用户的 OpenIM Token 和连接地址
       description: |
         该接口在签发 Token 前会兜底确保用户已经存在于 OpenIM。
+        相同业务用户和 platformId 在 Token 刷新时间到达前会返回同一份 Token，重复或并发调用不会反复踢掉 WebSocket 登录。
         客户端使用返回的 userId、token、wsAddr 初始化 OpenIM SDK；聊天 WebSocket 不连接 Go 后端。
       operationId: getOpenIMToken
       x-change-type: optimized
@@ -415,11 +503,13 @@ paths:
       parameters:
         - name: status
           in: query
+          description: 按同步任务状态筛选；不传时查询全部状态。
           schema:
             type: string
             enum: [pending, processing, retry, completed, dead]
         - name: limit
           in: query
+          description: 最多返回的任务数量，默认 100 条，最大 500 条。
           schema: {type: integer, minimum: 1, maximum: 500, default: 100}
       responses:
         '200': {$ref: '#/components/responses/IMOutboxResponse'}
@@ -438,6 +528,7 @@ paths:
         - name: id
           in: path
           required: true
+          description: 要重放的 OpenIM 同步任务自增 ID，只允许重放死信任务。
           schema: {type: integer, format: int64, minimum: 1}
       responses:
         '200': {$ref: '#/components/responses/ReplayResponse'}
@@ -545,46 +636,55 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: '业务接口登录凭证，在请求头中传入 `Authorization: Bearer <accessToken>`。'
     internalApiKey:
       type: apiKey
       in: header
       name: X-Internal-API-Key
+      description: 内部接口访问密钥，仅供可信后端服务和运维工具使用。
 
   parameters:
     UserId:
       name: id
       in: path
       required: true
+      description: 目标业务用户 ID（UUID）。
       schema: {$ref: '#/components/schemas/UUID'}
     MemberUserId:
       name: userId
       in: path
       required: true
+      description: 待管理的群成员业务用户 ID（UUID）。
       schema: {$ref: '#/components/schemas/UUID'}
     RequestId:
       name: id
       in: path
       required: true
+      description: 好友申请记录 ID（UUID）。
       schema: {$ref: '#/components/schemas/UUID'}
     GroupId:
       name: id
       in: path
       required: true
-      schema: {$ref: '#/components/schemas/UUID'}
+      description: 业务群 ID（十进制数字字符串）。
+      schema: {type: string, pattern: '^[0-9]+$', example: '100001'}
     BusinessUserId:
       name: businessUserId
       in: path
       required: true
+      description: 单聊目标的业务用户 ID（UUID），服务端会转换为 OpenIM 用户 ID。
       schema: {$ref: '#/components/schemas/UUID'}
     BusinessGroupId:
       name: businessGroupId
       in: path
       required: true
-      schema: {$ref: '#/components/schemas/UUID'}
+      description: 业务群 ID（十进制数字字符串），服务端会转换为 OpenIM 群 ID。
+      schema: {type: string, pattern: '^[0-9]+$', example: '100001'}
     WebhookSecret:
       name: secret
       in: path
       required: true
+      description: OpenIM Webhook 回调密钥，由服务端配置，普通前端不得使用。
       schema: {type: string, format: password}
 
   responses:
@@ -618,6 +718,26 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/GroupMembersEnvelope'}
+    GroupQRCodeResponse:
+      description: 群二维码信息
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GroupQRCodeEnvelope'}
+    GroupQRCodeResolveResponse:
+      description: 群二维码解析结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GroupQRCodeResolveEnvelope'}
+    JoinGroupByQRCodeResponse:
+      description: 扫码入群或申请入群结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/JoinGroupByQRCodeEnvelope'}
+    GroupReportResponse:
+      description: 群举报提交结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GroupReportEnvelope'}
     OpenIMTokenResponse:
       description: OpenIM 登录信息
       content:
@@ -695,103 +815,105 @@ components:
     UUID:
       type: string
       format: uuid
+      description: 业务数据的 UUID 标识。
 
     BaseEnvelope:
       type: object
       required: [code, message, data]
       properties:
-        code: {type: integer, example: 0}
-        message: {type: string, example: ok}
-        data: {}
+        code: {type: integer, description: 业务状态码；0 表示成功，非 0 表示失败。, example: 0}
+        message: {type: string, description: 接口处理结果提示信息。, example: ok}
+        data: {description: 接口返回的业务数据，具体结构见各接口响应模型。}
 
     ErrorEnvelope:
       type: object
       required: [code, message, data]
       properties:
-        code: {type: integer, example: 400}
-        message: {type: string, example: 参数错误}
-        data: {nullable: true}
+        code: {type: integer, description: 错误业务码，当前失败响应通常为 1。, example: 1}
+        message: {type: string, description: 可直接用于排查问题的中文错误提示。, example: 参数错误}
+        data: {nullable: true, description: 失败时固定为空。}
 
     InternalAuthError:
       type: object
       required: [code, message]
       properties:
-        code: {type: integer, example: 401}
-        message: {type: string, example: internal authentication required}
+        code: {type: integer, description: HTTP 风格的内部鉴权错误码。, example: 401}
+        message: {type: string, description: 内部鉴权失败原因。, example: internal authentication required}
 
     OKData:
       type: object
       required: [ok]
       properties:
-        ok: {type: boolean, example: true}
+        ok: {type: boolean, description: 操作是否执行成功。, example: true}
 
     OKEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/OKData'}
+            data: {allOf: [{$ref: '#/components/schemas/OKData'}], description: 通用操作成功标记。}
 
     RegisterRequest:
       type: object
-      required: [phone, password]
+      required: [phone, password, code]
       properties:
-        phone: {type: string, example: '13800138000'}
-        countryCode: {type: string, example: '+86'}
-        password: {type: string, format: password, minLength: 6}
-        code: {type: string, example: '123456'}
+        phone: {type: string, description: 注册手机号，不含国家/地区区号。, example: '13800138000'}
+        countryCode: {type: string, description: 国际电话区号；不传时服务端默认使用 +86。, example: '+86'}
+        password: {type: string, format: password, minLength: 6, description: 登录密码，至少 6 位；传输时为明文但必须使用 HTTPS。}
+        code: {type: string, description: 注册场景的短信验证码。, example: '123456'}
+        deviceId: {type: string, description: 客户端设备唯一标识，用于记录并管理刷新令牌会话；建议稳定传入。}
 
     UpdateProfileRequest:
       type: object
       properties:
-        nickname: {type: string, maxLength: 100}
-        avatar: {type: string}
-        avatarFileId: {type: string, format: uuid}
-        bio: {type: string, maxLength: 500}
+        nickname: {type: string, maxLength: 100, description: 新昵称；不传表示不修改。}
+        avatarFileId: {type: string, format: uuid, description: 已上传且可用的头像文件 ID；不传表示不修改。}
+        bio: {type: string, maxLength: 500, description: 个人简介；传空字符串表示清空。}
 
     MeProfile:
       type: object
       required: [id, publicId, nickname, avatar, bio, status, createdAt]
       properties:
-        id: {$ref: '#/components/schemas/UUID'}
-        phone: {type: string}
-        countryCode: {type: string}
-        publicId: {type: string, example: chat10001}
-        nickname: {type: string}
-        avatar: {type: string}
-        bio: {type: string}
-        status: {type: string, example: active}
-        createdAt: {type: string, format: date-time}
+        id: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 当前业务用户 ID。}
+        phoneMasked: {type: string, description: 脱敏后的手机号，例如 138****8000。, example: '138****8000'}
+        countryCode: {type: string, description: 手机号国际区号。}
+        publicId: {type: string, description: 对外展示、可搜索的用户号。, example: chat10001}
+        nickname: {type: string, description: 用户昵称。}
+        avatar: {type: string, description: 用户头像访问地址，未设置时为空字符串。}
+        bio: {type: string, description: 个人简介，未设置时为空字符串。}
+        status: {type: string, description: 账号状态，例如 active 表示正常。, example: active}
+        createdAt: {type: string, format: date-time, description: 用户注册时间（RFC 3339）。}
 
     AuthResult:
       type: object
-      required: [user, accessToken, refreshToken]
+      required: [user, accessToken, refreshToken, expiresIn]
       properties:
-        user: {$ref: '#/components/schemas/MeProfile'}
-        accessToken: {type: string}
-        refreshToken: {type: string}
+        user: {allOf: [{$ref: '#/components/schemas/MeProfile'}], description: 注册成功后的用户资料。}
+        accessToken: {type: string, description: 业务 API 的 JWT 访问令牌，放入 Bearer 请求头。}
+        refreshToken: {type: string, description: 用于换取新访问令牌的长期刷新令牌，请安全保存。}
+        expiresIn: {type: integer, description: accessToken 的有效秒数。, example: 7200}
 
     AuthEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/AuthResult'}
+            data: {allOf: [{$ref: '#/components/schemas/AuthResult'}], description: 注册用户资料及业务登录令牌。}
 
     MeEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/MeProfile'}
+            data: {allOf: [{$ref: '#/components/schemas/MeProfile'}], description: 当前用户的完整个人资料。}
 
     GroupPreview:
       type: object
       required: [id, name, avatar]
       properties:
-        id: {$ref: '#/components/schemas/UUID'}
-        name: {type: string}
-        avatar: {type: string}
+        id: {type: string, pattern: '^[0-9]+$', description: 业务群 ID（数字字符串）。, example: '100001'}
+        name: {type: string, description: 群名称。}
+        avatar: {type: string, description: 群头像访问地址，未设置时为空字符串。}
 
     GroupsEnvelope:
       allOf:
@@ -800,49 +922,67 @@ components:
           properties:
             data:
               type: array
+              description: 当前用户加入且尚未解散的群列表。
               items: {$ref: '#/components/schemas/GroupPreview'}
 
     CreateGroupRequest:
       type: object
       required: [name, memberIds]
       properties:
-        name: {type: string, minLength: 1, maxLength: 100}
+        name: {type: string, minLength: 1, maxLength: 100, description: 新群名称，1～100 个字符。}
         memberIds:
           type: array
           minItems: 2
           uniqueItems: true
+          description: 初始成员的业务用户 ID 列表，不需要包含当前群主；至少传 2 名其他有效用户。
           items: {$ref: '#/components/schemas/UUID'}
 
     GroupInfo:
       type: object
-      required: [id, name, avatar, ownerId, memberCount, allowMemberAddFriend]
+      required: [id, name, avatar, ownerId, memberCount, allowMemberAddFriend, joinMode, allMuted]
       properties:
-        id: {$ref: '#/components/schemas/UUID'}
-        name: {type: string}
-        avatar: {type: string}
-        ownerId: {$ref: '#/components/schemas/UUID'}
-        memberCount: {type: integer}
-        announcement: {type: string}
-        allowMemberAddFriend: {type: boolean}
+        id: {type: string, pattern: '^[0-9]+$', description: 业务群 ID（数字字符串）。, example: '100001'}
+        name: {type: string, description: 群名称。}
+        avatar: {type: string, description: 群头像访问地址。}
+        ownerId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 群主的业务用户 ID。}
+        memberCount: {type: integer, description: 当前有效群成员数量。}
+        announcement: {type: string, description: 群公告，未设置时为空字符串。}
+        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。}
+        myRole: {type: string, enum: [owner, admin, member], description: 当前登录用户在群内的角色；owner=群主，admin=管理员，member=普通成员。}
+        myNickname: {type: string, description: 当前登录用户的群昵称，未设置时为空字符串。}
+        joinMode: {type: string, enum: [open, approval], description: 入群方式；open=可直接加入，approval=需要管理员审核。}
+        allMuted: {type: boolean, description: 是否开启全员禁言。}
+        permissions:
+          type: object
+          description: 当前登录用户在本群可执行的操作权限。
+          properties:
+            canEditProfile: {type: boolean, description: 是否可编辑群名称和头像。}
+            canEditAnnouncement: {type: boolean, description: 是否可编辑群公告。}
+            canViewQRCode: {type: boolean, description: 是否可查看和分享群二维码。}
+            canManageMembers: {type: boolean, description: 是否可管理群成员、角色和禁言。}
+            canEditMyNickname: {type: boolean, description: 是否可修改自己的群昵称。}
+            canReport: {type: boolean, description: 是否可举报该群。}
         conversationId:
           type: string
-          description: 仅旧 Go 聊天模式可能返回
+          description: 旧版 Go 聊天模式的会话 ID；OpenIM 模式通常不返回。
 
     GroupEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/GroupInfo'}
+            data: {allOf: [{$ref: '#/components/schemas/GroupInfo'}], description: 群详情及当前用户的群权限。}
 
     GroupMember:
       type: object
-      required: [id, nickname, avatar, role]
+      required: [id, nickname, groupNickname, displayName, avatar, role]
       properties:
-        id: {$ref: '#/components/schemas/UUID'}
-        nickname: {type: string}
-        avatar: {type: string}
-        role: {type: string, enum: [owner, admin, member]}
+        id: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 群成员的业务用户 ID。}
+        nickname: {type: string, description: 用户的全局昵称。}
+        groupNickname: {type: string, description: 用户在本群设置的群昵称，未设置时为空字符串。}
+        displayName: {type: string, description: 前端应优先展示的名称，通常为群昵称，否则为全局昵称。}
+        avatar: {type: string, description: 用户头像访问地址。}
+        role: {type: string, enum: [owner, admin, member], description: 群角色；owner=群主，admin=管理员，member=普通成员。}
 
     GroupMembersEnvelope:
       allOf:
@@ -851,19 +991,54 @@ components:
           properties:
             data:
               type: array
+              description: 群内当前有效成员列表。
               items: {$ref: '#/components/schemas/GroupMember'}
 
     UpdateGroupSettingsRequest:
       type: object
       properties:
-        announcement: {type: string}
-        allowMemberAddFriend: {type: boolean}
+        name: {type: string, minLength: 1, maxLength: 100, description: 新群名称；不传表示不修改。}
+        avatarFileId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 已上传且可用的新群头像文件 ID；不传表示不修改。}
+        announcement: {type: string, maxLength: 2000, description: 新群公告；传空字符串表示清空。}
+        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。}
+        joinMode: {type: string, enum: [open, approval], description: 入群方式；open=直接加入，approval=需要审核。}
+        allMuted: {type: boolean, description: 是否开启全员禁言。}
+
+    QRCodeRequest:
+      type: object
+      properties:
+        token: {type: string, description: 从二维码内容提取出的原始令牌；与 payload、qrcode 三选一。}
+        payload: {type: string, description: 扫码得到的二维码载荷字符串；与 token、qrcode 三选一。}
+        qrcode: {type: string, description: 完整二维码 URL 或原始二维码内容；与 token、payload 三选一。}
+
+    JoinGroupByQRCodeRequest:
+      allOf:
+        - $ref: '#/components/schemas/QRCodeRequest'
+        - type: object
+          properties:
+            remark: {type: string, maxLength: 500, description: 需要审核入群时提交给管理员的申请说明。}
+
+    UpdateMyGroupNicknameRequest:
+      type: object
+      required: [nickname]
+      properties:
+        nickname: {type: string, maxLength: 32, description: 当前用户在本群的新昵称；传空字符串可清除群昵称。}
+
+    CreateGroupReportRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          enum: [spam, fraud, pornography, violence, harassment, other]
+          description: 举报原因；spam=垃圾广告，fraud=诈骗，pornography=色情，violence=暴力，harassment=骚扰，other=其他。
+        description: {type: string, maxLength: 1000, description: 举报补充说明，最多 1000 个字符。}
 
     UpdateGroupMemberRoleRequest:
       type: object
       required: [role]
       properties:
-        role: {type: string, enum: [admin, member]}
+        role: {type: string, enum: [admin, member], description: 目标角色；admin=设为管理员，member=取消管理员并设为普通成员。}
 
     UpdateGroupMemberMuteRequest:
       type: object
@@ -874,13 +1049,75 @@ components:
           format: int64
           minimum: 0
           maximum: 2592000
-          description: 0 表示解除禁言，最大 30 天
+          description: 禁言时长（秒）；0 表示解除禁言，最大 2592000 秒（30 天）。
 
     UpdateGroupMuteRequest:
       type: object
       required: [muted]
       properties:
-        muted: {type: boolean}
+        muted: {type: boolean, description: true 开启全员禁言，false 关闭全员禁言。}
+
+    GroupQRCodeResult:
+      type: object
+      required: [groupId, payload]
+      properties:
+        groupId: {type: string, pattern: '^[0-9]+$', description: 二维码所属的业务群 ID。, example: '100001'}
+        payload: {type: string, description: 前端用于生成二维码图片的完整载荷字符串。}
+        expiresAt: {type: string, format: date-time, description: 二维码失效时间（RFC 3339）；未设置有效期时可能不返回。}
+
+    GroupQRCodeEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {allOf: [{$ref: '#/components/schemas/GroupQRCodeResult'}], description: 群二维码内容及有效期。}
+
+    GroupQRCodeResolveResult:
+      type: object
+      required: [group, joined, joinMode, nextAction]
+      properties:
+        group: {allOf: [{$ref: '#/components/schemas/GroupInfo'}], description: 二维码对应的群详情。}
+        joined: {type: boolean, description: 当前用户是否已经是该群的有效成员。}
+        memberId: {type: string, description: 当前用户的群成员记录 ID；尚未入群时不返回。}
+        joinMode: {type: string, enum: [open, approval], description: 该群的入群方式；open=直接加入，approval=需要审核。}
+        nextAction: {type: string, enum: [enter, join, apply], description: 前端下一步动作；enter=直接进入群聊，join=可直接入群，apply=需提交入群申请。}
+
+    GroupQRCodeResolveEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {allOf: [{$ref: '#/components/schemas/GroupQRCodeResolveResult'}], description: 二维码解析及当前用户入群状态。}
+
+    JoinGroupByQRCodeResult:
+      type: object
+      required: [action, group]
+      properties:
+        action: {type: string, enum: [enter, joined, applied], description: 扫码结果；enter=原本已在群内，joined=已直接加入，applied=已提交审核申请。}
+        group: {allOf: [{$ref: '#/components/schemas/GroupInfo'}], description: 二维码对应的群详情。}
+        requestId: {type: string, format: uuid, description: action=applied 时生成的入群申请 ID，其他情况不返回。}
+
+    JoinGroupByQRCodeEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {allOf: [{$ref: '#/components/schemas/JoinGroupByQRCodeResult'}], description: 扫码入群或提交申请的执行结果。}
+
+    GroupReportResult:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: {type: string, format: uuid, description: 群举报记录 ID。}
+        status: {type: string, description: 举报处理状态，新提交的举报通常为 pending。, example: pending}
+        createdAt: {type: string, format: date-time, description: 举报提交时间（RFC 3339）。}
+
+    GroupReportEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {allOf: [{$ref: '#/components/schemas/GroupReportResult'}], description: 新建的群举报记录。}
 
     OpenIMTokenRequest:
       type: object
@@ -890,145 +1127,147 @@ components:
           minimum: 0
           maximum: 11
           default: 5
-          description: 省略或传 0 时按 uni-app 默认平台 5 处理
+          description: OpenIM 客户端平台编号；省略或传 0 时按 uni-app 默认平台 5 处理。
 
     OpenIMToken:
       type: object
       required: [userId, token, platform, expireSec, apiAddr, wsAddr]
       properties:
-        userId: {type: string, example: u_550e8400-e29b-41d4-a716-446655440000}
-        token: {type: string}
-        platform: {type: integer, example: 5}
-        expireSec: {type: integer, example: 86400}
-        apiAddr: {type: string, example: 'http://8.210.72.157:10002'}
-        wsAddr: {type: string, example: 'ws://8.210.72.157:10001'}
+        userId: {type: string, description: 当前业务用户映射后的 OpenIM 用户 ID，用于登录 OpenIM SDK。, example: u_550e8400-e29b-41d4-a716-446655440000}
+        token: {type: string, description: OpenIM SDK 登录令牌，不是业务 API 的 JWT。}
+        platform: {type: integer, description: 本次令牌对应的 OpenIM 客户端平台编号。, example: 5}
+        expireSec: {type: integer, description: 令牌剩余有效秒数。, example: 86400}
+        apiAddr: {type: string, description: OpenIM HTTP API 地址，传给客户端 SDK 配置。, example: 'http://8.210.72.157:10002'}
+        wsAddr: {type: string, description: OpenIM WebSocket 地址，客户端聊天长连接使用该地址。, example: 'ws://8.210.72.157:10001'}
 
     OpenIMTokenEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/OpenIMToken'}
+            data: {allOf: [{$ref: '#/components/schemas/OpenIMToken'}], description: OpenIM SDK 登录凭证和服务连接地址。}
 
     OpenIMPeer:
       type: object
       required: [businessUserId, imUserId, nickname, avatar, canChat, denyReason]
       properties:
-        businessUserId: {$ref: '#/components/schemas/UUID'}
-        imUserId: {type: string}
-        nickname: {type: string}
-        avatar: {type: string}
-        canChat: {type: boolean}
+        businessUserId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 单聊目标的业务用户 ID。}
+        imUserId: {type: string, description: 单聊目标映射后的 OpenIM 用户 ID。}
+        nickname: {type: string, description: 单聊目标的昵称。}
+        avatar: {type: string, description: 单聊目标的头像访问地址。}
+        canChat: {type: boolean, description: 当前用户是否允许与目标发起或继续单聊。}
         denyReason:
           type: string
           enum: ['', self, sender_inactive, account_inactive, blocked, not_friend]
+          description: 禁止聊天的原因；空字符串=允许，self=目标是自己，sender_inactive=当前账号不可用，account_inactive=对方账号不可用，blocked=存在拉黑关系，not_friend=双方不是好友。
 
     OpenIMPeerEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/OpenIMPeer'}
+            data: {allOf: [{$ref: '#/components/schemas/OpenIMPeer'}], description: 单聊目标的 OpenIM 映射信息及聊天权限。}
 
     OpenIMGroupTarget:
       type: object
       required: [businessGroupId, imGroupId, name, avatar, role, canChat, denyReason]
       properties:
-        businessGroupId: {$ref: '#/components/schemas/UUID'}
-        imGroupId: {type: string}
-        name: {type: string}
-        avatar: {type: string}
-        role: {type: string, enum: [owner, admin, member]}
-        canChat: {type: boolean}
+        businessGroupId: {type: string, pattern: '^[0-9]+$', description: 业务群 ID。, example: '100001'}
+        imGroupId: {type: string, description: 该群映射后的 OpenIM 群 ID。}
+        name: {type: string, description: 群名称。}
+        avatar: {type: string, description: 群头像访问地址。}
+        role: {type: string, enum: [owner, admin, member], description: 当前用户在群内的角色。}
+        canChat: {type: boolean, description: 当前用户此刻是否允许在该群发送消息。}
         denyReason:
           type: string
           enum: ['', group_inactive, member_muted, group_muted]
-        mutedUntil: {type: string, format: date-time, nullable: true}
+          description: 禁止群聊的原因；空字符串=允许，group_inactive=群或成员关系无效，member_muted=当前成员被禁言，group_muted=群已全员禁言。
+        mutedUntil: {type: string, format: date-time, nullable: true, description: 当前成员禁言截止时间；未被单独禁言时为空。}
 
     OpenIMGroupEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/OpenIMGroupTarget'}
+            data: {allOf: [{$ref: '#/components/schemas/OpenIMGroupTarget'}], description: 群聊目标的 OpenIM 映射信息及聊天权限。}
 
     IMSystemMessageRequest:
       type: object
       required: [idempotencyKey, receiverType, receiverBusinessId, messageType, guaranteed]
       properties:
-        idempotencyKey: {type: string, minLength: 1, maxLength: 128}
-        receiverType: {type: string, enum: [user, group]}
-        receiverBusinessId: {$ref: '#/components/schemas/UUID'}
-        messageType: {type: string, enum: [text, custom]}
-        text: {type: string, description: messageType=text 时必填}
-        key: {type: string, description: messageType=custom 时必填}
-        data: {type: object, additionalProperties: true, description: messageType=custom 时必填}
-        guaranteed: {type: boolean}
+        idempotencyKey: {type: string, minLength: 1, maxLength: 128, description: 调用方生成的幂等键；相同键重复请求不会重复发送消息。}
+        receiverType: {type: string, enum: [user, group], description: 接收方类型；user=单个业务用户，group=业务群。}
+        receiverBusinessId: {type: string, description: 接收方业务 ID；receiverType=user 时传用户 UUID，receiverType=group 时传数字形式的业务群 ID。}
+        messageType: {type: string, enum: [text, custom], description: 消息类型；text=文本消息，custom=自定义业务消息。}
+        text: {type: string, description: 文本消息内容；messageType=text 时必填。}
+        key: {type: string, description: 自定义消息的业务类型键；messageType=custom 时必填。}
+        data: {type: object, additionalProperties: true, description: 自定义消息携带的 JSON 数据；messageType=custom 时必填。}
+        guaranteed: {type: boolean, description: 是否保证最终送达；true 时上游暂时失败会进入同步任务重试。}
 
     IMSystemMessageResult:
       type: object
       required: [idempotencyKey, status]
       properties:
-        idempotencyKey: {type: string}
-        status: {type: string, enum: [pending, sent, failed]}
-        serverMsgId: {type: string}
-        clientMsgId: {type: string}
+        idempotencyKey: {type: string, description: 请求中传入的幂等键。}
+        status: {type: string, enum: [pending, sent, failed], description: 消息状态；pending=已排队等待重试，sent=已发送，failed=发送失败。}
+        serverMsgId: {type: string, description: OpenIM 服务端消息 ID；成功发送后返回。}
+        clientMsgId: {type: string, description: 本次发送使用的客户端消息 ID。}
 
     IMSystemMessageEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/IMSystemMessageResult'}
+            data: {allOf: [{$ref: '#/components/schemas/IMSystemMessageResult'}], description: 系统消息的发送或排队结果。}
 
     IMHealth:
       type: object
       required: [configured, apiReachable, adminTokenAvailable, outboxPending, outboxDead]
       properties:
-        configured: {type: boolean}
-        apiReachable: {type: boolean}
-        adminTokenAvailable: {type: boolean}
-        outboxPending: {type: integer, format: int64}
-        outboxDead: {type: integer, format: int64}
+        configured: {type: boolean, description: OpenIM 服务地址和凭据是否已完整配置。}
+        apiReachable: {type: boolean, description: Go 后端当前是否能访问 OpenIM HTTP API。}
+        adminTokenAvailable: {type: boolean, description: OpenIM 管理员 Token 是否可获取且可用。}
+        outboxPending: {type: integer, format: int64, description: 当前等待处理或等待重试的同步任务数量。}
+        outboxDead: {type: integer, format: int64, description: 达到最大重试次数后进入死信状态的任务数量。}
 
     IMHealthEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/IMHealth'}
+            data: {allOf: [{$ref: '#/components/schemas/IMHealth'}], description: OpenIM 配置、连通性和同步任务健康状态。}
 
     IMReconcileResult:
       type: object
       required: [users, friendships, blocks, groups, total]
       properties:
-        users: {type: integer, format: int64}
-        friendships: {type: integer, format: int64}
-        blocks: {type: integer, format: int64}
-        groups: {type: integer, format: int64}
-        total: {type: integer, format: int64}
+        users: {type: integer, format: int64, description: 本次创建的用户资料对账任务数。}
+        friendships: {type: integer, format: int64, description: 本次创建的好友关系对账任务数。}
+        blocks: {type: integer, format: int64, description: 本次创建的黑名单关系对账任务数。}
+        groups: {type: integer, format: int64, description: 本次创建的群及群成员对账任务数。}
+        total: {type: integer, format: int64, description: 本次创建的全部对账任务总数。}
 
     IMReconcileEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {$ref: '#/components/schemas/IMReconcileResult'}
+            data: {allOf: [{$ref: '#/components/schemas/IMReconcileResult'}], description: 本次全量对账创建的各类同步任务数量。}
 
     IMOutboxItem:
       type: object
       required: [id, aggregateType, aggregateId, eventType, payload, status, attemptCount, lastError, nextAttemptAt, updatedAt]
       properties:
-        id: {type: integer, format: int64}
-        aggregateType: {type: string}
-        aggregateId: {type: string}
-        eventType: {type: string}
-        payload: {type: object, additionalProperties: true}
-        status: {type: string, enum: [pending, processing, retry, completed, dead]}
-        attemptCount: {type: integer}
-        lastError: {type: string}
-        nextAttemptAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
+        id: {type: integer, format: int64, description: 同步任务自增 ID。}
+        aggregateType: {type: string, description: 被同步的业务聚合类型，例如 user、friendship、block 或 group。}
+        aggregateId: {type: string, description: 被同步业务对象的唯一 ID。}
+        eventType: {type: string, description: 要执行的 OpenIM 同步事件类型。}
+        payload: {type: object, additionalProperties: true, description: 执行同步所需的事件 JSON 数据。}
+        status: {type: string, enum: [pending, processing, retry, completed, dead], description: 任务状态；pending=待处理，processing=处理中，retry=等待重试，completed=已完成，dead=死信。}
+        attemptCount: {type: integer, description: 已尝试执行的次数。}
+        lastError: {type: string, description: 最近一次执行失败的错误信息；无错误时为空字符串。}
+        nextAttemptAt: {type: string, format: date-time, description: 下次允许重试的时间。}
+        updatedAt: {type: string, format: date-time, description: 任务最后更新时间。}
 
     IMOutboxEnvelope:
       allOf:
@@ -1037,6 +1276,7 @@ components:
           properties:
             data:
               type: array
+              description: 符合筛选条件的 OpenIM 同步任务列表。
               items: {$ref: '#/components/schemas/IMOutboxItem'}
 
     ReplayEnvelope:
@@ -1046,34 +1286,36 @@ components:
           properties:
             data:
               type: object
+              description: 死信任务重放结果。
               required: [replayed]
               properties:
-                replayed: {type: boolean, example: true}
+                replayed: {type: boolean, description: 死信任务是否已成功重置为待处理状态。, example: true}
 
     OpenIMWebhookMessage:
       type: object
       properties:
-        callbackCommand: {type: string}
-        serverMsgID: {type: string}
-        clientMsgID: {type: string}
-        conversationID: {type: string}
-        sendID: {type: string}
-        userID: {type: string}
-        recvID: {type: string}
-        groupID: {type: string}
-        contentType: {type: integer}
-        seq: {type: integer, format: int64}
-        sendTime: {type: integer, format: int64}
+        callbackCommand: {type: string, description: OpenIM 回调命令名称，用于区分回调事件。}
+        serverMsgID: {type: string, description: OpenIM 服务端消息 ID。}
+        clientMsgID: {type: string, description: OpenIM 客户端消息 ID。}
+        conversationID: {type: string, description: OpenIM 会话 ID。}
+        sendID: {type: string, description: 消息发送方的 OpenIM 用户 ID。}
+        userID: {type: string, description: 回调关联的 OpenIM 用户 ID；部分回调在 sendID 为空时使用该字段。}
+        recvID: {type: string, description: 单聊消息接收方的 OpenIM 用户 ID。}
+        groupID: {type: string, description: 群聊消息所属的 OpenIM 群 ID；单聊时为空。}
+        contentType: {type: integer, description: OpenIM 消息内容类型编号。}
+        seq: {type: integer, format: int64, description: 消息在会话中的序列号。}
+        sendTime: {type: integer, format: int64, description: 消息发送时间戳（毫秒）。}
         atUserList:
           type: array
-          items: {type: string}
+          description: 群消息中被 @ 的 OpenIM 用户 ID 列表。
+          items: {type: string, description: 被 @ 的 OpenIM 用户 ID。}
 
     OpenIMWebhookResponse:
       type: object
       required: [actionCode, errCode, errMsg, errDlt, nextCode]
       properties:
-        actionCode: {type: integer, example: 0}
-        errCode: {type: integer, example: 0}
-        errMsg: {type: string}
-        errDlt: {type: string}
-        nextCode: {type: integer, enum: [0, 1], example: 0}
+        actionCode: {type: integer, description: OpenIM Webhook 协议动作码；当前服务固定返回 0。, example: 0}
+        errCode: {type: integer, description: 回调业务错误码；0 表示允许或处理成功，5001 表示拒绝。, example: 0}
+        errMsg: {type: string, description: 拒绝或处理失败的简要原因，成功时为空字符串。}
+        errDlt: {type: string, description: 拒绝或处理失败的详细原因，成功时为空字符串。}
+        nextCode: {type: integer, enum: [0, 1], description: OpenIM 后续动作；0=继续处理消息，1=终止/拒绝消息。, example: 0}

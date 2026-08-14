@@ -171,6 +171,7 @@ func TestSendBusinessNotificationUsesAdminToken(t *testing.T) {
 
 func TestGroupModerationRequests(t *testing.T) {
 	paths := make([]string, 0)
+	var nicknameBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/auth/get_admin_token" {
@@ -181,6 +182,11 @@ func TestGroupModerationRequests(t *testing.T) {
 			t.Fatal("missing admin token")
 		}
 		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/group/set_group_member_info" && len(paths) == 2 {
+			if err := json.NewDecoder(r.Body).Decode(&nicknameBody); err != nil {
+				t.Fatalf("decode nickname request: %v", err)
+			}
+		}
 		_, _ = w.Write([]byte(`{"errCode":0}`))
 	}))
 	defer server.Close()
@@ -188,6 +194,7 @@ func TestGroupModerationRequests(t *testing.T) {
 	ctx := context.Background()
 	checks := []func() error{
 		func() error { return client.SetGroupMemberRole(ctx, "group-1", "user-1", 60) },
+		func() error { return client.SetGroupMemberNickname(ctx, "group-1", "user-1", "群昵称") },
 		func() error { return client.SetGroupMemberMute(ctx, "group-1", "user-1", 30) },
 		func() error { return client.SetGroupMemberMute(ctx, "group-1", "user-1", 0) },
 		func() error { return client.SetGroupMute(ctx, "group-1", true) },
@@ -200,12 +207,20 @@ func TestGroupModerationRequests(t *testing.T) {
 		}
 	}
 	want := []string{
-		"/group/set_group_member_info", "/group/mute_group_member",
+		"/group/set_group_member_info", "/group/set_group_member_info", "/group/mute_group_member",
 		"/group/cancel_mute_group_member", "/group/mute_group",
 		"/group/cancel_mute_group", "/group/dismiss_group",
 	}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("paths = %#v, want %#v", paths, want)
+	}
+	members, ok := nicknameBody["members"].([]any)
+	if !ok || len(members) != 1 {
+		t.Fatalf("nickname request members = %#v", nicknameBody["members"])
+	}
+	member, ok := members[0].(map[string]any)
+	if !ok || member["nickName"] != "群昵称" {
+		t.Fatalf("nickname request member = %#v", members[0])
 	}
 }
 
