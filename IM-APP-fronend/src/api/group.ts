@@ -35,3 +35,13 @@ export async function updateGroupSettings(
 export async function leaveGroup(groupId: string) {
   return request<{ ok: boolean }>({ url: `/groups/${groupId}/leave`, method: 'POST' })
 }
+
+export interface GroupQRCodeResult {
+  groupId: string
+  payload: string
+  expiresAt?: string
+}
+
+export async function fetchGroupQrcode(groupId: string): Promise<GroupQRCodeResult> {
+  return request<GroupQRCodeResult>({ url: `/groups/${groupId}/qrcode`, method: 'GET' })
+}

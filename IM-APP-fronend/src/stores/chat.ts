@@ -142,12 +142,27 @@ export const useChatStore = defineStore('chat', () => {
     const sourceId = isGroup
       ? (target as { imGroupId: string }).imGroupId
       : (target as { imUserId: string }).imUserId
-    const item = await getOneConversation(
-      sourceId,
-      isGroup ? SessionType.Group : SessionType.Single,
-    )
+    const item = await getGroupOrPeerConversation(sourceId, isGroup)
     upsertConversations([item])
     return toConversation(item)
+  }
+
+  async function getGroupOrPeerConversation(sourceId: string, isGroup: boolean) {
+    const sessionType = isGroup ? SessionType.Group : SessionType.Single
+    try {
+      return await getOneConversation(sourceId, sessionType)
+    } catch (e) {
+      const msg = (e as Error).message || ''
+      if (isGroup && msg.includes('10006')) {
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        try {
+          return await getOneConversation(sourceId, sessionType)
+        } catch {
+          throw new Error('群聊暂不可用，请稍后重试')
+        }
+      }
+      throw e
+    }
   }
 
   async function findConversationById(conversationId: string) {

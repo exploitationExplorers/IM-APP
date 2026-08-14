@@ -269,7 +269,7 @@ func main() {
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	if imClient.Available() {
 		imWorker := &service.IMSyncWorker{
-			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Client: imClient,
+			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Client: imClient,
 			BatchSize: 20, MaxAttempts: 10, PollInterval: 2 * time.Second,
 		}
 		go imWorker.Run(workerCtx)

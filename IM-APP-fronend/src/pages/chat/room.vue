@@ -7,6 +7,8 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { businessUserIdFromIM, imUserId } from '@/utils/openim'
+import { resolveIMGroup } from '@/api/im'
+import { fetchGroupDetail } from '@/api/group'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import type { ChatMessage } from '@/types'
@@ -21,6 +23,7 @@ const peerAvatar = ref(APP_CONFIG.defaultAvatarUrl)
 const chatType = ref<'private' | 'group'>('group')
 /** 业务侧的好友 / 群 ID，仅用于跳资料页 */
 const businessId = ref('')
+const memberCount = ref(0)
 const input = ref('')
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
@@ -78,6 +81,7 @@ onLoad(async (query) => {
     })
     conversationId.value = conv.id
     if (!query?.title) title.value = conv.title
+    await resolveBusinessTarget(conv)
     await chatStore.loadMessages(conv.id)
     await nextTick()
     scrollToBottom()
@@ -156,10 +160,44 @@ function goBack() {
   uni.navigateBack()
 }
 
-function goToProfile() {
+async function resolveBusinessTarget(conv: { peerUserId?: string; groupId?: string }) {
+  if (chatType.value === 'private') {
+    if (!businessId.value && conv.peerUserId) {
+      businessId.value = businessUserIdFromIM(conv.peerUserId)
+    }
+    return
+  }
+  if (!businessId.value && conv.groupId) {
+    try {
+      const target = await resolveIMGroup(conv.groupId)
+      businessId.value = target.businessGroupId
+    } catch {
+      return
+    }
+  }
   if (!businessId.value) return
+  try {
+    const detail = await fetchGroupDetail(businessId.value)
+    memberCount.value = detail.memberCount || 0
+    if (!title.value || title.value === '聊天') title.value = detail.name
+  } catch {
+    memberCount.value = 0
+  }
+}
+
+function goToProfile() {
+  if (!businessId.value) {
+    uni.showToast({ title: '暂时无法打开资料', icon: 'none' })
+    return
+  }
+  if (chatType.value === 'private') {
+    uni.navigateTo({
+      url: `/pages/contacts/friend-detail?id=${encodeURIComponent(businessId.value)}`,
+    })
+    return
+  }
   uni.navigateTo({
-    url: `/pages/group/detail?id=${encodeURIComponent(businessId.value)}&code=${encodeURIComponent(chatType.value)}`,
+    url: `/pages/group/detail?id=${encodeURIComponent(businessId.value)}`,
   })
 }
 
@@ -413,12 +451,13 @@ function pickImage() {
 
 <template>
   <view class="room">
-    <view class="chat-header" @click="goToProfile">
-      <view class="back-btn" @click.stop="goBack">‹</view>
-      <view class="header-title">
+    <view class="chat-header">
+      <view class="back-btn" @click="goBack">‹</view>
+      <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text>
+      <view class="header-title" @click="goToProfile">
         <text>{{ title }}</text>
       </view>
-      <view class="header-icon">⋯</view>
+      <view class="header-icon" @click="goToProfile">⋯</view>
     </view>
 
     <scroll-view
@@ -507,7 +546,6 @@ function pickImage() {
 .chat-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   height: 94rpx;
   padding: 0 26rpx;
   background: #ffffff;
@@ -523,11 +561,21 @@ function pickImage() {
   font-size: 52rpx;
   color: #1a1a1a;
   line-height: 1;
+  flex-shrink: 0;
+}
+
+.member-count {
+  margin-right: 12rpx;
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #111;
+  flex-shrink: 0;
 }
 
 .header-title {
   flex: 1;
-  text-align: center;
+  min-width: 0;
+  text-align: left;
   font-size: 38rpx;
   font-weight: 700;
   color: #111;
@@ -544,6 +592,7 @@ function pickImage() {
   justify-content: center;
   font-size: 42rpx;
   color: #444;
+  flex-shrink: 0;
 }
 
 .msg-list {
