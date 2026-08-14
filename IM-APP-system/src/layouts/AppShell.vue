@@ -31,7 +31,10 @@ const featureEntries = computed(() => {
 
 function formatBuildTime(value?: string): string {
   if (!value) return "-";
-  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+  return value
+    .replace("T", " ")
+    .replace(/\.\d+/, "")
+    .replace(/\+08:00$/, "");
 }
 
 function toggleCollapse(): void {
@@ -114,6 +117,20 @@ onMounted(async () => {
                 <el-menu-item index="/system/logs">
                   <el-icon><Document /></el-icon>
                   <template #title>操作日志</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="/audit-log">
+                <template #title>
+                  <el-icon><Memo /></el-icon>
+                  <span>审计日志</span>
+                </template>
+                <el-menu-item index="/audit-log/admin-login-log">
+                  <el-icon><Memo /></el-icon>
+                  <template #title>管理员登录日志</template>
+                </el-menu-item>
+                <el-menu-item index="/audit-log/admin-audit-log">
+                  <el-icon><Memo /></el-icon>
+                  <template #title>管理操作审计日志</template>
                 </el-menu-item>
               </el-sub-menu>
             </el-menu>

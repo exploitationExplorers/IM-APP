@@ -1,5 +1,14 @@
 import http from "@/api";
-import type { AdminPage, Auth, Groups, Moderation, Reports, SensitiveWords, Sms } from "@/api/interface";
+import type {
+  AdminPage,
+  Auth,
+  Groups,
+  Moderation,
+  Reports,
+  SensitiveWords,
+  Sms,
+  Audit,
+} from "@/api/interface";
 
 const AUTH_BASE = "/admin/v1/auth";
 const HEALTH_BASE = "/admin/v1/health";
@@ -9,6 +18,8 @@ const MODERATION_BASE = "/admin/v1/moderation";
 const SENSITIVE_WORDS_BASE = "/admin/v1/sensitive-words";
 const REPORTS_BASE = "/admin/v1/reports";
 const GROUPS_BASE = "/admin/v1/groups";
+const AUDIT_LOG_BASE = "/admin/v1/audit-logs";
+const ADMIN_LOGIN_LOG_BASE = "/admin/v1/admin-login-logs";
 
 export const loginApi = (params: Auth.ReqLoginForm) => {
   return http.post<Auth.ResLogin>(`${AUTH_BASE}/login`, params, { loading: false, cancel: false });
@@ -17,7 +28,7 @@ export const loginApi = (params: Auth.ReqLoginForm) => {
 export const refreshTokenApi = (params: Auth.ReqRefreshForm) => {
   return http.post<Auth.ResLogin>(`${AUTH_BASE}/token/refresh`, params, {
     loading: false,
-    cancel: false
+    cancel: false,
   });
 };
 
@@ -26,11 +37,15 @@ export const getAdminHealth = () => {
 };
 
 export const getAdminMeta = () => {
-  return http.get<Auth.ResMeta>(META_BASE, {}, {
-    loading: false,
-    cancel: false,
-    skipAuthRefresh: true
-  });
+  return http.get<Auth.ResMeta>(
+    META_BASE,
+    {},
+    {
+      loading: false,
+      cancel: false,
+      skipAuthRefresh: true,
+    },
+  );
 };
 
 export const getSmsProvidersHealth = () => {
@@ -48,21 +63,21 @@ export const getModerationProfiles = (params: Moderation.ReqProfilesParams = {})
 export const rejectModerationProfile = (userId: string, body: Moderation.ReqRejectProfile) => {
   return http.post<Moderation.ActionResult>(
     `${MODERATION_BASE}/profiles/${encodeURIComponent(userId)}/reject`,
-    body
+    body,
   );
 };
 
 export const approveModerationProfile = (userId: string, body: Moderation.ReqApproveProfile) => {
   return http.post<Moderation.ActionResult>(
     `${MODERATION_BASE}/profiles/${encodeURIComponent(userId)}/approve`,
-    body
+    body,
   );
 };
 
 export const restoreModerationProfile = (userId: string, body: Moderation.ReqRestoreProfile) => {
   return http.post<Moderation.ActionResult>(
     `${MODERATION_BASE}/profiles/${encodeURIComponent(userId)}/restore`,
-    body
+    body,
   );
 };
 
@@ -141,13 +156,28 @@ export const muteGroupAll = (id: string, body: Groups.ReqMuteAllGroup) => {
 export const getGroupRecallLogs = (id: string, params: Groups.ReqRecallLogsParams = {}) => {
   return http.get<AdminPage<Groups.RecallLogItem>>(
     `${GROUPS_BASE}/${encodeURIComponent(id)}/recall-logs`,
-    params
+    params,
   );
 };
 
 export const getGroupReports = (id: string, params: Groups.ReqGroupReportsParams = {}) => {
   return http.get<AdminPage<Reports.ReportItem>>(
     `${GROUPS_BASE}/${encodeURIComponent(id)}/reports`,
-    params
+    params,
   );
+};
+
+/** 管理员登录日志 */
+export const getAdminLoginLogs = (body: Audit.AdminLoginLogsRequest) => {
+  return http.get<Audit.AdminLoginLogsResponse>(`${ADMIN_LOGIN_LOG_BASE}`, body);
+};
+
+/** 管理操作审计日志 */
+export const getAuditLogs = (body: Audit.AuditLogsRequest) => {
+  return http.get<Audit.AuditLogsResponse>(`${AUDIT_LOG_BASE}`, body);
+};
+
+/** 审计日志详情 */
+export const getAuditLogDetail = (id: string) => {
+  return http.get<Audit.AuditLogDetailResponse>(`${AUDIT_LOG_BASE}/${encodeURIComponent(id)}`);
 };

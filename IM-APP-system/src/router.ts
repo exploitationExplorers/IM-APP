@@ -57,6 +57,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import("./views/smsOperationConfig/SmsOperationConfigView.vue"),
         meta: { title: "短信和运营配置" },
       },
+      {
+        path: "audit-log/admin-login-log",
+        component: () => import("./views/auditLog/AdminLoginLogView.vue"),
+        meta: { title: "管理员登录日志" },
+      },
+      {
+        path: "audit-log/admin-audit-log",
+        component: () => import("./views/auditLog/AdminAuditLogView.vue"),
+        meta: { title: "管理操作审计日志" },
+      },
     ],
   },
   { path: "/:pathMatch(.*)*", redirect: "/home" },
