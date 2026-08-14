@@ -8,6 +8,7 @@ import (
 
 	"im-app-server/internal/im"
 	"im-app-server/internal/middleware"
+	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
 	"im-app-server/internal/response"
 	"im-app-server/internal/service"
@@ -80,4 +81,44 @@ func (h *IMHandler) Group(c *gin.Context) {
 		return
 	}
 	response.OK(c, group)
+}
+
+func (h *IMHandler) GetConversationSettings(c *gin.Context) {
+	result, err := h.Service.GetConversationSettings(
+		c.Request.Context(), middleware.UserID(c), c.Param("conversationId"),
+	)
+	if err != nil {
+		h.handleConversationSettingsError(c, err)
+		return
+	}
+	response.OK(c, result)
+}
+
+func (h *IMHandler) UpdateConversationSettings(c *gin.Context) {
+	var req models.UpdateIMConversationSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "会话设置参数错误")
+		return
+	}
+	result, err := h.Service.UpdateConversationSettings(
+		c.Request.Context(), middleware.UserID(c), c.Param("conversationId"), req,
+	)
+	if err != nil {
+		h.handleConversationSettingsError(c, err)
+		return
+	}
+	response.OK(c, result)
+}
+
+func (h *IMHandler) handleConversationSettingsError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrInvalidConversationSettings):
+		response.Fail(c, http.StatusBadRequest, "会话设置参数错误")
+	case errors.Is(err, im.ErrConversationNotFound):
+		response.Fail(c, http.StatusNotFound, "会话不存在")
+	case errors.Is(err, service.ErrIMUnavailable), errors.Is(err, im.ErrUnavailable):
+		response.Fail(c, http.StatusServiceUnavailable, "OpenIM 服务不可用")
+	default:
+		response.Fail(c, http.StatusBadGateway, "会话设置操作失败")
+	}
 }

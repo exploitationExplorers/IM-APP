@@ -14,6 +14,21 @@ type IMPeer struct {
 	DenyReason     string `json:"denyReason"`
 }
 
+type IMConversationSettings struct {
+	ConversationID string `json:"conversationId"`
+	Pinned         bool   `json:"pinned"`
+	DoNotDisturb   bool   `json:"doNotDisturb"`
+	BurnAfterRead  bool   `json:"burnAfterRead"`
+	BurnDuration   int    `json:"burnDuration"`
+}
+
+type UpdateIMConversationSettingsRequest struct {
+	Pinned        *bool `json:"pinned"`
+	DoNotDisturb  *bool `json:"doNotDisturb"`
+	BurnAfterRead *bool `json:"burnAfterRead"`
+	BurnDuration  *int  `json:"burnDuration"`
+}
+
 type IMGroupTarget struct {
 	BusinessGroupID string     `json:"businessGroupId"`
 	IMGroupID       string     `json:"imGroupId"`

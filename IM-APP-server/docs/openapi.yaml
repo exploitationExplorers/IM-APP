@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: IM-APP OpenIM 对接增量接口
-  version: 1.0.0
+  title: IM-APP 后端增量接口
+  version: 1.1.0
   description: |
-    仅包含本次 OpenIM 对接开发中新增或实际优化过的 Go 后端接口。
+    包含 OpenIM 对接、私聊设置、用户举报中新增或实际优化过的 Go 后端接口。
     不包含未改动的普通登录、短信、用户查询、文件上传和旧 Go 对话接口。
 
     PostgreSQL 保存业务身份、好友、群组、同步任务和审计元数据；
@@ -20,6 +20,8 @@ tags:
     description: 好友、黑名单关系及 OpenIM 同步
   - name: Group Sync
     description: 群资料、成员、权限及 OpenIM 同步
+  - name: Reports
+    description: 用户举报原因和举报工单
   - name: OpenIM Client
     description: 客户端连接 OpenIM 所需接口
   - name: OpenIM Internal
@@ -395,6 +397,46 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalError'}
 
+  /api/v1/report-reasons:
+    get:
+      tags: [Reports]
+      summary: 查询启用的用户举报原因
+      operationId: listUserReportReasons
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: targetType
+          in: query
+          required: true
+          schema: {type: string, enum: [user]}
+        - name: language
+          in: query
+          schema: {type: string, maxLength: 8, default: zh}
+      responses:
+        '200': {$ref: '#/components/responses/ReportReasonsResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/reports:
+    post:
+      tags: [Reports]
+      summary: 提交用户举报
+      operationId: createUserReport
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateUserReportRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/UserReportResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
   /api/v1/im/token:
     post:
       tags: [OpenIM Client]
@@ -433,6 +475,43 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/im/conversations/{conversationId}/settings:
+    get:
+      tags: [OpenIM Client]
+      summary: 读取当前用户的单聊设置
+      operationId: getOpenIMConversationSettings
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '200': {$ref: '#/components/responses/ConversationSettingsResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+    patch:
+      tags: [OpenIM Client]
+      summary: 更新当前用户的单聊设置
+      operationId: updateOpenIMConversationSettings
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateConversationSettingsRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/ConversationSettingsResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
 
   /api/v1/im/groups/{businessGroupId}:
     get:
@@ -680,6 +759,12 @@ components:
       required: true
       description: 业务群 ID（十进制数字字符串），服务端会转换为 OpenIM 群 ID。
       schema: {type: string, pattern: '^[0-9]+$', example: '100001'}
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      description: OpenIM 单聊会话 ID，只接受 `si_` 开头且属于当前用户的会话。
+      schema: {type: string, pattern: '^si_', example: si_10223cf659ec45568c09141915e190ed_8ef20bd3b8584ec59239075fa2dba7ab}
     WebhookSecret:
       name: secret
       in: path
@@ -738,6 +823,16 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/GroupReportEnvelope'}
+    ReportReasonsResponse:
+      description: 用户举报原因列表
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ReportReasonsEnvelope'}
+    UserReportResponse:
+      description: 用户举报提交结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/UserReportEnvelope'}
     OpenIMTokenResponse:
       description: OpenIM 登录信息
       content:
@@ -748,6 +843,11 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/OpenIMPeerEnvelope'}
+    ConversationSettingsResponse:
+      description: OpenIM 单聊设置
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ConversationSettingsEnvelope'}
     OpenIMGroupResponse:
       description: 群聊目标与权限
       content:
@@ -1118,6 +1218,79 @@ components:
         - type: object
           properties:
             data: {allOf: [{$ref: '#/components/schemas/GroupReportResult'}], description: 新建的群举报记录。}
+
+    ReportReason:
+      type: object
+      required: [id, targetType, reason, language, sortOrder]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        targetType: {type: string, enum: [user]}
+        reason: {type: string, maxLength: 128, example: 垃圾广告}
+        language: {type: string, maxLength: 8, example: zh}
+        sortOrder: {type: integer, example: 10}
+
+    ReportReasonsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/ReportReason'}
+
+    CreateUserReportRequest:
+      type: object
+      required: [targetType, targetId, reasonId]
+      properties:
+        targetType: {type: string, enum: [user]}
+        targetId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 被举报用户的业务 UUID。}
+        reasonId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 启用中的用户举报原因 UUID。}
+        description: {type: string, maxLength: 1000}
+        evidenceFileIds:
+          type: array
+          maxItems: 9
+          items: {$ref: '#/components/schemas/UUID'}
+
+    UserReportResult:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        status: {type: string, enum: [pending, processing, reopened]}
+        createdAt: {type: string, format: date-time}
+
+    UserReportEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/UserReportResult'}
+
+    ConversationSettings:
+      type: object
+      required: [conversationId, pinned, doNotDisturb, burnAfterRead, burnDuration]
+      properties:
+        conversationId: {type: string, pattern: '^si_'}
+        pinned: {type: boolean, description: 是否置顶会话。}
+        doNotDisturb: {type: boolean, description: 是否屏蔽该会话的新消息提醒。}
+        burnAfterRead: {type: boolean, description: 是否启用阅后即焚。}
+        burnDuration: {type: integer, minimum: 0, maximum: 86400, description: 阅后即焚时长，单位秒；关闭时为 0。}
+
+    UpdateConversationSettingsRequest:
+      type: object
+      minProperties: 1
+      properties:
+        pinned: {type: boolean}
+        doNotDisturb: {type: boolean}
+        burnAfterRead: {type: boolean}
+        burnDuration: {type: integer, minimum: 0, maximum: 86400}
+
+    ConversationSettingsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/ConversationSettings'}
 
     OpenIMTokenRequest:
       type: object

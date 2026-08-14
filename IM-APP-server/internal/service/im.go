@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,8 +20,9 @@ import (
 )
 
 var (
-	ErrIMUnavailable     = errors.New("OpenIM service is unavailable")
-	ErrIMAccountInactive = errors.New("account is not active")
+	ErrIMUnavailable               = errors.New("OpenIM service is unavailable")
+	ErrIMAccountInactive           = errors.New("account is not active")
+	ErrInvalidConversationSettings = errors.New("invalid conversation settings")
 )
 
 type IMToken struct {
@@ -173,6 +175,136 @@ func (s *IMService) ensureOpenIMGroup(ctx context.Context, requesterID, internal
 		return err
 	}
 	return nil
+}
+
+func (s *IMService) GetConversationSettings(ctx context.Context, businessUserID, conversationID string) (models.IMConversationSettings, error) {
+	if s.Client == nil || !s.Client.Available() {
+		return models.IMConversationSettings{}, ErrIMUnavailable
+	}
+	if !strings.HasPrefix(conversationID, "si_") {
+		return models.IMConversationSettings{}, ErrInvalidConversationSettings
+	}
+	ownerUserID, err := im.UserIDFromBusinessID(businessUserID)
+	if err != nil {
+		return models.IMConversationSettings{}, err
+	}
+	settings, err := s.Client.GetConversationSettings(ctx, ownerUserID, conversationID)
+	if err != nil {
+		return models.IMConversationSettings{}, err
+	}
+	return toConversationSettings(settings), nil
+}
+
+func (s *IMService) UpdateConversationSettings(
+	ctx context.Context,
+	businessUserID, conversationID string,
+	req models.UpdateIMConversationSettingsRequest,
+) (models.IMConversationSettings, error) {
+	if req.Pinned == nil && req.DoNotDisturb == nil && req.BurnAfterRead == nil && req.BurnDuration == nil {
+		return models.IMConversationSettings{}, ErrInvalidConversationSettings
+	}
+	if req.BurnDuration != nil {
+		if req.BurnAfterRead != nil && !*req.BurnAfterRead {
+			if *req.BurnDuration != 0 {
+				return models.IMConversationSettings{}, ErrInvalidConversationSettings
+			}
+		} else if *req.BurnDuration < 5 || *req.BurnDuration > 86400 {
+			return models.IMConversationSettings{}, ErrInvalidConversationSettings
+		}
+	}
+
+	currentResult, err := s.GetConversationSettings(ctx, businessUserID, conversationID)
+	if err != nil {
+		return models.IMConversationSettings{}, err
+	}
+	ownerUserID, err := im.UserIDFromBusinessID(businessUserID)
+	if err != nil {
+		return models.IMConversationSettings{}, err
+	}
+	current := im.ConversationSettings{
+		ConversationID: currentResult.ConversationID,
+		RecvMsgOpt:     boolToRecvMsgOpt(currentResult.DoNotDisturb),
+		IsPinned:       currentResult.Pinned,
+		IsPrivateChat:  currentResult.BurnAfterRead,
+		BurnDuration:   currentResult.BurnDuration,
+	}
+	// The peer OpenIM user ID is encoded in a single-chat conversation ID.
+	current.UserID, err = peerUserIDFromConversation(conversationID, ownerUserID)
+	if err != nil {
+		return models.IMConversationSettings{}, err
+	}
+
+	update := im.UpdateConversationSettings{
+		IsPinned:      req.Pinned,
+		IsPrivateChat: req.BurnAfterRead,
+		BurnDuration:  req.BurnDuration,
+	}
+	if req.DoNotDisturb != nil {
+		value := boolToRecvMsgOpt(*req.DoNotDisturb)
+		update.RecvMsgOpt = &value
+	}
+	if req.BurnAfterRead != nil && !*req.BurnAfterRead && req.BurnDuration == nil {
+		zero := 0
+		update.BurnDuration = &zero
+	}
+	if err := s.Client.SetConversationSettings(ctx, ownerUserID, current, update); err != nil {
+		return models.IMConversationSettings{}, err
+	}
+
+	result := currentResult
+	if req.Pinned != nil {
+		result.Pinned = *req.Pinned
+	}
+	if req.DoNotDisturb != nil {
+		result.DoNotDisturb = *req.DoNotDisturb
+	}
+	if req.BurnAfterRead != nil {
+		result.BurnAfterRead = *req.BurnAfterRead
+		if !*req.BurnAfterRead && req.BurnDuration == nil {
+			result.BurnDuration = 0
+		}
+	}
+	if req.BurnDuration != nil {
+		result.BurnDuration = *req.BurnDuration
+	}
+	return result, nil
+}
+
+func toConversationSettings(settings im.ConversationSettings) models.IMConversationSettings {
+	return models.IMConversationSettings{
+		ConversationID: settings.ConversationID,
+		Pinned:         settings.IsPinned,
+		DoNotDisturb:   settings.RecvMsgOpt == 2,
+		BurnAfterRead:  settings.IsPrivateChat,
+		BurnDuration:   settings.BurnDuration,
+	}
+}
+
+func boolToRecvMsgOpt(enabled bool) int {
+	if enabled {
+		return 2
+	}
+	return 0
+}
+
+func peerUserIDFromConversation(conversationID, ownerUserID string) (string, error) {
+	value := strings.TrimPrefix(conversationID, "si_")
+	if value == conversationID {
+		return "", ErrInvalidConversationSettings
+	}
+	if prefix := ownerUserID + "_"; strings.HasPrefix(value, prefix) {
+		peer := strings.TrimPrefix(value, prefix)
+		if peer != "" && peer != ownerUserID {
+			return peer, nil
+		}
+	}
+	if suffix := "_" + ownerUserID; strings.HasSuffix(value, suffix) {
+		peer := strings.TrimSuffix(value, suffix)
+		if peer != "" && peer != ownerUserID {
+			return peer, nil
+		}
+	}
+	return "", ErrInvalidConversationSettings
 }
 
 func (s *IMService) Token(ctx context.Context, userID string, platformID int) (IMToken, error) {

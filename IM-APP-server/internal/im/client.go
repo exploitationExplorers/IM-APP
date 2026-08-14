@@ -21,9 +21,10 @@ import (
 const maxResponseBytes = 2 << 20
 
 var (
-	ErrUnavailable     = errors.New("openim is not configured")
-	ErrInvalidPlatform = errors.New("invalid OpenIM platform ID")
-	ErrInvalidUserID   = errors.New("invalid business user ID")
+	ErrUnavailable          = errors.New("openim is not configured")
+	ErrInvalidPlatform      = errors.New("invalid OpenIM platform ID")
+	ErrInvalidUserID        = errors.New("invalid business user ID")
+	ErrConversationNotFound = errors.New("openim conversation not found")
 )
 
 // UserIDFromBusinessID converts the PostgreSQL UUID into an OpenIM-compatible
@@ -115,6 +116,23 @@ type TokenResult struct {
 	ExpireSec  int    `json:"expireSec"`
 	PlatformID int    `json:"platformId"`
 	UserID     string `json:"userId"`
+}
+
+type ConversationSettings struct {
+	ConversationID string `json:"conversationID"`
+	OwnerUserID    string `json:"ownerUserID"`
+	UserID         string `json:"userID"`
+	RecvMsgOpt     int    `json:"recvMsgOpt"`
+	IsPinned       bool   `json:"isPinned"`
+	IsPrivateChat  bool   `json:"isPrivateChat"`
+	BurnDuration   int    `json:"burnDuration"`
+}
+
+type UpdateConversationSettings struct {
+	RecvMsgOpt    *int  `json:"recvMsgOpt,omitempty"`
+	IsPinned      *bool `json:"isPinned,omitempty"`
+	IsPrivateChat *bool `json:"isPrivateChat,omitempty"`
+	BurnDuration  *int  `json:"burnDuration,omitempty"`
 }
 
 type flexInt int
@@ -474,6 +492,54 @@ func (c *Client) SendTextMessage(ctx context.Context, receiverID string, session
 	}
 	err := c.postWithAdmin(ctx, "/msg/send_msg", body, &result)
 	return result, err
+}
+
+func (c *Client) GetConversationSettings(ctx context.Context, ownerUserID, conversationID string) (ConversationSettings, error) {
+	var data struct {
+		Conversations []ConversationSettings `json:"conversations"`
+	}
+	err := c.postWithAdmin(ctx, "/conversation/get_conversations", map[string]any{
+		"ownerUserID":     ownerUserID,
+		"conversationIDs": []string{conversationID},
+	}, &data)
+	if err != nil {
+		return ConversationSettings{}, err
+	}
+	for _, conversation := range data.Conversations {
+		if conversation.ConversationID == conversationID && conversation.OwnerUserID == ownerUserID {
+			return conversation, nil
+		}
+	}
+	return ConversationSettings{}, ErrConversationNotFound
+}
+
+func (c *Client) SetConversationSettings(
+	ctx context.Context,
+	ownerUserID string,
+	current ConversationSettings,
+	update UpdateConversationSettings,
+) error {
+	conversation := struct {
+		ConversationID   string `json:"conversationID"`
+		ConversationType int    `json:"conversationType"`
+		UserID           string `json:"userID"`
+		RecvMsgOpt       *int   `json:"recvMsgOpt,omitempty"`
+		IsPinned         *bool  `json:"isPinned,omitempty"`
+		IsPrivateChat    *bool  `json:"isPrivateChat,omitempty"`
+		BurnDuration     *int   `json:"burnDuration,omitempty"`
+	}{
+		ConversationID:   current.ConversationID,
+		ConversationType: 1,
+		UserID:           current.UserID,
+		RecvMsgOpt:       update.RecvMsgOpt,
+		IsPinned:         update.IsPinned,
+		IsPrivateChat:    update.IsPrivateChat,
+		BurnDuration:     update.BurnDuration,
+	}
+	return c.postWithAdmin(ctx, "/conversation/set_conversations", map[string]any{
+		"userIDs":      []string{ownerUserID},
+		"conversation": conversation,
+	}, nil)
 }
 
 func (c *Client) postWithAdmin(ctx context.Context, path string, request, response any) error {

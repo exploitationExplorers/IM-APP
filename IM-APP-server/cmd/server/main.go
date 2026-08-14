@@ -36,6 +36,13 @@ func main() {
 	if err := db.RunMigrationsDir(context.Background(), pool, migrationsDir); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
+	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
+		"report_reasons": {"id", "target_type", "reason", "language", "sort_order", "status"},
+		"reports":        {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
+		"report_files":   {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
+	}); err != nil {
+		log.Fatalf("schema check: %v; required migration: 017_app_reports.sql", err)
+	}
 	log.Println("migrations applied")
 
 	if cfg.SeedDemo {
@@ -80,6 +87,7 @@ func main() {
 	fileRepo := &repository.FileRepo{DB: pool}
 	imOutboxRepo := &repository.IMSyncOutboxRepo{DB: pool}
 	imAccessRepo := &repository.IMAccessRepo{DB: pool}
+	reportRepo := &repository.ReportRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
 
@@ -100,6 +108,7 @@ func main() {
 	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
+	reportSvc := &service.ReportService{Reports: reportRepo}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
 	var smsGateway service.SMSGateway = service.DevSMSGateway{}
@@ -120,6 +129,7 @@ func main() {
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Service: imSvc}
+	reportH := &handler.ReportHandler{Svc: reportSvc}
 	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
 	openIMWebhookH := handler.NewOpenIMWebhookHandler(
 		imAccessRepo, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs,
@@ -188,6 +198,8 @@ func main() {
 			auth.POST("/users/qrcode/resolve", userH.ResolveUserQRCode)
 			auth.GET("/users/search", userH.Search)
 			auth.GET("/users/:id", userH.GetUser)
+			auth.GET("/report-reasons", reportH.ListReasons)
+			auth.POST("/reports", reportH.Create)
 
 			if cfg.LegacyChatEnabled {
 				auth.GET("/conversations", chatH.ListConversations)
@@ -251,6 +263,8 @@ func main() {
 			auth.POST("/im/token", imH.Token)
 			auth.GET("/im/peers/:businessUserId", imH.Peer)
 			auth.GET("/im/groups/:businessGroupId", imH.Group)
+			auth.GET("/im/conversations/:conversationId/settings", imH.GetConversationSettings)
+			auth.PATCH("/im/conversations/:conversationId/settings", imH.UpdateConversationSettings)
 			if cfg.LegacyChatEnabled {
 				auth.POST("/forward-tasks", forwardH.Create)
 				auth.GET("/forward-tasks/:id", forwardH.Get)

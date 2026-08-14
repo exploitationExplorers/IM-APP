@@ -282,3 +282,73 @@ func TestListGroupMemberIDsPaginates(t *testing.T) {
 		t.Fatalf("calls=%d members=%#v", calls, got)
 	}
 }
+
+func TestConversationSettingsRequestsAreScopedToOwner(t *testing.T) {
+	var setBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/conversation/get_conversations":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["ownerUserID"] != "owner-1" {
+				t.Fatalf("get ownerUserID = %#v", body["ownerUserID"])
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"conversations":[{"conversationID":"si_owner-1_peer-1","ownerUserID":"owner-1","userID":"peer-1","recvMsgOpt":2,"isPinned":true,"isPrivateChat":false,"burnDuration":0}]}}`))
+		case "/conversation/set_conversations":
+			_ = json.NewDecoder(r.Body).Decode(&setBody)
+			_, _ = w.Write([]byte(`{"errCode":0,"data":null}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin"}, server.Client())
+	ctx := context.Background()
+	current, err := client.GetConversationSettings(ctx, "owner-1", "si_owner-1_peer-1")
+	if err != nil {
+		t.Fatalf("GetConversationSettings() error = %v", err)
+	}
+	if !current.IsPinned || current.RecvMsgOpt != 2 || current.UserID != "peer-1" {
+		t.Fatalf("unexpected settings: %#v", current)
+	}
+
+	pinned := false
+	recvMsgOpt := 0
+	if err := client.SetConversationSettings(ctx, "owner-1", current, UpdateConversationSettings{
+		IsPinned: &pinned, RecvMsgOpt: &recvMsgOpt,
+	}); err != nil {
+		t.Fatalf("SetConversationSettings() error = %v", err)
+	}
+	userIDs, ok := setBody["userIDs"].([]any)
+	if !ok || len(userIDs) != 1 || userIDs[0] != "owner-1" {
+		t.Fatalf("set userIDs = %#v", setBody["userIDs"])
+	}
+	conversation, ok := setBody["conversation"].(map[string]any)
+	if !ok || conversation["conversationID"] != "si_owner-1_peer-1" || conversation["userID"] != "peer-1" {
+		t.Fatalf("set conversation = %#v", setBody["conversation"])
+	}
+	if conversation["isPinned"] != false || conversation["recvMsgOpt"] != float64(0) {
+		t.Fatalf("set fields = %#v", conversation)
+	}
+}
+
+func TestGetConversationSettingsRejectsMissingConversation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/auth/get_admin_token" {
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"errCode":0,"data":{"conversations":[]}}`))
+	}))
+	defer server.Close()
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin"}, server.Client())
+	_, err := client.GetConversationSettings(context.Background(), "owner-1", "si_owner-1_peer-1")
+	if err != ErrConversationNotFound {
+		t.Fatalf("error = %v, want ErrConversationNotFound", err)
+	}
+}
