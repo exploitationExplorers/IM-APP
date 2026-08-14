@@ -465,6 +465,79 @@ func (c *Client) SendTextMessage(ctx context.Context, receiverID string, session
 	return result, err
 }
 
+// ConversationSettings 对应 OpenIM 的 Conversation 对象。
+// 字段名与 OpenIM JSON 完全一致，可直接作为 set_conversation 的 conversation 体回写。
+// recvMsgOpt 取值：0 正常接收 / 1 免打扰（不接收）/ 2 仅在线接收。
+type ConversationSettings struct {
+	ConversationID   string `json:"conversationID"`
+	ConversationType int    `json:"conversationType"` // 1 单聊 2 群聊
+	UserID           string `json:"userID"`           // 单聊对端 ID
+	GroupID          string `json:"groupID"`          // 群聊 ID
+	ShowName         string `json:"showName"`
+	FaceURL          string `json:"faceURL"`
+	RecvMsgOpt       int    `json:"recvMsgOpt"`
+	UnreadCount      int    `json:"unreadCount"`
+	GroupAtType      int    `json:"groupAtType"` // 群 @ 强提醒档位
+	IsPinned         bool   `json:"isPinned"`     // 置顶
+	IsPrivateChat    bool   `json:"isPrivateChat"`    // 阅后即焚开关
+	IsNotInGroup     bool   `json:"isNotInGroup"`
+	BurnDuration     int64  `json:"burnDuration"`     // 阅后即焚时长（秒）
+	HasReadSeq       int64  `json:"hasReadSeq"`
+	MsgDestructTime  int64  `json:"msgDestructTime"`  // 消息定时销毁时长（秒）
+	IsMsgDestruct    bool   `json:"isMsgDestruct"`    // 是否开启消息定时销毁
+	Ex               string `json:"ex"`              // 扩展字段（可存备注名）
+	DraftText        string `json:"draftText"`       // 会话草稿
+	AttachedInfo     string `json:"attachedInfo"`
+}
+
+// GetConversations 拉取指定会话的当前设置（全量对象）。
+// 不同 OpenIM 版本管理接口对“当前用户”字段命名不一致（opUserID / userID），
+// 这里两个都带、同值，多余的会被服务端忽略，缺失的为零，确保任一版本都能命中。
+func (c *Client) GetConversations(ctx context.Context, opUserID string, conversationIDs []string) ([]ConversationSettings, error) {
+	var data struct {
+		ConversationInfos []ConversationSettings `json:"conversationInfos"`
+	}
+	err := c.postWithAdmin(ctx, "/conversation/get_conversations", map[string]any{
+		"opUserID":       opUserID,
+		"userID":         opUserID,
+		"conversationIDs": conversationIDs,
+	}, &data)
+	if err != nil {
+		return nil, err
+	}
+	return data.ConversationInfos, nil
+}
+
+// SetConversation 写回单个会话的设置。调用方应先 GetConversations 取全量再叠加变更，
+// 避免部分写入把未传字段按 protobuf 默认值清零。
+func (c *Client) SetConversation(ctx context.Context, opUserID string, conv ConversationSettings) error {
+	return c.postWithAdmin(ctx, "/conversation/set_conversation", map[string]any{
+		"opUserID":   opUserID,
+		"userID":     opUserID,
+		"conversation": conv,
+	}, nil)
+}
+
+// MarkConversationAsRead 清空指定会话未读数。
+func (c *Client) MarkConversationAsRead(ctx context.Context, opUserID, conversationID string) error {
+	return c.postWithAdmin(ctx, "/conversation/mark_conversation_as_read", map[string]any{
+		"opUserID":      opUserID,
+		"userID":        opUserID,
+		"conversationID": conversationID,
+	}, nil)
+}
+
+// SetGlobalMsgRecvOpt 设置用户级全局免打扰（对所有会话生效）。
+// opt 取值同 recvMsgOpt：0 正常 / 1 免打扰 / 2 仅在线接收。
+func (c *Client) SetGlobalMsgRecvOpt(ctx context.Context, opUserID string, opt int) error {
+	return c.postWithAdmin(ctx, "/user/set_global_msg_recv_opt", map[string]any{
+		"opUserID": opUserID,
+		"userID":   opUserID,
+		"opt":      opt,
+		"recvMsgOpt": opt,
+	}, nil)
+}
+
 func (c *Client) postWithAdmin(ctx context.Context, path string, request, response any) error {
 	token, err := c.GetAdminToken(ctx)
 	if err != nil {

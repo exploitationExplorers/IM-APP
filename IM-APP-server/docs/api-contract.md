@@ -661,6 +661,87 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 把纯数字业务群号解析为内部 UUID，再解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
 
+### GET `/api/v1/im/conversations/:peerType/:peerId`
+
+获取单个会话的当前设置（OpenIM 全量对象）。
+
+- `peerType`：`c2c`（单聊）或 `group`（群聊）
+- `peerId`：业务好友 ID 或业务群 ID（**无需传 OpenIM conversationId**，后端用 `ResolvePeer`/`ResolveGroup` 解析并拼 `si_`/`sg_` 会话 ID，且带好友/群关系校验）
+
+**Response `data`**：见下方 PATCH 返回结构。
+
+### PATCH `/api/v1/im/conversations/:peerType/:peerId`
+
+部分更新会话设置，请求体为下列字段的任意子集（只传要改的）。后端先 GET 全量再叠加回写，避免清零其它设置。
+
+- `peerType` / `peerId`：含义同上
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `recvMsgOpt` | int | 0 正常 / 1 免打扰 / 2 仅在线接收 |
+| `isPinned` | bool | 置顶聊天 |
+| `isPrivateChat` | bool | 阅后即焚开关 |
+| `burnDuration` | int | 阅后即焚时长（秒） |
+| `isMsgDestruct` | bool | 消息定时销毁开关 |
+| `msgDestructTime` | int | 消息定时销毁时长（秒） |
+| `groupAtType` | int | 群 @ 强提醒档位 |
+| `ex` | string | 会话扩展（建议存备注名） |
+| `draftText` | string | 会话草稿 |
+
+**Body 示例**
+```json
+{ "recvMsgOpt": 1, "isPinned": true, "ex": "老王" }
+```
+
+**Response `data`**：回写后该会话的最新全量设置。至少传一个字段，否则 400；`peerType` 非法 400；与好友/群不可聊天 403；会话不存在（仅 GET）404。
+
+### POST `/api/v1/im/conversations/:peerType/:peerId/read`
+
+标记会话已读，清空未读数。`peerType` / `peerId` 含义同上。
+
+**Response `data`**：`{ "ok": true }`
+
+### PUT `/api/v1/im/me/global-msg-recv-opt`
+
+设置当前用户级全局免打扰（对所有会话生效）。
+
+**Body**
+```json
+{ "recvMsgOpt": 1 }
+```
+
+**Response `data`**：`{ "recvMsgOpt": 1 }`
+
+### POST `/api/v1/im/me/push-token`
+
+注册/更新当前用户的设备推送凭证（App 后台/离线时的「来消息提示」）。按 `platform + deviceToken` 去重 upsert，存于 Redis，不过期。
+
+**Body**
+```json
+{ "platform": "ios", "channel": "apns", "deviceToken": "a1b2c3d4e5f6...", "enabled": true }
+```
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `platform` | string | 是 | ios / android / web / harmony |
+| `channel` | string | 否 | apns / fcm / jpush / harmony（web 可空） |
+| `deviceToken` | string | 是 | 设备推送令牌 |
+| `enabled` | bool | 否 | 是否接收推送，缺省 true |
+
+**Response `data`**：`{ "ok": true }`（Redis 不可用时 503）
+
+### DELETE `/api/v1/im/me/push-token`
+
+注销当前用户某个设备的推送凭证（退出登录/关闭推送时调用）。
+
+**Body**
+```json
+{ "deviceToken": "a1b2c3d4e5f6..." }
+```
+
+**Response `data`**：`{ "ok": true }`
+
+> 消息推送管线：OpenIM 在消息落库后回调 `AfterMessage` Webhook，后端记录审计并构造 `PushMessage` 调用 `PushService.Dispatch`。当前为 `LoggingPushService` 日志桩（仅打印意图），后续替换为接入 APNs/FCM/个推 的实现。未读总数建议前端直接调 OpenIM SDK `getTotalUnreadMsgCount` 获取，无需后端中转。
+
 ## OpenIM 内部接口
 
 所有 `/internal/im/*` 必须携带 `X-Internal-API-Key`，密钥来自 `IM_INTERNAL_API_KEY`，不得下发给普通客户端。

@@ -70,13 +70,16 @@ services:
       MINIO_USE_SSL: "false"
       # MinIO 对外访问地址（预签名 URL 用，值从同目录 .env 读取；如 http://8.210.72.157:9000）
       MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
-      # OpenIM Secret 只注入 Go 后端，不能暴露给客户端。
-      OPENIM_API_URL: ${OPENIM_API_URL:-}
+      # ── OpenIM 对接配置（与 deploy/openim/docker-compose.yml 同源，详见 .env.example）──
+      # 后端内部连 OpenIM API：同共享网络直接用服务名 openim-api:10002。
+      # OPENIM_SECRET 必须与 OpenIM 的 IMENV_SHARE_SECRET 一致（两者都读宿主 OPENIM_SECRET 变量）。
+      OPENIM_API_URL: ${OPENIM_API_URL:-http://openim-api:10002}
       OPENIM_PUBLIC_API_URL: ${OPENIM_PUBLIC_API_URL:-}
       OPENIM_PUBLIC_WS_URL: ${OPENIM_PUBLIC_WS_URL:-}
       OPENIM_SECRET: ${OPENIM_SECRET:-}
       OPENIM_ADMIN_USER: ${OPENIM_ADMIN_USER:-imAdmin}
       OPENIM_WEBHOOK_SECRET: ${OPENIM_WEBHOOK_SECRET:-}
+      # 允许 OpenIM 容器回调 webhook 的来源网段；填共享网络 im-app-openim-net 的 Subnet。
       OPENIM_WEBHOOK_ALLOW_CIDRS: ${OPENIM_WEBHOOK_ALLOW_CIDRS:-}
       IM_INTERNAL_API_KEY: ${IM_INTERNAL_API_KEY:-}
       LEGACY_CHAT_ENABLED: ${LEGACY_CHAT_ENABLED:-false}
@@ -87,7 +90,19 @@ services:
       CAPTCHA_REGION_ID: ${CAPTCHA_REGION_ID:-cn-hangzhou}
     ports:
       - "8080:8080"
+    # 接入与 OpenIM 共享的外部网络，使本服务能用服务名 openim-api:10002 访问 OpenIM，
+    # 同时 OpenIM 也能用 im-app-api:8080 回调本服务的 webhook。
+    # 启动前需先创建该网络：docker network create im-app-openim-net
+    networks:
+      - default
+      - im-app-openim-net
 
 volumes:
   im_pg_data:
   im_minio_data:
+
+# 与 deploy/openim/docker-compose.yml 共享的外部网络；
+# 启动前需先创建：docker network create im-app-openim-net
+networks:
+  im-app-openim-net:
+    external: true

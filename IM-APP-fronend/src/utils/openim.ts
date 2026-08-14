@@ -38,6 +38,24 @@ let tokenExpireAt = 0
 let loginPromise: Promise<string> | null = null
 
 /**
+ * SDK 是否已真正连上 OpenIM 服务端。
+ * 光本地缓存(imUserId/tokenExpireAt)有效还不够——服务端掉线时 SDK 会断连，
+ * 此时直接调会话接口会被 SDK 拒成 errCode=10004(Resource load not complete)。
+ * 只有收到 OnConnectSuccess 才认为可用。
+ */
+let connected = false
+
+/**
+ * 清空本地登录缓存，下次 ensureIMLogin 会强制重新登录。
+ * 触发场景：被其它端踢下线、token 在服务端过期、或需要重新握手时。
+ */
+function resetLoginCache() {
+  imUserId.value = ''
+  tokenExpireAt = 0
+  connected = false
+}
+
+/**
  * 聊天是否交给 OpenIM SDK。旧的自研 WS 通道已下线，
  * 只有显式设成 false 才会关闭聊天能力（用于排查问题）。
  */
@@ -104,6 +122,7 @@ async function getSdkLoginUserId(): Promise<string> {
 function rememberLogin(imToken: IMTokenResult): string {
   imUserId.value = imToken.userId
   tokenExpireAt = Date.now() + Math.max(0, imToken.expireSec - 300) * 1000
+  connected = true // 登录 + 同步已成功，视为已连上服务端
   return imUserId.value
 }
 
@@ -172,7 +191,11 @@ async function doLogin(): Promise<string> {
 /** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
 export async function ensureIMLogin(): Promise<string> {
   if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
-  if (imUserId.value && Date.now() < tokenExpireAt) return imUserId.value
+  // 三者同时满足才直接复用缓存：本地有用户、token 未过期、且 SDK 当前已连上。
+  // 只信前两个会在服务端掉线后误以为仍登录，从而拿到 errCode=10004。
+  if (imUserId.value && Date.now() < tokenExpireAt && connected) {
+    return imUserId.value
+  }
   if (!loginPromise) {
     loginPromise = doLogin().finally(() => {
       loginPromise = null
@@ -181,9 +204,43 @@ export async function ensureIMLogin(): Promise<string> {
   return loginPromise
 }
 
+/**
+ * 连接监听是否已注册，避免 initOpenIM 被多次调用时重复订阅同一事件。
+ */
+let connectionWatchersReady = false
+
+/**
+ * 订阅 SDK 连接生命周期事件（只注册一次）。
+ * 这是修复「errCode=10004 资源未加载」的关键：OpenIM 服务端不稳定会断连，
+ * 前端必须感知断连 / 被踢 / token 过期，据此失效本地缓存、等待重连，
+ * 否则缓存还自认已登录，调会话接口就被 SDK 拒绝。
+ */
+function setupConnectionWatchers() {
+  if (connectionWatchersReady) return
+  connectionWatchersReady = true
+
+  // 连接失败：标记未连上。本地缓存保留，等 SDK 自动重连或下次调用时重登。
+  onIMEvent(IMEvents.OnConnectFailed, () => {
+    connected = false
+  })
+  // 连接成功：标记已可用，缓存复用路径恢复。
+  onIMEvent(IMEvents.OnConnectSuccess, () => {
+    connected = true
+  })
+  // 被其它端踢下线：SDK 会自动 logout，本地缓存作废，下次必须重新登录。
+  onIMEvent(IMEvents.OnKickedOffline, () => {
+    resetLoginCache()
+  })
+  // token 被服务端判过期：旧 token 作废，必须重新向业务后端换 token 再登录。
+  onIMEvent(IMEvents.OnUserTokenExpired, () => {
+    resetLoginCache()
+  })
+}
+
 /** 业务登录成功后调用，失败不阻断主流程 */
 export async function initOpenIM(): Promise<void> {
   if (!shouldUseOpenIM()) return
+  setupConnectionWatchers() // 注册连接生命周期监听（只注册一次）
   await ensureIMLogin()
 }
 
@@ -194,6 +251,7 @@ export async function logoutOpenIM(): Promise<void> {
   } finally {
     imUserId.value = ''
     tokenExpireAt = 0
+    connected = false
   }
 }
 

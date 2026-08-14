@@ -8,6 +8,7 @@ import (
 
 	"im-app-server/internal/im"
 	"im-app-server/internal/repository"
+	"im-app-server/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -42,12 +43,14 @@ type OpenIMWebhookHandler struct {
 	Secret    string
 	AdminUser string
 	AllowNets []*net.IPNet
+	// Pusher 消息推送服务（日志桩或真实 APNs/FCM 通道），AfterMessage 回调时触发。
+	Pusher service.PushService
 }
 
-func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, secret, adminUser string, allowCIDRs []string) *OpenIMWebhookHandler {
+func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, secret, adminUser string, allowCIDRs []string, pusher service.PushService) *OpenIMWebhookHandler {
 	return &OpenIMWebhookHandler{
 		Access: access, Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
-		AllowNets: parseAllowNets(allowCIDRs),
+		AllowNets: parseAllowNets(allowCIDRs), Pusher: pusher,
 	}
 }
 
@@ -145,6 +148,21 @@ func (h *OpenIMWebhookHandler) AfterMessage(c *gin.Context) {
 		req.RecvID, req.GroupID, req.ContentType, req.Seq, req.SendTime); err != nil {
 		c.JSON(http.StatusInternalServerError, denyWebhook("audit storage failed"))
 		return
+	}
+	// 触发消息推送（来消息提示）。即便推送失败也不影响消息投递与审计。
+	if h.Pusher != nil {
+		recvs := make([]string, 0, 1)
+		if req.GroupID == "" && req.RecvID != "" && req.RecvID != h.AdminUser && req.RecvID != req.SendID {
+			recvs = append(recvs, req.RecvID)
+		}
+		_ = h.Pusher.Dispatch(c.Request.Context(), service.PushMessage{
+			ConversationID: req.ConversationID,
+			SenderOpenIMID: req.SendID,
+			RecvOpenIMIDs:  recvs,
+			GroupID:        req.GroupID,
+			ContentType:    req.ContentType,
+			SendTime:       req.SendTime,
+		})
 	}
 	c.JSON(http.StatusOK, allowWebhook())
 }

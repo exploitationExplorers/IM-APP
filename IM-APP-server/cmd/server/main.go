@@ -119,8 +119,10 @@ func main() {
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Service: imSvc}
 	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
+	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
+	pushSvc := service.NewLoggingPushService()
 	openIMWebhookH := handler.NewOpenIMWebhookHandler(
-		imAccessRepo, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs,
+		imAccessRepo, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
 	)
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
 	favH := &handler.FavoriteHandler{Svc: favSvc}
@@ -248,6 +250,17 @@ func main() {
 			auth.POST("/im/token", imH.Token)
 			auth.GET("/im/peers/:businessUserId", imH.Peer)
 			auth.GET("/im/groups/:businessGroupId", imH.Group)
+
+		// 会话设置配置接口（IM 有的都要出）：免打扰/置顶/阅后即焚/消息定时销毁/备注/@强提醒/草稿/已读/全局免打扰
+		// peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（后端拼 conversationId）
+		auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
+		auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
+		auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
+		auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
+
+		// 消息推送（来消息提示）：前端注册/注销设备推送凭证
+		auth.POST("/im/me/push-token", imH.RegisterPushToken)
+		auth.DELETE("/im/me/push-token", imH.UnregisterPushToken)
 			if cfg.LegacyChatEnabled {
 				auth.POST("/forward-tasks", forwardH.Create)
 				auth.GET("/forward-tasks/:id", forwardH.Get)
