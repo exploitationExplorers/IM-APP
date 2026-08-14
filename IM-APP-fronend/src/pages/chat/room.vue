@@ -73,6 +73,7 @@ function nicknameOf(message: ChatMessage): string {
 
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
+const hasInput = computed(() => input.value.trim().length > 0)
 
 onLoad(async (query) => {
   title.value = decodeURIComponent(String(query?.title || '聊天'))
@@ -166,7 +167,21 @@ function onConfirmSend() {
 }
 
 function goBack() {
-  uni.navigateBack()
+  const pages = getCurrentPages()
+  const current = pages[pages.length - 1]
+  const previous = pages[pages.length - 2]
+
+  if (pages.length > 1 && previous && previous.route !== current?.route) {
+    uni.navigateBack({
+      delta: 1,
+      fail: () => {
+        uni.switchTab({ url: '/pages/chat/index' })
+      },
+    })
+    return
+  }
+
+  uni.switchTab({ url: '/pages/chat/index' })
 }
 
 async function resolveBusinessTarget(conv: { peerUserId?: string; groupId?: string }) {
@@ -526,6 +541,7 @@ function pickImage() {
           <text class="emoji" @click="onEmoji">☺</text>
         </view>
         <view class="tool" @click="onPlus">＋</view>
+        <view v-if="hasInput" class="send-btn" @click="onSend">传送</view>
       </view>
 
       <view v-if="showPlusPanel" class="plus-panel">
@@ -646,6 +662,20 @@ function pickImage() {
   justify-content: center;
   font-size: 40rpx;
   color: #333;
+}
+
+.send-btn {
+  min-width: 120rpx;
+  height: 64rpx;
+  padding: 0 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18rpx;
+  background: #0a2fc2;
+  color: #fff;
+  font-size: 26rpx;
+  font-weight: 600;
 }
 
 .input-wrap {

@@ -30,6 +30,7 @@ export interface JoinGroupByQRCodeResult {
 export interface GroupMember {
   id: string
   nickname: string
+  groupNickname?: string
   avatar: string
   role: 'owner' | 'admin' | 'member'
 }

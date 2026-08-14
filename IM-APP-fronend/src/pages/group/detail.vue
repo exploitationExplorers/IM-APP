@@ -3,16 +3,23 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useGroupStore } from '@/stores/group'
 import { APP_CONFIG } from '@/config'
+import ImSwitch from '@/components/ImSwitch.vue'
 
 const groupStore = useGroupStore()
 const groupId = ref('')
 const code = ref('group')
+const doNotDisturb = ref(false)
+const pinnedChat = ref(false)
 
 const groupDetail = computed(() => groupStore.currentGroup)
 const memberList = computed(() => groupStore.members)
 const groupName = computed(() => groupDetail.value?.name || '群聊')
 const avatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
+
+function getMemberDisplayName(member: { nickname?: string; groupNickname?: string }) {
+  return member.groupNickname || member.nickname || '成员'
+}
 
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
@@ -108,7 +115,7 @@ function copyGroupId() {
       <view class="member-row" @click="goToMembers">
         <view v-for="member in memberList" :key="member.id" class="member-item">
           <image class="member-avatar" :src="member.avatar" mode="aspectFill" />
-          <text class="member-name">{{ member.nickname }}</text>
+          <text class="member-name">{{ getMemberDisplayName(member) }}</text>
         </view>
         <view v-if="memberList.length" class="add-member" @click.stop="goToMembers">
           <view class="add-circle">＋</view>
@@ -177,16 +184,12 @@ function copyGroupId() {
 
       <view class="switch-row">
         <text class="label">消息免打扰</text>
-        <view class="switch-track">
-          <view class="switch-knob" />
-        </view>
+        <ImSwitch v-model="doNotDisturb" />
       </view>
 
       <view class="switch-row">
         <text class="label">置顶聊天</text>
-        <view class="switch-track">
-          <view class="switch-knob" />
-        </view>
+        <ImSwitch v-model="pinnedChat" />
       </view>
 
       <view class="action-row" @click="goToReport">
@@ -419,27 +422,6 @@ function copyGroupId() {
   padding: 0 30rpx;
   background: #fff;
   border-bottom: 1rpx solid #f0f0f0;
-}
-
-.switch-track {
-  width: 76rpx;
-  height: 40rpx;
-  border-radius: 24rpx;
-  background: #d9d9d9;
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding: 4rpx;
-}
-
-.switch-knob {
-  width: 32rpx;
-  height: 32rpx;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.16);
-  position: absolute;
-  left: 6rpx;
 }
 
 .action-row {

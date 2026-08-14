@@ -38,6 +38,14 @@ export async function updateGroupSettings(
   })
 }
 
+export async function updateGroupMyNickname(groupId: string, nickname: string) {
+  return request<{ nickname: string } | null>({
+    url: `/groups/${groupId}/me/nickname`,
+    method: 'PUT',
+    data: { nickname },
+  })
+}
+
 export async function leaveGroup(groupId: string) {
   return request<{ ok: boolean }>({ url: `/groups/${groupId}/leave`, method: 'POST' })
 }

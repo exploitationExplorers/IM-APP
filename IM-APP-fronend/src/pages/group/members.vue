@@ -12,9 +12,10 @@ const loading = ref(false)
 const filteredMembers = computed(() => {
   const text = keyword.value.trim().toLowerCase()
   if (!text) return members.value
-  return members.value.filter((member) =>
-    member.nickname.toLowerCase().includes(text),
-  )
+  return members.value.filter((member) => {
+    const displayName = member.groupNickname || member.nickname || ''
+    return displayName.toLowerCase().includes(text)
+  })
 })
 
 onLoad(async (query) => {
@@ -77,7 +78,7 @@ function roleLabel(member: GroupMember) {
         class="member-row"
       >
         <image class="avatar" :src="member.avatar || '/static/avatar-me.png'" mode="aspectFill" />
-        <text class="name">{{ member.nickname }}</text>
+        <text class="name">{{ member.groupNickname || member.nickname }}</text>
         <view v-if="roleLabel(member)" class="badge">{{ roleLabel(member) }}</view>
       </view>
       <view v-if="!loading && !filteredMembers.length" class="empty">暂无成员</view>
