@@ -27,6 +27,10 @@ type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword,omitempty"`
 }
 
+type VerifyPasswordRequest struct {
+	OldPassword string `json:"oldPassword"`
+}
+
 type UserQRCodeResolveResult struct {
 	User     PublicProfile `json:"user"`
 	Relation string        `json:"relation"`
@@ -39,9 +43,24 @@ type GroupQRCodeResult struct {
 }
 
 type GroupQRCodeResolveResult struct {
-	Group    GroupInfo `json:"group"`
-	Joined   bool      `json:"joined"`
-	MemberID string    `json:"memberId,omitempty"`
+	Group      GroupInfo `json:"group"`
+	Joined     bool      `json:"joined"`
+	MemberID   string    `json:"memberId,omitempty"`
+	JoinMode   string    `json:"joinMode"`
+	NextAction string    `json:"nextAction"`
+}
+
+type JoinGroupByQRCodeRequest struct {
+	Token   string `json:"token"`
+	Payload string `json:"payload"`
+	QRCode  string `json:"qrcode"`
+	Remark  string `json:"remark"`
+}
+
+type JoinGroupByQRCodeResult struct {
+	Action    string    `json:"action"`
+	Group     GroupInfo `json:"group"`
+	RequestID string    `json:"requestId,omitempty"`
 }
 type UserQRCodeResult struct {
 	Payload   string      `json:"payload"` // 二维码内容，前端据此渲染二维码图片

@@ -1,21 +1,37 @@
 package models
 
 type GroupInfo struct {
-	ID                    string `json:"id"`
-	Name                  string `json:"name"`
-	Avatar                string `json:"avatar"`
-	OwnerID               string `json:"ownerId"`
-	MemberCount           int    `json:"memberCount"`
-	Announcement          string `json:"announcement,omitempty"`
-	AllowMemberAddFriend  bool   `json:"allowMemberAddFriend"`
-	ConversationID        string `json:"conversationId,omitempty"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	Avatar               string            `json:"avatar"`
+	OwnerID              string            `json:"ownerId"`
+	MemberCount          int               `json:"memberCount"`
+	Announcement         string            `json:"announcement,omitempty"`
+	AllowMemberAddFriend bool              `json:"allowMemberAddFriend"`
+	ConversationID       string            `json:"conversationId,omitempty"`
+	MyRole               string            `json:"myRole,omitempty"`
+	MyNickname           string            `json:"myNickname,omitempty"`
+	JoinMode             string            `json:"joinMode"`
+	AllMuted             bool              `json:"allMuted"`
+	Permissions          *GroupPermissions `json:"permissions,omitempty"`
+}
+
+type GroupPermissions struct {
+	CanEditProfile      bool `json:"canEditProfile"`
+	CanEditAnnouncement bool `json:"canEditAnnouncement"`
+	CanViewQRCode       bool `json:"canViewQRCode"`
+	CanManageMembers    bool `json:"canManageMembers"`
+	CanEditMyNickname   bool `json:"canEditMyNickname"`
+	CanReport           bool `json:"canReport"`
 }
 
 type GroupMember struct {
-	ID       string `json:"id"`
-	Nickname string `json:"nickname"`
-	Avatar   string `json:"avatar"`
-	Role     string `json:"role"`
+	ID            string `json:"id"`
+	Nickname      string `json:"nickname"`
+	GroupNickname string `json:"groupNickname"`
+	DisplayName   string `json:"displayName"`
+	Avatar        string `json:"avatar"`
+	Role          string `json:"role"`
 }
 
 type CreateGroupReq struct {
@@ -24,10 +40,27 @@ type CreateGroupReq struct {
 }
 
 type UpdateGroupSettingsReq struct {
+	Name                 *string `json:"name"`
+	AvatarFileID         *string `json:"avatarFileId"`
 	Announcement         *string `json:"announcement"`
 	AllowMemberAddFriend *bool   `json:"allowMemberAddFriend"`
 	JoinMode             *string `json:"joinMode"`
 	AllMuted             *bool   `json:"allMuted"`
+}
+
+type UpdateMyGroupNicknameReq struct {
+	Nickname string `json:"nickname"`
+}
+
+type CreateGroupReportReq struct {
+	Reason      string `json:"reason"`
+	Description string `json:"description"`
+}
+
+type GroupReportResult struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"createdAt"`
 }
 
 type InviteGroupMembersReq struct {
@@ -39,26 +72,18 @@ type CreateGroupJoinReq struct {
 	InviteToken string `json:"inviteToken"`
 }
 
-type UpdateMemberRoleReq struct {
-	Role string `json:"role"` // admin|member
-}
-
-type MuteMemberReq struct {
-	MutedUntil string `json:"mutedUntil"` // RFC3339 or empty to unmute
-}
-
 type GroupJoinRequestItem struct {
-	ID        string        `json:"id"`
-	Status    string        `json:"status"`
-	Remark    string        `json:"remark"`
-	CreatedAt string        `json:"createdAt"`
-	HandledAt string        `json:"handledAt,omitempty"`
-	Applicant UserSummary   `json:"applicant"`
+	ID        string      `json:"id"`
+	Status    string      `json:"status"`
+	Remark    string      `json:"remark"`
+	CreatedAt string      `json:"createdAt"`
+	HandledAt string      `json:"handledAt,omitempty"`
+	Applicant UserSummary `json:"applicant"`
 }
 
 type JoinGroupResult struct {
-	Group GroupInfo   `json:"group"`
-	Role  string      `json:"role,omitempty"`
+	Group GroupInfo `json:"group"`
+	Role  string    `json:"role,omitempty"`
 }
 
 type ContactTagItem struct {
@@ -78,4 +103,16 @@ type SetTagMembersReq struct {
 type UpdateContactReq struct {
 	Remark *string  `json:"remark"`
 	TagIDs []string `json:"tagIds,omitempty"`
+}
+
+type UpdateGroupMemberRoleReq struct {
+	Role string `json:"role"`
+}
+
+type UpdateGroupMemberMuteReq struct {
+	MutedSeconds int64 `json:"mutedSeconds"`
+}
+
+type UpdateGroupMuteReq struct {
+	Muted bool `json:"muted"`
 }

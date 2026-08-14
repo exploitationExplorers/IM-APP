@@ -122,7 +122,7 @@ type RecallLog struct {
 }
 
 type UpdateGroupStatusRequest struct {
-	Status string `json:"status"` // normal|banned|dissolved
+	Status string `json:"status"` // active|banned|dismissed
 }
 
 // UpdateGroupSettingsRequest 群公共设置（传哪个改哪个）

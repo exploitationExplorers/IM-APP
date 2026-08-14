@@ -1,0 +1,251 @@
+package im
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"sync/atomic"
+	"testing"
+
+	"im-app-server/internal/config"
+)
+
+func TestGetUserTokenUsesCachedAdminToken(t *testing.T) {
+	var adminCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			adminCalls.Add(1)
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["secret"] != "server-secret" || body["userID"] != "imAdmin" {
+				t.Fatalf("unexpected admin token request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":"3600"}}`))
+		case "/auth/get_user_token":
+			if r.Header.Get("token") != "admin-token" {
+				t.Fatalf("missing admin token header")
+			}
+			if r.Header.Get("operationID") == "" {
+				t.Fatalf("missing operationID header")
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"user-token","expireTimeSeconds":7200}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	for range 2 {
+		result, err := client.GetUserToken(context.Background(), "user-1", 5)
+		if err != nil {
+			t.Fatalf("GetUserToken() error = %v", err)
+		}
+		if result.Token != "user-token" || result.ExpireSec != 7200 || result.PlatformID != 5 {
+			t.Fatalf("unexpected token result: %#v", result)
+		}
+	}
+	if got := adminCalls.Load(); got != 1 {
+		t.Fatalf("admin token calls = %d, want 1", got)
+	}
+}
+
+func TestEnsureUserRegistersMissingUser(t *testing.T) {
+	var checkCalls, registerCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/user/account_check":
+			checkCalls.Add(1)
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"results":[{"userID":"user-1","accountStatus":0}]}}`))
+		case "/user/user_register":
+			registerCalls.Add(1)
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"failedUserIDs":[]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	err := client.EnsureUser(context.Background(), User{UserID: "user-1", Nickname: "Alice"})
+	if err != nil {
+		t.Fatalf("EnsureUser() error = %v", err)
+	}
+	if checkCalls.Load() != 1 || registerCalls.Load() != 1 {
+		t.Fatalf("check calls=%d register calls=%d", checkCalls.Load(), registerCalls.Load())
+	}
+}
+
+func TestBusinessErrorWithHTTP200IsReturned(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errCode":1001,"errMsg":"ArgsError","errDlt":"bad platform"}`))
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	_, err := client.GetAdminToken(context.Background())
+	if err == nil {
+		t.Fatal("GetAdminToken() error = nil, want API error")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok || apiErr.ErrCode != 1001 {
+		t.Fatalf("error = %#v, want APIError code 1001", err)
+	}
+}
+
+func TestInvalidPlatformRejectedBeforeNetwork(t *testing.T) {
+	client := NewClient(config.OpenIMConfig{})
+	_, err := client.GetUserToken(context.Background(), "user-1", 0)
+	if err != ErrInvalidPlatform {
+		t.Fatalf("error = %v, want ErrInvalidPlatform", err)
+	}
+}
+
+func TestUserIDFromBusinessID(t *testing.T) {
+	got, err := UserIDFromBusinessID("10223cf6-59ec-4556-8c09-141915e190ed")
+	if err != nil {
+		t.Fatalf("UserIDFromBusinessID() error = %v", err)
+	}
+	if got != "10223cf659ec45568c09141915e190ed" {
+		t.Fatalf("UserIDFromBusinessID() = %q", got)
+	}
+	if _, err := UserIDFromBusinessID("not-a-uuid"); err != ErrInvalidUserID {
+		t.Fatalf("invalid ID error = %v, want ErrInvalidUserID", err)
+	}
+	reversed, err := BusinessIDFromUserID(got)
+	if err != nil || reversed != "10223cf6-59ec-4556-8c09-141915e190ed" {
+		t.Fatalf("BusinessIDFromUserID() = %q, %v", reversed, err)
+	}
+	if _, err := BusinessIDFromUserID("external-openim-user"); err != ErrInvalidUserID {
+		t.Fatalf("external ID error = %v, want ErrInvalidUserID", err)
+	}
+}
+
+func TestSendBusinessNotificationUsesAdminToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/msg/send_business_notification":
+			if r.Header.Get("token") != "admin-token" {
+				t.Fatalf("missing admin token")
+			}
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["recvUserID"] != "user-1" || body["key"] != "group_join_approved" || body["reliabilityLevel"] != float64(2) {
+				t.Fatalf("unexpected request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"serverMsgID":"server-1","clientMsgID":"client-1","sendTime":123}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	result, err := client.SendBusinessNotification(context.Background(), "user-1", "", "group_join_approved", `{}`, true)
+	if err != nil {
+		t.Fatalf("SendBusinessNotification() error = %v", err)
+	}
+	if result.ServerMsgID != "server-1" || result.ClientMsgID != "client-1" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestGroupModerationRequests(t *testing.T) {
+	paths := make([]string, 0)
+	var nicknameBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/auth/get_admin_token" {
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+			return
+		}
+		if r.Header.Get("token") != "admin-token" {
+			t.Fatal("missing admin token")
+		}
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/group/set_group_member_info" && len(paths) == 2 {
+			if err := json.NewDecoder(r.Body).Decode(&nicknameBody); err != nil {
+				t.Fatalf("decode nickname request: %v", err)
+			}
+		}
+		_, _ = w.Write([]byte(`{"errCode":0}`))
+	}))
+	defer server.Close()
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin"}, server.Client())
+	ctx := context.Background()
+	checks := []func() error{
+		func() error { return client.SetGroupMemberRole(ctx, "group-1", "user-1", 60) },
+		func() error { return client.SetGroupMemberNickname(ctx, "group-1", "user-1", "群昵称") },
+		func() error { return client.SetGroupMemberMute(ctx, "group-1", "user-1", 30) },
+		func() error { return client.SetGroupMemberMute(ctx, "group-1", "user-1", 0) },
+		func() error { return client.SetGroupMute(ctx, "group-1", true) },
+		func() error { return client.SetGroupMute(ctx, "group-1", false) },
+		func() error { return client.DismissGroup(ctx, "group-1") },
+	}
+	for _, check := range checks {
+		if err := check(); err != nil {
+			t.Fatalf("group request failed: %v", err)
+		}
+	}
+	want := []string{
+		"/group/set_group_member_info", "/group/set_group_member_info", "/group/mute_group_member",
+		"/group/cancel_mute_group_member", "/group/mute_group",
+		"/group/cancel_mute_group", "/group/dismiss_group",
+	}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("paths = %#v, want %#v", paths, want)
+	}
+	members, ok := nicknameBody["members"].([]any)
+	if !ok || len(members) != 1 {
+		t.Fatalf("nickname request members = %#v", nicknameBody["members"])
+	}
+	member, ok := members[0].(map[string]any)
+	if !ok || member["nickName"] != "群昵称" {
+		t.Fatalf("nickname request member = %#v", members[0])
+	}
+}
+
+func TestListGroupMemberIDsPaginates(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/auth/get_admin_token" {
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+			return
+		}
+		calls++
+		if calls == 1 {
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"total":2,"members":[{"userID":"u1"}]}}`))
+		} else {
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"total":2,"members":[{"userID":"u2"}]}}`))
+		}
+	}))
+	defer server.Close()
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin"}, server.Client())
+	got, err := client.ListGroupMemberIDs(context.Background(), "group-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || !reflect.DeepEqual(got, []string{"u1", "u2"}) {
+		t.Fatalf("calls=%d members=%#v", calls, got)
+	}
+}

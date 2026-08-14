@@ -1,8 +1,23 @@
 import { request } from '@/utils/request'
-import type { Contact, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
+import type { Contact, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 
 export async function fetchContacts(): Promise<Contact[]> {
   return request<Contact[]>({ url: '/contacts', method: 'GET' })
+}
+
+export async function fetchContact(contactId: string): Promise<Contact> {
+  return request<Contact>({ url: `/contacts/${contactId}`, method: 'GET' })
+}
+
+export async function updateContact(
+  contactId: string,
+  data: { remark?: string; tagIds?: string[] },
+): Promise<Contact> {
+  return request<Contact>({
+    url: `/contacts/${contactId}`,
+    method: 'PATCH',
+    data,
+  })
 }
 
 export async function fetchGroups(role?: 'owner' | 'member'): Promise<GroupPreview[]> {
@@ -59,9 +74,14 @@ export async function unblockContact(contactId: string) {
   })
 }
 
-export async function getContactConversationId(contactId: string): Promise<string | null> {
-  return request<string | null>({
-    url: `/contacts/${contactId}/conversation`,
-    method: 'GET',
+export async function fetchContactTags(): Promise<ContactTagItem[]> {
+  return request<ContactTagItem[]>({ url: '/contact-tags', method: 'GET' })
+}
+
+export async function createContactTag(name: string): Promise<ContactTagItem> {
+  return request<ContactTagItem>({
+    url: '/contact-tags',
+    method: 'POST',
+    data: { name },
   })
 }

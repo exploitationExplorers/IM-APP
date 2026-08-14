@@ -10,6 +10,7 @@ import (
 
 type ContactService struct {
 	Contacts *repository.ContactRepo
+	Groups   *repository.GroupRepo
 	Users    *repository.UserRepo
 	Tags     *repository.ContactTagRepo
 	Privacy  *repository.PrivacyRepo
@@ -50,10 +51,15 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 		source = "public_id"
 	}
 	if source == "group" && sourceGroupID != "" {
-		allowed, err := s.Contacts.IsGroupAddFriendAllowed(ctx, uid, toUserID, sourceGroupID)
+		internalID, err := s.Groups.InternalIDByPublicID(ctx, sourceGroupID)
+		if err != nil {
+			return empty, ErrForbidden
+		}
+		allowed, err := s.Contacts.IsGroupAddFriendAllowed(ctx, uid, toUserID, internalID)
 		if err != nil || !allowed {
 			return empty, ErrForbidden
 		}
+		sourceGroupID = internalID
 	}
 
 	// 对方未开启「加我为好友需验证」时直接成为好友（参考站默认关闭）
@@ -112,12 +118,34 @@ func (s *ContactService) GetContact(ctx context.Context, uid, contactID string) 
 	if err != nil {
 		return c, ErrNotFound
 	}
+	if s.Tags != nil {
+		tags, err := s.Tags.ListByFriend(ctx, uid, contactID)
+		if err != nil {
+			return c, err
+		}
+		c.Tags = tags
+	} else {
+		c.Tags = []models.ContactTagItem{}
+	}
+	groups, err := s.Contacts.ListCommonGroups(ctx, uid, contactID)
+	if err != nil {
+		return c, err
+	}
+	c.CommonGroups = groups
 	return c, nil
 }
 
-func (s *ContactService) UpdateContact(ctx context.Context, uid, contactID string, remark *string) (models.Contact, error) {
+func (s *ContactService) UpdateContact(ctx context.Context, uid, contactID string, remark *string, tagIDs []string) (models.Contact, error) {
 	if remark != nil {
 		if err := s.Contacts.UpdateContactRemark(ctx, uid, contactID, *remark); err != nil {
+			return models.Contact{}, ErrNotFound
+		}
+	}
+	if tagIDs != nil {
+		if s.Tags == nil {
+			return models.Contact{}, errors.New("标签功能不可用")
+		}
+		if err := s.Tags.SetFriendTags(ctx, uid, contactID, tagIDs); err != nil {
 			return models.Contact{}, ErrNotFound
 		}
 	}

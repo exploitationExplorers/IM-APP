@@ -34,12 +34,28 @@ func (s *FavoriteService) Create(ctx context.Context, uid, messageID string) (mo
 	return s.Fav.Create(ctx, uid, m.ID, m.Type, m.Content, m.SenderID, m.ConversationID)
 }
 
-// List 查询收藏，msgType 为空=全部，支持 text/emoji/image/video/file/voice
-func (s *FavoriteService) List(ctx context.Context, uid, msgType string, page, size int) ([]models.Favorite, error) {
-	if msgType != "" && !validFavoriteTypes[msgType] {
+// List 查询收藏，type：0全部 1文字(含表情) 2图片与视频 3文件 4语音
+func (s *FavoriteService) List(ctx context.Context, uid string, typ, page, size int) ([]models.Favorite, error) {
+	if typ < 0 || typ > 4 {
 		return nil, errors.New("收藏类型不合法")
 	}
-	return s.Fav.List(ctx, uid, msgType, size, (page-1)*size)
+	return s.Fav.List(ctx, uid, favoriteTypeFilter(typ), size, (page-1)*size)
+}
+
+// favoriteTypeFilter 把 type 枚举映射为消息类型集合
+func favoriteTypeFilter(typ int) []string {
+	switch typ {
+	case 1:
+		return []string{"text", "emoji"}
+	case 2:
+		return []string{"image", "video"}
+	case 3:
+		return []string{"file"}
+	case 4:
+		return []string{"voice"}
+	default:
+		return nil // 0=全部
+	}
 }
 
 func (s *FavoriteService) Delete(ctx context.Context, uid, favoriteID string) error {

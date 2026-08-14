@@ -2,7 +2,7 @@
 
 export interface UserInfo {
   id: string
-  /** 完整手机号仅 Mock / 本人安全页使用；真实接口通常不返回 */
+  /** 完整本地号：接口不返回，由登录时本地缓存填入，供安全页展示 */
   phone?: string
   /** 脱敏手机号，如 138****8000 */
   phoneMasked?: string

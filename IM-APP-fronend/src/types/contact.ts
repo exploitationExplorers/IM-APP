@@ -1,12 +1,21 @@
 /** 通讯录相关类型 */
 
+export interface ContactTagItem {
+  id: string
+  name: string
+  memberCount: number
+}
+
 export interface Contact {
   id: string
   publicId?: string
   nickname: string
   avatar: string
   remark?: string
-  tags?: string[]
+  /** @deprecated 列表侧旧字段；详情用 tags */
+  tagNames?: string[]
+  tags?: ContactTagItem[]
+  commonGroups?: GroupPreview[]
 }
 
 export interface GroupPreview {

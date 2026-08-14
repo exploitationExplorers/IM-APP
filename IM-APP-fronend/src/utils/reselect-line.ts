@@ -1,7 +1,5 @@
-import { wsClient } from '@/utils/websocket'
+import { reconnectOpenIM } from '@/utils/openim'
 
 export async function reselectLine(): Promise<void> {
-  wsClient.disconnect()
-  await new Promise<void>((resolve) => setTimeout(resolve, 400))
-  wsClient.connect()
+  await reconnectOpenIM()
 }

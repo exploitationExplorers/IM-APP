@@ -23,7 +23,7 @@ onShow(async () => {
     await chatStore.loadConversations().catch(() => undefined)
   }
   if (!contactStore.contacts.length && !contactStore.groups.length) {
-    await contactStore.loadAll().catch(() => undefined)
+    await contactStore.loadDirectory().catch(() => undefined)
   }
 })
 
@@ -63,7 +63,8 @@ const listGroups = computed<MassTarget[]>(() =>
 const listTags = computed<MassTarget[]>(() => {
   const tagSet = new Set<string>()
   contactStore.contacts.forEach((c) => {
-    ;(c.tags || []).forEach((t) => tagSet.add(t))
+    ;(c.tags || []).forEach((t) => tagSet.add(t.name))
+    ;(c.tagNames || []).forEach((t) => tagSet.add(t))
   })
   const tags = Array.from(tagSet)
   if (!tags.length) {

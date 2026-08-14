@@ -103,6 +103,27 @@
       }
     },
     {
+      "path": "pages/contacts/friend-detail",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "好友详情"
+      }
+    },
+    {
+      "path": "pages/contacts/friend-remark",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "备注名"
+      }
+    },
+    {
+      "path": "pages/contacts/friend-tags",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "设置标签"
+      }
+    },
+    {
       "path": "pages/contacts/tags",
       "style": {
         "navigationBarTitleText": "标签"
@@ -126,6 +147,69 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "群资料"
+      }
+    },
+    {
+      "path": "pages/group/members",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群聊成员"
+      }
+    },
+    {
+      "path": "pages/group/announcement",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群公告"
+      }
+    },
+    {
+      "path": "pages/group/qrcode",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群二维码"
+      }
+    },
+    {
+      "path": "pages/group/my-nickname",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "我在本群的昵称"
+      }
+    },
+    {
+      "path": "pages/group/media",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "图片与视频"
+      }
+    },
+    {
+      "path": "pages/group/search-history",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "搜索聊天记录"
+      }
+    },
+    {
+      "path": "pages/group/clear-history",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "清除聊天记录"
+      }
+    },
+    {
+      "path": "pages/group/report",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "检举"
+      }
+    },
+    {
+      "path": "pages/group/leave",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "退出群并删除对话"
       }
     },
     {

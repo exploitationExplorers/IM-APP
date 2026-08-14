@@ -3,7 +3,6 @@ package handler
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"im-app-server/internal/middleware"
 	"im-app-server/internal/models"
@@ -38,18 +37,27 @@ func (h *FavoriteHandler) Create(c *gin.Context) {
 	response.OK(c, f)
 }
 
-// List 收藏列表 GET /favorites?type=image&page=1&limit=20 （type 不传=全部）
+type favoriteListReq struct {
+	Page int `json:"page"`
+	Size int `json:"size"`
+	Type int `json:"type"` // 0全部 1文字 2图片视频 3文件 4语音
+}
+
+// List 收藏列表 POST /favorites/list {page,size,type}
 func (h *FavoriteHandler) List(c *gin.Context) {
 	uid := middleware.UserID(c)
-	page, _ := strconv.Atoi(c.Query("page"))
-	if page < 1 {
-		page = 1
+	var req favoriteListReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
 	}
-	size, _ := strconv.Atoi(c.Query("limit"))
-	if size < 1 || size > 100 {
-		size = 20
+	if req.Page < 1 {
+		req.Page = 1
 	}
-	list, err := h.Svc.List(c.Request.Context(), uid, c.Query("type"), page, size)
+	if req.Size < 1 || req.Size > 100 {
+		req.Size = 20
+	}
+	list, err := h.Svc.List(c.Request.Context(), uid, req.Type, req.Page, req.Size)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return

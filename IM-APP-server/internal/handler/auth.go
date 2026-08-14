@@ -144,14 +144,14 @@ func (h *AuthHandler) verifySMSCode(ctx context.Context, e164, scene, code strin
 
 // ---- 注册 ----
 
-// Register 手机号+验证码+密码 注册
+// Register 手机号+验证码注册；密码可选，不设则仅验证码登录，之后在安全设置里设初始密码
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req models.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	if len(req.Password) < 6 {
+	if req.Password != "" && len(req.Password) < 6 {
 		response.Fail(c, http.StatusBadRequest, "密码至少 6 位")
 		return
 	}
@@ -203,6 +203,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	user, err := h.findUserByE164(c.Request.Context(), e164)
 	if err != nil {
 		response.Fail(c, http.StatusUnauthorized, "账号或密码错误")
+		return
+	}
+	if user.PasswordHash == "" {
+		response.Fail(c, http.StatusUnauthorized, "该账号未设置密码，请使用验证码登录")
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
@@ -354,7 +358,7 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 	tag, err := h.DB.Exec(ctx,
-		`UPDATE users SET password_hash=$1, updated_at=NOW() WHERE phone_e164=$2 AND status='active'`,
+		`UPDATE users SET password_hash=$1, password_set=true, updated_at=NOW() WHERE phone_e164=$2 AND status='active'`,
 		string(hash), e164,
 	)
 	if err != nil || tag.RowsAffected() == 0 {
@@ -430,10 +434,10 @@ func (h *AuthHandler) findUserByE164(ctx context.Context, e164 string) (models.U
 	var u models.User
 	err := h.DB.QueryRow(ctx, `
 		SELECT id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at
+			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
 		FROM users WHERE phone_e164=$1 AND status='active'`, e164,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
-		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
 	return u, err
 }
 
@@ -441,25 +445,24 @@ func (h *AuthHandler) findUserByID(ctx context.Context, id string) (models.User,
 	var u models.User
 	err := h.DB.QueryRow(ctx, `
 		SELECT id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at
+			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
 		FROM users WHERE id=$1 AND status='active'`, id,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
-		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
 	return u, err
 }
 
 // createUser 创建用户：phone 存本地号码，phone_e164 存标准 E.164
 func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, password string) (models.User, error) {
 	hash := ""
+	passwordSet := false
 	if password != "" {
 		b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
 			return models.User{}, err
 		}
 		hash = string(b)
-	} else {
-		b, _ := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
-		hash = string(b)
+		passwordSet = true
 	}
 	dial := digitsOnly(countryCode)
 	if dial == "" {
@@ -468,23 +471,38 @@ func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, passwor
 	cc := "+" + dial
 	local := strings.TrimPrefix(strings.TrimPrefix(e164, "+"), dial)
 	nickname := "用户" + local[max(0, len(local)-4):]
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		return models.User{}, err
+	}
+	defer tx.Rollback(ctx)
+
 	var count int
-	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	_ = tx.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
 	publicID := fmt.Sprintf("chat%d", 10000+count+1)
 
 	var u models.User
-	err := h.DB.QueryRow(ctx, `
-		INSERT INTO users(phone, country_code, phone_e164, password_hash, nickname, avatar, public_id)
-		VALUES($1,$2,$3,$4,$5,$7,$6)
+	err = tx.QueryRow(ctx, `
+		INSERT INTO users(phone, country_code, phone_e164, password_hash, nickname, avatar, public_id, password_set)
+		VALUES($1,$2,$3,$4,$5,$7,$6,$8)
 		RETURNING id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at`,
-		local, cc, e164, hash, nickname, publicID, models.DefaultAvatar,
+			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)`,
+		local, cc, e164, hash, nickname, publicID, models.DefaultAvatar, passwordSet,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
-		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
-	if err == nil {
-		u.PasswordHash = ""
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
+	if err != nil {
+		return models.User{}, err
 	}
-	return u, err
+	if err := repository.EnqueueIMSyncTx(ctx, tx, repository.IMEventUserRegistered, u.ID, map[string]string{
+		"nickname": u.Nickname, "avatar": u.Avatar,
+	}); err != nil {
+		return models.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.User{}, err
+	}
+	u.PasswordHash = ""
+	return u, nil
 }
 
 func toMeProfile(u models.User) models.MeProfile {
@@ -498,6 +516,7 @@ func toMeProfile(u models.User) models.MeProfile {
 		Bio:         u.Bio,
 		Status:      u.Status,
 		CreatedAt:   u.CreatedAt.UTC().Format(time.RFC3339),
+		HasPassword: u.PasswordSet,
 	}
 }
 
