@@ -1,12 +1,27 @@
 <script setup lang="ts">
-import { computed, reactive, shallowRef } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
-import { CirclePlus, Delete, Search } from "@element-plus/icons-vue";
+import { onMounted, reactive, shallowRef, watch } from "vue";
+import { ElMessage } from "element-plus";
+import { Delete, Search } from "@element-plus/icons-vue";
+
+import {
+  AdminUsers,
+  getAdminUserDetailApi,
+  getAdminUserForwardTasksApi,
+  getAdminUserGroupsApi,
+  getAdminUserReportsApi,
+  getAdminUsersApi,
+  getAdminUserForwardLimitApi,
+  postAdminUserPhoneRevealApi,
+  postAdminUserRevokeSessionsApi,
+  putAdminUserBanApi,
+  putAdminUserForwardLimitApi,
+  putAdminUserLoginRestrictionApi
+} from "@/api/modules/adminUsers";
 
 type AppUserStatus = "normal" | "restricted" | "banned" | "cancelled";
 
 interface AppUser {
-  id: number;
+  id: string;
   internalId: string;
   publicId: string;
   phone: string;
@@ -22,16 +37,6 @@ interface AppUser {
   reportCount: number;
   createdAt: string;
   lastActiveAt: string;
-}
-
-interface ReportRecord {
-  id: number;
-  reporter: string;
-  reporterId: string;
-  reason: string;
-  detail: string;
-  createdAt: string;
-  status: "pending" | "resolved";
 }
 
 interface UserFilters {
@@ -61,158 +66,427 @@ const filters = reactive<UserFilters>({
 });
 const currentPage = shallowRef(1);
 const pageSize = shallowRef(10);
+const total = shallowRef(0);
+const tableLoading = shallowRef(false);
 const detailVisible = shallowRef(false);
 const selectedUser = shallowRef<AppUser | null>(null);
-const userReports = shallowRef<ReportRecord[]>([]);
+const activeDetailTab = shallowRef<"base" | "reports" | "forward" | "groups">("base");
+const detailLoading = shallowRef(false);
+const forwardLoading = shallowRef(false);
+const groupLoading = shallowRef(false);
+const reportLoading = shallowRef(false);
+const reports = shallowRef<AdminUsers.ReportItem[]>([]);
+const reportTotal = shallowRef(0);
+const reportPage = shallowRef(1);
+const reportPageSize = shallowRef(20);
+const forwardTasks = shallowRef<AdminUsers.ForwardTaskItem[]>([]);
+const forwardTotal = shallowRef(0);
+const forwardPage = shallowRef(1);
+const forwardPageSize = shallowRef(20);
+const groups = shallowRef<AdminUsers.GroupItem[]>([]);
+const groupTotal = shallowRef(0);
+const groupPage = shallowRef(1);
+const groupPageSize = shallowRef(20);
 
-const users = shallowRef<AppUser[]>([
-  {
-    id: 1,
-    internalId: "U100001",
-    publicId: "IM_8a3f2k",
-    phone: "138****6621",
-    countryCode: "+86",
-    countryName: "中国大陆",
-    nickname: "陈安",
-    avatar: "陈",
-    friendCount: 128,
-    groupCount: 15,
-    status: "normal",
-    bannedLogin: false,
-    bannedSendMessage: false,
-    reportCount: 0,
-    createdAt: "2026-03-08",
-    lastActiveAt: "2026-08-12 10:41",
-  },
-  {
-    id: 2,
-    internalId: "U100002",
-    publicId: "IM_x2m9p1",
-    phone: "139****0085",
-    countryCode: "+86",
-    countryName: "中国大陆",
-    nickname: "林诺",
-    avatar: "林",
-    friendCount: 56,
-    groupCount: 8,
-    status: "normal",
-    bannedLogin: false,
-    bannedSendMessage: false,
-    reportCount: 1,
-    createdAt: "2026-03-13",
-    lastActiveAt: "2026-08-12 09:36",
-  },
-  {
-    id: 3,
-    internalId: "U100003",
-    publicId: "IM_q7v4tw",
-    phone: "090****1234",
-    countryCode: "+81",
-    countryName: "日本",
-    nickname: "周米娅",
-    avatar: "周",
-    friendCount: 23,
-    groupCount: 3,
-    status: "restricted",
-    bannedLogin: false,
-    bannedSendMessage: true,
-    reportCount: 3,
-    createdAt: "2026-04-02",
-    lastActiveAt: "2026-08-11 20:17",
-  },
-  {
-    id: 4,
-    internalId: "U100004",
-    publicId: "IM_b5n8rc",
-    phone: "010****5678",
-    countryCode: "+1",
-    countryName: "美国",
-    nickname: "王磊",
-    avatar: "王",
-    friendCount: 5,
-    groupCount: 1,
-    status: "banned",
-    bannedLogin: true,
-    bannedSendMessage: true,
-    reportCount: 8,
-    createdAt: "2026-04-15",
-    lastActiveAt: "2026-08-06 14:28",
-  },
-  {
-    id: 5,
-    internalId: "U100005",
-    publicId: "IM_h3k6sf",
-    phone: "852****9090",
-    countryCode: "+852",
-    countryName: "中国香港",
-    nickname: "黄怡",
-    avatar: "黄",
-    friendCount: 89,
-    groupCount: 12,
-    status: "normal",
-    bannedLogin: false,
-    bannedSendMessage: false,
-    reportCount: 0,
-    createdAt: "2026-05-20",
-    lastActiveAt: "2026-08-12 08:55",
-  },
-  {
-    id: 6,
-    internalId: "U100006",
-    publicId: "IM_d9j2lm",
-    phone: "040****3333",
-    countryCode: "+61",
-    countryName: "澳大利亚",
-    nickname: "张博",
-    avatar: "张",
-    friendCount: 0,
-    groupCount: 0,
-    status: "cancelled",
-    bannedLogin: false,
-    bannedSendMessage: false,
-    reportCount: 2,
-    createdAt: "2026-06-01",
-    lastActiveAt: "2026-07-15 16:22",
-  },
-]);
+const users = shallowRef<AppUser[]>([]);
 
-const allReports: Record<number, ReportRecord[]> = {
-  3: [
-    { id: 1, reporter: "陈安", reporterId: "U100001", reason: "发送广告骚扰", detail: "多次在群聊中发送推广链接", createdAt: "2026-08-10 14:30", status: "pending" },
-    { id: 2, reporter: "林诺", reporterId: "U100002", reason: "辱骂他人", detail: "单聊中使用不文明用语", createdAt: "2026-08-09 11:20", status: "resolved" },
-    { id: 3, reporter: "黄怡", reporterId: "U100005", reason: "频繁添加好友", detail: "短时间内向大量用户发送好友申请", createdAt: "2026-08-08 09:15", status: "pending" },
-  ],
-  4: [
-    { id: 4, reporter: "周米娅", reporterId: "U100003", reason: "诈骗行为", detail: "冒充官方人员进行诈骗", createdAt: "2026-08-05 18:00", status: "pending" },
-    { id: 5, reporter: "黄怡", reporterId: "U100005", reason: "传播违规内容", detail: "在群聊中传播违规图片", createdAt: "2026-08-04 10:45", status: "resolved" },
-  ],
-};
+type ActionMode = "loginRestriction" | "banUser" | "revokeSessions" | "forwardLimit" | "phoneReveal";
 
-const filteredUsers = computed(() => {
-  const keyword = filters.keyword.trim().toLowerCase();
-  return users.value.filter((user) => {
-    let matchesKeyword = true;
-    if (keyword) {
-      if (filters.searchType === "phone") {
-        matchesKeyword = user.phone.includes(keyword);
-      } else if (filters.searchType === "publicId") {
-        matchesKeyword = user.publicId.toLowerCase().includes(keyword);
+interface ActionFormModel {
+  reason: string;
+  ticketNo: string;
+  until: Date | null;
+  enabled: boolean;
+  dailyLimit: number;
+  hourlyLimit: number;
+  singleTargets: number;
+}
+
+const actionVisible = shallowRef(false);
+const actionLoading = shallowRef(false);
+const actionMode = shallowRef<ActionMode>("loginRestriction");
+const actionNext = shallowRef(false);
+const actionUser = shallowRef<AppUser | null>(null);
+
+const actionForm = reactive<ActionFormModel>({
+  reason: "",
+  ticketNo: "",
+  until: null,
+  enabled: false,
+  dailyLimit: 0,
+  hourlyLimit: 0,
+  singleTargets: 0,
+});
+
+const forwardLimitLoading = shallowRef(false);
+const forwardLimit = shallowRef<AdminUsers.ForwardLimitConfig | null>(null);
+const revealedPhones = reactive<Record<string, string>>({});
+
+function normalizeStatus(value?: string): AppUserStatus {
+  const raw = (value || "").toLowerCase();
+  if (raw === "active") return "normal";
+  if (raw === "inactive") return "restricted";
+  if (raw === "normal" || raw === "restricted" || raw === "banned" || raw === "cancelled") {
+    return raw as AppUserStatus;
+  }
+  return "normal";
+}
+
+function pickAvatarText(nickname: string): string {
+  const name = nickname?.trim();
+  return name ? name.slice(0, 1) : "U";
+}
+
+function pickField(row: Record<string, any>, keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (value === 0) return "0";
+    if (value === false) return "否";
+    if (value) return String(value);
+  }
+  return "—";
+}
+
+function pickNumberField(row: Record<string, any> | null | undefined, keys: string[], fallback = 0): number {
+  if (!row) return fallback;
+  for (const key of keys) {
+    const value = (row as any)[key];
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value);
+  }
+  return fallback;
+}
+
+function pickBoolField(row: Record<string, any> | null | undefined, keys: string[], fallback = false): boolean {
+  if (!row) return fallback;
+  for (const key of keys) {
+    const value = (row as any)[key];
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+      const lowered = value.toLowerCase();
+      if (lowered === "true") return true;
+      if (lowered === "false") return false;
+    }
+  }
+  return fallback;
+}
+
+function pickStringField(row: any, keys: string[]): string {
+  if (!row) return "";
+  if (typeof row === "string") return row;
+  for (const key of keys) {
+    const value = row?.[key];
+    if (typeof value === "string" && value.trim() !== "") return value;
+  }
+  return "";
+}
+
+function toIsoString(value: Date | null): string | undefined {
+  if (!value) return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
+function getDisplayPhone(user: AppUser | null): string {
+  if (!user) return "";
+  const full = revealedPhones[user.id];
+  return `${user.countryCode} ${full || user.phone}`.trim();
+}
+
+function syncUserPatch(userId: string, patch: Partial<AppUser>): void {
+  users.value = users.value.map((u) => (u.id === userId ? { ...u, ...patch } : u));
+  if (selectedUser.value?.id === userId) {
+    selectedUser.value = { ...selectedUser.value, ...patch };
+  }
+}
+
+function getActionTitle(): string {
+  const userName = actionUser.value?.nickname ? `「${actionUser.value.nickname}」` : "";
+  if (actionMode.value === "loginRestriction") return `${actionNext.value ? "禁止登录" : "恢复登录"}${userName}`;
+  if (actionMode.value === "banUser") return `${actionNext.value ? "禁止发送消息" : "恢复发送消息"}${userName}`;
+  if (actionMode.value === "revokeSessions") return `强制下线${userName}`;
+  if (actionMode.value === "forwardLimit") return `转发权限设置${userName}`;
+  if (actionMode.value === "phoneReveal") return `查看完整手机号${userName}`;
+  return "操作";
+}
+
+function resetActionForm(): void {
+  actionForm.reason = "";
+  actionForm.ticketNo = "";
+  actionForm.until = null;
+  actionForm.enabled = false;
+  actionForm.dailyLimit = 0;
+  actionForm.hourlyLimit = 0;
+  actionForm.singleTargets = 0;
+}
+
+async function fetchForwardLimit(userId: string): Promise<AdminUsers.ForwardLimitConfig> {
+  forwardLimitLoading.value = true;
+  try {
+    const res = await getAdminUserForwardLimitApi(userId);
+    const raw = res.data as any;
+    const parsed: AdminUsers.ForwardLimitConfig = {
+      enabled: pickBoolField(raw, ["enabled", "isEnabled"], false),
+      dailyLimit: pickNumberField(raw, ["dailyLimit", "dayLimit", "daily"], 0),
+      hourlyLimit: pickNumberField(raw, ["hourlyLimit", "hourLimit", "hourly"], 0),
+      singleTargets: pickNumberField(raw, ["singleTargets", "singleTarget", "singleTargetLimit"], 0),
+    };
+    forwardLimit.value = parsed;
+    return parsed;
+  } catch {
+    const fallback = { enabled: false, dailyLimit: 0, hourlyLimit: 0, singleTargets: 0 };
+    forwardLimit.value = fallback;
+    return fallback;
+  } finally {
+    forwardLimitLoading.value = false;
+  }
+}
+
+async function openAction(mode: ActionMode, user: AppUser, next?: boolean): Promise<void> {
+  actionMode.value = mode;
+  actionUser.value = user;
+  actionNext.value = Boolean(next);
+  resetActionForm();
+
+  if (mode === "forwardLimit") {
+    const config = await fetchForwardLimit(user.id);
+    actionForm.enabled = config.enabled;
+    actionForm.dailyLimit = config.dailyLimit;
+    actionForm.hourlyLimit = config.hourlyLimit;
+    actionForm.singleTargets = config.singleTargets;
+  }
+
+  actionVisible.value = true;
+}
+
+async function submitAction(): Promise<void> {
+  if (!actionUser.value) return;
+  const userId = actionUser.value.id;
+
+  const reason = actionForm.reason.trim();
+  if (!reason) {
+    ElMessage.warning("请填写操作原因");
+    return;
+  }
+
+  if (actionMode.value === "banUser" || actionMode.value === "phoneReveal") {
+    const ticketNo = actionForm.ticketNo.trim();
+    if (!ticketNo) {
+      ElMessage.warning("请填写关联工单号");
+      return;
+    }
+  }
+
+  actionLoading.value = true;
+  try {
+    if (actionMode.value === "loginRestriction") {
+      await putAdminUserLoginRestrictionApi(userId, {
+        banned: actionNext.value,
+        reason,
+        until: toIsoString(actionForm.until),
+      });
+      syncUserPatch(userId, { bannedLogin: actionNext.value });
+      ElMessage.success(actionNext.value ? "已禁止登录" : "已恢复登录");
+    }
+
+    if (actionMode.value === "banUser") {
+      const idempotencyKey =
+        typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function"
+          ? (crypto as any).randomUUID()
+          : undefined;
+      await putAdminUserBanApi(userId, {
+        banned: actionNext.value,
+        idempotencyKey,
+        reason,
+        ticketNo: actionForm.ticketNo.trim(),
+        until: toIsoString(actionForm.until),
+      });
+      syncUserPatch(userId, { bannedSendMessage: actionNext.value });
+      ElMessage.success(actionNext.value ? "已禁止发送消息" : "已恢复发送消息");
+    }
+
+    if (actionMode.value === "revokeSessions") {
+      await postAdminUserRevokeSessionsApi(userId, { reason });
+      ElMessage.success("已强制下线");
+    }
+
+    if (actionMode.value === "forwardLimit") {
+      await putAdminUserForwardLimitApi(userId, {
+        enabled: actionForm.enabled,
+        dailyLimit: actionForm.dailyLimit,
+        hourlyLimit: actionForm.hourlyLimit,
+        singleTargets: actionForm.singleTargets,
+        reason,
+      });
+      ElMessage.success("转发权限已更新");
+      await fetchForwardLimit(userId);
+    }
+
+    if (actionMode.value === "phoneReveal") {
+      const res = await postAdminUserPhoneRevealApi(userId, {
+        reason,
+        ticketNo: actionForm.ticketNo.trim(),
+      });
+      const raw = res.data as any;
+      const phone = pickStringField(raw, ["phone", "phoneNumber", "mobile"]);
+      if (phone) {
+        revealedPhones[userId] = phone;
+        ElMessage.success("已获取完整手机号");
       } else {
-        matchesKeyword = user.internalId.toLowerCase().includes(keyword);
+        ElMessage.success("操作成功");
       }
     }
-    const matchesStatus = !filters.status || user.status === filters.status;
-    return matchesKeyword && matchesStatus;
-  });
-});
 
-const pageUsers = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  return filteredUsers.value.slice(start, start + pageSize.value);
-});
+    actionVisible.value = false;
+    if (detailVisible.value && selectedUser.value?.id === userId) {
+      fetchUserDetail(userId);
+    }
+    fetchUsers();
+  } catch {
+    // ignored
+  } finally {
+    actionLoading.value = false;
+  }
+}
+
+async function fetchUsers(): Promise<void> {
+  tableLoading.value = true;
+  try {
+    const res = await getAdminUsersApi({
+      page: currentPage.value,
+      pageSize: pageSize.value,
+      keyword: filters.keyword.trim() || undefined,
+      searchType: filters.searchType,
+      status: filters.status || undefined,
+    });
+
+    const items = res.data?.items ?? [];
+    users.value = items.map((item) => ({
+      id: item.id,
+      internalId: item.id ? item.id.slice(0, 8) : "",
+      publicId: item.publicId,
+      phone: item.phoneMasked,
+      countryCode: item.countryCode,
+      countryName: "",
+      nickname: item.nickname,
+      avatar: item.avatar || pickAvatarText(item.nickname),
+      friendCount: item.friendCount ?? 0,
+      groupCount: item.groupCount ?? 0,
+      status: normalizeStatus(item.status),
+      bannedLogin: Boolean(item.loginBanned),
+      bannedSendMessage: Boolean(item.messageBanned),
+      reportCount: item.reportCount ?? 0,
+      createdAt: item.createdAt || "",
+      lastActiveAt: item.lastActiveAt || "",
+    }));
+
+    total.value = res.data?.total ?? users.value.length;
+  } catch {
+    users.value = [];
+    total.value = 0;
+  } finally {
+    tableLoading.value = false;
+  }
+}
+
+async function fetchUserDetail(id: string): Promise<void> {
+  detailLoading.value = true;
+  try {
+    const res = await getAdminUserDetailApi(id);
+    const data = res.data;
+    selectedUser.value = {
+      id: data.id,
+      internalId: data.id ? data.id.slice(0, 8) : "",
+      publicId: data.publicId,
+      phone: data.phoneMasked,
+      countryCode: data.countryCode,
+      countryName: "",
+      nickname: data.nickname,
+      avatar: data.avatar || pickAvatarText(data.nickname),
+      friendCount: data.friendCount ?? 0,
+      groupCount: data.groupCount ?? 0,
+      status: normalizeStatus(data.status),
+      bannedLogin: Boolean(data.loginBanned),
+      bannedSendMessage: Boolean(data.messageBanned),
+      reportCount: data.reportCount ?? 0,
+      createdAt: data.createdAt || "",
+      lastActiveAt: data.lastActiveAt || "",
+    };
+  } catch {
+    // ignored
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+async function fetchForwardTasks(id: string): Promise<void> {
+  forwardLoading.value = true;
+  try {
+    const res = await getAdminUserForwardTasksApi(id, {
+      page: forwardPage.value,
+      pageSize: forwardPageSize.value,
+    });
+    forwardTasks.value = res.data?.items ?? [];
+    forwardTotal.value = res.data?.total ?? forwardTasks.value.length;
+  } catch {
+    forwardTasks.value = [];
+    forwardTotal.value = 0;
+  } finally {
+    forwardLoading.value = false;
+  }
+}
+
+async function fetchGroups(id: string): Promise<void> {
+  groupLoading.value = true;
+  try {
+    const res = await getAdminUserGroupsApi(id, {
+      page: groupPage.value,
+      pageSize: groupPageSize.value,
+    });
+    const data = res.data;
+    if (Array.isArray(data)) {
+      groups.value = data;
+      groupTotal.value = data.length;
+    } else if (Array.isArray(data?.items)) {
+      groups.value = data.items;
+      groupTotal.value = data.total ?? data.items.length;
+    } else if (Array.isArray(data?.list)) {
+      groups.value = data.list;
+      groupTotal.value = data.total ?? data.list.length;
+    } else {
+      groups.value = [];
+      groupTotal.value = 0;
+    }
+  } catch {
+    groups.value = [];
+    groupTotal.value = 0;
+  } finally {
+    groupLoading.value = false;
+  }
+}
+
+async function fetchReports(id: string): Promise<void> {
+  reportLoading.value = true;
+  try {
+    const res = await getAdminUserReportsApi(id, {
+      page: reportPage.value,
+      pageSize: reportPageSize.value,
+    });
+    reports.value = res.data?.items ?? [];
+    reportTotal.value = res.data?.total ?? reports.value.length;
+  } catch {
+    reports.value = [];
+    reportTotal.value = 0;
+  } finally {
+    reportLoading.value = false;
+  }
+}
 
 function queryUsers(): void {
   currentPage.value = 1;
+  fetchUsers();
 }
 
 function resetFilters(): void {
@@ -220,69 +494,81 @@ function resetFilters(): void {
   filters.searchType = "internalId";
   filters.status = "";
   currentPage.value = 1;
+  fetchUsers();
 }
 
 function openUserDetail(user: AppUser): void {
-  selectedUser.value = user;
-  userReports.value = allReports[user.id] ?? [];
+  selectedUser.value = { ...user };
   detailVisible.value = true;
+  activeDetailTab.value = "base";
+  reportPage.value = 1;
+  forwardPage.value = 1;
+  groupPage.value = 1;
+  reports.value = [];
+  forwardTasks.value = [];
+  groups.value = [];
+  fetchUserDetail(user.id);
+  forwardLimit.value = null;
+  fetchForwardLimit(user.id);
 }
 
 async function toggleBanLogin(user: AppUser): Promise<void> {
-  const next = !user.bannedLogin;
-  const action = next ? "禁止登录" : "恢复登录";
-  try {
-    await ElMessageBox.confirm(`确认对用户「${user.nickname}」${action}？`, action, {
-      type: "warning",
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-    });
-    users.value = users.value.map((u) =>
-      u.id === user.id ? { ...u, bannedLogin: next } : u,
-    );
-    ElMessage.success(`${action}操作成功`);
-  } catch {
-    // dismissed
-  }
+  await openAction("loginRestriction", user, !user.bannedLogin);
 }
 
 async function toggleBanMessage(user: AppUser): Promise<void> {
-  const next = !user.bannedSendMessage;
-  const action = next ? "禁止发送消息" : "恢复发送消息";
-  try {
-    await ElMessageBox.confirm(`确认对用户「${user.nickname}」${action}？`, action, {
-      type: "warning",
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-    });
-    users.value = users.value.map((u) =>
-      u.id === user.id ? { ...u, bannedSendMessage: next } : u,
-    );
-    ElMessage.success(`${action}操作成功`);
-  } catch {
-    // dismissed
-  }
+  await openAction("banUser", user, !user.bannedSendMessage);
 }
 
-async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void> {
-  if (user.status === status) return;
-  try {
-    await ElMessageBox.confirm(
-      `确认将用户「${user.nickname}」状态修改为「${statusLabels[status]}」？`,
-      "修改用户状态",
-      { type: "warning", confirmButtonText: "确定", cancelButtonText: "取消" },
-    );
-    users.value = users.value.map((u) =>
-      u.id === user.id ? { ...u, status } : u,
-    );
-    ElMessage.success("用户状态修改成功");
-    if (selectedUser.value?.id === user.id) {
-      selectedUser.value = { ...selectedUser.value, status };
-    }
-  } catch {
-    // dismissed
+onMounted(() => {
+  fetchUsers();
+});
+
+watch([currentPage, pageSize], () => {
+  fetchUsers();
+});
+
+watch([forwardPage, forwardPageSize], () => {
+  if (!detailVisible.value || !selectedUser.value || activeDetailTab.value !== "forward") return;
+  fetchForwardTasks(selectedUser.value.id);
+});
+
+watch([groupPage, groupPageSize], () => {
+  if (!detailVisible.value || !selectedUser.value || activeDetailTab.value !== "groups") return;
+  fetchGroups(selectedUser.value.id);
+});
+
+watch([reportPage, reportPageSize], () => {
+  if (!detailVisible.value || !selectedUser.value || activeDetailTab.value !== "reports") return;
+  fetchReports(selectedUser.value.id);
+});
+
+watch(activeDetailTab, (tab) => {
+  if (!detailVisible.value || !selectedUser.value) return;
+  if (tab === "base") {
+    fetchUserDetail(selectedUser.value.id);
+    fetchForwardLimit(selectedUser.value.id);
   }
-}
+  if (tab === "reports") fetchReports(selectedUser.value.id);
+  if (tab === "forward") fetchForwardTasks(selectedUser.value.id);
+  if (tab === "groups") fetchGroups(selectedUser.value.id);
+});
+
+watch(detailVisible, (visible) => {
+  if (visible) return;
+  if (selectedUser.value?.id) {
+    delete revealedPhones[selectedUser.value.id];
+  }
+  selectedUser.value = null;
+  activeDetailTab.value = "base";
+  reports.value = [];
+  forwardTasks.value = [];
+  groups.value = [];
+  forwardLimit.value = null;
+  reportTotal.value = 0;
+  forwardTotal.value = 0;
+  groupTotal.value = 0;
+});
 </script>
 
 <template>
@@ -329,13 +615,16 @@ async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void>
     </section>
 
     <section class="card table-main">
-      <el-table :data="pageUsers" style="width: 100%">
+      <el-table v-loading="tableLoading" :data="users" style="width: 100%">
         <el-table-column label="用户" min-width="200">
           <template #default="{ row }">
             <div class="user-cell">
-              <span class="user-avatar">{{ row.avatar }}</span>
+              <span class="user-avatar clickable" @click="openUserDetail(row)">
+                <img v-if="row.avatar && row.avatar.startsWith('http')" :src="row.avatar" alt="" />
+                <span v-else>{{ row.avatar || row.nickname.slice(0, 1) }}</span>
+              </span>
               <div>
-                <strong>{{ row.nickname }}</strong>
+                <strong class="clickable" @click="openUserDetail(row)">{{ row.nickname }}</strong>
                 <span>{{ row.internalId }}</span>
               </div>
             </div>
@@ -403,80 +692,350 @@ async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void>
           v-model:page-size="pageSize"
           :page-sizes="[10, 25, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
-          :total="filteredUsers.length"
+          :total="total"
         />
       </div>
     </section>
 
     <!-- 用户详情抽屉 -->
-    <el-drawer v-model="detailVisible" title="用户详情" size="560px">
+    <el-drawer v-model="detailVisible" title="用户详情" size="50%" class="user-detail-drawer">
       <template v-if="selectedUser">
-        <div class="detail-header">
-          <span class="user-avatar lg">{{ selectedUser.avatar }}</span>
-          <div class="detail-header-info">
-            <h3>{{ selectedUser.nickname }}</h3>
-            <span>{{ selectedUser.internalId }} · {{ selectedUser.publicId }}</span>
-          </div>
-          <el-tag :type="statusTagTypes[selectedUser.status]" effect="light">
-            {{ statusLabels[selectedUser.status] }}
-          </el-tag>
-        </div>
+        <el-tabs v-model="activeDetailTab" class="detail-tabs">
+          <el-tab-pane label="基础信息" name="base">
+            <div class="detail-header" v-loading="detailLoading">
+              <span class="user-avatar lg">
+                <img v-if="selectedUser.avatar && selectedUser.avatar.startsWith('http')" :src="selectedUser.avatar" alt="" />
+                <span v-else>{{ selectedUser.avatar || selectedUser.nickname.slice(0, 1) }}</span>
+              </span>
+              <div class="detail-header-info">
+                <h3>{{ selectedUser.nickname }}</h3>
+                <span>{{ selectedUser.internalId }} · {{ selectedUser.publicId }}</span>
+              </div>
+              <el-tag :type="statusTagTypes[selectedUser.status]" effect="light">
+                {{ statusLabels[selectedUser.status] }}
+              </el-tag>
+            </div>
 
-        <el-descriptions :column="2" border size="small" class="detail-desc">
-          <el-descriptions-item label="手机号">{{ selectedUser.countryCode }} {{ selectedUser.phone }}</el-descriptions-item>
-          <el-descriptions-item label="国家/地区">{{ selectedUser.countryName }}</el-descriptions-item>
-          <el-descriptions-item label="好友数">{{ selectedUser.friendCount }}</el-descriptions-item>
-          <el-descriptions-item label="群组数">{{ selectedUser.groupCount }}</el-descriptions-item>
-          <el-descriptions-item label="举报次数">{{ selectedUser.reportCount }}</el-descriptions-item>
-          <el-descriptions-item label="禁止登录">
-            <el-tag :type="selectedUser.bannedLogin ? 'danger' : 'success'" size="small">
-              {{ selectedUser.bannedLogin ? "是" : "否" }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="禁止发消息">
-            <el-tag :type="selectedUser.bannedSendMessage ? 'danger' : 'success'" size="small">
-              {{ selectedUser.bannedSendMessage ? "是" : "否" }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="注册时间">{{ selectedUser.createdAt }}</el-descriptions-item>
-          <el-descriptions-item label="最近活跃">{{ selectedUser.lastActiveAt }}</el-descriptions-item>
-        </el-descriptions>
+            <div class="kv-grid">
+              <div class="kv-item">
+                <div class="kv-label">用户ID</div>
+                <el-tooltip :content="selectedUser.id" placement="top">
+                  <span class="kv-value mono-text">{{ selectedUser.id }}</span>
+                </el-tooltip>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">公开ID</div>
+                <el-tooltip :content="selectedUser.publicId" placement="top">
+                  <span class="kv-value mono-text">{{ selectedUser.publicId }}</span>
+                </el-tooltip>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">手机号</div>
+                <div class="kv-value phone-reveal">
+                  <span>{{ getDisplayPhone(selectedUser) }}</span>
+                  <el-button
+                    v-if="!revealedPhones[selectedUser.id]"
+                    link
+                    type="primary"
+                    size="small"
+                    @click="openAction('phoneReveal', selectedUser!)"
+                  >
+                    查看完整
+                  </el-button>
+                </div>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">国家/地区</div>
+                <span class="kv-value">{{ selectedUser.countryName || "—" }}</span>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">好友数</div>
+                <span class="kv-value">{{ selectedUser.friendCount }}</span>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">群组数</div>
+                <span class="kv-value">{{ selectedUser.groupCount }}</span>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">举报次数</div>
+                <span class="kv-value">{{ selectedUser.reportCount }}</span>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">禁止登录</div>
+                <span class="kv-value">
+                  <el-tag :type="selectedUser.bannedLogin ? 'danger' : 'success'" size="small">
+                    {{ selectedUser.bannedLogin ? "是" : "否" }}
+                  </el-tag>
+                </span>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">禁止发消息</div>
+                <span class="kv-value">
+                  <el-tag :type="selectedUser.bannedSendMessage ? 'danger' : 'success'" size="small">
+                    {{ selectedUser.bannedSendMessage ? "是" : "否" }}
+                  </el-tag>
+                </span>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">注册时间</div>
+                <el-tooltip :content="selectedUser.createdAt || '—'" placement="top">
+                  <span class="kv-value">{{ selectedUser.createdAt || "—" }}</span>
+                </el-tooltip>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">最近活跃</div>
+                <el-tooltip :content="selectedUser.lastActiveAt || '—'" placement="top">
+                  <span class="kv-value">{{ selectedUser.lastActiveAt || "—" }}</span>
+                </el-tooltip>
+              </div>
+            </div>
 
-        <div class="detail-section">
-          <h4>状态操作</h4>
-          <el-radio-group
-            :model-value="selectedUser.status"
-            @change="(val: AppUserStatus) => changeStatus(selectedUser!, val)"
-          >
-            <el-radio-button value="normal">正常</el-radio-button>
-            <el-radio-button value="restricted">限制</el-radio-button>
-            <el-radio-button value="banned">封禁</el-radio-button>
-            <el-radio-button value="cancelled">注销</el-radio-button>
-          </el-radio-group>
-        </div>
+            <div class="detail-section">
+              <h4>用户状态</h4>
+              <el-radio-group :model-value="selectedUser.status" disabled>
+                <el-radio-button value="normal">正常</el-radio-button>
+                <el-radio-button value="restricted">限制</el-radio-button>
+                <el-radio-button value="banned">封禁</el-radio-button>
+                <el-radio-button value="cancelled">注销</el-radio-button>
+              </el-radio-group>
+            </div>
 
-        <div class="detail-section">
-          <div class="detail-section-header">
-            <h4>举报记录</h4>
-            <el-tag v-if="userReports.length" type="danger" size="small">{{ userReports.length }} 条</el-tag>
-          </div>
-          <el-table v-if="userReports.length" :data="userReports" size="small" style="width: 100%">
-            <el-table-column prop="reason" label="原因" min-width="120" />
-            <el-table-column prop="reporter" label="举报人" min-width="90" />
-            <el-table-column prop="createdAt" label="时间" min-width="150" />
-            <el-table-column label="状态" min-width="80">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 'pending' ? 'warning' : 'success'" size="small">
-                  {{ row.status === "pending" ? "待处理" : "已处理" }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="detail" label="详情" min-width="200" show-overflow-tooltip />
-          </el-table>
-          <el-empty v-else description="暂无举报记录" :image-size="60" />
-        </div>
+            <div class="detail-section">
+              <h4>账号操作</h4>
+              <div class="detail-action-bar">
+                <el-button
+                  :type="selectedUser.bannedLogin ? 'success' : 'danger'"
+                  :disabled="selectedUser.status === 'cancelled'"
+                  @click="toggleBanLogin(selectedUser!)"
+                >
+                  {{ selectedUser.bannedLogin ? "恢复登录" : "禁止登录" }}
+                </el-button>
+                <el-button
+                  :type="selectedUser.bannedSendMessage ? 'success' : 'danger'"
+                  :disabled="selectedUser.status === 'cancelled'"
+                  @click="toggleBanMessage(selectedUser!)"
+                >
+                  {{ selectedUser.bannedSendMessage ? "恢复发送" : "禁止发送" }}
+                </el-button>
+                <el-button
+                  type="warning"
+                  :disabled="selectedUser.status === 'cancelled'"
+                  @click="openAction('revokeSessions', selectedUser!)"
+                >
+                  强制下线
+                </el-button>
+              </div>
+            </div>
+
+            <div class="detail-section">
+              <div class="detail-section-header">
+                <h4>转发权限限制</h4>
+                <el-button link type="primary" @click="openAction('forwardLimit', selectedUser!)">设置</el-button>
+              </div>
+              <div class="forward-limit-card" v-loading="forwardLimitLoading">
+                <div class="forward-limit-item">
+                  <span class="forward-limit-label">是否启用</span>
+                  <el-tag :type="(forwardLimit?.enabled ?? false) ? 'warning' : 'info'" size="small" effect="light">
+                    {{ (forwardLimit?.enabled ?? false) ? "启用" : "未启用" }}
+                  </el-tag>
+                </div>
+                <div class="forward-limit-item">
+                  <span class="forward-limit-label">每小时上限</span>
+                  <span class="forward-limit-value">{{ forwardLimit?.hourlyLimit ?? 0 }}</span>
+                </div>
+                <div class="forward-limit-item">
+                  <span class="forward-limit-label">每日上限</span>
+                  <span class="forward-limit-value">{{ forwardLimit?.dailyLimit ?? 0 }}</span>
+                </div>
+                <div class="forward-limit-item">
+                  <span class="forward-limit-label">单次目标上限</span>
+                  <span class="forward-limit-value">{{ forwardLimit?.singleTargets ?? 0 }}</span>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="举报记录" name="reports">
+            <div class="detail-table" v-loading="reportLoading">
+              <el-table :data="reports" size="small" style="width: 100%">
+                <el-table-column label="举报ID" min-width="160">
+                  <template #default="{ row }">
+                    <span class="mono-text">{{ pickField(row, ["id", "reportId"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="类型" min-width="120">
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["type", "category"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="原因" min-width="150" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["reason", "title"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" min-width="110">
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["status", "state"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="时间" min-width="180">
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["createdAt", "createTime", "created_at", "reportedAt"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="详情" min-width="240" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["detail", "content", "message", "remark", "note"]) }}</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+
+              <div class="table-footer">
+                <el-pagination
+                  background
+                  v-model:current-page="reportPage"
+                  v-model:page-size="reportPageSize"
+                  :page-sizes="[20, 50, 100]"
+                  layout="total, sizes, prev, pager, next"
+                  :total="reportTotal"
+                />
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="转发任务" name="forward">
+            <div class="detail-table" v-loading="forwardLoading">
+              <el-table :data="forwardTasks" size="small" style="width: 100%">
+                <el-table-column label="任务ID" min-width="160">
+                  <template #default="{ row }">
+                    <span class="mono-text">{{ pickField(row, ["id", "taskId", "forwardTaskId"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" min-width="120">
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["status", "state"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="创建时间" min-width="180">
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["createdAt", "createTime", "created_at"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="说明" min-width="220" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["remark", "note", "content", "detail", "message"]) }}</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+
+              <div class="table-footer">
+                <el-pagination
+                  background
+                  v-model:current-page="forwardPage"
+                  v-model:page-size="forwardPageSize"
+                  :page-sizes="[20, 50, 100]"
+                  layout="total, sizes, prev, pager, next"
+                  :total="forwardTotal"
+                />
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="加入群" name="groups">
+            <div class="detail-table" v-loading="groupLoading">
+              <el-table :data="groups" size="small" style="width: 100%">
+                <el-table-column label="群ID" min-width="160">
+                  <template #default="{ row }">
+                    <span class="mono-text">{{ pickField(row, ["id", "groupId"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="群名称" min-width="180" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["name", "groupName", "title"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="成员数" min-width="120">
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["memberCount", "members", "memberTotal"]) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="加入时间" min-width="180">
+                  <template #default="{ row }">
+                    <span>{{ pickField(row, ["joinedAt", "joinTime", "createdAt"]) }}</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+
+              <div class="table-footer">
+                <el-pagination
+                  background
+                  v-model:current-page="groupPage"
+                  v-model:page-size="groupPageSize"
+                  :page-sizes="[20, 50, 100]"
+                  layout="total, sizes, prev, pager, next"
+                  :total="groupTotal"
+                />
+              </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
       </template>
     </el-drawer>
+
+    <el-dialog v-model="actionVisible" :title="getActionTitle()" width="520px" destroy-on-close>
+      <el-form :model="actionForm" label-width="90px" class="action-form">
+        <template v-if="actionMode === 'forwardLimit'">
+          <el-form-item label="启用限制">
+            <el-switch v-model="actionForm.enabled" />
+          </el-form-item>
+          <el-form-item label="每小时上限">
+            <el-input-number v-model="actionForm.hourlyLimit" :min="0" :max="999999" />
+          </el-form-item>
+          <el-form-item label="每日上限">
+            <el-input-number v-model="actionForm.dailyLimit" :min="0" :max="999999" />
+          </el-form-item>
+          <el-form-item label="单次目标">
+            <el-input-number v-model="actionForm.singleTargets" :min="0" :max="999999" />
+          </el-form-item>
+        </template>
+
+        <template v-if="actionMode === 'loginRestriction' || actionMode === 'banUser'">
+          <el-form-item label="截止时间">
+            <el-date-picker
+              v-model="actionForm.until"
+              type="datetime"
+              clearable
+              placeholder="不填表示永久"
+              style="width: 100%"
+            />
+          </el-form-item>
+        </template>
+
+        <template v-if="actionMode === 'banUser' || actionMode === 'phoneReveal'">
+          <el-form-item label="工单号">
+            <el-input v-model="actionForm.ticketNo" placeholder="请输入工单号" maxlength="64" show-word-limit />
+          </el-form-item>
+        </template>
+
+        <el-form-item label="操作原因">
+          <el-input
+            v-model="actionForm.reason"
+            type="textarea"
+            :autosize="{ minRows: 3, maxRows: 6 }"
+            placeholder="请填写本次操作原因（必填）"
+            maxlength="200"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button :disabled="actionLoading" @click="actionVisible = false">取消</el-button>
+          <el-button type="primary" :loading="actionLoading" @click="submitAction">确定</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -575,8 +1134,16 @@ async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void>
   color: #08766f;
   background: #dff6f2;
   border-radius: 50%;
+  overflow: hidden;
   font-size: 13px;
   font-weight: 700;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
 
   &.lg {
     width: 56px;
@@ -584,6 +1151,10 @@ async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void>
     font-size: 20px;
     flex-shrink: 0;
   }
+}
+
+.clickable {
+  cursor: pointer;
 }
 
 .mono-text {
@@ -606,13 +1177,21 @@ async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void>
 }
 
 /* Drawer detail */
+.user-detail-drawer {
+  :deep(.el-drawer__body) {
+    padding: 12px 16px 16px;
+  }
+}
+
 .detail-header {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding-bottom: 16px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 12px 12px;
+  margin-bottom: 12px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
 }
 
 .detail-header-info {
@@ -633,6 +1212,60 @@ async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void>
   margin-bottom: 20px;
 }
 
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--el-bg-color);
+}
+
+.kv-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-width: 0;
+  border-right: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.kv-item:nth-child(2n) {
+  border-right: none;
+}
+
+.kv-label {
+  width: 72px;
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.kv-value {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phone-reveal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.phone-reveal > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .detail-section {
   margin-bottom: 24px;
 
@@ -648,6 +1281,61 @@ async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void>
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.detail-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.forward-limit-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+}
+
+.forward-limit-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.forward-limit-label {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.forward-limit-value {
+  font-weight: 600;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.detail-tabs {
+  :deep(.el-tabs__header) {
+    margin: 0 0 12px;
+  }
+
+  :deep(.el-tabs__nav-wrap::after) {
+    height: 1px;
+  }
+}
+
+.detail-table {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 @media (max-width: 1100px) {
@@ -671,6 +1359,10 @@ async function changeStatus(user: AppUser, status: AppUserStatus): Promise<void>
 
   .table-footer {
     justify-content: center;
+  }
+
+  .user-detail-drawer :deep(.el-drawer) {
+    width: 100% !important;
   }
 }
 </style>
