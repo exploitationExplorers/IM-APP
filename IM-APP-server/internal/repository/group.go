@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"im-app-server/internal/models"
@@ -21,11 +22,30 @@ type GroupRepo struct {
 // InternalIDByPublicID resolves the short numeric ID used by clients to the
 // UUID used by database relations and the existing OpenIM mapping.
 func (r *GroupRepo) InternalIDByPublicID(ctx context.Context, publicID string) (string, error) {
-	var groupID string
-	err := r.DB.QueryRow(ctx, `
-		SELECT id::text FROM groups WHERE public_id=$1`, publicID,
-	).Scan(&groupID)
-	return groupID, err
+	internalID, _, err := r.LookupGroupIDs(ctx, publicID)
+	return internalID, err
+}
+
+// LookupGroupIDs accepts 纯数字群号、内部 UUID 或 OpenIM 无连字符群 ID。
+func (r *GroupRepo) LookupGroupIDs(ctx context.Context, id string) (internalID, publicID string, err error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", "", pgx.ErrNoRows
+	}
+	err = r.DB.QueryRow(ctx, `
+		SELECT id::text, public_id FROM groups WHERE public_id=$1`, id,
+	).Scan(&internalID, &publicID)
+	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
+		return internalID, publicID, err
+	}
+	normalized := strings.ToLower(strings.ReplaceAll(id, "-", ""))
+	if len(normalized) != 32 {
+		return "", "", pgx.ErrNoRows
+	}
+	err = r.DB.QueryRow(ctx, `
+		SELECT id::text, public_id FROM groups WHERE replace(id::text,'-','')=$1`, normalized,
+	).Scan(&internalID, &publicID)
+	return internalID, publicID, err
 }
 
 // PublicIDByInternalID is the inverse of InternalIDByPublicID: given the
@@ -121,13 +141,14 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 	var g models.GroupInfo
 	var allow bool
 	err := r.DB.QueryRow(ctx, `
-		SELECT g.public_id, g.name, g.avatar, g.owner_id::text,
+		SELECT g.public_id, g.name, COALESCE(g.avatar,''), g.owner_id::text,
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
-			g.announcement, g.allow_member_add_friend, COALESCE(g.conversation_id::text,''),
-			gm.role, gm.nickname, g.join_mode, g.all_muted
+			COALESCE(g.announcement,''), COALESCE(g.allow_member_add_friend, true),
+			COALESCE(g.conversation_id::text,''),
+			gm.role, COALESCE(gm.nickname,''), COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false)
 		FROM groups g
-		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2
-		WHERE g.id=$1 AND g.status='active'`, groupID, uid).Scan(
+		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2::uuid
+		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID, uid).Scan(
 		&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.MemberCount,
 		&g.Announcement, &allow, &g.ConversationID, &g.MyRole, &g.MyNickname,
 		&g.JoinMode, &g.AllMuted)
@@ -154,12 +175,12 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]mod
 		return nil, ErrForbidden
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT u.id::text, u.nickname, gm.nickname,
-			CASE WHEN gm.nickname='' THEN u.nickname ELSE gm.nickname END,
-			u.avatar, gm.role
+		SELECT u.id::text, COALESCE(u.nickname,''), COALESCE(gm.nickname,''),
+			CASE WHEN COALESCE(gm.nickname,'')='' THEN COALESCE(u.nickname,'') ELSE gm.nickname END,
+			COALESCE(u.avatar,''), gm.role
 		FROM group_members gm
 		JOIN users u ON u.id = gm.user_id
-		WHERE gm.group_id=$1
+		WHERE gm.group_id=$1::uuid
 		ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END`,
 		groupID)
 	if err != nil {
@@ -317,8 +338,8 @@ func (r *GroupRepo) Leave(ctx context.Context, groupID, uid string) error {
 func (r *GroupRepo) GetSyncState(ctx context.Context, groupID string) (models.IMGroupSyncState, error) {
 	var state models.IMGroupSyncState
 	err := r.DB.QueryRow(ctx, `
-		SELECT id::text, name, avatar, owner_id::text, announcement,
-			allow_member_add_friend, status, all_muted
+		SELECT id::text, name, COALESCE(avatar,''), owner_id::text, COALESCE(announcement,''),
+			COALESCE(allow_member_add_friend, true), COALESCE(status,'active'), COALESCE(all_muted, false)
 		FROM groups WHERE id=$1::uuid`, groupID).Scan(
 		&state.ID, &state.Name, &state.Avatar, &state.OwnerID, &state.Announcement,
 		&state.AllowMemberAddFriend, &state.Status, &state.AllMuted)
@@ -326,7 +347,8 @@ func (r *GroupRepo) GetSyncState(ctx context.Context, groupID string) (models.IM
 		return state, err
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT u.id::text, u.nickname, gm.nickname, u.avatar, COALESCE(u.status,'active'), gm.role, gm.muted_until
+		SELECT u.id::text, COALESCE(u.nickname,''), COALESCE(gm.nickname,''), COALESCE(u.avatar,''),
+			COALESCE(u.status,'active'), gm.role, gm.muted_until
 		FROM group_members gm JOIN users u ON u.id=gm.user_id
 		WHERE gm.group_id=$1::uuid
 		ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END`, groupID)
@@ -619,10 +641,11 @@ func (r *GroupRepo) GetByIDPublic(ctx context.Context, groupID string) (models.G
 	var g models.GroupInfo
 	var allow bool
 	err := r.DB.QueryRow(ctx, `
-		SELECT g.public_id, g.name, g.avatar, g.owner_id::text,
+		SELECT g.public_id, g.name, COALESCE(g.avatar,''), g.owner_id::text,
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
-			g.announcement, g.allow_member_add_friend, COALESCE(g.conversation_id::text,''),
-			g.join_mode, g.all_muted
+			COALESCE(g.announcement,''), COALESCE(g.allow_member_add_friend, true),
+			COALESCE(g.conversation_id::text,''),
+			COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false)
 		FROM groups g
 		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID,
 	).Scan(&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.MemberCount,

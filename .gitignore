@@ -8,3 +8,4 @@ IM-APP-admin/.env
 
 # 管理后台打包产物（release 目录不上传）
 IM-APP-admin/release/
+.workbuddy

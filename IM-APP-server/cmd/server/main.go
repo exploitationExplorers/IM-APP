@@ -37,6 +37,13 @@ func main() {
 	if err := db.RunMigrationsDir(context.Background(), pool, migrationsDir); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
+	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
+		"report_reasons": {"id", "target_type", "reason", "language", "sort_order", "status"},
+		"reports":        {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
+		"report_files":   {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
+	}); err != nil {
+		log.Fatalf("schema check: %v; required migration: 017_app_reports.sql", err)
+	}
 	log.Println("migrations applied")
 
 	if cfg.SeedDemo {
@@ -81,6 +88,7 @@ func main() {
 	fileRepo := &repository.FileRepo{DB: pool}
 	imOutboxRepo := &repository.IMSyncOutboxRepo{DB: pool}
 	imAccessRepo := &repository.IMAccessRepo{DB: pool}
+	reportRepo := &repository.ReportRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
 
@@ -98,8 +106,10 @@ func main() {
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
 	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
+	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
+	reportSvc := &service.ReportService{Reports: reportRepo}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
 	var smsGateway service.SMSGateway = service.DevSMSGateway{}
@@ -112,6 +122,7 @@ func main() {
 			RegionID:        cfg.SMS.RegionID,
 		}
 	}
+	countryH := &handler.CountryHandler{Repo: countryRepo}
 	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient, SMS: smsGateway}
 	userH := &handler.UserHandler{Svc: userSvc}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
@@ -119,6 +130,7 @@ func main() {
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Service: imSvc}
+	reportH := &handler.ReportHandler{Svc: reportSvc}
 	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
 	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
 	pushSvc := service.NewLoggingPushService()
@@ -172,6 +184,7 @@ func main() {
 
 	api := r.Group("/api/v1")
 	{
+		api.GET("/public/countries", countryH.Countries)
 		api.POST("/auth/sms/send", authH.SendSMS)
 		api.POST("/auth/login", authH.Login)
 		api.POST("/auth/login/sms", authH.LoginSMS)
@@ -194,6 +207,8 @@ func main() {
 			auth.POST("/users/qrcode/resolve", userH.ResolveUserQRCode)
 			auth.GET("/users/search", userH.Search)
 			auth.GET("/users/:id", userH.GetUser)
+			auth.GET("/report-reasons", reportH.ListReasons)
+			auth.POST("/reports", reportH.Create)
 
 			if cfg.LegacyChatEnabled {
 				auth.GET("/conversations", chatH.ListConversations)
@@ -290,7 +305,7 @@ func main() {
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	if imClient.Available() {
 		imWorker := &service.IMSyncWorker{
-			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Client: imClient,
+			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Client: imClient,
 			BatchSize: 20, MaxAttempts: 10, PollInterval: 2 * time.Second,
 		}
 		go imWorker.Run(workerCtx)

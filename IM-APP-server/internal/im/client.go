@@ -21,9 +21,9 @@ import (
 const maxResponseBytes = 2 << 20
 
 var (
-	ErrUnavailable     = errors.New("openim is not configured")
-	ErrInvalidPlatform = errors.New("invalid OpenIM platform ID")
-	ErrInvalidUserID   = errors.New("invalid business user ID")
+	ErrUnavailable          = errors.New("openim is not configured")
+	ErrInvalidPlatform      = errors.New("invalid OpenIM platform ID")
+	ErrInvalidUserID        = errors.New("invalid business user ID")
 )
 
 // UserIDFromBusinessID converts the PostgreSQL UUID into an OpenIM-compatible
@@ -216,7 +216,8 @@ func (c *Client) IsUserRegistered(ctx context.Context, userID string) (bool, err
 			return result.AccountStatus == 1, nil
 		}
 	}
-	return false, errors.New("openim account check response did not contain requested user")
+	// OpenIM 对未注册账号可能省略 results 项，按未注册处理以便补注册。
+	return false, nil
 }
 
 // EnsureUser makes PostgreSQL's user visible to OpenIM and keeps the OpenIM
@@ -356,7 +357,7 @@ func (c *Client) EnsureGroup(ctx context.Context, group Group) error {
 	if group.AllowMemberAddFriend {
 		applyMemberFriend = 0
 	}
-	return c.postWithAdmin(ctx, "/group/create_group", map[string]any{
+	err = c.postWithAdmin(ctx, "/group/create_group", map[string]any{
 		"ownerUserID": group.OwnerUserID, "memberUserIDs": group.MemberUserIDs,
 		"adminUserIDs": group.AdminUserIDs,
 		"groupInfo": map[string]any{
@@ -366,6 +367,7 @@ func (c *Client) EnsureGroup(ctx context.Context, group Group) error {
 			"applyMemberFriend": applyMemberFriend,
 		},
 	}, nil)
+	return ignoreAlreadyDesired(err)
 }
 
 func (c *Client) UpdateGroup(ctx context.Context, group Group) error {
@@ -457,11 +459,20 @@ func (c *Client) SendBusinessNotification(ctx context.Context, receiverUserID, r
 
 func (c *Client) SendTextMessage(ctx context.Context, receiverID string, sessionType int, text string) (SendMessageResult, error) {
 	var result SendMessageResult
-	err := c.postWithAdmin(ctx, "/msg/send_msg", map[string]any{
-		"sendID": c.cfg.AdminUser, "recvID": receiverID,
-		"content": map[string]string{"content": text}, "contentType": 101,
-		"sessionType": sessionType, "isOnlineOnly": false, "notOfflinePush": false,
-	}, &result)
+	body := map[string]any{
+		"sendID":         c.cfg.AdminUser,
+		"content":        map[string]string{"content": text},
+		"contentType":    101,
+		"sessionType":    sessionType,
+		"isOnlineOnly":   false,
+		"notOfflinePush": false,
+	}
+	if sessionType == 3 {
+		body["groupID"] = receiverID
+	} else {
+		body["recvID"] = receiverID
+	}
+	err := c.postWithAdmin(ctx, "/msg/send_msg", body, &result)
 	return result, err
 }
 
@@ -650,7 +661,11 @@ func ignoreAlreadyDesired(err error) error {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		message := strings.ToLower(apiErr.ErrMsg + " " + apiErr.ErrDlt)
-		if apiErr.ErrCode == 1004 || strings.Contains(message, "already") || strings.Contains(message, "repeat") {
+		if apiErr.ErrCode == 1004 ||
+			strings.Contains(message, "already") ||
+			strings.Contains(message, "repeat") ||
+			strings.Contains(message, "已在群") ||
+			strings.Contains(message, "已经存在") {
 			return nil
 		}
 	}

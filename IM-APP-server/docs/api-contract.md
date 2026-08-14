@@ -445,6 +445,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 }
 ```
 
+群同步到 OpenIM 后，系统向该群发送一条欢迎消息：`新群创建成功，一起来聊天吧`。
+
 ### GET `/api/v1/groups`
 
 见通讯录章节（支持 `role` 筛选）。
@@ -566,6 +568,53 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
+## 用户举报（需 JWT）
+
+### GET `/api/v1/report-reasons?targetType=user&language=zh`
+
+返回当前启用的用户举报原因，按 `sortOrder` 排序。当前后端只接受 `targetType=user`，`language` 默认 `zh`。
+
+**Response**
+```json
+[
+  {
+    "id": "uuid",
+    "targetType": "user",
+    "reason": "垃圾广告",
+    "language": "zh",
+    "sortOrder": 10
+  }
+]
+```
+
+### POST `/api/v1/reports`
+
+提交用户举报。证据文件必须由当前用户上传且状态为 `ready`，最多 9 个；补充说明最多 1000 个字符。同一用户对同一目标已有 `pending`、`processing` 或 `reopened` 工单时，接口幂等返回原工单。
+
+**Body**
+```json
+{
+  "targetType": "user",
+  "targetId": "被举报用户UUID",
+  "reasonId": "举报原因UUID",
+  "description": "补充说明",
+  "evidenceFileIds": ["已完成上传的文件UUID"]
+}
+```
+
+**Response**
+```json
+{
+  "id": "举报工单UUID",
+  "status": "pending",
+  "createdAt": "2026-08-14T12:00:00Z"
+}
+```
+
+该接口写入管理后台共用的 `report_reasons`、`reports`、`report_files`，不写入也不修改原有 `group_reports`。
+
+---
+
 ## 文件上传（需 JWT）
 
 ### POST `/api/v1/files/uploads`
@@ -659,9 +708,40 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 把业务用户 UUID 解析为稳定的 OpenIM userID，并返回 `canChat/denyReason`。校验双方账号、好友关系和双向拉黑状态，不创建 PostgreSQL 会话。
 
+### GET `/api/v1/im/conversations/:conversationId/settings`
+
+读取当前用户某个 OpenIM 单聊会话的设置。只允许 `si_` 单聊会话，并由 OpenIM 按当前用户身份校验会话归属。
+
+**Response**
+```json
+{
+  "conversationId": "si_xxx_xxx",
+  "pinned": false,
+  "doNotDisturb": false,
+  "burnAfterRead": false,
+  "burnDuration": 0
+}
+```
+
+### PATCH `/api/v1/im/conversations/:conversationId/settings`
+
+局部更新置顶、消息免打扰和阅后即焚。所有字段均可选，但至少传一个。`burnDuration` 单位为秒；启用时范围为 5～86400，关闭阅后即焚时服务端自动清零。
+
+**Body**
+```json
+{
+  "pinned": true,
+  "doNotDisturb": true,
+  "burnAfterRead": true,
+  "burnDuration": 30
+}
+```
+
+设置直接保存到 OpenIM，不新增 PostgreSQL 字段。
+
 ### GET `/api/v1/im/groups/:businessGroupId`
 
-把纯数字业务群号解析为内部 UUID，再解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
+把纯数字业务群号、内部 UUID 或 OpenIM 群 ID 解析为稳定的 OpenIM groupID，响应里的 `businessGroupId` 始终是纯数字群号。校验群状态、成员资格、单人禁言及全员禁言。若 OpenIM 尚无该群（历史数据未同步），会按业务库补创建并把当前用户邀请进群后再返回；全量成员对账仍由 Outbox 负责。
 
 ### GET `/api/v1/im/conversations/:peerType/:peerId`
 

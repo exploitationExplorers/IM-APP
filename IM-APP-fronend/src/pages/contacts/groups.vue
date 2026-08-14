@@ -57,7 +57,7 @@ function goCreate() {
       <image
         class="avatar"
         :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
-        mode="aspectFill"
+        mode="aspectFit"
       />
       <text class="name">{{ g.name }}</text>
       <text class="arrow">›</text>

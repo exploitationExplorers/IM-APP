@@ -32,7 +32,12 @@ export type {
   SendFriendResult,
 } from './contact'
 
-export type { GroupInfo, GroupMember } from './group'
+export type {
+  GroupInfo,
+  GroupMember,
+  GroupQRCodeResolveResult,
+  JoinGroupByQRCodeResult,
+} from './group'
 
 export type {
   UploadPurpose,

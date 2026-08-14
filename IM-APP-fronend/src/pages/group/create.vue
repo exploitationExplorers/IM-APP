@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import { useContactStore } from '@/stores/contact'
 import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
+import { useChatStore } from '@/stores/chat'
+import { resolveIMGroup } from '@/api/im'
 import { APP_CONFIG } from '@/config'
 
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
 const userStore = useUserStore()
+const chatStore = useChatStore()
 const { contacts } = storeToRefs(contactStore)
 
 const step = ref<'select' | 'create'>('select')
@@ -45,15 +49,23 @@ const nameLen = computed(() => groupName.value.length)
 
 const canConfirm = computed(() => selectedCount.value > 0)
 
+const myAvatar = computed(
+  () => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl,
+)
+
 const memberPreview = computed(() => {
   const meName = userStore.profile?.nickname || '我'
   const names = [meName, ...selectedContacts.value.map((c) => c.nickname)]
   return names
 })
 
-onMounted(() => {
+function contactAvatar(url: string) {
+  return url || APP_CONFIG.defaultAvatarUrl
+}
+
+onShow(() => {
   contactStore.loadDirectory()
-  if (!userStore.profile) userStore.bootstrap()
+  userStore.loadProfile().catch(() => undefined)
 })
 
 function goBack() {
@@ -94,6 +106,30 @@ function onConfirmSelect() {
   step.value = 'create'
 }
 
+async function waitForGroupConversation(groupId: string) {
+  const deadline = Date.now() + 12000
+  const welcome = '新群创建成功，一起来聊天吧'
+  let found: { id: string; lastMessage: string } | undefined
+  while (Date.now() < deadline) {
+    try {
+      const target = await resolveIMGroup(groupId)
+      await chatStore.loadConversations()
+      found = chatStore.conversations.find(
+        (c) => c.type === 'group' && c.groupId === target.imGroupId,
+      )
+      // 等欢迎语落到会话后再标已读，避免随后到达又把红点加回来
+      if (found?.lastMessage.includes(welcome)) {
+        await chatStore.markAsRead(found.id)
+        return
+      }
+    } catch {
+      /* OpenIM 群尚未同步完成 */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+  if (found) await chatStore.markAsRead(found.id)
+}
+
 async function onCreate() {
   const name = groupName.value.trim()
   if (!name) {
@@ -104,14 +140,15 @@ async function onCreate() {
   uni.showLoading({ title: '创建中...', mask: true })
   try {
     const g = await groupStore.create(name, [...selected.value])
-    uni.showToast({ title: '创建成功', icon: 'success' })
-    if (g.conversationId) {
-      uni.redirectTo({
-        url: `/pages/chat/room?id=${g.conversationId}&title=${encodeURIComponent(g.name)}`,
-      })
-    } else {
-      uni.navigateBack()
-    }
+    await contactStore.loadDirectory().catch(() => undefined)
+    await waitForGroupConversation(g.id)
+    uni.hideLoading()
+    uni.switchTab({
+      url: '/pages/chat/index',
+      success: () => {
+        uni.showToast({ title: '创建成功', icon: 'success' })
+      },
+    })
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   } finally {
@@ -146,7 +183,7 @@ async function onCreate() {
           class="chip"
           @click.stop="removeSelected(c.id)"
         >
-          <image class="chip-avatar" :src="c.avatar || '/static/avatar-me.png'" mode="aspectFill" />
+          <image class="chip-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
           <text class="chip-name">{{ c.nickname }}</text>
         </view>
       </view>
@@ -195,7 +232,7 @@ async function onCreate() {
           class="row"
           @click="toggle(c.id)"
         >
-          <image class="avatar" :src="c.avatar || '/static/avatar-me.png'" mode="aspectFill" />
+          <image class="avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
           <text class="name">{{ c.nickname }}</text>
           <view class="check" :class="{ on: isSelected(c.id) }" />
         </view>
@@ -236,13 +273,13 @@ async function onCreate() {
           <view class="member">
             <image
               class="member-avatar"
-              :src="userStore.profile?.avatar || '/static/avatar-me.png'"
+              :src="myAvatar"
               mode="aspectFill"
             />
             <text class="member-name">{{ userStore.profile?.nickname || '我' }}</text>
           </view>
           <view v-for="c in selectedContacts" :key="c.id" class="member">
-            <image class="member-avatar" :src="c.avatar || '/static/avatar-me.png'" mode="aspectFill" />
+            <image class="member-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
             <text class="member-name">{{ c.nickname }}</text>
           </view>
         </view>

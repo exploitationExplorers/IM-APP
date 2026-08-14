@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Conversation } from '@/types'
+import { APP_CONFIG } from '@/config'
 import { formatRelativeTime } from '@/utils/format'
 import { useChatStore } from '@/stores/chat'
 

@@ -8,6 +8,8 @@ export interface ChatMessage {
   senderId: string
   /** OpenIM 消息上的发送者头像，群聊按人展示 */
   senderAvatar?: string
+  /** OpenIM 消息上的发送者昵称，群聊对方气泡上方展示 */
+  senderNickname?: string
   type: MessageType
   content: string
   createdAt: string

@@ -20,7 +20,7 @@ const code = ref('group')
 const groupDetail = computed(() => groupStore.currentGroup)
 const memberList = computed(() => groupStore.members)
 const groupName = computed(() => groupDetail.value?.name || '群聊')
-const avatar = computed(() => groupDetail.value?.avatar || '/static/avatar-1.png')
+const avatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
 
 // 会话级设置：进入页面时从本地会话列表读取当前状态（OpenIM 已云同步）

@@ -71,6 +71,15 @@ function avatarOf(message: ChatMessage): string {
   return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
 }
 
+function nicknameOf(message: ChatMessage): string {
+  if (chatType.value !== 'group' || message.senderId === myId.value) return ''
+  if (message.senderNickname) return message.senderNickname
+  const uid = businessUserIdFromIM(message.senderId)
+  if (!uid) return ''
+  const contact = contactStore.contacts.find((c) => c.id === uid)
+  return contact?.remark?.trim() || contact?.nickname || ''
+}
+
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 
@@ -471,12 +480,13 @@ function pickImage() {
 
 <template>
   <view class="room">
-    <view class="chat-header" @click="goToProfile">
-      <view class="back-btn" @click.stop="goBack">‹</view>
-      <view class="header-title">
+    <view class="chat-header">
+      <view class="back-btn" @click="goBack">‹</view>
+      <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text>
+      <view class="header-title" @click="goToProfile">
         <text>{{ title }}</text>
       </view>
-      <view class="header-icon">⋯</view>
+      <view class="header-icon" @click="goToProfile">⋯</view>
     </view>
 
     <scroll-view
@@ -499,6 +509,7 @@ function pickImage() {
           :message="m"
           :mine="isMine(m)"
           :avatar="avatarOf(m)"
+          :nickname="nicknameOf(m)"
           @avatar-click="onAvatarClick(m)"
         />
       </view>
@@ -565,7 +576,6 @@ function pickImage() {
 .chat-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   height: 94rpx;
   padding: 0 26rpx;
   background: #ffffff;
@@ -581,11 +591,21 @@ function pickImage() {
   font-size: 52rpx;
   color: #1a1a1a;
   line-height: 1;
+  flex-shrink: 0;
+}
+
+.member-count {
+  margin-right: 12rpx;
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #111;
+  flex-shrink: 0;
 }
 
 .header-title {
   flex: 1;
-  text-align: center;
+  min-width: 0;
+  text-align: left;
   font-size: 38rpx;
   font-weight: 700;
   color: #111;
@@ -602,6 +622,7 @@ function pickImage() {
   justify-content: center;
   font-size: 42rpx;
   color: #444;
+  flex-shrink: 0;
 }
 
 .msg-list {

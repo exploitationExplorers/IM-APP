@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"io"
+	"log"
 	"net/http"
 
 	"im-app-server/internal/im"
@@ -66,8 +67,10 @@ func (h *IMHandler) Peer(c *gin.Context) {
 }
 
 func (h *IMHandler) Group(c *gin.Context) {
-	group, err := h.Service.ResolveGroup(c.Request.Context(), middleware.UserID(c), c.Param("businessGroupId"))
+	groupID := c.Param("businessGroupId")
+	group, err := h.Service.ResolveGroup(c.Request.Context(), middleware.UserID(c), groupID)
 	if err != nil {
+		log.Printf("resolve group %s: %v", groupID, err)
 		switch {
 		case errors.Is(err, repository.ErrIMTargetNotFound), errors.Is(err, im.ErrInvalidUserID):
 			response.Fail(c, http.StatusNotFound, "群聊不存在或无权访问")
