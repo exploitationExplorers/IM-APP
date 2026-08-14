@@ -7,7 +7,7 @@ import ImTabBar from '@/components/ImTabBar.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
-import type { Contact } from '@/types'
+import type { Contact, GroupPreview } from '@/types'
 
 useAuthGuard()
 useTabBar()
@@ -24,8 +24,6 @@ const sortLabel = computed(() => {
   if (sortKey.value === 'chat') return '最近聊天'
   return '最近加入(默认)'
 })
-
-const featuredGroup = computed(() => groups.value[0] ?? null)
 
 const filteredContacts = computed(() => {
   let list = [...contacts.value]
@@ -58,12 +56,8 @@ function openContact(c: Contact) {
   go(`/pages/contacts/friend-detail?id=${c.id}`)
 }
 
-function openFeaturedGroup() {
-  const g = featuredGroup.value
-  if (!g) return
-  uni.navigateTo({
-    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(g.id)}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || '/static/icons/menu-group.svg')}`,
-  })
+function openGroupChat(g: GroupPreview) {
+  contactStore.openChatWithGroup(g.id, g.name, g.avatar || '/static/icons/menu-group.svg')
 }
 
 function onAdd() {
@@ -126,13 +120,18 @@ function closeMenus() {
         </view>
       </view>
 
-      <view v-if="featuredGroup" class="featured-band">
-        <view class="featured-card" @click="openFeaturedGroup">
-          <image class="featured-avatar" :src="featuredGroup.avatar" mode="aspectFill" />
-          <text class="featured-name">{{ featuredGroup.name }}</text>
+      <view v-if="groups.length" class="group-band">
+        <view
+          v-for="g in groups.slice(0, 5)"
+          :key="g.id"
+          class="group-card"
+          @click="openGroupChat(g)"
+        >
+          <image class="group-avatar" :src="g.avatar || '/static/icons/menu-group.svg'" mode="aspectFill" />
+          <text class="group-name">{{ g.name }}</text>
         </view>
       </view>
-      <view v-else class="section-divider" />
+      <view class="section-divider" />
 
       <view class="section-head">
         <text class="section-count">联络人 ({{ filteredContacts.length }})</text>
@@ -293,23 +292,28 @@ function closeMenus() {
   flex-shrink: 0;
 }
 
-.featured-band {
+.group-band {
   background: #f3f4f7;
   padding: 16rpx 40rpx;
   margin-bottom: 16rpx;
 }
 
-.featured-card {
+.group-card {
   display: flex;
   align-items: center;
   gap: 32rpx;
-  padding: 8rpx;
+  padding: 16rpx;
   background: #fff;
   border-radius: 8rpx;
   box-sizing: border-box;
+  margin-bottom: 16rpx;
 }
 
-.featured-avatar {
+.group-card:last-child {
+  margin-bottom: 0;
+}
+
+.group-avatar {
   width: 96rpx;
   height: 96rpx;
   border-radius: 50%;
@@ -317,7 +321,7 @@ function closeMenus() {
   flex-shrink: 0;
 }
 
-.featured-name {
+.group-name {
   flex: 1;
   font-size: 34rpx;
   color: #212121;

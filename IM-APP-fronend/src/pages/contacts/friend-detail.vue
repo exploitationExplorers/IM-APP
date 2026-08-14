@@ -8,16 +8,26 @@ import {
   fetchContact,
 } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
+import { useChatStore } from '@/stores/chat'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import ImSwitch from '@/components/ImSwitch.vue'
+import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
+import { setConversationPin, setConversationRecvOpt } from '@/utils/openim'
 import type { Contact, GroupPreview } from '@/types'
 
 useAuthGuard()
 
 const contactStore = useContactStore()
+const chatStore = useChatStore()
 const contactId = ref('')
 const contact = ref<Contact | null>(null)
 const loading = ref(false)
 const showMore = ref(false)
+
+// 会话级设置
+const convId = ref('')
+const recvOpt = ref<number>(MessageReceiveOptType.Normal)
+const pinned = ref(false)
 
 const nickname = computed(() => contact.value?.nickname || '')
 const listName = computed(
@@ -40,10 +50,52 @@ async function loadDetail() {
   loading.value = true
   try {
     contact.value = await fetchContact(contactId.value)
+    await initConversationSettings()
   } catch (e) {
     uni.showToast({ title: (e as Error).message || '加载失败', icon: 'none' })
   } finally {
     loading.value = false
+  }
+}
+
+/** 读取与该好友的 OpenIM 会话状态（置顶 / 免打扰） */
+async function initConversationSettings() {
+  try {
+    const conv = await chatStore.enterConversation({ type: 'private', businessId: contactId.value })
+    convId.value = conv.id
+    recvOpt.value = conv.recvMsgOpt ?? MessageReceiveOptType.Normal
+    pinned.value = conv.pinned ?? false
+  } catch {
+    // 拿不到会话时开关保持默认，不影响其它功能
+  }
+}
+
+async function onToggleRecv(v: boolean) {
+  if (!convId.value) {
+    uni.showToast({ title: '会话未就绪', icon: 'none' })
+    return
+  }
+  const opt = v ? MessageReceiveOptType.NotNotify : MessageReceiveOptType.Normal
+  try {
+    await setConversationRecvOpt(convId.value, opt)
+    recvOpt.value = opt
+    chatStore.patchConversation(convId.value, { recvMsgOpt: opt })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
+  }
+}
+
+async function onTogglePin(v: boolean) {
+  if (!convId.value) {
+    uni.showToast({ title: '会话未就绪', icon: 'none' })
+    return
+  }
+  try {
+    await setConversationPin(convId.value, v)
+    pinned.value = v
+    chatStore.patchConversation(convId.value, { pinned: v })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
   }
 }
 
@@ -226,6 +278,17 @@ function onDelete() {
             />
             <text class="group-name">{{ g.name }}</text>
             <image class="chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+          </view>
+        </view>
+
+        <view class="switch-card">
+          <view class="switch-row">
+            <text class="label">消息免打扰</text>
+            <ImSwitch :model-value="recvOpt === MessageReceiveOptType.NotNotify" @change="onToggleRecv" />
+          </view>
+          <view class="switch-row">
+            <text class="label">置顶聊天</text>
+            <ImSwitch :model-value="pinned" @change="onTogglePin" />
           </view>
         </view>
 
@@ -571,5 +634,25 @@ function onDelete() {
   text-align: center;
   color: #999;
   margin-top: 240rpx;
+}
+
+.switch-card {
+  margin-top: 24rpx;
+  background: #fff;
+  border-radius: 24rpx;
+  overflow: hidden;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 96rpx;
+  padding: 20rpx 40rpx;
+  box-sizing: border-box;
+}
+
+.switch-row + .switch-row {
+  border-top: 1rpx solid #f0f0f0;
 }
 </style>

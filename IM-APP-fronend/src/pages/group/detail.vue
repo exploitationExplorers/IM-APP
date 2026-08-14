@@ -5,12 +5,11 @@ import ImSwitch from '@/components/ImSwitch.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
-import { resolveIMGroup } from '@/api/im'
 import {
   setConversationPin,
   setConversationRecvOpt,
-  resolveGroupConversationID,
 } from '@/utils/openim'
+import { resolveIMGroup } from '@/api/im'
 
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
@@ -45,13 +44,19 @@ onLoad(async (query) => {
   }
 })
 
-/** 取该群的 OpenIM 会话 ID，并从本地会话列表读出当前置顶 / 免打扰状态 */
+/**
+ * 取该群的 OpenIM 会话并读出当前置顶 / 免打扰状态。
+ * 优先用本地缓存（按 OpenIM 会话 ID 匹配）；没有则让 SDK 建会话（或后端兜底），保证开关与真实状态一致。
+ */
 async function initConversationSettings() {
   try {
-    convId.value = await resolveGroupConversationID(groupId.value)
-    const conv = chatStore.conversations.find((c) => c.id === convId.value)
-    recvOpt.value = conv?.recvMsgOpt ?? MessageReceiveOptType.Normal
-    pinned.value = conv?.pinned ?? false
+    const target = await resolveIMGroup(groupId.value)
+    const conversationID = `sg_${target.imGroupId}`
+    const cached = chatStore.conversations.find((c) => c.id === conversationID)
+    const conv = cached || (await chatStore.enterConversation({ type: 'group', businessId: groupId.value }))
+    convId.value = conv.id
+    recvOpt.value = conv.recvMsgOpt ?? MessageReceiveOptType.Normal
+    pinned.value = conv.pinned ?? false
   } catch {
     // 拿不到会话 ID 时开关保持默认，不影响其它功能
   }

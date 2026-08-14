@@ -176,8 +176,14 @@ function goBack() {
 
 function goToProfile() {
   if (!businessId.value) return
+  if (chatType.value === 'private') {
+    uni.navigateTo({
+      url: `/pages/contacts/friend-detail?id=${encodeURIComponent(businessId.value)}`,
+    })
+    return
+  }
   uni.navigateTo({
-    url: `/pages/group/detail?id=${encodeURIComponent(businessId.value)}&code=${encodeURIComponent(chatType.value)}`,
+    url: `/pages/group/detail?id=${encodeURIComponent(businessId.value)}&code=group`,
   })
 }
 

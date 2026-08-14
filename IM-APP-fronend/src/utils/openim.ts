@@ -626,17 +626,21 @@ function toISOTime(timestamp: number): string {
 // 注意：这些不经由业务后端 REST 接口，避免与 OpenIM 服务端的会话状态冲突。
 // ---------------------------------------------------------------------------
 
-/** 置顶 / 取消置顶某个会话 */
+/**
+ * 置顶 / 取消置顶某个会话。
+ * 按 OpenIM 官方文档，uni-app 统一走 asyncApi('setConversation', ...)。
+ */
 export async function setConversationPin(conversationID: string, isPinned: boolean): Promise<void> {
-  await imCall(IMMethods.PinConversation, { conversationID, isPinned })
+  await imCall('setConversation' as IMMethods, { conversationID, isPinned })
 }
 
 /**
  * 设置会话的消息接收选项。
  * opt 取值见 MessageReceiveOptType：0=正常提醒，1=不接收，2=接收但不提醒（免打扰）。
+ * 按 OpenIM 官方文档，uni-app 统一走 asyncApi('setConversation', ...)。
  */
 export async function setConversationRecvOpt(conversationID: string, opt: number): Promise<void> {
-  await imCall(IMMethods.SetConversationRecvMessageOpt, { conversationID, opt })
+  await imCall('setConversation' as IMMethods, { conversationID, recvMsgOpt: opt })
 }
 
 /**

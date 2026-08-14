@@ -12,11 +12,15 @@ const emit = defineEmits<{
 }>()
 
 const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
+const isMuted = computed(() => props.item.recvMsgOpt === 1 || props.item.recvMsgOpt === 2)
 </script>
 
 <template>
   <view class="conv" @click="emit('click', item)">
-    <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
+    <view class="avatar-wrap">
+      <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
+      <image v-if="item.pinned" class="pin-badge" src="/static/icons/icon-pin.svg" mode="aspectFit" />
+    </view>
     <view class="body">
       <view class="top">
         <text class="title">{{ item.title }}</text>
@@ -24,6 +28,7 @@ const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
       </view>
       <view class="bottom">
         <view class="preview">
+          <image v-if="isMuted" class="mute-icon" src="/static/icons/icon-bell-slash.svg" mode="aspectFit" />
           <text v-if="item.highlightTag" class="tag">{{ item.highlightTag }}</text>
           <text class="msg">{{ item.lastMessage }}</text>
         </view>
@@ -42,13 +47,29 @@ const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
   background: #fff;
 }
 
+.avatar-wrap {
+  position: relative;
+  width: 96rpx;
+  height: 96rpx;
+  margin-right: 24rpx;
+  flex-shrink: 0;
+}
+
 .avatar {
   width: 96rpx;
   height: 96rpx;
   border-radius: 50%;
-  margin-right: 24rpx;
-  flex-shrink: 0;
   background: #eee;
+}
+
+.pin-badge {
+  position: absolute;
+  top: -4rpx;
+  right: -4rpx;
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 50%;
+  background: #297bfb;
 }
 
 .body {
@@ -98,6 +119,13 @@ const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
   color: #e54d42;
   font-size: 26rpx;
   margin-right: 6rpx;
+}
+
+.mute-icon {
+  width: 24rpx;
+  height: 24rpx;
+  margin-right: 6rpx;
+  flex-shrink: 0;
 }
 
 .msg {
