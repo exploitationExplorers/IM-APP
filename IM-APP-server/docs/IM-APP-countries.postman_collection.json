@@ -1,0 +1,23 @@
+{
+  "info": {
+    "_postman_id": "5a4b3c2d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
+    "name": "IM-APP 后端 · 区号接口",
+    "description": "国家/地区区号查询（登录前可用）。\n\n使用说明：\n1) baseUrl 默认正式环境 http://8.210.72.157:8080/api/v1，本机联调可改为 http://localhost:8080/api/v1。\n2) 该接口无需登录，直接 GET 即可。\n3) 返回所有启用国家的区号，前端登录/注册页用来渲染区号选择器。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://8.210.72.157:8080/api/v1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "国家/地区区号列表",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/public/countries",
+        "description": "查询所有启用的国家/地区区号。\n无需登录。\n\n响应 data 示例：\n[\n  { \"code\": \"CN\", \"dialCode\": \"86\", \"cnName\": \"中国\", \"enName\": \"China\", \"enabled\": true },\n  { \"code\": \"HK\", \"dialCode\": \"852\", \"cnName\": \"中国香港\", \"enName\": \"Hong Kong\", \"enabled\": true },\n  { \"code\": \"US\", \"dialCode\": \"1\", \"cnName\": \"美国\", \"enName\": \"United States\", \"enabled\": true },\n  ...\n]\n前端据此渲染区号选择器，选中后把 countryCode + phone 传给注册/登录接口。"
+      },
+      "response": []
+    }
+  ]
+}
