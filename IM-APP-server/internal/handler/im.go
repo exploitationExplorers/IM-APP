@@ -79,6 +79,21 @@ func (h *IMHandler) Group(c *gin.Context) {
 	response.OK(c, group)
 }
 
+// GroupByIM 接收 OpenIM 群 ID（会话列表拿到的 groupID），反查业务群资料。
+func (h *IMHandler) GroupByIM(c *gin.Context) {
+	group, err := h.Service.ResolveGroupByIM(c.Request.Context(), middleware.UserID(c), c.Param("imGroupId"))
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrIMTargetNotFound), errors.Is(err, im.ErrInvalidUserID):
+			response.Fail(c, http.StatusNotFound, "群聊不存在或无权访问")
+		default:
+			response.Fail(c, http.StatusInternalServerError, "解析群聊失败")
+		}
+		return
+	}
+	response.OK(c, group)
+}
+
 // conversationPatchRequest 对应 PATCH 会话设置的部分更新入参。
 // 用指针区分「未传」与「传了零值」：客户端没给的字段保持 nil，仅叠加给了的字段。
 type conversationPatchRequest struct {

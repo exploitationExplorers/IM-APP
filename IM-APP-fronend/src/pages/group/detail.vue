@@ -10,6 +10,7 @@ import {
   setConversationRecvOpt,
 } from '@/utils/openim'
 import { resolveIMGroup } from '@/api/im'
+import { safeBack } from '@/utils/nav'
 
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
@@ -98,7 +99,7 @@ function goToChat() {
 }
 
 function goBack() {
-  uni.navigateBack()
+  safeBack('/pages/chat/index')
 }
 
 function goToMembers() {

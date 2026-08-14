@@ -109,6 +109,20 @@ func (s *IMService) ResolveGroup(ctx context.Context, userID, groupID string) (m
 	return group, nil
 }
 
+// ResolveGroupByIM 是 ResolveGroup 的逆入口：前端只有 OpenIM 群 ID（来自会话列表）
+// 时，先把它还原成内部 UUID，再换出对外 public ID 与 OpenIM 群 ID。
+func (s *IMService) ResolveGroupByIM(ctx context.Context, userID, imGroupID string) (models.IMGroupTarget, error) {
+	internalID, err := im.BusinessIDFromUserID(imGroupID)
+	if err != nil {
+		return models.IMGroupTarget{}, repository.ErrIMTargetNotFound
+	}
+	publicID, err := s.Groups.PublicIDByInternalID(ctx, internalID)
+	if err != nil {
+		return models.IMGroupTarget{}, err
+	}
+	return s.ResolveGroup(ctx, userID, publicID)
+}
+
 func (s *IMService) Token(ctx context.Context, userID string, platformID int) (IMToken, error) {
 	if s.Client == nil || !s.Client.Available() || s.Config.PublicAPIURL == "" || s.Config.PublicWSURL == "" {
 		return IMToken{}, ErrIMUnavailable

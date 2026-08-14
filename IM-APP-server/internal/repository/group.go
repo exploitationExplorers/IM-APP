@@ -28,6 +28,20 @@ func (r *GroupRepo) InternalIDByPublicID(ctx context.Context, publicID string) (
 	return groupID, err
 }
 
+// PublicIDByInternalID is the inverse of InternalIDByPublicID: given the
+// database group UUID (which also doubles as the OpenIM group ID source),
+// return the public ID clients use in URLs.
+func (r *GroupRepo) PublicIDByInternalID(ctx context.Context, internalID string) (string, error) {
+	var publicID string
+	err := r.DB.QueryRow(ctx, `
+		SELECT public_id FROM groups WHERE id=$1::uuid`, internalID,
+	).Scan(&publicID)
+	if err != nil {
+		return "", ErrIMTargetNotFound
+	}
+	return publicID, nil
+}
+
 func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs []string) (models.GroupInfo, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {

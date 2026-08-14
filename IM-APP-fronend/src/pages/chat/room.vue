@@ -9,7 +9,9 @@ import { useChatSettingsStore } from '@/stores/chatSettings'
 import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
-import type { ChatMessage } from '@/types'
+import { resolveIMGroupByIM } from '@/api/im'
+import { safeBack } from '@/utils/nav'
+import type { ChatMessage, Conversation } from '@/types'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -21,6 +23,8 @@ const peerAvatar = ref(APP_CONFIG.defaultAvatarUrl)
 const chatType = ref<'private' | 'group'>('group')
 /** 业务侧的好友 / 群 ID，仅用于跳资料页 */
 const businessId = ref('')
+/** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
+const convRef = ref<Conversation | null>(null)
 const input = ref('')
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
@@ -84,6 +88,7 @@ onLoad(async (query) => {
       type: chatType.value,
       businessId: businessId.value,
     })
+    convRef.value = conv
     conversationId.value = conv.id
     if (!query?.title) title.value = conv.title
 
@@ -171,19 +176,48 @@ function onConfirmSend() {
 }
 
 function goBack() {
-  uni.navigateBack()
+  safeBack('/pages/chat/index')
 }
 
-function goToProfile() {
-  if (!businessId.value) return
+/**
+ * 解析资料页所需的「业务 ID」。
+ * 通讯录 / 好友详情进来时已带 targetId（业务 ID），直接用；
+ * 聊天列表点进来只有 OpenIM 会话 ID，需要根据会话反查：
+ *  - 私聊：OpenIM 用户 ID 逆运算回业务 UUID（与 resolveIMPeer 同一套 ID）。
+ *  - 群聊：OpenIM 群 ID → 后端反查出对外 public ID（群资料页与 resolveIMGroup 需要它）。
+ */
+async function resolveBusinessTarget(): Promise<string> {
+  if (businessId.value) return businessId.value
+  const conv = convRef.value
+  if (!conv) return ''
+  if (chatType.value === 'private') {
+    return businessUserIdFromIM(conv.peerUserId || '')
+  }
+  if (conv.groupId) {
+    try {
+      const target = await resolveIMGroupByIM(conv.groupId)
+      return target.businessGroupId
+    } catch {
+      return ''
+    }
+  }
+  return ''
+}
+
+async function goToProfile() {
+  const id = await resolveBusinessTarget()
+  if (!id) {
+    uni.showToast({ title: '暂无可跳转的资料', icon: 'none' })
+    return
+  }
   if (chatType.value === 'private') {
     uni.navigateTo({
-      url: `/pages/contacts/friend-detail?id=${encodeURIComponent(businessId.value)}`,
+      url: `/pages/contacts/friend-detail?id=${encodeURIComponent(id)}`,
     })
     return
   }
   uni.navigateTo({
-    url: `/pages/group/detail?id=${encodeURIComponent(businessId.value)}&code=group`,
+    url: `/pages/group/detail?id=${encodeURIComponent(id)}&code=group`,
   })
 }
 

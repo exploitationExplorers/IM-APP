@@ -13,6 +13,7 @@ import { useAuthGuard } from '@/composables/useAuthGuard'
 import ImSwitch from '@/components/ImSwitch.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { setConversationPin, setConversationRecvOpt } from '@/utils/openim'
+import { safeBack } from '@/utils/nav'
 import type { Contact, GroupPreview } from '@/types'
 
 useAuthGuard()
@@ -100,7 +101,7 @@ async function onTogglePin(v: boolean) {
 }
 
 function goBack() {
-  uni.navigateBack()
+  safeBack('/pages/contacts/index')
 }
 
 function goRemark() {

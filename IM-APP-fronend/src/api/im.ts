@@ -54,3 +54,14 @@ export async function resolveIMGroup(businessGroupId: string): Promise<IMGroupTa
     method: 'GET',
   })
 }
+
+/**
+ * OpenIM 群 ID（会话列表拿到的 groupID）→ 业务群资料。
+ * 聊天列表点进来时只有 OpenIM 群 ID，没有对外 public ID，靠它换出资料页所需的 ID。
+ */
+export async function resolveIMGroupByIM(imGroupId: string): Promise<IMGroupTarget> {
+  return request<IMGroupTarget>({
+    url: `/im/groups/by-im/${encodeURIComponent(imGroupId)}`,
+    method: 'GET',
+  })
+}

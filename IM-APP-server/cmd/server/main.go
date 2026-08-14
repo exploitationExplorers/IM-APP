@@ -255,8 +255,9 @@ func main() {
 			auth.GET("/files/:fileId", fileH.Get)
 
 			auth.POST("/im/token", imH.Token)
-			auth.GET("/im/peers/:businessUserId", imH.Peer)
-			auth.GET("/im/groups/:businessGroupId", imH.Group)
+		auth.GET("/im/peers/:businessUserId", imH.Peer)
+		auth.GET("/im/groups/:businessGroupId", imH.Group)
+		auth.GET("/im/groups/by-im/:imGroupId", imH.GroupByIM)
 
 		// 会话设置配置接口（IM 有的都要出）：免打扰/置顶/阅后即焚/消息定时销毁/备注/@强提醒/草稿/已读/全局免打扰
 		// peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（后端拼 conversationId）
