@@ -320,40 +320,60 @@ func validateRecvMsgOpt(opt int) bool {
 	return opt == 0 || opt == 1 || opt == 2
 }
 
-// resolveConversationID 把「业务好友/群 ID + 类型」解析为 OpenIM conversationID。
+// conversationTarget 是「业务好友/群 ID + 类型」解析后的会话目标，
+// 同时携带创建会话所需的元信息（类型与对端/群 IM ID），供会话不存在时自动创建。
+type conversationTarget struct {
+	ConversationID   string // OpenIM conversationID（si_xxx / sg_xxx）
+	OpUserID         string // 当前用户 OpenIM ID
+	ConversationType int    // 1 单聊 2 群聊
+	PeerIMID         string // 单聊对端 OpenIM ID（群聊为空）
+	GroupIMID        string // 群聊 OpenIM ID（单聊为空）
+}
+
+// resolveConversationID 把「业务好友/群 ID + 类型」解析为会话目标。
 // 单聊：si_ + 两个 OpenIM 用户ID排序后用 _ 连接（OpenIM 规则，无歧义）。
 // 群聊：本项目 EnsureGroup 用 groupType=2（超级群）→ 前缀 sg_；兼容普通群前缀 g_
-//       做兜底（按候选顺序命中已存在的会话）。返回 conversationID 与当前用户 opUserID。
-func (s *IMService) resolveConversationID(ctx context.Context, userID, peerType, peerId string) (string, string, error) {
+//       做兜底（按候选顺序命中已存在的会话）。
+func (s *IMService) resolveConversationID(ctx context.Context, userID, peerType, peerId string) (conversationTarget, error) {
 	opUserID, err := im.UserIDFromBusinessID(userID)
 	if err != nil {
-		return "", "", err
+		return conversationTarget{}, err
 	}
 	switch peerType {
 	case "c2c":
 		peer, perr := s.ResolvePeer(ctx, userID, peerId)
 		if perr != nil {
-			return "", "", perr
+			return conversationTarget{}, perr
 		}
 		if !peer.CanChat {
-			return "", "", ErrIMTargetNotChattable
+			return conversationTarget{}, ErrIMTargetNotChattable
 		}
-		return buildC2CConversationID(opUserID, peer.IMUserID), opUserID, nil
+		return conversationTarget{
+			ConversationID:   buildC2CConversationID(opUserID, peer.IMUserID),
+			OpUserID:         opUserID,
+			ConversationType: 1,
+			PeerIMID:         peer.IMUserID,
+		}, nil
 	case "group":
 		grp, gerr := s.ResolveGroup(ctx, userID, peerId)
 		if gerr != nil {
-			return "", "", gerr
+			return conversationTarget{}, gerr
 		}
 		if !grp.CanChat {
-			return "", "", ErrIMTargetNotChattable
+			return conversationTarget{}, ErrIMTargetNotChattable
 		}
 		cid, rerr := s.resolveGroupConversationID(ctx, opUserID, grp.IMGroupID)
 		if rerr != nil {
-			return "", "", rerr
+			return conversationTarget{}, rerr
 		}
-		return cid, opUserID, nil
+		return conversationTarget{
+			ConversationID:   cid,
+			OpUserID:         opUserID,
+			ConversationType: 2,
+			GroupIMID:        grp.IMGroupID,
+		}, nil
 	default:
-		return "", "", ErrIMInvalidPeerType
+		return conversationTarget{}, ErrIMInvalidPeerType
 	}
 }
 
@@ -366,33 +386,58 @@ func buildC2CConversationID(a, b string) string {
 
 // resolveGroupConversationID 群会话 ID 按候选前缀依次尝试：命中已存在会话即用它；
 // 都不存在时默认超级群前缀 sg_（本项目群均为 groupType=2 超级群）。
+// 若两个候选的查询都出错（而非「不存在」），返回最近一次错误，交由上层处理，
+// 不再静默兜底，避免把未知故障伪装成「用 sg_ 前缀」去创建/设置。
 func (s *IMService) resolveGroupConversationID(ctx context.Context, opUserID, groupID string) (string, error) {
 	candidates := []string{"sg_" + groupID, "g_" + groupID}
+	var lastErr error
 	for _, cid := range candidates {
 		list, err := s.Client.GetConversations(ctx, opUserID, []string{cid})
-		if err == nil && len(list) > 0 {
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(list) > 0 {
 			return cid, nil
 		}
+	}
+	if lastErr != nil {
+		return "", lastErr
 	}
 	return candidates[0], nil
 }
 
 // GetConversationSettings 返回指定会话的当前设置（OpenIM 全量对象）。
 // peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（由后端拼 conversationId）。
+// 会话在 OpenIM 中尚不存在时（双方从未发过消息），与前端 SDK GetOneConversation 对齐，
+// 主动创建会话后再返回，避免直接 404。
 func (s *IMService) GetConversationSettings(ctx context.Context, userID, peerType, peerId string) (*im.ConversationSettings, error) {
 	if s.Client == nil || !s.Client.Available() {
 		return nil, ErrIMUnavailable
 	}
-	convID, opUserID, err := s.resolveConversationID(ctx, userID, peerType, peerId)
+	target, err := s.resolveConversationID(ctx, userID, peerType, peerId)
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.Client.GetConversations(ctx, opUserID, []string{convID})
+	// 同一会话的读与写串行化，避免与 UpdateConversationSettings 的读改写竞态。
+	unlock := s.lockTokenKey("conv:" + target.ConversationID)
+	defer unlock()
+	list, err := s.Client.GetConversations(ctx, target.OpUserID, []string{target.ConversationID})
 	if err != nil {
 		return nil, err
 	}
 	if len(list) == 0 {
-		return nil, ErrIMConversationNotFound
+		if cerr := s.Client.CreateConversation(ctx, target.OpUserID, target.ConversationID,
+			target.ConversationType, target.PeerIMID, target.GroupIMID); cerr != nil {
+			return nil, cerr
+		}
+		list, err = s.Client.GetConversations(ctx, target.OpUserID, []string{target.ConversationID})
+		if err != nil {
+			return nil, err
+		}
+		if len(list) == 0 {
+			return nil, ErrIMConversationNotFound
+		}
 	}
 	return &list[0], nil
 }
@@ -405,15 +450,29 @@ func (s *IMService) UpdateConversationSettings(ctx context.Context, userID, peer
 	if s.Client == nil || !s.Client.Available() {
 		return nil, ErrIMUnavailable
 	}
-	convID, opUserID, err := s.resolveConversationID(ctx, userID, peerType, peerId)
+	target, err := s.resolveConversationID(ctx, userID, peerType, peerId)
 	if err != nil {
 		return nil, err
 	}
 
-	// 1) 取全量，作为回写基准
-	current, err := s.Client.GetConversations(ctx, opUserID, []string{convID})
+	// 同一会话串行化「先读全量 → 叠加变更 → 回写」，避免并发设置互相覆盖。
+	unlock := s.lockTokenKey("conv:" + target.ConversationID)
+	defer unlock()
+
+	// 1) 取全量，作为回写基准（会话尚不存在时先创建，对齐前端 GetOneConversation）
+	current, err := s.Client.GetConversations(ctx, target.OpUserID, []string{target.ConversationID})
 	if err != nil {
 		return nil, err
+	}
+	if len(current) == 0 {
+		if cerr := s.Client.CreateConversation(ctx, target.OpUserID, target.ConversationID,
+			target.ConversationType, target.PeerIMID, target.GroupIMID); cerr != nil {
+			return nil, cerr
+		}
+		current, err = s.Client.GetConversations(ctx, target.OpUserID, []string{target.ConversationID})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(current) == 0 {
 		return nil, ErrIMConversationNotFound
@@ -453,12 +512,12 @@ func (s *IMService) UpdateConversationSettings(ctx context.Context, userID, peer
 	}
 
 	// 3) 回写合并后的全量对象
-	if err := s.Client.SetConversation(ctx, opUserID, conv); err != nil {
+	if err := s.Client.SetConversation(ctx, target.OpUserID, conv); err != nil {
 		return nil, err
 	}
 
 	// 4) 再 GET 一次拿到服务端最新值返回（OpenIM 回写可能异步最终一致）
-	updated, err := s.Client.GetConversations(ctx, opUserID, []string{convID})
+	updated, err := s.Client.GetConversations(ctx, target.OpUserID, []string{target.ConversationID})
 	if err != nil || len(updated) == 0 {
 		return &conv, nil
 	}
@@ -471,11 +530,11 @@ func (s *IMService) MarkConversationRead(ctx context.Context, userID, peerType, 
 	if s.Client == nil || !s.Client.Available() {
 		return ErrIMUnavailable
 	}
-	convID, opUserID, err := s.resolveConversationID(ctx, userID, peerType, peerId)
+	target, err := s.resolveConversationID(ctx, userID, peerType, peerId)
 	if err != nil {
 		return err
 	}
-	return s.Client.MarkConversationAsRead(ctx, opUserID, convID)
+	return s.Client.MarkConversationAsRead(ctx, target.OpUserID, target.ConversationID)
 }
 
 // SetGlobalMsgRecvOpt 设置用户级全局免打扰（对所有会话生效）。

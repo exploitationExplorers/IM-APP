@@ -518,6 +518,25 @@ func (c *Client) SetConversation(ctx context.Context, opUserID string, conv Conv
 	}, nil)
 }
 
+// CreateConversation 主动创建一个会话（OpenIM 原本是「首次发消息/拉取时自动建」）。
+// 与前端 SDK 的 GetOneConversation 行为对齐：即使双方尚未发过消息，
+// 后端设置会话（置顶/免打扰等）时也能先确保会话存在，避免 404。
+//   - 单聊：conversationType=1，userID 为对端 OpenIM ID（opUserID 为创建者）。
+//   - 群聊：conversationType=2，groupID 为群 OpenIM ID。
+func (c *Client) CreateConversation(ctx context.Context, opUserID, conversationID string, conversationType int, userID, groupID string) error {
+	return c.postWithAdmin(ctx, "/conversation/create_conversation", map[string]any{
+		"opUserID": opUserID,
+		"conversation": map[string]any{
+			"conversationID":   conversationID,
+			"conversationType": conversationType,
+			"userID":           userID,
+			"groupID":          groupID,
+			"recvMsgOpt":       0,
+			"isPinned":         false,
+		},
+	}, nil)
+}
+
 // MarkConversationAsRead 清空指定会话未读数。
 func (c *Client) MarkConversationAsRead(ctx context.Context, opUserID, conversationID string) error {
 	return c.postWithAdmin(ctx, "/conversation/mark_conversation_as_read", map[string]any{

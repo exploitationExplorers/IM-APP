@@ -10,6 +10,17 @@ import (
 	"im-app-server/internal/im"
 )
 
+// ErrIMInvalidPushPlatform 表示设备注册推送时 platform 取值不在允许集合内。
+var ErrIMInvalidPushPlatform = errors.New("invalid push platform, must be ios/android/web/harmony")
+
+// 允许的推送平台取值，与前端 SDK 约定保持一致。
+var validPushPlatforms = map[string]bool{
+	"ios":    true,
+	"android": true,
+	"web":     true,
+	"harmony": true,
+}
+
 // PushToken 是前端设备注册到后端的推送凭证。
 // 当 App 处于后台/离线时，后端可经 APNs / FCM / 个推 / 鸿蒙 等通道
 // 向这些设备下发「来消息提示」推送。
@@ -44,12 +55,19 @@ func (s *IMService) RegisterPushToken(ctx context.Context, userID string, token 
 	if token.Platform == "" {
 		return errors.New("platform 不能为空")
 	}
-	token.Enabled = true
+	if !validPushPlatforms[token.Platform] {
+		return ErrIMInvalidPushPlatform
+	}
+	// 注意：不要在此处覆盖 token.Enabled。Handler 已经根据前端请求的
+	// enabled 字段计算好（缺省 true），这里原样保留，否则关闭推送不会生效。
 	token.UpdatedAt = time.Now().Unix()
 
 	if s.TokenCache == nil || !s.TokenCache.Available() {
 		return ErrIMUnavailable
 	}
+	// 按用户串行化「先读后写」，避免并发注册/注销同一用户的设备令牌时互相覆盖。
+	unlock := s.lockTokenKey("push:" + opUserID)
+	defer unlock()
 	list, err := s.listPushTokens(ctx, opUserID)
 	if err != nil {
 		return err
@@ -80,6 +98,8 @@ func (s *IMService) UnregisterPushToken(ctx context.Context, userID, deviceToken
 	if s.TokenCache == nil || !s.TokenCache.Available() {
 		return ErrIMUnavailable
 	}
+	unlock := s.lockTokenKey("push:" + opUserID)
+	defer unlock()
 	list, err := s.listPushTokens(ctx, opUserID)
 	if err != nil {
 		return err

@@ -18,7 +18,12 @@ import {
   targetOf,
   toChatMessage,
   toConversation,
+  conversationIdOf,
+  imUserId,
 } from '@/utils/openim'
+import { playMessageSound, vibrateShort } from '@/utils/notify'
+import { useChatSettingsStore } from '@/stores/chatSettings'
+import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 
 const PAGE_SIZE = 20
 
@@ -49,7 +54,35 @@ export const useChatStore = defineStore('chat', () => {
   /** SDK 有时推单条，有时推数组；解析失败时不能让监听器抛错把后续消息吃掉 */
   function ingestIncoming(raw: MessageItem | MessageItem[] | null) {
     const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+    if (!list.length) return
     list.forEach(appendMessage)
+    // 收到消息后统一尝试提示音：一批消息只响一次
+    maybeNotifyIncoming(list)
+  }
+
+  /**
+   * 收到他人消息时播放提示音并震动。规则：
+   * - 自己发的消息不响；
+   * - 全局「消息免打扰」开启时不响；
+   * - 全局「声音」关闭时不响；
+   * - 会话级 recvMsgOpt 为 NotReceive(1)/NotNotify(2)（免打扰）时不响。
+   * 私聊与群聊一视同仁，满足「不管群聊还是私聊收到消息都要提示音」。
+   */
+  function maybeNotifyIncoming(list: MessageItem[]) {
+    const settings = useChatSettingsStore()
+    if (settings.noDisturb || !settings.sound) return
+    const audible = list.some((item) => {
+      if (item.sendID === imUserId.value) return false
+      const conv = conversations.value.find((c) => c.id === conversationIdOf(item))
+      const opt = conv?.recvMsgOpt
+      if (opt === MessageReceiveOptType.NotReceive || opt === MessageReceiveOptType.NotNotify) {
+        return false
+      }
+      return true
+    })
+    if (!audible) return
+    playMessageSound()
+    if (settings.vibration) vibrateShort()
   }
 
   function upsertConversations(items: ConversationItem[]) {
@@ -198,6 +231,15 @@ export const useChatStore = defineStore('chat', () => {
     return conv
   }
 
+  /** 局部更新本地会话（如置顶、会话级免打扰），命中才重排，保证 UI 即时反映 */
+  function patchConversation(conversationId: string, patch: Partial<Conversation>) {
+    const idx = conversations.value.findIndex((c) => c.id === conversationId)
+    if (idx < 0) return
+    const copy = [...conversations.value]
+    copy[idx] = { ...copy[idx], ...patch }
+    conversations.value = sortConversations(copy)
+  }
+
   /** 发送前先占位，SDK 返回后用真实消息替换，失败则标红 */
   async function sendWithPlaceholder(
     conversationId: string,
@@ -308,6 +350,7 @@ export const useChatStore = defineStore('chat', () => {
     markAllAsRead,
     subscribeRealtime,
     unsubscribeRealtime,
+    patchConversation,
     reset,
   }
 })

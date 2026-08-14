@@ -254,6 +254,8 @@ func (h *IMHandler) handleIMError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrIMInvalidRecvMsgOpt):
 		response.Fail(c, http.StatusBadRequest, "recvMsgOpt 非法，只能为 0/1/2")
+	case errors.Is(err, service.ErrIMInvalidPushPlatform):
+		response.Fail(c, http.StatusBadRequest, "platform 非法，只能为 ios/android/web/harmony")
 	case errors.Is(err, service.ErrIMInvalidPeerType):
 		response.Fail(c, http.StatusBadRequest, "peerType 必须为 c2c 或 group")
 	case errors.Is(err, service.ErrIMConversationNotFound):

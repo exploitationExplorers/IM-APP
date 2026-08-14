@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -122,8 +123,14 @@ func main() {
 	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
 	pushSvc := service.NewLoggingPushService()
 	openIMWebhookH := handler.NewOpenIMWebhookHandler(
-		imAccessRepo, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
+		imAccessRepo, imClient, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
 	)
+	// 安全提醒：配置了 webhook 密钥却没配来源 CIDR 白名单时，authorized 会整体拒绝所有回调，
+	// 等同于 webhook 功能静默失效——显式打 warning，避免排查时一脸懵。
+	if cfg.OpenIM.WebhookSecret != "" && len(cfg.OpenIM.WebhookAllowCIDRs) == 0 {
+		log.Println("WARN: OPENIM_WEBHOOK_SECRET 已配置，但未配置 OPENIM_WEBHOOK_ALLOW_CIDRS；" +
+			"OpenIM 回调来源 IP 不在白名单内将被全部拒绝（webhook 实际失效）")
+	}
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
 	favH := &handler.FavoriteHandler{Svc: favSvc}
 
@@ -140,7 +147,7 @@ func main() {
 		}
 	}
 	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
-	r.Use(corsMiddleware())
+	r.Use(corsMiddleware(cfg.CORSAllowOrigins))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -307,9 +314,27 @@ func main() {
 	_ = srv.Shutdown(ctx)
 }
 
-func corsMiddleware() gin.HandlerFunc {
+// corsMiddleware 跨域处理。配置了允许源白名单时，仅对白名单内的 Origin 回显
+// （并允许携带凭证）；未配置白名单时回退为通配 *（仅建议本地开发）。
+func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o = strings.TrimSpace(o); o != "" {
+			allowed[o] = struct{}{}
+		}
+	}
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		switch {
+		case origin != "" && len(allowed) > 0:
+			if _, ok := allowed[origin]; ok {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Credentials", "true")
+				c.Header("Vary", "Origin")
+			}
+		case len(allowed) == 0:
+			c.Header("Access-Control-Allow-Origin", "*")
+		}
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {

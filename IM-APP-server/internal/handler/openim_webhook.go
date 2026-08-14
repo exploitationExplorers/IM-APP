@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"context"
 	"crypto/subtle"
+	"log"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"im-app-server/internal/im"
 	"im-app-server/internal/repository"
@@ -40,6 +43,7 @@ type openIMWebhookResponse struct {
 
 type OpenIMWebhookHandler struct {
 	Access    *repository.IMAccessRepo
+	Client    *im.Client
 	Secret    string
 	AdminUser string
 	AllowNets []*net.IPNet
@@ -47,9 +51,9 @@ type OpenIMWebhookHandler struct {
 	Pusher service.PushService
 }
 
-func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, secret, adminUser string, allowCIDRs []string, pusher service.PushService) *OpenIMWebhookHandler {
+func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, client *im.Client, secret, adminUser string, allowCIDRs []string, pusher service.PushService) *OpenIMWebhookHandler {
 	return &OpenIMWebhookHandler{
-		Access: access, Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
+		Access: access, Client: client, Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
 		AllowNets: parseAllowNets(allowCIDRs), Pusher: pusher,
 	}
 }
@@ -149,22 +153,48 @@ func (h *OpenIMWebhookHandler) AfterMessage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, denyWebhook("audit storage failed"))
 		return
 	}
-	// 触发消息推送（来消息提示）。即便推送失败也不影响消息投递与审计。
+	// 触发消息推送（来消息提示）。推送解析（含群成员展开）异步进行，不阻塞 OpenIM 回调响应；
+	// 即便推送失败也不影响消息投递与审计。
 	if h.Pusher != nil {
-		recvs := make([]string, 0, 1)
-		if req.GroupID == "" && req.RecvID != "" && req.RecvID != h.AdminUser && req.RecvID != req.SendID {
-			recvs = append(recvs, req.RecvID)
-		}
-		_ = h.Pusher.Dispatch(c.Request.Context(), service.PushMessage{
-			ConversationID: req.ConversationID,
-			SenderOpenIMID: req.SendID,
-			RecvOpenIMIDs:  recvs,
-			GroupID:        req.GroupID,
-			ContentType:    req.ContentType,
-			SendTime:       req.SendTime,
-		})
+		go h.dispatchPush(req, senderID)
 	}
 	c.JSON(http.StatusOK, allowWebhook())
+}
+
+// dispatchPush 在独立 goroutine 中解析推送收件人并下发。
+//   - 单聊：收件人即 req.RecvID（排除发送方与管理员账号）。
+//   - 群聊：展开群成员列表，排除发送方与管理员账号——之前此处收件人一直为空，
+//     导致群消息无法经真实推送通道下发。
+func (h *OpenIMWebhookHandler) dispatchPush(req openIMWebhookMessage, senderID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	recvs := make([]string, 0, 1)
+	if req.GroupID == "" {
+		if req.RecvID != "" && req.RecvID != h.AdminUser && req.RecvID != req.SendID {
+			recvs = append(recvs, req.RecvID)
+		}
+	} else if h.Client != nil && h.Client.Available() {
+		members, err := h.Client.ListGroupMemberIDs(ctx, req.GroupID)
+		if err != nil {
+			log.Printf("openim webhook: list group members failed: %v", err)
+		} else {
+			for _, m := range members {
+				if m == req.SendID || m == h.AdminUser {
+					continue
+				}
+				recvs = append(recvs, m)
+			}
+		}
+	}
+	_ = h.Pusher.Dispatch(ctx, service.PushMessage{
+		ConversationID: req.ConversationID,
+		SenderOpenIMID: req.SendID,
+		RecvOpenIMIDs:  recvs,
+		GroupID:        req.GroupID,
+		ContentType:    req.ContentType,
+		SendTime:       req.SendTime,
+	})
 }
 
 func limitWebhookBody(c *gin.Context) {

@@ -1,9 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImSwitch from '@/components/ImSwitch.vue'
+import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
+import { useChatStore } from '@/stores/chat'
+import { resolveIMGroup } from '@/api/im'
+import {
+  setConversationPin,
+  setConversationRecvOpt,
+  resolveGroupConversationID,
+} from '@/utils/openim'
 
 const groupStore = useGroupStore()
+const chatStore = useChatStore()
 const groupId = ref('')
 const code = ref('group')
 
@@ -12,6 +22,11 @@ const memberList = computed(() => groupStore.members)
 const groupName = computed(() => groupDetail.value?.name || '群聊')
 const avatar = computed(() => groupDetail.value?.avatar || '/static/avatar-1.png')
 const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
+
+// 会话级设置：进入页面时从本地会话列表读取当前状态（OpenIM 已云同步）
+const convId = ref('')
+const recvOpt = ref<number>(MessageReceiveOptType.Normal)
+const pinned = ref(false)
 
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
@@ -24,10 +39,58 @@ onLoad(async (query) => {
 
   try {
     await groupStore.loadDetail(groupId.value)
+    await initConversationSettings()
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载群聊详情失败', icon: 'none' })
   }
 })
+
+/** 取该群的 OpenIM 会话 ID，并从本地会话列表读出当前置顶 / 免打扰状态 */
+async function initConversationSettings() {
+  try {
+    convId.value = await resolveGroupConversationID(groupId.value)
+    const conv = chatStore.conversations.find((c) => c.id === convId.value)
+    recvOpt.value = conv?.recvMsgOpt ?? MessageReceiveOptType.Normal
+    pinned.value = conv?.pinned ?? false
+  } catch {
+    // 拿不到会话 ID 时开关保持默认，不影响其它功能
+  }
+}
+
+async function onToggleRecv(v: boolean) {
+  if (!convId.value) {
+    uni.showToast({ title: '会话未就绪', icon: 'none' })
+    return
+  }
+  const opt = v ? MessageReceiveOptType.NotNotify : MessageReceiveOptType.Normal
+  try {
+    await setConversationRecvOpt(convId.value, opt)
+    recvOpt.value = opt
+    chatStore.patchConversation(convId.value, { recvMsgOpt: opt })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
+  }
+}
+
+async function onTogglePin(v: boolean) {
+  if (!convId.value) {
+    uni.showToast({ title: '会话未就绪', icon: 'none' })
+    return
+  }
+  try {
+    await setConversationPin(convId.value, v)
+    pinned.value = v
+    chatStore.patchConversation(convId.value, { pinned: v })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
+  }
+}
+
+function goToChat() {
+  uni.navigateTo({
+    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId.value)}&title=${encodeURIComponent(groupName.value)}&avatar=${encodeURIComponent(avatar.value)}`,
+  })
+}
 
 function goBack() {
   uni.navigateBack()
@@ -124,6 +187,11 @@ function copyGroupId() {
     </view>
 
     <view class="info-list">
+      <view class="chat-entry" @click="goToChat">
+        <text class="chat-entry-text">进入群聊</text>
+        <text class="arrow">›</text>
+      </view>
+
       <view class="info-row">
         <text class="label">群组名称</text>
         <text class="value">{{ groupName }}</text>
@@ -176,16 +244,12 @@ function copyGroupId() {
 
       <view class="switch-row">
         <text class="label">消息免打扰</text>
-        <view class="switch-track">
-          <view class="switch-knob" />
-        </view>
+        <ImSwitch :model-value="recvOpt === MessageReceiveOptType.NotNotify" @change="onToggleRecv" />
       </view>
 
       <view class="switch-row">
         <text class="label">置顶聊天</text>
-        <view class="switch-track">
-          <view class="switch-knob" />
-        </view>
+        <ImSwitch :model-value="pinned" @change="onTogglePin" />
       </view>
 
       <view class="action-row" @click="goToReport">
@@ -331,6 +395,22 @@ function copyGroupId() {
 .info-list {
   margin-top: 8rpx;
   background: #fff;
+}
+
+.chat-entry {
+  min-height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 30rpx;
+  background: #fff;
+  border-bottom: 1rpx solid #f0f0f0;
+}
+
+.chat-entry-text {
+  font-size: 30rpx;
+  color: #1d1d1d;
+  font-weight: 500;
 }
 
 .info-row {

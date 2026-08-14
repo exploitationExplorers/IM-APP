@@ -10,7 +10,7 @@ import IMSDK, {
 } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import { APP_CONFIG } from '@/config'
-import { fetchIMToken, type IMTokenResult } from '@/api/im'
+import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
@@ -145,7 +145,7 @@ function rememberLogin(imToken: IMTokenResult): string {
  * 登录成功只代表连上了，SDK 还要异步从服务端拉会话与消息。
  * 这期间查历史会拿到空列表，所以要等同步结束；超时兜底，避免同步事件丢失时卡死。
  */
-function waitForSync(timeoutMs = 8000): Promise<void> {
+export function waitForSync(timeoutMs = 8000): Promise<void> {
   return new Promise((resolve) => {
     let settled = false
     const finish = () => {
@@ -306,12 +306,47 @@ export async function getConversationList(offset = 0, count = 200): Promise<Conv
   return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
 }
 
-/** 按业务目标取会话，OpenIM 会在不存在时新建，无需先建群或建会话 */
+/**
+ * 按业务目标取会话，OpenIM 会在不存在时新建，无需先建群或建会话。
+ *
+ * 注意：SDK 登录后还会异步从服务端拉取会话/消息资源，这段窗口期内调用
+ * GetOneConversation 会瞬时返回 errCode=10004(ResourceLoadNotComplete)。
+ *
+ * 修复策略：
+ * 1. 先指数退避重试 4 次（300→600→1200→2400ms），自动跨过资源未就绪的窗口。
+ * 2. 若仍 10004，多半是内存登录缓存认为已连上但 SDK 实际已掉线/资源从未同步，
+ *    此时清空本地缓存并重新登录，再最后试一次。
+ * 3. 非 10004 的错误（如目标不可聊）立即上抛。
+ */
 export async function getOneConversation(
   sourceID: string,
   sessionType: number,
+  maxRetry = 4,
 ): Promise<ConversationItem> {
-  return imCall<ConversationItem>(IMMethods.GetOneConversation, { sourceID, sessionType })
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= maxRetry; attempt++) {
+    try {
+      return await imCall<ConversationItem>(IMMethods.GetOneConversation, { sourceID, sessionType })
+    } catch (e) {
+      lastErr = e
+      const errMsg = (e as Error)?.message || ''
+      const isResourceNotReady = errMsg.includes('10004')
+      // 其它错误直接抛
+      if (!isResourceNotReady) throw e
+      // 资源未就绪：先等 SDK 自动恢复
+      if (attempt < maxRetry) {
+        await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)))
+        continue
+      }
+      // 重试耗尽：清缓存、重新登录并等待资源同步完成后再最后试一次。
+      // 否则 doLogin 的缓存复用分支会跳过同步等待，仍可能立即 10004。
+      resetLoginCache()
+      await ensureIMLogin()
+      await waitForSync(5000)
+      return await imCall<ConversationItem>(IMMethods.GetOneConversation, { sourceID, sessionType })
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('getOneConversation 重试/重登后仍失败')
 }
 
 export async function getHistoryMessages(
@@ -484,6 +519,7 @@ export function toConversation(item: ConversationItem): Conversation {
     lastMessageAt: toISOTime(item.latestMsgSendTime),
     unreadCount: item.unreadCount || 0,
     pinned: item.isPinned,
+    recvMsgOpt: item.recvMsgOpt,
     peerUserId: item.userID || undefined,
     groupId: item.groupID || undefined,
   }
@@ -583,4 +619,31 @@ function summarize(latestMsg: string): string {
 function toISOTime(timestamp: number): string {
   if (!timestamp) return new Date().toISOString()
   return new Date(timestamp).toISOString()
+}
+
+// ---------------------------------------------------------------------------
+// 会话级设置（置顶 / 免打扰）：直接走 OpenIM SDK，随账号云同步，多端一致。
+// 注意：这些不经由业务后端 REST 接口，避免与 OpenIM 服务端的会话状态冲突。
+// ---------------------------------------------------------------------------
+
+/** 置顶 / 取消置顶某个会话 */
+export async function setConversationPin(conversationID: string, isPinned: boolean): Promise<void> {
+  await imCall(IMMethods.PinConversation, { conversationID, isPinned })
+}
+
+/**
+ * 设置会话的消息接收选项。
+ * opt 取值见 MessageReceiveOptType：0=正常提醒，1=不接收，2=接收但不提醒（免打扰）。
+ */
+export async function setConversationRecvOpt(conversationID: string, opt: number): Promise<void> {
+  await imCall(IMMethods.SetConversationRecvMessageOpt, { conversationID, opt })
+}
+
+/**
+ * 群聊的 OpenIM 会话 ID 是 `sg_` + 群 ID（超级群 groupType=2，本项目群均为该类型）。
+ * 用业务群 ID 换取 OpenIM 群 ID 后，可确定性拼出会话 ID，无需先建会话。
+ */
+export async function resolveGroupConversationID(businessGroupId: string): Promise<string> {
+  const target = await resolveIMGroup(businessGroupId)
+  return `sg_${target.imGroupId}`
 }

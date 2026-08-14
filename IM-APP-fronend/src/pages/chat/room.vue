@@ -6,7 +6,7 @@ import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
-import { businessUserIdFromIM, imUserId } from '@/utils/openim'
+import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import type { ChatMessage } from '@/types'
@@ -47,12 +47,20 @@ const messages = computed(() =>
   (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
 )
 // 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
-const myId = computed(() => imUserId.value)
+// 用 ref 快照而不是 computed：避免 H5/热更新下 computed 与全局 ref 不同步导致 mine 判断失效
+const myId = ref('')
 const myAvatar = computed(() => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl)
 const settingsStore = useChatSettingsStore()
 
+function isMine(message: ChatMessage): boolean {
+  if (myId.value && message.senderId === myId.value) return true
+  // 发送中的占位消息一定属于自己，避免 myId 还没拿到时跑到左边
+  if (message.status === 'sending') return true
+  return false
+}
+
 function avatarOf(message: ChatMessage): string {
-  if (message.senderId === myId.value) {
+  if (isMine(message)) {
     return message.senderAvatar || myAvatar.value
   }
   if (message.senderAvatar) return message.senderAvatar
@@ -78,6 +86,16 @@ onLoad(async (query) => {
     })
     conversationId.value = conv.id
     if (!query?.title) title.value = conv.title
+
+    // 确保当前 OpenIM 用户 ID 已就绪（某些 H5/热更新场景下 imUserId 可能未同步到本页）
+    if (!imUserId.value) {
+      await ensureIMLogin()
+    }
+    myId.value = imUserId.value
+    if (!myId.value) {
+      throw new Error('当前 IM 用户 ID 未初始化，请重新登录')
+    }
+
     await chatStore.loadMessages(conv.id)
     await nextTick()
     scrollToBottom()
@@ -139,7 +157,7 @@ async function onSend() {
   input.value = ''
   showPlusPanel.value = false
   try {
-    await chatStore.sendText(conversationId.value, text, myId.value)
+    await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
     await nextTick()
     scrollToBottom()
   } catch (e) {
@@ -354,7 +372,7 @@ async function sendVoiceDraft() {
       conversationId.value,
       voiceDraft.value.path,
       voiceDraft.value.duration,
-      myId.value,
+      imUserId.value || myId.value,
     )
     voiceDraft.value = null
     voiceMode.value = false
@@ -400,7 +418,7 @@ function pickImage() {
     success: async (res) => {
       showPlusPanel.value = false
       try {
-        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], myId.value)
+        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
         await nextTick()
         scrollToBottom()
       } catch (e) {
@@ -439,7 +457,7 @@ function pickImage() {
         <ChatBubble
           v-else
           :message="m"
-          :mine="m.senderId === myId"
+          :mine="isMine(m)"
           :avatar="avatarOf(m)"
           @avatar-click="onAvatarClick(m)"
         />
