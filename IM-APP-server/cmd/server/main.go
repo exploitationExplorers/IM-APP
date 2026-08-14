@@ -161,7 +161,8 @@ func main() {
 	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
 	r.Use(corsMiddleware(cfg.CORSAllowOrigins))
 
-	r.GET("/health", func(c *gin.Context) {
+	// health 限流：每 IP 每分钟最多 20 次，防止前端频繁轮询
+	r.GET("/health", middleware.RateLimitIP(redisClient, 20, time.Minute, "health"), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	if cfg.LegacyChatEnabled {
