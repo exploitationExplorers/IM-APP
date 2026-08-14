@@ -23,7 +23,7 @@ function onConfirm(e: Event) {
 
 <template>
   <view class="search-bar" @click="emit('click')">
-    <text class="search-icon">⌕</text>
+    <icon type="search" size="16" color="#8a8f9c" class="search-icon" />
     <input
       class="search-input"
       type="text"
@@ -41,26 +41,32 @@ function onConfirm(e: Event) {
 .search-bar {
   display: flex;
   align-items: center;
+  gap: 16rpx;
   background: #f3f4f7;
-  border-radius: 999rpx;
+  border-radius: 8rpx;
   height: 72rpx;
-  padding: 0 28rpx;
-  margin: 0 28rpx 8rpx;
+  padding: 0 32rpx;
+  margin: 16rpx 40rpx;
 }
 
 .search-icon {
-  color: #8a8f9c;
+  color: #626e8d;
   font-size: 30rpx;
-  margin-right: 12rpx;
+  line-height: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .search-input {
   flex: 1;
   font-size: 28rpx;
   color: #212121;
+  height: 72rpx;
+  line-height: 72rpx;
 }
 
 .search-placeholder {
-  color: #8a8f9c;
+  color: #626e8d;
 }
 </style>

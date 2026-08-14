@@ -1,12 +1,19 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
+import ImTabBar from '@/components/ImTabBar.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
-import type { Contact } from '@/types'
+import { useTabBar } from '@/composables/useTabBar'
+import type { Contact, GroupPreview } from '@/types'
 
 useAuthGuard()
+useTabBar()
+
 const contactStore = useContactStore()
+const { contacts, groups } = storeToRefs(contactStore)
 const keyword = ref('')
 const sortKey = ref<'recent' | 'name' | 'chat'>('recent')
 const showSort = ref(false)
@@ -19,17 +26,24 @@ const sortLabel = computed(() => {
 })
 
 const filteredContacts = computed(() => {
-  let list = [...contactStore.contacts]
+  let list = [...contacts.value]
   const k = keyword.value.trim()
-  if (k) list = list.filter((c) => c.nickname.includes(k))
+  if (k) {
+    list = list.filter((c) => listName(c).includes(k) || (c.publicId || '').includes(k))
+  }
   if (sortKey.value === 'name') {
-    list.sort((a, b) => a.nickname.localeCompare(b.nickname, 'zh-CN'))
+    list.sort((a, b) => listName(a).localeCompare(listName(b), 'zh-CN'))
   }
   return list
 })
 
-onMounted(() => {
-  contactStore.loadAll()
+function listName(c: Contact) {
+  return c.remark?.trim() || c.nickname
+}
+
+// tabBar 页会常驻，onMounted 只跑一次，切回来必须重新拉才能看到新加的好友
+onShow(() => {
+  contactStore.loadDirectory()
 })
 
 function go(url: string) {
@@ -39,7 +53,11 @@ function go(url: string) {
 }
 
 function openContact(c: Contact) {
-  contactStore.openChatWithContact(c.id, c.nickname, c.avatar)
+  go(`/pages/contacts/friend-detail?id=${c.id}`)
+}
+
+function openGroupChat(g: GroupPreview) {
+  contactStore.openChatWithGroup(g.id, g.name, g.avatar || '/static/icons/menu-group.svg')
 }
 
 function onAdd() {
@@ -63,10 +81,20 @@ function closeMenus() {
     <view class="header">
       <text class="title">通讯录</text>
       <view class="add-wrap" @click.stop="onAdd">
-        <text class="icon-btn">＋</text>
+        <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
         <view v-if="showAddMenu" class="popup-menu">
-          <view class="popup-item" @click="go('/pages/contacts/add-friend')">添加朋友</view>
-          <view class="popup-item" @click="go('/pages/group/create')">创建群聊</view>
+          <view class="popup-item" @click="go('/pages/contacts/add-friend')">
+            <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
+            <text>添加朋友</text>
+          </view>
+          <view class="popup-item" @click="go('/pages/contacts/scan')">
+            <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
+            <text>添加群聊</text>
+          </view>
+          <view class="popup-item" @click="go('/pages/group/create')">
+            <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
+            <text>创建群聊</text>
+          </view>
         </view>
       </view>
     </view>
@@ -76,35 +104,40 @@ function closeMenus() {
     <scroll-view scroll-y class="body">
       <view class="menu-list">
         <view class="menu-item" @click="go('/pages/contacts/new-friends')">
-          <view class="menu-icon orange">
-            <text class="menu-icon-text">＋</text>
-          </view>
+          <image class="menu-icon" src="/static/icons/menu-new-friend.svg" mode="aspectFit" />
           <text class="menu-text">新的朋友</text>
-          <text class="arrow">›</text>
+          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
         </view>
         <view class="menu-item" @click="go('/pages/contacts/tags')">
-          <view class="menu-icon pink">
-            <text class="menu-icon-text">🏷</text>
-          </view>
+          <image class="menu-icon" src="/static/icons/menu-tag.svg" mode="aspectFit" />
           <text class="menu-text">标签</text>
-          <text class="arrow">›</text>
+          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
         </view>
         <view class="menu-item" @click="go('/pages/contacts/groups')">
-          <view class="menu-icon blue">
-            <text class="menu-icon-text">👥</text>
-          </view>
+          <image class="menu-icon" src="/static/icons/menu-group.svg" mode="aspectFit" />
           <text class="menu-text">群聊天</text>
-          <text class="arrow">›</text>
+          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
         </view>
       </view>
 
+      <view v-if="groups.length" class="group-band">
+        <view
+          v-for="g in groups.slice(0, 5)"
+          :key="g.id"
+          class="group-card"
+          @click="openGroupChat(g)"
+        >
+          <image class="group-avatar" :src="g.avatar || '/static/icons/menu-group.svg'" mode="aspectFill" />
+          <text class="group-name">{{ g.name }}</text>
+        </view>
+      </view>
       <view class="section-divider" />
 
       <view class="section-head">
         <text class="section-count">联络人 ({{ filteredContacts.length }})</text>
         <view class="sort-wrap" @click.stop="showSort = !showSort">
           <text class="sort">{{ sortLabel }}</text>
-          <text class="sort-caret">▾</text>
+          <image class="sort-caret" src="/static/icons/icon-caret.svg" mode="aspectFit" />
           <view v-if="showSort" class="popup-menu sort-menu">
             <view
               class="popup-item"
@@ -132,9 +165,11 @@ function closeMenus() {
         @click="openContact(c)"
       >
         <image class="avatar" :src="c.avatar" mode="aspectFill" />
-        <text class="name">{{ c.nickname }}</text>
+        <text class="name">{{ listName(c) }}</text>
       </view>
     </scroll-view>
+
+    <ImTabBar current="contacts" />
   </view>
 </template>
 
@@ -144,60 +179,76 @@ function closeMenus() {
   background: #fff;
   display: flex;
   flex-direction: column;
+  padding-bottom: calc(144rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24rpx 28rpx 16rpx;
+  height: 96rpx;
+  padding: 0 40rpx;
   background: #fff;
+  box-sizing: border-box;
 }
 
 .title {
-  font-size: 44rpx;
+  font-size: 48rpx;
   font-weight: 700;
   color: #212121;
+  line-height: 64rpx;
 }
 
 .add-wrap {
   position: relative;
-}
-
-.icon-btn {
-  width: 64rpx;
-  height: 64rpx;
+  width: 48rpx;
+  height: 48rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 44rpx;
-  color: #212121;
-  line-height: 1;
+}
+
+.icon-plus {
+  width: 48rpx;
+  height: 48rpx;
 }
 
 .popup-menu {
   position: absolute;
-  top: 72rpx;
+  top: 64rpx;
   right: 0;
-  min-width: 240rpx;
+  min-width: 288rpx;
+  padding: 16rpx;
   background: #fff;
-  border-radius: 12rpx;
-  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.12);
+  border-radius: 16rpx;
+  box-shadow: 0 20rpx 30rpx -6rpx rgba(0, 0, 0, 0.1), 0 8rpx 12rpx -8rpx rgba(0, 0, 0, 0.1);
   z-index: 30;
-  overflow: hidden;
 }
 
 .sort-menu {
   right: 0;
   left: auto;
   top: 48rpx;
+  min-width: 320rpx;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.1);
 }
 
 .popup-item {
-  padding: 28rpx 32rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 16rpx 32rpx;
   font-size: 28rpx;
   color: #212121;
   white-space: nowrap;
+  border-radius: 8rpx;
+}
+
+.popup-icon {
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
 
 .popup-item.active {
@@ -216,56 +267,89 @@ function closeMenus() {
 .menu-item {
   display: flex;
   align-items: center;
-  padding: 24rpx 28rpx;
+  gap: 16rpx;
+  height: 96rpx;
+  padding: 0 40rpx;
+  box-sizing: border-box;
 }
 
 .menu-icon {
-  width: 80rpx;
-  height: 80rpx;
-  border-radius: 50%;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 24rpx;
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
-
-.menu-icon-text {
-  font-size: 32rpx;
-  line-height: 1;
-}
-
-.orange { background: #ff8a3d; }
-.pink { background: #ff6b9d; }
-.blue { background: #3b7bff; }
 
 .menu-text {
   flex: 1;
-  font-size: 30rpx;
+  font-size: 34rpx;
   color: #212121;
+  line-height: 48rpx;
 }
 
 .arrow {
-  color: #c8ccd6;
-  font-size: 36rpx;
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
+}
+
+.group-band {
+  background: #f3f4f7;
+  padding: 16rpx 40rpx;
+  margin-bottom: 16rpx;
+}
+
+.group-card {
+  display: flex;
+  align-items: center;
+  gap: 32rpx;
+  padding: 16rpx;
+  background: #fff;
+  border-radius: 8rpx;
+  box-sizing: border-box;
+  margin-bottom: 16rpx;
+}
+
+.group-card:last-child {
+  margin-bottom: 0;
+}
+
+.group-avatar {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: #f3f4f7;
+  flex-shrink: 0;
+}
+
+.group-name {
+  flex: 1;
+  font-size: 34rpx;
+  color: #212121;
+  line-height: 48rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-divider {
-  height: 16rpx;
-  background: #f5f6f8;
+  height: 48rpx;
+  margin: 0 0 16rpx;
+  background: #f3f4f7;
 }
 
 .section-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20rpx 28rpx;
+  height: 48rpx;
+  margin: 0 40rpx 16rpx;
 }
 
 .section-count {
   color: #212121;
   font-size: 28rpx;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 48rpx;
 }
 
 .sort-wrap {
@@ -275,31 +359,40 @@ function closeMenus() {
   gap: 4rpx;
 }
 
-.sort,
-.sort-caret {
-  color: #8a8f9c;
+.sort {
+  color: #626e8d;
   font-size: 24rpx;
+  line-height: 40rpx;
+}
+
+.sort-caret {
+  width: 16rpx;
+  height: 16rpx;
 }
 
 .contact-row {
   display: flex;
   align-items: center;
-  padding: 20rpx 28rpx;
+  gap: 32rpx;
+  height: 128rpx;
+  padding: 0 40rpx;
   background: #fff;
+  box-sizing: border-box;
 }
 
 .avatar {
-  width: 80rpx;
-  height: 80rpx;
+  width: 96rpx;
+  height: 96rpx;
   border-radius: 50%;
-  margin-right: 20rpx;
-  background: #eee;
+  background: #f3f4f7;
+  flex-shrink: 0;
 }
 
 .name {
   flex: 1;
-  font-size: 28rpx;
+  font-size: 34rpx;
   color: #212121;
+  line-height: 48rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

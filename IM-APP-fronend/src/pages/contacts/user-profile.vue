@@ -16,7 +16,7 @@ onLoad((query) => {
 })
 
 onMounted(async () => {
-  await contactStore.loadAll()
+  await contactStore.loadDirectory()
   if (!userId.value) return
   loading.value = true
   try {
@@ -33,8 +33,11 @@ const isFriend = () => contactStore.contacts.some((c) => c.id === userId.value)
 async function onAddFriend() {
   if (!user.value) return
   try {
-    await contactStore.addFriend(user.value.id, message.value)
-    uni.showToast({ title: '已发送好友申请', icon: 'success' })
+    const res = await contactStore.addFriend(user.value.id, message.value)
+    uni.showToast({
+      title: res.status === 'accepted' ? '已添加好友' : '已发送好友申请',
+      icon: 'success',
+    })
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }

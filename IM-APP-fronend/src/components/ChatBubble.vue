@@ -9,11 +9,54 @@ const props = defineProps<{
   avatar: string
 }>()
 
+const emit = defineEmits<{
+  avatarClick: []
+}>()
+
+function onAvatarClick() {
+  if (props.mine) return
+  emit('avatarClick')
+}
+
 const parts = computed(() =>
   props.message.type === 'text' ? splitTextWithLinks(props.message.content) : [],
 )
 
+const voiceMeta = computed(() => {
+  if (props.message.type !== 'voice') return null
+  try {
+    const parsed = JSON.parse(props.message.content) as { path?: string; duration?: number }
+    return {
+      path: parsed.path || '',
+      duration: Number(parsed.duration || 0),
+    }
+  } catch {
+    return { path: '', duration: 0 }
+  }
+})
+
 const timeText = computed(() => formatClock(props.message.createdAt))
+
+function formatVoiceDuration(seconds: number) {
+  const total = Math.max(0, Math.ceil(seconds))
+  const min = String(Math.floor(total / 60)).padStart(2, '0')
+  const sec = String(total % 60).padStart(2, '0')
+  return `${min}:${sec}`
+}
+
+function playVoice() {
+  if (!voiceMeta.value?.path) return
+  const inner = (uni as any).createInnerAudioContext?.()
+  if (inner) {
+    inner.src = voiceMeta.value.path
+    inner.play()
+    return
+  }
+  if (typeof Audio !== 'undefined') {
+    const audio = new Audio(voiceMeta.value.path)
+    audio.play().catch(() => undefined)
+  }
+}
 
 function openLink(url: string) {
   const href = url.startsWith('http') ? url : `https://${url}`
@@ -31,10 +74,30 @@ function openLink(url: string) {
 
 <template>
   <view class="row" :class="{ mine }">
-    <image v-if="!mine" class="avatar" :src="avatar" mode="aspectFill" />
+    <image
+      v-if="!mine"
+      class="avatar"
+      :src="avatar"
+      mode="aspectFill"
+      @click="onAvatarClick"
+    />
     <view class="content-wrap">
       <view v-if="message.type === 'image'" class="bubble image-bubble">
         <image class="msg-image" :src="message.content" mode="widthFix" />
+      </view>
+      <view
+        v-else-if="message.type === 'voice'"
+        class="bubble voice-bubble"
+        :class="mine ? 'bubble-mine voice-mine' : 'bubble-other voice-other'"
+        @click="playVoice"
+      >
+        <view class="voice-inner">
+          <view class="voice-play">▶</view>
+          <view class="voice-wave">
+            <text>▁▂▃▄▅▆▇</text>
+          </view>
+          <text class="voice-duration">{{ formatVoiceDuration(voiceMeta?.duration || 0) }}</text>
+        </view>
       </view>
       <view v-else class="bubble" :class="mine ? 'bubble-mine' : 'bubble-other'">
         <text
@@ -111,6 +174,50 @@ function openLink(url: string) {
   width: 420rpx;
   border-radius: 12rpx;
   display: block;
+}
+
+.voice-bubble {
+  min-width: 260rpx;
+  padding: 12rpx 18rpx;
+}
+
+.voice-inner {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.voice-play {
+  font-size: 24rpx;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.voice-wave {
+  flex: 1;
+  min-width: 110rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20rpx;
+  letter-spacing: 2rpx;
+  opacity: 0.9;
+}
+
+.voice-duration {
+  font-size: 22rpx;
+  min-width: 70rpx;
+  text-align: right;
+}
+
+.voice-other {
+  background: #d9edf9;
+  color: #1f2d3d;
+}
+
+.voice-mine {
+  background: #bfe3ff;
+  color: #1f2d3d;
 }
 
 .link {

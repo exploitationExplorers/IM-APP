@@ -10,7 +10,9 @@ alwaysApply: false
 
 uni-app 3.0 + Vue 3.4 + TypeScript（strict）+ Vite 5 + Pinia 2 + Sass。
 
-**当前没有**：UI 组件库、UnoCSS、ESLint / Prettier、Pinia 持久化插件、OpenIM SDK。
+聊天能力由 OpenIM SDK 提供：`openim-uniapp-polyfill`（app 端走原生插件，web / 小程序端转发到 `@openim/client-sdk`）。
+
+**当前没有**：UI 组件库、UnoCSS、ESLint / Prettier、Pinia 持久化插件、本地 Mock。
 不要为了实现某个需求顺手引入以上依赖，需要时先确认。
 
 | 用途 | 命令 |
@@ -22,25 +24,24 @@ uni-app 3.0 + Vue 3.4 + TypeScript（strict）+ Vite 5 + Pinia 2 + Sass。
 
 ```
 pages / components  →  stores  →  api  →  utils/request  →  Go API
-                                    └→  mock/handlers    →  mock/store
 ```
 
 - **禁止**在 `pages/` 或 `components/` 内直接调用 `uni.request`，一律经 `src/api/*`。
 - 页面只做编排与展示；跨页面共享的状态放 store，单页复杂逻辑抽 `composables/useXxx.ts`。
-- `api/` 不写业务判断，只做请求与 Mock 分支；`stores/` 不直接拼 URL。
+- `api/` 不写业务判断，只做请求封装；`stores/` 不直接拼 URL。
+- **禁止**再引入 `src/mock/` 或 `VITE_USE_MOCK` 双分支。
 
 ## 目录约定
 
 ```
 src/
-  api/          # 按业务域拆分，每个函数 Mock/Real 双分支
+  api/          # 按业务域拆分，直连 Go API
   stores/       # Pinia Setup Store：user / chat / contact / group
   composables/  # 可复用逻辑，useXxx.ts
   components/   # 通用组件，业务组件用 Im 前缀
   pages/        # 路由页面，与 pages.json 一一对应
   types/        # 按域拆分，禁止一个大 index 承载全部类型
-  utils/        # request / websocket / openim / format
-  mock/         # seed（静态数据）+ store（内存态）+ handlers（行为）
+  utils/        # request / openim / format / device
   styles/       # common.scss / auth.scss
   config.ts     # 环境变量统一出口，禁止组件内读 import.meta.env
 ```
@@ -61,37 +62,35 @@ src/
 - 只用 Setup Store：`defineStore('name', () => { ... return {...} })`。
 - 页面解构状态必须 `storeToRefs()`；action 可直接解构。
 - store 内不做页面跳转以外的 UI 操作（`showToast` 留给页面）。
-- 只有 token 持久化（`utils/request.ts` 写 `im_token`）；其余状态内存态，靠 `bootstrap()` / `onShow` 重新拉取。
+- Token 持久化：`im_token`（accessToken）+ `im_refresh_token`；其余状态内存态，靠 `bootstrap()` / `onShow` 重新拉取。
 
 ## 请求与鉴权
 
 - 统一走 [request.ts](../../IM-APP-fronend/src/utils/request.ts)。`request<T>()` **已解包 `data`**，直接拿业务对象；失败以 `throw Error(message)` 表达，调用方用 `try/catch`。
-- Token：`uni.setStorageSync('im_token')`，请求头 `Authorization: Bearer`；401 由 `request` 统一清 token 并 `reLaunch` 登录页，业务代码不要重复处理 401。
+- Token：`Authorization: Bearer <accessToken>`；401 由 `request` 统一清 token 并 `reLaunch` 登录页，业务代码不要重复处理 401。
 - 登录 / 注册 / 短信类接口显式传 `auth: false`。
+- 认证相关请求需带 `deviceId`（`utils/device.ts` 的 `getDeviceId()`）。
 - 需登录的页面首行调用 `useAuthGuard()`。
 
 新增接口按此模式写：
 
 ```typescript
 export async function fetchProfile(): Promise<UserInfo> {
-  if (APP_CONFIG.useMock) return mockFetchProfile()
   return request<UserInfo>({ url: '/me', method: 'GET' })
 }
 ```
 
-## Mock 模式
+## 聊天通道（OpenIM）
 
-- 开关：`.env` 的 `VITE_USE_MOCK`，只有显式 `'true'` 才走 Mock；代码里统一读 `APP_CONFIG.useMock`。
-- Mock 是纯内存（`mock/store.ts`），刷新即重置；改数据用 `mutateMockState()`。
-- **Mock 行为必须与 Go 后端一致**：字段名、校验顺序、错误文案、失败分支都要对齐 api-contract，不允许 Mock 通过而真实接口失败。
-- 实时消息：Mock 用 `mock/ws.ts` 的 `mockWs`，真实用 `utils/websocket.ts` 的 `wsClient`；两条路径都要实现，不能只做一边。
+自研 WebSocket 通道（`utils/websocket.ts`、`api/chat.ts`）已删除，聊天一律走 OpenIM SDK。
 
-## WebSocket
-
-- 只用 `wsClient` 单例（心跳 25s、断线 3s 重连），禁止页面内 `uni.connectSocket`。
-- `wsClient.on()` 返回取消函数，**必须**在 `onUnmounted` / `onUnload` 调用，否则重复订阅导致消息重复渲染。
-- 消息协议固定 `{ event: string, data: unknown }`。
-- `utils/openim.ts` 是 Phase 4 占位，未接入 SDK 前不要在业务代码里依赖它。
+- SDK 只在 [openim.ts](../../IM-APP-fronend/src/utils/openim.ts) 里调用，业务代码不直接 `import` SDK。
+- 连接地址由 `POST /im/token` 下发（`apiAddr` / `wsAddr`），**禁止**在前端硬编码或写进 `.env`。
+- 进聊天前调 `ensureIMLogin()`；token 约 24h，过期会自动重新取。
+- 消息、会话、未读、已读、历史全部来自 SDK；业务后端只提供 token 与业务 ID → OpenIM ID 的映射（`/im/peers/:id`、`/im/groups/:id`）。
+- 群聊 `sessionType=3` 必须填 `groupID`，填 `recvID` 会被 OpenIM 拒绝。
+- 事件订阅集中在 `stores/chat` 的 `subscribeRealtime()`；`onIMEvent()` 返回取消函数，重复订阅前必须先取消。
+- 历史消息只能由 SDK 拉，后端 REST 没有 `get_history_msgs`。
 
 ## 大列表与 9999+ 群发
 
@@ -122,7 +121,7 @@ export async function fetchProfile(): Promise<UserInfo> {
 | 模块 | 页面 | store | api |
 |---|---|---|---|
 | 认证 | `pages/auth/` | `stores/user` | `api/auth` |
-| 会话 / 聊天 | `pages/chat/` | `stores/chat` | `api/chat` |
+| 会话 / 聊天 | `pages/chat/` | `stores/chat` | `api/im` + `utils/openim`（SDK） |
 | 通讯录 / 好友 | `pages/contacts/` | `stores/contact` | `api/contact` |
 | 群组 | `pages/group/` | `stores/group` | `api/group` |
 | 我的 / 资料 | `pages/mine/` | `stores/user` | `api/user` |

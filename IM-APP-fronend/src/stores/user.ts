@@ -1,88 +1,124 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { UserInfo } from '@/types'
-import { loginByPassword, loginBySms, registerBySms, fetchProfile } from '@/api/auth'
+import type { AuthResult, UpdateProfileInput, UserInfo } from '@/types'
+import {
+  loginByPassword,
+  loginBySms,
+  registerBySms,
+  fetchProfile,
+  logoutCurrentDevice,
+  refreshAuthToken,
+} from '@/api/auth'
 import { updateProfile } from '@/api/user'
-import { clearToken, getToken, setToken } from '@/utils/request'
-import { wsClient } from '@/utils/websocket'
-import { APP_CONFIG } from '@/config'
-import { mutateMockState } from '@/mock/store'
+import {
+  clearToken,
+  getRefreshToken,
+  getToken,
+  setRefreshToken,
+  setToken,
+} from '@/utils/request'
+import { initOpenIM, logoutOpenIM } from '@/utils/openim'
+import { applyLoginPhone, clearLoginPhone, saveLoginPhone } from '@/utils/login-phone'
+import { useChatStore } from '@/stores/chat'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(getToken())
+  const refreshToken = ref(getRefreshToken())
   const profile = ref<UserInfo | null>(null)
 
   const isLoggedIn = computed(() => !!token.value)
 
-  function afterLogin(res: { token: string; user: UserInfo }) {
-    token.value = res.token
-    profile.value = res.user
-    setToken(res.token)
-    if (APP_CONFIG.useMock) {
-      mutateMockState((s) => {
-        s.currentUserId = res.user.id
-      })
-    } else {
-      wsClient.connect()
-    }
+  function afterLogin(res: AuthResult, phone: string, countryCode?: string) {
+    saveLoginPhone(countryCode || '+86', phone)
+    token.value = res.accessToken
+    refreshToken.value = res.refreshToken
+    profile.value = applyLoginPhone(res.user)
+    setToken(res.accessToken)
+    setRefreshToken(res.refreshToken)
+    // IM 登录失败不应挡住业务登录，进聊天页时还会再试一次
+    startIMSession()
   }
 
-  async function loginPassword(phone: string, password: string) {
-    const res = await loginByPassword(phone, password)
-    afterLogin(res)
+  async function loginPassword(phone: string, password: string, countryCode?: string) {
+    const res = await loginByPassword(phone, password, countryCode)
+    afterLogin(res, phone, countryCode)
   }
 
-  async function loginSms(phone: string, code: string) {
-    const res = await loginBySms(phone, code)
-    afterLogin(res)
+  async function loginSms(phone: string, code: string, countryCode?: string) {
+    const res = await loginBySms(phone, code, countryCode)
+    afterLogin(res, phone, countryCode)
   }
 
-  async function register(phone: string, code: string, countryCode?: string) {
-    const res = await registerBySms(phone, code, countryCode)
-    afterLogin(res)
+  async function register(
+    phone: string,
+    code: string,
+    password: string,
+    countryCode?: string,
+  ) {
+    const res = await registerBySms(phone, code, password, countryCode)
+    afterLogin(res, phone, countryCode)
   }
 
   async function loadProfile() {
     if (!token.value) return
-    profile.value = await fetchProfile()
+    profile.value = applyLoginPhone(await fetchProfile())
   }
 
-  async function saveProfile(input: { nickname?: string; avatar?: string; bio?: string }) {
-    profile.value = await updateProfile(input)
+  async function saveProfile(input: UpdateProfileInput) {
+    profile.value = applyLoginPhone(await updateProfile(input))
   }
 
-  function logout() {
+  async function tryRefreshToken() {
+    const res = await refreshAuthToken()
+    token.value = res.accessToken
+    refreshToken.value = res.refreshToken
+    setToken(res.accessToken)
+    setRefreshToken(res.refreshToken)
+  }
+
+  async function logout() {
+    try {
+      if (refreshToken.value) {
+        await logoutCurrentDevice()
+      }
+    } catch {
+      // 本地清理优先，忽略服务端撤销失败
+    }
     token.value = ''
+    refreshToken.value = ''
     profile.value = null
+    clearLoginPhone()
     clearToken()
-    wsClient.disconnect()
+    useChatStore().reset()
+    await logoutOpenIM().catch(() => undefined)
     uni.reLaunch({ url: '/pages/auth/sign-in' })
   }
 
+  /** 登录 SDK 后立刻挂上收消息监听，不能等到用户点开会话列表才订阅 */
+  function startIMSession() {
+    initOpenIM()
+      .then(() => useChatStore().subscribeRealtime())
+      .catch(() => undefined)
+  }
+
   function bootstrap() {
-    if (!APP_CONFIG.useMock && token.value.startsWith('mock_token_')) {
+    if (token.value.startsWith('mock_token_')) {
       token.value = ''
+      refreshToken.value = ''
       profile.value = null
+      clearLoginPhone()
       clearToken()
       return
     }
     if (token.value) {
-      if (APP_CONFIG.useMock) {
-        const phone = token.value.replace('mock_token_', '')
-        mutateMockState((s) => {
-          const user = s.users.find((u) => u.phone === phone)
-          if (user) s.currentUserId = user.id
-        })
-        loadProfile().catch(() => undefined)
-      } else {
-        wsClient.connect()
-        loadProfile().catch(() => undefined)
-      }
+      startIMSession()
+      loadProfile().catch(() => undefined)
     }
   }
 
   return {
     token,
+    refreshToken,
     profile,
     isLoggedIn,
     loginPassword,
@@ -90,6 +126,7 @@ export const useUserStore = defineStore('user', () => {
     register,
     loadProfile,
     saveProfile,
+    tryRefreshToken,
     logout,
     bootstrap,
   }

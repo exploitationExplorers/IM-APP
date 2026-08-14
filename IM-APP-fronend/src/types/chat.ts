@@ -6,6 +6,8 @@ export interface ChatMessage {
   id: string
   conversationId: string
   senderId: string
+  /** OpenIM 消息上的发送者头像，群聊按人展示 */
+  senderAvatar?: string
   type: MessageType
   content: string
   createdAt: string
@@ -24,6 +26,13 @@ export interface Conversation {
   /** 如 [有新公告] */
   highlightTag?: string
   pinned?: boolean
-  /** 私聊对方用户 ID */
+  /**
+   * 会话级消息接收选项，来自 OpenIM ConversationItem.recvMsgOpt。
+   * 0=正常提醒 1=不接收 2=接收但不提醒（免打扰）。前端用于决定是否播放提示音。
+   */
+  recvMsgOpt?: number
+  /** 私聊对方的 OpenIM 用户 ID */
   peerUserId?: string
+  /** 群聊的 OpenIM 群 ID */
+  groupId?: string
 }

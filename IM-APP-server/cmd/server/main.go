@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,7 +39,7 @@ func main() {
 	}
 	log.Println("migrations applied")
 
-	{
+	if cfg.SeedDemo {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := db.SeedDemo(ctx, pool); err != nil {
 			cancel()
@@ -47,7 +48,10 @@ func main() {
 		cancel()
 	}
 
-	hub := ws.NewHub(cfg.JWTSecret)
+	var hub *ws.Hub
+	if cfg.LegacyChatEnabled {
+		hub = ws.NewHub(cfg.JWTSecret)
+	}
 
 	redisClient, err := infra.NewRedis(cfg.RedisURL)
 	if err != nil {
@@ -71,32 +75,100 @@ func main() {
 
 	userRepo := &repository.UserRepo{DB: pool}
 	contactRepo := &repository.ContactRepo{DB: pool}
+	contactTagRepo := &repository.ContactTagRepo{DB: pool}
+	privacyRepo := &repository.PrivacyRepo{DB: pool}
 	chatRepo := &repository.ChatRepo{DB: pool}
+	fileRepo := &repository.FileRepo{DB: pool}
+	imOutboxRepo := &repository.IMSyncOutboxRepo{DB: pool}
+	imAccessRepo := &repository.IMAccessRepo{DB: pool}
 
-	groupRepo := &repository.GroupRepo{DB: pool}
+	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
 
-	userSvc := &service.UserService{Users: userRepo}
-	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo}
-	chatSvc := &service.ChatService{Chat: chatRepo, Hub: hub}
-	groupSvc := &service.GroupService{Groups: groupRepo}
+	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo}
+	imSvc := &service.IMService{
+		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Config: cfg.OpenIM, TokenCache: redisClient,
+	}
+	imAdminSvc := &service.IMAdminService{
+		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Outbox: imOutboxRepo,
+	}
+	contactSvc := &service.ContactService{Contacts: contactRepo, Groups: groupRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo}
+	chatSvc := &service.ChatService{Chat: chatRepo}
+	if cfg.LegacyChatEnabled {
+		chatSvc.Hub = hub
+	}
+	favRepo := &repository.FavoriteRepo{DB: pool}
+	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
+	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
 
-	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient}
+	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
+	var smsGateway service.SMSGateway = service.DevSMSGateway{}
+	if cfg.SMS.SignName != "" && cfg.SMS.TemplateCode != "" {
+		smsGateway = &service.AliyunSMSGateway{
+			AccessKeyID:     cfg.SMS.AccessKeyID,
+			AccessKeySecret: cfg.SMS.AccessKeySecret,
+			SignName:        cfg.SMS.SignName,
+			TemplateCode:    cfg.SMS.TemplateCode,
+			RegionID:        cfg.SMS.RegionID,
+		}
+	}
+	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient, SMS: smsGateway}
 	userH := &handler.UserHandler{Svc: userSvc}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
-	fileH := &handler.FileHandler{MinIO: minioClient}
-	imH := &handler.IMHandler{Client: imClient}
+	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
+	imH := &handler.IMHandler{Service: imSvc}
+	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
+	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
+	pushSvc := service.NewLoggingPushService()
+	openIMWebhookH := handler.NewOpenIMWebhookHandler(
+		imAccessRepo, imClient, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
+	)
+	// 安全提醒：配置了 webhook 密钥却没配来源 CIDR 白名单时，authorized 会整体拒绝所有回调，
+	// 等同于 webhook 功能静默失效——显式打 warning，避免排查时一脸懵。
+	if cfg.OpenIM.WebhookSecret != "" && len(cfg.OpenIM.WebhookAllowCIDRs) == 0 {
+		log.Println("WARN: OPENIM_WEBHOOK_SECRET 已配置，但未配置 OPENIM_WEBHOOK_ALLOW_CIDRS；" +
+			"OpenIM 回调来源 IP 不在白名单内将被全部拒绝（webhook 实际失效）")
+	}
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
+	favH := &handler.FavoriteHandler{Svc: favSvc}
 
-	r := gin.Default()
-	r.Use(corsMiddleware())
+	r := gin.New()
+	loggerConfig := gin.LoggerConfig{}
+	if cfg.OpenIM.WebhookSecret != "" {
+		base := "/internal/openim/webhooks/" + cfg.OpenIM.WebhookSecret
+		loggerConfig.SkipPaths = []string{
+			base + "/callbackBeforeSendSingleMsgCommand",
+			base + "/callbackBeforeSendGroupMsgCommand",
+			base + "/callbackAfterSendSingleMsgCommand",
+			base + "/callbackAfterSendGroupMsgCommand",
+			base + "/callbackBeforeAfterMsgCommand",
+		}
+	}
+	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
+	r.Use(corsMiddleware(cfg.CORSAllowOrigins))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.GET("/ws", hub.HandleWS)
+	if cfg.LegacyChatEnabled {
+		r.GET("/ws", hub.HandleWS)
+	}
+	r.POST("/internal/openim/webhooks/:secret/callbackBeforeSendSingleMsgCommand", openIMWebhookH.BeforeSingle)
+	r.POST("/internal/openim/webhooks/:secret/callbackBeforeSendGroupMsgCommand", openIMWebhookH.BeforeGroup)
+	r.POST("/internal/openim/webhooks/:secret/callbackAfterSendSingleMsgCommand", openIMWebhookH.AfterMessage)
+	r.POST("/internal/openim/webhooks/:secret/callbackAfterSendGroupMsgCommand", openIMWebhookH.AfterMessage)
+	r.POST("/internal/openim/webhooks/:secret/callbackBeforeAfterMsgCommand", openIMWebhookH.AfterMessage)
+	internalIM := r.Group("/internal/im")
+	internalIM.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+	{
+		internalIM.POST("/messages", imInternalH.SendMessage)
+		internalIM.GET("/health", imInternalH.Health)
+		internalIM.POST("/reconcile", imInternalH.Reconcile)
+		internalIM.GET("/outbox", imInternalH.ListOutbox)
+		internalIM.POST("/outbox/:id/replay", imInternalH.ReplayOutbox)
+	}
 
 	api := r.Group("/api/v1")
 	{
@@ -104,35 +176,70 @@ func main() {
 		api.POST("/auth/login", authH.Login)
 		api.POST("/auth/login/sms", authH.LoginSMS)
 		api.POST("/auth/register", authH.Register)
+		api.POST("/auth/token/refresh", authH.RefreshToken)
 		api.POST("/auth/password/reset", authH.ResetPassword)
+		api.POST("/auth/logout", authH.Logout)
 
 		auth := api.Group("")
 		auth.Use(middleware.AuthRequired(cfg.JWTSecret))
 		{
+			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
-			auth.PUT("/me", userH.UpdateProfile)
+			auth.PATCH("/me", userH.UpdateProfile)
+			auth.POST("/me/password/verify", userH.VerifyPassword)
+			auth.PUT("/me/password", userH.ChangePassword)
+			auth.GET("/me/privacy-settings", userH.GetPrivacySettings)
+			auth.PUT("/me/privacy-settings", userH.UpdatePrivacySettings)
 			auth.GET("/me/qrcode", userH.Qrcode)
+			auth.POST("/users/qrcode/resolve", userH.ResolveUserQRCode)
 			auth.GET("/users/search", userH.Search)
 			auth.GET("/users/:id", userH.GetUser)
 
-			auth.GET("/conversations", chatH.ListConversations)
-			auth.POST("/conversations/read-all", chatH.ReadAll)
-			auth.GET("/conversations/:id/messages", chatH.ListMessages)
-			auth.POST("/conversations/:id/messages", chatH.SendMessage)
+			if cfg.LegacyChatEnabled {
+				auth.GET("/conversations", chatH.ListConversations)
+				auth.POST("/conversations/read-all", chatH.ReadAll)
+				auth.GET("/conversations/:id/messages", chatH.ListMessages)
+				auth.POST("/conversations/:id/messages", chatH.SendMessage)
+				auth.GET("/contacts/:id/conversation", contactH.GetConversation)
+			}
 
 			auth.GET("/contacts", contactH.ListContacts)
-			auth.GET("/contacts/:id/conversation", contactH.GetConversation)
+			auth.GET("/contacts/:id", contactH.GetContact)
+			auth.PATCH("/contacts/:id", contactH.UpdateContact)
 			auth.DELETE("/contacts/:id", contactH.DeleteContact)
 			auth.POST("/contacts/:id/block", contactH.BlockContact)
 			auth.DELETE("/contacts/:id/block", contactH.UnblockContact)
 
+			auth.GET("/contact-tags", contactH.ListTags)
+			auth.POST("/contact-tags", contactH.CreateTag)
+			auth.PATCH("/contact-tags/:tagId", contactH.UpdateTag)
+			auth.DELETE("/contact-tags/:tagId", contactH.DeleteTag)
+			auth.GET("/contact-tags/:tagId/members", contactH.ListTagMembers)
+			auth.PUT("/contact-tags/:tagId/members", contactH.SetTagMembers)
+
 			auth.GET("/groups", contactH.ListGroups)
 			auth.POST("/groups", groupH.Create)
+			auth.POST("/groups/qrcode/resolve", groupH.ResolveQRCode)
+			auth.POST("/groups/qrcode/join", groupH.JoinByQRCode)
 			auth.GET("/groups/:id", groupH.Detail)
 			auth.GET("/groups/:id/members", groupH.Members)
+			auth.GET("/groups/:id/qrcode", groupH.Qrcode)
 			auth.POST("/groups/:id/join", groupH.Join)
+			auth.POST("/groups/:id/invitations", groupH.InviteMembers)
+			auth.POST("/groups/:id/join-requests", groupH.CreateJoinRequest)
+			auth.GET("/groups/:id/join-requests", groupH.ListJoinRequests)
+			auth.POST("/groups/:id/join-requests/:requestId/approve", groupH.ApproveJoinRequest)
+			auth.POST("/groups/:id/join-requests/:requestId/reject", groupH.RejectJoinRequest)
+			auth.PUT("/groups/:id/members/:userId/role", groupH.UpdateMemberRole)
+			auth.PUT("/groups/:id/members/:userId/mute", groupH.UpdateMemberMute)
+			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
+			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
 			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
+			auth.POST("/groups/:id/reports", groupH.CreateReport)
+			auth.PUT("/groups/:id/mute", groupH.UpdateMute)
 			auth.POST("/groups/:id/leave", groupH.Leave)
+			auth.POST("/groups/:id/dismiss", groupH.Dismiss)
+			auth.POST("/group-invitations/:token/accept", groupH.AcceptInvitation)
 			auth.GET("/friend-requests", contactH.ListFriendRequests)
 			auth.POST("/friend-requests", contactH.CreateFriendRequest)
 			auth.POST("/friend-requests/:id/accept", contactH.AcceptFriendRequest)
@@ -143,10 +250,34 @@ func main() {
 			} else {
 				auth.POST("/files/presign", handler.DevPresign)
 			}
+			auth.POST("/files/uploads", fileH.Uploads)
+			auth.POST("/files/uploads/:fileId/complete", fileH.Complete)
+			auth.GET("/files/:fileId", fileH.Get)
 
 			auth.POST("/im/token", imH.Token)
-			auth.POST("/forward-tasks", forwardH.Create)
-			auth.GET("/forward-tasks/:id", forwardH.Get)
+		auth.GET("/im/peers/:businessUserId", imH.Peer)
+		auth.GET("/im/groups/:businessGroupId", imH.Group)
+		auth.GET("/im/groups/by-im/:imGroupId", imH.GroupByIM)
+
+		// 会话设置配置接口（IM 有的都要出）：免打扰/置顶/阅后即焚/消息定时销毁/备注/@强提醒/草稿/已读/全局免打扰
+		// peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（后端拼 conversationId）
+		auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
+		auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
+		auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
+		auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
+
+		// 消息推送（来消息提示）：前端注册/注销设备推送凭证
+		auth.POST("/im/me/push-token", imH.RegisterPushToken)
+		auth.DELETE("/im/me/push-token", imH.UnregisterPushToken)
+			if cfg.LegacyChatEnabled {
+				auth.POST("/forward-tasks", forwardH.Create)
+				auth.GET("/forward-tasks/:id", forwardH.Get)
+			}
+
+			// 收藏
+			auth.POST("/favorites/list", favH.List)
+			auth.POST("/favorites", favH.Create)
+			auth.DELETE("/favorites/:favoriteId", favH.Delete)
 		}
 	}
 
@@ -154,6 +285,17 @@ func main() {
 		Addr:              cfg.HTTPAddr,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	if imClient.Available() {
+		imWorker := &service.IMSyncWorker{
+			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Client: imClient,
+			BatchSize: 20, MaxAttempts: 10, PollInterval: 2 * time.Second,
+		}
+		go imWorker.Run(workerCtx)
+	} else {
+		log.Println("OpenIM sync worker disabled: OPENIM_API_URL or OPENIM_SECRET is missing")
 	}
 
 	go func() {
@@ -166,17 +308,36 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	stopWorker()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
 }
 
-func corsMiddleware() gin.HandlerFunc {
+// corsMiddleware 跨域处理。配置了允许源白名单时，仅对白名单内的 Origin 回显
+// （并允许携带凭证）；未配置白名单时回退为通配 *（仅建议本地开发）。
+func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o = strings.TrimSpace(o); o != "" {
+			allowed[o] = struct{}{}
+		}
+	}
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		switch {
+		case origin != "" && len(allowed) > 0:
+			if _, ok := allowed[origin]; ok {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Credentials", "true")
+				c.Header("Vary", "Origin")
+			}
+		case len(allowed) == 0:
+			c.Header("Access-Control-Allow-Origin", "*")
+		}
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return

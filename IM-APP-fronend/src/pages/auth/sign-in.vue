@@ -30,23 +30,25 @@ function validatePhoneInput() {
   return true
 }
 
+function startCountdown(seconds: number) {
+  countdown.value = seconds > 0 ? seconds : 60
+  if (timer) clearInterval(timer)
+  timer = setInterval(() => {
+    countdown.value -= 1
+    if (countdown.value <= 0 && timer) {
+      clearInterval(timer)
+      timer = null
+    }
+  }, 1000)
+}
+
 async function onSendCode() {
   if (countdown.value > 0) return
   if (!validatePhoneInput()) return
   try {
-    const res = await sendSmsCode(phone.value, 'login')
-    uni.showToast({
-      title: (res as { tip?: string }).tip || '验证码已发送',
-      icon: 'none',
-    })
-    countdown.value = 60
-    timer = setInterval(() => {
-      countdown.value -= 1
-      if (countdown.value <= 0 && timer) {
-        clearInterval(timer)
-        timer = null
-      }
-    }, 1000)
+    const res = await sendSmsCode(phone.value, 'login', countryCode.value)
+    uni.showToast({ title: '验证码已发送', icon: 'none' })
+    startCountdown(res.retryAfterSec || 60)
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }
@@ -61,13 +63,13 @@ async function onLogin() {
         uni.showToast({ title: '请输入密码', icon: 'none' })
         return
       }
-      await userStore.loginPassword(phone.value, password.value)
+      await userStore.loginPassword(phone.value, password.value, countryCode.value)
     } else {
       if (!code.value) {
         uni.showToast({ title: '请输入验证码', icon: 'none' })
         return
       }
-      await userStore.loginSms(phone.value, code.value)
+      await userStore.loginSms(phone.value, code.value, countryCode.value)
     }
     uni.switchTab({ url: '/pages/chat/index' })
   } catch (e) {

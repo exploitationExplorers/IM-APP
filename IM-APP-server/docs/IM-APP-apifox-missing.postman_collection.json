@@ -1,0 +1,301 @@
+{
+  "info": {
+    "_postman_id": "c4e8b7a2-1d3f-4a6c-9e0b-5f7d8c2a1b90",
+    "name": "IM-APP 后端 · Apifox 补缺接口",
+    "description": "仅包含 IM-APP-server 已上线、但 Apifox 项目 8705473 尚未收录的业务接口。不含管理后台、不含旧聊天链路（conversations / forward-tasks / ws）。\n\n导入 Apifox：\n1) 打开 https://app.apifox.com/project/8705473\n2) 项目设置 → 导入数据 → Postman → 选本文件\n3) 务必选「智能合并」，避免覆盖已有接口\n4) 环境变量 baseUrl 默认 http://8.210.72.157:8080/api/v1；本机改 localhost:8080\n5) 先登录拿到 accessToken，填到环境变量",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://8.210.72.157:8080/api/v1", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "contactId", "value": "", "type": "string" },
+    { "key": "groupId", "value": "", "type": "string" },
+    { "key": "tagId", "value": "", "type": "string" },
+    { "key": "friendRequestId", "value": "", "type": "string" },
+    { "key": "joinRequestId", "value": "", "type": "string" },
+    { "key": "groupInviteToken", "value": "", "type": "string" },
+    { "key": "memberUserId", "value": "", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "通讯录",
+      "item": [
+        {
+          "name": "好友列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contacts",
+            "description": "需 JWT。当前用户好友列表。响应不含完整手机号。"
+          },
+          "response": []
+        },
+        {
+          "name": "好友详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contacts/{{contactId}}",
+            "description": "需 JWT。含 remark、tags、commonGroups（共同群组）。"
+          },
+          "response": []
+        },
+        {
+          "name": "修改好友备注/标签",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"remark\": \"备注名\",\n  \"tagIds\": []\n}"
+            },
+            "url": "{{baseUrl}}/contacts/{{contactId}}",
+            "description": "需 JWT。remark 可选；tagIds 省略则不改标签，传数组则覆盖该好友所属标签。"
+          },
+          "response": []
+        },
+        {
+          "name": "好友申请列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/friend-requests?direction=received",
+            "description": "需 JWT。direction=received|sent，默认 received。"
+          },
+          "response": []
+        },
+        {
+          "name": "发送好友申请",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toUserId\": \"{{contactId}}\",\n  \"message\": \"你好，想加你为好友\",\n  \"source\": \"public_id\"\n}"
+            },
+            "url": "{{baseUrl}}/friend-requests",
+            "description": "需 JWT。source: public_id | user_qrcode | group。source=group 时需 sourceGroupId，服务端校验该群 allowMemberAddFriend。\n若对方 requireFriendApproval=false，直接互加，status=accepted；否则 pending。\n成功后会同步 OpenIM 好友关系。"
+          },
+          "response": []
+        },
+        {
+          "name": "拒绝好友申请",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/friend-requests/{{friendRequestId}}/reject",
+            "description": "需 JWT。拒绝收到的好友申请。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "标签",
+      "item": [
+        {
+          "name": "标签列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contact-tags",
+            "description": "需 JWT。当前用户标签列表，含 memberCount。"
+          },
+          "response": []
+        },
+        {
+          "name": "创建标签",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"同事\"\n}"
+            },
+            "url": "{{baseUrl}}/contact-tags",
+            "description": "需 JWT。创建好友标签。"
+          },
+          "response": []
+        },
+        {
+          "name": "重命名标签",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"朋友\"\n}"
+            },
+            "url": "{{baseUrl}}/contact-tags/{{tagId}}",
+            "description": "需 JWT。修改标签名。"
+          },
+          "response": []
+        },
+        {
+          "name": "删除标签",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/contact-tags/{{tagId}}",
+            "description": "需 JWT。删除标签及其成员关联。"
+          },
+          "response": []
+        },
+        {
+          "name": "标签成员列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/contact-tags/{{tagId}}/members",
+            "description": "需 JWT。标签下的好友列表。"
+          },
+          "response": []
+        },
+        {
+          "name": "覆盖设置标签成员",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userIds\": [\"{{contactId}}\"]\n}"
+            },
+            "url": "{{baseUrl}}/contact-tags/{{tagId}}/members",
+            "description": "需 JWT。覆盖该标签成员集合。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "群组",
+      "item": [
+        {
+          "name": "获取群二维码",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/qrcode",
+            "description": "需 JWT。仅群主/管理员。返回 payload 供前端渲染二维码。\n响应 data：{ groupId, payload, expiresAt }"
+          },
+          "response": []
+        },
+        {
+          "name": "解析群二维码",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"uuid\",\n  \"payload\": \"{\\\"token\\\":\\\"...\\\",\\\"type\\\":\\\"group\\\"}\"\n}"
+            },
+            "url": "{{baseUrl}}/groups/qrcode/resolve",
+            "description": "需 JWT。解析群二维码。token 与 payload 二选一。\n响应 data：{ group, joined, memberId }"
+          },
+          "response": []
+        },
+        {
+          "name": "邀请好友入群",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userIds\": [\"{{contactId}}\"]\n}"
+            },
+            "url": "{{baseUrl}}/groups/{{groupId}}/invitations",
+            "description": "需 JWT。邀请好友入群，成功后 Outbox 同步 OpenIM 群成员。\n响应 data：{ ok, invitedCount }"
+          },
+          "response": []
+        },
+        {
+          "name": "接受群邀请",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/group-invitations/{{groupInviteToken}}/accept",
+            "description": "需 JWT。接受群邀请并加入，同步 OpenIM。"
+          },
+          "response": []
+        },
+        {
+          "name": "提交入群申请",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"remark\": \"申请说明\"\n}"
+            },
+            "url": "{{baseUrl}}/groups/{{groupId}}/join-requests",
+            "description": "需 JWT。joinMode=approval 时提交入群申请。"
+          },
+          "response": []
+        },
+        {
+          "name": "入群申请列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/join-requests",
+            "description": "需 JWT。仅群主/管理员可查看。"
+          },
+          "response": []
+        },
+        {
+          "name": "通过入群申请",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/join-requests/{{joinRequestId}}/approve",
+            "description": "需 JWT。群主/管理员通过后，成员加入业务群并同步 OpenIM。"
+          },
+          "response": []
+        },
+        {
+          "name": "拒绝入群申请",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/join-requests/{{joinRequestId}}/reject",
+            "description": "需 JWT。群主/管理员拒绝入群申请。"
+          },
+          "response": []
+        },
+        {
+          "name": "移除群成员",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members/{{memberUserId}}",
+            "description": "需 JWT。群主可移除管理员和普通成员，管理员只能移除普通成员。同步 OpenIM 退群。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "文件",
+      "item": [
+        {
+          "name": "预签名上传（兼容旧版）",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filename\": \"photo.jpg\",\n  \"contentType\": \"image/jpeg\"\n}"
+            },
+            "url": "{{baseUrl}}/files/presign",
+            "description": "需 JWT。兼容旧版预签名上传。新链路请用 POST /files/uploads → PUT → POST /files/uploads/:fileId/complete。\nMinIO 未配置时返回 dev 占位 URL。\n响应 data：{ uploadUrl, fileUrl, objectKey, expiresIn }"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

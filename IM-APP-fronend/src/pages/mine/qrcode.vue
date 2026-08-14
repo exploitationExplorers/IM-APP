@@ -1,43 +1,161 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useUserStore } from '@/stores/user'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { fetchQrcode } from '@/api/user'
-import type { QrcodePayload } from '@/types'
+import { useAuthGuard } from '@/composables/useAuthGuard'
+import { buildQrcodeDataUrl } from '@/utils/qrcode'
+import { buildQrcodeCardDataUrl, saveBase64ImageToAlbum } from '@/utils/qrcode-card'
+import type { UserQrcodeResult } from '@/types'
 
-const userStore = useUserStore()
-const qrcode = ref<QrcodePayload | null>(null)
+useAuthGuard()
 
-onMounted(async () => {
+const loading = ref(true)
+const qrcodeData = ref<UserQrcodeResult | null>(null)
+const qrImageUrl = ref('')
+
+const nickname = computed(() => qrcodeData.value?.user.nickname || '')
+const avatarUrl = computed(() => qrcodeData.value?.user.avatar || '')
+const nicknameInitial = computed(() => (nickname.value ? nickname.value.slice(0, 1) : '?'))
+const hasAvatar = computed(() => Boolean(avatarUrl.value))
+
+async function loadQrcode() {
+  loading.value = true
   try {
-    qrcode.value = await fetchQrcode()
-  } catch {
-    qrcode.value = {
-      publicId: userStore.profile?.publicId || '',
-      nickname: userStore.profile?.nickname || '',
-      avatar: userStore.profile?.avatar || '',
-      payload: '',
+    const data = await fetchQrcode()
+    qrcodeData.value = data
+    qrImageUrl.value = await buildQrcodeDataUrl(data.payload)
+  } catch (e) {
+    qrcodeData.value = null
+    qrImageUrl.value = ''
+    uni.showToast({ title: (e as Error).message || '加载失败', icon: 'none' })
+  } finally {
+    loading.value = false
+  }
+}
+
+onShow(() => {
+  void loadQrcode()
+})
+
+function goBack() {
+  uni.navigateBack()
+}
+
+function goScan() {
+  uni.navigateTo({ url: '/pages/contacts/scan' })
+}
+
+async function onShare() {
+  if (!qrImageUrl.value) return
+  // #ifdef H5
+  if (typeof navigator !== 'undefined' && navigator.share) {
+    try {
+      await navigator.share({
+        title: `${nickname.value}的二维码`,
+        text: '扫一扫加我为好友',
+      })
+      return
+    } catch {
+      // 用户取消或不支持文件分享
     }
   }
-})
+  // #endif
+  uni.setClipboardData({
+    data: qrcodeData.value?.payload || '',
+    success: () => uni.showToast({ title: '二维码内容已复制', icon: 'none' }),
+  })
+}
+
+async function onSave() {
+  if (!qrImageUrl.value) return
+  uni.showLoading({ title: '保存中...', mask: true })
+  try {
+    const cardUrl = await buildQrcodeCardDataUrl({
+      nickname: nickname.value,
+      nicknameInitial: nicknameInitial.value,
+      avatarUrl: avatarUrl.value || undefined,
+      qrDataUrl: qrImageUrl.value,
+      brandLogoUrl: '/static/auth/logo-full.png',
+    })
+
+    // #ifdef H5
+    const link = document.createElement('a')
+    link.href = cardUrl
+    link.download = `${nickname.value || 'qrcode'}.png`
+    link.click()
+    uni.showToast({ title: '已保存', icon: 'success' })
+    return
+    // #endif
+
+    // #ifdef APP-PLUS
+    await saveBase64ImageToAlbum(cardUrl)
+    uni.showToast({ title: '已保存到相册', icon: 'success' })
+    return
+    // #endif
+
+    uni.showToast({ title: '请长按图片保存', icon: 'none' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error).message || '保存失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
+}
 </script>
 
 <template>
   <view class="page">
-    <view class="card">
-      <image
-        class="avatar"
-        :src="qrcode?.avatar || userStore.profile?.avatar || '/static/avatar-me.png'"
-        mode="aspectFill"
-      />
-      <text class="name">{{ qrcode?.nickname || userStore.profile?.nickname }}</text>
-      <text class="pid">公开 ID: {{ qrcode?.publicId }}</text>
-      <view class="qr">
-        <view class="qr-box">
-          <text class="qr-id">{{ qrcode?.publicId }}</text>
-          <text class="qr-hint">扫码加好友</text>
+    <view class="nav">
+      <view class="nav-back" @click="goBack">
+        <image class="nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
+      </view>
+      <text class="nav-title">二维码</text>
+      <view class="nav-actions">
+        <view class="nav-action" @click="goScan">
+          <image class="nav-action-icon" src="/static/icons/icon-scan.svg" mode="aspectFit" />
+        </view>
+        <view class="nav-action" @click="onShare">
+          <image class="nav-action-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
         </view>
       </view>
-      <text class="tip">扫一扫上面的二维码，加我为好友</text>
+    </view>
+
+    <view class="card">
+      <view class="user-row">
+        <image
+          v-if="hasAvatar"
+          class="avatar"
+          :src="avatarUrl"
+          mode="aspectFill"
+        />
+        <view v-else class="avatar avatar-fallback">
+          <text class="avatar-text">{{ nicknameInitial }}</text>
+        </view>
+        <text class="nickname">{{ nickname }}</text>
+        <image class="brand-logo" src="/static/auth/logo-full.png" mode="aspectFit" />
+      </view>
+
+      <view class="qr-wrap">
+        <view v-if="loading" class="qr-loading">加载中...</view>
+        <image
+          v-else-if="qrImageUrl"
+          class="qr-image"
+          :src="qrImageUrl"
+          mode="aspectFit"
+          show-menu-by-longpress
+        />
+        <view v-else class="qr-loading">二维码加载失败</view>
+      </view>
+    </view>
+
+    <view class="bottom-bar">
+      <view class="bottom-action" @click="onSave">
+        <image class="bottom-icon" src="/static/icons/icon-download.svg" mode="aspectFit" />
+        <text class="bottom-text">保存</text>
+      </view>
+      <view class="bottom-action" @click="onShare">
+        <image class="bottom-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
+        <text class="bottom-text">分享</text>
+      </view>
     </view>
   </view>
 </template>
@@ -45,70 +163,159 @@ onMounted(async () => {
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background: #f5f6f8;
-  padding: 40rpx;
+  background: #f3f4f7;
+  display: flex;
+  flex-direction: column;
+}
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: calc(88rpx + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 24rpx 0;
+  background: #fff;
+  border-bottom: 1rpx solid #e1e3ea;
+  box-sizing: border-box;
+}
+
+.nav-back {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.nav-back-icon {
+  width: 40rpx;
+  height: 40rpx;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #212121;
+}
+
+.nav-actions {
+  width: 144rpx;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8rpx;
+}
+
+.nav-action {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-action-icon {
+  width: 44rpx;
+  height: 44rpx;
 }
 
 .card {
+  flex: 1;
+  margin: 0;
   background: #fff;
-  border-radius: 20rpx;
-  padding: 48rpx 32rpx;
+  padding: 32rpx 40rpx 48rpx;
+  box-sizing: border-box;
+}
+
+.user-row {
   display: flex;
-  flex-direction: column;
   align-items: center;
+  gap: 20rpx;
+  margin-bottom: 48rpx;
 }
 
 .avatar {
-  width: 120rpx;
-  height: 120rpx;
+  width: 88rpx;
+  height: 88rpx;
   border-radius: 50%;
-  background: #eee;
+  flex-shrink: 0;
+  background: #eef1f6;
 }
 
-.name {
-  margin-top: 20rpx;
-  font-size: 32rpx;
+.avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a2fc2;
+}
+
+.avatar-text {
+  color: #fff;
+  font-size: 36rpx;
   font-weight: 600;
 }
 
-.pid {
-  margin-top: 8rpx;
-  font-size: 24rpx;
-  color: #999;
+.nickname {
+  flex: 1;
+  min-width: 0;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #212121;
 }
 
-.qr {
-  margin-top: 40rpx;
+.brand-logo {
+  width: 72rpx;
+  height: 72rpx;
+  flex-shrink: 0;
 }
 
-.qr-box {
-  width: 360rpx;
-  height: 360rpx;
-  background: #f8f9fb;
-  border: 2rpx solid #e1e3ea;
+.qr-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 560rpx;
+}
+
+.qr-image {
+  width: 560rpx;
+  height: 560rpx;
+}
+
+.qr-loading {
+  color: #636e86;
+  font-size: 28rpx;
+}
+
+.bottom-bar {
+  display: flex;
+  align-items: stretch;
+  background: #fff;
+  border-top: 1rpx solid #e1e3ea;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bottom-action {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: 12rpx;
+  gap: 8rpx;
+  padding: 28rpx 0;
 }
 
-.qr-id {
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #222;
-  letter-spacing: 2rpx;
+.bottom-icon {
+  width: 44rpx;
+  height: 44rpx;
 }
 
-.qr-hint {
-  margin-top: 16rpx;
+.bottom-text {
   font-size: 24rpx;
-  color: #999;
-}
-
-.tip {
-  margin-top: 28rpx;
-  color: #999;
-  font-size: 24rpx;
+  color: #636e86;
 }
 </style>
