@@ -166,6 +166,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.PUT("/sensitive-words/:id/status", middleware.RequirePermission(rbacRepo, "moderation.words.write"), d.OpsH.SetSensitiveWordStatus)
 			auth.GET("/moderation/hits", middleware.RequirePermission(rbacRepo, "moderation.hits.read"), d.OpsH.ListModerationHits)
 			auth.GET("/moderation/profiles", middleware.RequirePermission(rbacRepo, "moderation.profiles.read"), d.OpsH.ListProfileModerations)
+			auth.POST("/moderation/profiles/:userId/approve", middleware.RequirePermission(rbacRepo, "moderation.profiles.handle"), d.OpsH.ApproveProfile)
 			auth.POST("/moderation/profiles/:userId/reject", middleware.RequirePermission(rbacRepo, "moderation.profiles.handle"), d.OpsH.RejectProfile)
 			auth.POST("/moderation/profiles/:userId/restore", middleware.RequirePermission(rbacRepo, "moderation.profiles.handle"), d.OpsH.RestoreProfile)
 

@@ -1970,7 +1970,15 @@
                   },
                   "status": {
                     "description": "active|disabled",
-                    "type": "string"
+                    "enum": [
+                      "active",
+                      "disabled"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "启用",
+                      "停用"
+                    ]
                   }
                 },
                 "required": [
@@ -2120,7 +2128,15 @@
                   },
                   "platform": {
                     "description": "android|ios",
-                    "type": "string"
+                    "enum": [
+                      "android",
+                      "ios"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "安卓",
+                      "苹果"
+                    ]
                   },
                   "version": {
                     "description": "版本号",
@@ -2319,7 +2335,15 @@
                   },
                   "status": {
                     "description": "published|draft",
-                    "type": "string"
+                    "enum": [
+                      "published",
+                      "draft"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "已发布",
+                      "草稿"
+                    ]
                   }
                 },
                 "required": [
@@ -2429,7 +2453,17 @@
             "name": "result",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "success",
+                "denied",
+                "failed"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "成功",
+                "权限拒绝",
+                "失败"
+              ]
             }
           },
           {
@@ -3952,7 +3986,21 @@
             "name": "status",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "pending",
+                "processing",
+                "success",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "待处理",
+                "处理中",
+                "已完成",
+                "失败",
+                "已终止"
+              ]
             }
           }
         ],
@@ -4387,7 +4435,21 @@
             "name": "status",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "pending",
+                "success",
+                "failed",
+                "skipped",
+                "cancelled"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "待发送",
+                "已送达",
+                "失败",
+                "已跳过",
+                "已取消"
+              ]
             }
           }
         ],
@@ -4503,7 +4565,19 @@
             "name": "status",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "normal",
+                "banned",
+                "dissolved",
+                "muted"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "正常",
+                "已封禁",
+                "已解散",
+                "全员禁言"
+              ]
             }
           }
         ],
@@ -5482,7 +5556,15 @@
                   },
                   "type": {
                     "description": "user_agreement|privacy_policy",
-                    "type": "string"
+                    "enum": [
+                      "user_agreement",
+                      "privacy_policy"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "用户服务协议",
+                      "隐私政策"
+                    ]
                   },
                   "version": {
                     "description": "版本号",
@@ -6214,7 +6296,17 @@
             "name": "status",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "pending",
+                "rejected",
+                "restored"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "待审核",
+                "已驳回",
+                "已恢复"
+              ]
             }
           }
         ],
@@ -6292,10 +6384,10 @@
         ]
       }
     },
-    "/api/admin/v1/moderation/profiles/{userId}/reject": {
+    "/api/admin/v1/moderation/profiles/{userId}/approve": {
       "post": {
-        "description": "驳回头像/昵称（需原因）。接口路径：/api/admin/v1/moderation/profiles/:userId/reject",
-        "operationId": "POST_api_admin_v1_moderation_profiles_{userId}_reject",
+        "description": "同意头像/昵称资料审核（状态→已同意）。接口路径：/api/admin/v1/moderation/profiles/:userId/approve",
+        "operationId": "POST_api_admin_v1_moderation_profiles_{userId}_approve",
         "parameters": [
           {
             "description": "用户 ID（UUID）",
@@ -6314,105 +6406,15 @@
                 "properties": {
                   "field": {
                     "description": "avatar|nickname",
-                    "type": "string"
-                  },
-                  "reason": {
-                    "description": "驳回原因",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "field",
-                  "reason"
-                ],
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "code": {
-                      "description": "0=成功",
-                      "type": "integer"
-                    },
-                    "data": {
-                      "properties": {
-                        "ok": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "ok"
-                      ],
-                      "type": "object"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "requestId": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "requestId"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "成功"
-          },
-          "400": {
-            "description": "参数错误"
-          },
-          "401": {
-            "description": "未登录或登录已过期"
-          },
-          "403": {
-            "description": "无权限"
-          },
-          "500": {
-            "description": "服务异常"
-          }
-        },
-        "summary": "驳回头像/昵称（需原因）",
-        "tags": [
-          "敏感词审核"
-        ]
-      }
-    },
-    "/api/admin/v1/moderation/profiles/{userId}/restore": {
-      "post": {
-        "description": "恢复资料状态。接口路径：/api/admin/v1/moderation/profiles/:userId/restore",
-        "operationId": "POST_api_admin_v1_moderation_profiles_{userId}_restore",
-        "parameters": [
-          {
-            "description": "用户 ID（UUID）",
-            "in": "path",
-            "name": "userId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "field": {
-                    "description": "avatar|nickname",
-                    "type": "string"
+                    "enum": [
+                      "avatar",
+                      "nickname"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "头像",
+                      "昵称"
+                    ]
                   },
                   "reason": {
                     "description": "操作原因",
@@ -6482,7 +6484,219 @@
             "description": "服务异常"
           }
         },
-        "summary": "恢复资料状态",
+        "summary": "同意头像/昵称资料审核（状态→已同意）",
+        "tags": [
+          "敏感词审核"
+        ]
+      }
+    },
+    "/api/admin/v1/moderation/profiles/{userId}/reject": {
+      "post": {
+        "description": "驳回头像/昵称（状态→已驳回）。接口路径：/api/admin/v1/moderation/profiles/:userId/reject",
+        "operationId": "POST_api_admin_v1_moderation_profiles_{userId}_reject",
+        "parameters": [
+          {
+            "description": "用户 ID（UUID）",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "field": {
+                    "description": "avatar|nickname",
+                    "enum": [
+                      "avatar",
+                      "nickname"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "头像",
+                      "昵称"
+                    ]
+                  },
+                  "reason": {
+                    "description": "驳回原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "field",
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "驳回头像/昵称（状态→已驳回）",
+        "tags": [
+          "敏感词审核"
+        ]
+      }
+    },
+    "/api/admin/v1/moderation/profiles/{userId}/restore": {
+      "post": {
+        "description": "恢复到待审核队列（状态→待审核）。接口路径：/api/admin/v1/moderation/profiles/:userId/restore",
+        "operationId": "POST_api_admin_v1_moderation_profiles_{userId}_restore",
+        "parameters": [
+          {
+            "description": "用户 ID（UUID）",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "field": {
+                    "description": "avatar|nickname",
+                    "enum": [
+                      "avatar",
+                      "nickname"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "头像",
+                      "昵称"
+                    ]
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "field",
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "恢复到待审核队列（状态→待审核）",
         "tags": [
           "敏感词审核"
         ]
@@ -6629,7 +6843,17 @@
                   },
                   "targetType": {
                     "description": "user|group|message",
-                    "type": "string"
+                    "enum": [
+                      "user",
+                      "group",
+                      "message"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "用户",
+                      "群组",
+                      "消息"
+                    ]
                   }
                 },
                 "required": [
@@ -6824,7 +7048,15 @@
                 "properties": {
                   "status": {
                     "description": "active|disabled",
-                    "type": "string"
+                    "enum": [
+                      "active",
+                      "disabled"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "启用",
+                      "停用"
+                    ]
                   }
                 },
                 "required": [
@@ -6933,7 +7165,21 @@
             "name": "status",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "pending",
+                "processing",
+                "resolved",
+                "rejected",
+                "reopened"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "待处理",
+                "处理中",
+                "已结案",
+                "已驳回",
+                "已重开"
+              ]
             }
           },
           {
@@ -6942,7 +7188,17 @@
             "name": "targetType",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "user",
+                "group",
+                "message"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "用户",
+                "群组",
+                "消息"
+              ]
             }
           }
         ],
@@ -8476,7 +8732,15 @@
                 "properties": {
                   "status": {
                     "description": "active|disabled",
-                    "type": "string"
+                    "enum": [
+                      "active",
+                      "disabled"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "启用",
+                      "停用"
+                    ]
                   }
                 },
                 "required": [
@@ -8585,7 +8849,19 @@
             "name": "status",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "sent",
+                "success",
+                "failed",
+                "pending"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "已发送",
+                "已送达",
+                "失败",
+                "发送中"
+              ]
             }
           }
         ],
@@ -9298,7 +9574,17 @@
             "name": "status",
             "required": false,
             "schema": {
-              "type": "string"
+              "enum": [
+                "active",
+                "banned",
+                "cancelled"
+              ],
+              "type": "string",
+              "x-enum-descriptions": [
+                "正常",
+                "已封禁",
+                "已注销"
+              ]
             }
           }
         ],

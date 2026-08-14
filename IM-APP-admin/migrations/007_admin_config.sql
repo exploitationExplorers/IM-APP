@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS profile_moderation_records (
     field       VARCHAR(32) NOT NULL DEFAULT '',   -- avatar|nickname
     old_value   TEXT        NOT NULL DEFAULT '',
     new_value   TEXT        NOT NULL DEFAULT '',
-    status      VARCHAR(16) NOT NULL DEFAULT 'pending', -- pending|rejected|restored
+    status      VARCHAR(16) NOT NULL DEFAULT 'pending', -- 资料审核状态机：pending|approved|rejected
     handler_id  UUID,
     reason      TEXT        NOT NULL DEFAULT '',
     handled_at  TIMESTAMPTZ,

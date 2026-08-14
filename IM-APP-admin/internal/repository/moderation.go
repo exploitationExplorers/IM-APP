@@ -123,10 +123,35 @@ func (r *OpsRepo) ListProfileModerations(ctx context.Context, status string, pag
 	return out, total, nil
 }
 
-func (r *OpsRepo) HandleProfileModeration(ctx context.Context, userID, field, toStatus, reason, handlerID string) error {
-	_, err := r.DB.Exec(ctx, `
+// upsertProfileStatus 按 user_id+field 更新当前审核状态；不存在则插入（资料审核状态机）
+func (r *OpsRepo) upsertProfileStatus(ctx context.Context, userID, field, status, reason, handlerID string) error {
+	tag, err := r.DB.Exec(ctx, `
+		UPDATE profile_moderation_records
+		SET status=$3, reason=$4, handler_id=$5::uuid, handled_at=NOW()
+		WHERE user_id=$1::uuid AND field=$2`, userID, field, status, reason, handlerID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	_, err = r.DB.Exec(ctx, `
 		INSERT INTO profile_moderation_records(user_id, field, old_value, new_value, status, reason, handler_id, handled_at)
-		VALUES($1::uuid,$2, '', '', $3,$4,$5::uuid, NOW())
-		ON CONFLICT DO NOTHING`, userID, field, toStatus, reason, handlerID)
+		VALUES($1::uuid,$2,'','',$3,$4,$5::uuid,NOW())`, userID, field, status, reason, handlerID)
 	return err
+}
+
+// ApproveProfile 同意资料审核：pending → approved
+func (r *OpsRepo) ApproveProfile(ctx context.Context, userID, field, handlerID string) error {
+	return r.upsertProfileStatus(ctx, userID, field, "approved", "", handlerID)
+}
+
+// RejectProfile 驳回资料审核：pending → rejected
+func (r *OpsRepo) RejectProfile(ctx context.Context, userID, field, reason, handlerID string) error {
+	return r.upsertProfileStatus(ctx, userID, field, "rejected", reason, handlerID)
+}
+
+// ReopenProfile 恢复待审核：rejected/approved → pending（重新进入队列，可再同意/驳回）
+func (r *OpsRepo) ReopenProfile(ctx context.Context, userID, field, handlerID string) error {
+	return r.upsertProfileStatus(ctx, userID, field, "pending", "", handlerID)
 }

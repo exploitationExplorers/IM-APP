@@ -300,18 +300,79 @@ func queryParams(method, p string) []any {
 	}
 	out := make([]any, 0, len(specs))
 	for _, s := range specs {
-		out = append(out, param(s.Name, "query", s.Desc, s.Type, s.Required))
+		out = append(out, param(s.Name, "query", s.Desc, s.Type, s.Required, queryParamEnums[key+" "+s.Name], enumDescs[key+" "+s.Name]))
 	}
 	return out
 }
 
-func param(name, in, desc, typ string, required bool) map[string]any {
+// queryParamEnums 各接口 query 参数的可选值（key = "方法 路径 参数名"）
+var queryParamEnums = map[string][]string{
+	"GET /api/admin/v1/users status":                      {"active", "banned", "cancelled"},
+	"GET /api/admin/v1/groups status":                     {"normal", "banned", "dissolved", "muted"},
+	"GET /api/admin/v1/reports status":                    {"pending", "processing", "resolved", "rejected", "reopened"},
+	"GET /api/admin/v1/reports targetType":                {"user", "group", "message"},
+	"GET /api/admin/v1/audit-logs result":                 {"success", "denied", "failed"},
+	"GET /api/admin/v1/forward-tasks status":              {"pending", "processing", "success", "failed", "cancelled"},
+	"GET /api/admin/v1/forward-tasks/{id}/targets status": {"pending", "success", "failed", "skipped", "cancelled"},
+	"GET /api/admin/v1/sms/logs status":                   {"sent", "success", "failed", "pending"},
+	"GET /api/admin/v1/moderation/profiles status":        {"pending", "rejected", "restored"},
+}
+
+// enumDescs 各 query 参数枚举值的含义说明（与 queryParamEnums 值一一对应）
+var enumDescs = map[string][]string{
+	"GET /api/admin/v1/users status":                      {"正常", "已封禁", "已注销"},
+	"GET /api/admin/v1/groups status":                     {"正常", "已封禁", "已解散", "全员禁言"},
+	"GET /api/admin/v1/reports status":                    {"待处理", "处理中", "已结案", "已驳回", "已重开"},
+	"GET /api/admin/v1/reports targetType":                {"用户", "群组", "消息"},
+	"GET /api/admin/v1/audit-logs result":                 {"成功", "权限拒绝", "失败"},
+	"GET /api/admin/v1/forward-tasks status":              {"待处理", "处理中", "已完成", "失败", "已终止"},
+	"GET /api/admin/v1/forward-tasks/{id}/targets status": {"待发送", "已送达", "失败", "已跳过", "已取消"},
+	"GET /api/admin/v1/sms/logs status":                   {"已发送", "已送达", "失败", "发送中"},
+	"GET /api/admin/v1/moderation/profiles status":        {"待审核", "已驳回", "已恢复"},
+}
+
+// fieldEnums 请求体字段的可选值枚举（key = "接口key 字段名"）
+var fieldEnums = map[string][]string{
+	"PUT /api/admin/v1/admins/{id}/status status":                   {"active", "disabled"},
+	"PUT /api/admin/v1/report-reasons/{id}/status status":           {"active", "disabled"},
+	"PUT /api/admin/v1/sensitive-words/{id}/status status":          {"active", "disabled"},
+	"PUT /api/admin/v1/app-versions/{id}/status status":             {"published", "draft"},
+	"POST /api/admin/v1/app-versions platform":                      {"android", "ios"},
+	"POST /api/admin/v1/report-reasons targetType":                  {"user", "group", "message"},
+	"POST /api/admin/v1/moderation/profiles/{userId}/approve field": {"avatar", "nickname"},
+	"POST /api/admin/v1/moderation/profiles/{userId}/reject field":  {"avatar", "nickname"},
+	"POST /api/admin/v1/moderation/profiles/{userId}/restore field": {"avatar", "nickname"},
+	"POST /api/admin/v1/legal-documents type":                       {"user_agreement", "privacy_policy"},
+}
+
+// fieldEnumDescs 请求体字段枚举值的含义说明（与 fieldEnums 值一一对应）
+var fieldEnumDescs = map[string][]string{
+	"PUT /api/admin/v1/admins/{id}/status status":                   {"启用", "停用"},
+	"PUT /api/admin/v1/report-reasons/{id}/status status":           {"启用", "停用"},
+	"PUT /api/admin/v1/sensitive-words/{id}/status status":          {"启用", "停用"},
+	"PUT /api/admin/v1/app-versions/{id}/status status":             {"已发布", "草稿"},
+	"POST /api/admin/v1/app-versions platform":                      {"安卓", "苹果"},
+	"POST /api/admin/v1/report-reasons targetType":                  {"用户", "群组", "消息"},
+	"POST /api/admin/v1/moderation/profiles/{userId}/approve field": {"头像", "昵称"},
+	"POST /api/admin/v1/moderation/profiles/{userId}/reject field":  {"头像", "昵称"},
+	"POST /api/admin/v1/moderation/profiles/{userId}/restore field": {"头像", "昵称"},
+	"POST /api/admin/v1/legal-documents type":                       {"用户服务协议", "隐私政策"},
+}
+
+func param(name, in, desc, typ string, required bool, enum []string, enumDesc []string) map[string]any {
+	schema := map[string]any{"type": typ}
+	if len(enum) > 0 {
+		schema["enum"] = enum
+		if len(enumDesc) == len(enum) {
+			schema["x-enum-descriptions"] = enumDesc
+		}
+	}
 	return map[string]any{
 		"name":        name,
 		"in":          in,
 		"description": desc,
 		"required":    required,
-		"schema":      map[string]any{"type": typ},
+		"schema":      schema,
 	}
 }
 
@@ -406,6 +467,12 @@ func propSchema(prefix string, f fieldSpec) map[string]any {
 	p := map[string]any{"type": f.Type}
 	if f.Desc != "" {
 		p["description"] = f.Desc
+	}
+	if enums, ok := fieldEnums[prefix+" "+f.Name]; ok {
+		p["enum"] = enums
+		if descs, ok2 := fieldEnumDescs[prefix+" "+f.Name]; ok2 && len(descs) == len(enums) {
+			p["x-enum-descriptions"] = descs
+		}
 	}
 	switch f.Type {
 	case "array":
@@ -651,6 +718,10 @@ var writeBodyFields = map[string][]fieldSpec{
 	"PUT /api/admin/v1/sensitive-words/{id}/status": {
 		{"status", "string", true, "active|disabled"},
 	},
+	"POST /api/admin/v1/moderation/profiles/{userId}/approve": {
+		{"field", "string", true, "avatar|nickname"},
+		{"reason", "string", true, "操作原因"},
+	},
 	"POST /api/admin/v1/moderation/profiles/{userId}/reject": {
 		{"field", "string", true, "avatar|nickname"},
 		{"reason", "string", true, "驳回原因"},
@@ -808,8 +879,9 @@ var apiDescriptions = map[string]string{
 	"PUT /api/admin/v1/sensitive-words/{id}/status":              "启用/停用敏感词",
 	"GET /api/admin/v1/moderation/hits":                          "敏感词命中记录",
 	"GET /api/admin/v1/moderation/profiles":                      "待审核头像/昵称列表",
-	"POST /api/admin/v1/moderation/profiles/{userId}/reject":     "驳回头像/昵称（需原因）",
-	"POST /api/admin/v1/moderation/profiles/{userId}/restore":    "恢复资料状态",
+	"POST /api/admin/v1/moderation/profiles/{userId}/approve":    "同意头像/昵称资料审核（状态→已同意）",
+	"POST /api/admin/v1/moderation/profiles/{userId}/reject":     "驳回头像/昵称（状态→已驳回）",
+	"POST /api/admin/v1/moderation/profiles/{userId}/restore":    "恢复到待审核队列（状态→待审核）",
 	"GET /api/admin/v1/system/errors":                            "运行错误列表",
 	"GET /api/admin/v1/system/errors/{id}":                       "运行错误详情",
 	"POST /api/admin/v1/exports":                                 "创建异步导出任务",
