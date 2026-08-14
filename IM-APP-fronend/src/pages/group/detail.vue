@@ -11,6 +11,7 @@ import {
 } from '@/utils/openim'
 import { resolveIMGroup } from '@/api/im'
 import { safeBack } from '@/utils/nav'
+import { APP_CONFIG } from '@/config'
 
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
@@ -27,6 +28,10 @@ const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.
 const convId = ref('')
 const recvOpt = ref<number>(MessageReceiveOptType.Normal)
 const pinned = ref(false)
+
+function getMemberDisplayName(member: { nickname?: string; groupNickname?: string }) {
+  return member.groupNickname || member.nickname || '成员'
+}
 
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
@@ -176,7 +181,7 @@ function copyGroupId() {
       <view class="member-row" @click="goToMembers">
         <view v-for="member in memberList" :key="member.id" class="member-item">
           <image class="member-avatar" :src="member.avatar" mode="aspectFill" />
-          <text class="member-name">{{ member.nickname }}</text>
+          <text class="member-name">{{ getMemberDisplayName(member) }}</text>
         </view>
         <view v-if="memberList.length" class="add-member" @click.stop="goToMembers">
           <view class="add-circle">＋</view>
@@ -504,27 +509,6 @@ function copyGroupId() {
   padding: 0 30rpx;
   background: #fff;
   border-bottom: 1rpx solid #f0f0f0;
-}
-
-.switch-track {
-  width: 76rpx;
-  height: 40rpx;
-  border-radius: 24rpx;
-  background: #d9d9d9;
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding: 4rpx;
-}
-
-.switch-knob {
-  width: 32rpx;
-  height: 32rpx;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.16);
-  position: absolute;
-  left: 6rpx;
 }
 
 .action-row {

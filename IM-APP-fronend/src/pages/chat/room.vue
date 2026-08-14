@@ -10,6 +10,7 @@ import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { resolveIMGroupByIM } from '@/api/im'
+import { fetchGroupDetail } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { ChatMessage, Conversation } from '@/types'
 
@@ -23,6 +24,7 @@ const peerAvatar = ref(APP_CONFIG.defaultAvatarUrl)
 const chatType = ref<'private' | 'group'>('group')
 /** 业务侧的好友 / 群 ID，仅用于跳资料页 */
 const businessId = ref('')
+const memberCount = ref(0)
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
 const convRef = ref<Conversation | null>(null)
 const input = ref('')
@@ -82,6 +84,7 @@ function nicknameOf(message: ChatMessage): string {
 
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
+const hasInput = computed(() => input.value.trim().length > 0)
 
 onLoad(async (query) => {
   title.value = decodeURIComponent(String(query?.title || '聊天'))
@@ -108,6 +111,18 @@ onLoad(async (query) => {
     myId.value = imUserId.value
     if (!myId.value) {
       throw new Error('当前 IM 用户 ID 未初始化，请重新登录')
+    }
+
+    if (chatType.value === 'group') {
+      try {
+        const gid = businessId.value || (await resolveBusinessTarget())
+        if (gid) {
+          const detail = await fetchGroupDetail(gid)
+          memberCount.value = detail.memberCount || 0
+        }
+      } catch {
+        memberCount.value = 0
+      }
     }
 
     await chatStore.loadMessages(conv.id)
@@ -546,6 +561,7 @@ function pickImage() {
           <text class="emoji" @click="onEmoji">☺</text>
         </view>
         <view class="tool" @click="onPlus">＋</view>
+        <view v-if="hasInput" class="send-btn" @click="onSend">传送</view>
       </view>
 
       <view v-if="showPlusPanel" class="plus-panel">
@@ -666,6 +682,20 @@ function pickImage() {
   justify-content: center;
   font-size: 40rpx;
   color: #333;
+}
+
+.send-btn {
+  min-width: 120rpx;
+  height: 64rpx;
+  padding: 0 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18rpx;
+  background: #0a2fc2;
+  color: #fff;
+  font-size: 26rpx;
+  font-weight: 600;
 }
 
 .input-wrap {

@@ -7,6 +7,7 @@ import {
   fetchGroupMembers,
   joinGroup,
   leaveGroup,
+  updateGroupMyNickname,
   updateGroupSettings,
 } from '@/api/group'
 
@@ -39,6 +40,11 @@ export const useGroupStore = defineStore('group', () => {
     await loadDetail(groupId)
   }
 
+  async function updateMyNickname(groupId: string, nickname: string) {
+    await updateGroupMyNickname(groupId, nickname)
+    await loadDetail(groupId)
+  }
+
   async function leave(groupId: string) {
     await leaveGroup(groupId)
     currentGroup.value = null
@@ -52,6 +58,7 @@ export const useGroupStore = defineStore('group', () => {
     create,
     join,
     updateSettings,
+    updateMyNickname,
     leave,
   }
 })
