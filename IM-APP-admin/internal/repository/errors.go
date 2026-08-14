@@ -52,8 +52,9 @@ func (r *OpsRepo) CreateExportJob(ctx context.Context, resource, filters, creato
 
 func (r *OpsRepo) ListExportJobs(ctx context.Context, creatorID string, page, size int) ([]models.ExportJob, int64, error) {
 	where := ""
-	args := []any{creatorID}
+	args := make([]any, 0)
 	if creatorID != "" {
+		args = append(args, creatorID)
 		where = " WHERE created_by=$1::uuid"
 	}
 	var total int64
@@ -63,7 +64,7 @@ func (r *OpsRepo) ListExportJobs(ctx context.Context, creatorID string, page, si
 	qargs := append(append([]any{}, args...), size, (page-1)*size)
 	rows, err := r.DB.Query(ctx, `
 		SELECT id::text, resource, filters, status, file_url, created_at, finished_at, expires_at
-		FROM export_jobs`+where+` ORDER BY created_at DESC LIMIT $2 OFFSET $3`, qargs...)
+		FROM export_jobs`+where+` ORDER BY created_at DESC LIMIT $`+itoa(len(qargs)-1)+` OFFSET $`+itoa(len(qargs)), qargs...)
 	if err != nil {
 		return nil, 0, err
 	}

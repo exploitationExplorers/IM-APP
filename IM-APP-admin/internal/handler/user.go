@@ -23,7 +23,7 @@ func (h *DataHandler) ListUsers(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Data.ListUsers(c.Request.Context(), c.Query("keyword"), c.Query("status"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -32,7 +32,7 @@ func (h *DataHandler) ListUsers(c *gin.Context) {
 func (h *DataHandler) GetUser(c *gin.Context) {
 	u, err := h.Data.GetUserDetail(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, http.StatusNotFound, "用户不存在")
+		response.FailErr(c, http.StatusNotFound, "用户不存在", err)
 		return
 	}
 	response.OK(c, u)
@@ -47,7 +47,7 @@ func (h *DataHandler) RevealPhone(c *gin.Context) {
 	}
 	phone, err := h.Data.RevealPhone(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, http.StatusNotFound, "用户不存在")
+		response.FailErr(c, http.StatusNotFound, "用户不存在", err)
 		return
 	}
 	c.Set("auditReason", "查看完整手机号："+req.Reason+" 工单:"+req.TicketNo)
@@ -57,7 +57,7 @@ func (h *DataHandler) RevealPhone(c *gin.Context) {
 func (h *DataHandler) ListUserGroups(c *gin.Context) {
 	list, err := h.Data.ListUserGroups(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -67,7 +67,7 @@ func (h *DataHandler) ListUserReports(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Data.ListUserReports(c.Request.Context(), c.Param("id"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -77,7 +77,7 @@ func (h *DataHandler) ListUserForwardTasks(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Data.ListUserForwardTasks(c.Request.Context(), c.Param("id"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -126,7 +126,7 @@ func (h *DataHandler) RevokeSessions(c *gin.Context) {
 		return
 	}
 	if err := h.Data.RevokeSessions(c.Request.Context(), c.Param("id")); err != nil {
-		response.Fail(c, 500, "操作失败")
+		response.FailErr(c, 500, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)

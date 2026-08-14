@@ -1,6 +1,7 @@
 package response
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -61,8 +62,21 @@ func Fail(c *gin.Context, httpStatus int, message string) {
 	FailWithCode(c, httpStatus, 1, message)
 }
 
+// FailErr 失败返回并附带底层错误日志（便于控制台定位真实失败原因）
+// 底层 err 只进日志、不回传给前端，避免泄露内部细节
+func FailErr(c *gin.Context, httpStatus int, message string, err error) {
+	if err != nil {
+		log.Printf("[api:err] %s %s requestId=%s http=%d err=%v",
+			c.Request.Method, c.Request.URL.Path, requestID(c), httpStatus, err)
+	}
+	Fail(c, httpStatus, message)
+}
+
 // FailWithCode 失败返回（自定义业务错误码；400 系列用 HTTP 状态码作为业务语义）
 func FailWithCode(c *gin.Context, httpStatus, code int, message string) {
+	// 统一记录失败请求日志，便于控制台/日志定位（requestId 与响应体一致，可联查）
+	log.Printf("[api] %s %s requestId=%s http=%d code=%d message=%q",
+		c.Request.Method, c.Request.URL.Path, requestID(c), httpStatus, code, message)
 	c.JSON(httpStatus, Body{Code: code, Message: message, Data: nil, RequestID: requestID(c)})
 }
 

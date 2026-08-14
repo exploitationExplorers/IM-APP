@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/http"
 	"strings"
 	"time"
 
@@ -87,7 +88,7 @@ func AuthRequired(secret, issuer, audience string) gin.HandlerFunc {
 			return []byte(secret), nil
 		}, jwt.WithIssuer(issuer), jwt.WithAudience(audience), jwt.WithValidMethods([]string{"HS256"}))
 		if err != nil || !token.Valid {
-			response.Unauthorized(c, "登录已过期或无效")
+			response.FailErr(c, http.StatusUnauthorized, "登录已过期或无效", err)
 			c.Abort()
 			return
 		}

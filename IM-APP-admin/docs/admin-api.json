@@ -167,7 +167,33 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "nickname": {
+                    "description": "昵称",
+                    "type": "string"
+                  },
+                  "password": {
+                    "description": "初始密码（至少6位）",
+                    "type": "string"
+                  },
+                  "roleIds": {
+                    "description": "角色 ID 列表",
+                    "type": "array"
+                  },
+                  "status": {
+                    "description": "active|disabled",
+                    "type": "string"
+                  },
+                  "username": {
+                    "description": "登录账号",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "type": "object"
               }
             }
           },
@@ -209,6 +235,7 @@
         "operationId": "PATCH_api_admin_v1_admins_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -221,7 +248,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "nickname": {
+                    "description": "昵称",
+                    "type": "string"
+                  },
+                  "password": {
+                    "description": "新密码（至少6位，不填不改）",
+                    "type": "string"
+                  },
+                  "roleIds": {
+                    "description": "角色 ID 列表",
+                    "type": "array"
+                  },
+                  "status": {
+                    "description": "active|disabled",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
               }
             }
           },
@@ -263,6 +308,7 @@
         "operationId": "POST_api_admin_v1_admins_{id}_mfa_reset",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -275,7 +321,13 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
               }
             }
           },
@@ -317,6 +369,7 @@
         "operationId": "PUT_api_admin_v1_admins_{id}_status",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -329,7 +382,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "status": {
+                    "description": "active|disabled",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -425,7 +492,33 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "description": {
+                    "description": "更新说明",
+                    "type": "string"
+                  },
+                  "downloadUrl": {
+                    "description": "下载地址",
+                    "type": "string"
+                  },
+                  "forceUpgrade": {
+                    "description": "是否强制升级",
+                    "type": "boolean"
+                  },
+                  "platform": {
+                    "description": "android|ios",
+                    "type": "string"
+                  },
+                  "version": {
+                    "description": "版本号",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "platform",
+                  "version"
+                ],
+                "type": "object"
               }
             }
           },
@@ -467,6 +560,7 @@
         "operationId": "PUT_api_admin_v1_app-versions_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -479,7 +573,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "description": {
+                    "description": "更新说明",
+                    "type": "string"
+                  },
+                  "downloadUrl": {
+                    "description": "下载地址",
+                    "type": "string"
+                  },
+                  "forceUpgrade": {
+                    "description": "是否强制升级",
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
               }
             }
           },
@@ -521,6 +629,7 @@
         "operationId": "PUT_api_admin_v1_app-versions_{id}_status",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -533,7 +642,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "status": {
+                    "description": "published|draft",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -638,6 +761,7 @@
         "operationId": "GET_api_admin_v1_audit-logs_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -686,9 +810,11 @@
               "schema": {
                 "properties": {
                   "password": {
+                    "description": "登录密码",
                     "type": "string"
                   },
                   "username": {
+                    "description": "管理员账号",
                     "type": "string"
                   }
                 },
@@ -743,6 +869,7 @@
               "schema": {
                 "properties": {
                   "refreshToken": {
+                    "description": "要注销会话的 refreshToken",
                     "type": "string"
                   }
                 },
@@ -793,15 +920,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "refreshToken": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "refreshToken"
-                ],
-                "type": "object"
+                "$ref": "#/components/schemas/AdminActionRequest"
               }
             }
           },
@@ -847,10 +966,11 @@
               "schema": {
                 "properties": {
                   "challengeToken": {
+                    "description": "上一步 login 返回的 mfaChallenge",
                     "type": "string"
                   },
                   "code": {
-                    "description": "6位验证码",
+                    "description": "6位 TOTP 验证码",
                     "type": "string"
                   }
                 },
@@ -905,6 +1025,7 @@
               "schema": {
                 "properties": {
                   "refreshToken": {
+                    "description": "登录/刷新时返回的 refreshToken",
                     "type": "string"
                   }
                 },
@@ -1016,7 +1137,42 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "cnName": {
+                    "description": "中文名",
+                    "type": "string"
+                  },
+                  "code": {
+                    "description": "国家码（如 CN）",
+                    "type": "string"
+                  },
+                  "dialCode": {
+                    "description": "区号（如 86）",
+                    "type": "string"
+                  },
+                  "enName": {
+                    "description": "英文名",
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "description": "是否启用",
+                    "type": "boolean"
+                  },
+                  "phoneRule": {
+                    "description": "号码规则",
+                    "type": "string"
+                  },
+                  "sortOrder": {
+                    "description": "排序",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "code",
+                  "dialCode",
+                  "cnName"
+                ],
+                "type": "object"
               }
             }
           },
@@ -1058,6 +1214,7 @@
         "operationId": "PUT_api_admin_v1_countries_{code}_status",
         "parameters": [
           {
+            "description": "国家/地区码（如 CN）",
             "in": "path",
             "name": "code",
             "required": true,
@@ -1070,7 +1227,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "enabled": {
+                    "description": "是否启用注册",
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -1328,7 +1499,20 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "filters": {
+                    "description": "过滤条件 JSON",
+                    "type": "string"
+                  },
+                  "resource": {
+                    "description": "导出资源（users/groups/reports 等）",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "resource"
+                ],
+                "type": "object"
               }
             }
           },
@@ -1370,6 +1554,7 @@
         "operationId": "GET_api_admin_v1_forward-limits_users_{userId}",
         "parameters": [
           {
+            "description": "用户 ID（UUID）",
             "in": "path",
             "name": "userId",
             "required": true,
@@ -1412,6 +1597,7 @@
         "operationId": "PUT_api_admin_v1_forward-limits_users_{userId}",
         "parameters": [
           {
+            "description": "用户 ID（UUID）",
             "in": "path",
             "name": "userId",
             "required": true,
@@ -1424,7 +1610,32 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "dailyLimit": {
+                    "description": "每日上限",
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "description": "是否启用限制",
+                    "type": "boolean"
+                  },
+                  "hourlyLimit": {
+                    "description": "每小时上限",
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "singleTargets": {
+                    "description": "单次目标上限",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -1520,7 +1731,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "settings": {
+                    "description": "全局转发规则对象",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "settings",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -1634,6 +1859,7 @@
         "operationId": "GET_api_admin_v1_forward-tasks_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -1678,6 +1904,7 @@
         "operationId": "POST_api_admin_v1_forward-tasks_{id}_cancel",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -1690,7 +1917,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "终止原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -1732,6 +1968,7 @@
         "operationId": "GET_api_admin_v1_forward-tasks_{id}_failures",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -1776,6 +2013,7 @@
         "operationId": "POST_api_admin_v1_forward-tasks_{id}_retry-failed",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -1788,7 +2026,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -1830,6 +2077,7 @@
         "operationId": "GET_api_admin_v1_forward-tasks_{id}_targets",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -1946,6 +2194,7 @@
         "operationId": "GET_api_admin_v1_groups_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -1990,6 +2239,7 @@
         "operationId": "POST_api_admin_v1_groups_{id}_dissolve",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -2002,7 +2252,24 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "idempotencyKey": {
+                    "description": "幂等键",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "解散原因",
+                    "type": "string"
+                  },
+                  "ticketNo": {
+                    "description": "关联工单号",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -2044,6 +2311,7 @@
         "operationId": "PUT_api_admin_v1_groups_{id}_member-add-friend",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -2056,7 +2324,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "enabled": {
+                    "description": "是否允许群内互加好友",
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -2098,6 +2380,7 @@
         "operationId": "GET_api_admin_v1_groups_{id}_members",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -2142,6 +2425,7 @@
         "operationId": "POST_api_admin_v1_groups_{id}_messages_{messageId}_recall",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -2150,6 +2434,7 @@
             }
           },
           {
+            "description": "消息 ID（UUID）",
             "in": "path",
             "name": "messageId",
             "required": true,
@@ -2162,7 +2447,20 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "撤回原因",
+                    "type": "string"
+                  },
+                  "ticketNo": {
+                    "description": "关联工单号",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -2204,6 +2502,7 @@
         "operationId": "PUT_api_admin_v1_groups_{id}_mute-all",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -2216,7 +2515,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "muted": {
+                    "description": "是否全员禁言",
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "muted",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -2258,6 +2571,7 @@
         "operationId": "GET_api_admin_v1_groups_{id}_recall-logs",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -2302,6 +2616,7 @@
         "operationId": "GET_api_admin_v1_groups_{id}_reports",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -2455,7 +2770,40 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "contentUrl": {
+                    "description": "内容 URL",
+                    "type": "string"
+                  },
+                  "language": {
+                    "description": "语言（默认 zh）",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "title": {
+                    "description": "标题",
+                    "type": "string"
+                  },
+                  "type": {
+                    "description": "user_agreement|privacy_policy",
+                    "type": "string"
+                  },
+                  "version": {
+                    "description": "版本号",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "version",
+                  "title",
+                  "contentUrl",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -2497,6 +2845,7 @@
         "operationId": "POST_api_admin_v1_legal-documents_{id}_publish",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -2661,7 +3010,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "code": {
+                    "description": "6位验证码",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
               }
             }
           },
@@ -2705,7 +3063,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "code": {
+                    "description": "6位验证码",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
               }
             }
           },
@@ -2749,7 +3116,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "newPassword": {
+                    "description": "新密码（至少6位）",
+                    "type": "string"
+                  },
+                  "oldPassword": {
+                    "description": "原密码",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "oldPassword",
+                  "newPassword"
+                ],
+                "type": "object"
               }
             }
           },
@@ -2962,6 +3343,7 @@
         "operationId": "POST_api_admin_v1_moderation_profiles_{userId}_reject",
         "parameters": [
           {
+            "description": "用户 ID（UUID）",
             "in": "path",
             "name": "userId",
             "required": true,
@@ -2974,7 +3356,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "field": {
+                    "description": "avatar|nickname",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "驳回原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "field",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3016,6 +3412,7 @@
         "operationId": "POST_api_admin_v1_moderation_profiles_{userId}_restore",
         "parameters": [
           {
+            "description": "用户 ID（UUID）",
             "in": "path",
             "name": "userId",
             "required": true,
@@ -3028,7 +3425,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "field": {
+                    "description": "avatar|nickname",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "field",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3178,7 +3589,33 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "language": {
+                    "description": "语言",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "原因文案",
+                    "type": "string"
+                  },
+                  "sortOrder": {
+                    "description": "排序",
+                    "type": "integer"
+                  },
+                  "status": {
+                    "description": "active|disabled",
+                    "type": "string"
+                  },
+                  "targetType": {
+                    "description": "user|group|message",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "targetType",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3220,6 +3657,7 @@
         "operationId": "PUT_api_admin_v1_report-reasons_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3232,7 +3670,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "language": {
+                    "description": "语言",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "原因文案",
+                    "type": "string"
+                  },
+                  "sortOrder": {
+                    "description": "排序",
+                    "type": "integer"
+                  },
+                  "targetType": {
+                    "description": "user|group|message",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
               }
             }
           },
@@ -3274,6 +3730,7 @@
         "operationId": "PUT_api_admin_v1_report-reasons_{id}_status",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3286,7 +3743,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "status": {
+                    "description": "active|disabled",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3400,6 +3866,7 @@
         "operationId": "GET_api_admin_v1_reports_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3444,6 +3911,7 @@
         "operationId": "GET_api_admin_v1_reports_{id}_actions",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3488,6 +3956,7 @@
         "operationId": "POST_api_admin_v1_reports_{id}_assign",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3500,7 +3969,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "assigneeId": {
+                    "description": "接单管理员 ID",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "assigneeId",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3542,6 +4025,7 @@
         "operationId": "POST_api_admin_v1_reports_{id}_notes",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3554,7 +4038,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "content": {
+                    "description": "备注内容",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3596,6 +4089,7 @@
         "operationId": "POST_api_admin_v1_reports_{id}_reject",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3608,7 +4102,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "驳回原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3650,6 +4153,7 @@
         "operationId": "POST_api_admin_v1_reports_{id}_reopen",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3662,7 +4166,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "重开原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3704,6 +4217,7 @@
         "operationId": "POST_api_admin_v1_reports_{id}_resolve",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3716,7 +4230,24 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "conclusion": {
+                    "description": "结案结论",
+                    "type": "string"
+                  },
+                  "disposeActions": {
+                    "description": "处置动作：warn|restrict_login|restrict_message|ban|mute_all|recall|dissolve",
+                    "type": "array"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3758,6 +4289,7 @@
         "operationId": "POST_api_admin_v1_reports_{id}_start",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3866,7 +4398,29 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "code": {
+                    "description": "角色编码（如 operator）",
+                    "type": "string"
+                  },
+                  "description": {
+                    "description": "描述",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "角色名称",
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "description": "权限码列表（见 /permissions）",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name",
+                  "code"
+                ],
+                "type": "object"
               }
             }
           },
@@ -3908,6 +4462,7 @@
         "operationId": "DELETE_api_admin_v1_roles_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3950,6 +4505,7 @@
         "operationId": "PUT_api_admin_v1_roles_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3962,7 +4518,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "description": {
+                    "description": "描述",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "角色名称",
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "description": "权限码列表",
+                    "type": "array"
+                  },
+                  "status": {
+                    "description": "active|disabled",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
               }
             }
           },
@@ -4067,7 +4641,20 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "category": {
+                    "description": "分类",
+                    "type": "string"
+                  },
+                  "word": {
+                    "description": "敏感词",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "word"
+                ],
+                "type": "object"
               }
             }
           },
@@ -4111,7 +4698,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "category": {
+                    "description": "分类",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "words": {
+                    "description": "敏感词列表",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "words",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -4153,6 +4758,7 @@
         "operationId": "PUT_api_admin_v1_sensitive-words_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4165,7 +4771,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "category": {
+                    "description": "分类",
+                    "type": "string"
+                  },
+                  "status": {
+                    "description": "active|disabled",
+                    "type": "string"
+                  },
+                  "word": {
+                    "description": "敏感词",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
               }
             }
           },
@@ -4207,6 +4827,7 @@
         "operationId": "PUT_api_admin_v1_sensitive-words_{id}_status",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4219,7 +4840,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "status": {
+                    "description": "active|disabled",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "type": "object"
               }
             }
           },
@@ -4333,6 +4963,7 @@
         "operationId": "GET_api_admin_v1_sms_logs_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4539,7 +5170,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "limits": {
+                    "description": "系统限制对象",
+                    "type": "object"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "limits",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -4583,7 +5228,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -4679,6 +5333,7 @@
         "operationId": "GET_api_admin_v1_system_errors_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4795,6 +5450,7 @@
         "operationId": "GET_api_admin_v1_users_{id}",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4839,6 +5495,7 @@
         "operationId": "PUT_api_admin_v1_users_{id}_ban",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4851,7 +5508,33 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "banned": {
+                    "description": "是否封禁",
+                    "type": "boolean"
+                  },
+                  "idempotencyKey": {
+                    "description": "幂等键",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "ticketNo": {
+                    "description": "关联工单号",
+                    "type": "string"
+                  },
+                  "until": {
+                    "description": "截止时间 ISO8601，永久留空",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "banned",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -4893,6 +5576,7 @@
         "operationId": "GET_api_admin_v1_users_{id}_forward-tasks",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4937,6 +5621,7 @@
         "operationId": "GET_api_admin_v1_users_{id}_groups",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4981,6 +5666,7 @@
         "operationId": "PUT_api_admin_v1_users_{id}_login-restriction",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4993,7 +5679,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "banned": {
+                    "description": "是否禁止登录",
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "until": {
+                    "description": "截止时间 ISO8601，永久留空",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "banned",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -5035,6 +5739,7 @@
         "operationId": "PUT_api_admin_v1_users_{id}_message-restriction",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -5047,7 +5752,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "banned": {
+                    "description": "是否禁止发消息",
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "until": {
+                    "description": "截止时间 ISO8601",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "banned",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -5089,6 +5812,7 @@
         "operationId": "POST_api_admin_v1_users_{id}_phone_reveal",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -5101,7 +5825,20 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "查看原因",
+                    "type": "string"
+                  },
+                  "ticketNo": {
+                    "description": "关联工单号",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -5143,6 +5880,7 @@
         "operationId": "GET_api_admin_v1_users_{id}_reports",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -5187,6 +5925,7 @@
         "operationId": "POST_api_admin_v1_users_{id}_sessions_revoke",
         "parameters": [
           {
+            "description": "资源 ID（UUID）",
             "in": "path",
             "name": "id",
             "required": true,
@@ -5199,7 +5938,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },

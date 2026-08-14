@@ -16,7 +16,7 @@ func (h *DataHandler) ListGroups(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Data.ListGroups(c.Request.Context(), c.Query("keyword"), c.Query("status"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -25,7 +25,7 @@ func (h *DataHandler) ListGroups(c *gin.Context) {
 func (h *DataHandler) GetGroup(c *gin.Context) {
 	g, err := h.Data.GetGroupDetail(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, http.StatusNotFound, "群不存在")
+		response.FailErr(c, http.StatusNotFound, "群不存在", err)
 		return
 	}
 	response.OK(c, g)
@@ -34,7 +34,7 @@ func (h *DataHandler) GetGroup(c *gin.Context) {
 func (h *DataHandler) ListGroupMembers(c *gin.Context) {
 	list, err := h.Data.ListGroupMembers(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -44,7 +44,7 @@ func (h *DataHandler) ListGroupReports(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Data.ListGroupReports(c.Request.Context(), c.Param("id"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -96,7 +96,7 @@ func (h *DataHandler) ListGroupRecallLogs(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Data.ListGroupRecallLogs(c.Request.Context(), c.Param("id"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)

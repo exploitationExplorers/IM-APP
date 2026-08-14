@@ -165,15 +165,32 @@ func pathParams(p string) []any {
 	out := make([]any, 0)
 	for _, s := range strings.Split(p, "/") {
 		if strings.HasPrefix(s, ":") {
+			name := strings.TrimPrefix(s, ":")
 			out = append(out, map[string]any{
-				"name":     strings.TrimPrefix(s, ":"),
-				"in":       "path",
-				"required": true,
-				"schema":   map[string]any{"type": "string"},
+				"name":        name,
+				"in":          "path",
+				"required":    true,
+				"description": pathParamDesc(name),
+				"schema":      map[string]any{"type": "string"},
 			})
 		}
 	}
 	return out
+}
+
+func pathParamDesc(name string) string {
+	switch name {
+	case "id":
+		return "资源 ID（UUID）"
+	case "userId":
+		return "用户 ID（UUID）"
+	case "messageId":
+		return "消息 ID（UUID）"
+	case "code":
+		return "国家/地区码（如 CN）"
+	default:
+		return "资源 ID"
+	}
 }
 
 func queryParams(method, p string) []any {
@@ -210,42 +227,275 @@ func param(name, in, desc, typ string, required bool) map[string]any {
 	}
 }
 
-// requestBody 写操作统一要求 reason；登录/刷新/二次验证给专用结构
+// requestBody 写操作请求体：优先使用业务字段映射（含必填/选填），未覆盖的用 AdminActionRequest
 func requestBody(method, p string) any {
+	key := strings.ToUpper(method) + " " + openapiPath(p)
+	if fields, ok := writeBodyFields[key]; ok {
+		return bodyFromFields(fields)
+	}
 	if method == "GET" || method == "DELETE" {
 		return nil
 	}
-	ref := func(schema string) any {
-		return map[string]any{
-			"required": true,
-			"content":  map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/" + schema}}},
+	return map[string]any{
+		"required": true,
+		"content":  map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/AdminActionRequest"}}},
+	}
+}
+
+// fieldSpec 请求体字段定义
+type fieldSpec struct {
+	Name     string
+	Type     string
+	Required bool
+	Desc     string
+}
+
+func bodyFromFields(fields []fieldSpec) any {
+	props := map[string]any{}
+	required := []string{}
+	for _, f := range fields {
+		prop := map[string]any{"type": f.Type}
+		if f.Desc != "" {
+			prop["description"] = f.Desc
+		}
+		props[f.Name] = prop
+		if f.Required {
+			required = append(required, f.Name)
 		}
 	}
-	switch {
-	case strings.Contains(p, "/auth/login"):
-		return map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
-			"type": "object", "required": []string{"username", "password"},
-			"properties": map[string]any{
-				"username": map[string]any{"type": "string"},
-				"password": map[string]any{"type": "string"},
-			},
-		}}}}
-	case strings.Contains(p, "/auth/mfa/verify"):
-		return map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
-			"type": "object", "required": []string{"challengeToken", "code"},
-			"properties": map[string]any{
-				"challengeToken": map[string]any{"type": "string"},
-				"code":           map[string]any{"type": "string", "description": "6位验证码"},
-			},
-		}}}}
-	case strings.Contains(p, "/auth/token/refresh"), strings.Contains(p, "/auth/logout"):
-		return map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
-			"type": "object", "required": []string{"refreshToken"},
-			"properties": map[string]any{"refreshToken": map[string]any{"type": "string"}},
-		}}}}
-	default:
-		return ref("AdminActionRequest")
+	schema := map[string]any{"type": "object", "properties": props}
+	if len(required) > 0 {
+		schema["required"] = required
 	}
+	return map[string]any{
+		"required": true,
+		"content":  map[string]any{"application/json": map[string]any{"schema": schema}},
+	}
+}
+
+// writeBodyFields 各写操作请求体字段（key = 方法 + OpenAPI 路径）
+var writeBodyFields = map[string][]fieldSpec{
+	"POST /api/admin/v1/auth/login": {
+		{"username", "string", true, "管理员账号"},
+		{"password", "string", true, "登录密码"},
+	},
+	"POST /api/admin/v1/auth/mfa/verify": {
+		{"challengeToken", "string", true, "上一步 login 返回的 mfaChallenge"},
+		{"code", "string", true, "6位 TOTP 验证码"},
+	},
+	"POST /api/admin/v1/auth/token/refresh": {
+		{"refreshToken", "string", true, "登录/刷新时返回的 refreshToken"},
+	},
+	"POST /api/admin/v1/auth/logout": {
+		{"refreshToken", "string", true, "要注销会话的 refreshToken"},
+	},
+	"PUT /api/admin/v1/me/password": {
+		{"oldPassword", "string", true, "原密码"},
+		{"newPassword", "string", true, "新密码（至少6位）"},
+	},
+	"POST /api/admin/v1/me/mfa/setup": {
+		{"code", "string", true, "6位验证码"},
+	},
+	"POST /api/admin/v1/me/mfa/disable": {
+		{"code", "string", true, "6位验证码"},
+	},
+	"POST /api/admin/v1/admins": {
+		{"username", "string", true, "登录账号"},
+		{"password", "string", true, "初始密码（至少6位）"},
+		{"nickname", "string", false, "昵称"},
+		{"roleIds", "array", false, "角色 ID 列表"},
+		{"status", "string", false, "active|disabled"},
+	},
+	"PATCH /api/admin/v1/admins/{id}": {
+		{"password", "string", false, "新密码（至少6位，不填不改）"},
+		{"nickname", "string", false, "昵称"},
+		{"roleIds", "array", false, "角色 ID 列表"},
+		{"status", "string", false, "active|disabled"},
+	},
+	"PUT /api/admin/v1/admins/{id}/status": {
+		{"status", "string", true, "active|disabled"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/admins/{id}/mfa/reset": {
+		{"reason", "string", false, "操作原因"},
+	},
+	"POST /api/admin/v1/roles": {
+		{"name", "string", true, "角色名称"},
+		{"code", "string", true, "角色编码（如 operator）"},
+		{"description", "string", false, "描述"},
+		{"permissions", "array", false, "权限码列表（见 /permissions）"},
+	},
+	"PUT /api/admin/v1/roles/{id}": {
+		{"name", "string", false, "角色名称"},
+		{"description", "string", false, "描述"},
+		{"status", "string", false, "active|disabled"},
+		{"permissions", "array", false, "权限码列表"},
+	},
+	"POST /api/admin/v1/users/{id}/phone/reveal": {
+		{"reason", "string", true, "查看原因"},
+		{"ticketNo", "string", false, "关联工单号"},
+	},
+	"PUT /api/admin/v1/users/{id}/login-restriction": {
+		{"banned", "boolean", true, "是否禁止登录"},
+		{"until", "string", false, "截止时间 ISO8601，永久留空"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"PUT /api/admin/v1/users/{id}/message-restriction": {
+		{"banned", "boolean", true, "是否禁止发消息"},
+		{"until", "string", false, "截止时间 ISO8601"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"PUT /api/admin/v1/users/{id}/ban": {
+		{"banned", "boolean", true, "是否封禁"},
+		{"until", "string", false, "截止时间 ISO8601，永久留空"},
+		{"reason", "string", true, "操作原因"},
+		{"ticketNo", "string", false, "关联工单号"},
+		{"idempotencyKey", "string", false, "幂等键"},
+	},
+	"POST /api/admin/v1/users/{id}/sessions/revoke": {
+		{"reason", "string", true, "操作原因"},
+	},
+	"PUT /api/admin/v1/groups/{id}/mute-all": {
+		{"muted", "boolean", true, "是否全员禁言"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"PUT /api/admin/v1/groups/{id}/member-add-friend": {
+		{"enabled", "boolean", true, "是否允许群内互加好友"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/groups/{id}/dissolve": {
+		{"reason", "string", true, "解散原因"},
+		{"ticketNo", "string", false, "关联工单号"},
+		{"idempotencyKey", "string", false, "幂等键"},
+	},
+	"POST /api/admin/v1/groups/{id}/messages/{messageId}/recall": {
+		{"reason", "string", true, "撤回原因"},
+		{"ticketNo", "string", false, "关联工单号"},
+	},
+	"POST /api/admin/v1/reports/{id}/assign": {
+		{"assigneeId", "string", true, "接单管理员 ID"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/reports/{id}/notes": {
+		{"content", "string", true, "备注内容"},
+	},
+	"POST /api/admin/v1/reports/{id}/resolve": {
+		{"conclusion", "string", false, "结案结论"},
+		{"disposeActions", "array", false, "处置动作：warn|restrict_login|restrict_message|ban|mute_all|recall|dissolve"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/reports/{id}/reject": {
+		{"reason", "string", true, "驳回原因"},
+	},
+	"POST /api/admin/v1/reports/{id}/reopen": {
+		{"reason", "string", true, "重开原因"},
+	},
+	"POST /api/admin/v1/forward-tasks/{id}/cancel": {
+		{"reason", "string", true, "终止原因"},
+	},
+	"POST /api/admin/v1/forward-tasks/{id}/retry-failed": {
+		{"reason", "string", true, "操作原因"},
+	},
+	"PUT /api/admin/v1/forward-limits/users/{userId}": {
+		{"dailyLimit", "integer", false, "每日上限"},
+		{"hourlyLimit", "integer", false, "每小时上限"},
+		{"singleTargets", "integer", false, "单次目标上限"},
+		{"enabled", "boolean", false, "是否启用限制"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"PUT /api/admin/v1/forward-settings": {
+		{"settings", "object", true, "全局转发规则对象"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/countries": {
+		{"code", "string", true, "国家码（如 CN）"},
+		{"dialCode", "string", true, "区号（如 86）"},
+		{"cnName", "string", true, "中文名"},
+		{"enName", "string", false, "英文名"},
+		{"phoneRule", "string", false, "号码规则"},
+		{"enabled", "boolean", false, "是否启用"},
+		{"sortOrder", "integer", false, "排序"},
+	},
+	"PUT /api/admin/v1/countries/{code}/status": {
+		{"enabled", "boolean", true, "是否启用注册"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/app-versions": {
+		{"platform", "string", true, "android|ios"},
+		{"version", "string", true, "版本号"},
+		{"description", "string", false, "更新说明"},
+		{"downloadUrl", "string", false, "下载地址"},
+		{"forceUpgrade", "boolean", false, "是否强制升级"},
+	},
+	"PUT /api/admin/v1/app-versions/{id}": {
+		{"description", "string", false, "更新说明"},
+		{"downloadUrl", "string", false, "下载地址"},
+		{"forceUpgrade", "boolean", false, "是否强制升级"},
+	},
+	"PUT /api/admin/v1/app-versions/{id}/status": {
+		{"status", "string", true, "published|draft"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/legal-documents": {
+		{"type", "string", true, "user_agreement|privacy_policy"},
+		{"version", "string", true, "版本号"},
+		{"language", "string", false, "语言（默认 zh）"},
+		{"title", "string", true, "标题"},
+		{"contentUrl", "string", true, "内容 URL"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/report-reasons": {
+		{"targetType", "string", true, "user|group|message"},
+		{"reason", "string", true, "原因文案"},
+		{"language", "string", false, "语言"},
+		{"sortOrder", "integer", false, "排序"},
+		{"status", "string", false, "active|disabled"},
+	},
+	"PUT /api/admin/v1/report-reasons/{id}": {
+		{"targetType", "string", false, "user|group|message"},
+		{"reason", "string", false, "原因文案"},
+		{"language", "string", false, "语言"},
+		{"sortOrder", "integer", false, "排序"},
+	},
+	"PUT /api/admin/v1/report-reasons/{id}/status": {
+		{"status", "string", true, "active|disabled"},
+	},
+	"PUT /api/admin/v1/system-limits": {
+		{"limits", "object", true, "系统限制对象"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/system-limits/publish": {
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/sensitive-words": {
+		{"word", "string", true, "敏感词"},
+		{"category", "string", false, "分类"},
+	},
+	"POST /api/admin/v1/sensitive-words/import": {
+		{"words", "array", true, "敏感词列表"},
+		{"category", "string", false, "分类"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"PUT /api/admin/v1/sensitive-words/{id}": {
+		{"word", "string", false, "敏感词"},
+		{"category", "string", false, "分类"},
+		{"status", "string", false, "active|disabled"},
+	},
+	"PUT /api/admin/v1/sensitive-words/{id}/status": {
+		{"status", "string", true, "active|disabled"},
+	},
+	"POST /api/admin/v1/moderation/profiles/{userId}/reject": {
+		{"field", "string", true, "avatar|nickname"},
+		{"reason", "string", true, "驳回原因"},
+	},
+	"POST /api/admin/v1/moderation/profiles/{userId}/restore": {
+		{"field", "string", true, "avatar|nickname"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/exports": {
+		{"resource", "string", true, "导出资源（users/groups/reports 等）"},
+		{"filters", "string", false, "过滤条件 JSON"},
+	},
 }
 
 // tagFor 按路径分组到清单模块

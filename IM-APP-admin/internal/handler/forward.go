@@ -22,7 +22,7 @@ func (h *OpsHandler) ListForwardTasks(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Svc.ListForwardTasks(c.Request.Context(), c.Query("status"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -31,7 +31,7 @@ func (h *OpsHandler) ListForwardTasks(c *gin.Context) {
 func (h *OpsHandler) GetForwardTask(c *gin.Context) {
 	t, err := h.Svc.GetForwardTask(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, http.StatusNotFound, "任务不存在")
+		response.FailErr(c, http.StatusNotFound, "任务不存在", err)
 		return
 	}
 	response.OK(c, t)
@@ -41,7 +41,7 @@ func (h *OpsHandler) ListForwardTargets(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Svc.ListForwardTargets(c.Request.Context(), c.Param("id"), c.Query("status"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -50,7 +50,7 @@ func (h *OpsHandler) ListForwardTargets(c *gin.Context) {
 func (h *OpsHandler) ForwardFailures(c *gin.Context) {
 	list, err := h.Svc.ForwardFailures(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -88,7 +88,7 @@ func (h *OpsHandler) RetryForwardTask(c *gin.Context) {
 func (h *OpsHandler) GetForwardUserLimit(c *gin.Context) {
 	l, err := h.Svc.GetForwardUserLimit(c.Request.Context(), c.Param("userId"))
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, l)
@@ -111,7 +111,7 @@ func (h *OpsHandler) SetForwardUserLimit(c *gin.Context) {
 func (h *OpsHandler) GetForwardSettings(c *gin.Context) {
 	s, err := h.Svc.GetForwardSettings(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, s)

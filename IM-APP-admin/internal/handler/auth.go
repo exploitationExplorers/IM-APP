@@ -66,7 +66,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			status = http.StatusInternalServerError
 			msg = "登录失败"
 		}
-		response.Fail(c, status, msg)
+		response.FailErr(c, status, msg, err)
 		return
 	}
 	h.Limiter.Clear(key)
@@ -124,7 +124,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // LogoutAll 退出全部后台会话
 func (h *AuthHandler) LogoutAll(c *gin.Context) {
 	if err := h.Svc.LogoutAll(c.Request.Context(), middleware.AdminID(c)); err != nil {
-		response.Fail(c, 500, "操作失败")
+		response.FailErr(c, 500, "操作失败", err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -134,7 +134,7 @@ func (h *AuthHandler) LogoutAll(c *gin.Context) {
 func (h *AuthHandler) Me(c *gin.Context) {
 	me, err := h.Svc.Me(c.Request.Context(), middleware.AdminID(c))
 	if err != nil {
-		response.Fail(c, http.StatusNotFound, "管理员不存在")
+		response.FailErr(c, http.StatusNotFound, "管理员不存在", err)
 		return
 	}
 	response.OK(c, me)
@@ -159,7 +159,7 @@ func (h *AuthHandler) MFAStatus(c *gin.Context) {
 	adminID := middleware.AdminID(c)
 	secret, enabled, err := h.Svc.MFAStatus(c.Request.Context(), adminID)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	payload := gin.H{"enabled": enabled}

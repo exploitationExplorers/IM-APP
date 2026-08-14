@@ -15,7 +15,7 @@ import (
 func (h *OpsHandler) ListAppVersions(c *gin.Context) {
 	list, err := h.Svc.ListAppVersions(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -66,7 +66,7 @@ func (h *OpsHandler) SetAppVersionStatus(c *gin.Context) {
 func (h *OpsHandler) ListLegalDocuments(c *gin.Context) {
 	list, err := h.Svc.ListLegalDocuments(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -99,7 +99,7 @@ func (h *OpsHandler) PublishLegalDocument(c *gin.Context) {
 func (h *OpsHandler) ListReportReasons(c *gin.Context) {
 	list, err := h.Svc.ListReportReasons(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -149,7 +149,7 @@ func (h *OpsHandler) SetReportReasonStatus(c *gin.Context) {
 func (h *OpsHandler) GetSystemLimits(c *gin.Context) {
 	l, err := h.Svc.GetSystemLimits(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, l)

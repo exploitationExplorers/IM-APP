@@ -16,7 +16,7 @@ func (h *DataHandler) ListReports(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Data.ListReports(c.Request.Context(), c.Query("status"), c.Query("targetType"), c.Query("keyword"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -25,7 +25,7 @@ func (h *DataHandler) ListReports(c *gin.Context) {
 func (h *DataHandler) GetReport(c *gin.Context) {
 	rp, err := h.Data.GetReport(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, http.StatusNotFound, "举报不存在")
+		response.FailErr(c, http.StatusNotFound, "举报不存在", err)
 		return
 	}
 	response.OK(c, rp)
@@ -111,7 +111,7 @@ func (h *DataHandler) ReopenReport(c *gin.Context) {
 func (h *DataHandler) ListReportActions(c *gin.Context) {
 	list, err := h.Data.ListReportActions(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)

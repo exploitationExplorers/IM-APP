@@ -33,7 +33,7 @@ func RequirePermission(checker PermissionChecker, permission string) gin.Handler
 		}
 		ok, err := checker.HasPermission(c.Request.Context(), adminID, permission)
 		if err != nil {
-			response.Fail(c, 500, "权限校验失败")
+			response.FailErr(c, 500, "权限校验失败", err)
 			c.Abort()
 			return
 		}

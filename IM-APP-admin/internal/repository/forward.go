@@ -73,18 +73,21 @@ func (r *OpsRepo) GetForwardTask(ctx context.Context, taskID string) (*models.Fo
 
 func (r *OpsRepo) ListForwardTargets(ctx context.Context, taskID, status string, limit, offset int) ([]models.ForwardTarget, int64, error) {
 	where := " WHERE t.task_id=$1::uuid"
+	args := []any{taskID}
 	if status != "" && status != "all" {
-		where += " AND t.status=$3"
+		args = append(args, status)
+		where += " AND t.status=$" + itoa(len(args))
 	}
 	var total int64
-	if err := r.DB.QueryRow(ctx, "SELECT COUNT(*) FROM forward_task_targets t"+where, taskID, status).Scan(&total); err != nil {
+	if err := r.DB.QueryRow(ctx, "SELECT COUNT(*) FROM forward_task_targets t"+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
+	qargs := append(append([]any{}, args...), limit, offset)
 	rows, err := r.DB.Query(ctx, `
 		SELECT t.id::text, t.user_id::text, COALESCE(u.nickname,''), t.status, t.attempts,
 		       COALESCE(t.message_id::text,''), COALESCE(t.fail_code,''), t.finished_at
 		FROM forward_task_targets t LEFT JOIN users u ON u.id=t.user_id`+where+
-		" ORDER BY t.created_at LIMIT $2 OFFSET $4", taskID, status, limit, offset)
+		" ORDER BY t.created_at LIMIT $"+itoa(len(qargs)-1)+" OFFSET $"+itoa(len(qargs)), qargs...)
 	if err != nil {
 		return nil, 0, err
 	}

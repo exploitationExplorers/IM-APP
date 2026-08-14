@@ -28,6 +28,8 @@ func BuildRouter(d Deps) *gin.Engine {
 	auditRepo := d.AuditRepo
 
 	r := gin.New()
+	// 访问日志：记录每个请求的方法、路径、状态码与耗时（含 4xx/5xx，便于在控制台定位）
+	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 	r.Use(middleware.RequestID(cfg))
 	r.Use(middleware.CORS(cfg.CORSOrigins))

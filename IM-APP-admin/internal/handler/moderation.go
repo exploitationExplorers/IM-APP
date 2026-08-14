@@ -15,7 +15,7 @@ import (
 func (h *OpsHandler) ListSensitiveWords(c *gin.Context) {
 	list, err := h.Svc.ListSensitiveWords(c.Request.Context(), c.Query("keyword"))
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -81,7 +81,7 @@ func (h *OpsHandler) ListModerationHits(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Svc.ListModerationHits(c.Request.Context(), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -91,7 +91,7 @@ func (h *OpsHandler) ListProfileModerations(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Svc.ListProfileModerations(c.Request.Context(), c.Query("status"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)

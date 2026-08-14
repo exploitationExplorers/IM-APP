@@ -53,7 +53,7 @@ func (h *RBACHandler) ListAdmins(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Svc.ListAdmins(c.Request.Context(), c.Query("keyword"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -98,7 +98,7 @@ func (h *RBACHandler) SetAdminStatus(c *gin.Context) {
 		if errors.Is(err, service.ErrLastSuperAdmin) {
 			msg = "不能停用系统中最后一个可用超级管理员"
 		}
-		response.Fail(c, http.StatusBadRequest, msg)
+		response.FailErr(c, http.StatusBadRequest, msg, err)
 		return
 	}
 	c.Set("auditReason", req.Reason+" 状态->"+req.Status)
@@ -109,7 +109,7 @@ func (h *RBACHandler) ResetMFA(c *gin.Context) {
 	var req models.MFAResetRequest
 	_ = c.ShouldBindJSON(&req)
 	if err := h.Svc.ResetMFA(c.Request.Context(), c.Param("id")); err != nil {
-		response.Fail(c, http.StatusBadRequest, "重置失败")
+		response.FailErr(c, http.StatusBadRequest, "重置失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason+" 重置 MFA")
@@ -121,7 +121,7 @@ func (h *RBACHandler) ResetMFA(c *gin.Context) {
 func (h *RBACHandler) ListRoles(c *gin.Context) {
 	list, err := h.Svc.ListRoles(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -162,7 +162,7 @@ func (h *RBACHandler) DeleteRole(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 	if err := h.Svc.DeleteRole(c.Request.Context(), c.Param("id")); err != nil {
-		response.Fail(c, http.StatusBadRequest, "删除失败：内置角色或已被使用")
+		response.FailErr(c, http.StatusBadRequest, "删除失败：内置角色或已被使用", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -172,7 +172,7 @@ func (h *RBACHandler) DeleteRole(c *gin.Context) {
 func (h *RBACHandler) ListPermissions(c *gin.Context) {
 	list, err := h.Svc.ListPermissions(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -184,7 +184,7 @@ func (h *RBACHandler) ListAuditLogs(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Svc.ListAuditLogs(c.Request.Context(), c.Query("keyword"), c.Query("result"), c.Query("resource"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -198,7 +198,7 @@ func (h *RBACHandler) GetAuditLog(c *gin.Context) {
 	}
 	log, err := h.Svc.GetAuditLog(c.Request.Context(), id)
 	if err != nil {
-		response.Fail(c, http.StatusNotFound, "记录不存在")
+		response.FailErr(c, http.StatusNotFound, "记录不存在", err)
 		return
 	}
 	response.OK(c, log)
@@ -208,7 +208,7 @@ func (h *RBACHandler) ListLoginLogs(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Svc.ListLoginLogs(c.Request.Context(), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)

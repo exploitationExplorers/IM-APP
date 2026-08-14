@@ -14,7 +14,7 @@ import (
 func (h *OpsHandler) ListCountries(c *gin.Context) {
 	list, err := h.Svc.ListCountries(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)
@@ -52,7 +52,7 @@ func (h *OpsHandler) ListSmsLogs(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Svc.ListSmsLogs(c.Request.Context(), c.Query("keyword"), c.Query("status"), page, size)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
@@ -66,7 +66,7 @@ func (h *OpsHandler) GetSmsLog(c *gin.Context) {
 	}
 	l, err := h.Svc.GetSmsLog(c.Request.Context(), id)
 	if err != nil {
-		response.Fail(c, http.StatusNotFound, "记录不存在")
+		response.FailErr(c, http.StatusNotFound, "记录不存在", err)
 		return
 	}
 	response.OK(c, l)
@@ -76,7 +76,7 @@ func (h *OpsHandler) SmsStatistics(c *gin.Context) {
 	days := atoi(c.Query("days"), 7)
 	st, err := h.Svc.SmsStatistics(c.Request.Context(), days)
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, st)
@@ -85,7 +85,7 @@ func (h *OpsHandler) SmsStatistics(c *gin.Context) {
 func (h *OpsHandler) ProviderHealth(c *gin.Context) {
 	list, err := h.Svc.ProviderHealth(c.Request.Context())
 	if err != nil {
-		response.Fail(c, 500, "查询失败")
+		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OK(c, list)

@@ -10,11 +10,13 @@ import (
 
 func (r *OpsRepo) ListSensitiveWords(ctx context.Context, keyword string) ([]models.SensitiveWord, error) {
 	where := ""
+	var args []any
 	if keyword != "" {
 		where = " WHERE word ILIKE '%'||$1||'%'"
+		args = append(args, keyword)
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT id::text, word, category, status, created_at FROM sensitive_words`+where+` ORDER BY created_at DESC`, keyword)
+		SELECT id::text, word, category, status, created_at FROM sensitive_words`+where+` ORDER BY created_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,17 +94,20 @@ func (r *OpsRepo) ListModerationHits(ctx context.Context, page, size int) ([]mod
 
 func (r *OpsRepo) ListProfileModerations(ctx context.Context, status string, page, size int) ([]models.ProfileModeration, int64, error) {
 	where := ""
+	args := make([]any, 0)
 	if status != "" && status != "all" {
-		where = " WHERE status=$1"
+		args = append(args, status)
+		where = " WHERE status=$" + itoa(len(args))
 	}
 	var total int64
-	if err := r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM profile_moderation_records`+where, status).Scan(&total); err != nil {
+	if err := r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM profile_moderation_records`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
+	qargs := append(append([]any{}, args...), size, (page-1)*size)
 	rows, err := r.DB.Query(ctx, `
 		SELECT id, user_id::text, field, old_value, new_value, status, reason, handled_at
 		FROM profile_moderation_records`+where+`
-		ORDER BY created_at DESC LIMIT $2 OFFSET $3`, status, size, (page-1)*size)
+		ORDER BY created_at DESC LIMIT $`+itoa(len(qargs)-1)+` OFFSET $`+itoa(len(qargs)), qargs...)
 	if err != nil {
 		return nil, 0, err
 	}
