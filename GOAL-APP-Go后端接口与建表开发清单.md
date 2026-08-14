@@ -3,6 +3,8 @@
 > 文档状态：开发基线（仅 APP，不含运营管理后台）  
 > API 前缀：`/api/v1`  
 > 依据：最终需求范围、`site-api-capture.md`、当前前端 `src/api` / `src/types` / `src/mock`、现有 Go 服务与 migrations。
+>
+> 本清单只约束 Go 后端接口、数据库与服务端集成，不包含前端页面或前端代码修改。
 
 ## 1. 最终目标与边界
 
@@ -509,7 +511,7 @@ P1 可选表：`favorites`、`user_stickers`。
 6. 完成会话、类型化消息、游标分页、幂等发送、已读、撤回和同步。
 7. 完成设备注册、离线推送和设置。
 8. 完成万人转发任务、目标明细、重试、限流和压力测试。
-9. APP 全量联调，移除页面中的临时本地路径消息和假设置。
+9. 后端 API 契约、数据库迁移、权限与依赖降级场景完成全量验收；前端联调不在本清单范围内。
 
 最低验收门槛：
 
@@ -526,6 +528,5 @@ P1 可选表：`favorites`、`user_stickers`。
 - `IM-APP-server/docs/api-contract.md`：实现时按本文收敛为正式 OpenAPI，不继续扩展旧的简化契约。
 - `IM-APP-server/migrations/001_init.sql` 至 `004_forward_tasks.sql`：保留为历史迁移，新增迁移修正 E.164 唯一键、session、群申请、消息状态、目标明细等；不要直接修改已发布迁移。
 - `IM-APP-server/internal/models`：拆分 db model 与 API DTO，禁止直接把数据库 User 序列化给客户端。
-- `IM-APP-fronend/src/types`：同步本文字段；`ChatMessage.content` 从字符串升级为类型化对象。
-- `IM-APP-fronend/src/api` 与 `src/mock/handlers`：所有真实 API 与 mock 使用同一个契约，补齐 cursor、错误码、幂等键和空列表结构。
+- 前端字段适配、API 调用与 Mock 调整由独立前端任务负责，本后端任务不修改 `IM-APP-fronend`。
 - `site-api-capture.md` 含真实站点凭据，不应提交公共仓库；建议轮换其中 Token/密码并移出版本控制。

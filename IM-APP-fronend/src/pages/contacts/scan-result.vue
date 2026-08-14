@@ -35,7 +35,7 @@ onLoad(async (query) => {
   const token = (query?.token as string) || ''
   loading.value = true
   try {
-    await contactStore.loadAll()
+    await contactStore.loadDirectory()
     if (token) {
       const result = await resolveUserQRCode(token)
       relation.value = (result.relation || result.user.relation || 'none') as typeof relation.value

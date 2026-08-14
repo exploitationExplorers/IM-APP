@@ -71,11 +71,11 @@ func DevPresign(c *gin.Context) {
 	base := strings.TrimSuffix(c.Request.Host, ":8080")
 	fileURL := fmt.Sprintf("http://%s/static/%s", base, path.Base(objectKey))
 	response.OK(c, gin.H{
-		"uploadUrl":  fileURL,
-		"fileUrl":    fileURL,
-		"objectKey":  objectKey,
-		"expiresIn":  900,
-		"devMode":    true,
+		"uploadUrl": fileURL,
+		"fileUrl":   fileURL,
+		"objectKey": objectKey,
+		"expiresIn": 900,
+		"devMode":   true,
 	})
 }
 
@@ -123,7 +123,7 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 
 // Complete 确认上传完成，文件转 ready 后可用于头像/消息
 func (h *FileHandler) Complete(c *gin.Context) {
-	f, err := h.Files.MarkReady(c.Request.Context(), c.Param("fileId"))
+	f, err := h.Files.MarkReady(c.Request.Context(), c.Param("fileId"), middleware.UserID(c))
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "文件不存在或已处理")
 		return
@@ -133,7 +133,7 @@ func (h *FileHandler) Complete(c *gin.Context) {
 
 // Get 查询已完成文件信息
 func (h *FileHandler) Get(c *gin.Context) {
-	f, err := h.Files.FindByID(c.Request.Context(), c.Param("fileId"))
+	f, err := h.Files.FindByID(c.Request.Context(), c.Param("fileId"), middleware.UserID(c))
 	if err != nil {
 		response.Fail(c, http.StatusNotFound, "文件不存在")
 		return

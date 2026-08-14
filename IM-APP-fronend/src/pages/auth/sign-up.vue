@@ -35,11 +35,6 @@ function startCountdown(seconds: number) {
   }, 1000)
 }
 
-/** 参考站注册页不收集密码；接口仍要求 password，提交时生成临时密码，可之后在安全设置 / 忘记密码中修改 */
-function genTempPassword() {
-  return `Im${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-}
-
 async function onSendCode() {
   if (countdown.value > 0) return
   if (!validatePhoneInput()) return
@@ -60,7 +55,7 @@ async function onRegister() {
   }
   loading.value = true
   try {
-    await userStore.register(phone.value, code.value, genTempPassword(), countryCode.value)
+    await userStore.register(phone.value, code.value, '', countryCode.value)
     uni.redirectTo({ url: '/pages/auth/onboarding' })
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })

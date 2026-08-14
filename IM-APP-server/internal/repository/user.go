@@ -22,10 +22,10 @@ func (r *UserRepo) FindByID(ctx context.Context, id string) (models.User, error)
 	var u models.User
 	err := r.DB.QueryRow(ctx, `
 		SELECT id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at
+			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
 		FROM users WHERE id=$1`, id,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
-		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
 	return u, err
 }
 
@@ -33,10 +33,10 @@ func (r *UserRepo) FindByPhone(ctx context.Context, phone string) (models.User, 
 	var u models.User
 	err := r.DB.QueryRow(ctx, `
 		SELECT id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at
+			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
 		FROM users WHERE phone=$1`, phone,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
-		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
 	return u, err
 }
 
@@ -44,16 +44,21 @@ func (r *UserRepo) FindByPublicID(ctx context.Context, publicID string) (models.
 	var u models.User
 	err := r.DB.QueryRow(ctx, `
 		SELECT id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at
+			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
 		FROM users WHERE public_id=$1`, publicID,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
-		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
 	return u, err
 }
 
 func (r *UserRepo) UpdateProfile(ctx context.Context, id string, nickname, avatar, bio *string) (models.User, error) {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return models.User{}, err
+	}
+	defer tx.Rollback(ctx)
 	var u models.User
-	err := r.DB.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE users SET
 			nickname = COALESCE($2, nickname),
 			avatar = COALESCE($3, avatar),
@@ -61,11 +66,22 @@ func (r *UserRepo) UpdateProfile(ctx context.Context, id string, nickname, avata
 			updated_at = NOW()
 		WHERE id=$1
 		RETURNING id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at`,
+			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)`,
 		id, nickname, avatar, bio,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
-		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
-	return u, err
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
+	if err != nil {
+		return u, err
+	}
+	if err := EnqueueIMSyncTx(ctx, tx, IMEventUserProfileUpdated, u.ID, map[string]string{
+		"nickname": u.Nickname, "avatar": u.Avatar,
+	}); err != nil {
+		return models.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.User{}, err
+	}
+	return u, nil
 }
 
 func (r *UserRepo) NextPublicID(ctx context.Context) (string, error) {
@@ -79,13 +95,13 @@ func (r *UserRepo) NextPublicID(ctx context.Context) (string, error) {
 func (r *UserRepo) Create(ctx context.Context, phone, countryCode, passwordHash, nickname, publicID string) (models.User, error) {
 	var u models.User
 	err := r.DB.QueryRow(ctx, `
-		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id)
-		VALUES($1,$2,$3,$4,'',$5)
+		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id, password_set)
+		VALUES($1,$2,$3,$4,'',$5,$6)
 		RETURNING id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at`,
-		phone, countryCode, passwordHash, nickname, publicID,
+			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)`,
+		phone, countryCode, passwordHash, nickname, publicID, passwordHash != "",
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
-		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt)
+		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
 	return u, err
 }
 
@@ -138,7 +154,7 @@ func (r *UserRepo) ResolveUserQRCode(ctx context.Context, token string) (models.
 // UpdatePassword 更新登录密码
 func (r *UserRepo) UpdatePassword(ctx context.Context, userID, passwordHash string) error {
 	tag, err := r.DB.Exec(ctx, `
-		UPDATE users SET password_hash=$1, updated_at=NOW() WHERE id=$2::uuid`, passwordHash, userID)
+		UPDATE users SET password_hash=$1, password_set=true, updated_at=NOW() WHERE id=$2::uuid`, passwordHash, userID)
 	if err != nil {
 		return err
 	}

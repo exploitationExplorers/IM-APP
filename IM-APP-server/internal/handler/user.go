@@ -47,6 +47,24 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	response.OK(c, toMeProfile(u))
 }
 
+func (h *UserHandler) VerifyPassword(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.VerifyPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.OldPassword == "" {
+		response.Fail(c, http.StatusBadRequest, "请输入旧密码")
+		return
+	}
+	if err := h.Svc.VerifyPassword(c.Request.Context(), uid, req.OldPassword); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "用户不存在")
+			return
+		}
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
 func (h *UserHandler) ChangePassword(c *gin.Context) {
 	uid := middleware.UserID(c)
 	var req models.ChangePasswordRequest
@@ -55,6 +73,10 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.ChangePassword(c.Request.Context(), uid, req.Password, req.OldPassword); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "用户不存在")
+			return
+		}
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}

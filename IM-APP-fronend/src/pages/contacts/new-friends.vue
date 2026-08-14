@@ -9,7 +9,7 @@ const contactStore = useContactStore()
 const loaded = ref(false)
 
 onMounted(async () => {
-  await contactStore.loadAll()
+  await contactStore.loadFriendRequests()
   loaded.value = true
 })
 

@@ -23,7 +23,7 @@ onShow(async () => {
     await chatStore.loadConversations().catch(() => undefined)
   }
   if (!contactStore.contacts.length && !contactStore.groups.length) {
-    await contactStore.loadAll().catch(() => undefined)
+    await contactStore.loadDirectory().catch(() => undefined)
   }
 })
 

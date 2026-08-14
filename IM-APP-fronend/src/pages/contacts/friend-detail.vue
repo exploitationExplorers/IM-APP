@@ -19,7 +19,8 @@ const contact = ref<Contact | null>(null)
 const loading = ref(false)
 const showMore = ref(false)
 
-const displayName = computed(
+const nickname = computed(() => contact.value?.nickname || '')
+const listName = computed(
   () => contact.value?.remark?.trim() || contact.value?.nickname || '',
 )
 const tagText = computed(() =>
@@ -78,19 +79,15 @@ async function onMessage() {
   if (!contact.value) return
   await contactStore.openChatWithContact(
     contact.value.id,
-    displayName.value,
+    listName.value,
     contact.value.avatar || APP_CONFIG.defaultAvatarUrl,
   )
 }
 
 function openGroup(g: GroupPreview) {
-  if (g.conversationId) {
-    uni.navigateTo({
-      url: `/pages/chat/room?id=${g.conversationId}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || '')}&type=group&targetId=${encodeURIComponent(g.id)}&code=group`,
-    })
-    return
-  }
-  uni.navigateTo({ url: `/pages/group/detail?id=${g.id}` })
+  uni.navigateTo({
+    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(g.id)}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || APP_CONFIG.defaultGroupAvatarUrl)}`,
+  })
 }
 
 function onMore() {
@@ -113,7 +110,7 @@ function onBlock() {
       if (!res.confirm || !contact.value) return
       try {
         await blockContact(contact.value.id)
-        await contactStore.loadAll()
+        await contactStore.loadDirectory()
         uni.showToast({ title: '已拉黑', icon: 'success' })
         setTimeout(() => uni.navigateBack(), 400)
       } catch (e) {
@@ -128,14 +125,14 @@ function onDelete() {
   if (!contact.value) return
   uni.showModal({
     title: '删除联络人',
-    content: `确定删除「${displayName.value}」吗？`,
+    content: `确定删除「${listName.value}」吗？`,
     confirmText: '删除',
     confirmColor: THEME.danger,
     success: async (res) => {
       if (!res.confirm || !contact.value) return
       try {
         await deleteContact(contact.value.id)
-        await contactStore.loadAll()
+        await contactStore.loadDirectory()
         uni.showToast({ title: '已删除', icon: 'success' })
         setTimeout(() => uni.navigateBack(), 400)
       } catch (e) {
@@ -161,8 +158,14 @@ function onDelete() {
       <view class="nav-btn" @click.stop="onMore">
         <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
         <view v-if="showMore" class="more-menu">
-          <view class="more-item" @click.stop="onBlock">加入黑名单</view>
-          <view class="more-item danger" @click.stop="onDelete">删除联络人</view>
+          <view class="more-item" @click.stop="onBlock">
+            <image class="more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
+            <text>加入黑名单</text>
+          </view>
+          <view class="more-item danger" @click.stop="onDelete">
+            <image class="more-icon" src="/static/icons/icon-profile-remove.svg" mode="aspectFit" />
+            <text>删除联络人</text>
+          </view>
         </view>
       </view>
     </view>
@@ -177,7 +180,7 @@ function onDelete() {
               mode="aspectFill"
             />
             <view class="profile-meta">
-              <text class="name">{{ displayName }}</text>
+              <text class="name">{{ nickname }}</text>
             </view>
           </view>
 
@@ -218,7 +221,7 @@ function onDelete() {
           >
             <image
               class="group-avatar"
-              :src="g.avatar || APP_CONFIG.defaultAvatarUrl"
+              :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
               mode="aspectFill"
             />
             <text class="group-name">{{ g.name }}</text>
@@ -324,20 +327,29 @@ function onDelete() {
   position: absolute;
   top: 72rpx;
   right: 0;
-  min-width: 260rpx;
+  min-width: 320rpx;
   background: #fff;
-  border-radius: 16rpx;
+  border-radius: 32rpx;
   box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.12);
   overflow: hidden;
   z-index: 30;
 }
 
 .more-item {
-  padding: 28rpx 32rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 24rpx 32rpx;
   font-size: 28rpx;
   color: #212121;
   white-space: nowrap;
   text-align: left;
+}
+
+.more-icon {
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
 }
 
 .more-item.danger {

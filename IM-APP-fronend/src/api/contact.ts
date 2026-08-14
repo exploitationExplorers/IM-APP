@@ -74,13 +74,6 @@ export async function unblockContact(contactId: string) {
   })
 }
 
-export async function getContactConversationId(contactId: string): Promise<string | null> {
-  return request<string | null>({
-    url: `/contacts/${contactId}/conversation`,
-    method: 'GET',
-  })
-}
-
 export async function fetchContactTags(): Promise<ContactTagItem[]> {
   return request<ContactTagItem[]>({ url: '/contact-tags', method: 'GET' })
 }

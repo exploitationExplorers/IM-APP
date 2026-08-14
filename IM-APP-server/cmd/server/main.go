@@ -38,7 +38,7 @@ func main() {
 	}
 	log.Println("migrations applied")
 
-	{
+	if cfg.SeedDemo {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := db.SeedDemo(ctx, pool); err != nil {
 			cancel()
@@ -47,7 +47,10 @@ func main() {
 		cancel()
 	}
 
-	hub := ws.NewHub(cfg.JWTSecret)
+	var hub *ws.Hub
+	if cfg.LegacyChatEnabled {
+		hub = ws.NewHub(cfg.JWTSecret)
+	}
 
 	redisClient, err := infra.NewRedis(cfg.RedisURL)
 	if err != nil {
@@ -75,13 +78,26 @@ func main() {
 	privacyRepo := &repository.PrivacyRepo{DB: pool}
 	chatRepo := &repository.ChatRepo{DB: pool}
 	fileRepo := &repository.FileRepo{DB: pool}
+	imOutboxRepo := &repository.IMSyncOutboxRepo{DB: pool}
+	imAccessRepo := &repository.IMAccessRepo{DB: pool}
 
-	groupRepo := &repository.GroupRepo{DB: pool}
+	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
 
 	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo}
-	contactSvc := &service.ContactService{Contacts: contactRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo}
-	chatSvc := &service.ChatService{Chat: chatRepo, Hub: hub}
-	groupSvc := &service.GroupService{Groups: groupRepo}
+	imSvc := &service.IMService{
+		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Config: cfg.OpenIM, TokenCache: redisClient,
+	}
+	imAdminSvc := &service.IMAdminService{
+		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Outbox: imOutboxRepo,
+	}
+	contactSvc := &service.ContactService{Contacts: contactRepo, Groups: groupRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo}
+	chatSvc := &service.ChatService{Chat: chatRepo}
+	if cfg.LegacyChatEnabled {
+		chatSvc.Hub = hub
+	}
+	favRepo := &repository.FavoriteRepo{DB: pool}
+	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
+	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
@@ -101,16 +117,49 @@ func main() {
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
-	imH := &handler.IMHandler{Client: imClient}
+	imH := &handler.IMHandler{Service: imSvc}
+	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
+	openIMWebhookH := handler.NewOpenIMWebhookHandler(
+		imAccessRepo, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs,
+	)
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
+	favH := &handler.FavoriteHandler{Svc: favSvc}
 
-	r := gin.Default()
+	r := gin.New()
+	loggerConfig := gin.LoggerConfig{}
+	if cfg.OpenIM.WebhookSecret != "" {
+		base := "/internal/openim/webhooks/" + cfg.OpenIM.WebhookSecret
+		loggerConfig.SkipPaths = []string{
+			base + "/callbackBeforeSendSingleMsgCommand",
+			base + "/callbackBeforeSendGroupMsgCommand",
+			base + "/callbackAfterSendSingleMsgCommand",
+			base + "/callbackAfterSendGroupMsgCommand",
+			base + "/callbackBeforeAfterMsgCommand",
+		}
+	}
+	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
 	r.Use(corsMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.GET("/ws", hub.HandleWS)
+	if cfg.LegacyChatEnabled {
+		r.GET("/ws", hub.HandleWS)
+	}
+	r.POST("/internal/openim/webhooks/:secret/callbackBeforeSendSingleMsgCommand", openIMWebhookH.BeforeSingle)
+	r.POST("/internal/openim/webhooks/:secret/callbackBeforeSendGroupMsgCommand", openIMWebhookH.BeforeGroup)
+	r.POST("/internal/openim/webhooks/:secret/callbackAfterSendSingleMsgCommand", openIMWebhookH.AfterMessage)
+	r.POST("/internal/openim/webhooks/:secret/callbackAfterSendGroupMsgCommand", openIMWebhookH.AfterMessage)
+	r.POST("/internal/openim/webhooks/:secret/callbackBeforeAfterMsgCommand", openIMWebhookH.AfterMessage)
+	internalIM := r.Group("/internal/im")
+	internalIM.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+	{
+		internalIM.POST("/messages", imInternalH.SendMessage)
+		internalIM.GET("/health", imInternalH.Health)
+		internalIM.POST("/reconcile", imInternalH.Reconcile)
+		internalIM.GET("/outbox", imInternalH.ListOutbox)
+		internalIM.POST("/outbox/:id/replay", imInternalH.ReplayOutbox)
+	}
 
 	api := r.Group("/api/v1")
 	{
@@ -128,6 +177,7 @@ func main() {
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
+			auth.POST("/me/password/verify", userH.VerifyPassword)
 			auth.PUT("/me/password", userH.ChangePassword)
 			auth.GET("/me/privacy-settings", userH.GetPrivacySettings)
 			auth.PUT("/me/privacy-settings", userH.UpdatePrivacySettings)
@@ -136,15 +186,17 @@ func main() {
 			auth.GET("/users/search", userH.Search)
 			auth.GET("/users/:id", userH.GetUser)
 
-			auth.GET("/conversations", chatH.ListConversations)
-			auth.POST("/conversations/read-all", chatH.ReadAll)
-			auth.GET("/conversations/:id/messages", chatH.ListMessages)
-			auth.POST("/conversations/:id/messages", chatH.SendMessage)
+			if cfg.LegacyChatEnabled {
+				auth.GET("/conversations", chatH.ListConversations)
+				auth.POST("/conversations/read-all", chatH.ReadAll)
+				auth.GET("/conversations/:id/messages", chatH.ListMessages)
+				auth.POST("/conversations/:id/messages", chatH.SendMessage)
+				auth.GET("/contacts/:id/conversation", contactH.GetConversation)
+			}
 
 			auth.GET("/contacts", contactH.ListContacts)
 			auth.GET("/contacts/:id", contactH.GetContact)
 			auth.PATCH("/contacts/:id", contactH.UpdateContact)
-			auth.GET("/contacts/:id/conversation", contactH.GetConversation)
 			auth.DELETE("/contacts/:id", contactH.DeleteContact)
 			auth.POST("/contacts/:id/block", contactH.BlockContact)
 			auth.DELETE("/contacts/:id/block", contactH.UnblockContact)
@@ -159,6 +211,7 @@ func main() {
 			auth.GET("/groups", contactH.ListGroups)
 			auth.POST("/groups", groupH.Create)
 			auth.POST("/groups/qrcode/resolve", groupH.ResolveQRCode)
+			auth.POST("/groups/qrcode/join", groupH.JoinByQRCode)
 			auth.GET("/groups/:id", groupH.Detail)
 			auth.GET("/groups/:id/members", groupH.Members)
 			auth.GET("/groups/:id/qrcode", groupH.Qrcode)
@@ -169,11 +222,14 @@ func main() {
 			auth.POST("/groups/:id/join-requests/:requestId/approve", groupH.ApproveJoinRequest)
 			auth.POST("/groups/:id/join-requests/:requestId/reject", groupH.RejectJoinRequest)
 			auth.PUT("/groups/:id/members/:userId/role", groupH.UpdateMemberRole)
-			auth.PUT("/groups/:id/members/:userId/mute", groupH.MuteMember)
+			auth.PUT("/groups/:id/members/:userId/mute", groupH.UpdateMemberMute)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
+			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
 			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
+			auth.POST("/groups/:id/reports", groupH.CreateReport)
+			auth.PUT("/groups/:id/mute", groupH.UpdateMute)
 			auth.POST("/groups/:id/leave", groupH.Leave)
-			auth.DELETE("/groups/:id", groupH.Dissolve)
+			auth.POST("/groups/:id/dismiss", groupH.Dismiss)
 			auth.POST("/group-invitations/:token/accept", groupH.AcceptInvitation)
 			auth.GET("/friend-requests", contactH.ListFriendRequests)
 			auth.POST("/friend-requests", contactH.CreateFriendRequest)
@@ -190,8 +246,17 @@ func main() {
 			auth.GET("/files/:fileId", fileH.Get)
 
 			auth.POST("/im/token", imH.Token)
-			auth.POST("/forward-tasks", forwardH.Create)
-			auth.GET("/forward-tasks/:id", forwardH.Get)
+			auth.GET("/im/peers/:businessUserId", imH.Peer)
+			auth.GET("/im/groups/:businessGroupId", imH.Group)
+			if cfg.LegacyChatEnabled {
+				auth.POST("/forward-tasks", forwardH.Create)
+				auth.GET("/forward-tasks/:id", forwardH.Get)
+			}
+
+			// 收藏
+			auth.POST("/favorites/list", favH.List)
+			auth.POST("/favorites", favH.Create)
+			auth.DELETE("/favorites/:favoriteId", favH.Delete)
 		}
 	}
 
@@ -199,6 +264,17 @@ func main() {
 		Addr:              cfg.HTTPAddr,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	if imClient.Available() {
+		imWorker := &service.IMSyncWorker{
+			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Client: imClient,
+			BatchSize: 20, MaxAttempts: 10, PollInterval: 2 * time.Second,
+		}
+		go imWorker.Run(workerCtx)
+	} else {
+		log.Println("OpenIM sync worker disabled: OPENIM_API_URL or OPENIM_SECRET is missing")
 	}
 
 	go func() {
@@ -211,6 +287,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	stopWorker()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

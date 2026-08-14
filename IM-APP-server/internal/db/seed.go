@@ -15,9 +15,9 @@ func SeedDemo(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if count > 0 {
-		_, _ = pool.Exec(ctx, `UPDATE users SET nickname=$1, public_id=COALESCE(NULLIF(public_id,''),'chat10001') WHERE phone='13800138000'`, "\u5f20\u4e09")
-		_, _ = pool.Exec(ctx, `UPDATE users SET nickname=$1, public_id=COALESCE(NULLIF(public_id,''),'chat10002') WHERE phone='13800138001'`, "\u674e\u56db")
-		_, _ = pool.Exec(ctx, `UPDATE users SET nickname=$1, public_id=COALESCE(NULLIF(public_id,''),'chat10003') WHERE phone='13800138002'`, "\u738b\u4e94")
+		_, _ = pool.Exec(ctx, `UPDATE users SET nickname=$1, public_id=COALESCE(NULLIF(public_id,''),'chat10001'), password_set=true WHERE phone='13800138000'`, "\u5f20\u4e09")
+		_, _ = pool.Exec(ctx, `UPDATE users SET nickname=$1, public_id=COALESCE(NULLIF(public_id,''),'chat10002'), password_set=true WHERE phone='13800138001'`, "\u674e\u56db")
+		_, _ = pool.Exec(ctx, `UPDATE users SET nickname=$1, public_id=COALESCE(NULLIF(public_id,''),'chat10003'), password_set=true WHERE phone='13800138002'`, "\u738b\u4e94")
 		_, _ = pool.Exec(ctx, `UPDATE conversations SET title=$1 WHERE type='private'`, "\u674e\u56db")
 		_, _ = pool.Exec(ctx, `UPDATE conversations SET title=$1 WHERE type='group'`, "\u4ea7\u54c1\u8ba8\u8bba\u7fa4")
 		_, _ = pool.Exec(ctx, `UPDATE groups SET name=$1`, "\u4ea7\u54c1\u8ba8\u8bba\u7fa4")
@@ -43,29 +43,29 @@ func SeedDemo(ctx context.Context, pool *pgxpool.Pool) error {
 
 	var meID, peerID, peer2ID, peer3ID string
 	err = pool.QueryRow(ctx, `
-		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id)
-		VALUES('13800138000', '+86', $1, $2, '', 'chat10001')
+		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id, password_set)
+		VALUES('13800138000', '+86', $1, $2, '', 'chat10001', true)
 		RETURNING id::text`, pwd, nickMe).Scan(&meID)
 	if err != nil {
 		return err
 	}
 	err = pool.QueryRow(ctx, `
-		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id)
-		VALUES('13800138001', '+86', $1, $2, '', 'chat10002')
+		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id, password_set)
+		VALUES('13800138001', '+86', $1, $2, '', 'chat10002', true)
 		RETURNING id::text`, pwd, nickPeer).Scan(&peerID)
 	if err != nil {
 		return err
 	}
 	err = pool.QueryRow(ctx, `
-		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id)
-		VALUES('13800138002', '+86', $1, $2, '', 'chat10003')
+		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id, password_set)
+		VALUES('13800138002', '+86', $1, $2, '', 'chat10003', true)
 		RETURNING id::text`, pwd, nickPeer2).Scan(&peer2ID)
 	if err != nil {
 		return err
 	}
 	err = pool.QueryRow(ctx, `
-		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id)
-		VALUES('13800138003', '+86', $1, $2, '', 'chat10004')
+		INSERT INTO users(phone, country_code, password_hash, nickname, avatar, public_id, password_set)
+		VALUES('13800138003', '+86', $1, $2, '', 'chat10004', true)
 		RETURNING id::text`, pwd, "\u8d75\u516d").Scan(&peer3ID)
 	if err != nil {
 		return err
