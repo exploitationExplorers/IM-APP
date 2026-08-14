@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"im-app-server/internal/middleware"
@@ -40,6 +41,11 @@ func (h *GroupHandler) Detail(c *gin.Context) {
 	uid := middleware.UserID(c)
 	g, err := h.Svc.GetDetail(c.Request.Context(), c.Param("id"), uid)
 	if err != nil {
+		log.Printf("get group %s: %v", c.Param("id"), err)
+		if errors.Is(err, repository.ErrInvalidGroupOperation) {
+			response.Fail(c, http.StatusBadRequest, "群聊 ID 不正确")
+			return
+		}
 		response.Fail(c, http.StatusNotFound, "群不存在或无权访问")
 		return
 	}

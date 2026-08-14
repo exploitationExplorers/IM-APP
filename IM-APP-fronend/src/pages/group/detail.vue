@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useGroupStore } from '@/stores/group'
+import { APP_CONFIG } from '@/config'
 
 const groupStore = useGroupStore()
 const groupId = ref('')
@@ -10,7 +11,7 @@ const code = ref('group')
 const groupDetail = computed(() => groupStore.currentGroup)
 const memberList = computed(() => groupStore.members)
 const groupName = computed(() => groupDetail.value?.name || '群聊')
-const avatar = computed(() => groupDetail.value?.avatar || '/static/avatar-1.png')
+const avatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
 
 onLoad(async (query) => {

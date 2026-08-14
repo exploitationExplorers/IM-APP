@@ -4,6 +4,7 @@ export interface QrcodeCardOptions {
   avatarUrl?: string
   qrDataUrl: string
   brandLogoUrl?: string
+  caption?: string
 }
 
 const CARD_WIDTH = 750
@@ -87,7 +88,8 @@ export async function buildQrcodeCardDataUrl(options: QrcodeCardOptions): Promis
     throw new Error('当前环境不支持生成分享图')
   }
 
-  const height = PADDING + AVATAR_SIZE + SECTION_GAP + QR_SIZE + PADDING
+  const captionH = options.caption ? 64 : 0
+  const height = PADDING + AVATAR_SIZE + SECTION_GAP + QR_SIZE + captionH + PADDING
   const canvas = document.createElement('canvas')
   canvas.width = CARD_WIDTH
   canvas.height = height
@@ -119,6 +121,14 @@ export async function buildQrcodeCardDataUrl(options: QrcodeCardOptions): Promis
   const qrX = (CARD_WIDTH - QR_SIZE) / 2
   const qrY = rowY + AVATAR_SIZE + SECTION_GAP
   ctx.drawImage(qr, qrX, qrY, QR_SIZE, QR_SIZE)
+
+  if (options.caption) {
+    ctx.fillStyle = '#9aa3b5'
+    ctx.font = '400 28px PingFang SC, Microsoft YaHei, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.fillText(options.caption, CARD_WIDTH / 2, qrY + QR_SIZE + 24)
+  }
 
   return canvas.toDataURL('image/png')
 }

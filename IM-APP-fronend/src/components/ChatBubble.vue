@@ -9,6 +9,15 @@ const props = defineProps<{
   avatar: string
 }>()
 
+const emit = defineEmits<{
+  avatarClick: []
+}>()
+
+function onAvatarClick() {
+  if (props.mine) return
+  emit('avatarClick')
+}
+
 const parts = computed(() =>
   props.message.type === 'text' ? splitTextWithLinks(props.message.content) : [],
 )
@@ -65,7 +74,13 @@ function openLink(url: string) {
 
 <template>
   <view class="row" :class="{ mine }">
-    <image v-if="!mine" class="avatar" :src="avatar" mode="aspectFill" />
+    <image
+      v-if="!mine"
+      class="avatar"
+      :src="avatar"
+      mode="aspectFill"
+      @click="onAvatarClick"
+    />
     <view class="content-wrap">
       <view v-if="message.type === 'image'" class="bubble image-bubble">
         <image class="msg-image" :src="message.content" mode="widthFix" />
