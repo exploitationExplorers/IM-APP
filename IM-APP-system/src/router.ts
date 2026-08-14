@@ -52,6 +52,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import("./views/smsOperationConfig/SmsOperationConfigView.vue"),
         meta: { title: "短信和运营配置" },
       },
+      {
+        path: "runtime-observe/exports",
+        component: () => import("./views/runtimeObserve/ExportTasksView.vue"),
+        meta: { title: "导出任务" },
+      },
     ],
   },
   { path: "/:pathMatch(.*)*", redirect: "/home" },
