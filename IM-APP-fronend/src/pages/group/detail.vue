@@ -1,35 +1,95 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { useGroupStore } from '@/stores/group'
 
+const groupStore = useGroupStore()
 const groupId = ref('')
 const code = ref('group')
-const groupName = ref('观赏世界的窗')
-const avatar = ref('/static/avatar-1.png')
 
-const memberList = [
-  { id: '1', name: 'bug001', avatar: '/static/avatar-1.png' },
-  { id: '2', name: '妲己把茶…', avatar: '/static/avatar-1.png' },
-  { id: '3', name: '勿忘国耻', avatar: '/static/avatar-1.png' },
-  { id: '4', name: '月薪3.8k', avatar: '/static/avatar-1.png' },
-]
+const groupDetail = computed(() => groupStore.currentGroup)
+const memberList = computed(() => groupStore.members)
+const groupName = computed(() => groupDetail.value?.name || '群聊')
+const avatar = computed(() => groupDetail.value?.avatar || '/static/avatar-1.png')
+const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
 
-onLoad((query) => {
+onLoad(async (query) => {
   groupId.value = String(query?.id || '')
   code.value = String(query?.code || 'group')
-})
 
-onMounted(() => {
-  console.log('detail page mounted', groupId.value, code.value)
+  if (!groupId.value) {
+    uni.showToast({ title: '缺少群聊 ID', icon: 'none' })
+    return
+  }
+
+  try {
+    await groupStore.loadDetail(groupId.value)
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '加载群聊详情失败', icon: 'none' })
+  }
 })
 
 function goBack() {
   uni.navigateBack()
 }
 
+function goToMembers() {
+  uni.navigateTo({
+    url: `/pages/group/members?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToAnnouncement() {
+  uni.navigateTo({
+    url: `/pages/group/announcement?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToGroupQrcode() {
+  uni.navigateTo({
+    url: `/pages/group/qrcode?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToMyNickname() {
+  uni.navigateTo({
+    url: `/pages/group/my-nickname?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToMedia() {
+  uni.navigateTo({
+    url: `/pages/group/media?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToSearchHistory() {
+  uni.navigateTo({
+    url: `/pages/group/search-history?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToClearHistory() {
+  uni.navigateTo({
+    url: `/pages/group/clear-history?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToReport() {
+  uni.navigateTo({
+    url: `/pages/group/report?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToLeaveGroup() {
+  uni.navigateTo({
+    url: `/pages/group/leave?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
 function copyGroupId() {
   uni.setClipboardData({
-    data: '338495',
+    data: groupId.value,
     success: () => uni.showToast({ title: '已复制', icon: 'none' }),
   })
 }
@@ -44,21 +104,21 @@ function copyGroupId() {
     </view>
 
     <view class="members-wrap">
-      <view class="member-row">
+      <view class="member-row" @click="goToMembers">
         <view v-for="member in memberList" :key="member.id" class="member-item">
           <image class="member-avatar" :src="member.avatar" mode="aspectFill" />
-          <text class="member-name">{{ member.name }}</text>
+          <text class="member-name">{{ member.nickname }}</text>
         </view>
-        <view class="add-member">
+        <view v-if="memberList.length" class="add-member" @click.stop="goToMembers">
           <view class="add-circle">＋</view>
         </view>
       </view>
     </view>
 
-    <view class="group-row section-row">
+    <view class="group-row section-row" @click="goToMembers">
       <text class="label">群组成员</text>
       <view class="row-right">
-        <text class="muted">共5人</text>
+        <text class="muted">共{{ memberCount }}人</text>
         <text class="arrow">›</text>
       </view>
     </view>
@@ -76,40 +136,40 @@ function copyGroupId() {
         </view>
       </view>
 
-      <view class="info-row">
+      <view class="info-row info-row-id">
         <text class="label">群ID</text>
-        <view class="row-right id-box">
-          <text class="value id-value">338495</text>
+        <view class="id-box">
+          <text class="value id-value">{{ groupId }}</text>
           <view class="copy-btn" @click="copyGroupId">复制</view>
         </view>
       </view>
 
-      <view class="info-row nav-row">
+      <view class="info-row nav-row" @click="goToAnnouncement">
         <text class="label">群公告</text>
         <text class="arrow">›</text>
       </view>
 
-      <view class="info-row nav-row">
+      <view class="info-row nav-row" @click="goToGroupQrcode">
         <text class="label">群二维码</text>
         <text class="arrow">›</text>
       </view>
 
-      <view class="info-row nav-row">
+      <view class="info-row nav-row" @click="goToMyNickname">
         <text class="label">我在本群的昵称</text>
         <text class="arrow">›</text>
       </view>
 
-      <view class="info-row nav-row">
+      <view class="info-row nav-row" @click="goToMedia">
         <text class="label">图片与视频</text>
         <text class="arrow">›</text>
       </view>
 
-      <view class="info-row nav-row">
+      <view class="info-row nav-row" @click="goToSearchHistory">
         <text class="label">搜索聊天记录</text>
         <text class="arrow">›</text>
       </view>
 
-      <view class="info-row nav-row last-nav">
+      <view class="info-row nav-row last-nav" @click="goToClearHistory">
         <text class="label">清除聊天记录</text>
         <text class="arrow">›</text>
       </view>
@@ -128,9 +188,13 @@ function copyGroupId() {
         </view>
       </view>
 
-      <view class="action-row">
+      <view class="action-row" @click="goToReport">
         <text class="label">检举</text>
         <text class="arrow">›</text>
+      </view>
+
+      <view class="leave-row" @click="goToLeaveGroup">
+        <text class="leave-label">退出群并删除对话</text>
       </view>
     </view>
   </view>
@@ -301,12 +365,27 @@ function copyGroupId() {
   background: #d8eaff;
 }
 
+.info-row-id {
+  gap: 20rpx;
+}
+
 .id-box {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 18rpx;
+  flex: 1;
+  min-width: 0;
 }
 
 .id-value {
   color: #444;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  text-align: right;
 }
 
 .copy-btn {
@@ -320,6 +399,7 @@ function copyGroupId() {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .nav-row {
@@ -368,5 +448,21 @@ function copyGroupId() {
   justify-content: space-between;
   padding: 0 30rpx;
   background: #fff;
+}
+
+.leave-row {
+  min-height: 100rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 30rpx;
+  background: #fff;
+  margin-top: 18rpx;
+}
+
+.leave-label {
+  font-size: 30rpx;
+  color: #ff4d4f;
+  font-weight: 500;
 }
 </style>

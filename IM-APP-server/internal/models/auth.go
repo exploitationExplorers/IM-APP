@@ -68,9 +68,10 @@ type AuthResult struct {
 	User MeProfile `json:"user"`
 }
 
-// MeProfile 本人资料（对外 DTO，不含手机号明文）
+// MeProfile 本人资料。接口不返回明文手机号；安全页用登录时本地缓存的号码展示完整号。
 type MeProfile struct {
 	ID          string `json:"id"`
+	Phone       string `json:"phone,omitempty"`
 	PhoneMasked string `json:"phoneMasked"`
 	CountryCode string `json:"countryCode"`
 	PublicID    string `json:"publicId"`
@@ -79,6 +80,7 @@ type MeProfile struct {
 	Bio         string `json:"bio"`
 	Status      string `json:"status"`
 	CreatedAt   string `json:"createdAt"`
+	HasPassword bool   `json:"hasPassword"`
 }
 
 // UpdateProfileRequest 修改本人资料（指针字段，传了才更新）

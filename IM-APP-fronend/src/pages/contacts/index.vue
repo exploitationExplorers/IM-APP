@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
@@ -29,15 +30,22 @@ const featuredGroup = computed(() => groups.value[0] ?? null)
 const filteredContacts = computed(() => {
   let list = [...contacts.value]
   const k = keyword.value.trim()
-  if (k) list = list.filter((c) => c.nickname.includes(k))
+  if (k) {
+    list = list.filter((c) => listName(c).includes(k) || (c.publicId || '').includes(k))
+  }
   if (sortKey.value === 'name') {
-    list.sort((a, b) => a.nickname.localeCompare(b.nickname, 'zh-CN'))
+    list.sort((a, b) => listName(a).localeCompare(listName(b), 'zh-CN'))
   }
   return list
 })
 
-onMounted(() => {
-  contactStore.loadAll()
+function listName(c: Contact) {
+  return c.remark?.trim() || c.nickname
+}
+
+// tabBar 页会常驻，onMounted 只跑一次，切回来必须重新拉才能看到新加的好友
+onShow(() => {
+  contactStore.loadDirectory()
 })
 
 function go(url: string) {
@@ -53,7 +61,9 @@ function openContact(c: Contact) {
 function openFeaturedGroup() {
   const g = featuredGroup.value
   if (!g) return
-  go(`/pages/contacts/groups`)
+  uni.navigateTo({
+    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(g.id)}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || '/static/icons/menu-group.svg')}`,
+  })
 }
 
 function onAdd() {
@@ -156,7 +166,7 @@ function closeMenus() {
         @click="openContact(c)"
       >
         <image class="avatar" :src="c.avatar" mode="aspectFill" />
-        <text class="name">{{ c.nickname }}</text>
+        <text class="name">{{ listName(c) }}</text>
       </view>
     </scroll-view>
 

@@ -49,10 +49,12 @@ async function onSendRequest() {
   if (!result.value) return
   try {
     const res = await contactStore.addFriend(result.value.id, message.value)
-    uni.showToast({
-      title: res.status === 'accepted' ? '已添加好友' : '已发送好友申请',
-      icon: 'success',
-    })
+    if (res.status === 'accepted') {
+      // 已跳到通讯录，不能再 navigateBack
+      uni.showToast({ title: '已添加好友', icon: 'success' })
+      return
+    }
+    uni.showToast({ title: '已发送好友申请', icon: 'success' })
     setTimeout(() => uni.navigateBack(), 500)
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })

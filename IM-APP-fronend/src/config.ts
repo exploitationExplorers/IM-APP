@@ -5,11 +5,12 @@ export const APP_CONFIG = {
   displayName: '66快捷版',
   version: 'v0.1.0',
   apiBaseUrl: env.VITE_API_BASE_URL || 'http://8.210.72.157:8080/api/v1',
-  wsBaseUrl: env.VITE_WS_BASE_URL || 'ws://8.210.72.157:8080/ws',
   defaultCountryCode: '+86',
   /** 参考站默认头像 */
   defaultAvatarUrl:
     env.VITE_DEFAULT_AVATAR_URL || 'https://nxbf.yuntsy.com/contents/headimg.jpg',
+  /** 群未设头像时的占位，形状与参考站一致（蓝底双气泡） */
+  defaultGroupAvatarUrl: '/static/group-default.svg',
 }
 
 export const THEME = {

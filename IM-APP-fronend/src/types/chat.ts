@@ -6,6 +6,8 @@ export interface ChatMessage {
   id: string
   conversationId: string
   senderId: string
+  /** OpenIM 消息上的发送者头像，群聊按人展示 */
+  senderAvatar?: string
   type: MessageType
   content: string
   createdAt: string
@@ -24,6 +26,8 @@ export interface Conversation {
   /** 如 [有新公告] */
   highlightTag?: string
   pinned?: boolean
-  /** 私聊对方用户 ID */
+  /** 私聊对方的 OpenIM 用户 ID */
   peerUserId?: string
+  /** 群聊的 OpenIM 群 ID */
+  groupId?: string
 }

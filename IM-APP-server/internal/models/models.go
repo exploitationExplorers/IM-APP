@@ -8,6 +8,7 @@ type User struct {
 	CountryCode  string    `json:"countryCode"`
 	PublicID     string    `json:"publicId"`
 	PasswordHash string    `json:"-"`
+	PasswordSet  bool      `json:"-"`
 	Nickname     string    `json:"nickname"`
 	Avatar       string    `json:"avatar"`
 	Bio          string    `json:"bio"`
@@ -53,9 +54,9 @@ type Contact struct {
 	PublicID     string           `json:"publicId,omitempty"`
 	Nickname     string           `json:"nickname"`
 	Avatar       string           `json:"avatar"`
-	Remark       string           `json:"remark,omitempty"`
+	Remark       string           `json:"remark"`
 	Tags         []ContactTagItem `json:"tags,omitempty"`
-	CommonGroups []GroupPreview   `json:"commonGroups,omitempty"`
+	CommonGroups []GroupPreview   `json:"commonGroups"`
 }
 
 // PublicProfile 他人可见的公开资料（不含手机号）
