@@ -35,13 +35,21 @@ export const useChatStore = defineStore('chat', () => {
   )
 
   function appendMessage(item: MessageItem) {
+    if (!item?.clientMsgID) return
     const message = toChatMessage(item)
+    if (!message.conversationId) return
     const list = messagesMap.value[message.conversationId] || []
     if (list.some((m) => m.id === message.id)) return
     messagesMap.value = {
       ...messagesMap.value,
       [message.conversationId]: [...list, message],
     }
+  }
+
+  /** SDK 有时推单条，有时推数组；解析失败时不能让监听器抛错把后续消息吃掉 */
+  function ingestIncoming(raw: MessageItem | MessageItem[] | null) {
+    const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+    list.forEach(appendMessage)
   }
 
   function upsertConversations(items: ConversationItem[]) {
@@ -71,8 +79,8 @@ export const useChatStore = defineStore('chat', () => {
   function subscribeRealtime() {
     unsubscribeRealtime()
     unsubscribers = [
-      onIMEvent<MessageItem>(IMEvents.OnRecvNewMessage, appendMessage),
-      onIMEvent<MessageItem[]>(IMEvents.OnRecvNewMessages, (list) => list.forEach(appendMessage)),
+      onIMEvent<MessageItem>(IMEvents.OnRecvNewMessage, ingestIncoming),
+      onIMEvent<MessageItem[]>(IMEvents.OnRecvNewMessages, ingestIncoming),
       onIMEvent<ConversationItem[]>(IMEvents.OnConversationChanged, upsertConversations),
       onIMEvent<ConversationItem[]>(IMEvents.OnNewConversation, upsertConversations),
       onIMEvent<{ conversationID: string; clientMsgID: string }>(
@@ -108,6 +116,7 @@ export const useChatStore = defineStore('chat', () => {
     businessId?: string
   }): Promise<Conversation> {
     await ensureIMLogin()
+    subscribeRealtime()
 
     const cached = params.conversationId
       ? conversations.value.find((c) => c.id === params.conversationId)
@@ -297,6 +306,7 @@ export const useChatStore = defineStore('chat', () => {
     sendVoice,
     recall,
     markAllAsRead,
+    subscribeRealtime,
     unsubscribeRealtime,
     reset,
   }

@@ -17,7 +17,7 @@ function safeParse<T>(raw: string | null): T | null {
 }
 
 export const useChatSettingsStore = defineStore('chatSettings', () => {
-  const enterToSend = ref(false)
+  const enterToSend = ref(true)
 
   let hydrated = false
   function hydrate() {
@@ -25,7 +25,9 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     hydrated = true
     const raw = uni.getStorageSync(STORAGE_KEY)
     const parsed = safeParse<ChatSettingsState>(typeof raw === 'string' ? raw : null)
-    enterToSend.value = !!parsed?.enterToSend
+    if (typeof parsed?.enterToSend === 'boolean') {
+      enterToSend.value = parsed.enterToSend
+    }
   }
 
   function persist() {

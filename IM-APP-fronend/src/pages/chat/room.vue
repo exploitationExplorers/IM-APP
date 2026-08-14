@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
@@ -7,13 +7,15 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { imUserId } from '@/utils/openim'
+import { APP_CONFIG } from '@/config'
+import type { ChatMessage } from '@/types'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
 
 const conversationId = ref('')
 const title = ref('聊天')
-const peerAvatar = ref('/static/avatar-1.png')
+const peerAvatar = ref(APP_CONFIG.defaultAvatarUrl)
 const chatType = ref<'private' | 'group'>('group')
 /** 业务侧的好友 / 群 ID，仅用于跳资料页 */
 const businessId = ref('')
@@ -30,22 +32,37 @@ let recorder: any = null
 let browserRecorder: { stream: MediaStream; mediaRecorder: MediaRecorder } | null = null
 let recordingTimer: ReturnType<typeof setInterval> | null = null
 
-// OpenIM 的通知类消息取不到可显示内容，直接跳过，否则会渲染成空气泡
+/** 通知类（加好友等）没有可展示正文，渲染成气泡就是空气泡；撤回提示保留为居中系统行 */
+function isVisibleMessage(m: ChatMessage): boolean {
+  if (m.type === 'system') {
+    const text = m.content.trim()
+    return !!text && !text.startsWith('{') && !text.startsWith('[')
+  }
+  return !!m.content
+}
+
 const messages = computed(() =>
-  (chatStore.messagesMap[conversationId.value] || []).filter(
-    (m) => m.type !== 'system' || !!m.content,
-  ),
+  (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
 )
 // 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
 const myId = computed(() => imUserId.value)
-const myAvatar = computed(() => userStore.profile?.avatar || '/static/avatar-me.png')
+const myAvatar = computed(() => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl)
 const settingsStore = useChatSettingsStore()
+
+function avatarOf(message: ChatMessage): string {
+  if (message.senderId === myId.value) {
+    return message.senderAvatar || myAvatar.value
+  }
+  if (message.senderAvatar) return message.senderAvatar
+  return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
+}
+
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 
 onLoad(async (query) => {
   title.value = decodeURIComponent(String(query?.title || '聊天'))
-  peerAvatar.value = decodeURIComponent(String(query?.avatar || '/static/avatar-1.png'))
+  peerAvatar.value = decodeURIComponent(String(query?.avatar || APP_CONFIG.defaultAvatarUrl))
   chatType.value = String(query?.type || 'group') === 'private' ? 'private' : 'group'
   businessId.value = String(query?.targetId || '')
   uni.setNavigationBarTitle({ title: '' })
@@ -104,6 +121,15 @@ function scrollToBottom() {
   if (!list.length) return
   scrollInto.value = `msg_${list[list.length - 1].id}`
 }
+
+watch(
+  () => messages.value[messages.value.length - 1]?.id,
+  (id, prev) => {
+    if (id && id !== prev) {
+      nextTick(() => scrollToBottom())
+    }
+  },
+)
 
 async function onSend() {
   const text = input.value.trim()
@@ -373,10 +399,14 @@ function pickImage() {
         :id="`msg_${m.id}`"
         :key="m.id"
       >
+        <view v-if="m.type === 'system'" class="sys-tip">
+          <text class="sys-tip-text">{{ m.content }}</text>
+        </view>
         <ChatBubble
+          v-else
           :message="m"
           :mine="m.senderId === myId"
-          :avatar="m.senderId === myId ? myAvatar : peerAvatar"
+          :avatar="avatarOf(m)"
         />
       </view>
     </scroll-view>
@@ -485,6 +515,17 @@ function pickImage() {
   flex: 1;
   height: 0;
   padding-bottom: 16rpx;
+}
+
+.sys-tip {
+  display: flex;
+  justify-content: center;
+  padding: 12rpx 32rpx;
+}
+
+.sys-tip-text {
+  font-size: 22rpx;
+  color: #999;
 }
 
 .composer {

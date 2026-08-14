@@ -368,12 +368,16 @@ function imageSizeOf(path: string): Promise<{ width: number; height: number }> {
  * 要靠它归位到某个会话。
  */
 export function conversationIdOf(message: MessageItem): string {
+  const fromSdk = (message as MessageItem & { conversationID?: string }).conversationID
+  if (fromSdk) return fromSdk
   if (message.sessionType === SessionType.Single) {
+    if (!message.sendID || !message.recvID) return ''
     return `si_${[message.sendID, message.recvID].sort().join('_')}`
   }
   if (message.sessionType === SessionType.Notification) {
     return `sn_${message.sendID}_${message.recvID}`
   }
+  if (!message.groupID) return ''
   return `sg_${message.groupID}`
 }
 
@@ -417,6 +421,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     id: item.clientMsgID,
     conversationId: conversationIdOf(item),
     senderId: item.sendID,
+    senderAvatar: item.senderFaceUrl || undefined,
     type: toAppMessageType(item.contentType),
     content: extractContent(item),
     createdAt: toISOTime(item.sendTime),
@@ -442,14 +447,28 @@ function toAppMessageType(contentType: number): AppMessageType {
   }
 }
 
+function jsonContentField(raw: string, key: string): string {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (parsed && typeof parsed === 'object' && key in parsed) {
+      const value = (parsed as Record<string, unknown>)[key]
+      return typeof value === 'string' ? value : ''
+    }
+  } catch {
+    /* content 不是 JSON 时按纯文本用 */
+  }
+  return raw
+}
+
 function extractContent(item: MessageItem): string {
   switch (item.contentType) {
     case MessageType.TextMessage:
-      return item.textElem?.content || ''
+      return item.textElem?.content || jsonContentField(item.content, 'content')
     case MessageType.AtTextMessage:
-      return item.atTextElem?.text || ''
+      return item.atTextElem?.text || jsonContentField(item.content, 'text')
     case MessageType.QuoteMessage:
-      return item.quoteElem?.text || ''
+      return item.quoteElem?.text || jsonContentField(item.content, 'text')
     case MessageType.PictureMessage:
       return (
         item.pictureElem?.snapshotPicture?.url ||
@@ -467,7 +486,8 @@ function extractContent(item: MessageItem): string {
     case MessageType.VideoMessage:
       return item.videoElem?.videoUrl || ''
     default:
-      return item.notificationElem?.detail || ''
+      // 好友通知等 detail 是 JSON，聊天气泡里展示不出来，交给页面过滤
+      return ''
   }
 }
 
