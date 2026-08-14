@@ -1,5 +1,11 @@
 import { request } from '@/utils/request'
-import type { GroupInfo, GroupMember } from '@/types'
+import { parseQrcodePayload } from '@/utils/qrcode'
+import type {
+  GroupInfo,
+  GroupMember,
+  GroupQRCodeResolveResult,
+  JoinGroupByQRCodeResult,
+} from '@/types'
 
 export async function createGroup(name: string, memberIds: string[]): Promise<GroupInfo> {
   return request<GroupInfo>({
@@ -44,4 +50,36 @@ export interface GroupQRCodeResult {
 
 export async function fetchGroupQrcode(groupId: string): Promise<GroupQRCodeResult> {
   return request<GroupQRCodeResult>({ url: `/groups/${groupId}/qrcode`, method: 'GET' })
+}
+
+export async function resolveGroupQRCode(tokenOrPayload: string): Promise<GroupQRCodeResolveResult> {
+  const parsed = parseQrcodePayload(tokenOrPayload)
+  const token = parsed.token || tokenOrPayload
+  return request<GroupQRCodeResolveResult>({
+    url: '/groups/qrcode/resolve',
+    method: 'POST',
+    data: {
+      token,
+      payload: tokenOrPayload,
+      qrcode: tokenOrPayload.startsWith('http') ? tokenOrPayload : undefined,
+    },
+  })
+}
+
+export async function joinGroupByQRCode(
+  tokenOrPayload: string,
+  remark = '',
+): Promise<JoinGroupByQRCodeResult> {
+  const parsed = parseQrcodePayload(tokenOrPayload)
+  const token = parsed.token || tokenOrPayload
+  return request<JoinGroupByQRCodeResult>({
+    url: '/groups/qrcode/join',
+    method: 'POST',
+    data: {
+      token,
+      payload: tokenOrPayload,
+      qrcode: tokenOrPayload.startsWith('http') ? tokenOrPayload : undefined,
+      remark,
+    },
+  })
 }

@@ -20,7 +20,7 @@ export function parseQrcodePayload(raw: string): ParsedQrcodePayload {
       if (qrcode) {
         return {
           token: qrcode,
-          type: qrcodetype === 'u' ? 'user' : qrcodetype || undefined,
+          type: qrcodetype === 'u' ? 'user' : qrcodetype === 'g' ? 'group' : qrcodetype || undefined,
         }
       }
     } catch {
