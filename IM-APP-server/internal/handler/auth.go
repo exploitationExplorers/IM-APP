@@ -371,11 +371,13 @@ func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID str
 	user.PasswordHash = ""
 	access, err := middleware.IssueToken(h.Cfg.JWTSecret, user.ID, accessTokenTTL)
 	if err != nil {
+		log.Printf("issue access token failed: %v", err)
 		response.Fail(c, http.StatusInternalServerError, "签发令牌失败")
 		return
 	}
 	refresh, err := randomRefreshToken()
 	if err != nil {
+		log.Printf("gen refresh token failed: %v", err)
 		response.Fail(c, http.StatusInternalServerError, "签发令牌失败")
 		return
 	}
@@ -384,6 +386,7 @@ func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID str
 		VALUES($1,$2,$3,$4,$5,$6)`,
 		user.ID, deviceID, hashHex(refresh), c.ClientIP(), c.Request.UserAgent(), time.Now().Add(refreshTokenTTL),
 	); err != nil {
+		log.Printf("create auth session failed: %v", err)
 		response.Fail(c, http.StatusInternalServerError, "签发令牌失败")
 		return
 	}
