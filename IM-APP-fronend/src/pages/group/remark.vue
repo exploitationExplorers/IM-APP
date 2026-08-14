@@ -1,28 +1,30 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { updateMyNickname, fetchGroupDetail } from '@/api/group'
+import { fetchGroupDetail, updateGroupRemark } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
 
-const NICKNAME_MAX = 32
+const REMARK_MAX = 64
 const groupId = ref('')
-const nickname = ref('')
+const name = ref('')
+const remark = ref('')
 const saving = ref(false)
-const canSubmit = ref(true)
+
+const count = computed(() => remark.value.length)
+const canSubmit = computed(() => !saving.value)
 
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
-  const store = useGroupStore()
-  const current = store.currentGroup
-  if (current && current.id === groupId.value) {
-    nickname.value = current.myNickname?.trim() || ''
-  } else {
-    try {
-      const g = await fetchGroupDetail(groupId.value)
-      nickname.value = g.myNickname?.trim() || ''
-    } catch (e) {
-      uni.showToast({ title: (e as Error)?.message || '加载失败', icon: 'none' })
-    }
+  if (!groupId.value) {
+    uni.showToast({ title: '缺少群聊 ID', icon: 'none' })
+    return
+  }
+  try {
+    const g = await fetchGroupDetail(groupId.value)
+    name.value = g.name || ''
+    remark.value = g.remark?.trim() || ''
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '加载失败', icon: 'none' })
   }
 })
 
@@ -32,14 +34,14 @@ function goBack() {
 
 async function onSubmit() {
   if (!groupId.value || saving.value) return
-  const value = nickname.value.trim()
-  if (value.length > NICKNAME_MAX) {
-    uni.showToast({ title: `昵称最多 ${NICKNAME_MAX} 个字`, icon: 'none' })
+  const value = remark.value.trim()
+  if (value.length > REMARK_MAX) {
+    uni.showToast({ title: `群备注最多 ${REMARK_MAX} 个字`, icon: 'none' })
     return
   }
   saving.value = true
   try {
-    await updateMyNickname(groupId.value, value)
+    await updateGroupRemark(groupId.value, value)
     const store = useGroupStore()
     await store.loadDetail(groupId.value)
     uni.showToast({ title: '已保存', icon: 'success' })
@@ -58,19 +60,21 @@ async function onSubmit() {
       <view class="nav-back" @click="goBack">
         <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
       </view>
-      <text class="nav-title">我在本群的昵称</text>
+      <text class="nav-title">群备注</text>
       <view class="nav-spacer" />
     </view>
 
     <view class="form">
-      <input
+      <textarea
         class="input"
-        v-model="nickname"
-        :maxlength="NICKNAME_MAX"
-        placeholder="未设置"
+        v-model="remark"
+        :maxlength="REMARK_MAX"
+        :placeholder="name || '请输入群备注'"
+        auto-height
       />
       <view class="meta">
-        <text class="hint">仅群内成员可见，最多 {{ NICKNAME_MAX }} 个字</text>
+        <text class="hint">群备注仅自己可见，最多 {{ REMARK_MAX }} 个字</text>
+        <text class="count">{{ count }}/{{ REMARK_MAX }}</text>
       </view>
     </view>
 
@@ -122,15 +126,18 @@ async function onSubmit() {
 }
 .input {
   width: 100%;
-  height: 80rpx;
+  min-height: 120rpx;
   font-size: 30rpx;
   color: #212121;
-  padding: 0 8rpx;
+  line-height: 1.5;
 }
 .meta {
   margin-top: 16rpx;
+  display: flex;
+  justify-content: space-between;
 }
-.hint {
+.hint,
+.count {
   font-size: 24rpx;
   color: #636e86;
 }

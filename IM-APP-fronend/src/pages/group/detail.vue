@@ -20,7 +20,7 @@ const code = ref('group')
 
 const groupDetail = computed(() => groupStore.currentGroup)
 const memberList = computed(() => groupStore.members)
-const groupName = computed(() => groupDetail.value?.name || '群聊')
+const groupName = computed(() => groupDetail.value?.remark?.trim() || groupDetail.value?.name || '群聊')
 const avatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
 
@@ -131,6 +131,12 @@ function goToMyNickname() {
   })
 }
 
+function goToRemark() {
+  uni.navigateTo({
+    url: `/pages/group/remark?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
 function goToMedia() {
   uni.navigateTo({
     url: `/pages/group/media?id=${encodeURIComponent(groupId.value)}`,
@@ -231,6 +237,14 @@ function copyGroupId() {
       <view class="info-row nav-row" @click="goToGroupQrcode">
         <text class="label">群二维码</text>
         <text class="arrow">›</text>
+      </view>
+
+      <view class="info-row nav-row" @click="goToRemark">
+        <text class="label">群备注</text>
+        <view class="row-right">
+          <text class="muted">{{ groupDetail?.remark?.trim() || '未设置' }}</text>
+          <text class="arrow">›</text>
+        </view>
       </view>
 
       <view class="info-row nav-row" @click="goToMyNickname">
