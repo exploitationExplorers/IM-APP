@@ -36,7 +36,7 @@ export const useUserStore = defineStore('user', () => {
     setToken(res.accessToken)
     setRefreshToken(res.refreshToken)
     // IM 登录失败不应挡住业务登录，进聊天页时还会再试一次
-    initOpenIM().catch(() => undefined)
+    startIMSession()
   }
 
   async function loginPassword(phone: string, password: string, countryCode?: string) {
@@ -94,6 +94,13 @@ export const useUserStore = defineStore('user', () => {
     uni.reLaunch({ url: '/pages/auth/sign-in' })
   }
 
+  /** 登录 SDK 后立刻挂上收消息监听，不能等到用户点开会话列表才订阅 */
+  function startIMSession() {
+    initOpenIM()
+      .then(() => useChatStore().subscribeRealtime())
+      .catch(() => undefined)
+  }
+
   function bootstrap() {
     if (token.value.startsWith('mock_token_')) {
       token.value = ''
@@ -104,7 +111,7 @@ export const useUserStore = defineStore('user', () => {
       return
     }
     if (token.value) {
-      initOpenIM().catch(() => undefined)
+      startIMSession()
       loadProfile().catch(() => undefined)
     }
   }

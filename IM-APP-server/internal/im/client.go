@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"im-app-server/internal/config"
+	"im-app-server/internal/models"
 )
 
 const maxResponseBytes = 2 << 20
@@ -221,6 +222,9 @@ func (c *Client) IsUserRegistered(ctx context.Context, userID string) (bool, err
 // EnsureUser makes PostgreSQL's user visible to OpenIM and keeps the OpenIM
 // nickname/avatar current. account_check makes retries idempotent.
 func (c *Client) EnsureUser(ctx context.Context, user User) error {
+	if strings.TrimSpace(user.FaceURL) == "" {
+		user.FaceURL = models.DefaultAvatar
+	}
 	registered, err := c.IsUserRegistered(ctx, user.UserID)
 	if err != nil {
 		return err

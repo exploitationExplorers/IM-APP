@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"im-app-server/internal/config"
+	"im-app-server/internal/models"
 )
 
 func TestGetUserTokenUsesCachedAdminToken(t *testing.T) {
@@ -68,6 +69,13 @@ func TestEnsureUserRegistersMissingUser(t *testing.T) {
 			_, _ = w.Write([]byte(`{"errCode":0,"data":{"results":[{"userID":"user-1","accountStatus":0}]}}`))
 		case "/user/user_register":
 			registerCalls.Add(1)
+			var body struct {
+				Users []User `json:"users"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if len(body.Users) != 1 || body.Users[0].FaceURL != models.DefaultAvatar {
+				t.Fatalf("register users = %#v, want default faceURL", body.Users)
+			}
 			_, _ = w.Write([]byte(`{"errCode":0,"data":{"failedUserIDs":[]}}`))
 		default:
 			http.NotFound(w, r)
