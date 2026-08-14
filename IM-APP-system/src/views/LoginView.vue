@@ -3,6 +3,7 @@ import { reactive, shallowRef } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import { CircleClose, Lock, User, UserFilled } from "@element-plus/icons-vue";
 import { useRouter } from "vue-router";
+import { loginApi } from "@/api/modules/auth";
 import loginBackground from "../assets/images/login_bg.svg";
 import loginIllustration from "../assets/images/login_left.png";
 import logo from "../assets/images/logo.svg";
@@ -20,7 +21,7 @@ const loading = shallowRef(false);
 
 const form = reactive<LoginForm>({
   username: "admin",
-  password: "123456",
+  password: "admin123",
 });
 
 const rules: FormRules<LoginForm> = {
@@ -40,12 +41,18 @@ async function submit(): Promise<void> {
   if (!isValid || loading.value) return;
 
   loading.value = true;
-  window.setTimeout(async () => {
-    auth.login(form.username);
-    loading.value = false;
+  try {
+    const res = await loginApi({
+      username: form.username.trim(),
+      password: form.password,
+    });
+    auth.setSession(res.data);
     ElMessage.success("欢迎回来");
     await router.push("/home");
-  }, 420);
+  } catch {
+  } finally {
+    loading.value = false;
+  }
 }
 </script>
 
@@ -73,7 +80,7 @@ async function submit(): Promise<void> {
               v-model="form.password"
               type="password"
               show-password
-              placeholder="登录密码：123456"
+              placeholder="登录密码：admin123"
               :prefix-icon="Lock"
               autocomplete="current-password"
           /></el-form-item>
@@ -90,7 +97,7 @@ async function submit(): Promise<void> {
             >登录</el-button
           >
         </div>
-        <p class="login-hint">演示账号：admin · 密码：123456</p>
+        <p class="login-hint">演示账号：admin · 密码：admin123</p>
       </section>
     </section>
   </main>
