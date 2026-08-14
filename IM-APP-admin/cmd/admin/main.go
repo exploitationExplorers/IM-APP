@@ -15,13 +15,17 @@ import (
 	"im-app-admin/internal/handler"
 	"im-app-admin/internal/middleware"
 	"im-app-admin/internal/repository"
+	"im-app-admin/internal/server"
 	"im-app-admin/internal/service"
 
-	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
 	cfg := config.Load()
+	if cfg.AdminJWTSecret == "im-admin-dev-secret-change-me" {
+		log.Println("WARN: ADMIN_JWT_SECRET 使用默认开发密钥，生产环境必须设置独立密钥")
+	}
 
 	pool, err := db.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -35,69 +39,56 @@ func main() {
 	}
 	log.Println("migrations applied")
 
-	adminRepo := &repository.AdminRepo{DB: pool}
-	dataRepo := &repository.DataRepo{DB: pool}
-	if err := adminRepo.SeedDefault(context.Background()); err != nil {
-		log.Printf("seed admin: %v", err)
-	}
+	authRepo := &repository.AuthRepo{DB: pool}
+	rbacRepo := &repository.RBACRepo{DB: pool}
+	auditRepo := &repository.AuditRepo{DB: pool}
 
-	adminSvc := &service.AdminService{Repo: adminRepo}
-	dataSvc := &service.DataService{Repo: dataRepo}
-
-	adminH := &handler.AdminHandler{Svc: adminSvc, Secret: cfg.JWTSecret}
-	dataH := &handler.DataHandler{Data: dataSvc, Admin: adminSvc}
-
-	r := gin.Default()
-	r.Use(corsMiddleware())
-
-	api := r.Group("/api/admin")
-	{
-		api.POST("/login", adminH.Login)
-
-		auth := api.Group("")
-		auth.Use(middleware.AuthRequired(cfg.JWTSecret))
-		{
-			// 管理员与权限
-			auth.GET("/me", adminH.Me)
-			auth.GET("/admins", adminH.ListAdmins)
-			auth.POST("/admins", adminH.CreateAdmin)
-			auth.PUT("/admins/:id", adminH.UpdateAdmin)
-			auth.GET("/roles", adminH.ListRoles)
-			auth.POST("/roles", adminH.CreateRole)
-			auth.PUT("/roles/:id/permissions", adminH.SetRolePermissions)
-			auth.GET("/operation-logs", adminH.ListOperationLogs)
-
-			// 用户管理
-			auth.GET("/users", dataH.ListUsers)
-			auth.GET("/users/:id", dataH.GetUser)
-			auth.PUT("/users/:id/status", dataH.UpdateUserStatus)
-			auth.GET("/users/:id/reports", dataH.ListUserReports)
-
-			// 群组管理
-			auth.GET("/groups", dataH.ListGroups)
-			auth.GET("/groups/:id", dataH.GetGroupDetail)
-			auth.GET("/groups/:id/members", dataH.ListGroupMembers)
-			auth.PUT("/groups/:id/status", dataH.UpdateGroupStatus)
-			auth.PUT("/groups/:id/settings", dataH.UpdateGroupSettings)
-			auth.PUT("/groups/:id/mute-all", dataH.MuteGroupAll)
-			auth.GET("/groups/:id/recall-logs", dataH.ListGroupRecallLogs)
-
-			// 转发任务 / 短信记录
-			auth.GET("/forward-tasks", dataH.ListForwardTasks)
-			auth.GET("/sms-logs", dataH.ListSmsLogs)
-			auth.GET("/countries", dataH.ListCountries)
-			auth.PUT("/countries/:code", dataH.UpdateCountry)
-
-			// 运营配置
-			auth.GET("/app-versions", dataH.ListAppVersions)
-			auth.POST("/app-versions", dataH.CreateAppVersion)
-			auth.GET("/policies", dataH.ListPolicies)
-			auth.PUT("/policies", dataH.SavePolicy)
-			auth.GET("/sensitive-words", dataH.ListSensitiveWords)
-			auth.POST("/sensitive-words", dataH.CreateSensitiveWord)
-			auth.DELETE("/sensitive-words/:id", dataH.DeleteSensitiveWord)
+	// 一次性初始化超级管理员（密码来自环境变量，不写死演示密码）
+	if cfg.BootstrapPassword != "" {
+		hash, _ := bcrypt.GenerateFromPassword([]byte(cfg.BootstrapPassword), bcrypt.DefaultCost)
+		if err := rbacRepo.BootstrapAdmin(context.Background(), cfg.BootstrapUsername, string(hash)); err != nil {
+			log.Printf("bootstrap admin: %v", err)
+		} else {
+			log.Printf("super admin ensured (username=%s)", cfg.BootstrapUsername)
 		}
+	} else {
+		log.Println("未设置 ADMIN_BOOTSTRAP_PASSWORD，跳过首个超级管理员初始化")
 	}
+
+	authSvc := &service.AuthService{
+		Auth:       authRepo,
+		Rbac:       rbacRepo,
+		Audit:      auditRepo,
+		Secret:     cfg.AdminJWTSecret,
+		Issuer:     cfg.JWTIssuer,
+		Audience:   cfg.JWTAudience,
+		AccessTTL:  cfg.AccessTokenTTL,
+		RefreshTTL: cfg.RefreshTokenTTL,
+		MFATTL:     5 * time.Minute,
+	}
+	rbacSvc := &service.RBACService{Rbac: rbacRepo, Auth: authRepo, Audit: auditRepo}
+	dataSvc := &service.DataService{Repo: &repository.DataRepo{DB: pool}}
+	opsSvc := &service.OpsService{Repo: &repository.OpsRepo{DB: pool}}
+
+	authH := &handler.AuthHandler{
+		Svc:     authSvc,
+		Limiter: middleware.NewLoginLimiter(cfg.LoginFailThreshold, cfg.LoginLockMinutes),
+	}
+	rbacH := &handler.RBACHandler{Svc: rbacSvc}
+	dataH := &handler.DataHandler{Data: dataSvc}
+	opsH := &handler.OpsHandler{Svc: opsSvc}
+	metaH := &handler.MetaHandler{Version: "1.0.0", Commit: "dev", BuildTime: time.Now().UTC().Format(time.RFC3339)}
+
+	r := server.BuildRouter(server.Deps{
+		Cfg:       cfg,
+		RbacRepo:  rbacRepo,
+		AuditRepo: auditRepo,
+		AuthH:     authH,
+		RBACH:     rbacH,
+		DataH:     dataH,
+		OpsH:      opsH,
+		MetaH:     metaH,
+	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -119,17 +110,4 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
-}
-
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	}
 }

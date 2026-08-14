@@ -57,7 +57,7 @@ OpenIM ID：78037b3aec8046fdb1413154f0feabb3
 
 - OpenIM 用户 ID
 - 昵称
-- 头像 URL
+- 头像 URL（业务侧为空时写入默认头像，避免 OpenIM 客户端生成文字头像）
 
 不得同步：
 

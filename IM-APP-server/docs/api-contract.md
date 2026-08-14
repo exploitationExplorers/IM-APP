@@ -375,13 +375,15 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/contact-tags`
 
-标签列表。
+标签列表，含 `memberCount` 与最多 5 个 `memberNames` 预览。
 
 ### POST `/api/v1/contact-tags`
 
 **Body** `{ "name": "同事" }`
 
 ### PATCH `/api/v1/contact-tags/:tagId`
+
+**Body** `{ "name": "同事" }`
 
 ### DELETE `/api/v1/contact-tags/:tagId`
 

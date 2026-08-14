@@ -34,6 +34,21 @@ const isAppPlatform = uni.getSystemInfoSync().uniPlatform === 'app'
 /** 当前登录的 OpenIM 用户 ID，消息里的 sendID 就是它 */
 export const imUserId = ref('')
 
+const IM_USER_ID_RE = /^[0-9a-f]{32}$/
+const BUSINESS_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/**
+ * OpenIM 用户 ID → 业务用户 UUID。
+ * 后端用去掉连字符的 UUID 作为 OpenIM userID，这里做反向还原。
+ */
+export function businessUserIdFromIM(openIMUserID: string): string {
+  const normalized = openIMUserID.trim().toLowerCase()
+  if (BUSINESS_UUID_RE.test(normalized)) return normalized
+  if (!IM_USER_ID_RE.test(normalized)) return ''
+  return `${normalized.slice(0, 8)}-${normalized.slice(8, 12)}-${normalized.slice(12, 16)}-${normalized.slice(16, 20)}-${normalized.slice(20)}`
+}
+
 let tokenExpireAt = 0
 let loginPromise: Promise<string> | null = null
 
@@ -368,12 +383,16 @@ function imageSizeOf(path: string): Promise<{ width: number; height: number }> {
  * 要靠它归位到某个会话。
  */
 export function conversationIdOf(message: MessageItem): string {
+  const fromSdk = (message as MessageItem & { conversationID?: string }).conversationID
+  if (fromSdk) return fromSdk
   if (message.sessionType === SessionType.Single) {
+    if (!message.sendID || !message.recvID) return ''
     return `si_${[message.sendID, message.recvID].sort().join('_')}`
   }
   if (message.sessionType === SessionType.Notification) {
     return `sn_${message.sendID}_${message.recvID}`
   }
+  if (!message.groupID) return ''
   return `sg_${message.groupID}`
 }
 
@@ -417,6 +436,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     id: item.clientMsgID,
     conversationId: conversationIdOf(item),
     senderId: item.sendID,
+    senderAvatar: item.senderFaceUrl || undefined,
     type: toAppMessageType(item.contentType),
     content: extractContent(item),
     createdAt: toISOTime(item.sendTime),
@@ -442,14 +462,28 @@ function toAppMessageType(contentType: number): AppMessageType {
   }
 }
 
+function jsonContentField(raw: string, key: string): string {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (parsed && typeof parsed === 'object' && key in parsed) {
+      const value = (parsed as Record<string, unknown>)[key]
+      return typeof value === 'string' ? value : ''
+    }
+  } catch {
+    /* content 不是 JSON 时按纯文本用 */
+  }
+  return raw
+}
+
 function extractContent(item: MessageItem): string {
   switch (item.contentType) {
     case MessageType.TextMessage:
-      return item.textElem?.content || ''
+      return item.textElem?.content || jsonContentField(item.content, 'content')
     case MessageType.AtTextMessage:
-      return item.atTextElem?.text || ''
+      return item.atTextElem?.text || jsonContentField(item.content, 'text')
     case MessageType.QuoteMessage:
-      return item.quoteElem?.text || ''
+      return item.quoteElem?.text || jsonContentField(item.content, 'text')
     case MessageType.PictureMessage:
       return (
         item.pictureElem?.snapshotPicture?.url ||
@@ -467,7 +501,8 @@ function extractContent(item: MessageItem): string {
     case MessageType.VideoMessage:
       return item.videoElem?.videoUrl || ''
     default:
-      return item.notificationElem?.detail || ''
+      // 好友通知等 detail 是 JSON，聊天气泡里展示不出来，交给页面过滤
+      return ''
   }
 }
 
