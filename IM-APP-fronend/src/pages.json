@@ -120,13 +120,28 @@
       "path": "pages/contacts/friend-tags",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "设置标签"
+        "navigationBarTitleText": "新增标签"
+      }
+    },
+    {
+      "path": "pages/contacts/tag-detail",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "标签"
+      }
+    },
+    {
+      "path": "pages/contacts/tag-add-members",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "选择联络人"
       }
     },
     {
       "path": "pages/contacts/tags",
       "style": {
-        "navigationBarTitleText": "标签"
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "通讯录标签"
       }
     },
     {

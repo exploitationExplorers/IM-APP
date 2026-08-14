@@ -85,3 +85,33 @@ export async function createContactTag(name: string): Promise<ContactTagItem> {
     data: { name },
   })
 }
+
+export async function fetchTagMembers(tagId: string): Promise<Contact[]> {
+  return request<Contact[]>({
+    url: `/contact-tags/${encodeURIComponent(tagId)}/members`,
+    method: 'GET',
+  })
+}
+
+export async function setTagMembers(tagId: string, userIds: string[]): Promise<ContactTagItem> {
+  return request<ContactTagItem>({
+    url: `/contact-tags/${encodeURIComponent(tagId)}/members`,
+    method: 'PUT',
+    data: { userIds },
+  })
+}
+
+export async function updateContactTag(tagId: string, name: string): Promise<ContactTagItem> {
+  return request<ContactTagItem>({
+    url: `/contact-tags/${encodeURIComponent(tagId)}`,
+    method: 'PATCH',
+    data: { name },
+  })
+}
+
+export async function deleteContactTag(tagId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>({
+    url: `/contact-tags/${encodeURIComponent(tagId)}`,
+    method: 'DELETE',
+  })
+}

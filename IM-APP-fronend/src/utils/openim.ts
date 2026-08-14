@@ -34,6 +34,21 @@ const isAppPlatform = uni.getSystemInfoSync().uniPlatform === 'app'
 /** 当前登录的 OpenIM 用户 ID，消息里的 sendID 就是它 */
 export const imUserId = ref('')
 
+const IM_USER_ID_RE = /^[0-9a-f]{32}$/
+const BUSINESS_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/**
+ * OpenIM 用户 ID → 业务用户 UUID。
+ * 后端用去掉连字符的 UUID 作为 OpenIM userID，这里做反向还原。
+ */
+export function businessUserIdFromIM(openIMUserID: string): string {
+  const normalized = openIMUserID.trim().toLowerCase()
+  if (BUSINESS_UUID_RE.test(normalized)) return normalized
+  if (!IM_USER_ID_RE.test(normalized)) return ''
+  return `${normalized.slice(0, 8)}-${normalized.slice(8, 12)}-${normalized.slice(12, 16)}-${normalized.slice(16, 20)}-${normalized.slice(20)}`
+}
+
 let tokenExpireAt = 0
 let loginPromise: Promise<string> | null = null
 
