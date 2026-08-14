@@ -38,8 +38,16 @@
             "type": "array"
           },
           "status": {
-            "description": "active|disabled",
-            "type": "string"
+            "description": "active|disabled（可选值：active=启用, disabled=停用）",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "启用",
+              "停用"
+            ]
           },
           "username": {
             "description": "登录账号",
@@ -139,8 +147,16 @@
             "type": "array"
           },
           "status": {
-            "description": "active|disabled",
-            "type": "string"
+            "description": "active|disabled（可选值：active=启用, disabled=停用）",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "启用",
+              "停用"
+            ]
           },
           "userCount": {
             "description": "关联管理员数",
@@ -184,8 +200,20 @@
             "type": "string"
           },
           "status": {
-            "description": "normal|banned|dissolved|muted",
-            "type": "string"
+            "description": "normal|banned|dissolved|muted（可选值：normal=正常, banned=已封禁, dissolved=已解散, muted=全员禁言）",
+            "enum": [
+              "normal",
+              "banned",
+              "dissolved",
+              "muted"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "正常",
+              "已封禁",
+              "已解散",
+              "全员禁言"
+            ]
           }
         },
         "type": "object"
@@ -237,8 +265,20 @@
             "type": "string"
           },
           "status": {
-            "description": "normal|banned|dissolved|muted",
-            "type": "string"
+            "description": "normal|banned|dissolved|muted（可选值：normal=正常, banned=已封禁, dissolved=已解散, muted=全员禁言）",
+            "enum": [
+              "normal",
+              "banned",
+              "dissolved",
+              "muted"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "正常",
+              "已封禁",
+              "已解散",
+              "全员禁言"
+            ]
           }
         },
         "type": "object"
@@ -258,8 +298,16 @@
             "type": "string"
           },
           "role": {
-            "description": "member|owner",
-            "type": "string"
+            "description": "member|owner（可选值：member=成员, owner=群主）",
+            "enum": [
+              "member",
+              "owner"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "成员",
+              "群主"
+            ]
           },
           "userId": {
             "description": "用户 ID",
@@ -319,8 +367,18 @@
             "type": "integer"
           },
           "status": {
-            "description": "active|banned|cancelled",
-            "type": "string"
+            "description": "active|banned|cancelled（可选值：active=正常, banned=已封禁, cancelled=已注销）",
+            "enum": [
+              "active",
+              "banned",
+              "cancelled"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "正常",
+              "已封禁",
+              "已注销"
+            ]
           }
         },
         "type": "object"
@@ -387,8 +445,18 @@
             "type": "integer"
           },
           "status": {
-            "description": "active|banned|cancelled",
-            "type": "string"
+            "description": "active|banned|cancelled（可选值：active=正常, banned=已封禁, cancelled=已注销）",
+            "enum": [
+              "active",
+              "banned",
+              "cancelled"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "正常",
+              "已封禁",
+              "已注销"
+            ]
           }
         },
         "type": "object"
@@ -420,8 +488,16 @@
             "type": "string"
           },
           "status": {
-            "description": "draft|published",
-            "type": "string"
+            "description": "draft|published（可选值：draft=草稿, published=已发布）",
+            "enum": [
+              "draft",
+              "published"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "草稿",
+              "已发布"
+            ]
           },
           "version": {
             "description": "版本号",
@@ -481,8 +557,18 @@
             "type": "string"
           },
           "result": {
-            "description": "success|denied|failed",
-            "type": "string"
+            "description": "success|denied|failed（可选值：success=成功, denied=权限拒绝, failed=失败）",
+            "enum": [
+              "success",
+              "denied",
+              "failed"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "成功",
+              "权限拒绝",
+              "失败"
+            ]
           },
           "userAgent": {
             "description": "User-Agent",
@@ -576,8 +662,20 @@
             "type": "string"
           },
           "type": {
-            "description": "report|forward_risk|sms_failed|system_alert",
-            "type": "string"
+            "description": "report|forward_risk|sms_failed|system_alert（可选值：report=举报, forward_risk=转发风险, sms_failed=短信失败, system_alert=系统告警）",
+            "enum": [
+              "report",
+              "forward_risk",
+              "sms_failed",
+              "system_alert"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "举报",
+              "转发风险",
+              "短信失败",
+              "系统告警"
+            ]
           }
         },
         "type": "object"
@@ -679,8 +777,22 @@
             "type": "string"
           },
           "status": {
-            "description": "pending|processing|ready|failed|expired",
-            "type": "string"
+            "description": "pending|processing|ready|failed|expired（可选值：pending=待处理, processing=处理中, ready=已完成, failed=失败, expired=已过期）",
+            "enum": [
+              "pending",
+              "processing",
+              "ready",
+              "failed",
+              "expired"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "待处理",
+              "处理中",
+              "已完成",
+              "失败",
+              "已过期"
+            ]
           }
         },
         "type": "object"
@@ -733,8 +845,22 @@
             "type": "string"
           },
           "status": {
-            "description": "pending|success|failed|skipped|cancelled",
-            "type": "string"
+            "description": "pending|success|failed|skipped|cancelled（可选值：pending=待发送, success=已送达, failed=失败, skipped=已跳过, cancelled=已取消）",
+            "enum": [
+              "pending",
+              "success",
+              "failed",
+              "skipped",
+              "cancelled"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "待发送",
+              "已送达",
+              "失败",
+              "已跳过",
+              "已取消"
+            ]
           },
           "userId": {
             "description": "接收用户 ID",
@@ -778,8 +904,22 @@
             "type": "integer"
           },
           "status": {
-            "description": "pending|processing|success|failed|cancelled",
-            "type": "string"
+            "description": "pending|processing|success|failed|cancelled（可选值：pending=待处理, processing=处理中, success=已完成, failed=失败, cancelled=已终止）",
+            "enum": [
+              "pending",
+              "processing",
+              "success",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "待处理",
+              "处理中",
+              "已完成",
+              "失败",
+              "已终止"
+            ]
           },
           "successCount": {
             "description": "成功数",
@@ -840,16 +980,32 @@
             "type": "string"
           },
           "status": {
-            "description": "draft|published",
-            "type": "string"
+            "description": "draft|published（可选值：draft=草稿, published=已发布）",
+            "enum": [
+              "draft",
+              "published"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "草稿",
+              "已发布"
+            ]
           },
           "title": {
             "description": "标题",
             "type": "string"
           },
           "type": {
-            "description": "user_agreement|privacy_policy",
-            "type": "string"
+            "description": "user_agreement|privacy_policy（可选值：user_agreement=用户服务协议, privacy_policy=隐私政策）",
+            "enum": [
+              "user_agreement",
+              "privacy_policy"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "用户服务协议",
+              "隐私政策"
+            ]
           },
           "version": {
             "description": "版本号",
@@ -951,8 +1107,16 @@
             "type": "string"
           },
           "disposition": {
-            "description": "处置",
-            "type": "string"
+            "description": "处置（可选值：intercept=已拦截, pending_review=待复核）",
+            "enum": [
+              "intercept",
+              "pending_review"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "已拦截",
+              "待复核"
+            ]
           },
           "field": {
             "description": "命中字段",
@@ -976,8 +1140,16 @@
       "ProfileModeration": {
         "properties": {
           "field": {
-            "description": "avatar|nickname",
-            "type": "string"
+            "description": "avatar|nickname（可选值：avatar=头像, nickname=昵称）",
+            "enum": [
+              "avatar",
+              "nickname"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "头像",
+              "昵称"
+            ]
           },
           "handledAt": {
             "description": "处理时间（可空）",
@@ -1000,8 +1172,18 @@
             "type": "string"
           },
           "status": {
-            "description": "pending|rejected|restored",
-            "type": "string"
+            "description": "pending|approved|rejected（可选值：pending=待审核, approved=已同意, rejected=已驳回）",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "待审核",
+              "已同意",
+              "已驳回"
+            ]
           },
           "userId": {
             "description": "用户 ID",
@@ -1050,8 +1232,16 @@
             "type": "string"
           },
           "operatorType": {
-            "description": "admin|user",
-            "type": "string"
+            "description": "admin|user（可选值：admin=管理员, user=用户）",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "管理员",
+              "用户"
+            ]
           },
           "reason": {
             "description": "撤回原因",
@@ -1099,16 +1289,40 @@
             "type": "string"
           },
           "status": {
-            "description": "pending|processing|resolved|rejected|reopened",
-            "type": "string"
+            "description": "pending|processing|resolved|rejected|reopened（可选值：pending=待处理, processing=处理中, resolved=已结案, rejected=已驳回, reopened=已重开）",
+            "enum": [
+              "pending",
+              "processing",
+              "resolved",
+              "rejected",
+              "reopened"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "待处理",
+              "处理中",
+              "已结案",
+              "已驳回",
+              "已重开"
+            ]
           },
           "targetId": {
             "description": "目标 ID",
             "type": "string"
           },
           "targetType": {
-            "description": "user|group|message",
-            "type": "string"
+            "description": "user|group|message（可选值：user=用户, group=群组, message=消息）",
+            "enum": [
+              "user",
+              "group",
+              "message"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "用户",
+              "群组",
+              "消息"
+            ]
           },
           "updatedAt": {
             "description": "更新时间",
@@ -1203,16 +1417,40 @@
             "type": "string"
           },
           "status": {
-            "description": "pending|processing|resolved|rejected|reopened",
-            "type": "string"
+            "description": "pending|processing|resolved|rejected|reopened（可选值：pending=待处理, processing=处理中, resolved=已结案, rejected=已驳回, reopened=已重开）",
+            "enum": [
+              "pending",
+              "processing",
+              "resolved",
+              "rejected",
+              "reopened"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "待处理",
+              "处理中",
+              "已结案",
+              "已驳回",
+              "已重开"
+            ]
           },
           "targetId": {
             "description": "目标 ID",
             "type": "string"
           },
           "targetType": {
-            "description": "user|group|message",
-            "type": "string"
+            "description": "user|group|message（可选值：user=用户, group=群组, message=消息）",
+            "enum": [
+              "user",
+              "group",
+              "message"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "用户",
+              "群组",
+              "消息"
+            ]
           },
           "updatedAt": {
             "description": "更新时间",
@@ -1282,12 +1520,30 @@
             "type": "integer"
           },
           "status": {
-            "description": "active|disabled",
-            "type": "string"
+            "description": "active|disabled（可选值：active=启用, disabled=停用）",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "启用",
+              "停用"
+            ]
           },
           "targetType": {
-            "description": "user|group|message",
-            "type": "string"
+            "description": "user|group|message（可选值：user=用户, group=群组, message=消息）",
+            "enum": [
+              "user",
+              "group",
+              "message"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "用户",
+              "群组",
+              "消息"
+            ]
           }
         },
         "type": "object"
@@ -1307,8 +1563,16 @@
             "type": "string"
           },
           "status": {
-            "description": "active|disabled",
-            "type": "string"
+            "description": "active|disabled（可选值：active=启用, disabled=停用）",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "启用",
+              "停用"
+            ]
           },
           "word": {
             "description": "敏感词",
@@ -1348,8 +1612,20 @@
             "type": "string"
           },
           "status": {
-            "description": "状态",
-            "type": "string"
+            "description": "状态（可选值：sent=已发送, success=已送达, failed=失败, pending=发送中）",
+            "enum": [
+              "sent",
+              "success",
+              "failed",
+              "pending"
+            ],
+            "type": "string",
+            "x-enum-descriptions": [
+              "已发送",
+              "已送达",
+              "失败",
+              "发送中"
+            ]
           }
         },
         "type": "object"
@@ -1969,7 +2245,7 @@
                     "type": "string"
                   },
                   "status": {
-                    "description": "active|disabled",
+                    "description": "active|disabled（可选值：active=启用, disabled=停用）",
                     "enum": [
                       "active",
                       "disabled"
@@ -2127,7 +2403,7 @@
                     "type": "boolean"
                   },
                   "platform": {
-                    "description": "android|ios",
+                    "description": "android|ios（可选值：android=安卓, ios=苹果）",
                     "enum": [
                       "android",
                       "ios"
@@ -2334,7 +2610,7 @@
                     "type": "string"
                   },
                   "status": {
-                    "description": "published|draft",
+                    "description": "published|draft（可选值：published=已发布, draft=草稿）",
                     "enum": [
                       "published",
                       "draft"
@@ -2448,7 +2724,7 @@
             }
           },
           {
-            "description": "结果：success|denied|failed",
+            "description": "结果：success|denied|failed（可选值：success=成功, denied=权限拒绝, failed=失败）",
             "in": "query",
             "name": "result",
             "required": false,
@@ -3981,7 +4257,7 @@
             }
           },
           {
-            "description": "状态筛选：pending|processing|success|failed|cancelled",
+            "description": "状态筛选：pending|processing|success|failed|cancelled（可选值：pending=待处理, processing=处理中, success=已完成, failed=失败, cancelled=已终止）",
             "in": "query",
             "name": "status",
             "required": false,
@@ -4430,7 +4706,7 @@
             }
           },
           {
-            "description": "状态筛选：pending|success|failed|skipped|cancelled",
+            "description": "状态筛选：pending|success|failed|skipped|cancelled（可选值：pending=待发送, success=已送达, failed=失败, skipped=已跳过, cancelled=已取消）",
             "in": "query",
             "name": "status",
             "required": false,
@@ -4560,7 +4836,7 @@
             }
           },
           {
-            "description": "状态筛选：normal|banned|dissolved|muted",
+            "description": "状态筛选：normal|banned|dissolved|muted（可选值：normal=正常, banned=已封禁, dissolved=已解散, muted=全员禁言）",
             "in": "query",
             "name": "status",
             "required": false,
@@ -5555,7 +5831,7 @@
                     "type": "string"
                   },
                   "type": {
-                    "description": "user_agreement|privacy_policy",
+                    "description": "user_agreement|privacy_policy（可选值：user_agreement=用户服务协议, privacy_policy=隐私政策）",
                     "enum": [
                       "user_agreement",
                       "privacy_policy"
@@ -6291,7 +6567,7 @@
             }
           },
           {
-            "description": "状态筛选：pending|rejected|restored",
+            "description": "状态筛选：pending|rejected|restored（可选值：pending=待审核, rejected=已驳回, restored=已恢复）",
             "in": "query",
             "name": "status",
             "required": false,
@@ -6405,7 +6681,7 @@
               "schema": {
                 "properties": {
                   "field": {
-                    "description": "avatar|nickname",
+                    "description": "avatar|nickname（可选值：avatar=头像, nickname=昵称）",
                     "enum": [
                       "avatar",
                       "nickname"
@@ -6511,7 +6787,7 @@
               "schema": {
                 "properties": {
                   "field": {
-                    "description": "avatar|nickname",
+                    "description": "avatar|nickname（可选值：avatar=头像, nickname=昵称）",
                     "enum": [
                       "avatar",
                       "nickname"
@@ -6617,7 +6893,7 @@
               "schema": {
                 "properties": {
                   "field": {
-                    "description": "avatar|nickname",
+                    "description": "avatar|nickname（可选值：avatar=头像, nickname=昵称）",
                     "enum": [
                       "avatar",
                       "nickname"
@@ -6842,7 +7118,7 @@
                     "type": "string"
                   },
                   "targetType": {
-                    "description": "user|group|message",
+                    "description": "user|group|message（可选值：user=用户, group=群组, message=消息）",
                     "enum": [
                       "user",
                       "group",
@@ -7047,7 +7323,7 @@
               "schema": {
                 "properties": {
                   "status": {
-                    "description": "active|disabled",
+                    "description": "active|disabled（可选值：active=启用, disabled=停用）",
                     "enum": [
                       "active",
                       "disabled"
@@ -7160,7 +7436,7 @@
             }
           },
           {
-            "description": "状态筛选：pending|processing|resolved|rejected|reopened",
+            "description": "状态筛选：pending|processing|resolved|rejected|reopened（可选值：pending=待处理, processing=处理中, resolved=已结案, rejected=已驳回, reopened=已重开）",
             "in": "query",
             "name": "status",
             "required": false,
@@ -7183,7 +7459,7 @@
             }
           },
           {
-            "description": "目标类型：user|group|message",
+            "description": "目标类型：user|group|message（可选值：user=用户, group=群组, message=消息）",
             "in": "query",
             "name": "targetType",
             "required": false,
@@ -8731,7 +9007,7 @@
               "schema": {
                 "properties": {
                   "status": {
-                    "description": "active|disabled",
+                    "description": "active|disabled（可选值：active=启用, disabled=停用）",
                     "enum": [
                       "active",
                       "disabled"
@@ -8844,7 +9120,7 @@
             }
           },
           {
-            "description": "状态筛选",
+            "description": "状态筛选（可选值：sent=已发送, success=已送达, failed=失败, pending=发送中）",
             "in": "query",
             "name": "status",
             "required": false,
@@ -9569,7 +9845,7 @@
             }
           },
           {
-            "description": "状态筛选：active|banned|cancelled",
+            "description": "状态筛选：active|banned|cancelled（可选值：active=正常, banned=已封禁, cancelled=已注销）",
             "in": "query",
             "name": "status",
             "required": false,

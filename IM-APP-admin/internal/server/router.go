@@ -45,7 +45,7 @@ func BuildRouter(d Deps) *gin.Engine {
 	{
 		// 模块 00：健康与元信息
 		v1.GET("/health", d.MetaH.Health)
-		v1.GET("/meta", middleware.RequirePermission(rbacRepo, "admin.login"), d.MetaH.Meta)
+		v1.GET("/meta", middleware.AuthRequired(cfg.AdminJWTSecret, cfg.JWTIssuer, cfg.JWTAudience), middleware.RequirePermission(rbacRepo, "admin.login"), d.MetaH.Meta)
 
 		// 模块 01：登录 / MFA 挑战（公共）
 		v1.POST("/auth/login", d.AuthH.Login)

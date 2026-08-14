@@ -343,6 +343,34 @@ var fieldEnums = map[string][]string{
 	"POST /api/admin/v1/moderation/profiles/{userId}/reject field":  {"avatar", "nickname"},
 	"POST /api/admin/v1/moderation/profiles/{userId}/restore field": {"avatar", "nickname"},
 	"POST /api/admin/v1/legal-documents type":                       {"user_agreement", "privacy_policy"},
+	// ---- 响应模型字段枚举 ----
+	"AppUser status":            {"active", "banned", "cancelled"},
+	"AppUserDetail status":      {"active", "banned", "cancelled"},
+	"AdminAccount status":       {"active", "disabled"},
+	"AdminRole status":          {"active", "disabled"},
+	"AppGroup status":           {"normal", "banned", "dissolved", "muted"},
+	"AppGroupDetail status":     {"normal", "banned", "dissolved", "muted"},
+	"AppGroupMember role":       {"member", "owner"},
+	"AppVersion status":         {"draft", "published"},
+	"LegalDocument type":        {"user_agreement", "privacy_policy"},
+	"LegalDocument status":      {"draft", "published"},
+	"ReportReason targetType":   {"user", "group", "message"},
+	"ReportReason status":       {"active", "disabled"},
+	"Report targetType":         {"user", "group", "message"},
+	"Report status":             {"pending", "processing", "resolved", "rejected", "reopened"},
+	"ReportDetail targetType":   {"user", "group", "message"},
+	"ReportDetail status":       {"pending", "processing", "resolved", "rejected", "reopened"},
+	"ForwardTask status":        {"pending", "processing", "success", "failed", "cancelled"},
+	"ForwardTarget status":      {"pending", "success", "failed", "skipped", "cancelled"},
+	"RecallLog operatorType":    {"admin", "user"},
+	"SensitiveWord status":      {"active", "disabled"},
+	"ModerationHit disposition": {"intercept", "pending_review"},
+	"ProfileModeration field":   {"avatar", "nickname"},
+	"ProfileModeration status":  {"pending", "approved", "rejected"},
+	"SmsLog status":             {"sent", "success", "failed", "pending"},
+	"AuditLog result":           {"success", "denied", "failed"},
+	"ExportJob status":          {"pending", "processing", "ready", "failed", "expired"},
+	"DashboardTodo type":        {"report", "forward_risk", "sms_failed", "system_alert"},
 }
 
 // fieldEnumDescs 请求体字段枚举值的含义说明（与 fieldEnums 值一一对应）
@@ -357,6 +385,34 @@ var fieldEnumDescs = map[string][]string{
 	"POST /api/admin/v1/moderation/profiles/{userId}/reject field":  {"头像", "昵称"},
 	"POST /api/admin/v1/moderation/profiles/{userId}/restore field": {"头像", "昵称"},
 	"POST /api/admin/v1/legal-documents type":                       {"用户服务协议", "隐私政策"},
+	// ---- 响应模型字段枚举说明 ----
+	"AppUser status":            {"正常", "已封禁", "已注销"},
+	"AppUserDetail status":      {"正常", "已封禁", "已注销"},
+	"AdminAccount status":       {"启用", "停用"},
+	"AdminRole status":          {"启用", "停用"},
+	"AppGroup status":           {"正常", "已封禁", "已解散", "全员禁言"},
+	"AppGroupDetail status":     {"正常", "已封禁", "已解散", "全员禁言"},
+	"AppGroupMember role":       {"成员", "群主"},
+	"AppVersion status":         {"草稿", "已发布"},
+	"LegalDocument type":        {"用户服务协议", "隐私政策"},
+	"LegalDocument status":      {"草稿", "已发布"},
+	"ReportReason targetType":   {"用户", "群组", "消息"},
+	"ReportReason status":       {"启用", "停用"},
+	"Report targetType":         {"用户", "群组", "消息"},
+	"Report status":             {"待处理", "处理中", "已结案", "已驳回", "已重开"},
+	"ReportDetail targetType":   {"用户", "群组", "消息"},
+	"ReportDetail status":       {"待处理", "处理中", "已结案", "已驳回", "已重开"},
+	"ForwardTask status":        {"待处理", "处理中", "已完成", "失败", "已终止"},
+	"ForwardTarget status":      {"待发送", "已送达", "失败", "已跳过", "已取消"},
+	"RecallLog operatorType":    {"管理员", "用户"},
+	"SensitiveWord status":      {"启用", "停用"},
+	"ModerationHit disposition": {"已拦截", "待复核"},
+	"ProfileModeration field":   {"头像", "昵称"},
+	"ProfileModeration status":  {"待审核", "已同意", "已驳回"},
+	"SmsLog status":             {"已发送", "已送达", "失败", "发送中"},
+	"AuditLog result":           {"成功", "权限拒绝", "失败"},
+	"ExportJob status":          {"待处理", "处理中", "已完成", "失败", "已过期"},
+	"DashboardTodo type":        {"举报", "转发风险", "短信失败", "系统告警"},
 }
 
 func param(name, in, desc, typ string, required bool, enum []string, enumDesc []string) map[string]any {
@@ -365,6 +421,7 @@ func param(name, in, desc, typ string, required bool, enum []string, enumDesc []
 		schema["enum"] = enum
 		if len(enumDesc) == len(enum) {
 			schema["x-enum-descriptions"] = enumDesc
+			desc = appendEnumDesc(desc, enumDescriptions(enum, enumDesc))
 		}
 	}
 	return map[string]any{
@@ -374,6 +431,27 @@ func param(name, in, desc, typ string, required bool, enum []string, enumDesc []
 		"required":    required,
 		"schema":      schema,
 	}
+}
+
+// enumDescriptions 把枚举值与说明拼成 "值=说明, 值=说明"
+func enumDescriptions(enum, desc []string) string {
+	parts := make([]string, 0, len(enum))
+	for i, v := range enum {
+		if i < len(desc) && desc[i] != "" {
+			parts = append(parts, v+"="+desc[i])
+		} else {
+			parts = append(parts, v)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// appendEnumDesc 把枚举说明追加到参数描述末尾（apifox 即使不识别 x-enum-descriptions 也能在说明中看到）
+func appendEnumDesc(desc, parts string) string {
+	if desc == "" {
+		return "可选值：" + parts
+	}
+	return desc + "（可选值：" + parts + "）"
 }
 
 // requestBody 写操作请求体：优先使用业务字段映射（含必填/选填），未覆盖的用 AdminActionRequest
@@ -472,6 +550,12 @@ func propSchema(prefix string, f fieldSpec) map[string]any {
 		p["enum"] = enums
 		if descs, ok2 := fieldEnumDescs[prefix+" "+f.Name]; ok2 && len(descs) == len(enums) {
 			p["x-enum-descriptions"] = descs
+			cur, _ := p["description"].(string)
+			if cur == "" {
+				p["description"] = "可选值：" + enumDescriptions(enums, descs)
+			} else {
+				p["description"] = cur + "（可选值：" + enumDescriptions(enums, descs) + "）"
+			}
 		}
 	}
 	switch f.Type {
@@ -1315,7 +1399,7 @@ var modelSchemas = map[string][]fieldSpec{
 		{"field", "string", false, "avatar|nickname"},
 		{"oldValue", "string", false, "原值"},
 		{"newValue", "string", false, "新值"},
-		{"status", "string", false, "pending|rejected|restored"},
+		{"status", "string", false, "pending|approved|rejected"},
 		{"reason", "string", false, "处理原因"},
 		{"handledAt", "string", false, "处理时间（可空）"},
 	},
