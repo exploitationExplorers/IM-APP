@@ -1,16 +1,51 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
+import { computed, onMounted, shallowRef } from "vue";
 import { useRoute } from "vue-router";
+import { getAdminMeta } from "@/api/modules/admin";
+import type { Auth } from "@/api/interface";
 import SystemHeader from "./components/SystemHeader.vue";
 import SystemTabs from "./components/SystemTabs.vue";
 
 const route = useRoute();
 const isCollapse = shallowRef(false);
 const activeMenu = computed(() => route.path);
+const meta = shallowRef<Auth.ResMeta | null>(null);
+
+const metaSummary = computed(() => {
+  const data = meta.value;
+  if (!data) return "IM-APP 管理系统";
+  const parts = ["IM-APP 管理系统"];
+  if (data.version) parts.push(`v${data.version}`);
+  if (data.commit) parts.push(data.commit.slice(0, 8));
+  return parts.join(" · ");
+});
+
+const featureEntries = computed(() => {
+  const features = meta.value?.features;
+  if (!features || typeof features !== "object") return [];
+  return Object.entries(features).map(([key, value]) => ({
+    key,
+    value: typeof value === "boolean" ? (value ? "开启" : "关闭") : String(value ?? "-"),
+  }));
+});
+
+function formatBuildTime(value?: string): string {
+  if (!value) return "-";
+  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+}
 
 function toggleCollapse(): void {
   isCollapse.value = !isCollapse.value;
 }
+
+onMounted(async () => {
+  try {
+    const res = await getAdminMeta();
+    meta.value = res.data ?? null;
+  } catch {
+    meta.value = null;
+  }
+});
 </script>
 
 <template>
@@ -38,6 +73,10 @@ function toggleCollapse(): void {
               <el-menu-item index="/app/groups">
                 <el-icon><ChatSquare /></el-icon>
                 <template #title>群组管理</template>
+              </el-menu-item>
+              <el-menu-item index="/app/reports">
+                <el-icon><Warning /></el-icon>
+                <template #title>举报管理</template>
               </el-menu-item>
               <el-sub-menu index="/forward-group-send">
                 <template #title>
@@ -90,7 +129,39 @@ function toggleCollapse(): void {
             </transition>
           </router-view>
         </el-main>
-        <el-footer><div class="footer">IM-APP 管理系统</div></el-footer>
+        <el-footer>
+          <div class="footer">
+            <el-popover placement="top" :width="320" trigger="hover">
+              <template #reference>
+                <button class="meta-summary" type="button">{{ metaSummary }}</button>
+              </template>
+              <div class="meta-panel">
+                <div class="meta-row">
+                  <span>版本</span>
+                  <strong>{{ meta?.version || "-" }}</strong>
+                </div>
+                <div class="meta-row">
+                  <span>Commit</span>
+                  <strong>{{ meta?.commit || "-" }}</strong>
+                </div>
+                <div class="meta-row">
+                  <span>构建时间</span>
+                  <strong>{{ formatBuildTime(meta?.buildTime) }}</strong>
+                </div>
+                <div class="meta-features">
+                  <div class="meta-features-title">功能开关</div>
+                  <template v-if="featureEntries.length">
+                    <div v-for="item in featureEntries" :key="item.key" class="meta-row">
+                      <span>{{ item.key }}</span>
+                      <strong>{{ item.value }}</strong>
+                    </div>
+                  </template>
+                  <div v-else class="meta-empty">暂无功能开关</div>
+                </div>
+              </div>
+            </el-popover>
+          </div>
+        </el-footer>
       </el-container>
     </el-container>
   </el-container>
@@ -174,6 +245,65 @@ function toggleCollapse(): void {
   background-color: var(--el-bg-color);
   border-top: 1px solid var(--el-border-color-light);
   font-size: 14px;
+}
+
+.meta-summary {
+  max-width: 90vw;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  font: inherit;
+}
+
+.meta-summary:hover {
+  color: var(--el-color-primary);
+}
+
+.meta-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.meta-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  font-size: 13px;
+
+  span {
+    color: var(--el-text-color-secondary);
+  }
+
+  strong {
+    max-width: 200px;
+    overflow-wrap: anywhere;
+    color: var(--el-text-color-primary);
+    font-weight: 600;
+    text-align: right;
+  }
+}
+
+.meta-features {
+  padding-top: 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.meta-features-title {
+  margin-bottom: 8px;
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.meta-empty {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 @media (max-width: 700px) {

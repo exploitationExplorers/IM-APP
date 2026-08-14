@@ -2,7 +2,7 @@ import http from "@/api";
 import { PORT1 } from "@/api/config/servicePort";
 import { Login } from "@/api/interface/index";
 
-export { loginApi, refreshTokenApi } from "./auth";
+export { loginApi, refreshTokenApi } from "./admin";
 
 export const getAuthMenuListApi = () => {
   return http.get<any[]>(PORT1 + `/menu/list`, {}, { loading: false });

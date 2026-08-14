@@ -21,6 +21,8 @@ export interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   loading?: boolean;
   cancel?: boolean;
   _retry?: boolean;
+  /** 401 时不刷新、不强制登出（用于可选接口如 meta） */
+  skipAuthRefresh?: boolean;
 }
 
 const config = {
@@ -41,20 +43,37 @@ function pickMessage(data: { message?: string; msg?: string } | undefined, fallb
   return data?.message || data?.msg || fallback;
 }
 
+function setAuthorizationHeader(headers: InternalAxiosRequestConfig["headers"], token: string): void {
+  if (!headers) return;
+  if (typeof (headers as { set?: unknown }).set === "function") {
+    (headers as { set: (key: string, value: string) => void }).set("Authorization", `Bearer ${token}`);
+    return;
+  }
+  (headers as Record<string, string>).Authorization = `Bearer ${token}`;
+}
+
 async function refreshAccessToken(): Promise<string> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
     const authStore = useAuthStore();
     const currentRefresh = authStore.refreshToken;
+    const currentToken = authStore.token;
     if (!currentRefresh) {
       throw new Error("missing refresh token");
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+    if (currentToken) {
+      headers.Authorization = `Bearer ${currentToken}`;
     }
 
     const response = await axios.post<ResultData<Auth.ResLogin>>(
       `${config.baseURL}/admin/v1/auth/token/refresh`,
       { refreshToken: currentRefresh },
-      { timeout: ResultEnum.TIMEOUT as number }
+      { timeout: ResultEnum.TIMEOUT as number, headers }
     );
 
     const body = response.data;
@@ -90,8 +109,8 @@ class RequestHttp {
         if (requestConfig.cancel) axiosCanceler.addPending(requestConfig);
         requestConfig.loading ??= true;
         if (requestConfig.loading) showFullScreenLoading();
-        if (authStore.token && requestConfig.headers && typeof requestConfig.headers.set === "function") {
-          requestConfig.headers.set("Authorization", `Bearer ${authStore.token}`);
+        if (authStore.token) {
+          setAuthorizationHeader(requestConfig.headers, authStore.token);
         }
         return requestConfig;
       },
@@ -126,6 +145,10 @@ class RequestHttp {
         if (error.message.includes("timeout")) ElMessage.error("请求超时！请您稍后重试");
         if (error.message.includes("Network Error")) ElMessage.error("网络错误！请您稍后重试");
 
+        if (requestConfig?.skipAuthRefresh && response?.status === 401) {
+          return Promise.reject(error);
+        }
+
         if (
           response?.status === 401 &&
           requestConfig &&
@@ -135,9 +158,7 @@ class RequestHttp {
           try {
             requestConfig._retry = true;
             const newToken = await refreshAccessToken();
-            if (requestConfig.headers && typeof requestConfig.headers.set === "function") {
-              requestConfig.headers.set("Authorization", `Bearer ${newToken}`);
-            }
+            setAuthorizationHeader(requestConfig.headers, newToken);
             return this.service.request(requestConfig);
           } catch {
             forceLogout("登录失效！请您重新登录");

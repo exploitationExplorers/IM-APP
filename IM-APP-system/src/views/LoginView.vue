@@ -3,7 +3,7 @@ import { reactive, shallowRef } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import { CircleClose, Lock, User, UserFilled } from "@element-plus/icons-vue";
 import { useRouter } from "vue-router";
-import { loginApi } from "@/api/modules/auth";
+import { loginApi } from "@/api/modules/admin";
 import loginBackground from "../assets/images/login_bg.svg";
 import loginIllustration from "../assets/images/login_left.png";
 import logo from "../assets/images/logo.svg";
