@@ -87,9 +87,10 @@ type JoinGroupResult struct {
 }
 
 type ContactTagItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	MemberCount int64  `json:"memberCount"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	MemberCount int64    `json:"memberCount"`
+	MemberNames []string `json:"memberNames,omitempty"`
 }
 
 type SaveContactTagReq struct {

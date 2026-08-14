@@ -21,10 +21,20 @@ function openScanResultByPublicId(publicId: string) {
   })
 }
 
+function openGroupScanResult(token: string) {
+  uni.navigateTo({
+    url: `/pages/contacts/scan-group-result?token=${encodeURIComponent(token)}`,
+  })
+}
+
+function isGroupQrcode(type?: string) {
+  return type === 'group' || type === 'g'
+}
+
 async function handleScanRaw(raw: string) {
   const parsed = parseQrcodePayload(raw)
-  if (parsed.type === 'group' && parsed.token) {
-    uni.showToast({ title: '请使用添加群聊扫描群二维码', icon: 'none' })
+  if (isGroupQrcode(parsed.type) && parsed.token) {
+    openGroupScanResult(parsed.token)
     return
   }
   if (parsed.token) {

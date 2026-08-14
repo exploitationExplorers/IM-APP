@@ -375,13 +375,15 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/contact-tags`
 
-标签列表。
+标签列表，含 `memberCount` 与最多 5 个 `memberNames` 预览。
 
 ### POST `/api/v1/contact-tags`
 
 **Body** `{ "name": "同事" }`
 
 ### PATCH `/api/v1/contact-tags/:tagId`
+
+**Body** `{ "name": "同事" }`
 
 ### DELETE `/api/v1/contact-tags/:tagId`
 
@@ -442,6 +444,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
   "conversationId": "uuid"
 }
 ```
+
+群同步到 OpenIM 后，系统向该群发送一条欢迎消息：`新群创建成功，一起来聊天吧`。
 
 ### GET `/api/v1/groups`
 
@@ -659,7 +663,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/im/groups/:businessGroupId`
 
-把纯数字业务群号解析为内部 UUID，再解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
+把纯数字业务群号、内部 UUID 或 OpenIM 群 ID 解析为稳定的 OpenIM groupID，响应里的 `businessGroupId` 始终是纯数字群号。校验群状态、成员资格、单人禁言及全员禁言。若 OpenIM 尚无该群（历史数据未同步），会按业务库补创建并把当前用户邀请进群后再返回；全量成员对账仍由 Outbox 负责。
 
 ## OpenIM 内部接口
 

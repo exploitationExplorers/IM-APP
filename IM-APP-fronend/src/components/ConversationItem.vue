@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Conversation } from '@/types'
+import { APP_CONFIG } from '@/config'
 import { formatRelativeTime } from '@/utils/format'
 
 const props = defineProps<{
@@ -12,11 +13,17 @@ const emit = defineEmits<{
 }>()
 
 const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
+const avatarSrc = computed(() => {
+  if (props.item.avatar) return props.item.avatar
+  return props.item.type === 'group'
+    ? APP_CONFIG.defaultGroupAvatarUrl
+    : APP_CONFIG.defaultAvatarUrl
+})
 </script>
 
 <template>
   <view class="conv" @click="emit('click', item)">
-    <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
+    <image class="avatar" :src="avatarSrc" mode="aspectFill" />
     <view class="body">
       <view class="top">
         <text class="title">{{ item.title }}</text>

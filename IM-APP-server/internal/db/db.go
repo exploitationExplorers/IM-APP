@@ -17,7 +17,7 @@ func Connect(databaseURL string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
-	cfg.MaxConns = 10
+	cfg.MaxConns = 25
 	cfg.MinConns = 1
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

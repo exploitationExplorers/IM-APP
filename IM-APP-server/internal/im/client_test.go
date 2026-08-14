@@ -57,6 +57,31 @@ func TestGetUserTokenUsesCachedAdminToken(t *testing.T) {
 	}
 }
 
+func TestIsUserRegisteredTreatsMissingResultAsUnregistered(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/user/account_check":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"results":[]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	registered, err := client.IsUserRegistered(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("IsUserRegistered() error = %v", err)
+	}
+	if registered {
+		t.Fatal("IsUserRegistered() = true, want false for omitted account")
+	}
+}
+
 func TestEnsureUserRegistersMissingUser(t *testing.T) {
 	var checkCalls, registerCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

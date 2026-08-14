@@ -97,6 +97,7 @@ func main() {
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
 	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
+	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
 
@@ -111,6 +112,7 @@ func main() {
 			RegionID:        cfg.SMS.RegionID,
 		}
 	}
+	countryH := &handler.CountryHandler{Repo: countryRepo}
 	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient, SMS: smsGateway}
 	userH := &handler.UserHandler{Svc: userSvc}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
@@ -163,6 +165,7 @@ func main() {
 
 	api := r.Group("/api/v1")
 	{
+		api.GET("/public/countries", countryH.Countries)
 		api.POST("/auth/sms/send", authH.SendSMS)
 		api.POST("/auth/login", authH.Login)
 		api.POST("/auth/login/sms", authH.LoginSMS)
@@ -269,7 +272,7 @@ func main() {
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	if imClient.Available() {
 		imWorker := &service.IMSyncWorker{
-			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Client: imClient,
+			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Client: imClient,
 			BatchSize: 20, MaxAttempts: 10, PollInterval: 2 * time.Second,
 		}
 		go imWorker.Run(workerCtx)

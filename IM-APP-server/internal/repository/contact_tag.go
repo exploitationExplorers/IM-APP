@@ -16,7 +16,20 @@ type ContactTagRepo struct {
 func (r *ContactTagRepo) List(ctx context.Context, uid string) ([]models.ContactTagItem, error) {
 	rows, err := r.DB.Query(ctx, `
 		SELECT t.id::text, t.name,
-			(SELECT COUNT(*) FROM contact_tag_members m WHERE m.tag_id=t.id)
+			(SELECT COUNT(*) FROM contact_tag_members m WHERE m.tag_id=t.id),
+			COALESCE((
+				SELECT array_agg(n)
+				FROM (
+					SELECT COALESCE(NULLIF(TRIM(f.remark), ''), NULLIF(TRIM(u.nickname), ''), '') AS n
+					FROM contact_tag_members m
+					JOIN users u ON u.id=m.friend_id
+					LEFT JOIN friendships f ON f.user_id=$1::uuid AND f.friend_id=m.friend_id
+					WHERE m.tag_id=t.id
+					ORDER BY COALESCE(NULLIF(TRIM(f.remark), ''), NULLIF(TRIM(u.nickname), ''), '')
+					LIMIT 5
+				) preview
+				WHERE n <> ''
+			), ARRAY[]::text[])
 		FROM contact_tags t
 		WHERE t.user_id=$1::uuid
 		ORDER BY t.created_at ASC`, uid)
@@ -27,9 +40,14 @@ func (r *ContactTagRepo) List(ctx context.Context, uid string) ([]models.Contact
 	list := make([]models.ContactTagItem, 0)
 	for rows.Next() {
 		var item models.ContactTagItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.MemberCount); err != nil {
+		var names []string
+		if err := rows.Scan(&item.ID, &item.Name, &item.MemberCount, &names); err != nil {
 			return nil, err
 		}
+		if names == nil {
+			names = []string{}
+		}
+		item.MemberNames = names
 		list = append(list, item)
 	}
 	return list, nil

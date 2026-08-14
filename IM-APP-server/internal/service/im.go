@@ -84,7 +84,7 @@ func (s *IMService) ResolvePeer(ctx context.Context, requesterID, targetID strin
 }
 
 func (s *IMService) ResolveGroup(ctx context.Context, userID, groupID string) (models.IMGroupTarget, error) {
-	internalID, err := s.Groups.InternalIDByPublicID(ctx, groupID)
+	internalID, publicID, err := s.Groups.LookupGroupIDs(ctx, groupID)
 	if err != nil {
 		return models.IMGroupTarget{}, repository.ErrIMTargetNotFound
 	}
@@ -96,9 +96,83 @@ func (s *IMService) ResolveGroup(ctx context.Context, userID, groupID string) (m
 	if err != nil {
 		return group, err
 	}
-	group.BusinessGroupID = groupID
+	group.BusinessGroupID = publicID
 	group.IMGroupID = imGroupID
+	if err := s.ensureOpenIMGroup(ctx, userID, internalID, imGroupID); err != nil {
+		return models.IMGroupTarget{}, err
+	}
 	return group, nil
+}
+
+// ensureOpenIMGroup 保证当前用户能进这个业务群对应的 OpenIM 群。
+// 只补群主和当前成员，全量成员对账仍由 Outbox worker 负责。
+func (s *IMService) ensureOpenIMGroup(ctx context.Context, requesterID, internalID, imGroupID string) error {
+	if s.Client == nil || !s.Client.Available() {
+		return nil
+	}
+	state, err := s.Groups.GetSyncState(ctx, internalID)
+	if err != nil {
+		return err
+	}
+	if state.Status != "active" {
+		return nil
+	}
+	ownerID, err := im.UserIDFromBusinessID(state.OwnerID)
+	if err != nil {
+		return err
+	}
+	ownerNick, ownerFace := "", ""
+	requesterNick, requesterFace := "", ""
+	requesterActive := false
+	for _, member := range state.Members {
+		if member.ID == state.OwnerID {
+			ownerNick, ownerFace = member.Nickname, member.Avatar
+		}
+		if member.ID == requesterID {
+			requesterActive = member.Status == "active"
+			requesterNick, requesterFace = member.Nickname, member.Avatar
+		}
+	}
+	if err := s.Client.EnsureUser(ctx, im.User{
+		UserID: ownerID, Nickname: ownerNick, FaceURL: ownerFace,
+	}); err != nil {
+		return fmt.Errorf("ensure group owner: %w", err)
+	}
+	registered, err := s.Client.IsGroupRegistered(ctx, imGroupID)
+	if err != nil {
+		return err
+	}
+	if !registered {
+		log.Printf("OpenIM group missing, creating from business group %s", internalID)
+		if err := s.Client.EnsureGroup(ctx, im.Group{
+			GroupID: imGroupID, GroupName: state.Name, Notification: state.Announcement,
+			FaceURL: state.Avatar, OwnerUserID: ownerID,
+			AllowMemberAddFriend: state.AllowMemberAddFriend,
+		}); err != nil {
+			return err
+		}
+	}
+	if requesterID == state.OwnerID || !requesterActive {
+		return nil
+	}
+	requesterIMID, err := im.UserIDFromBusinessID(requesterID)
+	if err != nil {
+		return err
+	}
+	if err := s.Client.EnsureUser(ctx, im.User{
+		UserID: requesterIMID, Nickname: requesterNick, FaceURL: requesterFace,
+	}); err != nil {
+		return fmt.Errorf("ensure group member: %w", err)
+	}
+	if err := s.Client.InviteGroupMember(ctx, imGroupID, []string{requesterIMID}); err != nil {
+		log.Printf("OpenIM invite member %s for group %s: %v", requesterID, internalID, err)
+		registered, checkErr := s.Client.IsGroupRegistered(ctx, imGroupID)
+		if checkErr == nil && registered {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *IMService) Token(ctx context.Context, userID string, platformID int) (IMToken, error) {

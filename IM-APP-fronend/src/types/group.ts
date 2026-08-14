@@ -10,6 +10,21 @@ export interface GroupInfo {
   allowMemberAddFriend?: boolean
   /** 关联的群聊会话 ID */
   conversationId?: string
+  joinMode?: 'open' | 'approval'
+}
+
+export interface GroupQRCodeResolveResult {
+  group: GroupInfo
+  joined: boolean
+  memberId?: string
+  joinMode: 'open' | 'approval'
+  nextAction: 'enter' | 'join' | 'apply'
+}
+
+export interface JoinGroupByQRCodeResult {
+  action: 'enter' | 'joined' | 'pending_approval'
+  group: GroupInfo
+  requestId?: string
 }
 
 export interface GroupMember {
