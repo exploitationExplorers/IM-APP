@@ -33,6 +33,26 @@ const LOGIN_REPEAT_CODE = 10102
 /** app 端走原生插件，web / 小程序端走 @openim/client-sdk，两者初始化方式不同 */
 const isAppPlatform = uni.getSystemInfoSync().uniPlatform === 'app'
 
+/** 标准运行基座不含第三方原生插件，App 聊天必须用包含 OpenIM 的自定义调试基座 */
+const APP_NATIVE_PLUGIN_MISSING =
+  'App 端缺少 OpenIM 原生插件，请用自定义调试基座运行'
+
+function hasAppNativeIMSDK(): boolean {
+  if (!isAppPlatform) return true
+  try {
+    const sdk = uni.requireNativePlugin('Tuoyun-OpenIMSDK') as { initSDK?: unknown } | null
+    return typeof sdk?.initSDK === 'function'
+  } catch {
+    return false
+  }
+}
+
+function assertAppNativeIMSDK(): void {
+  if (!hasAppNativeIMSDK()) {
+    throw new Error(APP_NATIVE_PLUGIN_MISSING)
+  }
+}
+
 /** 当前登录的 OpenIM 用户 ID，消息里的 sendID 就是它 */
 export const imUserId = ref('')
 
@@ -86,11 +106,75 @@ function currentPlatformId(): number {
 }
 
 /**
+ * App 端 OpenIM 本地库目录。
+ * uni.env.USER_DATA_PATH 是小程序字段，App 上为空，SDK 会把库建到 `/OpenIM_v3_xxx.db` 然后 10006。
+ */
+function getAppSdkDataDir(): Promise<string> {
+  const io = plus?.io
+  if (!io) {
+    return Promise.reject(new Error('当前 App 环境无法获取本地存储目录'))
+  }
+
+  const fromUrl = (): string => {
+    const raw = io.convertLocalFileSystemURL('_doc/openim/') || ''
+    return raw.replace(/^file:\/\//, '')
+  }
+
+  return new Promise((resolve, reject) => {
+    const type = io.PRIVATE_DOC ?? 1
+    io.requestFileSystem(
+      type,
+      (fs) => {
+        const root = fs.root
+        if (!root) {
+          const fallback = fromUrl()
+          if (fallback && fallback !== '/') {
+            resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
+            return
+          }
+          reject(new Error('OpenIM 数据目录无效'))
+          return
+        }
+        root.getDirectory(
+          'openim',
+          { create: true },
+          (entry) => {
+            const path = (entry.fullPath || fromUrl()).replace(/^file:\/\//, '')
+            if (!path || path === '/') {
+              reject(new Error('OpenIM 数据目录无效'))
+              return
+            }
+            resolve(path.endsWith('/') ? path : `${path}/`)
+          },
+          (err) => {
+            const fallback = fromUrl()
+            if (fallback && fallback !== '/') {
+              resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
+              return
+            }
+            reject(err)
+          },
+        )
+      },
+      (err) => {
+        const fallback = fromUrl()
+        if (fallback && fallback !== '/') {
+          resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
+          return
+        }
+        reject(err)
+      },
+    )
+  })
+}
+
+/**
  * 统一 asyncApi 的返回形态：多数方法返回 { errCode, data } 信封，
  * createXxxMessage 这类同步方法直接返回结果本身。
  * 失败时 polyfill reject 的是 { errCode, errMsg } 裸对象，转成 Error 才能带到 UI。
  */
 async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
+  assertAppNativeIMSDK()
   let raw: unknown
   try {
     raw = await IMSDK.asyncApi(method, IMSDK.uuid(), ...args)
@@ -168,11 +252,12 @@ async function doLogin(): Promise<string> {
   const imToken: IMTokenResult = await fetchIMToken(currentPlatformId())
 
   if (isAppPlatform) {
+    const dataDir = await getAppSdkDataDir()
     await imCall(IMMethods.InitSDK, {
       platformID: imToken.platform,
       apiAddr: imToken.apiAddr,
       wsAddr: imToken.wsAddr,
-      dataDir: (uni as unknown as { env?: { USER_DATA_PATH?: string } }).env?.USER_DATA_PATH,
+      dataDir,
       logLevel: 4,
       isLogStandardOutput: true,
     })

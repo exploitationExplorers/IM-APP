@@ -179,6 +179,7 @@ export const useChatStore = defineStore('chat', () => {
       ),
     ]
     console.log('[online] 私聊会话 peerUserIds:', userIDs)
+    if (!userIDs.length && !subscribedUserIDs.value.size) return
 
     // 退订已不在列表中的用户
     const toUnsubscribe = [...subscribedUserIDs.value].filter((id) => !userIDs.includes(id))

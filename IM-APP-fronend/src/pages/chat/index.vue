@@ -33,7 +33,12 @@ const filtered = computed(() => {
 // 会话变化平时由 SDK 事件推送，每次进入页面再兜底拉一次
 onShow(() => {
   chatStore.loadConversations().catch((e: Error) => {
-    uni.showToast({ title: e?.message || '会话加载失败', icon: 'none' })
+    const message = e?.message || '会话加载失败'
+    if (message.includes('自定义调试基座')) {
+      uni.showModal({ title: '无法连接聊天', content: message, showCancel: false })
+      return
+    }
+    uni.showToast({ title: message, icon: 'none' })
   })
 })
 
