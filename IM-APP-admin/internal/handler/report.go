@@ -46,10 +46,16 @@ func (h *DataHandler) AssignReport(c *gin.Context) {
 }
 
 func (h *DataHandler) StartReport(c *gin.Context) {
+	var req response.AdminActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+		response.BadRequest(c, "必须填写原因")
+		return
+	}
 	if err := h.Data.StartReport(c.Request.Context(), c.Param("id"), middleware.AdminID(c)); err != nil {
 		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
 		return
 	}
+	c.Set("auditReason", req.Reason)
 	response.OK(c, gin.H{"ok": true})
 }
 

@@ -88,11 +88,16 @@ func (h *OpsHandler) CreateLegalDocument(c *gin.Context) {
 }
 
 func (h *OpsHandler) PublishLegalDocument(c *gin.Context) {
+	var req response.AdminActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+		response.BadRequest(c, "必须填写原因")
+		return
+	}
 	if err := h.Svc.PublishLegalDocument(c.Request.Context(), c.Param("id")); err != nil {
 		response.Fail(c, http.StatusBadRequest, "发布失败："+err.Error())
 		return
 	}
-	c.Set("auditReason", "发布协议")
+	c.Set("auditReason", req.Reason)
 	response.OK(c, gin.H{"ok": true})
 }
 

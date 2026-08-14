@@ -123,10 +123,16 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 
 // LogoutAll 退出全部后台会话
 func (h *AuthHandler) LogoutAll(c *gin.Context) {
+	var req response.AdminActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+		response.BadRequest(c, "必须填写操作原因")
+		return
+	}
 	if err := h.Svc.LogoutAll(c.Request.Context(), middleware.AdminID(c)); err != nil {
 		response.FailErr(c, 500, "操作失败", err)
 		return
 	}
+	c.Set("auditReason", req.Reason)
 	response.OK(c, gin.H{"ok": true})
 }
 

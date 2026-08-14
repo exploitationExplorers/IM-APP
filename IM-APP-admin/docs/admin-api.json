@@ -1,6 +1,53 @@
 {
   "components": {
     "schemas": {
+      "AdminAccount": {
+        "properties": {
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "id": {
+            "description": "管理员 ID",
+            "type": "string"
+          },
+          "lastLoginAt": {
+            "description": "最后登录时间（可空）",
+            "type": "string"
+          },
+          "mfaEnabled": {
+            "description": "是否已启用 MFA",
+            "type": "boolean"
+          },
+          "nickname": {
+            "description": "昵称",
+            "type": "string"
+          },
+          "roleIds": {
+            "description": "角色 ID 列表",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "roleNames": {
+            "description": "角色名列表",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "active|disabled",
+            "type": "string"
+          },
+          "username": {
+            "description": "登录账号",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "AdminActionRequest": {
         "properties": {
           "idempotencyKey": {
@@ -21,6 +68,31 @@
         ],
         "type": "object"
       },
+      "AdminPermission": {
+        "properties": {
+          "code": {
+            "description": "权限码",
+            "type": "string"
+          },
+          "description": {
+            "description": "描述",
+            "type": "string"
+          },
+          "id": {
+            "description": "权限 ID",
+            "type": "string"
+          },
+          "module": {
+            "description": "所属模块",
+            "type": "string"
+          },
+          "name": {
+            "description": "权限名",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "AdminResponse": {
         "properties": {
           "code": {
@@ -33,6 +105,1325 @@
           },
           "requestId": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AdminRole": {
+        "properties": {
+          "code": {
+            "description": "角色编码",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "description": {
+            "description": "描述",
+            "type": "string"
+          },
+          "id": {
+            "description": "角色 ID",
+            "type": "string"
+          },
+          "name": {
+            "description": "角色名称",
+            "type": "string"
+          },
+          "permissions": {
+            "description": "权限码列表",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "active|disabled",
+            "type": "string"
+          },
+          "userCount": {
+            "description": "关联管理员数",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "AppGroup": {
+        "properties": {
+          "allMuted": {
+            "description": "是否全员禁言",
+            "type": "boolean"
+          },
+          "avatar": {
+            "description": "群头像",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "id": {
+            "description": "群 ID",
+            "type": "string"
+          },
+          "memberCount": {
+            "description": "成员数",
+            "type": "integer"
+          },
+          "name": {
+            "description": "群名",
+            "type": "string"
+          },
+          "ownerId": {
+            "description": "群主 ID",
+            "type": "string"
+          },
+          "ownerName": {
+            "description": "群主昵称",
+            "type": "string"
+          },
+          "status": {
+            "description": "normal|banned|dissolved|muted",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AppGroupDetail": {
+        "properties": {
+          "allMuted": {
+            "description": "是否全员禁言",
+            "type": "boolean"
+          },
+          "allowMemberAddFriend": {
+            "description": "是否允许群内互加好友",
+            "type": "boolean"
+          },
+          "announcement": {
+            "description": "群公告",
+            "type": "string"
+          },
+          "avatar": {
+            "description": "群头像",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "id": {
+            "description": "群 ID",
+            "type": "string"
+          },
+          "joinMode": {
+            "description": "加入方式：direct|approval",
+            "type": "string"
+          },
+          "memberCount": {
+            "description": "成员数",
+            "type": "integer"
+          },
+          "name": {
+            "description": "群名",
+            "type": "string"
+          },
+          "ownerId": {
+            "description": "群主 ID",
+            "type": "string"
+          },
+          "ownerName": {
+            "description": "群主昵称",
+            "type": "string"
+          },
+          "status": {
+            "description": "normal|banned|dissolved|muted",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AppGroupMember": {
+        "properties": {
+          "joinedAt": {
+            "description": "入群时间",
+            "type": "string"
+          },
+          "mutedUntil": {
+            "description": "禁言截止（可空）",
+            "type": "string"
+          },
+          "nickname": {
+            "description": "昵称",
+            "type": "string"
+          },
+          "role": {
+            "description": "member|owner",
+            "type": "string"
+          },
+          "userId": {
+            "description": "用户 ID",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AppUser": {
+        "properties": {
+          "avatar": {
+            "description": "头像",
+            "type": "string"
+          },
+          "countryCode": {
+            "description": "国家码",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "注册时间",
+            "type": "string"
+          },
+          "friendCount": {
+            "description": "好友数",
+            "type": "integer"
+          },
+          "groupCount": {
+            "description": "群数",
+            "type": "integer"
+          },
+          "id": {
+            "description": "用户 ID",
+            "type": "string"
+          },
+          "loginBanned": {
+            "description": "登录限制",
+            "type": "boolean"
+          },
+          "messageBanned": {
+            "description": "发消息限制",
+            "type": "boolean"
+          },
+          "nickname": {
+            "description": "昵称",
+            "type": "string"
+          },
+          "phoneMasked": {
+            "description": "脱敏手机号",
+            "type": "string"
+          },
+          "publicId": {
+            "description": "公共 ID",
+            "type": "string"
+          },
+          "reportCount": {
+            "description": "被举报数",
+            "type": "integer"
+          },
+          "status": {
+            "description": "active|banned|cancelled",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AppUserDetail": {
+        "properties": {
+          "avatar": {
+            "description": "头像",
+            "type": "string"
+          },
+          "bio": {
+            "description": "个性签名",
+            "type": "string"
+          },
+          "countryCode": {
+            "description": "国家码",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "注册时间",
+            "type": "string"
+          },
+          "friendCount": {
+            "description": "好友数",
+            "type": "integer"
+          },
+          "groupCount": {
+            "description": "群数",
+            "type": "integer"
+          },
+          "groupIds": {
+            "description": "加入的群 ID 列表",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "用户 ID",
+            "type": "string"
+          },
+          "loginBanned": {
+            "description": "登录限制",
+            "type": "boolean"
+          },
+          "messageBanned": {
+            "description": "发消息限制",
+            "type": "boolean"
+          },
+          "nickname": {
+            "description": "昵称",
+            "type": "string"
+          },
+          "phoneMasked": {
+            "description": "脱敏手机号",
+            "type": "string"
+          },
+          "publicId": {
+            "description": "公共 ID",
+            "type": "string"
+          },
+          "reportCount": {
+            "description": "被举报数",
+            "type": "integer"
+          },
+          "status": {
+            "description": "active|banned|cancelled",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AppVersion": {
+        "properties": {
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "description": {
+            "description": "更新说明",
+            "type": "string"
+          },
+          "downloadUrl": {
+            "description": "下载地址",
+            "type": "string"
+          },
+          "forceUpgrade": {
+            "description": "是否强制升级",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "版本 ID",
+            "type": "string"
+          },
+          "platform": {
+            "description": "android|ios",
+            "type": "string"
+          },
+          "status": {
+            "description": "draft|published",
+            "type": "string"
+          },
+          "version": {
+            "description": "版本号",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AuditLog": {
+        "properties": {
+          "action": {
+            "description": "操作",
+            "type": "string"
+          },
+          "adminId": {
+            "description": "管理员 ID（可空）",
+            "type": "string"
+          },
+          "adminName": {
+            "description": "管理员昵称",
+            "type": "string"
+          },
+          "afterValue": {
+            "description": "变更后",
+            "type": "string"
+          },
+          "beforeValue": {
+            "description": "变更前",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "时间",
+            "type": "string"
+          },
+          "id": {
+            "description": "审计 ID",
+            "type": "integer"
+          },
+          "ip": {
+            "description": "IP",
+            "type": "string"
+          },
+          "reason": {
+            "description": "操作原因",
+            "type": "string"
+          },
+          "requestId": {
+            "description": "请求 ID",
+            "type": "string"
+          },
+          "resource": {
+            "description": "资源类型",
+            "type": "string"
+          },
+          "resourceId": {
+            "description": "资源 ID",
+            "type": "string"
+          },
+          "result": {
+            "description": "success|denied|failed",
+            "type": "string"
+          },
+          "userAgent": {
+            "description": "User-Agent",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Country": {
+        "properties": {
+          "cnName": {
+            "description": "中文名",
+            "type": "string"
+          },
+          "code": {
+            "description": "国家码",
+            "type": "string"
+          },
+          "dialCode": {
+            "description": "区号",
+            "type": "string"
+          },
+          "enName": {
+            "description": "英文名",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "是否启用",
+            "type": "boolean"
+          },
+          "phoneRule": {
+            "description": "号码规则",
+            "type": "string"
+          },
+          "sortOrder": {
+            "description": "排序",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DashboardOverview": {
+        "properties": {
+          "activeToday": {
+            "description": "今日活跃",
+            "type": "integer"
+          },
+          "forwardTasks": {
+            "description": "转发任务总数",
+            "type": "integer"
+          },
+          "groups": {
+            "description": "群总数",
+            "type": "integer"
+          },
+          "messagesToday": {
+            "description": "今日消息",
+            "type": "integer"
+          },
+          "pendingReports": {
+            "description": "待处理举报",
+            "type": "integer"
+          },
+          "smsSentToday": {
+            "description": "今日短信",
+            "type": "integer"
+          },
+          "users": {
+            "description": "用户总数",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DashboardTodo": {
+        "properties": {
+          "createdAt": {
+            "description": "时间",
+            "type": "string"
+          },
+          "id": {
+            "description": "ID",
+            "type": "string"
+          },
+          "targetId": {
+            "description": "目标 ID（可空）",
+            "type": "string"
+          },
+          "title": {
+            "description": "标题",
+            "type": "string"
+          },
+          "type": {
+            "description": "report|forward_risk|sms_failed|system_alert",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DashboardTrend": {
+        "properties": {
+          "active": {
+            "description": "活跃数",
+            "type": "integer"
+          },
+          "date": {
+            "description": "日期 YYYY-MM-DD",
+            "type": "string"
+          },
+          "forwards": {
+            "description": "转发数",
+            "type": "integer"
+          },
+          "messages": {
+            "description": "消息数",
+            "type": "integer"
+          },
+          "registrations": {
+            "description": "注册数",
+            "type": "integer"
+          },
+          "reports": {
+            "description": "举报数",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ErrorEvent": {
+        "properties": {
+          "count": {
+            "description": "出现次数",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "description": "指纹",
+            "type": "string"
+          },
+          "firstAt": {
+            "description": "首次时间",
+            "type": "string"
+          },
+          "id": {
+            "description": "事件 ID",
+            "type": "integer"
+          },
+          "lastAt": {
+            "description": "最后时间",
+            "type": "string"
+          },
+          "level": {
+            "description": "级别",
+            "type": "string"
+          },
+          "message": {
+            "description": "消息",
+            "type": "string"
+          },
+          "service": {
+            "description": "服务",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ExportJob": {
+        "properties": {
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "expiresAt": {
+            "description": "过期时间（可空）",
+            "type": "string"
+          },
+          "fileUrl": {
+            "description": "下载地址（可空）",
+            "type": "string"
+          },
+          "filters": {
+            "description": "过滤条件 JSON",
+            "type": "string"
+          },
+          "finishedAt": {
+            "description": "完成时间（可空）",
+            "type": "string"
+          },
+          "id": {
+            "description": "任务 ID",
+            "type": "string"
+          },
+          "resource": {
+            "description": "导出资源",
+            "type": "string"
+          },
+          "status": {
+            "description": "pending|processing|ready|failed|expired",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ForwardSettings": {
+        "properties": {
+          "defaultDailyLimit": {
+            "description": "默认每日上限",
+            "type": "integer"
+          },
+          "defaultHourlyLimit": {
+            "description": "默认每小时上限",
+            "type": "integer"
+          },
+          "defaultSingleTargets": {
+            "description": "默认单次目标数",
+            "type": "integer"
+          },
+          "maxSingleTargets": {
+            "description": "单次目标数上限",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ForwardTarget": {
+        "properties": {
+          "attempts": {
+            "description": "尝试次数",
+            "type": "integer"
+          },
+          "failCode": {
+            "description": "失败码",
+            "type": "string"
+          },
+          "finishedAt": {
+            "description": "完成时间（可空）",
+            "type": "string"
+          },
+          "id": {
+            "description": "目标 ID",
+            "type": "string"
+          },
+          "messageId": {
+            "description": "消息 ID（可空）",
+            "type": "string"
+          },
+          "nickname": {
+            "description": "昵称",
+            "type": "string"
+          },
+          "status": {
+            "description": "pending|success|failed|skipped|cancelled",
+            "type": "string"
+          },
+          "userId": {
+            "description": "接收用户 ID",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ForwardTask": {
+        "properties": {
+          "contentSummary": {
+            "description": "内容摘要",
+            "type": "string"
+          },
+          "contentType": {
+            "description": "内容类型",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "failedCount": {
+            "description": "失败数",
+            "type": "integer"
+          },
+          "finishedAt": {
+            "description": "完成时间（可空）",
+            "type": "string"
+          },
+          "id": {
+            "description": "任务 ID",
+            "type": "string"
+          },
+          "riskLevel": {
+            "description": "风险级别",
+            "type": "string"
+          },
+          "skippedCount": {
+            "description": "跳过数",
+            "type": "integer"
+          },
+          "status": {
+            "description": "pending|processing|success|failed|cancelled",
+            "type": "string"
+          },
+          "successCount": {
+            "description": "成功数",
+            "type": "integer"
+          },
+          "targetCount": {
+            "description": "目标数",
+            "type": "integer"
+          },
+          "userId": {
+            "description": "发起用户 ID",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ForwardUserLimit": {
+        "properties": {
+          "dailyLimit": {
+            "description": "每日上限",
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "是否启用",
+            "type": "boolean"
+          },
+          "hourlyLimit": {
+            "description": "每小时上限",
+            "type": "integer"
+          },
+          "singleTargets": {
+            "description": "单次目标上限",
+            "type": "integer"
+          },
+          "userId": {
+            "description": "用户 ID",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LegalDocument": {
+        "properties": {
+          "contentUrl": {
+            "description": "内容 URL",
+            "type": "string"
+          },
+          "id": {
+            "description": "协议 ID",
+            "type": "string"
+          },
+          "language": {
+            "description": "语言",
+            "type": "string"
+          },
+          "publishedAt": {
+            "description": "发布时间（可空）",
+            "type": "string"
+          },
+          "status": {
+            "description": "draft|published",
+            "type": "string"
+          },
+          "title": {
+            "description": "标题",
+            "type": "string"
+          },
+          "type": {
+            "description": "user_agreement|privacy_policy",
+            "type": "string"
+          },
+          "version": {
+            "description": "版本号",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LoginLog": {
+        "properties": {
+          "adminId": {
+            "description": "管理员 ID（可空）",
+            "type": "string"
+          },
+          "adminName": {
+            "description": "管理员昵称",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "时间",
+            "type": "string"
+          },
+          "failReason": {
+            "description": "失败原因",
+            "type": "string"
+          },
+          "id": {
+            "description": "日志 ID",
+            "type": "integer"
+          },
+          "ip": {
+            "description": "IP",
+            "type": "string"
+          },
+          "requestId": {
+            "description": "请求 ID",
+            "type": "string"
+          },
+          "success": {
+            "description": "是否成功",
+            "type": "boolean"
+          },
+          "userAgent": {
+            "description": "User-Agent",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LoginResult": {
+        "properties": {
+          "admin": {
+            "description": "管理员资料",
+            "type": "object"
+          },
+          "mfaChallenge": {
+            "description": "MFA 挑战凭证（需二次验证时返回）",
+            "type": "string"
+          },
+          "refreshToken": {
+            "description": "刷新令牌（MFA 场景可能不含）",
+            "type": "string"
+          },
+          "token": {
+            "description": "访问令牌（MFA 场景可能不含）",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MeResult": {
+        "properties": {
+          "admin": {
+            "description": "管理员资料",
+            "type": "object"
+          },
+          "permissions": {
+            "description": "权限码列表",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ModerationHit": {
+        "properties": {
+          "category": {
+            "description": "分类",
+            "type": "string"
+          },
+          "content": {
+            "description": "命中内容",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "时间",
+            "type": "string"
+          },
+          "disposition": {
+            "description": "处置",
+            "type": "string"
+          },
+          "field": {
+            "description": "命中字段",
+            "type": "string"
+          },
+          "id": {
+            "description": "记录 ID",
+            "type": "integer"
+          },
+          "matchedWord": {
+            "description": "命中的敏感词",
+            "type": "string"
+          },
+          "userId": {
+            "description": "用户 ID（可空）",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProfileModeration": {
+        "properties": {
+          "field": {
+            "description": "avatar|nickname",
+            "type": "string"
+          },
+          "handledAt": {
+            "description": "处理时间（可空）",
+            "type": "string"
+          },
+          "id": {
+            "description": "记录 ID",
+            "type": "integer"
+          },
+          "newValue": {
+            "description": "新值",
+            "type": "string"
+          },
+          "oldValue": {
+            "description": "原值",
+            "type": "string"
+          },
+          "reason": {
+            "description": "处理原因",
+            "type": "string"
+          },
+          "status": {
+            "description": "pending|rejected|restored",
+            "type": "string"
+          },
+          "userId": {
+            "description": "用户 ID",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProviderHealth": {
+        "properties": {
+          "healthy": {
+            "description": "是否健康",
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "description": "延迟(ms)",
+            "type": "integer"
+          },
+          "provider": {
+            "description": "供应商",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RecallLog": {
+        "properties": {
+          "createdAt": {
+            "description": "时间",
+            "type": "string"
+          },
+          "groupId": {
+            "description": "群 ID",
+            "type": "string"
+          },
+          "id": {
+            "description": "记录 ID",
+            "type": "integer"
+          },
+          "messageId": {
+            "description": "消息 ID",
+            "type": "string"
+          },
+          "operatorName": {
+            "description": "操作者昵称",
+            "type": "string"
+          },
+          "operatorType": {
+            "description": "admin|user",
+            "type": "string"
+          },
+          "reason": {
+            "description": "撤回原因",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Report": {
+        "properties": {
+          "actionTaken": {
+            "description": "处置动作（可空）",
+            "type": "string"
+          },
+          "assigneeId": {
+            "description": "处理人 ID（可空）",
+            "type": "string"
+          },
+          "conclusion": {
+            "description": "结论（可空）",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "description": {
+            "description": "描述",
+            "type": "string"
+          },
+          "id": {
+            "description": "举报 ID",
+            "type": "string"
+          },
+          "reasonText": {
+            "description": "举报原因",
+            "type": "string"
+          },
+          "reportNo": {
+            "description": "编号",
+            "type": "string"
+          },
+          "reporterId": {
+            "description": "举报人 ID（可空）",
+            "type": "string"
+          },
+          "status": {
+            "description": "pending|processing|resolved|rejected|reopened",
+            "type": "string"
+          },
+          "targetId": {
+            "description": "目标 ID",
+            "type": "string"
+          },
+          "targetType": {
+            "description": "user|group|message",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "更新时间",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReportAction": {
+        "properties": {
+          "action": {
+            "description": "操作",
+            "type": "string"
+          },
+          "adminId": {
+            "description": "管理员 ID（可空）",
+            "type": "string"
+          },
+          "afterStatus": {
+            "description": "变更后状态",
+            "type": "string"
+          },
+          "beforeStatus": {
+            "description": "变更前状态",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "时间",
+            "type": "string"
+          },
+          "detail": {
+            "description": "详情",
+            "type": "string"
+          },
+          "id": {
+            "description": "记录 ID",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ReportDetail": {
+        "properties": {
+          "actionTaken": {
+            "description": "处置动作（可空）",
+            "type": "string"
+          },
+          "assigneeId": {
+            "description": "处理人 ID（可空）",
+            "type": "string"
+          },
+          "conclusion": {
+            "description": "结论（可空）",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "description": {
+            "description": "描述",
+            "type": "string"
+          },
+          "files": {
+            "description": "证据文件列表",
+            "items": {
+              "$ref": "#/components/schemas/ReportFile"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "举报 ID",
+            "type": "string"
+          },
+          "notes": {
+            "description": "备注列表",
+            "items": {
+              "$ref": "#/components/schemas/ReportNote"
+            },
+            "type": "array"
+          },
+          "reasonText": {
+            "description": "举报原因",
+            "type": "string"
+          },
+          "reportNo": {
+            "description": "编号",
+            "type": "string"
+          },
+          "reporterId": {
+            "description": "举报人 ID（可空）",
+            "type": "string"
+          },
+          "status": {
+            "description": "pending|processing|resolved|rejected|reopened",
+            "type": "string"
+          },
+          "targetId": {
+            "description": "目标 ID",
+            "type": "string"
+          },
+          "targetType": {
+            "description": "user|group|message",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "更新时间",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReportFile": {
+        "properties": {
+          "contentType": {
+            "description": "类型",
+            "type": "string"
+          },
+          "fileUrl": {
+            "description": "文件 URL",
+            "type": "string"
+          },
+          "id": {
+            "description": "文件 ID",
+            "type": "string"
+          },
+          "messageId": {
+            "description": "消息 ID",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReportNote": {
+        "properties": {
+          "adminId": {
+            "description": "管理员 ID（可空）",
+            "type": "string"
+          },
+          "content": {
+            "description": "内容",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "时间",
+            "type": "string"
+          },
+          "id": {
+            "description": "备注 ID",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ReportReason": {
+        "properties": {
+          "id": {
+            "description": "原因 ID",
+            "type": "string"
+          },
+          "language": {
+            "description": "语言",
+            "type": "string"
+          },
+          "reason": {
+            "description": "原因文案",
+            "type": "string"
+          },
+          "sortOrder": {
+            "description": "排序",
+            "type": "integer"
+          },
+          "status": {
+            "description": "active|disabled",
+            "type": "string"
+          },
+          "targetType": {
+            "description": "user|group|message",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SensitiveWord": {
+        "properties": {
+          "category": {
+            "description": "分类",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "创建时间",
+            "type": "string"
+          },
+          "id": {
+            "description": "词 ID",
+            "type": "string"
+          },
+          "status": {
+            "description": "active|disabled",
+            "type": "string"
+          },
+          "word": {
+            "description": "敏感词",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SmsLog": {
+        "properties": {
+          "countryCode": {
+            "description": "国家码",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "时间",
+            "type": "string"
+          },
+          "errorCode": {
+            "description": "错误码",
+            "type": "string"
+          },
+          "id": {
+            "description": "日志 ID",
+            "type": "integer"
+          },
+          "phoneMasked": {
+            "description": "脱敏手机号",
+            "type": "string"
+          },
+          "provider": {
+            "description": "供应商",
+            "type": "string"
+          },
+          "scene": {
+            "description": "场景",
+            "type": "string"
+          },
+          "status": {
+            "description": "状态",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SmsStatPoint": {
+        "properties": {
+          "date": {
+            "description": "日期",
+            "type": "string"
+          },
+          "failed": {
+            "description": "失败",
+            "type": "integer"
+          },
+          "success": {
+            "description": "成功",
+            "type": "integer"
+          },
+          "total": {
+            "description": "总量",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "SmsStatistics": {
+        "properties": {
+          "byDate": {
+            "description": "按日统计",
+            "items": {
+              "$ref": "#/components/schemas/SmsStatPoint"
+            },
+            "type": "array"
+          },
+          "deliveredRate": {
+            "description": "送达率",
+            "type": "number"
+          },
+          "failed": {
+            "description": "失败",
+            "type": "integer"
+          },
+          "success": {
+            "description": "成功",
+            "type": "integer"
+          },
+          "total": {
+            "description": "总量",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "SystemLimits": {
+        "properties": {
+          "maxFileSizeMb": {
+            "description": "单文件大小上限(MB)",
+            "type": "integer"
+          },
+          "maxForwardTargets": {
+            "description": "单次转发目标数上限",
+            "type": "integer"
+          },
+          "maxGroupMembers": {
+            "description": "单群成员数上限",
+            "type": "integer"
+          },
+          "maxNicknameLen": {
+            "description": "昵称最大长度",
+            "type": "integer"
+          },
+          "recallWindowSec": {
+            "description": "消息撤回时间窗(秒)",
+            "type": "integer"
           }
         },
         "type": "object"
@@ -82,7 +1473,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/LoginLog"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -129,6 +1564,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "关键字（按用户名/昵称匹配）",
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -136,7 +1580,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/AdminAccount"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -178,6 +1666,9 @@
                   },
                   "roleIds": {
                     "description": "角色 ID 列表",
+                    "items": {
+                      "type": "string"
+                    },
                     "type": "array"
                   },
                   "status": {
@@ -204,7 +1695,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -259,6 +1779,9 @@
                   },
                   "roleIds": {
                     "description": "角色 ID 列表",
+                    "items": {
+                      "type": "string"
+                    },
                     "type": "array"
                   },
                   "status": {
@@ -277,7 +1800,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -338,7 +1890,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -393,8 +1974,7 @@
                   }
                 },
                 "required": [
-                  "status",
-                  "reason"
+                  "status"
                 ],
                 "type": "object"
               }
@@ -407,7 +1987,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -436,32 +2045,36 @@
       "get": {
         "description": "APP 版本列表。接口路径：/api/admin/v1/app-versions",
         "operationId": "GET_api_admin_v1_app-versions",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/AppVersion"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -515,7 +2128,6 @@
                   }
                 },
                 "required": [
-                  "platform",
                   "version"
                 ],
                 "type": "object"
@@ -529,7 +2141,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -598,7 +2239,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -667,7 +2337,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -716,9 +2415,27 @@
             }
           },
           {
-            "description": "关键字（按各资源匹配）",
+            "description": "关键字（按管理员/动作/资源ID/IP匹配）",
             "in": "query",
             "name": "keyword",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "结果：success|denied|failed",
+            "in": "query",
+            "name": "result",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "资源类型筛选",
+            "in": "query",
+            "name": "resource",
             "required": false,
             "schema": {
               "type": "string"
@@ -730,7 +2447,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/AuditLog"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -766,7 +2527,7 @@
             "name": "id",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             }
           }
         ],
@@ -775,7 +2536,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuditLog"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -833,7 +2615,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/LoginResult"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -887,7 +2690,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -931,7 +2763,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -989,7 +2850,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/LoginResult"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1043,7 +2925,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/LoginResult"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1072,41 +2975,36 @@
       "get": {
         "description": "国家/地区列表。接口路径：/api/admin/v1/countries",
         "operationId": "GET_api_admin_v1_countries",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "关键字（按各资源匹配）",
-            "in": "query",
-            "name": "keyword",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/Country"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1168,9 +3066,7 @@
                   }
                 },
                 "required": [
-                  "code",
-                  "dialCode",
-                  "cnName"
+                  "code"
                 ],
                 "type": "object"
               }
@@ -1183,7 +3079,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1252,7 +3177,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1281,32 +3235,33 @@
       "get": {
         "description": "工作台核心概览（用户/活跃/群/消息/转发/短信/待办举报）。接口路径：/api/admin/v1/dashboard/overview",
         "operationId": "GET_api_admin_v1_dashboard_overview",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DashboardOverview"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1335,32 +3290,36 @@
       "get": {
         "description": "工作台待办列表（待处理举报/转发风险/系统告警）。接口路径：/api/admin/v1/dashboard/todos",
         "operationId": "GET_api_admin_v1_dashboard_todos",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/DashboardTodo"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1391,18 +3350,9 @@
         "operationId": "GET_api_admin_v1_dashboard_trends",
         "parameters": [
           {
-            "description": "页码（默认1）",
+            "description": "趋势统计天数（默认7）",
             "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
+            "name": "days",
             "required": false,
             "schema": {
               "type": "integer"
@@ -1414,7 +3364,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/DashboardTrend"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1468,7 +3442,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/ExportJob"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1523,7 +3541,34 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "id": {
+                          "description": "导出任务 ID",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1568,7 +3613,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ForwardUserLimit"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1646,7 +3712,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1675,32 +3770,33 @@
       "get": {
         "description": "获取全局转发规则。接口路径：/api/admin/v1/forward-settings",
         "operationId": "GET_api_admin_v1_forward-settings",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ForwardSettings"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1737,7 +3833,24 @@
                     "type": "string"
                   },
                   "settings": {
-                    "description": "全局转发规则对象",
+                    "properties": {
+                      "defaultDailyLimit": {
+                        "description": "默认每日上限",
+                        "type": "integer"
+                      },
+                      "defaultHourlyLimit": {
+                        "description": "默认每小时上限",
+                        "type": "integer"
+                      },
+                      "defaultSingleTargets": {
+                        "description": "默认单次目标数",
+                        "type": "integer"
+                      },
+                      "maxSingleTargets": {
+                        "description": "单次目标数上限",
+                        "type": "integer"
+                      }
+                    },
                     "type": "object"
                   }
                 },
@@ -1756,7 +3869,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1805,16 +3947,7 @@
             }
           },
           {
-            "description": "关键字（按各资源匹配）",
-            "in": "query",
-            "name": "keyword",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "状态筛选",
+            "description": "状态筛选：pending|processing|success|failed|cancelled",
             "in": "query",
             "name": "status",
             "required": false,
@@ -1828,7 +3961,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/ForwardTask"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1873,7 +4050,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ForwardTask"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1937,7 +4135,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -1982,7 +4209,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2046,7 +4297,34 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "retried": {
+                          "description": "重试数量",
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2084,6 +4362,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "页码（默认1）",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "每页条数（默认20，最大100）",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "状态筛选：pending|success|failed|skipped|cancelled",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2091,7 +4396,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/ForwardTarget"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2140,7 +4489,7 @@
             }
           },
           {
-            "description": "关键字（按各资源匹配）",
+            "description": "关键字（按群名/群ID匹配）",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -2149,7 +4498,7 @@
             }
           },
           {
-            "description": "状态筛选",
+            "description": "状态筛选：normal|banned|dissolved|muted",
             "in": "query",
             "name": "status",
             "required": false,
@@ -2163,7 +4512,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/AppGroup"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2208,7 +4601,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AppGroupDetail"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2280,7 +4694,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2349,7 +4792,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2394,7 +4866,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/AppGroupMember"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2448,6 +4944,10 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "idempotencyKey": {
+                    "description": "幂等键",
+                    "type": "string"
+                  },
                   "reason": {
                     "description": "撤回原因",
                     "type": "string"
@@ -2471,7 +4971,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2540,7 +5069,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2578,6 +5136,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "页码（默认1）",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "每页条数（默认20，最大100）",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -2585,7 +5161,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/RecallLog"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2623,6 +5243,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "页码（默认1）",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "每页条数（默认20，最大100）",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -2630,7 +5268,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/Report"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2659,32 +5341,39 @@
       "get": {
         "description": "后台存活检查。接口路径：/api/admin/v1/health",
         "operationId": "GET_api_admin_v1_health",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "status": {
+                          "description": "ok",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2714,32 +5403,36 @@
       "get": {
         "description": "协议文档列表（用户协议/隐私政策）。接口路径：/api/admin/v1/legal-documents",
         "operationId": "GET_api_admin_v1_legal-documents",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/LegalDocument"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2814,7 +5507,34 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "id": {
+                          "description": "协议 ID",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2869,7 +5589,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2898,32 +5647,33 @@
       "get": {
         "description": "获取当前管理员资料与权限列表。接口路径：/api/admin/v1/me",
         "operationId": "GET_api_admin_v1_me",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MeResult"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -2952,32 +5702,43 @@
       "get": {
         "description": "查看本人 MFA 状态（未启用时返回绑定密钥）。接口路径：/api/admin/v1/me/mfa",
         "operationId": "GET_api_admin_v1_me_mfa",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "enabled": {
+                          "description": "是否已启用 MFA",
+                          "type": "boolean"
+                        },
+                        "secret": {
+                          "description": "未启用时的绑定密钥（仅未启用时返回）",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3030,7 +5791,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3083,7 +5873,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3141,7 +5960,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3170,32 +6018,51 @@
       "get": {
         "description": "后台版本、commit、构建时间与功能开关。接口路径：/api/admin/v1/meta",
         "operationId": "GET_api_admin_v1_meta",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "buildTime": {
+                          "description": "构建时间",
+                          "type": "string"
+                        },
+                        "commit": {
+                          "description": "Git commit",
+                          "type": "string"
+                        },
+                        "features": {
+                          "description": "功能开关",
+                          "type": "object"
+                        },
+                        "version": {
+                          "description": "后台版本",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3249,7 +6116,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/ModerationHit"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3298,7 +6209,7 @@
             }
           },
           {
-            "description": "状态筛选",
+            "description": "状态筛选：pending|rejected|restored",
             "in": "query",
             "name": "status",
             "required": false,
@@ -3312,7 +6223,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/ProfileModeration"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3381,7 +6336,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3450,7 +6434,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3479,32 +6492,36 @@
       "get": {
         "description": "权限码字典列表。接口路径：/api/admin/v1/permissions",
         "operationId": "GET_api_admin_v1_permissions",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/AdminPermission"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3533,32 +6550,36 @@
       "get": {
         "description": "举报原因列表。接口路径：/api/admin/v1/report-reasons",
         "operationId": "GET_api_admin_v1_report-reasons",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/ReportReason"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3612,7 +6633,6 @@
                   }
                 },
                 "required": [
-                  "targetType",
                   "reason"
                 ],
                 "type": "object"
@@ -3626,7 +6646,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3699,7 +6748,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3763,7 +6841,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3812,7 +6919,7 @@
             }
           },
           {
-            "description": "关键字（按各资源匹配）",
+            "description": "关键字（按编号/目标匹配）",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -3821,9 +6928,18 @@
             }
           },
           {
-            "description": "状态筛选",
+            "description": "状态筛选：pending|processing|resolved|rejected|reopened",
             "in": "query",
             "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "目标类型：user|group|message",
+            "in": "query",
+            "name": "targetType",
             "required": false,
             "schema": {
               "type": "string"
@@ -3835,7 +6951,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/Report"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3880,7 +7040,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReportDetail"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3925,7 +7106,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/ReportAction"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -3994,7 +7199,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4058,7 +7292,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4103,8 +7366,27 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "conclusion": {
+                    "description": "结案结论",
+                    "type": "string"
+                  },
+                  "disposeActions": {
+                    "description": "处置动作：warn|restrict_login|restrict_message|ban|mute_all|recall|dissolve",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "idempotencyKey": {
+                    "description": "幂等键",
+                    "type": "string"
+                  },
                   "reason": {
                     "description": "驳回原因",
+                    "type": "string"
+                  },
+                  "ticketNo": {
+                    "description": "关联工单号",
                     "type": "string"
                   }
                 },
@@ -4122,7 +7404,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4167,8 +7478,27 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "conclusion": {
+                    "description": "结案结论",
+                    "type": "string"
+                  },
+                  "disposeActions": {
+                    "description": "处置动作：warn|restrict_login|restrict_message|ban|mute_all|recall|dissolve",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "idempotencyKey": {
+                    "description": "幂等键",
+                    "type": "string"
+                  },
                   "reason": {
                     "description": "重开原因",
+                    "type": "string"
+                  },
+                  "ticketNo": {
+                    "description": "关联工单号",
                     "type": "string"
                   }
                 },
@@ -4186,7 +7516,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4237,10 +7596,21 @@
                   },
                   "disposeActions": {
                     "description": "处置动作：warn|restrict_login|restrict_message|ban|mute_all|recall|dissolve",
+                    "items": {
+                      "type": "string"
+                    },
                     "type": "array"
+                  },
+                  "idempotencyKey": {
+                    "description": "幂等键",
+                    "type": "string"
                   },
                   "reason": {
                     "description": "操作原因",
+                    "type": "string"
+                  },
+                  "ticketNo": {
+                    "description": "关联工单号",
                     "type": "string"
                   }
                 },
@@ -4258,7 +7628,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4313,7 +7712,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4342,32 +7770,36 @@
       "get": {
         "description": "角色列表（含权限码）。接口路径：/api/admin/v1/roles",
         "operationId": "GET_api_admin_v1_roles",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/AdminRole"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4413,6 +7845,9 @@
                   },
                   "permissions": {
                     "description": "权限码列表（见 /permissions）",
+                    "items": {
+                      "type": "string"
+                    },
                     "type": "array"
                   }
                 },
@@ -4431,7 +7866,34 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "id": {
+                          "description": "角色 ID",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4471,12 +7933,57 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "reason": {
+                    "description": "操作原因（可选，用于审计）",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4529,6 +8036,9 @@
                   },
                   "permissions": {
                     "description": "权限码列表",
+                    "items": {
+                      "type": "string"
+                    },
                     "type": "array"
                   },
                   "status": {
@@ -4547,7 +8057,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4578,25 +8117,7 @@
         "operationId": "GET_api_admin_v1_sensitive-words",
         "parameters": [
           {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "关键字（按各资源匹配）",
+            "description": "关键字（按敏感词匹配）",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -4610,7 +8131,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/SensitiveWord"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4665,7 +8210,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4709,6 +8283,9 @@
                   },
                   "words": {
                     "description": "敏感词列表",
+                    "items": {
+                      "type": "string"
+                    },
                     "type": "array"
                   }
                 },
@@ -4727,7 +8304,34 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "imported": {
+                          "description": "导入数量",
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4796,7 +8400,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4860,7 +8493,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4909,7 +8571,7 @@
             }
           },
           {
-            "description": "关键字（按各资源匹配）",
+            "description": "关键字（按手机号匹配）",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -4932,7 +8594,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/SmsLog"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -4968,7 +8674,7 @@
             "name": "id",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             }
           }
         ],
@@ -4977,7 +8683,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SmsLog"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5006,32 +8733,36 @@
       "get": {
         "description": "短信供应商健康状态。接口路径：/api/admin/v1/sms/providers/health",
         "operationId": "GET_api_admin_v1_sms_providers_health",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/ProviderHealth"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5062,18 +8793,9 @@
         "operationId": "GET_api_admin_v1_sms_statistics",
         "parameters": [
           {
-            "description": "页码（默认1）",
+            "description": "统计天数（默认7）",
             "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
+            "name": "days",
             "required": false,
             "schema": {
               "type": "integer"
@@ -5085,7 +8807,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SmsStatistics"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5114,32 +8857,33 @@
       "get": {
         "description": "获取系统限制配置（已发布）。接口路径：/api/admin/v1/system-limits",
         "operationId": "GET_api_admin_v1_system-limits",
-        "parameters": [
-          {
-            "description": "页码（默认1）",
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "每页条数（默认20，最大100）",
-            "in": "query",
-            "name": "size",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SystemLimits"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5172,7 +8916,28 @@
               "schema": {
                 "properties": {
                   "limits": {
-                    "description": "系统限制对象",
+                    "properties": {
+                      "maxFileSizeMb": {
+                        "description": "单文件大小上限(MB)",
+                        "type": "integer"
+                      },
+                      "maxForwardTargets": {
+                        "description": "单次转发目标数上限",
+                        "type": "integer"
+                      },
+                      "maxGroupMembers": {
+                        "description": "单群成员数上限",
+                        "type": "integer"
+                      },
+                      "maxNicknameLen": {
+                        "description": "昵称最大长度",
+                        "type": "integer"
+                      },
+                      "recallWindowSec": {
+                        "description": "消息撤回时间窗(秒)",
+                        "type": "integer"
+                      }
+                    },
                     "type": "object"
                   },
                   "reason": {
@@ -5195,7 +8960,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5248,7 +9042,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5302,7 +9125,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/ErrorEvent"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5338,7 +9205,7 @@
             "name": "id",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             }
           }
         ],
@@ -5347,7 +9214,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ErrorEvent"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5396,7 +9284,7 @@
             }
           },
           {
-            "description": "关键字（按各资源匹配）",
+            "description": "关键字（按昵称/公共ID/手机号匹配）",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -5405,7 +9293,7 @@
             }
           },
           {
-            "description": "状态筛选",
+            "description": "状态筛选：active|banned|cancelled",
             "in": "query",
             "name": "status",
             "required": false,
@@ -5419,7 +9307,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/AppUser"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5464,7 +9396,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AppUserDetail"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5545,7 +9498,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5583,6 +9565,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "页码（默认1）",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "每页条数（默认20，最大100）",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -5590,7 +9590,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/ForwardTask"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5635,7 +9679,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/AppGroup"
+                      },
+                      "type": "array"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5708,7 +9776,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5781,7 +9878,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5849,7 +9975,34 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "phone": {
+                          "description": "完整手机号",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5887,6 +10040,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "页码（默认1）",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "每页条数（默认20，最大100）",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -5894,7 +10065,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/Report"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -5939,8 +10154,16 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "idempotencyKey": {
+                    "description": "幂等键",
+                    "type": "string"
+                  },
                   "reason": {
                     "description": "操作原因",
+                    "type": "string"
+                  },
+                  "ticketNo": {
+                    "description": "关联工单号",
                     "type": "string"
                   }
                 },
@@ -5958,7 +10181,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminResponse"
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
                 }
               }
             },
