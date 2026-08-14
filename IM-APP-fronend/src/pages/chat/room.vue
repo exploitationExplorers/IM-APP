@@ -10,6 +10,7 @@ import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { resolveIMGroupByIM } from '@/api/im'
+import { fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { ChatMessage, Conversation } from '@/types'
 
@@ -25,6 +26,8 @@ const chatType = ref<'private' | 'group'>('group')
 const businessId = ref('')
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
 const convRef = ref<Conversation | null>(null)
+const memberRemarkMap = ref<Record<string, string>>({})
+const memberCount = ref(0)
 const input = ref('')
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
@@ -73,9 +76,11 @@ function avatarOf(message: ChatMessage): string {
 
 function nicknameOf(message: ChatMessage): string {
   if (chatType.value !== 'group' || message.senderId === myId.value) return ''
-  if (message.senderNickname) return message.senderNickname
   const uid = businessUserIdFromIM(message.senderId)
-  if (!uid) return ''
+  if (!uid) return message.senderNickname || ''
+  const mr = memberRemarkMap.value[uid]
+  if (mr) return mr
+  if (message.senderNickname) return message.senderNickname
   const contact = contactStore.contacts.find((c) => c.id === uid)
   return contact?.remark?.trim() || contact?.nickname || ''
 }
@@ -111,6 +116,20 @@ onLoad(async (query) => {
     }
 
     await chatStore.loadMessages(conv.id)
+    if (chatType.value === 'group' && businessId.value) {
+      try {
+        const ms = await fetchGroupMembers(businessId.value)
+        const map: Record<string, string> = {}
+        for (const m of ms) {
+          const r = m.memberRemark?.trim()
+          if (r) map[m.id] = r
+        }
+        memberRemarkMap.value = map
+        memberCount.value = ms.length
+      } catch {
+        // 成员备注加载失败时不影响聊天
+      }
+    }
     await nextTick()
     scrollToBottom()
   } catch (e) {

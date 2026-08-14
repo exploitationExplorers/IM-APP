@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { fetchGroupMembers } from '@/api/group'
+import { fetchGroupMembers, updateMemberRemark } from '@/api/group'
 import type { GroupMember } from '@/types'
 
 const groupId = ref('')
@@ -43,6 +43,25 @@ function roleLabel(member: GroupMember) {
   if (member.role === 'admin') return '管理员'
   return ''
 }
+
+async function editRemark(member: GroupMember) {
+  const current = member.memberRemark?.trim() || ''
+  const res = await uni.showModal({
+    title: '设置成员备注',
+    editable: true,
+    placeholderText: '请输入备注名',
+    content: current,
+  })
+  if (!res.confirm) return
+  const value = (res.content || '').trim()
+  try {
+    await updateMemberRemark(groupId.value, member.id, value)
+    member.memberRemark = value
+    uni.showToast({ title: '已保存', icon: 'success' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '保存失败', icon: 'none' })
+  }
+}
 </script>
 
 <template>
@@ -77,8 +96,12 @@ function roleLabel(member: GroupMember) {
         class="member-row"
       >
         <image class="avatar" :src="member.avatar || '/static/avatar-me.png'" mode="aspectFill" />
-        <text class="name">{{ member.nickname }}</text>
+        <view class="name-col">
+          <text class="name">{{ member.memberRemark?.trim() || member.nickname }}</text>
+          <text v-if="member.memberRemark?.trim()" class="name-sub">{{ member.nickname }}</text>
+        </view>
         <view v-if="roleLabel(member)" class="badge">{{ roleLabel(member) }}</view>
+        <view class="remark-btn" @click.stop="editRemark(member)">备注</view>
       </view>
       <view v-if="!loading && !filteredMembers.length" class="empty">暂无成员</view>
     </scroll-view>
@@ -218,5 +241,33 @@ function roleLabel(member: GroupMember) {
   text-align: center;
   color: #8a8f9c;
   font-size: 28rpx;
+}
+.name-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.name-sub {
+  font-size: 24rpx;
+  color: #8a8f9c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remark-btn {
+  margin-left: 16rpx;
+  min-width: 88rpx;
+  height: 56rpx;
+  padding: 0 18rpx;
+  border-radius: 28rpx;
+  background: #f0f3ff;
+  color: #0a2fc2;
+  font-size: 26rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 </style>

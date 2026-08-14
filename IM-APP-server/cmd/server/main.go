@@ -249,6 +249,8 @@ func main() {
 			auth.PUT("/groups/:id/members/:userId/mute", groupH.UpdateMemberMute)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
 			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
+			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
+			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
 			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
 			auth.POST("/groups/:id/reports", groupH.CreateReport)
 			auth.PUT("/groups/:id/mute", groupH.UpdateMute)

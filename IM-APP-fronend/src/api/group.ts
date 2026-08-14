@@ -83,3 +83,33 @@ export async function joinGroupByQRCode(
     },
   })
 }
+
+
+export async function updateMyNickname(groupId: string, nickname: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: `/groups/${groupId}/me/nickname`,
+    method: 'PUT',
+    data: { nickname },
+  })
+}
+
+export async function updateGroupRemark(groupId: string, remark: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: `/groups/${groupId}/remark`,
+    method: 'PUT',
+    data: { remark },
+  })
+}
+
+export async function updateMemberRemark(
+  groupId: string,
+  memberUserId: string,
+  remark: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${memberUserId}/remark`,
+    method: 'PUT',
+    data: { remark },
+  })
+}
+
