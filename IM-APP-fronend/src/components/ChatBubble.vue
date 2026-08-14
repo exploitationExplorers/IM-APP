@@ -7,7 +7,10 @@ const props = defineProps<{
   message: ChatMessage
   mine: boolean
   avatar: string
+  nickname?: string
 }>()
+
+const showNickname = computed(() => !props.mine && !!props.nickname)
 
 const emit = defineEmits<{
   avatarClick: []
@@ -82,6 +85,7 @@ function openLink(url: string) {
       @click="onAvatarClick"
     />
     <view class="content-wrap">
+      <text v-if="showNickname" class="nickname">{{ nickname }}</text>
       <view v-if="message.type === 'image'" class="bubble image-bubble">
         <image class="msg-image" :src="message.content" mode="widthFix" />
       </view>
@@ -141,6 +145,17 @@ function openLink(url: string) {
 
 .mine .content-wrap {
   align-items: flex-end;
+}
+
+.nickname {
+  margin-bottom: 8rpx;
+  font-size: 22rpx;
+  line-height: 32rpx;
+  color: #9aa3b5;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bubble {

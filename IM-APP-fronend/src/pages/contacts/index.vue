@@ -184,7 +184,9 @@ function closeMenus() {
 
 <style scoped lang="scss">
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -266,7 +268,11 @@ function closeMenus() {
 
 .body {
   flex: 1;
-  height: 0;
+  min-height: 0;
+  /* #ifdef H5 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* #endif */
 }
 
 .menu-list {

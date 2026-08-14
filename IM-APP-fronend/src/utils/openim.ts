@@ -437,6 +437,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     conversationId: conversationIdOf(item),
     senderId: item.sendID,
     senderAvatar: item.senderFaceUrl || undefined,
+    senderNickname: item.senderNickname || undefined,
     type: toAppMessageType(item.contentType),
     content: extractContent(item),
     createdAt: toISOTime(item.sendTime),

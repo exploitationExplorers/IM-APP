@@ -62,6 +62,15 @@ function avatarOf(message: ChatMessage): string {
   return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
 }
 
+function nicknameOf(message: ChatMessage): string {
+  if (chatType.value !== 'group' || message.senderId === myId.value) return ''
+  if (message.senderNickname) return message.senderNickname
+  const uid = businessUserIdFromIM(message.senderId)
+  if (!uid) return ''
+  const contact = contactStore.contacts.find((c) => c.id === uid)
+  return contact?.remark?.trim() || contact?.nickname || ''
+}
+
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 
@@ -480,6 +489,7 @@ function pickImage() {
           :message="m"
           :mine="m.senderId === myId"
           :avatar="avatarOf(m)"
+          :nickname="nicknameOf(m)"
           @avatar-click="onAvatarClick(m)"
         />
       </view>
