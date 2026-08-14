@@ -60,6 +60,9 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.POST("/auth/logout", d.AuthH.Logout)
 			auth.POST("/auth/logout-all", d.AuthH.LogoutAll)
 			auth.GET("/me", d.AuthH.Me)
+			// 功能开关（MFA / 举报等）
+			auth.GET("/features", middleware.RequirePermission(rbacRepo, "system-limits.read"), d.MetaH.GetFeatures)
+			auth.PUT("/features", middleware.RequirePermission(rbacRepo, "system-limits.write"), d.MetaH.SetFeatures)
 			auth.PUT("/me/password", d.AuthH.ChangePassword)
 			auth.GET("/me/mfa", d.AuthH.MFAStatus)
 			auth.POST("/me/mfa/setup", d.AuthH.MFASetup)

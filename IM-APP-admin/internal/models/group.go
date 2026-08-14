@@ -11,7 +11,7 @@ type AppGroup struct {
 	OwnerID     string    `json:"ownerId"`
 	OwnerName   string    `json:"ownerName,omitempty"`
 	MemberCount int64     `json:"memberCount"`
-	Status      string    `json:"status"` // normal|banned|dissolved|muted
+	Status      string    `json:"status"` // normal|banned|dismissed|muted
 	AllMuted    bool      `json:"allMuted"`
 	CreatedAt   time.Time `json:"createdAt"`
 }

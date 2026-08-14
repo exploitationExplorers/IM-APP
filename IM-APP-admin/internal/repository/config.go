@@ -156,6 +156,33 @@ func (r *OpsRepo) SaveSystemLimits(ctx context.Context, l *models.SystemLimits, 
 	return err
 }
 
+// ===== 功能开关（feature.flags） =====
+
+const cfgKeyFeatureFlags = "feature.flags"
+
+func defaultFeatureFlags() *models.FeatureFlags {
+	return &models.FeatureFlags{MFA: true, Report: true}
+}
+
+func (r *OpsRepo) GetFeatureFlags(ctx context.Context) (*models.FeatureFlags, error) {
+	f := defaultFeatureFlags()
+	var raw string
+	if err := r.DB.QueryRow(ctx, `SELECT value FROM app_configs WHERE key=$1`, cfgKeyFeatureFlags).Scan(&raw); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), f)
+	}
+	return f, nil
+}
+
+func (r *OpsRepo) SaveFeatureFlags(ctx context.Context, flags *models.FeatureFlags, operatorID string) error {
+	b, _ := json.Marshal(flags)
+	_, err := r.DB.Exec(ctx, `
+		INSERT INTO app_configs(key, value, description, updated_by, updated_at)
+		VALUES($1,$2,'功能开关',$3::uuid,NOW())
+		ON CONFLICT (key) DO UPDATE SET value=$2, updated_by=$3::uuid, updated_at=NOW()`,
+		cfgKeyFeatureFlags, string(b), operatorID)
+	return err
+}
+
 func (r *OpsRepo) PublishSystemLimits(ctx context.Context, operatorID string) error {
 	var raw string
 	if err := r.DB.QueryRow(ctx, `SELECT value FROM app_configs WHERE key=$1`, cfgKeySystemLimits).Scan(&raw); err != nil {

@@ -49,7 +49,7 @@ func main() {
 		RBACH:     &handler.RBACHandler{Svc: rbacSvc},
 		DataH:     &handler.DataHandler{Data: dataSvc},
 		OpsH:      &handler.OpsHandler{Svc: opsSvc},
-		MetaH:     &handler.MetaHandler{Version: "1.0.0", Commit: "dev"},
+		MetaH:     &handler.MetaHandler{Version: "1.0.0", Commit: "dev", Svc: opsSvc},
 	})
 
 	doc := buildOpenAPI(r.Routes())
@@ -211,7 +211,7 @@ var queryParamSpecs = map[string][]queryParamSpec{
 		{"page", "integer", false, "页码（默认1）"},
 		{"size", "integer", false, "每页条数（默认20，最大100）"},
 		{"keyword", "string", false, "关键字（按群名/群ID匹配）"},
-		{"status", "string", false, "状态筛选：normal|banned|dissolved|muted"},
+		{"status", "string", false, "状态筛选：normal|banned|dismissed|muted"},
 	},
 	"GET /api/admin/v1/reports": {
 		{"page", "integer", false, "页码（默认1）"},
@@ -308,7 +308,7 @@ func queryParams(method, p string) []any {
 // queryParamEnums 各接口 query 参数的可选值（key = "方法 路径 参数名"）
 var queryParamEnums = map[string][]string{
 	"GET /api/admin/v1/users status":                      {"active", "banned", "cancelled"},
-	"GET /api/admin/v1/groups status":                     {"normal", "banned", "dissolved", "muted"},
+	"GET /api/admin/v1/groups status":                     {"normal", "banned", "dismissed", "muted"},
 	"GET /api/admin/v1/reports status":                    {"pending", "processing", "resolved", "rejected", "reopened"},
 	"GET /api/admin/v1/reports targetType":                {"user", "group", "message"},
 	"GET /api/admin/v1/audit-logs result":                 {"success", "denied", "failed"},
@@ -348,8 +348,8 @@ var fieldEnums = map[string][]string{
 	"AppUserDetail status":      {"active", "banned", "cancelled"},
 	"AdminAccount status":       {"active", "disabled"},
 	"AdminRole status":          {"active", "disabled"},
-	"AppGroup status":           {"normal", "banned", "dissolved", "muted"},
-	"AppGroupDetail status":     {"normal", "banned", "dissolved", "muted"},
+	"AppGroup status":           {"normal", "banned", "dismissed", "muted"},
+	"AppGroupDetail status":     {"normal", "banned", "dismissed", "muted"},
 	"AppGroupMember role":       {"member", "owner"},
 	"AppVersion status":         {"draft", "published"},
 	"LegalDocument type":        {"user_agreement", "privacy_policy"},
@@ -782,6 +782,11 @@ var writeBodyFields = map[string][]fieldSpec{
 		{"limits", "object", true, "系统限制对象"},
 		{"reason", "string", true, "操作原因"},
 	},
+	"PUT /api/admin/v1/features": {
+		{"mfa", "boolean", false, "MFA 多因素认证开关（不传则保持原值）"},
+		{"report", "boolean", false, "举报功能开关（不传则保持原值）"},
+		{"reason", "string", true, "操作原因"},
+	},
 	"POST /api/admin/v1/system-limits/publish": {
 		{"reason", "string", true, "操作原因"},
 	},
@@ -956,6 +961,8 @@ var apiDescriptions = map[string]string{
 	"GET /api/admin/v1/system-limits":                            "获取系统限制配置（已发布）",
 	"PUT /api/admin/v1/system-limits":                            "保存系统限制草稿",
 	"POST /api/admin/v1/system-limits/publish":                   "发布系统限制配置（版本化）",
+	"GET /api/admin/v1/features":                                 "获取功能开关（MFA/举报）",
+	"PUT /api/admin/v1/features":                                 "设置功能开关（MFA/举报，可部分修改）",
 	"GET /api/admin/v1/sensitive-words":                          "敏感词列表",
 	"POST /api/admin/v1/sensitive-words":                         "新建敏感词",
 	"POST /api/admin/v1/sensitive-words/import":                  "批量导入敏感词",
@@ -1044,6 +1051,10 @@ var responseData = map[string]dataKind{
 	"GET /api/admin/v1/me/mfa": {Kind: "props", Props: []fieldSpec{
 		{"enabled", "boolean", false, "是否已启用 MFA"},
 		{"secret", "string", false, "未启用时的绑定密钥（仅未启用时返回）"},
+	}},
+	"GET /api/admin/v1/features": {Kind: "props", Props: []fieldSpec{
+		{"mfa", "boolean", false, "MFA 多因素认证是否启用"},
+		{"report", "boolean", false, "举报功能是否启用"},
 	}},
 	// ---- 登录/刷新返回 ----
 	"POST /api/admin/v1/auth/login":         {Kind: "ref", Model: "LoginResult"},
@@ -1341,7 +1352,7 @@ var modelSchemas = map[string][]fieldSpec{
 		{"ownerId", "string", false, "群主 ID"},
 		{"ownerName", "string", false, "群主昵称"},
 		{"memberCount", "integer", false, "成员数"},
-		{"status", "string", false, "normal|banned|dissolved|muted"},
+		{"status", "string", false, "normal|banned|dismissed|muted"},
 		{"allMuted", "boolean", false, "是否全员禁言"},
 		{"createdAt", "string", false, "创建时间"},
 	},
@@ -1352,7 +1363,7 @@ var modelSchemas = map[string][]fieldSpec{
 		{"ownerId", "string", false, "群主 ID"},
 		{"ownerName", "string", false, "群主昵称"},
 		{"memberCount", "integer", false, "成员数"},
-		{"status", "string", false, "normal|banned|dissolved|muted"},
+		{"status", "string", false, "normal|banned|dismissed|muted"},
 		{"allMuted", "boolean", false, "是否全员禁言"},
 		{"createdAt", "string", false, "创建时间"},
 		{"joinMode", "string", false, "加入方式：direct|approval"},

@@ -200,11 +200,11 @@
             "type": "string"
           },
           "status": {
-            "description": "normal|banned|dissolved|muted（可选值：normal=正常, banned=已封禁, dissolved=已解散, muted=全员禁言）",
+            "description": "normal|banned|dismissed|muted（可选值：normal=正常, banned=已封禁, dismissed=已解散, muted=全员禁言）",
             "enum": [
               "normal",
               "banned",
-              "dissolved",
+              "dismissed",
               "muted"
             ],
             "type": "string",
@@ -265,11 +265,11 @@
             "type": "string"
           },
           "status": {
-            "description": "normal|banned|dissolved|muted（可选值：normal=正常, banned=已封禁, dissolved=已解散, muted=全员禁言）",
+            "description": "normal|banned|dismissed|muted（可选值：normal=正常, banned=已封禁, dismissed=已解散, muted=全员禁言）",
             "enum": [
               "normal",
               "banned",
-              "dissolved",
+              "dismissed",
               "muted"
             ],
             "type": "string",
@@ -3903,6 +3903,159 @@
         ]
       }
     },
+    "/api/admin/v1/features": {
+      "get": {
+        "description": "获取功能开关（MFA/举报）。接口路径：/api/admin/v1/features",
+        "operationId": "GET_api_admin_v1_features",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "mfa": {
+                          "description": "MFA 多因素认证是否启用",
+                          "type": "boolean"
+                        },
+                        "report": {
+                          "description": "举报功能是否启用",
+                          "type": "boolean"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "获取功能开关（MFA/举报）",
+        "tags": [
+          "其他"
+        ]
+      },
+      "put": {
+        "description": "设置功能开关（MFA/举报，可部分修改）。接口路径：/api/admin/v1/features",
+        "operationId": "PUT_api_admin_v1_features",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "mfa": {
+                    "description": "MFA 多因素认证开关（不传则保持原值）",
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  },
+                  "report": {
+                    "description": "举报功能开关（不传则保持原值）",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "设置功能开关（MFA/举报，可部分修改）",
+        "tags": [
+          "其他"
+        ]
+      }
+    },
     "/api/admin/v1/forward-limits/users/{userId}": {
       "get": {
         "description": "查看用户转发限额。接口路径：/api/admin/v1/forward-limits/users/:userId",
@@ -4836,7 +4989,7 @@
             }
           },
           {
-            "description": "状态筛选：normal|banned|dissolved|muted（可选值：normal=正常, banned=已封禁, dissolved=已解散, muted=全员禁言）",
+            "description": "状态筛选：normal|banned|dismissed|muted（可选值：normal=正常, banned=已封禁, dismissed=已解散, muted=全员禁言）",
             "in": "query",
             "name": "status",
             "required": false,
@@ -4844,7 +4997,7 @@
               "enum": [
                 "normal",
                 "banned",
-                "dissolved",
+                "dismissed",
                 "muted"
               ],
               "type": "string",

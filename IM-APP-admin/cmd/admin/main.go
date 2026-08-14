@@ -77,7 +77,7 @@ func main() {
 	rbacH := &handler.RBACHandler{Svc: rbacSvc}
 	dataH := &handler.DataHandler{Data: dataSvc}
 	opsH := &handler.OpsHandler{Svc: opsSvc}
-	metaH := &handler.MetaHandler{Version: "1.0.0", Commit: "dev", BuildTime: time.Now().UTC().Format(time.RFC3339)}
+	metaH := &handler.MetaHandler{Version: "1.0.0", Commit: "dev", BuildTime: time.Now().UTC().Format(time.RFC3339), Svc: opsSvc}
 
 	r := server.BuildRouter(server.Deps{
 		Cfg:       cfg,
