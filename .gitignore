@@ -2,3 +2,6 @@
 .tmp-ref-home.html
 .tmp-*
 .idea
+
+# 前端依赖锁文件
+IM-APP-fronend/pnpm-lock.yaml
