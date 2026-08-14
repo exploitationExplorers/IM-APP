@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Conversation } from '@/types'
 import { formatRelativeTime } from '@/utils/format'
+import { useChatStore } from '@/stores/chat'
 
 const props = defineProps<{
   item: Conversation
@@ -11,8 +12,16 @@ const emit = defineEmits<{
   (e: 'click', item: Conversation): void
 }>()
 
+const chatStore = useChatStore()
 const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
 const isMuted = computed(() => props.item.recvMsgOpt === 1 || props.item.recvMsgOpt === 2)
+const isOnline = computed(
+  () =>
+    props.item.type === 'private' &&
+    !!props.item.peerUserId &&
+    chatStore.isPeerOnline(props.item.peerUserId),
+)
+console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.item.peerUserId, 'isOnline=', isOnline.value)
 </script>
 
 <template>
@@ -20,6 +29,7 @@ const isMuted = computed(() => props.item.recvMsgOpt === 1 || props.item.recvMsg
     <view class="avatar-wrap">
       <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
       <image v-if="item.pinned" class="pin-badge" src="/static/icons/icon-pin.svg" mode="aspectFit" />
+      <view v-if="isOnline" class="online-dot" />
     </view>
     <view class="body">
       <view class="top">
@@ -70,6 +80,18 @@ const isMuted = computed(() => props.item.recvMsgOpt === 1 || props.item.recvMsg
   height: 28rpx;
   border-radius: 50%;
   background: #297bfb;
+}
+
+.online-dot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22rpx;
+  height: 22rpx;
+  border-radius: 50%;
+  background: #52c41a;
+  border: 4rpx solid #fff;
+  box-sizing: border-box;
 }
 
 .body {

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { IMEvents, SessionType } from 'openim-uniapp-polyfill'
+import { ref, computed, watch } from 'vue'
+import { IMEvents, OnlineState, SessionType } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { ChatMessage, Conversation } from '@/types'
 import { resolveIMGroup, resolveIMPeer } from '@/api/im'
@@ -11,10 +11,14 @@ import {
   getOneConversation,
   markConversationRead,
   onIMEvent,
+  onUserStatusChanged,
   revokeMessage,
   sendImageMessage,
   sendTextMessage,
   sendVoiceMessage,
+  subscribeUsersStatus,
+  unsubscribeUsersStatus,
+  getSubscribeUsersStatus,
   targetOf,
   toChatMessage,
   toConversation,
@@ -33,6 +37,10 @@ export const useChatStore = defineStore('chat', () => {
   const loading = ref(false)
   /** 会话是否已翻到最早一条 */
   const historyEnd = ref<Record<string, boolean>>({})
+  /** OpenIM userID → 在线状态（0=离线 1=在线） */
+  const onlineStatus = ref<Record<string, OnlineState>>({})
+  /** 当前已订阅在线状态的用户 ID 集合 */
+  const subscribedUserIDs = ref<Set<string>>(new Set())
   let unsubscribers: Array<() => void> = []
 
   const totalUnread = computed(() =>
@@ -120,6 +128,10 @@ export const useChatStore = defineStore('chat', () => {
         IMEvents.OnNewRecvMessageRevoked,
         (info) => dropRevokedMessage(info.conversationID, info.clientMsgID),
       ),
+      onUserStatusChanged((state) => {
+        console.log('[online] 状态变更事件:', state)
+        onlineStatus.value[state.userID] = state.status
+      }),
     ]
   }
 
@@ -129,14 +141,81 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadConversations() {
+    console.log('[chat] loadConversations start')
     loading.value = true
     try {
       await ensureIMLogin()
       subscribeRealtime()
-      conversations.value = sortConversations((await getConversationList()).map(toConversation))
+      const list = await getConversationList()
+      console.log('[chat] getConversationList count:', list.length)
+      conversations.value = sortConversations(list.map(toConversation))
+      console.log('[chat] conversations mapped, will refresh online status')
+      refreshOnlineStatus().catch((e) => console.warn('[chat] 刷新在线状态失败', e))
     } finally {
       loading.value = false
     }
+  }
+
+  // 兜底：会话列表变化时（包括 HMR/热更新后）自动刷新在线状态订阅
+  watch(
+    () => conversations.value.map((c) => c.peerUserId).filter(Boolean),
+    () => {
+      console.log('[chat] conversations changed, refresh online status')
+      refreshOnlineStatus().catch((e) => console.warn('[chat] 刷新在线状态失败', e))
+    },
+    { immediate: true, deep: true },
+  )
+
+  /**
+   * 订阅所有私聊对方的在线状态，并查询一次当前状态。
+   * 会话变化时自动 diff：新增订阅、移除不再需要的订阅。
+   */
+  async function refreshOnlineStatus() {
+    const userIDs = [
+      ...new Set(
+        conversations.value
+          .filter((c) => c.type === 'private' && c.peerUserId)
+          .map((c) => c.peerUserId!),
+      ),
+    ]
+    console.log('[online] 私聊会话 peerUserIds:', userIDs)
+
+    // 退订已不在列表中的用户
+    const toUnsubscribe = [...subscribedUserIDs.value].filter((id) => !userIDs.includes(id))
+    if (toUnsubscribe.length) {
+      await unsubscribeUsersStatus(toUnsubscribe).catch(() => {})
+      toUnsubscribe.forEach((id) => subscribedUserIDs.value.delete(id))
+    }
+
+    // 订阅新增用户
+    const toSubscribe = userIDs.filter((id) => !subscribedUserIDs.value.has(id))
+    if (toSubscribe.length) {
+      console.log('[online] 订阅用户:', toSubscribe)
+      const states = await subscribeUsersStatus(toSubscribe).catch((e) => {
+        console.warn('[online] subscribeUsersStatus 失败:', e)
+        return [] as { userID: string; status: OnlineState }[]
+      })
+      console.log('[online] 订阅返回:', states)
+      states.forEach((s) => {
+        onlineStatus.value[s.userID] = s.status
+      })
+      toSubscribe.forEach((id) => subscribedUserIDs.value.add(id))
+    }
+
+    // 再查询一次所有已订阅用户的最新状态，补齐事件推送可能漏掉的状态
+    const allStates = await getSubscribeUsersStatus().catch((e) => {
+      console.warn('[online] getSubscribeUsersStatus 失败:', e)
+      return [] as { userID: string; status: OnlineState }[]
+    })
+    console.log('[online] 查询全部状态:', allStates)
+    allStates.forEach((s) => {
+      onlineStatus.value[s.userID] = s.status
+    })
+  }
+
+  /** 判断某个 OpenIM 用户是否在线 */
+  function isPeerOnline(userID: string): boolean {
+    return userID ? onlineStatus.value[userID] === OnlineState.Online : false
   }
 
   /**
@@ -330,6 +409,8 @@ export const useChatStore = defineStore('chat', () => {
     conversations.value = []
     messagesMap.value = {}
     historyEnd.value = {}
+    onlineStatus.value = {}
+    subscribedUserIDs.value.clear()
   }
 
   return {
@@ -338,6 +419,8 @@ export const useChatStore = defineStore('chat', () => {
     loading,
     historyEnd,
     totalUnread,
+    onlineStatus,
+    isPeerOnline,
     loadConversations,
     enterConversation,
     loadMessages,

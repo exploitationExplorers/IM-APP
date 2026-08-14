@@ -5,10 +5,12 @@ import IMSDK, {
   LoginStatus,
   MessageStatus,
   MessageType,
+  OnlineState,
   Platform,
   SessionType,
 } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
+import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
@@ -651,3 +653,40 @@ export async function resolveGroupConversationID(businessGroupId: string): Promi
   const target = await resolveIMGroup(businessGroupId)
   return `sg_${target.imGroupId}`
 }
+
+// ---------------------------------------------------------------------------
+// 用户在线状态：订阅 + 事件更新，用于聊天列表私聊头像的小绿点。
+// App 原生插件方法名是小写，Web/小程序端 client-sdk 方法名是大写驼峰，需要做平台适配。
+// ---------------------------------------------------------------------------
+
+/**
+ * 订阅指定用户的在线状态。成功后会通过 OnUserStatusChanged 事件推送变更，
+ * 也可调用 getSubscribeUsersStatus 查询当前状态。
+ *
+ * 注意：polyfill 的 asyncApi 在 Web 端直接调用 client-sdk 的方法对象，方法名均为小写，
+ * 因此这里统一使用 polyfill 枚举里的方法名（小写）。
+ */
+export async function subscribeUsersStatus(userIDs: string[]): Promise<UserOnlineState[]> {
+  if (!userIDs.length) return []
+  const res = await imCall<UserOnlineState[]>(IMMethods.SubscribeUsersStatus, userIDs)
+  return res || []
+}
+
+/** 取消订阅指定用户的在线状态 */
+export async function unsubscribeUsersStatus(userIDs: string[]): Promise<void> {
+  if (!userIDs.length) return
+  await imCall(IMMethods.UnsubscribeUsersStatus, userIDs)
+}
+
+/** 查询所有已订阅用户的当前在线状态 */
+export async function getSubscribeUsersStatus(): Promise<UserOnlineState[]> {
+  const res = await imCall<UserOnlineState[]>('getSubscribeUsersStatus' as IMMethods)
+  return res || []
+}
+
+/** 监听用户在线状态变更 */
+export function onUserStatusChanged(handler: (state: UserOnlineState) => void): () => void {
+  return onIMEvent<UserOnlineState>(IMEvents.OnUserStatusChanged, handler)
+}
+
+export { OnlineState }
