@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, reactive, shallowRef } from "vue";
+import { computed, onMounted, reactive, shallowRef, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { RefreshLeft, Search, View, Plus, Delete, Edit } from "@element-plus/icons-vue";
+import { getModerationHits } from "@/api/modules/moderation";
+import type { Moderation } from "@/api/interface";
 
 const activeTab = shallowRef("region");
 
@@ -260,6 +262,65 @@ async function deleteSensitiveWord(row: SensitiveWord): Promise<void> {
     // cancelled
   }
 }
+
+const hitPage = shallowRef(1);
+const hitSize = shallowRef(20);
+const hitTotal = shallowRef(0);
+const hitLoading = shallowRef(false);
+const hitItems = shallowRef<Moderation.HitItem[]>([]);
+
+const hitFieldLabels: Record<string, string> = {
+  nickname: "昵称",
+  group_name: "群名",
+  announcement: "群公告",
+};
+
+const hitDispositionLabels: Record<string, string> = {
+  intercept: "已拦截",
+  pending_review: "待审核",
+};
+
+function formatHitField(field: string): string {
+  return hitFieldLabels[field] ?? field;
+}
+
+function formatHitDisposition(disposition: string): string {
+  return hitDispositionLabels[disposition] ?? disposition;
+}
+
+function formatHitTime(value: string): string {
+  if (!value) return "-";
+  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+}
+
+async function loadModerationHits(): Promise<void> {
+  hitLoading.value = true;
+  try {
+    const res = await getModerationHits({
+      page: hitPage.value,
+      size: hitSize.value,
+    });
+    hitItems.value = res.data?.items ?? [];
+    hitTotal.value = res.data?.total ?? 0;
+  } catch {
+    hitItems.value = [];
+    hitTotal.value = 0;
+  } finally {
+    hitLoading.value = false;
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === "sensitiveHit") void loadModerationHits();
+});
+
+watch([hitPage, hitSize], () => {
+  if (activeTab.value === "sensitiveHit") void loadModerationHits();
+});
+
+onMounted(() => {
+  if (activeTab.value === "sensitiveHit") void loadModerationHits();
+});
 
 /* ============================================================
  *  Tab 7: 运行错误记录
@@ -640,6 +701,57 @@ function openErrorDetail(log: ErrorLog): void {
               :page-sizes="[10, 25, 50, 100]"
               layout="total, sizes, prev, pager, next, jumper"
               :total="filteredSensitiveWords.length"
+            />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="敏感词命中记录" name="sensitiveHit">
+          <div class="tab-search">
+            <div class="search-grid">
+              <div class="search-operation">
+                <el-button type="primary" :icon="RefreshLeft" :loading="hitLoading" @click="loadModerationHits">
+                  刷新
+                </el-button>
+              </div>
+            </div>
+          </div>
+
+          <el-table v-loading="hitLoading" :data="hitItems" style="width: 100%">
+            <el-table-column prop="matchedWord" label="命中词" min-width="120" />
+            <el-table-column prop="category" label="分类" min-width="90">
+              <template #default="{ row }">
+                <el-tag effect="plain" round>{{ row.category }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="字段" min-width="100">
+              <template #default="{ row }">{{ formatHitField(row.field) }}</template>
+            </el-table-column>
+            <el-table-column prop="content" label="原文内容" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
+            <el-table-column label="处理结果" min-width="110">
+              <template #default="{ row }">
+                <el-tag
+                  :type="row.disposition === 'intercept' ? 'danger' : 'warning'"
+                  effect="plain"
+                  round
+                >
+                  {{ formatHitDisposition(row.disposition) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="时间" min-width="170">
+              <template #default="{ row }">{{ formatHitTime(row.createdAt) }}</template>
+            </el-table-column>
+          </el-table>
+
+          <div class="table-footer">
+            <el-pagination
+              background
+              v-model:current-page="hitPage"
+              v-model:page-size="hitSize"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next, jumper"
+              :total="hitTotal"
             />
           </div>
         </el-tab-pane>
