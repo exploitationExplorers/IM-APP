@@ -87,6 +87,7 @@ docker compose up -d --build
 | `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE` | 阿里云短信签名 / 模板（审核通过） |
 | `MINIO_PUBLIC_URL` | MinIO 对外访问地址，如 `http://8.210.72.157:9000`（空则文件 URL 是内网，外部不可访问） |
 | `OPENIM_API_URL` / `OPENIM_SECRET` | 连 OpenIM 服务 |
+| `KAFKA_BROKERS` | 万人转发 Kafka broker；未配置时转发提交/恢复/重试返回 503 |
 
 ### 关键约定
 

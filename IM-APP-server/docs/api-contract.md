@@ -14,9 +14,15 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 失败时 `code: 1`，HTTP 状态码：400 / 401 / 403 / 404 / 500。
 
+例外：`GET /health` 为无需登录的基础存活检查，直接返回 `{ "status": "ok" }`，并按来源 IP 限制为每分钟最多 20 次。
+
 ---
 
 ## 认证（无需 JWT，除标注外）
+
+### GET `/api/v1/public/countries`
+
+登录、注册前查询已启用的国家/地区和国际电话区号。响应项包含 `code`、`dialCode`、`cnName`、`enName`、`enabled`。注册、密码登录、验证码登录、发送验证码和重置密码均传 `countryCode + phone`；`countryCode` 不传时兼容默认 `+86`，传入时按 libphonenumber 的各国规则校验并统一存为 E.164。
 
 ### POST `/api/v1/auth/sms/send`
 
@@ -550,6 +556,14 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 **Body** `{ "nickname": "群内昵称" }`
 
+### PUT `/api/v1/groups/:id/remark`
+
+设置当前用户对该群的备注，最多 64 个字。**Body** `{ "remark": "项目群" }`；传空字符串清除。群详情响应通过 `remark` 返回。
+
+### PUT `/api/v1/groups/:id/members/:userId/remark`
+
+设置当前用户对指定群成员的备注，最多 64 个字。**Body** `{ "remark": "产品负责人" }`；传空字符串清除。群成员列表通过 `memberRemark` 返回。
+
 ### POST `/api/v1/groups/:id/reports`
 
 举报当前群聊，仅群成员可提交；同一用户对同一群的待处理举报幂等。
@@ -708,37 +722,6 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 把业务用户 UUID 解析为稳定的 OpenIM userID，并返回 `canChat/denyReason`。校验双方账号、好友关系和双向拉黑状态，不创建 PostgreSQL 会话。
 
-### GET `/api/v1/im/conversations/:conversationId/settings`
-
-读取当前用户某个 OpenIM 单聊会话的设置。只允许 `si_` 单聊会话，并由 OpenIM 按当前用户身份校验会话归属。
-
-**Response**
-```json
-{
-  "conversationId": "si_xxx_xxx",
-  "pinned": false,
-  "doNotDisturb": false,
-  "burnAfterRead": false,
-  "burnDuration": 0
-}
-```
-
-### PATCH `/api/v1/im/conversations/:conversationId/settings`
-
-局部更新置顶、消息免打扰和阅后即焚。所有字段均可选，但至少传一个。`burnDuration` 单位为秒；启用时范围为 5～86400，关闭阅后即焚时服务端自动清零。
-
-**Body**
-```json
-{
-  "pinned": true,
-  "doNotDisturb": true,
-  "burnAfterRead": true,
-  "burnDuration": 30
-}
-```
-
-设置直接保存到 OpenIM，不新增 PostgreSQL 字段。
-
 ### GET `/api/v1/im/groups/:businessGroupId`
 
 把纯数字业务群号、内部 UUID 或 OpenIM 群 ID 解析为稳定的 OpenIM groupID，响应里的 `businessGroupId` 始终是纯数字群号。校验群状态、成员资格、单人禁言及全员禁言。若 OpenIM 尚无该群（历史数据未同步），会按业务库补创建并把当前用户邀请进群后再返回；全量成员对账仍由 Outbox 负责。
@@ -856,20 +839,58 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ## 消息转发（Phase 5）
 
-这是旧 PostgreSQL 消息链路能力，仅 `LEGACY_CHAT_ENABLED=true` 时注册；OpenIM 模式默认返回 404。普通用户消息转发应由 OpenIM SDK 完成。
+万人转发采用“PostgreSQL 任务状态 + 事务 Outbox + Kafka 异步队列 + OpenIM 发消息”的链路，接口始终注册，不依赖 `LEGACY_CHAT_ENABLED`。转发目标总人数不设业务上限；worker 从 Kafka 逐批消费并逐个发送，不会在一个 HTTP 请求内同步发完。离线推送和前端对接不在本阶段范围内。
+
+接口约定：GET 使用 query 参数；新建的 POST 写接口全部使用静态路径和 JSON body，不把 `taskId` 拼入路径。`GET /api/v1/forward-tasks/:id` 只保留给旧客户端兼容，新客户端使用 `/forward-task-progress?taskId=...`。
 
 ### POST `/api/v1/forward-tasks`
 
-创建异步转发任务（最多 9999 个目标会话）。
+创建异步转发草稿任务。`targetUserIds` 可以一次传入全部目标，服务端内部按每批 1000 条写 PostgreSQL；也可以先创建空任务，再通过 add/generate 逐批补充。
 
 **Body**
 ```json
-{ "sourceMessageId": "uuid", "targetConvIds": ["uuid1", "uuid2"] }
+{
+  "sourceConversationId": "si_xxx_xxx",
+  "sourceClientMsgId": "OpenIM-clientMsgID",
+  "sourceServerMsgId": "OpenIM-serverMsgID",
+  "sourceSnapshot": {
+    "contentType": 101,
+    "content": {"content": "需要转发的文本"}
+  },
+  "selector": {"mode": "all_friends"},
+  "idempotencyKey": "forward-request-uuid",
+  "targetUserIds": ["业务用户UUID-1", "业务用户UUID-2"]
+}
 ```
 
-### GET `/api/v1/forward-tasks/:id`
+`sourceClientMsgId` 与兼容字段 `sourceMessageId` 至少传一个；`sourceSnapshot.contentType` 只能是 1～999，禁止借转发接口伪造 OpenIM 通知/控制消息。
 
-查询转发任务进度。
+### 目标管理
+
+| 方法与路径 | 参数 | 说明 |
+|---|---|---|
+| `GET /api/v1/forward-task-targets?taskId=...&status=...&cursor=...&limit=50` | query | 游标分页查询目标明细 |
+| `POST /api/v1/forward-task-targets/add` | `{taskId,targetUserIds}` | 向草稿任务添加目标，单次最多 1000 个 |
+| `POST /api/v1/forward-task-targets/generate` | `{taskId,selector}` | 按全部好友、标签或关键字生成目标 |
+| `POST /api/v1/forward-task-targets/remove` | `{taskId,targetUserIds}` | 从草稿任务移除目标，单次最多 1000 个 |
+| `POST /api/v1/forward-task-targets/clear` | `{taskId}` | 清空草稿任务目标 |
+
+`selector.mode` 可选 `all_friends`、`tags`、`search`；`tags` 需传 `tagIds`，`search` 可传 `keyword`。1000 是单次数据库写入/重试请求的技术批次，不是一个转发任务的总人数限制。
+
+### 任务控制与进度
+
+| 方法与路径 | 参数 | 说明 |
+|---|---|---|
+| `GET /api/v1/forward-tasks?status=...&cursor=...&limit=20` | query | 查询当前用户的任务列表 |
+| `GET /api/v1/forward-task-progress?taskId=...` | query | 查询任务汇总进度 |
+| `GET /api/v1/forward-tasks/:id` | path | 旧客户端兼容查询，已废弃 |
+| `POST /api/v1/forward-tasks/submit` | `{taskId}` | 提交任务并写 Kafka Outbox |
+| `POST /api/v1/forward-tasks/cancel` | `{taskId,reason}` | 取消任务 |
+| `POST /api/v1/forward-tasks/retry` | `{taskId,onlyFailed,targetUserIds}` | 重试失败或指定目标，指定目标单次最多 1000 个 |
+| `POST /api/v1/forward-tasks/pause` | `{taskId}` | 暂停任务 |
+| `POST /api/v1/forward-tasks/resume` | `{taskId}` | 恢复任务并重新派发 Kafka 事件 |
+
+提交、恢复或重试时 Kafka 未配置返回 503。任务状态包括 `draft`、`expanding`、`pending`、`processing`、`completed`、`partially_completed`、`failed`、`paused`、`cancelled`；进度响应包含目标总数及成功、失败、跳过、取消、等待中、处理中等计数。
 
 ---
 
@@ -905,9 +926,16 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 }
 ```
 
-### GET `/api/v1/favorites?type=image&page=1&limit=20`
+### POST `/api/v1/favorites/list`
 
-收藏列表。`type` 可选：`text` | `emoji` | `image` | `video` | `file` | `voice`；不传则全部。`page` 默认 1，`limit` 默认 20（最大 100）。
+收藏列表使用 JSON body，不使用 query 参数。
+
+**Body**
+```json
+{ "page": 1, "size": 20, "type": 0 }
+```
+
+`type`：`0` 全部、`1` 文字、`2` 图片/视频、`3` 文件、`4` 语音；`size` 默认 20，最大 100。
 
 **Response**：收藏对象数组（字段同创建响应）。
 
