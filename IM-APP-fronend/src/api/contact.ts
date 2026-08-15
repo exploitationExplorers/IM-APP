@@ -1,8 +1,20 @@
 import { request } from '@/utils/request'
 import type { Contact, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 
+interface ContactListResult {
+  items: Contact[]
+  hasMore: boolean
+  total: number
+}
+
 export async function fetchContacts(): Promise<Contact[]> {
-  return request<Contact[]>({ url: '/contacts', method: 'GET' })
+  const result = await request<Contact[] | ContactListResult>({
+    url: '/contacts',
+    method: 'GET',
+  })
+
+  // 线上接口返回分页对象；兼容仍直接返回数组的旧版服务。
+  return Array.isArray(result) ? result : result.items
 }
 
 export async function fetchContact(contactId: string): Promise<Contact> {
