@@ -378,22 +378,29 @@ func main() {
 // （并允许携带凭证）；未配置白名单时回退为通配 *（仅建议本地开发）。
 func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 	allowed := make(map[string]struct{}, len(allowedOrigins))
+	allowAll := len(allowedOrigins) == 0
 	for _, o := range allowedOrigins {
-		if o = strings.TrimSpace(o); o != "" {
+		o = strings.TrimSpace(o)
+		switch o {
+		case "":
+			continue
+		case "*":
+			allowAll = true
+		default:
 			allowed[o] = struct{}{}
 		}
 	}
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		switch {
-		case origin != "" && len(allowed) > 0:
+		case allowAll:
+			c.Header("Access-Control-Allow-Origin", "*")
+		case origin != "":
 			if _, ok := allowed[origin]; ok {
 				c.Header("Access-Control-Allow-Origin", origin)
 				c.Header("Access-Control-Allow-Credentials", "true")
 				c.Header("Vary", "Origin")
 			}
-		case len(allowed) == 0:
-			c.Header("Access-Control-Allow-Origin", "*")
 		}
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
