@@ -259,3 +259,47 @@ func (s *GroupService) Dismiss(ctx context.Context, groupID, operatorID string) 
 	}
 	return s.Groups.Dismiss(ctx, internalID, operatorID)
 }
+
+func (s *GroupService) GetGroupRemark(ctx context.Context, groupID, uid string) (string, error) {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return "", err
+	}
+	return s.Groups.GetGroupRemark(ctx, uid, internalID)
+}
+
+func (s *GroupService) UpdateGroupRemark(ctx context.Context, groupID, uid, remark string) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	remark = strings.TrimSpace(remark)
+	if len([]rune(remark)) > 64 {
+		return repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.SetGroupRemark(ctx, uid, internalID, remark)
+}
+
+func (s *GroupService) GetMemberRemarks(ctx context.Context, groupID, uid string) (map[string]string, error) {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Groups.GetMemberRemarks(ctx, uid, internalID)
+}
+
+func (s *GroupService) UpdateMemberRemark(ctx context.Context, groupID, uid, memberUserID, remark string) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if _, err := uuid.Parse(memberUserID); err != nil {
+		return repository.ErrInvalidGroupOperation
+	}
+	remark = strings.TrimSpace(remark)
+	if len([]rune(remark)) > 64 {
+		return repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.SetMemberRemark(ctx, uid, internalID, memberUserID, remark)
+}
+

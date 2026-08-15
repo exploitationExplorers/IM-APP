@@ -7,7 +7,6 @@ import ImTabBar from '@/components/ImTabBar.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
-import { APP_CONFIG } from '@/config'
 import type { Contact, GroupPreview } from '@/types'
 
 useAuthGuard()
@@ -57,10 +56,8 @@ function openContact(c: Contact) {
   go(`/pages/contacts/friend-detail?id=${c.id}`)
 }
 
-function openGroup(g: GroupPreview) {
-  uni.navigateTo({
-    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(g.id)}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || APP_CONFIG.defaultGroupAvatarUrl)}`,
-  })
+function openGroupChat(g: GroupPreview) {
+  contactStore.openChatWithGroup(g.id, g.name, g.avatar || '/static/icons/menu-group.svg')
 }
 
 function onAdd() {
@@ -123,24 +120,18 @@ function closeMenus() {
         </view>
       </view>
 
-      <view v-if="groups.length" class="featured-band">
-        <view class="featured-card">
-          <view
-            v-for="g in groups"
-            :key="g.id"
-            class="featured-row"
-            @click="openGroup(g)"
-          >
-            <image
-              class="featured-avatar"
-              :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
-              mode="aspectFit"
-            />
-            <text class="featured-name">{{ g.name }}</text>
-          </view>
+      <view v-if="groups.length" class="group-band">
+        <view
+          v-for="g in groups.slice(0, 5)"
+          :key="g.id"
+          class="group-card"
+          @click="openGroupChat(g)"
+        >
+          <image class="group-avatar" :src="g.avatar || '/static/icons/menu-group.svg'" mode="aspectFill" />
+          <text class="group-name">{{ g.name }}</text>
         </view>
       </view>
-      <view v-else class="section-divider" />
+      <view class="section-divider" />
 
       <view class="section-head">
         <text class="section-count">联络人 ({{ filteredContacts.length }})</text>
@@ -184,7 +175,9 @@ function closeMenus() {
 
 <style scoped lang="scss">
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -266,7 +259,11 @@ function closeMenus() {
 
 .body {
   flex: 1;
-  height: 0;
+  min-height: 0;
+  /* #ifdef H5 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* #endif */
 }
 
 .menu-list {
@@ -301,31 +298,28 @@ function closeMenus() {
   flex-shrink: 0;
 }
 
-.featured-band {
+.group-band {
   background: #f3f4f7;
   padding: 16rpx 40rpx;
   margin-bottom: 16rpx;
 }
 
-.featured-card {
-  background: #fff;
-  border-radius: 8rpx;
-  overflow: hidden;
-}
-
-.featured-row {
+.group-card {
   display: flex;
   align-items: center;
   gap: 32rpx;
-  padding: 8rpx;
+  padding: 16rpx;
+  background: #fff;
+  border-radius: 8rpx;
   box-sizing: border-box;
+  margin-bottom: 16rpx;
 }
 
-.featured-row + .featured-row {
-  border-top: 2rpx solid #f3f4f7;
+.group-card:last-child {
+  margin-bottom: 0;
 }
 
-.featured-avatar {
+.group-avatar {
   width: 96rpx;
   height: 96rpx;
   border-radius: 50%;
@@ -333,7 +327,7 @@ function closeMenus() {
   flex-shrink: 0;
 }
 
-.featured-name {
+.group-name {
   flex: 1;
   font-size: 34rpx;
   color: #212121;

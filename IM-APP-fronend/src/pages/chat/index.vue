@@ -33,7 +33,12 @@ const filtered = computed(() => {
 // 会话变化平时由 SDK 事件推送，每次进入页面再兜底拉一次
 onShow(() => {
   chatStore.loadConversations().catch((e: Error) => {
-    uni.showToast({ title: e?.message || '会话加载失败', icon: 'none' })
+    const message = e?.message || '会话加载失败'
+    if (message.includes('自定义调试基座')) {
+      uni.showModal({ title: '无法连接聊天', content: message, showCancel: false })
+      return
+    }
+    uni.showToast({ title: message, icon: 'none' })
   })
 })
 
@@ -126,7 +131,10 @@ function closeMenus() {
 
 <style scoped lang="scss">
 .page {
-  min-height: 100vh;
+  /* iOS Safari：只有 min-height 时，flex 子项 height:0 会塌成 0，会话列表整页空白 */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -231,7 +239,11 @@ function closeMenus() {
 
 .list {
   flex: 1;
-  height: 0;
+  min-height: 0;
+  /* #ifdef H5 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* #endif */
 }
 
 .empty {

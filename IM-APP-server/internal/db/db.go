@@ -63,3 +63,28 @@ func RunMigrationsDir(ctx context.Context, pool *pgxpool.Pool, dir string) error
 	}
 	return nil
 }
+
+// RequireColumns prevents a new binary from serving traffic against an old
+// schema when its migration directory was not deployed with it.
+func RequireColumns(ctx context.Context, pool *pgxpool.Pool, required map[string][]string) error {
+	for table, columns := range required {
+		for _, column := range columns {
+			var exists bool
+			err := pool.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1
+					FROM information_schema.columns
+					WHERE table_schema = current_schema()
+					  AND table_name = $1
+					  AND column_name = $2
+				)`, table, column).Scan(&exists)
+			if err != nil {
+				return fmt.Errorf("check schema %s.%s: %w", table, column, err)
+			}
+			if !exists {
+				return fmt.Errorf("required database column %s.%s is missing", table, column)
+			}
+		}
+	}
+	return nil
+}

@@ -35,6 +35,7 @@ go run ./cmd/server
 
 - [docs/openapi.yaml](docs/openapi.yaml) — 可直接导入 Apifox、Postman、YApi 等工具的 OpenAPI 3.0 Swagger
 - [docs/api-contract.md](docs/api-contract.md) — REST 契约
+- [docs/私聊设置与用户举报接口部署说明.md](docs/私聊设置与用户举报接口部署说明.md) — 本次 SQL 核对、上线顺序和回退说明
 - [docs/architecture.md](docs/architecture.md) — 全栈架构
 
 ## 架构

@@ -18,6 +18,17 @@ export function formatRelativeTime(iso: string): string {
   return `${m}/${d}`
 }
 
+/** 收藏列表日期：今日 / 昨日 / 8月15日 */
+export function formatFavoriteDay(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const start = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diff = Math.round((start(new Date()) - start(date)) / 86400000)
+  if (diff === 0) return '今日'
+  if (diff === 1) return '昨日'
+  return `${date.getMonth() + 1}月${date.getDate()}日`
+}
+
 export function formatClock(iso: string): string {
   const date = new Date(iso)
   const hh = String(date.getHours()).padStart(2, '0')

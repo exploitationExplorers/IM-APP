@@ -9,6 +9,19 @@ npm install
 npm run dev:h5
 ```
 
+### App 端（HBuilderX 运行到模拟器 / 真机）
+
+H5 走 `@openim/client-sdk`，不需要原生插件。App 端 `openim-uniapp-polyfill` 会调用 `Tuoyun-OpenIMSDK`，**标准运行基座里没有这个插件**，聊天页会报 `Cannot read property 'initSDK' of undefined`。
+
+按下面做一次即可：
+
+1. 在 [DCloud 插件市场 · OpenIM SDK](https://ext.dcloud.net.cn/plugin?id=6577) 把插件绑定到本项目 appid（`__UNI__EC9D1AE`）。
+2. HBuilderX 打开 `src/manifest.json` → **App 原生插件**，勾选 `Tuoyun-OpenIMSDK`。
+3. 菜单 **运行 → 运行到手机或模拟器 → 制作自定义调试基座**，等云打包完成并安装到设备。
+4. 之后运行选 **自定义调试基座**，不要再用标准基座。
+
+没有自定义基座时，页面会提示「App 端缺少 OpenIM 原生插件」，会话列表会是空的。
+
 `.env`：
 
 ```

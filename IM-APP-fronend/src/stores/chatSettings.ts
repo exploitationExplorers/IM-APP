@@ -3,6 +3,16 @@ import { ref } from 'vue'
 
 type ChatSettingsState = {
   enterToSend: boolean
+  /** 全局消息免打扰：开启后所有会话（含私聊）都不响提示音 */
+  noDisturb: boolean
+  /** 应用未打开时的新消息通知开关（用于系统通知栏，与提示音解耦） */
+  message: boolean
+  /** 语音/视频邀请提醒 */
+  voice: boolean
+  /** 应用打开时是否播放提示音 */
+  sound: boolean
+  /** 应用打开时是否震动（仅 Android 有效） */
+  vibration: boolean
 }
 
 const STORAGE_KEY = 'im_chat_settings_v1'
@@ -18,6 +28,11 @@ function safeParse<T>(raw: string | null): T | null {
 
 export const useChatSettingsStore = defineStore('chatSettings', () => {
   const enterToSend = ref(true)
+  const noDisturb = ref(false)
+  const message = ref(true)
+  const voice = ref(true)
+  const sound = ref(true)
+  const vibration = ref(false)
 
   let hydrated = false
   function hydrate() {
@@ -25,13 +40,24 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     hydrated = true
     const raw = uni.getStorageSync(STORAGE_KEY)
     const parsed = safeParse<ChatSettingsState>(typeof raw === 'string' ? raw : null)
-    if (typeof parsed?.enterToSend === 'boolean') {
-      enterToSend.value = parsed.enterToSend
-    }
+    if (!parsed) return
+    if (typeof parsed.enterToSend === 'boolean') enterToSend.value = parsed.enterToSend
+    if (typeof parsed.noDisturb === 'boolean') noDisturb.value = parsed.noDisturb
+    if (typeof parsed.message === 'boolean') message.value = parsed.message
+    if (typeof parsed.voice === 'boolean') voice.value = parsed.voice
+    if (typeof parsed.sound === 'boolean') sound.value = parsed.sound
+    if (typeof parsed.vibration === 'boolean') vibration.value = parsed.vibration
   }
 
   function persist() {
-    const payload: ChatSettingsState = { enterToSend: enterToSend.value }
+    const payload: ChatSettingsState = {
+      enterToSend: enterToSend.value,
+      noDisturb: noDisturb.value,
+      message: message.value,
+      voice: voice.value,
+      sound: sound.value,
+      vibration: vibration.value,
+    }
     uni.setStorageSync(STORAGE_KEY, JSON.stringify(payload))
   }
 
@@ -40,12 +66,47 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     persist()
   }
 
+  function setNoDisturb(v: boolean) {
+    noDisturb.value = v
+    persist()
+  }
+
+  function setMessage(v: boolean) {
+    message.value = v
+    persist()
+  }
+
+  function setVoice(v: boolean) {
+    voice.value = v
+    persist()
+  }
+
+  function setSound(v: boolean) {
+    sound.value = v
+    persist()
+  }
+
+  function setVibration(v: boolean) {
+    vibration.value = v
+    persist()
+  }
+
   hydrate()
 
   return {
     enterToSend,
+    noDisturb,
+    message,
+    voice,
+    sound,
+    vibration,
     hydrate,
     persist,
     setEnterToSend,
+    setNoDisturb,
+    setMessage,
+    setVoice,
+    setSound,
+    setVibration,
   }
 })

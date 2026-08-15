@@ -5,12 +5,14 @@ import IMSDK, {
   LoginStatus,
   MessageStatus,
   MessageType,
+  OnlineState,
   Platform,
   SessionType,
 } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
+import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
-import { fetchIMToken, type IMTokenResult } from '@/api/im'
+import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
@@ -30,6 +32,26 @@ const LOGIN_REPEAT_CODE = 10102
 
 /** app 端走原生插件，web / 小程序端走 @openim/client-sdk，两者初始化方式不同 */
 const isAppPlatform = uni.getSystemInfoSync().uniPlatform === 'app'
+
+/** 标准运行基座不含第三方原生插件，App 聊天必须用包含 OpenIM 的自定义调试基座 */
+const APP_NATIVE_PLUGIN_MISSING =
+  'App 端缺少 OpenIM 原生插件，请用自定义调试基座运行'
+
+function hasAppNativeIMSDK(): boolean {
+  if (!isAppPlatform) return true
+  try {
+    const sdk = uni.requireNativePlugin('Tuoyun-OpenIMSDK') as { initSDK?: unknown } | null
+    return typeof sdk?.initSDK === 'function'
+  } catch {
+    return false
+  }
+}
+
+function assertAppNativeIMSDK(): void {
+  if (!hasAppNativeIMSDK()) {
+    throw new Error(APP_NATIVE_PLUGIN_MISSING)
+  }
+}
 
 /** 当前登录的 OpenIM 用户 ID，消息里的 sendID 就是它 */
 export const imUserId = ref('')
@@ -53,6 +75,24 @@ let tokenExpireAt = 0
 let loginPromise: Promise<string> | null = null
 
 /**
+ * SDK 是否已真正连上 OpenIM 服务端。
+ * 光本地缓存(imUserId/tokenExpireAt)有效还不够——服务端掉线时 SDK 会断连，
+ * 此时直接调会话接口会被 SDK 拒成 errCode=10004(Resource load not complete)。
+ * 只有收到 OnConnectSuccess 才认为可用。
+ */
+let connected = false
+
+/**
+ * 清空本地登录缓存，下次 ensureIMLogin 会强制重新登录。
+ * 触发场景：被其它端踢下线、token 在服务端过期、或需要重新握手时。
+ */
+function resetLoginCache() {
+  imUserId.value = ''
+  tokenExpireAt = 0
+  connected = false
+}
+
+/**
  * 聊天是否交给 OpenIM SDK。旧的自研 WS 通道已下线，
  * 只有显式设成 false 才会关闭聊天能力（用于排查问题）。
  */
@@ -66,11 +106,75 @@ function currentPlatformId(): number {
 }
 
 /**
+ * App 端 OpenIM 本地库目录。
+ * uni.env.USER_DATA_PATH 是小程序字段，App 上为空，SDK 会把库建到 `/OpenIM_v3_xxx.db` 然后 10006。
+ */
+function getAppSdkDataDir(): Promise<string> {
+  const io = plus?.io
+  if (!io) {
+    return Promise.reject(new Error('当前 App 环境无法获取本地存储目录'))
+  }
+
+  const fromUrl = (): string => {
+    const raw = io.convertLocalFileSystemURL('_doc/openim/') || ''
+    return raw.replace(/^file:\/\//, '')
+  }
+
+  return new Promise((resolve, reject) => {
+    const type = io.PRIVATE_DOC ?? 1
+    io.requestFileSystem(
+      type,
+      (fs) => {
+        const root = fs.root
+        if (!root) {
+          const fallback = fromUrl()
+          if (fallback && fallback !== '/') {
+            resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
+            return
+          }
+          reject(new Error('OpenIM 数据目录无效'))
+          return
+        }
+        root.getDirectory(
+          'openim',
+          { create: true },
+          (entry) => {
+            const path = (entry.fullPath || fromUrl()).replace(/^file:\/\//, '')
+            if (!path || path === '/') {
+              reject(new Error('OpenIM 数据目录无效'))
+              return
+            }
+            resolve(path.endsWith('/') ? path : `${path}/`)
+          },
+          (err) => {
+            const fallback = fromUrl()
+            if (fallback && fallback !== '/') {
+              resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
+              return
+            }
+            reject(err)
+          },
+        )
+      },
+      (err) => {
+        const fallback = fromUrl()
+        if (fallback && fallback !== '/') {
+          resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
+          return
+        }
+        reject(err)
+      },
+    )
+  })
+}
+
+/**
  * 统一 asyncApi 的返回形态：多数方法返回 { errCode, data } 信封，
  * createXxxMessage 这类同步方法直接返回结果本身。
  * 失败时 polyfill reject 的是 { errCode, errMsg } 裸对象，转成 Error 才能带到 UI。
  */
 async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
+  assertAppNativeIMSDK()
   let raw: unknown
   try {
     raw = await IMSDK.asyncApi(method, IMSDK.uuid(), ...args)
@@ -119,6 +223,7 @@ async function getSdkLoginUserId(): Promise<string> {
 function rememberLogin(imToken: IMTokenResult): string {
   imUserId.value = imToken.userId
   tokenExpireAt = Date.now() + Math.max(0, imToken.expireSec - 300) * 1000
+  connected = true // 登录 + 同步已成功，视为已连上服务端
   return imUserId.value
 }
 
@@ -126,7 +231,7 @@ function rememberLogin(imToken: IMTokenResult): string {
  * 登录成功只代表连上了，SDK 还要异步从服务端拉会话与消息。
  * 这期间查历史会拿到空列表，所以要等同步结束；超时兜底，避免同步事件丢失时卡死。
  */
-function waitForSync(timeoutMs = 8000): Promise<void> {
+export function waitForSync(timeoutMs = 8000): Promise<void> {
   return new Promise((resolve) => {
     let settled = false
     const finish = () => {
@@ -147,11 +252,12 @@ async function doLogin(): Promise<string> {
   const imToken: IMTokenResult = await fetchIMToken(currentPlatformId())
 
   if (isAppPlatform) {
+    const dataDir = await getAppSdkDataDir()
     await imCall(IMMethods.InitSDK, {
       platformID: imToken.platform,
       apiAddr: imToken.apiAddr,
       wsAddr: imToken.wsAddr,
-      dataDir: (uni as unknown as { env?: { USER_DATA_PATH?: string } }).env?.USER_DATA_PATH,
+      dataDir,
       logLevel: 4,
       isLogStandardOutput: true,
     })
@@ -187,7 +293,11 @@ async function doLogin(): Promise<string> {
 /** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
 export async function ensureIMLogin(): Promise<string> {
   if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
-  if (imUserId.value && Date.now() < tokenExpireAt) return imUserId.value
+  // 三者同时满足才直接复用缓存：本地有用户、token 未过期、且 SDK 当前已连上。
+  // 只信前两个会在服务端掉线后误以为仍登录，从而拿到 errCode=10004。
+  if (imUserId.value && Date.now() < tokenExpireAt && connected) {
+    return imUserId.value
+  }
   if (!loginPromise) {
     loginPromise = doLogin().finally(() => {
       loginPromise = null
@@ -196,9 +306,43 @@ export async function ensureIMLogin(): Promise<string> {
   return loginPromise
 }
 
+/**
+ * 连接监听是否已注册，避免 initOpenIM 被多次调用时重复订阅同一事件。
+ */
+let connectionWatchersReady = false
+
+/**
+ * 订阅 SDK 连接生命周期事件（只注册一次）。
+ * 这是修复「errCode=10004 资源未加载」的关键：OpenIM 服务端不稳定会断连，
+ * 前端必须感知断连 / 被踢 / token 过期，据此失效本地缓存、等待重连，
+ * 否则缓存还自认已登录，调会话接口就被 SDK 拒绝。
+ */
+function setupConnectionWatchers() {
+  if (connectionWatchersReady) return
+  connectionWatchersReady = true
+
+  // 连接失败：标记未连上。本地缓存保留，等 SDK 自动重连或下次调用时重登。
+  onIMEvent(IMEvents.OnConnectFailed, () => {
+    connected = false
+  })
+  // 连接成功：标记已可用，缓存复用路径恢复。
+  onIMEvent(IMEvents.OnConnectSuccess, () => {
+    connected = true
+  })
+  // 被其它端踢下线：SDK 会自动 logout，本地缓存作废，下次必须重新登录。
+  onIMEvent(IMEvents.OnKickedOffline, () => {
+    resetLoginCache()
+  })
+  // token 被服务端判过期：旧 token 作废，必须重新向业务后端换 token 再登录。
+  onIMEvent(IMEvents.OnUserTokenExpired, () => {
+    resetLoginCache()
+  })
+}
+
 /** 业务登录成功后调用，失败不阻断主流程 */
 export async function initOpenIM(): Promise<void> {
   if (!shouldUseOpenIM()) return
+  setupConnectionWatchers() // 注册连接生命周期监听（只注册一次）
   await ensureIMLogin()
 }
 
@@ -209,6 +353,7 @@ export async function logoutOpenIM(): Promise<void> {
   } finally {
     imUserId.value = ''
     tokenExpireAt = 0
+    connected = false
   }
 }
 
@@ -248,12 +393,47 @@ export async function getConversationList(offset = 0, count = 200): Promise<Conv
   return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
 }
 
-/** 按业务目标取会话，OpenIM 会在不存在时新建，无需先建群或建会话 */
+/**
+ * 按业务目标取会话，OpenIM 会在不存在时新建，无需先建群或建会话。
+ *
+ * 注意：SDK 登录后还会异步从服务端拉取会话/消息资源，这段窗口期内调用
+ * GetOneConversation 会瞬时返回 errCode=10004(ResourceLoadNotComplete)。
+ *
+ * 修复策略：
+ * 1. 先指数退避重试 4 次（300→600→1200→2400ms），自动跨过资源未就绪的窗口。
+ * 2. 若仍 10004，多半是内存登录缓存认为已连上但 SDK 实际已掉线/资源从未同步，
+ *    此时清空本地缓存并重新登录，再最后试一次。
+ * 3. 非 10004 的错误（如目标不可聊）立即上抛。
+ */
 export async function getOneConversation(
   sourceID: string,
   sessionType: number,
+  maxRetry = 4,
 ): Promise<ConversationItem> {
-  return imCall<ConversationItem>(IMMethods.GetOneConversation, { sourceID, sessionType })
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= maxRetry; attempt++) {
+    try {
+      return await imCall<ConversationItem>(IMMethods.GetOneConversation, { sourceID, sessionType })
+    } catch (e) {
+      lastErr = e
+      const errMsg = (e as Error)?.message || ''
+      const isResourceNotReady = errMsg.includes('10004')
+      // 其它错误直接抛
+      if (!isResourceNotReady) throw e
+      // 资源未就绪：先等 SDK 自动恢复
+      if (attempt < maxRetry) {
+        await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)))
+        continue
+      }
+      // 重试耗尽：清缓存、重新登录并等待资源同步完成后再最后试一次。
+      // 否则 doLogin 的缓存复用分支会跳过同步等待，仍可能立即 10004。
+      resetLoginCache()
+      await ensureIMLogin()
+      await waitForSync(5000)
+      return await imCall<ConversationItem>(IMMethods.GetOneConversation, { sourceID, sessionType })
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('getOneConversation 重试/重登后仍失败')
 }
 
 export async function getHistoryMessages(
@@ -279,6 +459,47 @@ export async function markConversationRead(conversationID: string): Promise<void
 
 export async function revokeMessage(conversationID: string, clientMsgID: string): Promise<void> {
   await imCall(IMMethods.RevokeMessage, { conversationID, clientMsgID })
+}
+
+export async function deleteLocalMessage(conversationID: string, clientMsgID: string): Promise<void> {
+  try {
+    await imCall(IMMethods.DeleteMessage, { conversationID, clientMsgID })
+  } catch {
+    await imCall(IMMethods.DeleteMessageFromLocalStorage, { conversationID, clientMsgID })
+  }
+}
+
+export async function sendQuoteMessage(
+  target: IMTarget,
+  text: string,
+  quote: MessageItem,
+): Promise<MessageItem> {
+  const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
+    text,
+    message: quote,
+  })
+  return sendCreatedMessage(target, message)
+}
+
+export async function sendForwardMessage(target: IMTarget, source: MessageItem): Promise<MessageItem> {
+  const message = await imCall<MessageItem>(IMMethods.CreateForwardMessage, {
+    message: source,
+  })
+  return sendCreatedMessage(target, message)
+}
+
+export async function sendAtTextMessage(
+  target: IMTarget,
+  text: string,
+  atUserIDList: string[],
+  atUsersInfo: Array<{ atUserID: string; groupNickname: string }>,
+): Promise<MessageItem> {
+  const message = await imCall<MessageItem>(IMMethods.CreateTextAtMessage, {
+    text,
+    atUserIDList,
+    atUsersInfo,
+  })
+  return sendCreatedMessage(target, message)
 }
 
 async function sendCreatedMessage(target: IMTarget, message: MessageItem): Promise<MessageItem> {
@@ -426,6 +647,7 @@ export function toConversation(item: ConversationItem): Conversation {
     lastMessageAt: toISOTime(item.latestMsgSendTime),
     unreadCount: item.unreadCount || 0,
     pinned: item.isPinned,
+    recvMsgOpt: item.recvMsgOpt,
     peerUserId: item.userID || undefined,
     groupId: item.groupID || undefined,
   }
@@ -437,9 +659,11 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     conversationId: conversationIdOf(item),
     senderId: item.sendID,
     senderAvatar: item.senderFaceUrl || undefined,
+    senderNickname: item.senderNickname || undefined,
     type: toAppMessageType(item.contentType),
     content: extractContent(item),
     createdAt: toISOTime(item.sendTime),
+    quote: quotePreviewOf(item),
     status: item.status === MessageStatus.Failed ? 'failed' : 'sent',
   }
 }
@@ -474,6 +698,16 @@ function jsonContentField(raw: string, key: string): string {
     /* content 不是 JSON 时按纯文本用 */
   }
   return raw
+}
+
+function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {
+  const quoted = item.quoteElem?.quoteMessage
+  if (!quoted) return undefined
+  const content = extractContent(quoted).trim()
+  return {
+    senderNickname: quoted.senderNickname || '',
+    content: content || '[消息]',
+  }
 }
 
 function extractContent(item: MessageItem): string {
@@ -526,3 +760,71 @@ function toISOTime(timestamp: number): string {
   if (!timestamp) return new Date().toISOString()
   return new Date(timestamp).toISOString()
 }
+
+// ---------------------------------------------------------------------------
+// 会话级设置（置顶 / 免打扰）：直接走 OpenIM SDK，随账号云同步，多端一致。
+// 注意：这些不经由业务后端 REST 接口，避免与 OpenIM 服务端的会话状态冲突。
+// ---------------------------------------------------------------------------
+
+/**
+ * 置顶 / 取消置顶某个会话。
+ * 按 OpenIM 官方文档，uni-app 统一走 asyncApi('setConversation', ...)。
+ */
+export async function setConversationPin(conversationID: string, isPinned: boolean): Promise<void> {
+  await imCall('setConversation' as IMMethods, { conversationID, isPinned })
+}
+
+/**
+ * 设置会话的消息接收选项。
+ * opt 取值见 MessageReceiveOptType：0=正常提醒，1=不接收，2=接收但不提醒（免打扰）。
+ * 按 OpenIM 官方文档，uni-app 统一走 asyncApi('setConversation', ...)。
+ */
+export async function setConversationRecvOpt(conversationID: string, opt: number): Promise<void> {
+  await imCall('setConversation' as IMMethods, { conversationID, recvMsgOpt: opt })
+}
+
+/**
+ * 群聊的 OpenIM 会话 ID 是 `sg_` + 群 ID（超级群 groupType=2，本项目群均为该类型）。
+ * 用业务群 ID 换取 OpenIM 群 ID 后，可确定性拼出会话 ID，无需先建会话。
+ */
+export async function resolveGroupConversationID(businessGroupId: string): Promise<string> {
+  const target = await resolveIMGroup(businessGroupId)
+  return `sg_${target.imGroupId}`
+}
+
+// ---------------------------------------------------------------------------
+// 用户在线状态：订阅 + 事件更新，用于聊天列表私聊头像的小绿点。
+// App 原生插件方法名是小写，Web/小程序端 client-sdk 方法名是大写驼峰，需要做平台适配。
+// ---------------------------------------------------------------------------
+
+/**
+ * 订阅指定用户的在线状态。成功后会通过 OnUserStatusChanged 事件推送变更，
+ * 也可调用 getSubscribeUsersStatus 查询当前状态。
+ *
+ * 注意：polyfill 的 asyncApi 在 Web 端直接调用 client-sdk 的方法对象，方法名均为小写，
+ * 因此这里统一使用 polyfill 枚举里的方法名（小写）。
+ */
+export async function subscribeUsersStatus(userIDs: string[]): Promise<UserOnlineState[]> {
+  if (!userIDs.length) return []
+  const res = await imCall<UserOnlineState[]>(IMMethods.SubscribeUsersStatus, userIDs)
+  return res || []
+}
+
+/** 取消订阅指定用户的在线状态 */
+export async function unsubscribeUsersStatus(userIDs: string[]): Promise<void> {
+  if (!userIDs.length) return
+  await imCall(IMMethods.UnsubscribeUsersStatus, userIDs)
+}
+
+/** 查询所有已订阅用户的当前在线状态 */
+export async function getSubscribeUsersStatus(): Promise<UserOnlineState[]> {
+  const res = await imCall<UserOnlineState[]>('getSubscribeUsersStatus' as IMMethods)
+  return res || []
+}
+
+/** 监听用户在线状态变更 */
+export function onUserStatusChanged(handler: (state: UserOnlineState) => void): () => void {
+  return onIMEvent<UserOnlineState>(IMEvents.OnUserStatusChanged, handler)
+}
+
+export { OnlineState }

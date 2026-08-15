@@ -1,0 +1,308 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "IM 后端接口（OpenIM 代理 + 消息推送）",
+    "version": "1.0.0",
+    "description": "前端对接用 IM 接口集合，可直接导入 Apifox 调试。\n\n鉴权：所有接口需在 Header 带 `Authorization: Bearer <JWT>`。\n\n约定：\n- `peerType` ∈ `c2c`(单聊) / `group`(群聊)\n- `peerId` 为业务好友 ID 或业务群 ID（后端负责解析为 OpenIM conversationId，前端无需持有 si_/sg_）\n- `recvMsgOpt` ∈ 0 正常接收 / 1 免打扰(不通知) / 2 仅在线接收"
+  },
+  "servers": [
+    { "url": "http://localhost:8080", "description": "本地开发" },
+    { "url": "https://your-api-domain", "description": "生产环境（替换为你自己的域名）" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "ConversationSettings": {
+        "type": "object",
+        "description": "会话设置（OpenIM 全量对象，GET 返回）。",
+        "properties": {
+          "conversationID": { "type": "string", "example": "si_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6_9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8" },
+          "conversationType": { "type": "integer", "description": "1 单聊 / 2 群聊", "example": 1 },
+          "userID": { "type": "string", "description": "单聊对端 OpenIM ID" },
+          "groupID": { "type": "string", "description": "群聊 OpenIM ID" },
+          "showName": { "type": "string" },
+          "faceURL": { "type": "string" },
+          "recvMsgOpt": { "type": "integer", "description": "0 正常 / 1 免打扰 / 2 仅在线", "enum": [0, 1, 2], "example": 0 },
+          "unreadCount": { "type": "integer", "example": 0 },
+          "groupAtType": { "type": "integer", "description": "群 @ 强提醒档位", "example": 0 },
+          "isPinned": { "type": "boolean", "description": "是否置顶", "example": false },
+          "isPrivateChat": { "type": "boolean", "description": "是否阅后即焚", "example": false },
+          "isNotInGroup": { "type": "boolean" },
+          "burnDuration": { "type": "integer", "description": "阅后即焚时长（秒）", "example": 0 },
+          "hasReadSeq": { "type": "integer" },
+          "msgDestructTime": { "type": "integer", "description": "消息定时销毁时长（秒）", "example": 0 },
+          "isMsgDestruct": { "type": "boolean", "description": "是否开启消息定时销毁", "example": false },
+          "ex": { "type": "string", "description": "扩展字段（可存备注名）" },
+          "draftText": { "type": "string", "description": "会话草稿" },
+          "attachedInfo": { "type": "string" }
+        }
+      },
+      "ConversationPatch": {
+        "type": "object",
+        "description": "部分更新请求体。所有字段可选，传哪个覆盖哪个，不传保持原值（指针语义）。",
+        "properties": {
+          "recvMsgOpt": { "type": "integer", "description": "0 正常 / 1 免打扰 / 2 仅在线", "enum": [0, 1, 2] },
+          "isPinned": { "type": "boolean", "description": "置顶" },
+          "isPrivateChat": { "type": "boolean", "description": "阅后即焚开关" },
+          "burnDuration": { "type": "integer", "description": "阅后即焚时长（秒）" },
+          "isMsgDestruct": { "type": "boolean", "description": "消息定时销毁开关" },
+          "msgDestructTime": { "type": "integer", "description": "消息定时销毁时长（秒）" },
+          "groupAtType": { "type": "integer", "description": "群 @ 强提醒档位" },
+          "ex": { "type": "string", "description": "备注名等扩展" },
+          "draftText": { "type": "string", "description": "会话草稿" }
+        }
+      },
+      "PushTokenRequest": {
+        "type": "object",
+        "required": ["platform", "deviceToken"],
+        "properties": {
+          "platform": { "type": "string", "description": "ios / android / web / harmony", "example": "ios" },
+          "channel": { "type": "string", "description": "apns / fcm / jpush / harmony，web 可空", "example": "apns" },
+          "deviceToken": { "type": "string", "description": "设备推送令牌（iOS deviceToken / FCM token 等）", "example": "a1b2c3d4e5f6..." },
+          "enabled": { "type": "boolean", "description": "是否接收推送，缺省 true", "example": true }
+        }
+      },
+      "OkResponse": {
+        "type": "object",
+        "properties": { "ok": { "type": "boolean", "example": true } }
+      },
+      "GlobalRecvOptRequest": {
+        "type": "object",
+        "required": ["recvMsgOpt"],
+        "properties": {
+          "recvMsgOpt": { "type": "integer", "description": "0 正常 / 1 免打扰 / 2 仅在线", "enum": [0, 1, 2], "example": 1 }
+        }
+      },
+      "TokenRequest": {
+        "type": "object",
+        "properties": {
+          "platformId": { "type": "integer", "description": "OpenIM 平台 ID（1-11），缺省默认 5", "example": 5 }
+        }
+      },
+      "TokenResponse": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string", "example": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6" },
+          "token": { "type": "string", "example": "eyJhbGciOiJIUzI1NiIs..." },
+          "platform": { "type": "integer", "example": 5 },
+          "expireSec": { "type": "integer", "example": 86400 },
+          "apiAddr": { "type": "string", "example": "http://openim-api:10002" },
+          "wsAddr": { "type": "string", "example": "ws://openim-api:10001" }
+        }
+      },
+      "IMPeer": {
+        "type": "object",
+        "description": "业务好友解析结果（可能含更多字段）。",
+        "properties": {
+          "imUserId": { "type": "string", "description": "好友的 OpenIM 用户 ID" },
+          "canChat": { "type": "boolean", "description": "是否可聊天（非好友/被拉黑则为 false）" },
+          "denyReason": { "type": "string", "description": "不可聊天原因" }
+        }
+      },
+      "IMGroupTarget": {
+        "type": "object",
+        "description": "业务群解析结果（可能含更多字段）。",
+        "properties": {
+          "imGroupId": { "type": "string", "description": "群的 OpenIM ID" },
+          "canChat": { "type": "boolean", "description": "是否可聊天（群禁言/未加入则为 false）" },
+          "denyReason": { "type": "string", "description": "不可聊天原因" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "example": 400 },
+          "message": { "type": "string", "example": "recvMsgOpt 非法，只能为 0/1/2" }
+        }
+      }
+    }
+  },
+  "security": [ { "bearerAuth": [] } ],
+  "paths": {
+    "/api/v1/im/token": {
+      "post": {
+        "summary": "获取 OpenIM 登录 Token",
+        "operationId": "getIMToken",
+        "tags": ["IM"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TokenRequest" },
+              "example": { "platformId": 5 }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TokenResponse" },
+                "example": { "userId": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", "token": "eyJhbGciOiJIUzI1NiIs...", "platform": 5, "expireSec": 86400, "apiAddr": "http://openim-api:10002", "wsAddr": "ws://openim-api:10001" }
+              }
+            }
+          },
+          "401": { "description": "未登录", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/im/peers/{businessUserId}": {
+      "get": {
+        "summary": "解析业务好友为 OpenIM 用户（含可聊天校验）",
+        "operationId": "resolvePeer",
+        "tags": ["IM"],
+        "parameters": [
+          { "name": "businessUserId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "业务好友 ID", "example": "b3c4d5e6-f7a8-4901-b234-5678c9d0e1f2" }
+        ],
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IMPeer" } } } },
+          "404": { "description": "聊天用户不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/im/groups/{businessGroupId}": {
+      "get": {
+        "summary": "解析业务群为 OpenIM 群（含可聊天校验）",
+        "operationId": "resolveGroup",
+        "tags": ["IM"],
+        "parameters": [
+          { "name": "businessGroupId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "业务群 ID", "example": "c4d5e6f7-a8b9-4012-c345-6789d0e1f2a3" }
+        ],
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IMGroupTarget" } } } },
+          "404": { "description": "群聊不存在或无权访问", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/im/conversations/{peerType}/{peerId}": {
+      "get": {
+        "summary": "获取会话设置（免打扰/置顶/阅后即焚等）",
+        "operationId": "getConversation",
+        "tags": ["IM", "会话设置"],
+        "parameters": [
+          { "name": "peerType", "in": "path", "required": true, "schema": { "type": "string", "enum": ["c2c", "group"] }, "description": "c2c 单聊 / group 群聊", "example": "c2c" },
+          { "name": "peerId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "业务好友 ID 或业务群 ID", "example": "b3c4d5e6-f7a8-4901-b234-5678c9d0e1f2" }
+        ],
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConversationSettings" } } } },
+          "400": { "description": "peerType 非法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "description": "与该好友/群不能聊天", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "404": { "description": "会话不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      },
+      "patch": {
+        "summary": "部分更新会话设置",
+        "operationId": "updateConversation",
+        "tags": ["IM", "会话设置"],
+        "parameters": [
+          { "name": "peerType", "in": "path", "required": true, "schema": { "type": "string", "enum": ["c2c", "group"] }, "example": "c2c" },
+          { "name": "peerId", "in": "path", "required": true, "schema": { "type": "string" }, "example": "b3c4d5e6-f7a8-4901-b234-5678c9d0e1f2" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ConversationPatch" },
+              "example": { "recvMsgOpt": 1, "isPinned": true }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "成功（返回更新后设置）", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConversationSettings" } } } },
+          "400": { "description": "未传任何字段 / recvMsgOpt 非法 / peerType 非法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "description": "与该好友/群不能聊天", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/im/conversations/{peerType}/{peerId}/read": {
+      "post": {
+        "summary": "标记会话已读（清空未读计数）",
+        "operationId": "markConversationRead",
+        "tags": ["IM", "会话设置"],
+        "parameters": [
+          { "name": "peerType", "in": "path", "required": true, "schema": { "type": "string", "enum": ["c2c", "group"] }, "example": "c2c" },
+          { "name": "peerId", "in": "path", "required": true, "schema": { "type": "string" }, "example": "b3c4d5e6-f7a8-4901-b234-5678c9d0e1f2" }
+        ],
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OkResponse" } } } },
+          "403": { "description": "与该好友/群不能聊天", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/im/me/global-msg-recv-opt": {
+      "put": {
+        "summary": "设置用户级全局免打扰（对所有会话生效）",
+        "operationId": "setGlobalMsgRecvOpt",
+        "tags": ["IM", "会话设置"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/GlobalRecvOptRequest" },
+              "example": { "recvMsgOpt": 1 }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "recvMsgOpt": { "type": "integer", "example": 1 } } },
+                "example": { "recvMsgOpt": 1 }
+              }
+            }
+          },
+          "400": { "description": "recvMsgOpt 非法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/im/me/push-token": {
+      "post": {
+        "summary": "注册/更新设备推送凭证（来消息提示）",
+        "operationId": "registerPushToken",
+        "tags": ["IM", "消息推送"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PushTokenRequest" },
+              "example": { "platform": "ios", "channel": "apns", "deviceToken": "a1b2c3d4e5f6...", "enabled": true }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OkResponse" } } } },
+          "400": { "description": "platform / deviceToken 必填", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "503": { "description": "OpenIM/Redis 不可用，推送未生效", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      },
+      "delete": {
+        "summary": "注销设备推送凭证（退出登录/关闭推送时调用）",
+        "operationId": "unregisterPushToken",
+        "tags": ["IM", "消息推送"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "required": ["deviceToken"], "properties": { "deviceToken": { "type": "string" } } },
+              "example": { "deviceToken": "a1b2c3d4e5f6..." }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OkResponse" } } } },
+          "400": { "description": "deviceToken 必填", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "503": { "description": "OpenIM/Redis 不可用", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    }
+  }
+}
