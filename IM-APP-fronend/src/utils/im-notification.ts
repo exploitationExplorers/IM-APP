@@ -1,4 +1,5 @@
 import type { MessageItem } from 'openim-uniapp-polyfill'
+import type { ChatMessage } from '@/types'
 
 /** OpenIM 通知类消息从 1000 起，普通聊天气泡在 100–199 */
 export function isIMNotification(contentType: number): boolean {
@@ -35,7 +36,7 @@ interface NoticeDetail {
   quitUser?: NoticeUser
   entrantUser?: NoticeUser
   mutedUser?: NoticeUser
-  group?: { groupName?: string }
+  group?: { groupID?: string; groupName?: string }
   kickedUserList?: NoticeUser[]
   invitedUserList?: NoticeUser[]
   memberList?: NoticeUser[]
@@ -62,6 +63,39 @@ function nameOf(user?: NoticeUser, fallback = ''): string {
 function namesOf(list?: NoticeUser[]): string {
   if (!list?.length) return ''
   return list.map((u) => nameOf(u, '成员')).join('、')
+}
+
+/**
+ * OpenIM 的 set_group_info_ex 重试可能生成多条不同消息 ID、但语义完全相同的
+ * 群改名通知。签名包含群、操作者和目标群名，因此真正改成不同名称时不会误合并。
+ */
+export function imNotificationEventKey(item: MessageItem): string {
+  if (item.contentType !== GroupNotice.NameSet) return ''
+  const detail = parseDetail(item)
+  const groupID = detail.group?.groupID || item.groupID || ''
+  const operatorID = detail.opUser?.userID || item.sendID || ''
+  const groupName = detail.group?.groupName?.trim() || ''
+  return `group-name:${groupID}:${operatorID}:${groupName}`
+}
+
+/**
+ * 只折叠连续、签名相同的群改名通知。普通聊天消息会切断折叠；A→B→A 这类
+ * 真实改名序列的签名也不同，不会被吞掉。
+ */
+export function collapseRepeatedGroupNameNotices(messages: ChatMessage[]): ChatMessage[] {
+  let previousKey = ''
+  return messages.filter((message) => {
+    const key = message.systemEventKey?.startsWith('group-name:')
+      ? message.systemEventKey
+      : ''
+    if (!key) {
+      previousKey = ''
+      return true
+    }
+    if (key === previousKey) return false
+    previousKey = key
+    return true
+  })
 }
 
 /**

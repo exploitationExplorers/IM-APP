@@ -105,6 +105,16 @@ type Group struct {
 	AllowMemberAddFriend bool
 }
 
+// GroupUpdate is intentionally sparse. OpenIM emits a persisted group notice
+// for every field present in set_group_info_ex, even when the supplied value is
+// unchanged. Callers must therefore only set fields changed by the user.
+type GroupUpdate struct {
+	GroupName            *string
+	Notification         *string
+	FaceURL              *string
+	AllowMemberAddFriend *bool
+}
+
 type SendMessageResult struct {
 	ServerMsgID string `json:"serverMsgID"`
 	ClientMsgID string `json:"clientMsgID"`
@@ -352,7 +362,9 @@ func (c *Client) EnsureGroup(ctx context.Context, group Group) error {
 		return err
 	}
 	if registered {
-		return c.UpdateGroup(ctx, group)
+		// EnsureGroup is used by creation/reconciliation jobs. Updating an
+		// existing group here would make OpenIM announce a fake profile change.
+		return nil
 	}
 	applyMemberFriend := 1
 	if group.AllowMemberAddFriend {
@@ -371,16 +383,28 @@ func (c *Client) EnsureGroup(ctx context.Context, group Group) error {
 	return ignoreAlreadyDesired(err)
 }
 
-func (c *Client) UpdateGroup(ctx context.Context, group Group) error {
-	applyMemberFriend := 1
-	if group.AllowMemberAddFriend {
-		applyMemberFriend = 0
+func (c *Client) UpdateGroup(ctx context.Context, groupID string, update GroupUpdate) error {
+	request := map[string]any{"groupID": groupID}
+	if update.GroupName != nil {
+		request["groupName"] = *update.GroupName
 	}
-	return c.postWithAdmin(ctx, "/group/set_group_info_ex", map[string]any{
-		"groupID": group.GroupID, "groupName": group.GroupName,
-		"notification": group.Notification, "faceURL": group.FaceURL,
-		"applyMemberFriend": applyMemberFriend,
-	}, nil)
+	if update.Notification != nil {
+		request["notification"] = *update.Notification
+	}
+	if update.FaceURL != nil {
+		request["faceURL"] = *update.FaceURL
+	}
+	if update.AllowMemberAddFriend != nil {
+		applyMemberFriend := 1
+		if *update.AllowMemberAddFriend {
+			applyMemberFriend = 0
+		}
+		request["applyMemberFriend"] = applyMemberFriend
+	}
+	if len(request) == 1 {
+		return nil
+	}
+	return c.postWithAdmin(ctx, "/group/set_group_info_ex", request, nil)
 }
 
 func (c *Client) InviteGroupMember(ctx context.Context, groupID string, userIDs []string) error {

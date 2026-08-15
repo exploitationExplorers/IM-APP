@@ -334,15 +334,13 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
 
-  /api/v1/groups/{id}/reports:
+  /api/v1/groups/reports:
     post:
       tags: [Group Sync]
       summary: 举报群聊
       operationId: reportGroup
       x-change-type: new
       security: [{bearerAuth: []}]
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
       requestBody:
         required: true
         content:
@@ -1792,13 +1790,21 @@ components:
 
     CreateGroupReportRequest:
       type: object
-      required: [reason]
+      required: [groupId, reason]
+      additionalProperties: false
       properties:
+        groupId: {type: string, pattern: '^[0-9]+$', description: 被举报群聊的业务群 ID。, example: '100001'}
         reason:
           type: string
           enum: [spam, fraud, pornography, violence, harassment, other]
           description: 举报原因；spam=垃圾广告，fraud=诈骗，pornography=色情，violence=暴力，harassment=骚扰，other=其他。
         description: {type: string, maxLength: 1000, description: 举报补充说明，最多 1000 个字符。}
+        imageFileIds:
+          type: array
+          maxItems: 9
+          uniqueItems: true
+          description: 通过文件上传接口上传并完成的图片文件 ID；仅接受当前用户 purpose=image、image/*、不超过 10 MiB 的图片。
+          items: {$ref: '#/components/schemas/UUID'}
 
     UpdateGroupMemberRoleRequest:
       type: object
@@ -1872,10 +1878,14 @@ components:
 
     GroupReportResult:
       type: object
-      required: [id, status, createdAt]
+      required: [id, status, imagePaths, createdAt]
       properties:
         id: {type: string, format: uuid, description: 群举报记录 ID。}
         status: {type: string, description: 举报处理状态，新提交的举报通常为 pending。, example: pending}
+        imagePaths:
+          type: array
+          description: 举报图片的公开可访问 URL；数组元素可直接点击打开，不返回 objectKey 等内部字符串。
+          items: {type: string, format: uri, example: 'https://minio.example.com/im-uploads/uploads/user-id/image-id.jpg'}
         createdAt: {type: string, format: date-time, description: 举报提交时间（RFC 3339）。}
 
     GroupReportEnvelope:

@@ -593,11 +593,15 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 设置当前用户对指定群成员的备注，最多 64 个字。**Body** `{ "remark": "产品负责人" }`；传空字符串清除。群成员列表通过 `memberRemark` 返回。
 
-### POST `/api/v1/groups/:id/reports`
+### POST `/api/v1/groups/reports`
 
 举报当前群聊，仅群成员可提交；同一用户对同一群的待处理举报幂等。
 
-**Body** `{ "reason": "spam|fraud|pornography|violence|harassment|other", "description": "补充说明" }`
+图片先通过 `POST /api/v1/files/uploads`（`purpose=image`）上传，并调用 `POST /api/v1/files/uploads/complete` 完成上传。举报最多关联 9 张当前用户的已完成图片，每张不超过 10 MiB。
+
+**Body** `{ "groupId": "100001", "reason": "spam|fraud|pornography|violence|harassment|other", "description": "补充说明", "imageFileIds": ["图片文件 UUID"] }`
+
+响应的 `imagePaths` 仅包含可直接点击打开的 MinIO HTTP(S) URL，不返回 objectKey 等内部字符串。
 
 ### POST `/api/v1/groups/:id/leave`
 

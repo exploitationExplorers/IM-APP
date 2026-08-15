@@ -59,8 +59,7 @@ func NewMinIO(cfg config.MinIOConfig) (*MinIO, error) {
 	if cfg.PublicRead {
 		policy := fmt.Sprintf(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}`, cfg.Bucket)
 		if err := client.SetBucketPolicy(ctx, cfg.Bucket, policy); err != nil {
-			// 设置失败不致命，记录即可
-			_ = err
+			return nil, fmt.Errorf("minio set public-read bucket policy: %w", err)
 		}
 	}
 	return m, nil
@@ -100,14 +99,15 @@ func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, e
 	}
 
 	var fileURL string
+	escapedObjectKey := escapeObjectKey(objectKey)
 	if m.PublicURL != "" {
-		fileURL = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(m.PublicURL, "/"), m.Bucket, url.PathEscape(objectKey))
+		fileURL = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(m.PublicURL, "/"), m.Bucket, escapedObjectKey)
 	} else {
 		scheme := "http"
 		if m.UseSSL {
 			scheme = "https"
 		}
-		fileURL = fmt.Sprintf("%s://%s/%s/%s", scheme, m.Endpoint, m.Bucket, url.PathEscape(objectKey))
+		fileURL = fmt.Sprintf("%s://%s/%s/%s", scheme, m.Endpoint, m.Bucket, escapedObjectKey)
 	}
 	return PresignResult{
 		UploadURL: u.String(),
@@ -115,4 +115,12 @@ func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, e
 		ObjectKey: objectKey,
 		ExpiresIn: int(expiry.Seconds()),
 	}, nil
+}
+
+func escapeObjectKey(objectKey string) string {
+	parts := strings.Split(objectKey, "/")
+	for i := range parts {
+		parts[i] = url.PathEscape(parts[i])
+	}
+	return strings.Join(parts, "/")
 }

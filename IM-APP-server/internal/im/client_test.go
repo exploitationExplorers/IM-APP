@@ -413,6 +413,70 @@ func TestGroupModerationRequests(t *testing.T) {
 	}
 }
 
+func TestUpdateGroupOnlySendsChangedFields(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/group/set_group_info_ex":
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode group update request: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin"}, server.Client())
+	avatar := "https://example.test/group.png"
+	allow := false
+	if err := client.UpdateGroup(context.Background(), "group-1", GroupUpdate{
+		FaceURL: &avatar, AllowMemberAddFriend: &allow,
+	}); err != nil {
+		t.Fatalf("UpdateGroup() error = %v", err)
+	}
+	if request["groupID"] != "group-1" || request["faceURL"] != avatar || request["applyMemberFriend"] != float64(1) {
+		t.Fatalf("unexpected group update request: %#v", request)
+	}
+	if _, exists := request["groupName"]; exists {
+		t.Fatalf("groupName must be omitted for a non-name update: %#v", request)
+	}
+	if _, exists := request["notification"]; exists {
+		t.Fatalf("notification must be omitted when unchanged: %#v", request)
+	}
+}
+
+func TestEnsureExistingGroupDoesNotWriteProfile(t *testing.T) {
+	var updateCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/group/get_groups_info":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"groupInfos":[{"groupID":"group-1"}]}}`))
+		case "/group/set_group_info_ex", "/group/create_group":
+			updateCalls.Add(1)
+			_, _ = w.Write([]byte(`{"errCode":0}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin"}, server.Client())
+	if err := client.EnsureGroup(context.Background(), Group{GroupID: "group-1", GroupName: "群聊"}); err != nil {
+		t.Fatalf("EnsureGroup() error = %v", err)
+	}
+	if got := updateCalls.Load(); got != 0 {
+		t.Fatalf("existing group profile write calls = %d, want 0", got)
+	}
+}
+
 func TestListGroupMemberIDsPaginates(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

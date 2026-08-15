@@ -18,6 +18,8 @@ export interface ChatMessage {
   type: MessageType
   content: string
   createdAt: string
+  /** 用于折叠 OpenIM 重试产生的连续重复系统通知；普通消息不设置。 */
+  systemEventKey?: string
   /** 引用回复时展示的原消息摘要 */
   quote?: MessageQuote
   /** 本地发送中状态 */

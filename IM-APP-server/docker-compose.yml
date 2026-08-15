@@ -98,7 +98,8 @@ services:
       MINIO_USE_SSL: "false"
       # MinIO 对外访问地址（预签名 URL 用，值从同目录 .env 读取；如 http://8.210.72.157:9000）
       MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
-      MINIO_PUBLIC_READ: ${MINIO_PUBLIC_READ:-false}
+      # 返回的图片 URL 需直接打开；设为 true 会公开读取整个 MINIO_BUCKET
+      MINIO_PUBLIC_READ: ${MINIO_PUBLIC_READ:-true}
       # ── OpenIM 对接配置（与 deploy/openim/docker-compose.yml 同源，详见 .env.example）──
       # 后端内部连 OpenIM API：同共享网络直接用服务名 openim-api:10002。
       # OPENIM_SECRET 必须与 OpenIM 的 IMENV_SHARE_SECRET 一致（两者都读宿主 OPENIM_SECRET 变量）。

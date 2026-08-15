@@ -258,7 +258,7 @@ func main() {
 			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
 			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
 			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
-			auth.POST("/groups/:id/reports", groupH.CreateReport)
+			auth.POST("/groups/reports", groupH.CreateReport)
 			auth.PUT("/groups/:id/mute", groupH.UpdateMute)
 			auth.POST("/groups/:id/leave", groupH.Leave)
 			auth.POST("/groups/:id/dismiss", groupH.Dismiss)

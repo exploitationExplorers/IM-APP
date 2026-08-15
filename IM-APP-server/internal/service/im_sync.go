@@ -257,9 +257,29 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		return w.sendGroupCreatedWelcome(ctx, state.ID, groupID)
 	}
 	if event.EventType == repository.IMEventGroupUpdated {
-		// 只同步群名/头像/公告/加好友开关。邀请、踢人、角色、禁言各有独立事件；
-		// 这里再全量 reconcile 会让 OpenIM 连发系统通知，会话列表未读狂跳、聊天页却看不到气泡。
-		return w.Client.EnsureGroup(ctx, group)
+		var updatePayload repository.IMGroupUpdatePayload
+		if err := json.Unmarshal(event.Payload, &updatePayload); err != nil {
+			return fmt.Errorf("decode %s payload: %w", event.EventType, err)
+		}
+		// Old group.updated rows used an empty payload and cannot tell which field
+		// really changed. Replaying them as a full update would recreate the fake
+		// group-name notices, so completing them without a remote write is safer.
+		if updatePayload.Name == nil && updatePayload.Avatar == nil && updatePayload.Announcement == nil && updatePayload.AllowMemberAddFriend == nil {
+			return nil
+		}
+		registered, err := w.Client.IsGroupRegistered(ctx, groupID)
+		if err != nil {
+			return err
+		}
+		if !registered {
+			return w.Client.EnsureGroup(ctx, group)
+		}
+		return w.Client.UpdateGroup(ctx, groupID, im.GroupUpdate{
+			GroupName:            updatePayload.Name,
+			FaceURL:              updatePayload.Avatar,
+			Notification:         updatePayload.Announcement,
+			AllowMemberAddFriend: updatePayload.AllowMemberAddFriend,
+		})
 	}
 	registered, err := w.Client.IsGroupRegistered(ctx, groupID)
 	if err != nil {

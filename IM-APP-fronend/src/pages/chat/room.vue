@@ -19,6 +19,7 @@ import { resolveIMGroupByIM } from '@/api/im'
 import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { ChatMessage, Conversation } from '@/types'
+import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -60,7 +61,9 @@ function isVisibleMessage(m: ChatMessage): boolean {
 }
 
 const messages = computed(() =>
-  (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
+  collapseRepeatedGroupNameNotices(
+    (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
+  ),
 )
 // 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
 // 用 ref 快照而不是 computed：避免 H5/热更新下 computed 与全局 ref 不同步导致 mine 判断失效

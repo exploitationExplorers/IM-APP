@@ -267,12 +267,42 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var role string
+	var role, currentName, currentAvatar, currentAnnouncement, currentJoinMode string
+	var currentAllow, currentAllMuted bool
 	err = tx.QueryRow(ctx, `
-		SELECT gm.role FROM group_members gm JOIN groups g ON g.id=gm.group_id
-		WHERE gm.group_id=$1 AND gm.user_id=$2 AND g.status='active'`, groupID, uid).Scan(&role)
+		SELECT gm.role, g.name, g.avatar, g.announcement,
+		       g.allow_member_add_friend, g.join_mode, g.all_muted
+		FROM group_members gm JOIN groups g ON g.id=gm.group_id
+		WHERE gm.group_id=$1 AND gm.user_id=$2 AND g.status='active'`, groupID, uid).Scan(
+		&role, &currentName, &currentAvatar, &currentAnnouncement,
+		&currentAllow, &currentJoinMode, &currentAllMuted,
+	)
 	if err != nil || (role != "owner" && role != "admin") {
 		return ErrForbidden
+	}
+	// Suppress no-op writes before creating outbox work. Besides reducing load,
+	// this is required for correctness because OpenIM treats a present field as
+	// a change and emits a notification without comparing the old value.
+	if name != nil && *name == currentName {
+		name = nil
+	}
+	if avatarURL != nil && *avatarURL == currentAvatar {
+		avatarURL = nil
+	}
+	if announcement != nil && *announcement == currentAnnouncement {
+		announcement = nil
+	}
+	if allow != nil && *allow == currentAllow {
+		allow = nil
+	}
+	if joinMode != nil && *joinMode == currentJoinMode {
+		joinMode = nil
+	}
+	if allMuted != nil && *allMuted == currentAllMuted {
+		allMuted = nil
+	}
+	if name == nil && avatarURL == nil && announcement == nil && allow == nil && joinMode == nil && allMuted == nil {
+		return tx.Commit(ctx)
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE groups SET
@@ -294,8 +324,13 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 			return err
 		}
 	}
-	if name != nil || avatarURL != nil || announcement != nil || allow != nil || joinMode != nil {
-		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, map[string]any{}); err != nil {
+	if name != nil || avatarURL != nil || announcement != nil || allow != nil {
+		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, IMGroupUpdatePayload{
+			Name:                 name,
+			Avatar:               avatarURL,
+			Announcement:         announcement,
+			AllowMemberAddFriend: allow,
+		}); err != nil {
 			return err
 		}
 	}
@@ -742,19 +777,20 @@ func (r *GroupRepo) UpdateMyNickname(ctx context.Context, groupID, uid, nickname
 	return tx.Commit(ctx)
 }
 
-func (r *GroupRepo) CreateReport(ctx context.Context, groupID, uid, reason, description string) (models.GroupReportResult, error) {
+func (r *GroupRepo) CreateReport(ctx context.Context, groupID, uid, reason, description string, imagePaths []string) (models.GroupReportResult, error) {
 	var result models.GroupReportResult
 	var createdAt time.Time
 	err := r.DB.QueryRow(ctx, `
-		INSERT INTO group_reports(group_id, reporter_id, reason, description)
-		SELECT $1::uuid,$2::uuid,$3,$4
+		INSERT INTO group_reports(group_id, reporter_id, reason, description, image_paths)
+		SELECT $1::uuid,$2::uuid,$3,$4,$5::text[]
 		WHERE EXISTS(
 			SELECT 1 FROM group_members gm JOIN groups g ON g.id=gm.group_id
 			WHERE gm.group_id=$1::uuid AND gm.user_id=$2::uuid AND g.status='active')
 		ON CONFLICT (group_id, reporter_id) WHERE status='pending'
-		DO UPDATE SET reason=EXCLUDED.reason, description=EXCLUDED.description, updated_at=NOW()
-		RETURNING id::text, status, created_at`, groupID, uid, reason, description,
-	).Scan(&result.ID, &result.Status, &createdAt)
+		DO UPDATE SET reason=EXCLUDED.reason, description=EXCLUDED.description,
+		              image_paths=EXCLUDED.image_paths, updated_at=NOW()
+		RETURNING id::text, status, image_paths, created_at`, groupID, uid, reason, description, imagePaths,
+	).Scan(&result.ID, &result.Status, &result.ImagePaths, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return result, ErrForbidden
 	}
@@ -925,4 +961,3 @@ func (r *GroupRepo) SetMemberRemark(ctx context.Context, uid, groupID, memberUse
 		DO UPDATE SET remark=EXCLUDED.remark, updated_at=now()`, uid, groupID, memberUserID, remark)
 	return err
 }
-

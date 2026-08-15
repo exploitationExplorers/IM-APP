@@ -14,7 +14,7 @@ import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
-import { formatIMNotification } from '@/utils/im-notification'
+import { formatIMNotification, imNotificationEventKey } from '@/utils/im-notification'
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
 export interface IMTarget {
@@ -693,6 +693,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     type: toAppMessageType(item.contentType),
     content: extractContent(item),
     createdAt: toISOTime(item.sendTime),
+    systemEventKey: imNotificationEventKey(item) || undefined,
     quote: quotePreviewOf(item),
     status: item.status === MessageStatus.Failed ? 'failed' : 'sent',
   }
