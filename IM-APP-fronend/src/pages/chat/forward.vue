@@ -42,6 +42,7 @@ const excludedFriendIds = ref<Set<string>>(new Set())
 const tags = ref<ContactTagItem[]>([])
 const sending = ref(false)
 const visibleLimit = ref(PAGE_SIZE)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 onLoad(async () => {
   if (!forwardStore.messageIds.length) {
@@ -52,20 +53,32 @@ onLoad(async () => {
   if (!chatStore.conversations.length) {
     await chatStore.loadConversations().catch(() => undefined)
   }
-  if (!contactStore.contacts.length && !contactStore.groups.length) {
-    await contactStore.loadDirectory().catch(() => undefined)
-  }
+  await Promise.all([
+    contactStore.reloadContacts({ keyword: '', sort: 'recent' }).catch(() => undefined),
+    contactStore.groups.length ? Promise.resolve() : contactStore.loadGroups().catch(() => undefined),
+  ])
   tags.value = await fetchContactTags().catch(() => [])
 })
 
-watch([active, keyword], () => {
+watch(active, (tab) => {
   visibleLimit.value = PAGE_SIZE
+  if (tab === 'contacts') {
+    void contactStore.reloadContacts({ keyword: keyword.value, sort: 'recent' })
+  }
+})
+
+watch(keyword, () => {
+  visibleLimit.value = PAGE_SIZE
+  if (active.value !== 'contacts') return
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void contactStore.reloadContacts({ keyword: keyword.value, sort: 'recent' })
+  }, 300)
 })
 
 const selectedCount = computed(() => {
-  let extra = 0
   if (allFriendsSelected.value) {
-    extra = Math.max(0, listContacts.value.length - excludedFriendIds.value.size)
+    let extra = Math.max(0, contactStore.contactTotal - excludedFriendIds.value.size)
     selected.value.forEach((item) => {
       if (item.kind !== 'contact') extra += 1
     })
@@ -126,16 +139,20 @@ const currentRaw = computed(() => {
 })
 
 const filteredList = computed(() => {
+  if (active.value === 'contacts') return currentRaw.value
   const k = keyword.value.trim()
   if (!k) return currentRaw.value
   return currentRaw.value.filter((i) => i.name.includes(k))
 })
 
-const currentList = computed(() => filteredList.value.slice(0, visibleLimit.value))
+const currentList = computed(() => {
+  if (active.value === 'contacts') return filteredList.value
+  return filteredList.value.slice(0, visibleLimit.value)
+})
 
 const allSelectedInView = computed(() => {
   if (active.value === 'contacts' && !keyword.value.trim()) {
-    return allFriendsSelected.value && excludedFriendIds.value.size === 0 && !!listContacts.value.length
+    return allFriendsSelected.value && excludedFriendIds.value.size === 0 && contactStore.contactTotal > 0
   }
   const list = filteredList.value
   return !!list.length && list.every((i) => isSelected(i))
@@ -153,7 +170,7 @@ function toggle(item: ForwardTarget) {
     const next = new Set(excludedFriendIds.value)
     if (next.has(item.businessUserId)) next.delete(item.businessUserId)
     else next.add(item.businessUserId)
-    if (next.size >= listContacts.value.length) {
+    if (next.size >= contactStore.contactTotal) {
       allFriendsSelected.value = false
       excludedFriendIds.value = new Set()
       return
@@ -193,9 +210,20 @@ function toggleSelectAll() {
 }
 
 function loadMore() {
+  if (active.value === 'contacts') {
+    void contactStore.loadMoreContacts()
+    return
+  }
   if (visibleLimit.value < filteredList.value.length) {
     visibleLimit.value += PAGE_SIZE
   }
+}
+
+function onListScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
+  const top = e.detail?.scrollTop || 0
+  const height = e.detail?.scrollHeight || 0
+  const view = uni.getSystemInfoSync().windowHeight || 0
+  if (height > 0 && height - top - view < 240) loadMore()
 }
 
 function collectPlan(): { friendPlan: FriendForwardPlan | null; groupTargets: ForwardTarget[] } {
@@ -249,16 +277,44 @@ async function resolveConversation(target: ForwardTarget) {
   throw new Error(`无法转发到${target.name}`)
 }
 
+function selectedPreviewNames() {
+  const names: string[] = []
+  const pushName = (name: string) => {
+    if (names.length < 3 && name) names.push(name)
+  }
+  if (allFriendsSelected.value) {
+    listContacts.value.forEach((item) => {
+      if (item.businessUserId && excludedFriendIds.value.has(item.businessUserId)) return
+      pushName(item.name)
+    })
+    selected.value.forEach((item) => {
+      if (item.kind !== 'contact') pushName(item.name)
+    })
+    return names
+  }
+  selected.value.forEach((item) => pushName(item.name))
+  return names
+}
+
+function confirmHint() {
+  const names = selectedPreviewNames().join('、')
+  return `确认传送给包含「${names}」的${selectedCount.value}个聊天？`
+}
+
 function confirmSend(content: string) {
   return new Promise<boolean>((resolve) => {
     uni.showModal({
-      title: '提示',
+      title: '',
       content,
-      confirmText: '传送',
+      confirmText: '确认',
       cancelText: '取消',
       success: (res) => resolve(!!res.confirm),
     })
   })
+}
+
+function afterNativeModal() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 120))
 }
 
 function buildSources() {
@@ -274,54 +330,39 @@ function buildSources() {
   })
 }
 
-async function sendToGroups(groupTargets: ForwardTarget[]) {
-  let failed = 0
+async function sendToGroups(groupTargets: ForwardTarget[], messageIds: string[]) {
   for (const target of groupTargets) {
     try {
       const conv = await resolveConversation(target)
-      await chatStore.forwardToConversation(conv.id, forwardStore.messageIds)
+      await chatStore.forwardToConversation(conv.id, messageIds)
     } catch {
-      failed += 1
+      /* 群转发走原生 SDK，失败不挡住好友队列 */
     }
   }
-  return failed
 }
 
 async function onSend() {
   const { friendPlan, groupTargets } = collectPlan()
   if ((!friendPlan && !groupTargets.length) || sending.value) return
-  const hint = friendPlan
-    ? allFriendsSelected.value
-      ? '确定转发给全部好友吗？'
-      : `确定转发给选中的好友吗？${groupTargets.length ? `（含 ${groupTargets.length} 个群）` : ''}`
-    : `确定转发给 ${groupTargets.length} 个群吗？`
-  const ok = await confirmSend(hint)
+  const ok = await confirmSend(confirmHint())
   if (!ok) return
   sending.value = true
-  uni.showLoading({ title: '提交中...' })
   try {
+    // App 原生弹窗关闭前立刻请求，容易把后续调用卡住；H5 没有这个问题。
+    await afterNativeModal()
     const sources = buildSources()
-    let taskIds: string[] = []
+    const messageIds = [...forwardStore.messageIds]
     if (friendPlan) {
-      taskIds = await forwardStore.submitFriendPlan(sources, friendPlan)
+      await forwardStore.submitFriendPlan(sources, friendPlan)
     }
-    const groupFailed = await sendToGroups(groupTargets)
+    const groups = [...groupTargets]
+    forwardStore.markSucceeded()
     forwardStore.clear()
-    uni.hideLoading()
-    if (taskIds.length) {
-      uni.redirectTo({
-        url: `/pages/chat/forward-progress?taskIds=${encodeURIComponent(taskIds.join(','))}`,
-      })
-      return
-    }
-    if (groupFailed) {
-      uni.showToast({ title: `完成，${groupFailed} 个群失败`, icon: 'none' })
-    } else {
-      uni.showToast({ title: '已传送', icon: 'success' })
-    }
     safeBack('/pages/chat/index')
+    if (groups.length) {
+      void sendToGroups(groups, messageIds)
+    }
   } catch (e) {
-    uni.hideLoading()
     uni.showToast({ title: e instanceof Error ? e.message : '提交失败', icon: 'none' })
   } finally {
     sending.value = false
@@ -354,7 +395,7 @@ function goBack() {
     </view>
 
     <view v-if="active === 'contacts'" class="section-head">
-      <text class="section-title">联络人 ({{ listContacts.length }})</text>
+      <text class="section-title">联络人 ({{ contactStore.contactTotal }})</text>
     </view>
 
     <view class="select-all" @click="toggleSelectAll">
@@ -364,7 +405,7 @@ function goBack() {
       </view>
     </view>
 
-    <scroll-view scroll-y class="list" :lower-threshold="120" @scrolltolower="loadMore">
+    <scroll-view scroll-y class="list" :lower-threshold="120" @scrolltolower="loadMore" @scroll="onListScroll">
       <view v-for="item in currentList" :key="item.id" class="row" @click="toggle(item)">
         <image class="avatar" :src="item.avatar" mode="aspectFill" />
         <text class="name">{{ item.name }}</text>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
@@ -7,17 +7,18 @@ import ImTabBar from '@/components/ImTabBar.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
-import type { Contact, GroupPreview } from '@/types'
+import type { Contact, ContactListSort, GroupPreview } from '@/types'
 
 useAuthGuard()
 useTabBar()
 
 const contactStore = useContactStore()
-const { contacts, groups } = storeToRefs(contactStore)
+const { contacts, contactTotal, contactHasMore, contactsLoading, groups } = storeToRefs(contactStore)
 const keyword = ref('')
 const sortKey = ref<'recent' | 'name' | 'chat'>('recent')
 const showSort = ref(false)
 const showAddMenu = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const sortLabel = computed(() => {
   if (sortKey.value === 'name') return '名字'
@@ -25,26 +26,41 @@ const sortLabel = computed(() => {
   return '最近加入(默认)'
 })
 
-const filteredContacts = computed(() => {
-  let list = [...contacts.value]
-  const k = keyword.value.trim()
-  if (k) {
-    list = list.filter((c) => listName(c).includes(k) || (c.publicId || '').includes(k))
-  }
-  if (sortKey.value === 'name') {
-    list.sort((a, b) => listName(a).localeCompare(listName(b), 'zh-CN'))
-  }
-  return list
-})
+const listSort = computed<ContactListSort>(() => (sortKey.value === 'name' ? 'name' : 'recent'))
 
 function listName(c: Contact) {
   return c.remark?.trim() || c.nickname
 }
 
+function refreshContacts() {
+  return contactStore.reloadContacts({
+    keyword: keyword.value,
+    sort: listSort.value,
+  })
+}
+
 // tabBar 页会常驻，onMounted 只跑一次，切回来必须重新拉才能看到新加的好友
 onShow(() => {
-  contactStore.loadDirectory()
+  void Promise.all([refreshContacts(), contactStore.loadGroups()])
 })
+
+watch(keyword, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void refreshContacts()
+  }, 300)
+})
+
+function onLoadMore() {
+  void contactStore.loadMoreContacts()
+}
+
+function onScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
+  const top = e.detail?.scrollTop || 0
+  const height = e.detail?.scrollHeight || 0
+  const view = uni.getSystemInfoSync().windowHeight || 0
+  if (height > 0 && height - top - view < 240) onLoadMore()
+}
 
 function go(url: string) {
   showAddMenu.value = false
@@ -68,6 +84,7 @@ function onAdd() {
 function setSort(key: 'recent' | 'name' | 'chat') {
   sortKey.value = key
   showSort.value = false
+  void refreshContacts()
 }
 
 function closeMenus() {
@@ -101,7 +118,13 @@ function closeMenus() {
 
     <AppSearchBar v-model="keyword" />
 
-    <scroll-view scroll-y class="body">
+    <scroll-view
+      scroll-y
+      class="body"
+      :lower-threshold="80"
+      @scrolltolower="onLoadMore"
+      @scroll="onScroll"
+    >
       <view class="menu-list">
         <view class="menu-item" @click="go('/pages/contacts/new-friends')">
           <image class="menu-icon" src="/static/icons/menu-new-friend.svg" mode="aspectFit" />
@@ -134,7 +157,7 @@ function closeMenus() {
       <view class="section-divider" />
 
       <view class="section-head">
-        <text class="section-count">联络人 ({{ filteredContacts.length }})</text>
+        <text class="section-count">联络人 ({{ contactTotal }})</text>
         <view class="sort-wrap" @click.stop="showSort = !showSort">
           <text class="sort">{{ sortLabel }}</text>
           <image class="sort-caret" src="/static/icons/icon-caret.svg" mode="aspectFit" />
@@ -159,7 +182,7 @@ function closeMenus() {
       </view>
 
       <view
-        v-for="c in filteredContacts"
+        v-for="c in contacts"
         :key="c.id"
         class="contact-row"
         @click="openContact(c)"
@@ -167,6 +190,9 @@ function closeMenus() {
         <image class="avatar" :src="c.avatar" mode="aspectFill" />
         <text class="name">{{ listName(c) }}</text>
       </view>
+      <view v-if="contactsLoading" class="list-status">加载中</view>
+      <view v-else-if="!contacts.length" class="list-status">暂无联络人</view>
+      <view v-else-if="!contactHasMore" class="list-status">没有更多了</view>
     </scroll-view>
 
     <ImTabBar current="contacts" />
@@ -402,5 +428,12 @@ function closeMenus() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.list-status {
+  padding: 24rpx 0 48rpx;
+  text-align: center;
+  font-size: 24rpx;
+  color: #8a8f9c;
 }
 </style>

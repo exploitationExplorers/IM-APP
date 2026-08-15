@@ -25,6 +25,9 @@ export type {
 
 export type {
   Contact,
+  ContactPage,
+  ContactListQuery,
+  ContactListSort,
   ContactTagItem,
   GroupPreview,
   FriendRequest,
@@ -36,8 +39,13 @@ export type {
 export type {
   GroupInfo,
   GroupMember,
+  GroupPermissions,
+  GroupSettingsInput,
+  GroupJoinRequestItem,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
+  GroupRole,
+  GroupJoinMode,
 } from './group'
 
 export type {

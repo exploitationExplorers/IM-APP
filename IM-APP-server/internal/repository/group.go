@@ -294,10 +294,12 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 			return err
 		}
 	}
-	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, map[string]any{}); err != nil {
-		return err
+	if name != nil || avatarURL != nil || announcement != nil || allow != nil || joinMode != nil {
+		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, map[string]any{}); err != nil {
+			return err
+		}
 	}
-	// 全员禁言在 OpenIM 侧是独立能力，改这个字段要额外发一次同步
+	// 全员禁言在 OpenIM 侧是独立能力，改这个字段单独同步，避免和资料更新叠出多条通知
 	if allMuted != nil {
 		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMute, map[string]any{
 			"muted": *allMuted,

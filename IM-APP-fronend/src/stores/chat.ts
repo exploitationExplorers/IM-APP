@@ -9,6 +9,7 @@ import {
   getConversationList,
   getHistoryMessages,
   getOneConversation,
+  clearConversationMessages,
   markConversationRead,
   onIMEvent,
   onUserStatusChanged,
@@ -28,6 +29,7 @@ import {
   conversationIdOf,
   imUserId,
 } from '@/utils/openim'
+import { isIMNotification } from '@/utils/im-notification'
 import { playMessageSound, vibrateShort } from '@/utils/notify'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
@@ -92,6 +94,8 @@ export const useChatStore = defineStore('chat', () => {
     if (settings.noDisturb || !settings.sound) return
     const audible = list.some((item) => {
       if (item.sendID === imUserId.value) return false
+      // 群禁言/改资料等 OpenIM 通知：参考站只在聊天里出系统提示，不响铃
+      if (isIMNotification(item.contentType)) return false
       const conv = conversations.value.find((c) => c.id === conversationIdOf(item))
       const opt = conv?.recvMsgOpt
       if (opt === MessageReceiveOptType.NotReceive || opt === MessageReceiveOptType.NotNotify) {
@@ -339,6 +343,21 @@ export const useChatStore = defineStore('chat', () => {
     return conv
   }
 
+  async function clearHistory(conversationId: string) {
+    await clearConversationMessages(conversationId)
+    const ids = (messagesMap.value[conversationId] || []).map((m) => m.id)
+    messagesMap.value = { ...messagesMap.value, [conversationId]: [] }
+    historyEnd.value = { ...historyEnd.value, [conversationId]: true }
+    if (ids.length) {
+      const nextRaw = { ...rawMessages.value }
+      ids.forEach((id) => {
+        delete nextRaw[id]
+      })
+      rawMessages.value = nextRaw
+    }
+    patchConversation(conversationId, { lastMessage: '', lastMessageAt: '' })
+  }
+
   /** 局部更新本地会话（如置顶、会话级免打扰），命中才重排，保证 UI 即时反映 */
   function patchConversation(conversationId: string, patch: Partial<Conversation>) {
     const idx = conversations.value.findIndex((c) => c.id === conversationId)
@@ -513,6 +532,7 @@ export const useChatStore = defineStore('chat', () => {
     subscribeRealtime,
     unsubscribeRealtime,
     patchConversation,
+    clearHistory,
     reset,
   }
 })

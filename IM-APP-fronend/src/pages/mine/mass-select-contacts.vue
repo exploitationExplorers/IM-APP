@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
@@ -13,6 +13,7 @@ const massStore = useMassSendStore()
 const keyword = ref('')
 const active = ref<'recent' | 'contacts' | 'groups' | 'tags'>('recent')
 const from = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 onLoad((q) => {
   from.value = String(q?.from || '')
@@ -22,9 +23,10 @@ onShow(async () => {
   if (!chatStore.conversations.length) {
     await chatStore.loadConversations().catch(() => undefined)
   }
-  if (!contactStore.contacts.length && !contactStore.groups.length) {
-    await contactStore.loadDirectory().catch(() => undefined)
-  }
+  await Promise.all([
+    contactStore.reloadContacts({ keyword: '', sort: 'recent' }).catch(() => undefined),
+    contactStore.groups.length ? Promise.resolve() : contactStore.loadGroups().catch(() => undefined),
+  ])
 })
 
 const selected = computed(() => massStore.selectedTargets)
@@ -85,10 +87,23 @@ const currentRaw = computed<MassTarget[]>(() => {
 })
 
 const currentList = computed<MassTarget[]>(() => {
+  if (active.value === 'contacts') return currentRaw.value
   const k = keyword.value.trim()
   if (!k) return currentRaw.value
   return currentRaw.value.filter((i) => i.name.includes(k))
 })
+
+watch([keyword, active], () => {
+  if (active.value !== 'contacts') return
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void contactStore.reloadContacts({ keyword: keyword.value, sort: 'recent' })
+  }, 300)
+})
+
+function loadMore() {
+  if (active.value === 'contacts') void contactStore.loadMoreContacts()
+}
 
 const currentIds = computed(() => currentList.value.map((i) => i.id))
 const allSelectedInView = computed(() => {
@@ -204,7 +219,7 @@ function onConfirm() {
       </view>
     </view>
 
-    <scroll-view scroll-y class="list">
+    <scroll-view scroll-y class="list" :lower-threshold="80" @scrolltolower="loadMore">
       <view v-for="item in currentList" :key="item.id" class="row" @click="toggle(item)">
         <image class="avatar" :src="item.avatar" mode="aspectFill" />
         <text class="name">{{ item.name }}</text>

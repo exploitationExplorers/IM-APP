@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
+import ImSuccessToast from '@/components/ImSuccessToast.vue'
 import { useChatMessageActions } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
+import { useForwardStore } from '@/stores/forward'
 import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
@@ -21,6 +23,8 @@ import type { ChatMessage, Conversation } from '@/types'
 const chatStore = useChatStore()
 const userStore = useUserStore()
 const contactStore = useContactStore()
+const forwardStore = useForwardStore()
+const successVisible = ref(false)
 
 const conversationId = ref('')
 const title = ref('聊天')
@@ -46,11 +50,11 @@ let recorder: any = null
 let browserRecorder: { stream: MediaStream; mediaRecorder: MediaRecorder } | null = null
 let recordingTimer: ReturnType<typeof setInterval> | null = null
 
-/** 通知类（加好友等）没有可展示正文，渲染成气泡就是空气泡；撤回提示保留为居中系统行 */
+/** 通知类没有可读正文时不渲染；群禁言等系统提示要保留，例如 `张三: [全体禁言]` */
 function isVisibleMessage(m: ChatMessage): boolean {
   if (m.type === 'system') {
     const text = m.content.trim()
-    return !!text && !text.startsWith('{') && !text.startsWith('[')
+    return !!text && !text.startsWith('{')
   }
   return !!m.content
 }
@@ -105,6 +109,12 @@ const actions = useChatMessageActions({
   isMine,
   visibleMessages: messages,
   conversationTitle: title,
+})
+
+onShow(() => {
+  if (!forwardStore.consumeSucceeded()) return
+  actions.cancelSelect()
+  successVisible.value = true
 })
 
 onLoad(async (query) => {
@@ -657,6 +667,12 @@ function pickImage() {
       @select="actions.onMenuSelect"
       @close="actions.closeMenu"
     />
+    <ImSuccessToast
+      :visible="successVisible"
+      text="转发成功"
+      placement="top"
+      @close="successVisible = false"
+    />
   </view>
 </template>
 
@@ -769,8 +785,10 @@ function pickImage() {
 }
 
 .sys-tip-text {
-  font-size: 22rpx;
-  color: #999;
+  font-size: 24rpx;
+  color: #333333;
+  text-align: center;
+  line-height: 1.5;
 }
 
 .composer {

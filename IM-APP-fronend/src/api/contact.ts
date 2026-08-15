@@ -1,20 +1,23 @@
 import { request } from '@/utils/request'
-import type { Contact, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
+import type { Contact, ContactListQuery, ContactPage, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 
-interface ContactListResult {
-  items: Contact[]
-  hasMore: boolean
-  total: number
-}
-
-export async function fetchContacts(): Promise<Contact[]> {
-  const result = await request<Contact[] | ContactListResult>({
+export async function fetchContacts(query: ContactListQuery = {}): Promise<ContactPage> {
+  const data: Record<string, string | number> = {
+    limit: query.limit ?? 50,
+  }
+  if (query.keyword?.trim()) data.keyword = query.keyword.trim()
+  if (query.sort) data.sort = query.sort
+  if (query.cursor) data.cursor = query.cursor
+  const result = await request<ContactPage | Contact[]>({
     url: '/contacts',
     method: 'GET',
+    data,
   })
 
-  // 线上接口返回分页对象；兼容仍直接返回数组的旧版服务。
-  return Array.isArray(result) ? result : result.items
+  // 兼容仍直接返回数组的旧版服务，同时保持分页调用方的数据结构稳定。
+  return Array.isArray(result)
+    ? { items: result, hasMore: false, total: result.length }
+    : result
 }
 
 export async function fetchContact(contactId: string): Promise<Contact> {

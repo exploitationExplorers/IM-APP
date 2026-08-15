@@ -77,13 +77,6 @@
       }
     },
     {
-      "path": "pages/chat/forward-progress",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "转发进度"
-      }
-    },
-    {
       "path": "pages/contacts/report-user",
       "style": {
         "navigationStyle": "custom",
@@ -197,6 +190,41 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "群聊成员"
+      }
+    },
+    {
+      "path": "pages/group/admin",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群组管理"
+      }
+    },
+    {
+      "path": "pages/group/admins",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群组管理员"
+      }
+    },
+    {
+      "path": "pages/group/admin-add",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "新增群组管理员"
+      }
+    },
+    {
+      "path": "pages/group/join-requests",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "入群申请"
+      }
+    },
+    {
+      "path": "pages/group/edit-name",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "修改群组名称"
       }
     },
     {

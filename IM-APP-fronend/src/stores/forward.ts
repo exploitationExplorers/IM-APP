@@ -23,11 +23,22 @@ export const useForwardStore = defineStore('forward', () => {
   const sourceConversationId = ref('')
   const messageIds = ref<string[]>([])
   const lastTaskIds = ref<string[]>([])
+  const justSucceeded = ref(false)
 
   function start(conversationId: string, ids: string[]) {
     sourceConversationId.value = conversationId
     messageIds.value = [...new Set(ids)]
     lastTaskIds.value = []
+  }
+
+  function markSucceeded() {
+    justSucceeded.value = true
+  }
+
+  function consumeSucceeded() {
+    const ok = justSucceeded.value
+    justSucceeded.value = false
+    return ok
   }
 
   function clear() {
@@ -57,6 +68,8 @@ export const useForwardStore = defineStore('forward', () => {
     messageIds,
     lastTaskIds,
     start,
+    markSucceeded,
+    consumeSucceeded,
     clear,
     submitFriendPlan,
   }
