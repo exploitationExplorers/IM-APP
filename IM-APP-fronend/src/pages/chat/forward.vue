@@ -285,6 +285,10 @@ function confirmSend(content: string) {
   })
 }
 
+function afterNativeModal() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 120))
+}
+
 function buildSources() {
   return forwardStore.messageIds.map((id) => {
     const raw = chatStore.getRawMessage(id)
@@ -298,17 +302,15 @@ function buildSources() {
   })
 }
 
-async function sendToGroups(groupTargets: ForwardTarget[]) {
-  let failed = 0
+async function sendToGroups(groupTargets: ForwardTarget[], messageIds: string[]) {
   for (const target of groupTargets) {
     try {
       const conv = await resolveConversation(target)
-      await chatStore.forwardToConversation(conv.id, forwardStore.messageIds)
+      await chatStore.forwardToConversation(conv.id, messageIds)
     } catch {
-      failed += 1
+      /* 群转发走原生 SDK，失败不挡住好友队列 */
     }
   }
-  return failed
 }
 
 async function onSend() {
@@ -317,23 +319,22 @@ async function onSend() {
   const ok = await confirmSend(confirmHint())
   if (!ok) return
   sending.value = true
-  uni.showLoading({ title: '传送中...' })
   try {
+    // App 原生弹窗关闭前立刻请求，容易把后续调用卡住；H5 没有这个问题。
+    await afterNativeModal()
     const sources = buildSources()
+    const messageIds = [...forwardStore.messageIds]
     if (friendPlan) {
       await forwardStore.submitFriendPlan(sources, friendPlan)
     }
-    const groupFailed = await sendToGroups(groupTargets)
+    const groups = [...groupTargets]
+    forwardStore.markSucceeded()
     forwardStore.clear()
-    uni.hideLoading()
-    if (groupFailed && !friendPlan) {
-      uni.showToast({ title: `完成，${groupFailed} 个群失败`, icon: 'none' })
-    } else {
-      forwardStore.markSucceeded()
-    }
     safeBack('/pages/chat/index')
+    if (groups.length) {
+      void sendToGroups(groups, messageIds)
+    }
   } catch (e) {
-    uni.hideLoading()
     uni.showToast({ title: e instanceof Error ? e.message : '提交失败', icon: 'none' })
   } finally {
     sending.value = false
