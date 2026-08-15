@@ -8,7 +8,16 @@ export async function fetchContacts(query: ContactListQuery = {}): Promise<Conta
   if (query.keyword?.trim()) data.keyword = query.keyword.trim()
   if (query.sort) data.sort = query.sort
   if (query.cursor) data.cursor = query.cursor
-  return request<ContactPage>({ url: '/contacts', method: 'GET', data })
+  const result = await request<ContactPage | Contact[]>({
+    url: '/contacts',
+    method: 'GET',
+    data,
+  })
+
+  // 兼容仍直接返回数组的旧版服务，同时保持分页调用方的数据结构稳定。
+  return Array.isArray(result)
+    ? { items: result, hasMore: false, total: result.length }
+    : result
 }
 
 export async function fetchContact(contactId: string): Promise<Contact> {
