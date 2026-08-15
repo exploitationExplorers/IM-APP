@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { createGroupReport, type GroupReportReason } from '@/api/report'
 import { uploadReportImage } from '@/utils/file-upload'
+import { safeBack } from '@/utils/nav'
 
 const MIN_LEN = 5
 const MAX_LEN = 200
@@ -31,7 +33,7 @@ onLoad((query) => {
 })
 
 function goBack() {
-  uni.navigateBack()
+  safeBack('/pages/chat/index')
 }
 
 /** 提交成功后越过检举原因页，直接回到群详情 */
@@ -103,11 +105,7 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">检举原因</text>
-      <view class="nav-space" />
-    </view>
+    <ImNavBar title="检举原因" @back="goBack" />
 
     <view class="card">
       <view class="card-title">检举原因</view>
@@ -154,38 +152,6 @@ async function onSubmit() {
   min-height: 100vh;
   background: #f5f5f5;
   padding-bottom: calc(48rpx + env(safe-area-inset-bottom));
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 96rpx;
-  padding: 0 26rpx;
-  background: #fff;
-}
-
-.nav-back {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #1f1f1f;
-}
-
-.nav-space {
-  width: 52rpx;
-  height: 52rpx;
 }
 
 .card {
