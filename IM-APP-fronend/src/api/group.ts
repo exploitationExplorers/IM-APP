@@ -121,3 +121,22 @@ export async function updateMemberRemark(
   })
 }
 
+export async function muteGroupMember(
+  groupId: string,
+  memberUserId: string,
+  mutedSeconds: number,
+): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${memberUserId}/mute`,
+    method: 'PUT',
+    data: { mutedSeconds },
+  })
+}
+
+export async function removeGroupMember(groupId: string, memberUserId: string): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${memberUserId}`,
+    method: 'DELETE',
+  })
+}
+

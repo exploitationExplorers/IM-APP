@@ -3,6 +3,10 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
+import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
+import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
+import ImQuoteBar from '@/components/ImQuoteBar.vue'
+import { useChatMessageActions } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
@@ -25,6 +29,7 @@ const chatType = ref<'private' | 'group'>('group')
 /** 业务侧的好友 / 群 ID，仅用于跳资料页 */
 const businessId = ref('')
 const memberCount = ref(0)
+const myRole = ref<'owner' | 'admin' | 'member'>('member')
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
 const convRef = ref<Conversation | null>(null)
 const memberRemarkMap = ref<Record<string, string>>({})
@@ -89,6 +94,19 @@ const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 const hasInput = computed(() => input.value.trim().length > 0)
 
+const actions = useChatMessageActions({
+  conversationId,
+  chatType,
+  businessId,
+  myId,
+  myRole,
+  input,
+  nicknameOf,
+  isMine,
+  visibleMessages: messages,
+  conversationTitle: title,
+})
+
 onLoad(async (query) => {
   title.value = decodeURIComponent(String(query?.title || '聊天'))
   peerAvatar.value = decodeURIComponent(String(query?.avatar || APP_CONFIG.defaultAvatarUrl))
@@ -139,6 +157,9 @@ onLoad(async (query) => {
         }
         memberRemarkMap.value = map
         memberCount.value = ms.length
+        const me = userStore.profile?.id
+        const self = me ? ms.find((m) => m.id === me) : undefined
+        if (self) myRole.value = self.role
       } catch {
         // 成员备注加载失败时不影响聊天
       }
@@ -203,7 +224,17 @@ async function onSend() {
   input.value = ''
   showPlusPanel.value = false
   try {
-    await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
+    if (actions.quote.value) {
+      await chatStore.sendQuote(
+        conversationId.value,
+        text,
+        actions.quote.value.id,
+        imUserId.value || myId.value,
+      )
+      actions.clearQuote()
+    } else {
+      await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
+    }
     await nextTick()
     scrollToBottom()
   } catch (e) {
@@ -532,7 +563,13 @@ function pickImage() {
         v-for="m in messages"
         :id="`msg_${m.id}`"
         :key="m.id"
+        class="msg-row"
+        :class="{ selecting: actions.selecting.value }"
+        @click="actions.selecting.value ? actions.toggleSelect(m) : undefined"
       >
+        <view v-if="actions.selecting.value && m.type !== 'system'" class="msg-check" :class="{ on: actions.selectedIds.value.has(m.id) }">
+          <text v-if="actions.selectedIds.value.has(m.id)">✓</text>
+        </view>
         <view v-if="m.type === 'system'" class="sys-tip">
           <text class="sys-tip-text">{{ m.content }}</text>
         </view>
@@ -543,11 +580,27 @@ function pickImage() {
           :avatar="avatarOf(m)"
           :nickname="nicknameOf(m)"
           @avatar-click="onAvatarClick(m)"
+          @longpress="actions.openMenu(m)"
         />
       </view>
     </scroll-view>
 
-    <view class="composer safe-bottom">
+    <view v-if="actions.selecting.value" class="composer safe-bottom">
+      <ImMessageSelectBar
+        :count="actions.selectedCount.value"
+        :mode="actions.selectMode.value"
+        @cancel="actions.cancelSelect"
+        @forward="actions.onSelectForward"
+        @remove="actions.onSelectDelete"
+      />
+    </view>
+    <view v-else class="composer safe-bottom">
+      <ImQuoteBar
+        v-if="actions.quote.value"
+        :nickname="actions.quote.value.senderNickname || nicknameOf(actions.quote.value) || '我'"
+        :text="actions.quote.value.content"
+        @close="actions.clearQuote"
+      />
       <view v-if="voiceMode" class="voice-bar">
         <view class="voice-trash" @click="cancelVoiceDraft">🗑</view>
 
@@ -595,6 +648,15 @@ function pickImage() {
         @close="showEmojiPanel = false"
       />
     </view>
+
+    <ImMessageActionMenu
+      v-if="actions.menuVisible.value"
+      :items="actions.menuItems.value"
+      :top="actions.menuTop.value"
+      :left="actions.menuLeft.value"
+      @select="actions.onMenuSelect"
+      @close="actions.closeMenu"
+    />
   </view>
 </template>
 
@@ -662,6 +724,42 @@ function pickImage() {
   flex: 1;
   height: 0;
   padding-bottom: 16rpx;
+}
+
+.msg-row {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.msg-row.selecting {
+  display: flex;
+  align-items: flex-start;
+  padding-left: 8rpx;
+}
+
+.msg-row.selecting :deep(.row) {
+  flex: 1;
+  min-width: 0;
+}
+
+.msg-check {
+  width: 40rpx;
+  height: 40rpx;
+  margin: 28rpx 8rpx 0 16rpx;
+  border-radius: 50%;
+  border: 3rpx solid #c8ccd6;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 22rpx;
+  flex-shrink: 0;
+}
+
+.msg-check.on {
+  border-color: #0a2fc2;
+  background: #0a2fc2;
 }
 
 .sys-tip {

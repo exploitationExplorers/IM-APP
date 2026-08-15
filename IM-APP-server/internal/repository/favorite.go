@@ -12,37 +12,35 @@ import (
 
 type FavoriteRepo struct{ DB *pgxpool.Pool }
 
-// Create 收藏消息；已收藏则返回已有记录（幂等）
+// Create 收藏消息快照；已收藏则返回已有记录（幂等）
 func (r *FavoriteRepo) Create(ctx context.Context, userID, messageID, msgType, content, senderID, convID string) (models.Favorite, error) {
 	var f models.Favorite
 	err := r.DB.QueryRow(ctx, `
 		INSERT INTO favorites(user_id, message_id, msg_type, content, sender_id, conversation_id)
-		VALUES($1::uuid,$2::uuid,$3,$4,$5::uuid,$6::uuid)
+		VALUES($1::uuid,$2,$3,$4,NULLIF($5,''),NULLIF($6,''))
 		ON CONFLICT (user_id, message_id) DO NOTHING
-		RETURNING id::text, message_id::text, msg_type, content,
-			COALESCE(sender_id::text,''), conversation_id::text, created_at`,
+		RETURNING id::text, message_id, msg_type, content,
+			COALESCE(sender_id,''), COALESCE(conversation_id,''), created_at`,
 		userID, messageID, msgType, content, senderID, convID,
 	).Scan(&f.ID, &f.MessageID, &f.Type, &f.Content, &f.SenderID, &f.ConversationID, &f.CreatedAt)
 	if err == nil {
 		return f, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		// 已收藏，返回现有记录
 		err = r.DB.QueryRow(ctx, `
-			SELECT id::text, message_id::text, msg_type, content,
-				COALESCE(sender_id::text,''), conversation_id::text, created_at
-			FROM favorites WHERE user_id=$1::uuid AND message_id=$2::uuid`, userID, messageID,
+			SELECT id::text, message_id, msg_type, content,
+				COALESCE(sender_id,''), COALESCE(conversation_id,''), created_at
+			FROM favorites WHERE user_id=$1::uuid AND message_id=$2`, userID, messageID,
 		).Scan(&f.ID, &f.MessageID, &f.Type, &f.Content, &f.SenderID, &f.ConversationID, &f.CreatedAt)
 		return f, err
 	}
 	return f, err
 }
 
-// List 查询收藏（msgType 为空=全部类型）
 // List 查询收藏；types 为空=全部类型，否则按类型集合过滤
 func (r *FavoriteRepo) List(ctx context.Context, userID string, types []string, limit, offset int) ([]models.Favorite, error) {
-	base := `SELECT id::text, message_id::text, msg_type, content,
-			COALESCE(sender_id::text,''), conversation_id::text, created_at
+	base := `SELECT id::text, message_id, msg_type, content,
+			COALESCE(sender_id,''), COALESCE(conversation_id,''), created_at
 	      FROM favorites WHERE user_id=$1::uuid`
 	var q string
 	var args []any

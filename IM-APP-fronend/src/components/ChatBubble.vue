@@ -14,11 +14,21 @@ const showNickname = computed(() => !props.mine && !!props.nickname)
 
 const emit = defineEmits<{
   avatarClick: []
+  longpress: []
 }>()
 
 function onAvatarClick() {
   if (props.mine) return
   emit('avatarClick')
+}
+
+function onLongPress() {
+  emit('longpress')
+}
+
+function onContextMenu(event: Event) {
+  event.preventDefault()
+  emit('longpress')
 }
 
 const parts = computed(() =>
@@ -86,7 +96,7 @@ function openLink(url: string) {
     />
     <view class="content-wrap">
       <text v-if="showNickname" class="nickname">{{ nickname }}</text>
-      <view v-if="message.type === 'image'" class="bubble image-bubble">
+      <view v-if="message.type === 'image'" class="bubble image-bubble" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
         <image class="msg-image" :src="message.content" mode="widthFix" />
       </view>
       <view
@@ -94,6 +104,8 @@ function openLink(url: string) {
         class="bubble voice-bubble"
         :class="mine ? 'bubble-mine voice-mine' : 'bubble-other voice-other'"
         @click="playVoice"
+        @longpress="onLongPress"
+        @contextmenu.prevent="onContextMenu"
       >
         <view class="voice-inner">
           <view class="voice-play">▶</view>
@@ -103,7 +115,11 @@ function openLink(url: string) {
           <text class="voice-duration">{{ formatVoiceDuration(voiceMeta?.duration || 0) }}</text>
         </view>
       </view>
-      <view v-else class="bubble" :class="mine ? 'bubble-mine' : 'bubble-other'">
+      <view v-else class="bubble" :class="mine ? 'bubble-mine' : 'bubble-other'" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
+        <view v-if="message.quote" class="quote-box" :class="mine ? 'quote-mine' : 'quote-other'">
+          <text class="quote-name">{{ message.quote.senderNickname }}</text>
+          <text class="quote-text">{{ message.quote.content }}</text>
+        </view>
         <text
           v-for="(p, idx) in parts"
           :key="idx"
@@ -121,6 +137,8 @@ function openLink(url: string) {
 .row {
   display: flex;
   align-items: flex-start;
+  width: 100%;
+  box-sizing: border-box;
   padding: 16rpx 24rpx;
 }
 
@@ -242,6 +260,36 @@ function openLink(url: string) {
 
 .mine .link {
   color: #dce7ff;
+}
+
+.quote-box {
+  margin-bottom: 10rpx;
+  padding: 10rpx 12rpx;
+  border-radius: 10rpx;
+}
+
+.quote-other {
+  background: #f3f4f7;
+}
+
+.quote-mine {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.quote-name {
+  display: block;
+  font-size: 22rpx;
+  font-weight: 700;
+  margin-bottom: 4rpx;
+}
+
+.quote-text {
+  display: block;
+  font-size: 22rpx;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .time {

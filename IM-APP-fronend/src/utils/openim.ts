@@ -461,6 +461,47 @@ export async function revokeMessage(conversationID: string, clientMsgID: string)
   await imCall(IMMethods.RevokeMessage, { conversationID, clientMsgID })
 }
 
+export async function deleteLocalMessage(conversationID: string, clientMsgID: string): Promise<void> {
+  try {
+    await imCall(IMMethods.DeleteMessage, { conversationID, clientMsgID })
+  } catch {
+    await imCall(IMMethods.DeleteMessageFromLocalStorage, { conversationID, clientMsgID })
+  }
+}
+
+export async function sendQuoteMessage(
+  target: IMTarget,
+  text: string,
+  quote: MessageItem,
+): Promise<MessageItem> {
+  const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
+    text,
+    message: quote,
+  })
+  return sendCreatedMessage(target, message)
+}
+
+export async function sendForwardMessage(target: IMTarget, source: MessageItem): Promise<MessageItem> {
+  const message = await imCall<MessageItem>(IMMethods.CreateForwardMessage, {
+    message: source,
+  })
+  return sendCreatedMessage(target, message)
+}
+
+export async function sendAtTextMessage(
+  target: IMTarget,
+  text: string,
+  atUserIDList: string[],
+  atUsersInfo: Array<{ atUserID: string; groupNickname: string }>,
+): Promise<MessageItem> {
+  const message = await imCall<MessageItem>(IMMethods.CreateTextAtMessage, {
+    text,
+    atUserIDList,
+    atUsersInfo,
+  })
+  return sendCreatedMessage(target, message)
+}
+
 async function sendCreatedMessage(target: IMTarget, message: MessageItem): Promise<MessageItem> {
   // sessionType=3 必须填 groupID，填 recvID 会被 OpenIM 拒绝
   return imCall<MessageItem>(IMMethods.SendMessage, {
@@ -622,6 +663,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     type: toAppMessageType(item.contentType),
     content: extractContent(item),
     createdAt: toISOTime(item.sendTime),
+    quote: quotePreviewOf(item),
     status: item.status === MessageStatus.Failed ? 'failed' : 'sent',
   }
 }
@@ -656,6 +698,16 @@ function jsonContentField(raw: string, key: string): string {
     /* content 不是 JSON 时按纯文本用 */
   }
   return raw
+}
+
+function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {
+  const quoted = item.quoteElem?.quoteMessage
+  if (!quoted) return undefined
+  const content = extractContent(quoted).trim()
+  return {
+    senderNickname: quoted.senderNickname || '',
+    content: content || '[消息]',
+  }
 }
 
 function extractContent(item: MessageItem): string {

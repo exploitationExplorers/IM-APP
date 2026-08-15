@@ -105,7 +105,7 @@ func main() {
 		chatSvc.Hub = hub
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
-	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
+	favSvc := &service.FavoriteService{Fav: favRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}

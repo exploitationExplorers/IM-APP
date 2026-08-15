@@ -2,6 +2,11 @@
 
 export type MessageType = 'text' | 'image' | 'voice' | 'file' | 'system'
 
+export interface MessageQuote {
+  senderNickname: string
+  content: string
+}
+
 export interface ChatMessage {
   id: string
   conversationId: string
@@ -13,6 +18,8 @@ export interface ChatMessage {
   type: MessageType
   content: string
   createdAt: string
+  /** 引用回复时展示的原消息摘要 */
+  quote?: MessageQuote
   /** 本地发送中状态 */
   status?: 'sending' | 'sent' | 'failed'
 }

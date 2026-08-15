@@ -875,9 +875,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ## 收藏
 
-收藏消息快照（文字 / 表情 / 图片 / 视频 / 文件 / 语音）。创建时按业务库 `messages` 校验消息存在且当前用户是会话成员；同一用户对同一消息幂等。
-
-> 说明：当前实现依赖 PostgreSQL `messages` 表。OpenIM 主路径下的消息尚未落该表时，创建可能返回「消息不存在」；列表 / 删除不受影响。
+收藏消息快照（文字 / 表情 / 图片 / 视频 / 文件 / 语音）。OpenIM 主路径下由客户端提交快照，服务端不再查业务库 `messages`。同一用户对同一 `messageId` 幂等。
 
 ### POST `/api/v1/favorites`
 
@@ -885,7 +883,13 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 **Body**
 ```json
-{ "messageId": "uuid" }
+{
+  "messageId": "OpenIM clientMsgID",
+  "type": "text",
+  "content": "消息内容或文件地址/JSON",
+  "senderId": "发送者业务或 OpenIM ID",
+  "conversationId": "OpenIM conversationID"
+}
 ```
 
 **Response**

@@ -12,8 +12,11 @@ import {
   markConversationRead,
   onIMEvent,
   onUserStatusChanged,
+  deleteLocalMessage,
   revokeMessage,
+  sendForwardMessage,
   sendImageMessage,
+  sendQuoteMessage,
   sendTextMessage,
   sendVoiceMessage,
   subscribeUsersStatus,
@@ -34,6 +37,8 @@ const PAGE_SIZE = 20
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
   const messagesMap = ref<Record<string, ChatMessage[]>>({})
+  /** OpenIM 原始消息，引用 / 转发需要完整 MessageItem */
+  const rawMessages = ref<Record<string, MessageItem>>({})
   const loading = ref(false)
   /** 会话是否已翻到最早一条 */
   const historyEnd = ref<Record<string, boolean>>({})
@@ -47,8 +52,14 @@ export const useChatStore = defineStore('chat', () => {
     conversations.value.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
   )
 
+  function rememberRaw(item: MessageItem) {
+    if (!item?.clientMsgID) return
+    rawMessages.value = { ...rawMessages.value, [item.clientMsgID]: item }
+  }
+
   function appendMessage(item: MessageItem) {
     if (!item?.clientMsgID) return
+    rememberRaw(item)
     const message = toChatMessage(item)
     if (!message.conversationId) return
     const list = messagesMap.value[message.conversationId] || []
@@ -285,6 +296,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadMessages(conversationId: string) {
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
+    messageList.forEach(rememberRaw)
     messagesMap.value = { ...messagesMap.value, [conversationId]: messageList.map(toChatMessage) }
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
     await markAsRead(conversationId)
@@ -302,6 +314,7 @@ export const useChatStore = defineStore('chat', () => {
     )
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
     if (!messageList.length) return false
+    messageList.forEach(rememberRaw)
     messagesMap.value = {
       ...messagesMap.value,
       [conversationId]: [...messageList.map(toChatMessage), ...list],
@@ -345,6 +358,7 @@ export const useChatStore = defineStore('chat', () => {
     messagesMap.value = { ...messagesMap.value, [conversationId]: [...list, placeholder] }
     try {
       const sent = await send()
+      rememberRaw(sent)
       replaceMessage(conversationId, placeholder.id, toChatMessage(sent))
     } catch (e) {
       replaceMessage(conversationId, placeholder.id, { ...placeholder, status: 'failed' })
@@ -415,6 +429,49 @@ export const useChatStore = defineStore('chat', () => {
     dropRevokedMessage(conversationId, messageId)
   }
 
+  async function sendQuote(conversationId: string, text: string, quoteMessageId: string, senderId: string) {
+    const quote = rawMessages.value[quoteMessageId]
+    if (!quote) throw new Error('原消息不存在')
+    const target = targetOf(requireConversation(conversationId))
+    const placeholder = placeholderOf(conversationId, senderId, 'text', text)
+    placeholder.quote = {
+      senderNickname: quote.senderNickname || '',
+      content: toChatMessage(quote).content || '[消息]',
+    }
+    await sendWithPlaceholder(conversationId, placeholder, () => sendQuoteMessage(target, text, quote))
+  }
+
+  async function removeLocal(conversationId: string, messageId: string) {
+    await deleteLocalMessage(conversationId, messageId).catch(() => undefined)
+    const list = messagesMap.value[conversationId] || []
+    messagesMap.value = {
+      ...messagesMap.value,
+      [conversationId]: list.filter((m) => m.id !== messageId),
+    }
+    const nextRaw = { ...rawMessages.value }
+    delete nextRaw[messageId]
+    rawMessages.value = nextRaw
+  }
+
+  async function removeLocalMany(conversationId: string, messageIds: string[]) {
+    for (const id of messageIds) {
+      await removeLocal(conversationId, id)
+    }
+  }
+
+  async function forwardToConversation(targetConversationId: string, messageIds: string[]) {
+    const target = targetOf(requireConversation(targetConversationId))
+    for (const id of messageIds) {
+      const raw = rawMessages.value[id]
+      if (!raw) throw new Error('原消息不存在')
+      await sendForwardMessage(target, raw)
+    }
+  }
+
+  function getRawMessage(messageId: string): MessageItem | undefined {
+    return rawMessages.value[messageId]
+  }
+
   async function markAllAsRead() {
     await Promise.all(conversations.value.map((c) => markAsRead(c.id)))
     conversations.value = conversations.value.map((c) => ({ ...c, unreadCount: 0 }))
@@ -424,6 +481,7 @@ export const useChatStore = defineStore('chat', () => {
     unsubscribeRealtime()
     conversations.value = []
     messagesMap.value = {}
+    rawMessages.value = {}
     historyEnd.value = {}
     onlineStatus.value = {}
     subscribedUserIDs.value.clear()
@@ -445,7 +503,12 @@ export const useChatStore = defineStore('chat', () => {
     sendText,
     sendImage,
     sendVoice,
+    sendQuote,
     recall,
+    removeLocal,
+    removeLocalMany,
+    forwardToConversation,
+    getRawMessage,
     markAllAsRead,
     subscribeRealtime,
     unsubscribeRealtime,
