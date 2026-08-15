@@ -32,12 +32,22 @@ export interface FetchFavoritesParams {
   size?: number;
 }
 
-/** 收藏消息 */
-export async function createFavorite(messageId: string): Promise<FavoriteItem> {
+export interface CreateFavoriteInput {
+  messageId: string;
+  type: FavoriteType;
+  content: string;
+  senderId: string;
+  conversationId: string;
+}
+
+/** 收藏消息快照 */
+export async function createFavorite(
+  input: CreateFavoriteInput,
+): Promise<FavoriteItem> {
   return request<FavoriteItem>({
     url: "/favorites",
     method: "POST",
-    data: { messageId },
+    data: input,
   });
 }
 

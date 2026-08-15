@@ -1,18 +1,37 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImSwitch from '@/components/ImSwitch.vue'
+import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
+import { useChatStore } from '@/stores/chat'
+import {
+  setConversationPin,
+  setConversationRecvOpt,
+} from '@/utils/openim'
+import { resolveIMGroup } from '@/api/im'
+import { safeBack } from '@/utils/nav'
 import { APP_CONFIG } from '@/config'
 
 const groupStore = useGroupStore()
+const chatStore = useChatStore()
 const groupId = ref('')
 const code = ref('group')
 
 const groupDetail = computed(() => groupStore.currentGroup)
 const memberList = computed(() => groupStore.members)
-const groupName = computed(() => groupDetail.value?.name || '群聊')
+const groupName = computed(() => groupDetail.value?.remark?.trim() || groupDetail.value?.name || '群聊')
 const avatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
+
+// 会话级设置：进入页面时从本地会话列表读取当前状态（OpenIM 已云同步）
+const convId = ref('')
+const recvOpt = ref<number>(MessageReceiveOptType.Normal)
+const pinned = ref(false)
+
+function getMemberDisplayName(member: { nickname?: string; groupNickname?: string }) {
+  return member.groupNickname || member.nickname || '成员'
+}
 
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
@@ -25,13 +44,67 @@ onLoad(async (query) => {
 
   try {
     await groupStore.loadDetail(groupId.value)
+    await initConversationSettings()
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载群聊详情失败', icon: 'none' })
   }
 })
 
+/**
+ * 取该群的 OpenIM 会话并读出当前置顶 / 免打扰状态。
+ * 优先用本地缓存（按 OpenIM 会话 ID 匹配）；没有则让 SDK 建会话（或后端兜底），保证开关与真实状态一致。
+ */
+async function initConversationSettings() {
+  try {
+    const target = await resolveIMGroup(groupId.value)
+    const conversationID = `sg_${target.imGroupId}`
+    const cached = chatStore.conversations.find((c) => c.id === conversationID)
+    const conv = cached || (await chatStore.enterConversation({ type: 'group', businessId: groupId.value }))
+    convId.value = conv.id
+    recvOpt.value = conv.recvMsgOpt ?? MessageReceiveOptType.Normal
+    pinned.value = conv.pinned ?? false
+  } catch {
+    // 拿不到会话 ID 时开关保持默认，不影响其它功能
+  }
+}
+
+async function onToggleRecv(v: boolean) {
+  if (!convId.value) {
+    uni.showToast({ title: '会话未就绪', icon: 'none' })
+    return
+  }
+  const opt = v ? MessageReceiveOptType.NotNotify : MessageReceiveOptType.Normal
+  try {
+    await setConversationRecvOpt(convId.value, opt)
+    recvOpt.value = opt
+    chatStore.patchConversation(convId.value, { recvMsgOpt: opt })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
+  }
+}
+
+async function onTogglePin(v: boolean) {
+  if (!convId.value) {
+    uni.showToast({ title: '会话未就绪', icon: 'none' })
+    return
+  }
+  try {
+    await setConversationPin(convId.value, v)
+    pinned.value = v
+    chatStore.patchConversation(convId.value, { pinned: v })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
+  }
+}
+
+function goToChat() {
+  uni.navigateTo({
+    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId.value)}&title=${encodeURIComponent(groupName.value)}&avatar=${encodeURIComponent(avatar.value)}`,
+  })
+}
+
 function goBack() {
-  uni.navigateBack()
+  safeBack('/pages/chat/index')
 }
 
 function goToMembers() {
@@ -55,6 +128,12 @@ function goToGroupQrcode() {
 function goToMyNickname() {
   uni.navigateTo({
     url: `/pages/group/my-nickname?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToRemark() {
+  uni.navigateTo({
+    url: `/pages/group/remark?id=${encodeURIComponent(groupId.value)}`,
   })
 }
 
@@ -108,7 +187,7 @@ function copyGroupId() {
       <view class="member-row" @click="goToMembers">
         <view v-for="member in memberList" :key="member.id" class="member-item">
           <image class="member-avatar" :src="member.avatar" mode="aspectFill" />
-          <text class="member-name">{{ member.nickname }}</text>
+          <text class="member-name">{{ getMemberDisplayName(member) }}</text>
         </view>
         <view v-if="memberList.length" class="add-member" @click.stop="goToMembers">
           <view class="add-circle">＋</view>
@@ -125,6 +204,11 @@ function copyGroupId() {
     </view>
 
     <view class="info-list">
+      <view class="chat-entry" @click="goToChat">
+        <text class="chat-entry-text">进入群聊</text>
+        <text class="arrow">›</text>
+      </view>
+
       <view class="info-row">
         <text class="label">群组名称</text>
         <text class="value">{{ groupName }}</text>
@@ -155,6 +239,14 @@ function copyGroupId() {
         <text class="arrow">›</text>
       </view>
 
+      <view class="info-row nav-row" @click="goToRemark">
+        <text class="label">群备注</text>
+        <view class="row-right">
+          <text class="muted">{{ groupDetail?.remark?.trim() || '未设置' }}</text>
+          <text class="arrow">›</text>
+        </view>
+      </view>
+
       <view class="info-row nav-row" @click="goToMyNickname">
         <text class="label">我在本群的昵称</text>
         <text class="arrow">›</text>
@@ -177,16 +269,12 @@ function copyGroupId() {
 
       <view class="switch-row">
         <text class="label">消息免打扰</text>
-        <view class="switch-track">
-          <view class="switch-knob" />
-        </view>
+        <ImSwitch :model-value="recvOpt === MessageReceiveOptType.NotNotify" @change="onToggleRecv" />
       </view>
 
       <view class="switch-row">
         <text class="label">置顶聊天</text>
-        <view class="switch-track">
-          <view class="switch-knob" />
-        </view>
+        <ImSwitch :model-value="pinned" @change="onTogglePin" />
       </view>
 
       <view class="action-row" @click="goToReport">
@@ -334,6 +422,22 @@ function copyGroupId() {
   background: #fff;
 }
 
+.chat-entry {
+  min-height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 30rpx;
+  background: #fff;
+  border-bottom: 1rpx solid #f0f0f0;
+}
+
+.chat-entry-text {
+  font-size: 30rpx;
+  color: #1d1d1d;
+  font-weight: 500;
+}
+
 .info-row {
   min-height: 96rpx;
   display: flex;
@@ -419,27 +523,6 @@ function copyGroupId() {
   padding: 0 30rpx;
   background: #fff;
   border-bottom: 1rpx solid #f0f0f0;
-}
-
-.switch-track {
-  width: 76rpx;
-  height: 40rpx;
-  border-radius: 24rpx;
-  background: #d9d9d9;
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding: 4rpx;
-}
-
-.switch-knob {
-  width: 32rpx;
-  height: 32rpx;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.16);
-  position: absolute;
-  left: 6rpx;
 }
 
 .action-row {

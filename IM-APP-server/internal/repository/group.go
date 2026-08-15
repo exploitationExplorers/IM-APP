@@ -48,6 +48,20 @@ func (r *GroupRepo) LookupGroupIDs(ctx context.Context, id string) (internalID, 
 	return internalID, publicID, err
 }
 
+// PublicIDByInternalID is the inverse of InternalIDByPublicID: given the
+// database group UUID (which also doubles as the OpenIM group ID source),
+// return the public ID clients use in URLs.
+func (r *GroupRepo) PublicIDByInternalID(ctx context.Context, internalID string) (string, error) {
+	var publicID string
+	err := r.DB.QueryRow(ctx, `
+		SELECT public_id FROM groups WHERE id=$1::uuid`, internalID,
+	).Scan(&publicID)
+	if err != nil {
+		return "", ErrIMTargetNotFound
+	}
+	return publicID, nil
+}
+
 func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs []string) (models.GroupInfo, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -131,13 +145,14 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
 			COALESCE(g.announcement,''), COALESCE(g.allow_member_add_friend, true),
 			COALESCE(g.conversation_id::text,''),
-			gm.role, COALESCE(gm.nickname,''), COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false)
+			gm.role, COALESCE(gm.nickname,''), COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false),
+		COALESCE((SELECT remark FROM group_remarks gr WHERE gr.user_id=$2::uuid AND gr.group_id=g.id),'')
 		FROM groups g
 		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2::uuid
 		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID, uid).Scan(
 		&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.MemberCount,
 		&g.Announcement, &allow, &g.ConversationID, &g.MyRole, &g.MyNickname,
-		&g.JoinMode, &g.AllMuted)
+		&g.JoinMode, &g.AllMuted, &g.Remark)
 	g.AllowMemberAddFriend = allow
 	if err == nil {
 		canManage := g.MyRole == "owner" || g.MyRole == "admin"
@@ -180,6 +195,13 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]mod
 			return nil, err
 		}
 		list = append(list, m)
+	}
+	if rm, rerr := r.GetMemberRemarks(ctx, groupID, uid); rerr == nil {
+		for i := range list {
+			if r2, ok := rm[list[i].ID]; ok {
+				list[i].MemberRemark = r2
+			}
+		}
 	}
 	return list, nil
 }
@@ -852,3 +874,53 @@ func (r *GroupRepo) userSummary(ctx context.Context, uid string) (models.UserSum
 	).Scan(&u.ID, &u.PublicID, &u.Nickname, &u.Avatar)
 	return u, err
 }
+
+func (r *GroupRepo) GetGroupRemark(ctx context.Context, uid, groupID string) (string, error) {
+	var remark string
+	err := r.DB.QueryRow(ctx, `
+		SELECT COALESCE(remark,'') FROM group_remarks
+		WHERE user_id=$1::uuid AND group_id=$2::uuid`, uid, groupID).Scan(&remark)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return remark, err
+}
+
+func (r *GroupRepo) SetGroupRemark(ctx context.Context, uid, groupID, remark string) error {
+	_, err := r.DB.Exec(ctx, `
+		INSERT INTO group_remarks(user_id, group_id, remark, updated_at)
+		VALUES($1::uuid, $2::uuid, $3, now())
+		ON CONFLICT (user_id, group_id)
+		DO UPDATE SET remark=EXCLUDED.remark, updated_at=now()`, uid, groupID, remark)
+	return err
+}
+
+func (r *GroupRepo) GetMemberRemarks(ctx context.Context, uid, groupID string) (map[string]string, error) {
+	rows, err := r.DB.Query(ctx, `
+		SELECT member_user_id::text, COALESCE(remark,'')
+		FROM group_member_remarks
+		WHERE user_id=$1::uuid AND group_id=$2::uuid`, uid, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var mid, remark string
+		if err := rows.Scan(&mid, &remark); err != nil {
+			return nil, err
+		}
+		out[mid] = remark
+	}
+	return out, nil
+}
+
+func (r *GroupRepo) SetMemberRemark(ctx context.Context, uid, groupID, memberUserID, remark string) error {
+	_, err := r.DB.Exec(ctx, `
+		INSERT INTO group_member_remarks(user_id, group_id, member_user_id, remark, updated_at)
+		VALUES($1::uuid, $2::uuid, $3::uuid, $4, now())
+		ON CONFLICT (user_id, group_id, member_user_id)
+		DO UPDATE SET remark=EXCLUDED.remark, updated_at=now()`, uid, groupID, memberUserID, remark)
+	return err
+}
+

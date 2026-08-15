@@ -3,15 +3,20 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
+import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
+import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
+import ImQuoteBar from '@/components/ImQuoteBar.vue'
+import { useChatMessageActions } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
-import { businessUserIdFromIM, imUserId } from '@/utils/openim'
-import { resolveIMGroup } from '@/api/im'
-import { fetchGroupDetail } from '@/api/group'
+import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
-import type { ChatMessage } from '@/types'
+import { resolveIMGroupByIM } from '@/api/im'
+import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
+import { safeBack } from '@/utils/nav'
+import type { ChatMessage, Conversation } from '@/types'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -24,6 +29,10 @@ const chatType = ref<'private' | 'group'>('group')
 /** 业务侧的好友 / 群 ID，仅用于跳资料页 */
 const businessId = ref('')
 const memberCount = ref(0)
+const myRole = ref<'owner' | 'admin' | 'member'>('member')
+/** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
+const convRef = ref<Conversation | null>(null)
+const memberRemarkMap = ref<Record<string, string>>({})
 const input = ref('')
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
@@ -50,20 +59,53 @@ const messages = computed(() =>
   (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
 )
 // 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
-const myId = computed(() => imUserId.value)
+// 用 ref 快照而不是 computed：避免 H5/热更新下 computed 与全局 ref 不同步导致 mine 判断失效
+const myId = ref('')
 const myAvatar = computed(() => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl)
 const settingsStore = useChatSettingsStore()
 
+function isMine(message: ChatMessage): boolean {
+  if (myId.value && message.senderId === myId.value) return true
+  // 发送中的占位消息一定属于自己，避免 myId 还没拿到时跑到左边
+  if (message.status === 'sending') return true
+  return false
+}
+
 function avatarOf(message: ChatMessage): string {
-  if (message.senderId === myId.value) {
+  if (isMine(message)) {
     return message.senderAvatar || myAvatar.value
   }
   if (message.senderAvatar) return message.senderAvatar
   return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
 }
 
+function nicknameOf(message: ChatMessage): string {
+  if (chatType.value !== 'group' || message.senderId === myId.value) return ''
+  const uid = businessUserIdFromIM(message.senderId)
+  if (!uid) return message.senderNickname || ''
+  const mr = memberRemarkMap.value[uid]
+  if (mr) return mr
+  if (message.senderNickname) return message.senderNickname
+  const contact = contactStore.contacts.find((c) => c.id === uid)
+  return contact?.remark?.trim() || contact?.nickname || ''
+}
+
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
+const hasInput = computed(() => input.value.trim().length > 0)
+
+const actions = useChatMessageActions({
+  conversationId,
+  chatType,
+  businessId,
+  myId,
+  myRole,
+  input,
+  nicknameOf,
+  isMine,
+  visibleMessages: messages,
+  conversationTitle: title,
+})
 
 onLoad(async (query) => {
   title.value = decodeURIComponent(String(query?.title || '聊天'))
@@ -79,10 +121,49 @@ onLoad(async (query) => {
       type: chatType.value,
       businessId: businessId.value,
     })
+    convRef.value = conv
     conversationId.value = conv.id
     if (!query?.title) title.value = conv.title
-    await resolveBusinessTarget(conv)
+
+    // 确保当前 OpenIM 用户 ID 已就绪（某些 H5/热更新场景下 imUserId 可能未同步到本页）
+    if (!imUserId.value) {
+      await ensureIMLogin()
+    }
+    myId.value = imUserId.value
+    if (!myId.value) {
+      throw new Error('当前 IM 用户 ID 未初始化，请重新登录')
+    }
+
+    if (chatType.value === 'group') {
+      try {
+        const gid = businessId.value || (await resolveBusinessTarget())
+        if (gid) {
+          const detail = await fetchGroupDetail(gid)
+          memberCount.value = detail.memberCount || 0
+        }
+      } catch {
+        memberCount.value = 0
+      }
+    }
+
     await chatStore.loadMessages(conv.id)
+    if (chatType.value === 'group' && businessId.value) {
+      try {
+        const ms = await fetchGroupMembers(businessId.value)
+        const map: Record<string, string> = {}
+        for (const m of ms) {
+          const r = m.memberRemark?.trim()
+          if (r) map[m.id] = r
+        }
+        memberRemarkMap.value = map
+        memberCount.value = ms.length
+        const me = userStore.profile?.id
+        const self = me ? ms.find((m) => m.id === me) : undefined
+        if (self) myRole.value = self.role
+      } catch {
+        // 成员备注加载失败时不影响聊天
+      }
+    }
     await nextTick()
     scrollToBottom()
   } catch (e) {
@@ -143,7 +224,17 @@ async function onSend() {
   input.value = ''
   showPlusPanel.value = false
   try {
-    await chatStore.sendText(conversationId.value, text, myId.value)
+    if (actions.quote.value) {
+      await chatStore.sendQuote(
+        conversationId.value,
+        text,
+        actions.quote.value.id,
+        imUserId.value || myId.value,
+      )
+      actions.clearQuote()
+    } else {
+      await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
+    }
     await nextTick()
     scrollToBottom()
   } catch (e) {
@@ -157,47 +248,48 @@ function onConfirmSend() {
 }
 
 function goBack() {
-  uni.navigateBack()
+  safeBack('/pages/chat/index')
 }
 
-async function resolveBusinessTarget(conv: { peerUserId?: string; groupId?: string }) {
+/**
+ * 解析资料页所需的「业务 ID」。
+ * 通讯录 / 好友详情进来时已带 targetId（业务 ID），直接用；
+ * 聊天列表点进来只有 OpenIM 会话 ID，需要根据会话反查：
+ *  - 私聊：OpenIM 用户 ID 逆运算回业务 UUID（与 resolveIMPeer 同一套 ID）。
+ *  - 群聊：OpenIM 群 ID → 后端反查出对外 public ID（群资料页与 resolveIMGroup 需要它）。
+ */
+async function resolveBusinessTarget(): Promise<string> {
+  if (businessId.value) return businessId.value
+  const conv = convRef.value
+  if (!conv) return ''
   if (chatType.value === 'private') {
-    if (!businessId.value && conv.peerUserId) {
-      businessId.value = businessUserIdFromIM(conv.peerUserId)
-    }
-    return
+    return businessUserIdFromIM(conv.peerUserId || '')
   }
-  if (!businessId.value && conv.groupId) {
+  if (conv.groupId) {
     try {
-      const target = await resolveIMGroup(conv.groupId)
-      businessId.value = target.businessGroupId
+      const target = await resolveIMGroupByIM(conv.groupId)
+      return target.businessGroupId
     } catch {
-      return
+      return ''
     }
   }
-  if (!businessId.value) return
-  try {
-    const detail = await fetchGroupDetail(businessId.value)
-    memberCount.value = detail.memberCount || 0
-    if (!title.value || title.value === '聊天') title.value = detail.name
-  } catch {
-    memberCount.value = 0
-  }
+  return ''
 }
 
-function goToProfile() {
-  if (!businessId.value) {
-    uni.showToast({ title: '暂时无法打开资料', icon: 'none' })
+async function goToProfile() {
+  const id = await resolveBusinessTarget()
+  if (!id) {
+    uni.showToast({ title: '暂无可跳转的资料', icon: 'none' })
     return
   }
   if (chatType.value === 'private') {
     uni.navigateTo({
-      url: `/pages/contacts/friend-detail?id=${encodeURIComponent(businessId.value)}`,
+      url: `/pages/contacts/friend-detail?id=${encodeURIComponent(id)}`,
     })
     return
   }
   uni.navigateTo({
-    url: `/pages/group/detail?id=${encodeURIComponent(businessId.value)}`,
+    url: `/pages/group/detail?id=${encodeURIComponent(id)}&code=group`,
   })
 }
 
@@ -392,7 +484,7 @@ async function sendVoiceDraft() {
       conversationId.value,
       voiceDraft.value.path,
       voiceDraft.value.duration,
-      myId.value,
+      imUserId.value || myId.value,
     )
     voiceDraft.value = null
     voiceMode.value = false
@@ -438,7 +530,7 @@ function pickImage() {
     success: async (res) => {
       showPlusPanel.value = false
       try {
-        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], myId.value)
+        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
         await nextTick()
         scrollToBottom()
       } catch (e) {
@@ -471,21 +563,44 @@ function pickImage() {
         v-for="m in messages"
         :id="`msg_${m.id}`"
         :key="m.id"
+        class="msg-row"
+        :class="{ selecting: actions.selecting.value }"
+        @click="actions.selecting.value ? actions.toggleSelect(m) : undefined"
       >
+        <view v-if="actions.selecting.value && m.type !== 'system'" class="msg-check" :class="{ on: actions.selectedIds.value.has(m.id) }">
+          <text v-if="actions.selectedIds.value.has(m.id)">✓</text>
+        </view>
         <view v-if="m.type === 'system'" class="sys-tip">
           <text class="sys-tip-text">{{ m.content }}</text>
         </view>
         <ChatBubble
           v-else
           :message="m"
-          :mine="m.senderId === myId"
+          :mine="isMine(m)"
           :avatar="avatarOf(m)"
+          :nickname="nicknameOf(m)"
           @avatar-click="onAvatarClick(m)"
+          @longpress="actions.openMenu(m)"
         />
       </view>
     </scroll-view>
 
-    <view class="composer safe-bottom">
+    <view v-if="actions.selecting.value" class="composer safe-bottom">
+      <ImMessageSelectBar
+        :count="actions.selectedCount.value"
+        :mode="actions.selectMode.value"
+        @cancel="actions.cancelSelect"
+        @forward="actions.onSelectForward"
+        @remove="actions.onSelectDelete"
+      />
+    </view>
+    <view v-else class="composer safe-bottom">
+      <ImQuoteBar
+        v-if="actions.quote.value"
+        :nickname="actions.quote.value.senderNickname || nicknameOf(actions.quote.value) || '我'"
+        :text="actions.quote.value.content"
+        @close="actions.clearQuote"
+      />
       <view v-if="voiceMode" class="voice-bar">
         <view class="voice-trash" @click="cancelVoiceDraft">🗑</view>
 
@@ -516,6 +631,7 @@ function pickImage() {
           <text class="emoji" @click="onEmoji">☺</text>
         </view>
         <view class="tool" @click="onPlus">＋</view>
+        <view v-if="hasInput" class="send-btn" @click="onSend">传送</view>
       </view>
 
       <view v-if="showPlusPanel" class="plus-panel">
@@ -532,6 +648,15 @@ function pickImage() {
         @close="showEmojiPanel = false"
       />
     </view>
+
+    <ImMessageActionMenu
+      v-if="actions.menuVisible.value"
+      :items="actions.menuItems.value"
+      :top="actions.menuTop.value"
+      :left="actions.menuLeft.value"
+      @select="actions.onMenuSelect"
+      @close="actions.closeMenu"
+    />
   </view>
 </template>
 
@@ -601,6 +726,42 @@ function pickImage() {
   padding-bottom: 16rpx;
 }
 
+.msg-row {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.msg-row.selecting {
+  display: flex;
+  align-items: flex-start;
+  padding-left: 8rpx;
+}
+
+.msg-row.selecting :deep(.row) {
+  flex: 1;
+  min-width: 0;
+}
+
+.msg-check {
+  width: 40rpx;
+  height: 40rpx;
+  margin: 28rpx 8rpx 0 16rpx;
+  border-radius: 50%;
+  border: 3rpx solid #c8ccd6;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 22rpx;
+  flex-shrink: 0;
+}
+
+.msg-check.on {
+  border-color: #0a2fc2;
+  background: #0a2fc2;
+}
+
 .sys-tip {
   display: flex;
   justify-content: center;
@@ -636,6 +797,20 @@ function pickImage() {
   justify-content: center;
   font-size: 40rpx;
   color: #333;
+}
+
+.send-btn {
+  min-width: 120rpx;
+  height: 64rpx;
+  padding: 0 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18rpx;
+  background: #0a2fc2;
+  color: #fff;
+  font-size: 26rpx;
+  font-weight: 600;
 }
 
 .input-wrap {

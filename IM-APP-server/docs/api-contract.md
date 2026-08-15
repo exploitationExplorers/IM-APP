@@ -568,6 +568,53 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
+## 用户举报（需 JWT）
+
+### GET `/api/v1/report-reasons?targetType=user&language=zh`
+
+返回当前启用的用户举报原因，按 `sortOrder` 排序。当前后端只接受 `targetType=user`，`language` 默认 `zh`。
+
+**Response**
+```json
+[
+  {
+    "id": "uuid",
+    "targetType": "user",
+    "reason": "垃圾广告",
+    "language": "zh",
+    "sortOrder": 10
+  }
+]
+```
+
+### POST `/api/v1/reports`
+
+提交用户举报。证据文件必须由当前用户上传且状态为 `ready`，最多 9 个；补充说明最多 1000 个字符。同一用户对同一目标已有 `pending`、`processing` 或 `reopened` 工单时，接口幂等返回原工单。
+
+**Body**
+```json
+{
+  "targetType": "user",
+  "targetId": "被举报用户UUID",
+  "reasonId": "举报原因UUID",
+  "description": "补充说明",
+  "evidenceFileIds": ["已完成上传的文件UUID"]
+}
+```
+
+**Response**
+```json
+{
+  "id": "举报工单UUID",
+  "status": "pending",
+  "createdAt": "2026-08-14T12:00:00Z"
+}
+```
+
+该接口写入管理后台共用的 `report_reasons`、`reports`、`report_files`，不写入也不修改原有 `group_reports`。
+
+---
+
 ## 文件上传（需 JWT）
 
 ### POST `/api/v1/files/uploads`
@@ -661,9 +708,121 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 把业务用户 UUID 解析为稳定的 OpenIM userID，并返回 `canChat/denyReason`。校验双方账号、好友关系和双向拉黑状态，不创建 PostgreSQL 会话。
 
+### GET `/api/v1/im/conversations/:conversationId/settings`
+
+读取当前用户某个 OpenIM 单聊会话的设置。只允许 `si_` 单聊会话，并由 OpenIM 按当前用户身份校验会话归属。
+
+**Response**
+```json
+{
+  "conversationId": "si_xxx_xxx",
+  "pinned": false,
+  "doNotDisturb": false,
+  "burnAfterRead": false,
+  "burnDuration": 0
+}
+```
+
+### PATCH `/api/v1/im/conversations/:conversationId/settings`
+
+局部更新置顶、消息免打扰和阅后即焚。所有字段均可选，但至少传一个。`burnDuration` 单位为秒；启用时范围为 5～86400，关闭阅后即焚时服务端自动清零。
+
+**Body**
+```json
+{
+  "pinned": true,
+  "doNotDisturb": true,
+  "burnAfterRead": true,
+  "burnDuration": 30
+}
+```
+
+设置直接保存到 OpenIM，不新增 PostgreSQL 字段。
+
 ### GET `/api/v1/im/groups/:businessGroupId`
 
 把纯数字业务群号、内部 UUID 或 OpenIM 群 ID 解析为稳定的 OpenIM groupID，响应里的 `businessGroupId` 始终是纯数字群号。校验群状态、成员资格、单人禁言及全员禁言。若 OpenIM 尚无该群（历史数据未同步），会按业务库补创建并把当前用户邀请进群后再返回；全量成员对账仍由 Outbox 负责。
+
+### GET `/api/v1/im/conversations/:peerType/:peerId`
+
+获取单个会话的当前设置（OpenIM 全量对象）。
+
+- `peerType`：`c2c`（单聊）或 `group`（群聊）
+- `peerId`：业务好友 ID 或业务群 ID（**无需传 OpenIM conversationId**，后端用 `ResolvePeer`/`ResolveGroup` 解析并拼 `si_`/`sg_` 会话 ID，且带好友/群关系校验）
+
+**Response `data`**：见下方 PATCH 返回结构。
+
+### PATCH `/api/v1/im/conversations/:peerType/:peerId`
+
+部分更新会话设置，请求体为下列字段的任意子集（只传要改的）。后端先 GET 全量再叠加回写，避免清零其它设置。
+
+- `peerType` / `peerId`：含义同上
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `recvMsgOpt` | int | 0 正常 / 1 免打扰 / 2 仅在线接收 |
+| `isPinned` | bool | 置顶聊天 |
+| `isPrivateChat` | bool | 阅后即焚开关 |
+| `burnDuration` | int | 阅后即焚时长（秒） |
+| `isMsgDestruct` | bool | 消息定时销毁开关 |
+| `msgDestructTime` | int | 消息定时销毁时长（秒） |
+| `groupAtType` | int | 群 @ 强提醒档位 |
+| `ex` | string | 会话扩展（建议存备注名） |
+| `draftText` | string | 会话草稿 |
+
+**Body 示例**
+```json
+{ "recvMsgOpt": 1, "isPinned": true, "ex": "老王" }
+```
+
+**Response `data`**：回写后该会话的最新全量设置。至少传一个字段，否则 400；`peerType` 非法 400；与好友/群不可聊天 403；会话不存在（仅 GET）404。
+
+### POST `/api/v1/im/conversations/:peerType/:peerId/read`
+
+标记会话已读，清空未读数。`peerType` / `peerId` 含义同上。
+
+**Response `data`**：`{ "ok": true }`
+
+### PUT `/api/v1/im/me/global-msg-recv-opt`
+
+设置当前用户级全局免打扰（对所有会话生效）。
+
+**Body**
+```json
+{ "recvMsgOpt": 1 }
+```
+
+**Response `data`**：`{ "recvMsgOpt": 1 }`
+
+### POST `/api/v1/im/me/push-token`
+
+注册/更新当前用户的设备推送凭证（App 后台/离线时的「来消息提示」）。按 `platform + deviceToken` 去重 upsert，存于 Redis，不过期。
+
+**Body**
+```json
+{ "platform": "ios", "channel": "apns", "deviceToken": "a1b2c3d4e5f6...", "enabled": true }
+```
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `platform` | string | 是 | ios / android / web / harmony |
+| `channel` | string | 否 | apns / fcm / jpush / harmony（web 可空） |
+| `deviceToken` | string | 是 | 设备推送令牌 |
+| `enabled` | bool | 否 | 是否接收推送，缺省 true |
+
+**Response `data`**：`{ "ok": true }`（Redis 不可用时 503）
+
+### DELETE `/api/v1/im/me/push-token`
+
+注销当前用户某个设备的推送凭证（退出登录/关闭推送时调用）。
+
+**Body**
+```json
+{ "deviceToken": "a1b2c3d4e5f6..." }
+```
+
+**Response `data`**：`{ "ok": true }`
+
+> 消息推送管线：OpenIM 在消息落库后回调 `AfterMessage` Webhook，后端记录审计并构造 `PushMessage` 调用 `PushService.Dispatch`。当前为 `LoggingPushService` 日志桩（仅打印意图），后续替换为接入 APNs/FCM/个推 的实现。未读总数建议前端直接调 OpenIM SDK `getTotalUnreadMsgCount` 获取，无需后端中转。
 
 ## OpenIM 内部接口
 
@@ -716,9 +875,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ## 收藏
 
-收藏消息快照（文字 / 表情 / 图片 / 视频 / 文件 / 语音）。创建时按业务库 `messages` 校验消息存在且当前用户是会话成员；同一用户对同一消息幂等。
-
-> 说明：当前实现依赖 PostgreSQL `messages` 表。OpenIM 主路径下的消息尚未落该表时，创建可能返回「消息不存在」；列表 / 删除不受影响。
+收藏消息快照（文字 / 表情 / 图片 / 视频 / 文件 / 语音）。OpenIM 主路径下由客户端提交快照，服务端不再查业务库 `messages`。同一用户对同一 `messageId` 幂等。
 
 ### POST `/api/v1/favorites`
 
@@ -726,7 +883,13 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 **Body**
 ```json
-{ "messageId": "uuid" }
+{
+  "messageId": "OpenIM clientMsgID",
+  "type": "text",
+  "content": "消息内容或文件地址/JSON",
+  "senderId": "发送者业务或 OpenIM ID",
+  "conversationId": "OpenIM conversationID"
+}
 ```
 
 **Response**

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +36,13 @@ func main() {
 	migrationsDir := filepath.Join("migrations")
 	if err := db.RunMigrationsDir(context.Background(), pool, migrationsDir); err != nil {
 		log.Fatalf("migrate: %v", err)
+	}
+	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
+		"report_reasons": {"id", "target_type", "reason", "language", "sort_order", "status"},
+		"reports":        {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
+		"report_files":   {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
+	}); err != nil {
+		log.Fatalf("schema check: %v; required migration: 017_app_reports.sql", err)
 	}
 	log.Println("migrations applied")
 
@@ -80,6 +88,7 @@ func main() {
 	fileRepo := &repository.FileRepo{DB: pool}
 	imOutboxRepo := &repository.IMSyncOutboxRepo{DB: pool}
 	imAccessRepo := &repository.IMAccessRepo{DB: pool}
+	reportRepo := &repository.ReportRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
 
@@ -96,10 +105,11 @@ func main() {
 		chatSvc.Hub = hub
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
-	favSvc := &service.FavoriteService{Fav: favRepo, Chat: chatRepo}
+	favSvc := &service.FavoriteService{Fav: favRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{DB: pool, Kafka: kafkaProducer}
+	reportSvc := &service.ReportService{Reports: reportRepo}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
 	var smsGateway service.SMSGateway = service.DevSMSGateway{}
@@ -120,10 +130,19 @@ func main() {
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Service: imSvc}
+	reportH := &handler.ReportHandler{Svc: reportSvc}
 	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
+	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
+	pushSvc := service.NewLoggingPushService()
 	openIMWebhookH := handler.NewOpenIMWebhookHandler(
-		imAccessRepo, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs,
+		imAccessRepo, imClient, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
 	)
+	// 安全提醒：配置了 webhook 密钥却没配来源 CIDR 白名单时，authorized 会整体拒绝所有回调，
+	// 等同于 webhook 功能静默失效——显式打 warning，避免排查时一脸懵。
+	if cfg.OpenIM.WebhookSecret != "" && len(cfg.OpenIM.WebhookAllowCIDRs) == 0 {
+		log.Println("WARN: OPENIM_WEBHOOK_SECRET 已配置，但未配置 OPENIM_WEBHOOK_ALLOW_CIDRS；" +
+			"OpenIM 回调来源 IP 不在白名单内将被全部拒绝（webhook 实际失效）")
+	}
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
 	favH := &handler.FavoriteHandler{Svc: favSvc}
 
@@ -140,9 +159,10 @@ func main() {
 		}
 	}
 	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
-	r.Use(corsMiddleware())
+	r.Use(corsMiddleware(cfg.CORSAllowOrigins))
 
-	r.GET("/health", func(c *gin.Context) {
+	// health 限流：每 IP 每分钟最多 20 次，防止前端频繁轮询
+	r.GET("/health", middleware.RateLimitIP(redisClient, 20, time.Minute, "health"), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	if cfg.LegacyChatEnabled {
@@ -188,6 +208,8 @@ func main() {
 			auth.POST("/users/qrcode/resolve", userH.ResolveUserQRCode)
 			auth.GET("/users/search", userH.Search)
 			auth.GET("/users/:id", userH.GetUser)
+			auth.GET("/report-reasons", reportH.ListReasons)
+			auth.POST("/reports", reportH.Create)
 
 			if cfg.LegacyChatEnabled {
 				auth.GET("/conversations", chatH.ListConversations)
@@ -228,6 +250,8 @@ func main() {
 			auth.PUT("/groups/:id/members/:userId/mute", groupH.UpdateMemberMute)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
 			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
+			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
+			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
 			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
 			auth.POST("/groups/:id/reports", groupH.CreateReport)
 			auth.PUT("/groups/:id/mute", groupH.UpdateMute)
@@ -249,8 +273,20 @@ func main() {
 			auth.GET("/files/:fileId", fileH.Get)
 
 			auth.POST("/im/token", imH.Token)
-			auth.GET("/im/peers/:businessUserId", imH.Peer)
-			auth.GET("/im/groups/:businessGroupId", imH.Group)
+		auth.GET("/im/peers/:businessUserId", imH.Peer)
+		auth.GET("/im/groups/:businessGroupId", imH.Group)
+		auth.GET("/im/groups/by-im/:imGroupId", imH.GroupByIM)
+
+		// 会话设置配置接口（IM 有的都要出）：免打扰/置顶/阅后即焚/消息定时销毁/备注/@强提醒/草稿/已读/全局免打扰
+		// peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（后端拼 conversationId）
+		auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
+		auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
+		auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
+		auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
+
+		// 消息推送（来消息提示）：前端注册/注销设备推送凭证
+		auth.POST("/im/me/push-token", imH.RegisterPushToken)
+		auth.DELETE("/im/me/push-token", imH.UnregisterPushToken)
 			if cfg.LegacyChatEnabled {
 				auth.POST("/forward-tasks", forwardH.Create)
 				auth.GET("/forward-tasks/:id", forwardH.Get)
@@ -297,9 +333,27 @@ func main() {
 	_ = srv.Shutdown(ctx)
 }
 
-func corsMiddleware() gin.HandlerFunc {
+// corsMiddleware 跨域处理。配置了允许源白名单时，仅对白名单内的 Origin 回显
+// （并允许携带凭证）；未配置白名单时回退为通配 *（仅建议本地开发）。
+func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o = strings.TrimSpace(o); o != "" {
+			allowed[o] = struct{}{}
+		}
+	}
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		switch {
+		case origin != "" && len(allowed) > 0:
+			if _, ok := allowed[origin]; ok {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Credentials", "true")
+				c.Header("Vary", "Origin")
+			}
+		case len(allowed) == 0:
+			c.Header("Access-Control-Allow-Origin", "*")
+		}
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {

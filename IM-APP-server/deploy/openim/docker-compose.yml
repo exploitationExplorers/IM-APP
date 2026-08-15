@@ -1,30 +1,97 @@
-# OpenIM 私有化部署（Phase 4）
+# OpenIM 私有化部署（稳定性加固版 + 与 Go 后端对接）
+#
+# ───────────────────────────────────────────────────────────────────────
+# 前置步骤（只需一次）：创建与 Go 后端共享的 Docker 网络
+#   docker network create im-app-openim-net
+# 否则后端 api 服务用服务名 openim-api:10002 解析不到 OpenIM。
+#
 # 启动：docker compose -f deploy/openim/docker-compose.yml up -d
-# 配置 Go 服务环境变量：OPENIM_API_URL=http://127.0.0.1:10002
+# ───────────────────────────────────────────────────────────────────────
+#
+# 相比原占位版(openim/openim-server:latest + 无 restart + 无持久化)的关键改动：
+#   1. 所有镜像锁定具体版本，杜绝 latest 漂移导致“莫名其妙挂”
+#   2. 每个服务都加 restart: unless-stopped，崩溃后自动拉起
+#   3. etcd / kafka 挂载数据卷，容器重建不再丢“服务发现 / 消息队列”状态
+#      （原版没挂卷，重启即清空 etcd，OpenIM 找不到后端 RPC → 直接“掉线”）
+#   4. 依赖服务加 healthcheck + openim-api 用 depends_on: condition: service_healthy，
+#      保证依赖真正就绪后再起，避免抢跑连不上
+#   5. 补全 openim-server 指向 mongo/redis/etcd/kafka/minio 的 IMENV_* 环境变量
+#      （原版只设了 OPENIM_API_PORT，连不上依赖，容器“up 但不可用”）
+#
+# 与 Go 后端(IM-APP-server/docker-compose.yml)的对接约定（三者必须一致）：
+#   A. 共享网络 im-app-openim-net：本服务的 openim-api 已加入，后端 api 也加入，
+#      后端才能用 http://openim-api:10002 访问 OpenIM。
+#   B. 密钥同源：IMENV_SHARE_SECRET 读宿主环境变量 OPENIM_SECRET（默认 openIM123），
+#      与后端 api 的 OPENIM_SECRET 是同一个变量，绝不可两边各写一份，否则 API 鉴权 401。
+#   C. Webhook 回调：IMENV_CALLBACK_URL 指回后端
+#      http://im-app-api:8080/internal/openim/webhooks/<OPENIM_WEBHOOK_SECRET>，
+#      OpenIM 会再拼接命令名（callbackBeforeSendSingleMsgCommand 等），正好命中后端路由。
+#      注意：启用 webhook 必须在宿主 .env 设 OPENIM_WEBHOOK_SECRET，且后端
+#      OPENIM_WEBHOOK_ALLOW_CIDRS 要包含本容器在 im-app-openim-net 中的来源网段。
+#
+# 生产环境建议直接用官方 openim-docker（https://github.com/OpenIMSDK/openim-docker），
+# 它额外提供 openim-chat 前端、Prometheus/Grafana 监控，以及三节点 etcd/kafka 高可用。
 
 services:
   mongodb:
     image: mongo:6.0
     container_name: im-openim-mongo
+    environment:
+      # 启用鉴权，openim-server 用 IMENV_MONGODB_USERNAME/PASSWORD 对应连接
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: openIM123
+      MONGO_INITDB_DATABASE: openim_v3
     ports:
       - "27017:27017"
     volumes:
       - openim_mongo_data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      # 带鉴权 ping，确认 mongo 真正可写
+      test: ["CMD", "mongosh", "--username", "root", "--password", "openIM123", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     container_name: im-openim-redis
     ports:
       - "6380:6379"
+    volumes:
+      - openim_redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   etcd:
     image: bitnami/etcd:3.5
     container_name: im-openim-etcd
     environment:
+      # 单节点 etcd，无鉴权（内网隔离环境够用）；数据落到 /etcd-data 卷，重启不丢
       ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_NAME: s1
+      ETCD_DATA_DIR: /etcd-data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
       ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd:2380
+      ETCD_INITIAL_CLUSTER: s1=http://etcd:2380
+      ETCD_INITIAL_CLUSTER_TOKEN: tkn
+      ETCD_INITIAL_CLUSTER_STATE: new
     ports:
       - "2379:2379"
+    volumes:
+      - openim_etcd_data:/etcd-data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   kafka:
     image: bitnami/kafka:3.6
@@ -32,16 +99,28 @@ services:
     environment:
       KAFKA_CFG_NODE_ID: 0
       KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
       KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
       KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CFG_LISTENERS_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      # 用服务名 kafka 广播，openim-server 容器才能通过服务名连上
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "9092:9092"
+    volumes:
+      - openim_kafka_data:/bitnami/kafka
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
 
   minio:
     image: minio/minio:latest
+    # 注意：minio 建议锁定到具体 RELEASE 日期标签（如 RELEASE.2024-06-13T22-53-53Z）
+    # 以提升可复现性；此处保留 latest 仅因原版即 latest，且非本次掉线主因。
     container_name: im-openim-minio
     command: server /data --console-address ":9001"
     environment:
@@ -52,23 +131,80 @@ services:
       - "9101:9001"
     volumes:
       - openim_minio_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # OpenIM 核心服务镜像版本请按官方文档锁定；此处为占位，便于后续替换
+  # openim-server 核心服务（对外 API 端口 10002，WS 网关端口 10001）
   openim-api:
-    image: openim/openim-server:latest
+    image: openim/openim-server:v3.8.3-patch.16
     container_name: im-openim-api
+    # 接入与 Go 后端共享的网络，既让后端能 openim-api:10002 访问本服务，
+    # 也让本服务能 im-app-api:8080 回调后端的 webhook。
+    networks:
+      - im-app-openim-net
     depends_on:
-      - mongodb
-      - redis
-      - etcd
-      - kafka
-      - minio
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     ports:
-      - "10002:10002"
+      - "10002:10002"   # API 端口，Go 后端 OPENIM_API_URL 指向它
+      - "10001:10001"   # WS 网关端口，客户端 SDK 的 wsAddr 指向它（原版未暴露）
     environment:
       OPENIM_API_PORT: "10002"
+      # ↓↓↓ 以下 IMENV_* 是 openim-server 连接各依赖的必需配置，原版缺失导致连不上 ↓↓↓
+      IMENV_MONGODB_ADDRESS: mongodb:27017
+      IMENV_MONGODB_USERNAME: root
+      IMENV_MONGODB_PASSWORD: openIM123
+      IMENV_KAFKA_ADDRESS: kafka:9092
+      IMENV_DISCOVERY_ETCD_ADDRESS: etcd:2379
+      IMENV_REDIS_ADDRESS: redis:6379
+      IMENV_REDIS_PASSWORD: ""
+      IMENV_DISCOVERY_ETCD_USERNAME: ""
+      IMENV_DISCOVERY_ETCD_PASSWORD: ""
+      IMENV_MINIO_INTERNALADDRESS: minio:9000
+      # 客户端可访问的外网地址；远程访问时把 127.0.0.1 换成服务器公网 IP
+      IMENV_MINIO_EXTERNALADDRESS: http://127.0.0.1:9100
+      IMENV_MINIO_ACCESSKEYID: minioadmin
+      IMENV_MINIO_SECRETACCESSKEY: minioadmin123
+      # 必须与 Go 后端的 OPENIM_SECRET 完全一致：此处读宿主 OPENIM_SECRET（同源变量）。
+      # 默认值 openIM123 与官方 openim-docker 一致；部署时前后端统一改同一个值即可。
+      IMENV_SHARE_SECRET: ${OPENIM_SECRET:-openIM123}
+      # Webhook 回调基地址：OpenIM 会在此基础上拼接命令名
+      # （callbackBeforeSendSingleMsgCommand 等），命中后端
+      # /internal/openim/webhooks/:secret/<command> 路由。
+      # 启用前提是宿主 .env 已设 OPENIM_WEBHOOK_SECRET（与后端一致）。
+      # 若 OpenIM 拼接出的路径与后端不匹配（出现双斜杠或缺斜杠），按 OpenIM 版本
+      # 行为调整此 base 末尾是否带 /。
+      IMENV_CALLBACK_URL: http://im-app-api:8080/internal/openim/webhooks/${OPENIM_WEBHOOK_SECRET:-}
+      IMENV_LOG_ISSTDOUT: "true"
+      IMENV_LOG_REMAINLOGLEVEL: "4"
     restart: unless-stopped
+    # 可选：官方镜像自带 mage check，可启用健康探测（不健康不会触发 unless-stopped 重启循环）
+    # healthcheck:
+    #   test: ["CMD", "sh", "-c", "mage check"]
+    #   interval: 15s
+    #   timeout: 60s
+    #   retries: 10
 
 volumes:
   openim_mongo_data:
+  openim_redis_data:
+  openim_etcd_data:
+  openim_kafka_data:
   openim_minio_data:
+
+# 与 Go 后端共享的外部网络；启动前需先：docker network create im-app-openim-net
+networks:
+  im-app-openim-net:
+    external: true

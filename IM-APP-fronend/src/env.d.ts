@@ -45,10 +45,35 @@ interface PlusNativeObjBitmap {
   clear(): void
 }
 
+interface PlusIoDirectoryEntry {
+  fullPath: string
+  getDirectory(
+    path: string,
+    options: { create?: boolean; exclusive?: boolean },
+    success: (entry: PlusIoDirectoryEntry) => void,
+    fail: (err: unknown) => void,
+  ): void
+}
+
+interface PlusIoFileSystem {
+  root: PlusIoDirectoryEntry
+}
+
+interface PlusIo {
+  PRIVATE_DOC: number
+  convertLocalFileSystemURL(path: string): string
+  requestFileSystem(
+    type: number,
+    success: (fs: PlusIoFileSystem) => void,
+    fail?: (err: unknown) => void,
+  ): void
+}
+
 interface PlusNative {
   nativeObj?: {
     Bitmap?: new (id: string) => PlusNativeObjBitmap
   }
+  io?: PlusIo
 }
 
 declare const plus: PlusNative | undefined

@@ -18,6 +18,7 @@ export type {
 
 export type {
   MessageType,
+  MessageQuote,
   ChatMessage,
   Conversation,
 } from './chat'

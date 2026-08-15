@@ -38,6 +38,14 @@ export async function updateGroupSettings(
   })
 }
 
+export async function updateGroupMyNickname(groupId: string, nickname: string) {
+  return request<{ nickname: string } | null>({
+    url: `/groups/${groupId}/me/nickname`,
+    method: 'PUT',
+    data: { nickname },
+  })
+}
+
 export async function leaveGroup(groupId: string) {
   return request<{ ok: boolean }>({ url: `/groups/${groupId}/leave`, method: 'POST' })
 }
@@ -83,3 +91,52 @@ export async function joinGroupByQRCode(
     },
   })
 }
+
+
+export async function updateMyNickname(groupId: string, nickname: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: `/groups/${groupId}/me/nickname`,
+    method: 'PUT',
+    data: { nickname },
+  })
+}
+
+export async function updateGroupRemark(groupId: string, remark: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: `/groups/${groupId}/remark`,
+    method: 'PUT',
+    data: { remark },
+  })
+}
+
+export async function updateMemberRemark(
+  groupId: string,
+  memberUserId: string,
+  remark: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${memberUserId}/remark`,
+    method: 'PUT',
+    data: { remark },
+  })
+}
+
+export async function muteGroupMember(
+  groupId: string,
+  memberUserId: string,
+  mutedSeconds: number,
+): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${memberUserId}/mute`,
+    method: 'PUT',
+    data: { mutedSeconds },
+  })
+}
+
+export async function removeGroupMember(groupId: string, memberUserId: string): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${memberUserId}`,
+    method: 'DELETE',
+  })
+}
+

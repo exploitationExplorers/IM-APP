@@ -362,3 +362,35 @@ func (h *GroupHandler) handleModerationResult(c *gin.Context, err error) {
 	}
 	response.OK(c, gin.H{"ok": true})
 }
+
+func (h *GroupHandler) UpdateGroupRemark(c *gin.Context) {
+	var req models.UpdateGroupRemarkReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := h.Svc.UpdateGroupRemark(c.Request.Context(), c.Param("id"), middleware.UserID(c), req.Remark); err != nil {
+		response.Fail(c, http.StatusBadRequest, "群备注最多 64 个字")
+		return
+	}
+	g, err := h.Svc.GetDetail(c.Request.Context(), c.Param("id"), middleware.UserID(c))
+	if err != nil {
+		response.OK(c, gin.H{"ok": true})
+		return
+	}
+	response.OK(c, g)
+}
+
+func (h *GroupHandler) UpdateMemberRemark(c *gin.Context) {
+	var req models.UpdateMemberRemarkReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := h.Svc.UpdateMemberRemark(c.Request.Context(), c.Param("id"), middleware.UserID(c), c.Param("userId"), req.Remark); err != nil {
+		response.Fail(c, http.StatusBadRequest, "成员备注最多 64 个字")
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+

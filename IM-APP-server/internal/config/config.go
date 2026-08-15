@@ -19,6 +19,7 @@ type Config struct {
 	SeedDemo          bool
 	Kafka             KafkaConfig
 	SMS               SMSConfig
+	CORSAllowOrigins  []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
 }
 
 type MinIOConfig struct {
@@ -65,7 +66,7 @@ func Load() Config {
 		IMInternalAPIKey:  getenv("IM_INTERNAL_API_KEY", ""),
 		LegacyChatEnabled: getenvBool("LEGACY_CHAT_ENABLED", false),
 		SeedDemo:          getenvBool("SEED_DEMO", false),
-		DevSMSCode:        getenv("DEV_SMS_CODE", "123456"),
+		DevSMSCode:        getenv("DEV_SMS_CODE", ""),
 		RedisURL:          getenv("REDIS_URL", ""),
 		MinIO: MinIOConfig{
 			Endpoint:   getenv("MINIO_ENDPOINT", ""),
@@ -96,6 +97,7 @@ func Load() Config {
 			TemplateCode:    getenv("SMS_TEMPLATE_CODE", ""),
 			RegionID:        getenv("SMS_REGION_ID", "cn-hangzhou"),
 		},
+		CORSAllowOrigins: splitCSV(getenv("CORS_ALLOW_ORIGINS", "")),
 	}
 }
 

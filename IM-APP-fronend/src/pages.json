@@ -70,6 +70,20 @@
       }
     },
     {
+      "path": "pages/chat/forward",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "转发给"
+      }
+    },
+    {
+      "path": "pages/contacts/report-user",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "检举"
+      }
+    },
+    {
       "path": "pages/contacts/new-friends",
       "style": {
         "navigationBarTitleText": "好友申请"

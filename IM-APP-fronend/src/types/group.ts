@@ -11,6 +11,8 @@ export interface GroupInfo {
   /** 关联的群聊会话 ID */
   conversationId?: string
   joinMode?: 'open' | 'approval'
+  myNickname?: string
+  remark?: string
 }
 
 export interface GroupQRCodeResolveResult {
@@ -30,6 +32,8 @@ export interface JoinGroupByQRCodeResult {
 export interface GroupMember {
   id: string
   nickname: string
+  groupNickname?: string
   avatar: string
   role: 'owner' | 'admin' | 'member'
+  memberRemark?: string
 }
