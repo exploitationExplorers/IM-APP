@@ -1,36 +1,31 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { fetchGroupDetail } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
 
-const ANNOUNCE_MAX = 500
+const NAME_MAX = 50
 const groupStore = useGroupStore()
 const groupId = ref('')
-const announcement = ref('')
+const name = ref('')
 const original = ref('')
-const canEdit = ref(false)
 const saving = ref(false)
 
-const count = computed(() => announcement.value.length)
-const canSubmit = computed(
-  () => canEdit.value && announcement.value !== original.value && !saving.value,
-)
+const count = computed(() => name.value.length)
+const canSubmit = computed(() => {
+  const value = name.value.trim()
+  return value.length > 0 && value !== original.value.trim() && !saving.value
+})
 
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
-  if (!groupId.value) {
-    uni.showToast({ title: '缺少群聊 ID', icon: 'none' })
-    return
-  }
+  if (!groupId.value) return
   try {
-    const detail = await groupStore.loadDetail(groupId.value)
-    announcement.value = detail.announcement || ''
-    original.value = detail.announcement || ''
-    canEdit.value =
-      detail.permissions?.canEditAnnouncement ??
-      (detail.myRole === 'owner' || detail.myRole === 'admin')
+    const g = await fetchGroupDetail(groupId.value)
+    name.value = g.name || ''
+    original.value = g.name || ''
   } catch (e) {
-    uni.showToast({ title: (e as Error)?.message || '加载群公告失败', icon: 'none' })
+    uni.showToast({ title: (e as Error)?.message || '加载失败', icon: 'none' })
   }
 })
 
@@ -40,14 +35,9 @@ function goBack() {
 
 async function onSubmit() {
   if (!canSubmit.value) return
-  if (announcement.value.length > ANNOUNCE_MAX) {
-    uni.showToast({ title: `公告最多 ${ANNOUNCE_MAX} 个字`, icon: 'none' })
-    return
-  }
   saving.value = true
   try {
-    await groupStore.updateSettings(groupId.value, { announcement: announcement.value })
-    original.value = announcement.value
+    await groupStore.updateSettings(groupId.value, { name: name.value.trim() })
     uni.showToast({ title: '已保存', icon: 'success' })
     setTimeout(() => uni.navigateBack(), 300)
   } catch (e) {
@@ -62,27 +52,19 @@ async function onSubmit() {
   <view class="page">
     <view class="nav">
       <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">群公告</text>
+      <text class="nav-title">修改群组名称</text>
       <view class="nav-space" />
     </view>
 
-    <view v-if="canEdit" class="form">
-      <textarea
-        class="textarea"
-        v-model="announcement"
-        :maxlength="ANNOUNCE_MAX"
-        placeholder="请输入公告内容"
-        auto-height
-      />
+    <view class="form">
+      <input class="input" v-model="name" :maxlength="NAME_MAX" placeholder="请输入群组名称" />
       <view class="meta">
-        <text class="count">{{ count }}/ {{ ANNOUNCE_MAX }}</text>
+        <text class="hint">群组名称最多 {{ NAME_MAX }} 个字</text>
+        <text class="count">{{ count }}/{{ NAME_MAX }}</text>
       </view>
     </view>
-    <view v-else class="content">
-      <text class="announcement">{{ announcement || '暂无群公告' }}</text>
-    </view>
 
-    <view v-if="canEdit" class="footer">
+    <view class="footer">
       <button class="btn" :disabled="!canSubmit" @click="onSubmit">确认</button>
     </view>
   </view>
@@ -118,42 +100,32 @@ async function onSubmit() {
 .nav-title {
   flex: 1;
   text-align: center;
-  font-size: 40rpx;
+  font-size: 36rpx;
   font-weight: 700;
-  color: #1f1f1f;
 }
 
-.form,
-.content {
+.form {
   margin-top: 16rpx;
   background: #fff;
-  padding: 32rpx 28rpx;
-  min-height: 240rpx;
+  padding: 32rpx;
 }
 
-.textarea {
+.input {
   width: 100%;
-  min-height: 280rpx;
+  height: 80rpx;
   font-size: 30rpx;
-  color: #2a2a2a;
-  line-height: 1.7;
 }
 
 .meta {
+  margin-top: 16rpx;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
 }
 
+.hint,
 .count {
   font-size: 24rpx;
   color: #636e86;
-}
-
-.announcement {
-  font-size: 30rpx;
-  color: #2a2a2a;
-  line-height: 1.8;
-  white-space: pre-wrap;
 }
 
 .footer {

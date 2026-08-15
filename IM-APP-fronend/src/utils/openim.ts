@@ -14,6 +14,7 @@ import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
+import { formatIMNotification } from '@/utils/im-notification'
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
 export interface IMTarget {
@@ -447,6 +448,35 @@ export async function getHistoryMessages(
   )
 }
 
+/** 从新到旧分页拉出会话历史，供搜索 / 媒体页使用 */
+export async function collectHistoryMessages(
+  conversationID: string,
+  maxCount = 400,
+): Promise<MessageItem[]> {
+  const pages: MessageItem[][] = []
+  let startClientMsgID = ''
+  let loaded = 0
+  while (loaded < maxCount) {
+    const { messageList, isEnd } = await getHistoryMessages(conversationID, 50, startClientMsgID)
+    if (!messageList.length) break
+    pages.push(messageList)
+    loaded += messageList.length
+    if (isEnd) break
+    startClientMsgID = messageList[0]?.clientMsgID || ''
+    if (!startClientMsgID) break
+  }
+  return pages.flat()
+}
+
+/** 只清当前用户本端及云端副本，不影响其他人设备 */
+export async function clearConversationMessages(conversationID: string): Promise<void> {
+  try {
+    await imCall('clearConversationAndDeleteAllMsg' as IMMethods, conversationID)
+  } catch {
+    await imCall('clearConversationMsgs' as IMMethods, conversationID)
+  }
+}
+
 /** 会话已全部读完时 OpenIM 报 hasReadSeq equal max，对调用方等价于成功 */
 export async function markConversationRead(conversationID: string): Promise<void> {
   try {
@@ -735,8 +765,7 @@ function extractContent(item: MessageItem): string {
     case MessageType.VideoMessage:
       return item.videoElem?.videoUrl || ''
     default:
-      // 好友通知等 detail 是 JSON，聊天气泡里展示不出来，交给页面过滤
-      return ''
+      return formatIMNotification(item)
   }
 }
 
@@ -749,7 +778,7 @@ function summarize(latestMsg: string): string {
     if (type === 'image') return '[图片]'
     if (type === 'voice') return '[语音]'
     if (type === 'file') return '[文件]'
-    return '[消息]'
+    return extractContent(message)
   } catch {
     return ''
   }

@@ -257,57 +257,9 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		return w.sendGroupCreatedWelcome(ctx, state.ID, groupID)
 	}
 	if event.EventType == repository.IMEventGroupUpdated {
-		if err := w.Client.EnsureGroup(ctx, group); err != nil {
-			return err
-		}
-		// Reconciliation is intentionally state based: inviting an existing
-		// member and setting their current role/mute are idempotent operations.
-		allInvitees := append(append([]string{}, group.MemberUserIDs...), group.AdminUserIDs...)
-		if err := w.Client.InviteGroupMember(ctx, groupID, allInvitees); err != nil {
-			return err
-		}
-		remoteMembers, err := w.Client.ListGroupMemberIDs(ctx, groupID)
-		if err != nil {
-			return err
-		}
-		expectedMembers := map[string]struct{}{ownerID: {}}
-		for memberID := range memberByID {
-			expectedMembers[memberID] = struct{}{}
-		}
-		unexpectedMembers := make([]string, 0)
-		for _, memberID := range remoteMembers {
-			if _, exists := expectedMembers[memberID]; !exists {
-				unexpectedMembers = append(unexpectedMembers, memberID)
-			}
-		}
-		if err := w.Client.KickGroupMember(ctx, groupID, unexpectedMembers); err != nil {
-			return err
-		}
-		if err := w.Client.SetGroupMute(ctx, groupID, state.AllMuted); err != nil {
-			return err
-		}
-		for memberID, member := range memberByID {
-			if member.GroupNickname != "" {
-				if err := w.Client.SetGroupMemberNickname(ctx, groupID, memberID, member.GroupNickname); err != nil {
-					return err
-				}
-			}
-			if member.Role == "owner" {
-				continue
-			}
-			if member.Role == "admin" {
-				if err := w.Client.SetGroupMemberRole(ctx, groupID, memberID, 60); err != nil {
-					return err
-				}
-			}
-			mutedSeconds := remainingMuteSeconds(member.MutedUntil)
-			if mutedSeconds > 0 {
-				if err := w.Client.SetGroupMemberMute(ctx, groupID, memberID, mutedSeconds); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+		// 只同步群名/头像/公告/加好友开关。邀请、踢人、角色、禁言各有独立事件；
+		// 这里再全量 reconcile 会让 OpenIM 连发系统通知，会话列表未读狂跳、聊天页却看不到气泡。
+		return w.Client.EnsureGroup(ctx, group)
 	}
 	registered, err := w.Client.IsGroupRegistered(ctx, groupID)
 	if err != nil {

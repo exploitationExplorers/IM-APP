@@ -8,23 +8,36 @@ import { useChatStore } from '@/stores/chat'
 import {
   setConversationPin,
   setConversationRecvOpt,
+  resolveGroupConversationID,
 } from '@/utils/openim'
-import { resolveIMGroup } from '@/api/im'
 import { safeBack } from '@/utils/nav'
 import { APP_CONFIG } from '@/config'
+import { uploadAvatarForProfile } from '@/utils/file-upload'
+import type { GroupJoinMode } from '@/types'
+
+const PREVIEW_MEMBER_LIMIT = 6
 
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
 const groupId = ref('')
-const code = ref('group')
+const showJoinMode = ref(false)
 
 const groupDetail = computed(() => groupStore.currentGroup)
 const memberList = computed(() => groupStore.members)
+const previewMembers = computed(() => memberList.value.slice(0, PREVIEW_MEMBER_LIMIT))
 const groupName = computed(() => groupDetail.value?.remark?.trim() || groupDetail.value?.name || '群聊')
 const avatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
+const myRole = computed(() => groupDetail.value?.myRole || 'member')
+const isOwner = computed(() => myRole.value === 'owner')
+const canManage = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
+const canEditProfile = computed(
+  () => groupDetail.value?.permissions?.canEditProfile ?? canManage.value,
+)
+const joinModeLabel = computed(() =>
+  groupDetail.value?.joinMode === 'approval' ? '私密群（申请入群）' : '公开群（扫码入群）',
+)
 
-// 会话级设置：进入页面时从本地会话列表读取当前状态（OpenIM 已云同步）
 const convId = ref('')
 const recvOpt = ref<number>(MessageReceiveOptType.Normal)
 const pinned = ref(false)
@@ -35,13 +48,10 @@ function getMemberDisplayName(member: { nickname?: string; groupNickname?: strin
 
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
-  code.value = String(query?.code || 'group')
-
   if (!groupId.value) {
     uni.showToast({ title: '缺少群聊 ID', icon: 'none' })
     return
   }
-
   try {
     await groupStore.loadDetail(groupId.value)
     await initConversationSettings()
@@ -50,19 +60,12 @@ onLoad(async (query) => {
   }
 })
 
-/**
- * 取该群的 OpenIM 会话并读出当前置顶 / 免打扰状态。
- * 优先用本地缓存（按 OpenIM 会话 ID 匹配）；没有则让 SDK 建会话（或后端兜底），保证开关与真实状态一致。
- */
 async function initConversationSettings() {
   try {
-    const target = await resolveIMGroup(groupId.value)
-    const conversationID = `sg_${target.imGroupId}`
-    const cached = chatStore.conversations.find((c) => c.id === conversationID)
-    const conv = cached || (await chatStore.enterConversation({ type: 'group', businessId: groupId.value }))
-    convId.value = conv.id
-    recvOpt.value = conv.recvMsgOpt ?? MessageReceiveOptType.Normal
-    pinned.value = conv.pinned ?? false
+    convId.value = await resolveGroupConversationID(groupId.value)
+    const cached = chatStore.conversations.find((c) => c.id === convId.value)
+    recvOpt.value = cached?.recvMsgOpt ?? MessageReceiveOptType.Normal
+    pinned.value = cached?.pinned ?? false
   } catch {
     // 拿不到会话 ID 时开关保持默认，不影响其它功能
   }
@@ -97,12 +100,6 @@ async function onTogglePin(v: boolean) {
   }
 }
 
-function goToChat() {
-  uni.navigateTo({
-    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId.value)}&title=${encodeURIComponent(groupName.value)}&avatar=${encodeURIComponent(avatar.value)}`,
-  })
-}
-
 function goBack() {
   safeBack('/pages/chat/index')
 }
@@ -110,6 +107,25 @@ function goBack() {
 function goToMembers() {
   uni.navigateTo({
     url: `/pages/group/members?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToAdmin() {
+  uni.navigateTo({
+    url: `/pages/group/admin?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToJoinRequests() {
+  uni.navigateTo({
+    url: `/pages/group/join-requests?id=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
+function goToEditName() {
+  if (!canEditProfile.value) return
+  uni.navigateTo({
+    url: `/pages/group/edit-name?id=${encodeURIComponent(groupId.value)}`,
   })
 }
 
@@ -149,21 +165,9 @@ function goToSearchHistory() {
   })
 }
 
-function goToClearHistory() {
-  uni.navigateTo({
-    url: `/pages/group/clear-history?id=${encodeURIComponent(groupId.value)}`,
-  })
-}
-
 function goToReport() {
   uni.navigateTo({
     url: `/pages/group/report?id=${encodeURIComponent(groupId.value)}`,
-  })
-}
-
-function goToLeaveGroup() {
-  uni.navigateTo({
-    url: `/pages/group/leave?id=${encodeURIComponent(groupId.value)}`,
   })
 }
 
@@ -173,19 +177,104 @@ function copyGroupId() {
     success: () => uni.showToast({ title: '已复制', icon: 'none' }),
   })
 }
+
+async function onChooseAvatar() {
+  if (!canEditProfile.value) return
+  uni.chooseImage({
+    count: 1,
+    sizeType: ['compressed'],
+    sourceType: ['album', 'camera'],
+    success: async (res) => {
+      const paths = res.tempFilePaths
+      const path = Array.isArray(paths) ? paths[0] : paths
+      if (!path) return
+      uni.showLoading({ title: '上传中…', mask: true })
+      try {
+        const fileId = await uploadAvatarForProfile(path, undefined)
+        await groupStore.updateSettings(groupId.value, { avatarFileId: fileId })
+        await groupStore.loadDetail(groupId.value)
+        uni.showToast({ title: '已更新', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: (e as Error)?.message || '上传失败', icon: 'none' })
+      } finally {
+        uni.hideLoading()
+      }
+    },
+  })
+}
+
+async function selectJoinMode(mode: GroupJoinMode) {
+  showJoinMode.value = false
+  if (groupDetail.value?.joinMode === mode) return
+  try {
+    await groupStore.updateSettings(groupId.value, { joinMode: mode })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
+  }
+}
+
+async function onClearHistory() {
+  const res = await uni.showModal({
+    title: '清除聊天记录',
+    content: '聊天记录只会从此设备中删除，不会从其他人的设备中删除',
+    confirmText: '确认',
+    cancelText: '取消',
+  })
+  if (!res.confirm) return
+  try {
+    const conversationId = convId.value || (await resolveGroupConversationID(groupId.value))
+    convId.value = conversationId
+    await chatStore.clearHistory(conversationId)
+    uni.showToast({ title: '已清除', icon: 'success' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '清除失败', icon: 'none' })
+  }
+}
+
+async function onLeaveOrDismiss() {
+  if (isOwner.value) {
+    const res = await uni.showModal({
+      title: '解散群',
+      content: '解散后群聊将不可恢复，确定继续吗？',
+      confirmText: '确定',
+      cancelText: '取消',
+    })
+    if (!res.confirm) return
+    try {
+      await groupStore.dismiss(groupId.value)
+      uni.reLaunch({ url: '/pages/chat/index' })
+    } catch (e) {
+      uni.showToast({ title: (e as Error)?.message || '解散失败', icon: 'none' })
+    }
+    return
+  }
+  const res = await uni.showModal({
+    title: '退出群聊',
+    content: '退出后将删除本群对话，确定继续吗？',
+    confirmText: '确定',
+    cancelText: '取消',
+  })
+  if (!res.confirm) return
+  try {
+    await groupStore.leave(groupId.value)
+    uni.reLaunch({ url: '/pages/chat/index' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '退出失败', icon: 'none' })
+  }
+}
 </script>
 
 <template>
   <view class="page">
     <view class="header">
       <view class="back-btn" @click="goBack">‹</view>
-      <text class="title">群详细</text>
+      <text class="title">群组详情</text>
       <view class="header-spacer" />
     </view>
 
-    <view class="members-wrap">
+    <view class="card">
       <view class="member-row" @click="goToMembers">
-        <view v-for="member in memberList" :key="member.id" class="member-item">
+        <view v-for="member in previewMembers" :key="member.id" class="member-item">
           <image class="member-avatar" :src="member.avatar" mode="aspectFill" />
           <text class="member-name">{{ getMemberDisplayName(member) }}</text>
         </view>
@@ -193,36 +282,54 @@ function copyGroupId() {
           <view class="add-circle">＋</view>
         </view>
       </view>
-    </view>
-
-    <view class="group-row section-row" @click="goToMembers">
-      <text class="label">群组成员</text>
-      <view class="row-right">
-        <text class="muted">共{{ memberCount }}人</text>
-        <text class="arrow">›</text>
+      <view class="group-row" @click="goToMembers">
+        <text class="label">群组成员</text>
+        <view class="row-right">
+          <text class="muted">共{{ memberCount }}人</text>
+          <text class="arrow">›</text>
+        </view>
       </view>
     </view>
 
-    <view class="info-list">
-      <view class="chat-entry" @click="goToChat">
-        <text class="chat-entry-text">进入群聊</text>
+    <view v-if="canManage" class="card">
+      <view class="info-row nav-row" @click="goToAdmin">
+        <text class="label">群组管理</text>
         <text class="arrow">›</text>
       </view>
+      <view class="info-row nav-row" @click="goToJoinRequests">
+        <text class="label">入群申请</text>
+        <text class="arrow">›</text>
+      </view>
+      <view class="info-row nav-row" @click="showJoinMode = true">
+        <text class="label">入群方式</text>
+        <view class="row-right">
+          <text class="muted">{{ joinModeLabel }}</text>
+          <text class="arrow">›</text>
+        </view>
+      </view>
+    </view>
 
-      <view class="info-row">
+    <view class="card">
+      <view class="info-row" :class="{ 'nav-row': canEditProfile }" @click="goToEditName">
         <text class="label">群组名称</text>
-        <text class="value">{{ groupName }}</text>
+        <view class="row-right">
+          <text class="value">{{ groupDetail?.name || groupName }}</text>
+          <text v-if="canEditProfile" class="arrow">›</text>
+        </view>
       </view>
 
-      <view class="info-row">
+      <view class="info-row" :class="{ 'nav-row': canEditProfile }" @click="onChooseAvatar">
         <text class="label">群头像</text>
-        <view class="avatar-box">
-          <image class="current-avatar" :src="avatar" mode="aspectFill" />
+        <view class="row-right">
+          <view class="avatar-box">
+            <image class="current-avatar" :src="avatar" mode="aspectFill" />
+          </view>
+          <text v-if="canEditProfile" class="arrow">›</text>
         </view>
       </view>
 
       <view class="info-row info-row-id">
-        <text class="label">群ID</text>
+        <text class="label">群聊ID</text>
         <view class="id-box">
           <text class="value id-value">{{ groupId }}</text>
           <view class="copy-btn" @click="copyGroupId">复制</view>
@@ -247,43 +354,56 @@ function copyGroupId() {
         </view>
       </view>
 
-      <view class="info-row nav-row" @click="goToMyNickname">
+      <view class="info-row nav-row last" @click="goToMyNickname">
         <text class="label">我在本群的昵称</text>
         <text class="arrow">›</text>
       </view>
+    </view>
 
+    <view class="card">
       <view class="info-row nav-row" @click="goToMedia">
         <text class="label">图片与视频</text>
         <text class="arrow">›</text>
       </view>
-
       <view class="info-row nav-row" @click="goToSearchHistory">
         <text class="label">搜索聊天记录</text>
         <text class="arrow">›</text>
       </view>
-
-      <view class="info-row nav-row last-nav" @click="goToClearHistory">
+      <view class="info-row nav-row last" @click="onClearHistory">
         <text class="label">清除聊天记录</text>
         <text class="arrow">›</text>
       </view>
+    </view>
 
+    <view class="card">
       <view class="switch-row">
         <text class="label">消息免打扰</text>
         <ImSwitch :model-value="recvOpt === MessageReceiveOptType.NotNotify" @change="onToggleRecv" />
       </view>
-
-      <view class="switch-row">
+      <view class="switch-row last">
         <text class="label">置顶聊天</text>
         <ImSwitch :model-value="pinned" @change="onTogglePin" />
       </view>
+    </view>
 
+    <view class="card">
       <view class="action-row" @click="goToReport">
         <text class="label">检举</text>
         <text class="arrow">›</text>
       </view>
+    </view>
 
-      <view class="leave-row" @click="goToLeaveGroup">
-        <text class="leave-label">退出群并删除对话</text>
+    <view class="card">
+      <view class="leave-row" @click="onLeaveOrDismiss">
+        <text class="leave-label">{{ isOwner ? '解散群' : '退出群并删除对话' }}</text>
+      </view>
+    </view>
+
+    <view v-if="showJoinMode" class="sheet-mask" @click="showJoinMode = false">
+      <view class="sheet" @click.stop>
+        <view class="sheet-item" @click="selectJoinMode('open')">公开群（扫码入群）</view>
+        <view class="sheet-item" @click="selectJoinMode('approval')">私密群（申请入群）</view>
+        <view class="sheet-cancel" @click="showJoinMode = false">取消</view>
       </view>
     </view>
   </view>
@@ -292,7 +412,8 @@ function copyGroupId() {
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background: #f5f5f5;
+  background: #f3f4f7;
+  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
 }
 
 .header {
@@ -327,15 +448,17 @@ function copyGroupId() {
   height: 52rpx;
 }
 
-.members-wrap {
+.card {
+  margin-top: 16rpx;
   background: #fff;
-  padding: 20rpx 22rpx 18rpx;
 }
 
 .member-row {
   display: flex;
   align-items: flex-start;
   gap: 18rpx;
+  padding: 20rpx 22rpx 8rpx;
+  overflow: hidden;
 }
 
 .member-item {
@@ -368,6 +491,7 @@ function copyGroupId() {
   display: flex;
   justify-content: center;
   align-items: center;
+  padding-top: 2rpx;
 }
 
 .add-circle {
@@ -382,18 +506,24 @@ function copyGroupId() {
   color: #8a8a8a;
 }
 
-.section-row {
-  margin-top: 18rpx;
-  border-top: 1rpx solid #f0f0f0;
+.group-row,
+.info-row,
+.switch-row,
+.action-row {
+  min-height: 96rpx;
+  padding: 0 30rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   border-bottom: 1rpx solid #f0f0f0;
 }
 
 .group-row {
-  background: #fff;
-  padding: 28rpx 30rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  border-top: 1rpx solid #f0f0f0;
+}
+
+.last {
+  border-bottom: none;
 }
 
 .label {
@@ -405,52 +535,22 @@ function copyGroupId() {
   display: flex;
   align-items: center;
   gap: 12rpx;
+  min-width: 0;
 }
 
-.muted {
+.muted,
+.value {
   font-size: 28rpx;
   color: #666;
+  max-width: 360rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .arrow {
   font-size: 40rpx;
   color: #999;
-}
-
-.info-list {
-  margin-top: 8rpx;
-  background: #fff;
-}
-
-.chat-entry {
-  min-height: 96rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 30rpx;
-  background: #fff;
-  border-bottom: 1rpx solid #f0f0f0;
-}
-
-.chat-entry-text {
-  font-size: 30rpx;
-  color: #1d1d1d;
-  font-weight: 500;
-}
-
-.info-row {
-  min-height: 96rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 30rpx;
-  border-bottom: 1rpx solid #f0f0f0;
-}
-
-.value {
-  font-size: 30rpx;
-  color: #666;
-  max-width: 50%;
 }
 
 .avatar-box {
@@ -507,46 +607,52 @@ function copyGroupId() {
   flex-shrink: 0;
 }
 
-.nav-row {
-  cursor: pointer;
-}
-
-.last-nav {
-  border-bottom: 1rpx solid #f0f0f0;
-}
-
-.switch-row {
-  min-height: 100rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 30rpx;
-  background: #fff;
-  border-bottom: 1rpx solid #f0f0f0;
-}
-
-.action-row {
-  min-height: 100rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 30rpx;
-  background: #fff;
-}
-
 .leave-row {
   min-height: 100rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 30rpx;
-  background: #fff;
-  margin-top: 18rpx;
 }
 
 .leave-label {
   font-size: 30rpx;
   color: #ff4d4f;
   font-weight: 500;
+}
+
+.sheet-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet {
+  width: 100%;
+  background: #fff;
+  border-radius: 24rpx 24rpx 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.sheet-item,
+.sheet-cancel {
+  height: 108rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32rpx;
+  color: #1d1d1d;
+}
+
+.sheet-item {
+  border-bottom: 1rpx solid #f0f0f0;
+}
+
+.sheet-cancel {
+  margin-top: 12rpx;
+  border-top: 12rpx solid #f3f4f7;
+  color: #666;
 }
 </style>

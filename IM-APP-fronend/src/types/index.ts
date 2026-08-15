@@ -39,8 +39,13 @@ export type {
 export type {
   GroupInfo,
   GroupMember,
+  GroupPermissions,
+  GroupSettingsInput,
+  GroupJoinRequestItem,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
+  GroupRole,
+  GroupJoinMode,
 } from './group'
 
 export type {

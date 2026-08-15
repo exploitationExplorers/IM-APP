@@ -50,11 +50,11 @@ let recorder: any = null
 let browserRecorder: { stream: MediaStream; mediaRecorder: MediaRecorder } | null = null
 let recordingTimer: ReturnType<typeof setInterval> | null = null
 
-/** 通知类（加好友等）没有可展示正文，渲染成气泡就是空气泡；撤回提示保留为居中系统行 */
+/** 通知类没有可读正文时不渲染；群禁言等系统提示要保留，例如 `张三: [全体禁言]` */
 function isVisibleMessage(m: ChatMessage): boolean {
   if (m.type === 'system') {
     const text = m.content.trim()
-    return !!text && !text.startsWith('{') && !text.startsWith('[')
+    return !!text && !text.startsWith('{')
   }
   return !!m.content
 }
@@ -785,8 +785,10 @@ function pickImage() {
 }
 
 .sys-tip-text {
-  font-size: 22rpx;
-  color: #999;
+  font-size: 24rpx;
+  color: #333333;
+  text-align: center;
+  line-height: 1.5;
 }
 
 .composer {
