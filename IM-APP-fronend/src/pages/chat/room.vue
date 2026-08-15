@@ -26,6 +26,9 @@ const contactStore = useContactStore()
 const forwardStore = useForwardStore()
 const successVisible = ref(false)
 
+// App 端 navigationStyle:custom 页面从状态栏底部开始绘制，头部需让出状态栏高度；H5 端为 0
+const statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 0
+
 const conversationId = ref('')
 const title = ref('聊天')
 const peerAvatar = ref(APP_CONFIG.defaultAvatarUrl)
@@ -553,7 +556,7 @@ function pickImage() {
 
 <template>
   <view class="room">
-    <view class="chat-header">
+    <view class="chat-header" :style="{ paddingTop: statusBarHeight + 'px' }">
       <view class="back-btn" @click="goBack">‹</view>
       <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text>
       <view class="header-title" @click="goToProfile">

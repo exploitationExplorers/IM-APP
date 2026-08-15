@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
+import { safeBack } from '@/utils/nav'
+
+/** 检举原因（接口未定，先按原型写死，接口确定后改为拉取） */
+const REASONS = [
+  '该群组发布色情，广告等不良信息',
+  '该群组存在诈骗钱财的行为',
+  '该群组发布广告骚扰信息',
+  '其他违规行为',
+]
 
 const groupId = ref('')
 
@@ -9,20 +19,31 @@ onLoad((query) => {
 })
 
 function goBack() {
-  uni.navigateBack()
+  safeBack('/pages/chat/index')
+}
+
+function chooseReason(reason: string) {
+  uni.navigateTo({
+    url: `/pages/group/report-submit?id=${encodeURIComponent(groupId.value)}&reason=${encodeURIComponent(reason)}`,
+  })
 }
 </script>
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">检举</text>
-      <view class="nav-space" />
-    </view>
+    <ImNavBar title="检举原因" @back="goBack" />
 
-    <view class="empty">
-      <text>检举功能待实现</text>
+    <view class="card">
+      <view
+        v-for="(reason, i) in REASONS"
+        :key="reason"
+        class="row"
+        :class="{ last: i === REASONS.length - 1 }"
+        @click="chooseReason(reason)"
+      >
+        <text class="row-text">{{ reason }}</text>
+        <text class="arrow">›</text>
+      </view>
     </view>
   </view>
 </template>
@@ -33,44 +54,32 @@ function goBack() {
   background: #f5f5f5;
 }
 
-.nav {
+.card {
+  margin: 24rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  overflow: hidden;
+}
+
+.row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 96rpx;
-  padding: 0 26rpx;
-  background: #fff;
+  padding: 32rpx;
+  border-bottom: 1rpx solid #f0f0f0;
 }
 
-.nav-back {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
+.row.last {
+  border-bottom: none;
 }
 
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #1f1f1f;
+.row-text {
+  font-size: 30rpx;
+  color: #222;
 }
 
-.nav-space {
-  width: 52rpx;
-  height: 52rpx;
-}
-
-.empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 240rpx;
-  color: #8a8f9c;
-  font-size: 28rpx;
+.arrow {
+  color: #c8ccd6;
+  font-size: 36rpx;
 }
 </style>
