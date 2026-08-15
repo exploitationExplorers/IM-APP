@@ -839,7 +839,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ## 消息转发（Phase 5）
 
-万人转发采用“PostgreSQL 任务状态 + 事务 Outbox + Kafka 异步队列 + OpenIM 发消息”的链路，接口始终注册，不依赖 `LEGACY_CHAT_ENABLED`。转发目标总人数不设业务上限；worker 从 Kafka 逐批消费并逐个发送，不会在一个 HTTP 请求内同步发完。离线推送和前端对接不在本阶段范围内。
+万人转发采用“PostgreSQL 任务状态 + 事务 Outbox + Kafka 异步队列 + OpenIM 发消息”的链路，接口始终注册，不依赖 `LEGACY_CHAT_ENABLED`。转发目标总人数不设业务上限；worker 从 Kafka 逐批消费并逐个发送，不会在一个 HTTP 请求内同步发完。客户端聊天「转发给」走本接口：创建草稿、按全部好友/标签生成或分批写入目标后提交，发送由 worker 异步完成。离线推送不在本阶段范围内。
 
 接口约定：GET 使用 query 参数；新建的 POST 写接口全部使用静态路径和 JSON body，不把 `taskId` 拼入路径。`GET /api/v1/forward-tasks/:id` 只保留给旧客户端兼容，新客户端使用 `/forward-task-progress?taskId=...`。
 

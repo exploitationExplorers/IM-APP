@@ -49,3 +49,19 @@ export type {
   FileInfo,
   PresignResult,
 } from './file'
+
+export type {
+  ForwardTaskStatus,
+  ForwardTargetStatus,
+  ForwardSelectorMode,
+  ForwardSelector,
+  ForwardMessageSnapshot,
+  ForwardTask,
+  ForwardTaskTarget,
+  ForwardTaskPage,
+  ForwardTaskTargetPage,
+  CreateForwardTaskInput,
+  AffectedCountResult,
+  OkResult,
+  FriendForwardPlan,
+} from './forward'
