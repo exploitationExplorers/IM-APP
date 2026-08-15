@@ -277,6 +277,46 @@ func TestConversationSettingsUseV383API(t *testing.T) {
 	}
 }
 
+func TestClearConversationMessagesOnlyClearsRequestingUser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/msg/clear_conversation_msg":
+			if r.Header.Get("token") != "admin-token" {
+				t.Fatalf("missing admin token")
+			}
+			var body struct {
+				UserID          string   `json:"userID"`
+				ConversationIDs []string `json:"conversationIDs"`
+				DeleteSyncOpt   struct {
+					IsSyncSelf  bool `json:"isSyncSelf"`
+					IsSyncOther bool `json:"isSyncOther"`
+				} `json:"deleteSyncOpt"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode clear conversation request: %v", err)
+			}
+			if body.UserID != "owner" || !reflect.DeepEqual(body.ConversationIDs, []string{"si_owner_peer"}) ||
+				!body.DeleteSyncOpt.IsSyncSelf || body.DeleteSyncOpt.IsSyncOther {
+				t.Fatalf("unexpected clear conversation request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	if err := client.ClearConversationMessages(context.Background(), "owner", []string{"si_owner_peer"}); err != nil {
+		t.Fatalf("ClearConversationMessages() error = %v", err)
+	}
+}
+
 func TestCreateConversationUsesV383SetConversations(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

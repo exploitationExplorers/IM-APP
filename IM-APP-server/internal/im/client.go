@@ -636,6 +636,22 @@ func (c *Client) MarkConversationAsRead(ctx context.Context, opUserID, conversat
 	}, nil)
 }
 
+// ClearConversationMessages 删除指定用户在会话中的服务端漫游历史，并向该用户的
+// 其他在线/离线设备发送清理同步通知。不会删除其他会话参与者的消息。
+func (c *Client) ClearConversationMessages(ctx context.Context, userID string, conversationIDs []string) error {
+	if userID == "" || len(conversationIDs) == 0 {
+		return errors.New("userID and conversationIDs are required")
+	}
+	return c.postWithAdmin(ctx, "/msg/clear_conversation_msg", map[string]any{
+		"userID":          userID,
+		"conversationIDs": conversationIDs,
+		"deleteSyncOpt": map[string]bool{
+			"isSyncSelf":  true,
+			"isSyncOther": false,
+		},
+	}, nil)
+}
+
 // SetGlobalMsgRecvOpt 设置用户级全局免打扰（对所有会话生效）。
 // opt 取值同 recvMsgOpt：0 正常 / 1 免打扰 / 2 仅在线接收。
 func (c *Client) SetGlobalMsgRecvOpt(ctx context.Context, opUserID string, opt int) error {

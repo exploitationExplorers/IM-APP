@@ -111,6 +111,11 @@ type conversationPatchRequest struct {
 	DraftText       *string `json:"draftText"`
 }
 
+type clearConversationMessagesRequest struct {
+	PeerType string `json:"peerType"`
+	PeerID   string `json:"peerId"`
+}
+
 // GetConversation 返回指定会话的当前设置（免打扰/置顶/阅后即焚等）。
 // peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（由后端拼 conversationId）。
 func (h *IMHandler) GetConversation(c *gin.Context) {
@@ -176,6 +181,29 @@ func (h *IMHandler) MarkConversationRead(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
+}
+
+// ClearConversationMessages 清除当前用户在指定单聊或群聊中的全部历史消息。
+// 该操作只影响当前用户及其其他登录设备，不删除对方或其他群成员的消息。
+func (h *IMHandler) ClearConversationMessages(c *gin.Context) {
+	var req clearConversationMessagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+	if req.PeerType != "c2c" && req.PeerType != "group" {
+		response.Fail(c, http.StatusBadRequest, "peerType 必须为 c2c 或 group")
+		return
+	}
+	if req.PeerID == "" {
+		response.Fail(c, http.StatusBadRequest, "peerId 不能为空")
+		return
+	}
+	if err := h.Service.ClearConversationMessages(c.Request.Context(), middleware.UserID(c), req.PeerType, req.PeerID); err != nil {
+		h.handleIMError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"ok": true, "scope": "self"})
 }
 
 // parsePeer 从路径参数解析 peerType/peerId，并校验 peerType 合法性。

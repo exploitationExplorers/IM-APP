@@ -274,8 +274,8 @@ func main() {
 				auth.POST("/files/presign", handler.DevPresign)
 			}
 			auth.POST("/files/uploads", fileH.Uploads)
-			auth.POST("/files/uploads/:fileId/complete", fileH.Complete)
-			auth.GET("/files/:fileId", fileH.Get)
+			auth.POST("/files/uploads/complete", fileH.Complete)
+			auth.GET("/files", fileH.Get)
 
 			auth.POST("/im/token", imH.Token)
 			auth.GET("/im/peers/:businessUserId", imH.Peer)
@@ -286,6 +286,7 @@ func main() {
 			// peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（后端拼 conversationId）
 			auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
+			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
 			auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
 			auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
 
