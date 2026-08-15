@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	ErrIMUnavailable          = errors.New("OpenIM service is unavailable")
-	ErrIMAccountInactive      = errors.New("account is not active")
-	ErrIMConversationNotFound = errors.New("conversation not found")
-	ErrIMInvalidRecvMsgOpt    = errors.New("invalid recvMsgOpt, must be 0/1/2")
+	ErrIMUnavailable               = errors.New("OpenIM service is unavailable")
+	ErrIMAccountInactive           = errors.New("account is not active")
+	ErrIMConversationNotFound      = errors.New("conversation not found")
+	ErrIMInvalidRecvMsgOpt         = errors.New("invalid recvMsgOpt, must be 0/1/2")
+	ErrInvalidConversationSettings = errors.New("invalid conversation settings")
 	// ErrIMTargetNotChattable 表示当前用户与该好友/群不能聊天（非好友/被拉黑/群禁言等）。
 	ErrIMTargetNotChattable = errors.New("cannot chat with this peer")
 	// ErrIMInvalidPeerType 表示 peerType 不是 c2c 或 group。
@@ -350,7 +351,8 @@ type conversationTarget struct {
 // resolveConversationID 把「业务好友/群 ID + 类型」解析为会话目标。
 // 单聊：si_ + 两个 OpenIM 用户ID排序后用 _ 连接（OpenIM 规则，无歧义）。
 // 群聊：本项目 EnsureGroup 用 groupType=2（超级群）→ 前缀 sg_；兼容普通群前缀 g_
-//       做兜底（按候选顺序命中已存在的会话）。
+//
+//	做兜底（按候选顺序命中已存在的会话）。
 func (s *IMService) resolveConversationID(ctx context.Context, userID, peerType, peerId string) (conversationTarget, error) {
 	opUserID, err := im.UserIDFromBusinessID(userID)
 	if err != nil {
@@ -399,6 +401,27 @@ func buildC2CConversationID(a, b string) string {
 	ids := []string{a, b}
 	sort.Strings(ids)
 	return "si_" + strings.Join(ids, "_")
+}
+
+// peerUserIDFromConversation 兼容 OpenIM 单聊会话 ID，并且不按下划线切分用户 ID。
+func peerUserIDFromConversation(conversationID, ownerUserID string) (string, error) {
+	if !strings.HasPrefix(conversationID, "si_") || ownerUserID == "" {
+		return "", ErrInvalidConversationSettings
+	}
+	payload := strings.TrimPrefix(conversationID, "si_")
+	if strings.HasPrefix(payload, ownerUserID+"_") {
+		peer := strings.TrimPrefix(payload, ownerUserID+"_")
+		if peer != "" {
+			return peer, nil
+		}
+	}
+	if strings.HasSuffix(payload, "_"+ownerUserID) {
+		peer := strings.TrimSuffix(payload, "_"+ownerUserID)
+		if peer != "" {
+			return peer, nil
+		}
+	}
+	return "", ErrInvalidConversationSettings
 }
 
 // resolveGroupConversationID 群会话 ID 按候选前缀依次尝试：命中已存在会话即用它；

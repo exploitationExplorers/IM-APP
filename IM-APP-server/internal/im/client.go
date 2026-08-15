@@ -24,6 +24,7 @@ var (
 	ErrUnavailable          = errors.New("openim is not configured")
 	ErrInvalidPlatform      = errors.New("invalid OpenIM platform ID")
 	ErrInvalidUserID        = errors.New("invalid business user ID")
+	ErrConversationNotFound = errors.New("openim conversation not found")
 )
 
 // UserIDFromBusinessID converts the PostgreSQL UUID into an OpenIM-compatible
@@ -477,54 +478,129 @@ func (c *Client) SendTextMessage(ctx context.Context, receiverID string, session
 }
 
 // ConversationSettings 对应 OpenIM 的 Conversation 对象。
-// 字段名与 OpenIM JSON 完全一致，可直接作为 set_conversation 的 conversation 体回写。
+// 字段名与 OpenIM JSON 完全一致，可直接作为 set_conversations 的 conversation 体回写。
 // recvMsgOpt 取值：0 正常接收 / 1 免打扰（不接收）/ 2 仅在线接收。
 type ConversationSettings struct {
 	ConversationID   string `json:"conversationID"`
 	ConversationType int    `json:"conversationType"` // 1 单聊 2 群聊
+	OwnerUserID      string `json:"ownerUserID"`      // 当前用户 OpenIM ID
 	UserID           string `json:"userID"`           // 单聊对端 ID
 	GroupID          string `json:"groupID"`          // 群聊 ID
 	ShowName         string `json:"showName"`
 	FaceURL          string `json:"faceURL"`
 	RecvMsgOpt       int    `json:"recvMsgOpt"`
 	UnreadCount      int    `json:"unreadCount"`
-	GroupAtType      int    `json:"groupAtType"` // 群 @ 强提醒档位
-	IsPinned         bool   `json:"isPinned"`     // 置顶
-	IsPrivateChat    bool   `json:"isPrivateChat"`    // 阅后即焚开关
+	GroupAtType      int    `json:"groupAtType"`   // 群 @ 强提醒档位
+	IsPinned         bool   `json:"isPinned"`      // 置顶
+	IsPrivateChat    bool   `json:"isPrivateChat"` // 阅后即焚开关
 	IsNotInGroup     bool   `json:"isNotInGroup"`
-	BurnDuration     int64  `json:"burnDuration"`     // 阅后即焚时长（秒）
+	BurnDuration     int64  `json:"burnDuration"` // 阅后即焚时长（秒）
 	HasReadSeq       int64  `json:"hasReadSeq"`
-	MsgDestructTime  int64  `json:"msgDestructTime"`  // 消息定时销毁时长（秒）
-	IsMsgDestruct    bool   `json:"isMsgDestruct"`    // 是否开启消息定时销毁
+	MsgDestructTime  int64  `json:"msgDestructTime"` // 消息定时销毁时长（秒）
+	IsMsgDestruct    bool   `json:"isMsgDestruct"`   // 是否开启消息定时销毁
 	Ex               string `json:"ex"`              // 扩展字段（可存备注名）
 	DraftText        string `json:"draftText"`       // 会话草稿
 	AttachedInfo     string `json:"attachedInfo"`
 }
 
+type UpdateConversationSettings struct {
+	RecvMsgOpt    *int  `json:"recvMsgOpt,omitempty"`
+	IsPinned      *bool `json:"isPinned,omitempty"`
+	IsPrivateChat *bool `json:"isPrivateChat,omitempty"`
+	BurnDuration  *int  `json:"burnDuration,omitempty"`
+}
+
+// SendForwardMessage 以原发送者身份向单聊目标发送已经冻结的消息内容。
+// clientMsgID 由转发任务和目标用户确定性生成，Worker 重试时不会产生新的业务消息 ID。
+// 万人转发暂不接离线推送，因此明确设置 notOfflinePush=true。
+func (c *Client) SendForwardMessage(
+	ctx context.Context,
+	senderID, receiverID, clientMsgID string,
+	contentType int,
+	content json.RawMessage,
+) (SendMessageResult, error) {
+	if senderID == "" || receiverID == "" || clientMsgID == "" || contentType <= 0 || !json.Valid(content) {
+		return SendMessageResult{}, errors.New("invalid forward message")
+	}
+	var decoded any
+	if err := json.Unmarshal(content, &decoded); err != nil || decoded == nil {
+		return SendMessageResult{}, errors.New("invalid forward message content")
+	}
+	var result SendMessageResult
+	err := c.postWithAdmin(ctx, "/msg/send_msg", map[string]any{
+		"sendID":         senderID,
+		"recvID":         receiverID,
+		"clientMsgID":    clientMsgID,
+		"content":        decoded,
+		"contentType":    contentType,
+		"sessionType":    1,
+		"isOnlineOnly":   false,
+		"notOfflinePush": true,
+	}, &result)
+	if result.ClientMsgID == "" {
+		result.ClientMsgID = clientMsgID
+	}
+	return result, err
+}
+
 // GetConversations 拉取指定会话的当前设置（全量对象）。
-// 不同 OpenIM 版本管理接口对“当前用户”字段命名不一致（opUserID / userID），
-// 这里两个都带、同值，多余的会被服务端忽略，缺失的为零，确保任一版本都能命中。
+// v3.8.3 使用 ownerUserID；同时携带 opUserID/userID 兼容旧部署。
 func (c *Client) GetConversations(ctx context.Context, opUserID string, conversationIDs []string) ([]ConversationSettings, error) {
 	var data struct {
 		ConversationInfos []ConversationSettings `json:"conversationInfos"`
+		Conversations     []ConversationSettings `json:"conversations"`
 	}
 	err := c.postWithAdmin(ctx, "/conversation/get_conversations", map[string]any{
-		"opUserID":       opUserID,
-		"userID":         opUserID,
+		"opUserID":        opUserID,
+		"ownerUserID":     opUserID,
+		"userID":          opUserID,
 		"conversationIDs": conversationIDs,
 	}, &data)
 	if err != nil {
 		return nil, err
 	}
-	return data.ConversationInfos, nil
+	if len(data.ConversationInfos) > 0 {
+		return data.ConversationInfos, nil
+	}
+	return data.Conversations, nil
+}
+
+// GetConversationSettings 保留旧调用契约；新代码统一使用 GetConversations。
+func (c *Client) GetConversationSettings(ctx context.Context, opUserID, conversationID string) (ConversationSettings, error) {
+	items, err := c.GetConversations(ctx, opUserID, []string{conversationID})
+	if err != nil {
+		return ConversationSettings{}, err
+	}
+	if len(items) == 0 {
+		return ConversationSettings{}, ErrConversationNotFound
+	}
+	return items[0], nil
+}
+
+// SetConversationSettings 保留旧调用契约，并将部分更新合并到全量会话对象。
+func (c *Client) SetConversationSettings(ctx context.Context, opUserID string, current ConversationSettings, patch UpdateConversationSettings) error {
+	if patch.RecvMsgOpt != nil {
+		current.RecvMsgOpt = *patch.RecvMsgOpt
+	}
+	if patch.IsPinned != nil {
+		current.IsPinned = *patch.IsPinned
+	}
+	if patch.IsPrivateChat != nil {
+		current.IsPrivateChat = *patch.IsPrivateChat
+	}
+	if patch.BurnDuration != nil {
+		current.BurnDuration = int64(*patch.BurnDuration)
+	}
+	return c.SetConversation(ctx, opUserID, current)
 }
 
 // SetConversation 写回单个会话的设置。调用方应先 GetConversations 取全量再叠加变更，
-// 避免部分写入把未传字段按 protobuf 默认值清零。
+// 避免部分写入把未传字段按 protobuf 默认值清零。OpenIM v3.8.3 只公开复数路由 set_conversations。
 func (c *Client) SetConversation(ctx context.Context, opUserID string, conv ConversationSettings) error {
-	return c.postWithAdmin(ctx, "/conversation/set_conversation", map[string]any{
-		"opUserID":   opUserID,
-		"userID":     opUserID,
+	return c.postWithAdmin(ctx, "/conversation/set_conversations", map[string]any{
+		"opUserID":     opUserID,
+		"userID":       opUserID,
+		"userIDs":      []string{opUserID},
 		"conversation": conv,
 	}, nil)
 }
@@ -535,11 +611,14 @@ func (c *Client) SetConversation(ctx context.Context, opUserID string, conv Conv
 //   - 单聊：conversationType=1，userID 为对端 OpenIM ID（opUserID 为创建者）。
 //   - 群聊：conversationType=2，groupID 为群 OpenIM ID。
 func (c *Client) CreateConversation(ctx context.Context, opUserID, conversationID string, conversationType int, userID, groupID string) error {
-	return c.postWithAdmin(ctx, "/conversation/create_conversation", map[string]any{
+	return c.postWithAdmin(ctx, "/conversation/set_conversations", map[string]any{
 		"opUserID": opUserID,
+		"userID":   opUserID,
+		"userIDs":  []string{opUserID},
 		"conversation": map[string]any{
 			"conversationID":   conversationID,
 			"conversationType": conversationType,
+			"ownerUserID":      opUserID,
 			"userID":           userID,
 			"groupID":          groupID,
 			"recvMsgOpt":       0,
@@ -551,8 +630,8 @@ func (c *Client) CreateConversation(ctx context.Context, opUserID, conversationI
 // MarkConversationAsRead 清空指定会话未读数。
 func (c *Client) MarkConversationAsRead(ctx context.Context, opUserID, conversationID string) error {
 	return c.postWithAdmin(ctx, "/conversation/mark_conversation_as_read", map[string]any{
-		"opUserID":      opUserID,
-		"userID":        opUserID,
+		"opUserID":       opUserID,
+		"userID":         opUserID,
 		"conversationID": conversationID,
 	}, nil)
 }
@@ -561,9 +640,9 @@ func (c *Client) MarkConversationAsRead(ctx context.Context, opUserID, conversat
 // opt 取值同 recvMsgOpt：0 正常 / 1 免打扰 / 2 仅在线接收。
 func (c *Client) SetGlobalMsgRecvOpt(ctx context.Context, opUserID string, opt int) error {
 	return c.postWithAdmin(ctx, "/user/set_global_msg_recv_opt", map[string]any{
-		"opUserID": opUserID,
-		"userID":   opUserID,
-		"opt":      opt,
+		"opUserID":   opUserID,
+		"userID":     opUserID,
+		"opt":        opt,
 		"recvMsgOpt": opt,
 	}, nil)
 }
