@@ -65,7 +65,7 @@ func Load() Config {
 		IMInternalAPIKey:  getenv("IM_INTERNAL_API_KEY", ""),
 		LegacyChatEnabled: getenvBool("LEGACY_CHAT_ENABLED", false),
 		SeedDemo:          getenvBool("SEED_DEMO", false),
-		DevSMSCode:        getenv("DEV_SMS_CODE", "123456"),
+		DevSMSCode:        getenv("DEV_SMS_CODE", ""),
 		RedisURL:          getenv("REDIS_URL", ""),
 		MinIO: MinIOConfig{
 			Endpoint:   getenv("MINIO_ENDPOINT", ""),
