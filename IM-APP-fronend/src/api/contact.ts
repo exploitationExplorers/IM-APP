@@ -1,8 +1,14 @@
 import { request } from '@/utils/request'
-import type { Contact, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
+import type { Contact, ContactListQuery, ContactPage, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 
-export async function fetchContacts(): Promise<Contact[]> {
-  return request<Contact[]>({ url: '/contacts', method: 'GET' })
+export async function fetchContacts(query: ContactListQuery = {}): Promise<ContactPage> {
+  const data: Record<string, string | number> = {
+    limit: query.limit ?? 50,
+  }
+  if (query.keyword?.trim()) data.keyword = query.keyword.trim()
+  if (query.sort) data.sort = query.sort
+  if (query.cursor) data.cursor = query.cursor
+  return request<ContactPage>({ url: '/contacts', method: 'GET', data })
 }
 
 export async function fetchContact(contactId: string): Promise<Contact> {

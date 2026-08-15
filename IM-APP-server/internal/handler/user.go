@@ -175,12 +175,20 @@ type ContactHandler struct {
 
 func (h *ContactHandler) ListContacts(c *gin.Context) {
 	uid := middleware.UserID(c)
-	list, err := h.Svc.ListContacts(c.Request.Context(), uid)
+	sort := c.DefaultQuery("sort", "recent")
+	if sort == "chat" {
+		sort = "recent"
+	}
+	page, err := h.Svc.ListContacts(c.Request.Context(), uid, c.Query("keyword"), sort, c.Query("cursor"), queryInt(c, "limit", 50))
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidContactQuery) {
+			response.Fail(c, http.StatusBadRequest, "参数错误")
+			return
+		}
 		response.Fail(c, http.StatusInternalServerError, "查询失败")
 		return
 	}
-	response.OK(c, list)
+	response.OK(c, page)
 }
 
 func (h *ContactHandler) ListGroups(c *gin.Context) {

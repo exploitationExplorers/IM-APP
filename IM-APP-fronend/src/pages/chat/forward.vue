@@ -42,6 +42,7 @@ const excludedFriendIds = ref<Set<string>>(new Set())
 const tags = ref<ContactTagItem[]>([])
 const sending = ref(false)
 const visibleLimit = ref(PAGE_SIZE)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 onLoad(async () => {
   if (!forwardStore.messageIds.length) {
@@ -52,20 +53,32 @@ onLoad(async () => {
   if (!chatStore.conversations.length) {
     await chatStore.loadConversations().catch(() => undefined)
   }
-  if (!contactStore.contacts.length && !contactStore.groups.length) {
-    await contactStore.loadDirectory().catch(() => undefined)
-  }
+  await Promise.all([
+    contactStore.reloadContacts({ keyword: '', sort: 'recent' }).catch(() => undefined),
+    contactStore.groups.length ? Promise.resolve() : contactStore.loadGroups().catch(() => undefined),
+  ])
   tags.value = await fetchContactTags().catch(() => [])
 })
 
-watch([active, keyword], () => {
+watch(active, (tab) => {
   visibleLimit.value = PAGE_SIZE
+  if (tab === 'contacts') {
+    void contactStore.reloadContacts({ keyword: keyword.value, sort: 'recent' })
+  }
+})
+
+watch(keyword, () => {
+  visibleLimit.value = PAGE_SIZE
+  if (active.value !== 'contacts') return
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void contactStore.reloadContacts({ keyword: keyword.value, sort: 'recent' })
+  }, 300)
 })
 
 const selectedCount = computed(() => {
-  let extra = 0
   if (allFriendsSelected.value) {
-    extra = Math.max(0, listContacts.value.length - excludedFriendIds.value.size)
+    let extra = Math.max(0, contactStore.contactTotal - excludedFriendIds.value.size)
     selected.value.forEach((item) => {
       if (item.kind !== 'contact') extra += 1
     })
@@ -126,16 +139,20 @@ const currentRaw = computed(() => {
 })
 
 const filteredList = computed(() => {
+  if (active.value === 'contacts') return currentRaw.value
   const k = keyword.value.trim()
   if (!k) return currentRaw.value
   return currentRaw.value.filter((i) => i.name.includes(k))
 })
 
-const currentList = computed(() => filteredList.value.slice(0, visibleLimit.value))
+const currentList = computed(() => {
+  if (active.value === 'contacts') return filteredList.value
+  return filteredList.value.slice(0, visibleLimit.value)
+})
 
 const allSelectedInView = computed(() => {
   if (active.value === 'contacts' && !keyword.value.trim()) {
-    return allFriendsSelected.value && excludedFriendIds.value.size === 0 && !!listContacts.value.length
+    return allFriendsSelected.value && excludedFriendIds.value.size === 0 && contactStore.contactTotal > 0
   }
   const list = filteredList.value
   return !!list.length && list.every((i) => isSelected(i))
@@ -153,7 +170,7 @@ function toggle(item: ForwardTarget) {
     const next = new Set(excludedFriendIds.value)
     if (next.has(item.businessUserId)) next.delete(item.businessUserId)
     else next.add(item.businessUserId)
-    if (next.size >= listContacts.value.length) {
+    if (next.size >= contactStore.contactTotal) {
       allFriendsSelected.value = false
       excludedFriendIds.value = new Set()
       return
@@ -193,9 +210,20 @@ function toggleSelectAll() {
 }
 
 function loadMore() {
+  if (active.value === 'contacts') {
+    void contactStore.loadMoreContacts()
+    return
+  }
   if (visibleLimit.value < filteredList.value.length) {
     visibleLimit.value += PAGE_SIZE
   }
+}
+
+function onListScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
+  const top = e.detail?.scrollTop || 0
+  const height = e.detail?.scrollHeight || 0
+  const view = uni.getSystemInfoSync().windowHeight || 0
+  if (height > 0 && height - top - view < 240) loadMore()
 }
 
 function collectPlan(): { friendPlan: FriendForwardPlan | null; groupTargets: ForwardTarget[] } {
@@ -367,7 +395,7 @@ function goBack() {
     </view>
 
     <view v-if="active === 'contacts'" class="section-head">
-      <text class="section-title">联络人 ({{ listContacts.length }})</text>
+      <text class="section-title">联络人 ({{ contactStore.contactTotal }})</text>
     </view>
 
     <view class="select-all" @click="toggleSelectAll">
@@ -377,7 +405,7 @@ function goBack() {
       </view>
     </view>
 
-    <scroll-view scroll-y class="list" :lower-threshold="120" @scrolltolower="loadMore">
+    <scroll-view scroll-y class="list" :lower-threshold="120" @scrolltolower="loadMore" @scroll="onListScroll">
       <view v-for="item in currentList" :key="item.id" class="row" @click="toggle(item)">
         <image class="avatar" :src="item.avatar" mode="aspectFill" />
         <text class="name">{{ item.name }}</text>

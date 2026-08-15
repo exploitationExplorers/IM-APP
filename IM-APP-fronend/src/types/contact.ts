@@ -19,6 +19,22 @@ export interface Contact {
   commonGroups?: GroupPreview[]
 }
 
+export interface ContactPage {
+  items: Contact[]
+  nextCursor?: string
+  hasMore: boolean
+  total: number
+}
+
+export type ContactListSort = 'recent' | 'name'
+
+export interface ContactListQuery {
+  keyword?: string
+  sort?: ContactListSort
+  cursor?: string
+  limit?: number
+}
+
 export interface GroupPreview {
   id: string
   name: string

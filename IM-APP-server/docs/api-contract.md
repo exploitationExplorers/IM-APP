@@ -294,7 +294,36 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/contacts`
 
-好友列表。每项含 `remark`（无备注时为空字符串）。通讯录展示优先用备注，没有则用昵称。
+好友列表（分页）。每项含 `remark`（无备注时为空字符串）。通讯录展示优先用备注，没有则用昵称。
+
+一次转发 9999+ 好友不要靠本接口拉全量，客户端全选后走 `POST /api/v1/forward-task-targets/generate` 的 `all_friends`。
+
+**Query**
+
+| 参数 | 说明 |
+|---|---|
+| `keyword` | 可选，匹配昵称 / 备注 / 公开 ID，最长 64 字 |
+| `sort` | `recent`（默认，最近加入）或 `name`（备注/昵称） |
+| `cursor` | 上一页最后一条好友 ID，首页省略 |
+| `limit` | 默认 50，最大 100 |
+
+**Response `data`**
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "publicId": "j8afsqh",
+      "nickname": "压测好友00001",
+      "avatar": "",
+      "remark": ""
+    }
+  ],
+  "nextCursor": "uuid",
+  "hasMore": true,
+  "total": 10002
+}
+```
 
 ### GET `/api/v1/contacts/:id`
 

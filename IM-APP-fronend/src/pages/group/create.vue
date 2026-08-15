@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import { useContactStore } from '@/stores/contact'
@@ -8,6 +8,7 @@ import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { resolveIMGroup } from '@/api/im'
 import { APP_CONFIG } from '@/config'
+import type { Contact, ContactListSort } from '@/types'
 
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
@@ -20,8 +21,10 @@ const keyword = ref('')
 const sortKey = ref<'recent' | 'name' | 'chat'>('recent')
 const showSort = ref(false)
 const selected = ref<Set<string>>(new Set())
+const selectedById = ref<Map<string, Contact>>(new Map())
 const groupName = ref('')
 const loading = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const sortLabel = computed(() => {
   if (sortKey.value === 'name') return '名字'
@@ -29,19 +32,18 @@ const sortLabel = computed(() => {
   return '最近加入(默认)'
 })
 
-const filteredContacts = computed(() => {
-  let list = [...contacts.value]
-  const k = keyword.value.trim()
-  if (k) list = list.filter((c) => c.nickname.includes(k))
-  if (sortKey.value === 'name') {
-    list.sort((a, b) => a.nickname.localeCompare(b.nickname, 'zh-CN'))
-  }
-  return list
-})
+const listSort = computed<ContactListSort>(() => (sortKey.value === 'name' ? 'name' : 'recent'))
 
-const selectedContacts = computed(() =>
-  contacts.value.filter((c) => selected.value.has(c.id)),
-)
+function refreshContacts() {
+  return contactStore.reloadContacts({
+    keyword: keyword.value,
+    sort: listSort.value,
+  })
+}
+
+const filteredContacts = computed(() => contacts.value)
+
+const selectedContacts = computed(() => [...selectedById.value.values()])
 
 const selectedCount = computed(() => selected.value.size)
 
@@ -64,8 +66,14 @@ function contactAvatar(url: string) {
 }
 
 onShow(() => {
-  contactStore.loadDirectory()
-  userStore.loadProfile().catch(() => undefined)
+  void Promise.all([refreshContacts(), contactStore.loadGroups(), userStore.loadProfile().catch(() => undefined)])
+})
+
+watch(keyword, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void refreshContacts()
+  }, 300)
 })
 
 function goBack() {
@@ -80,22 +88,33 @@ function isSelected(id: string) {
   return selected.value.has(id)
 }
 
-function toggle(id: string) {
-  const next = new Set(selected.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selected.value = next
+function toggle(c: Contact) {
+  const ids = new Set(selected.value)
+  const map = new Map(selectedById.value)
+  if (ids.has(c.id)) {
+    ids.delete(c.id)
+    map.delete(c.id)
+  } else {
+    ids.add(c.id)
+    map.set(c.id, c)
+  }
+  selected.value = ids
+  selectedById.value = map
 }
 
 function removeSelected(id: string) {
-  const next = new Set(selected.value)
-  next.delete(id)
-  selected.value = next
+  const ids = new Set(selected.value)
+  const map = new Map(selectedById.value)
+  ids.delete(id)
+  map.delete(id)
+  selected.value = ids
+  selectedById.value = map
 }
 
 function setSort(key: 'recent' | 'name' | 'chat') {
   sortKey.value = key
   showSort.value = false
+  void refreshContacts()
 }
 
 function onConfirmSelect() {
@@ -225,12 +244,12 @@ async function onCreate() {
         </view>
       </view>
 
-      <scroll-view scroll-y class="list">
+      <scroll-view scroll-y class="list" :lower-threshold="80" @scrolltolower="contactStore.loadMoreContacts">
         <view
           v-for="c in filteredContacts"
           :key="c.id"
           class="row"
-          @click="toggle(c.id)"
+          @click="toggle(c)"
         >
           <image class="avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
           <text class="name">{{ c.nickname }}</text>

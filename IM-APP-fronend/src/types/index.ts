@@ -25,6 +25,9 @@ export type {
 
 export type {
   Contact,
+  ContactPage,
+  ContactListQuery,
+  ContactListSort,
   ContactTagItem,
   GroupPreview,
   FriendRequest,

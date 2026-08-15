@@ -3,10 +3,16 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/google/uuid"
 
 	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
 )
+
+var ErrInvalidContactQuery = errors.New("invalid contact query")
 
 type ContactService struct {
 	Contacts *repository.ContactRepo
@@ -16,8 +22,28 @@ type ContactService struct {
 	Privacy  *repository.PrivacyRepo
 }
 
-func (s *ContactService) ListContacts(ctx context.Context, uid string) ([]models.Contact, error) {
-	return s.Contacts.ListContacts(ctx, uid)
+func (s *ContactService) ListContacts(ctx context.Context, uid, keyword, sort, cursor string, limit int) (models.ContactPage, error) {
+	keyword = strings.TrimSpace(keyword)
+	if utf8.RuneCountInString(keyword) > 64 {
+		return models.ContactPage{}, ErrInvalidContactQuery
+	}
+	if sort != "name" {
+		sort = "recent"
+	}
+	if cursor != "" {
+		if _, err := uuid.Parse(cursor); err != nil {
+			return models.ContactPage{}, ErrInvalidContactQuery
+		}
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	return s.Contacts.ListContacts(ctx, uid, escapeLike(keyword), sort, cursor, limit)
+}
+
+func escapeLike(raw string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(raw)
 }
 
 func (s *ContactService) ListGroups(ctx context.Context, uid, role string) ([]models.GroupPreview, error) {
