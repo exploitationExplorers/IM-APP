@@ -77,13 +77,6 @@
       }
     },
     {
-      "path": "pages/chat/forward-progress",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "转发进度"
-      }
-    },
-    {
       "path": "pages/contacts/report-user",
       "style": {
         "navigationStyle": "custom",

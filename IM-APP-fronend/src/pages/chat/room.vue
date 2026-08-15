@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
+import ImSuccessToast from '@/components/ImSuccessToast.vue'
 import { useChatMessageActions } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
+import { useForwardStore } from '@/stores/forward'
 import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
@@ -21,6 +23,8 @@ import type { ChatMessage, Conversation } from '@/types'
 const chatStore = useChatStore()
 const userStore = useUserStore()
 const contactStore = useContactStore()
+const forwardStore = useForwardStore()
+const successVisible = ref(false)
 
 const conversationId = ref('')
 const title = ref('聊天')
@@ -105,6 +109,12 @@ const actions = useChatMessageActions({
   isMine,
   visibleMessages: messages,
   conversationTitle: title,
+})
+
+onShow(() => {
+  if (!forwardStore.consumeSucceeded()) return
+  actions.cancelSelect()
+  successVisible.value = true
 })
 
 onLoad(async (query) => {
@@ -656,6 +666,12 @@ function pickImage() {
       :left="actions.menuLeft.value"
       @select="actions.onMenuSelect"
       @close="actions.closeMenu"
+    />
+    <ImSuccessToast
+      :visible="successVisible"
+      text="转发成功"
+      placement="top"
+      @close="successVisible = false"
     />
   </view>
 </template>

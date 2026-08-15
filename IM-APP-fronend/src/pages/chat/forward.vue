@@ -249,12 +249,36 @@ async function resolveConversation(target: ForwardTarget) {
   throw new Error(`无法转发到${target.name}`)
 }
 
+function selectedPreviewNames() {
+  const names: string[] = []
+  const pushName = (name: string) => {
+    if (names.length < 3 && name) names.push(name)
+  }
+  if (allFriendsSelected.value) {
+    listContacts.value.forEach((item) => {
+      if (item.businessUserId && excludedFriendIds.value.has(item.businessUserId)) return
+      pushName(item.name)
+    })
+    selected.value.forEach((item) => {
+      if (item.kind !== 'contact') pushName(item.name)
+    })
+    return names
+  }
+  selected.value.forEach((item) => pushName(item.name))
+  return names
+}
+
+function confirmHint() {
+  const names = selectedPreviewNames().join('、')
+  return `确认传送给包含「${names}」的${selectedCount.value}个聊天？`
+}
+
 function confirmSend(content: string) {
   return new Promise<boolean>((resolve) => {
     uni.showModal({
-      title: '提示',
+      title: '',
       content,
-      confirmText: '传送',
+      confirmText: '确认',
       cancelText: '取消',
       success: (res) => resolve(!!res.confirm),
     })
@@ -290,34 +314,22 @@ async function sendToGroups(groupTargets: ForwardTarget[]) {
 async function onSend() {
   const { friendPlan, groupTargets } = collectPlan()
   if ((!friendPlan && !groupTargets.length) || sending.value) return
-  const hint = friendPlan
-    ? allFriendsSelected.value
-      ? '确定转发给全部好友吗？'
-      : `确定转发给选中的好友吗？${groupTargets.length ? `（含 ${groupTargets.length} 个群）` : ''}`
-    : `确定转发给 ${groupTargets.length} 个群吗？`
-  const ok = await confirmSend(hint)
+  const ok = await confirmSend(confirmHint())
   if (!ok) return
   sending.value = true
-  uni.showLoading({ title: '提交中...' })
+  uni.showLoading({ title: '传送中...' })
   try {
     const sources = buildSources()
-    let taskIds: string[] = []
     if (friendPlan) {
-      taskIds = await forwardStore.submitFriendPlan(sources, friendPlan)
+      await forwardStore.submitFriendPlan(sources, friendPlan)
     }
     const groupFailed = await sendToGroups(groupTargets)
     forwardStore.clear()
     uni.hideLoading()
-    if (taskIds.length) {
-      uni.redirectTo({
-        url: `/pages/chat/forward-progress?taskIds=${encodeURIComponent(taskIds.join(','))}`,
-      })
-      return
-    }
-    if (groupFailed) {
+    if (groupFailed && !friendPlan) {
       uni.showToast({ title: `完成，${groupFailed} 个群失败`, icon: 'none' })
     } else {
-      uni.showToast({ title: '已传送', icon: 'success' })
+      forwardStore.markSucceeded()
     }
     safeBack('/pages/chat/index')
   } catch (e) {
