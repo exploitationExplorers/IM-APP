@@ -170,7 +170,7 @@ func (r *AuthRepo) ListLoginLogs(ctx context.Context, limit, offset int) ([]mode
 		return nil, 0, err
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT l.id, l.admin_id::text, COALESCE(a.nickname,''), l.success, l.fail_reason,
+		SELECT l.id, COALESCE(l.admin_id::text, ''), COALESCE(a.nickname,''), l.success, l.fail_reason,
 		       l.ip, l.user_agent, l.request_id, l.created_at
 		FROM admin_login_logs l LEFT JOIN admin_users a ON a.id = l.admin_id
 		ORDER BY l.created_at DESC LIMIT $1 OFFSET $2`, limit, offset)

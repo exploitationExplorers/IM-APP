@@ -34,7 +34,7 @@ func (r *AuditRepo) ListAuditLogs(ctx context.Context, keyword, result, resource
 	}
 	args := append(append([]any{}, where.args...), limit, offset)
 	rows, err := r.DB.Query(ctx, `
-		SELECT l.id, l.admin_id::text, COALESCE(a.nickname,''), l.action, l.resource,
+		SELECT l.id, COALESCE(l.admin_id::text,''), COALESCE(a.nickname,''), l.action, l.resource,
 		       l.resource_id, l.reason, l.before_value, l.after_value, l.ip, l.user_agent,
 		       l.request_id, l.result, l.created_at
 		FROM admin_audit_logs l LEFT JOIN admin_users a ON a.id = l.admin_id
@@ -61,7 +61,7 @@ func (r *AuditRepo) ListAuditLogs(ctx context.Context, keyword, result, resource
 func (r *AuditRepo) GetAuditLog(ctx context.Context, id int64) (*models.AuditLog, error) {
 	var l models.AuditLog
 	err := r.DB.QueryRow(ctx, `
-		SELECT l.id, l.admin_id::text, COALESCE(a.nickname,''), l.action, l.resource,
+		SELECT l.id, COALESCE(l.admin_id::text,''), COALESCE(a.nickname,''), l.action, l.resource,
 		       l.resource_id, l.reason, l.before_value, l.after_value, l.ip, l.user_agent,
 		       l.request_id, l.result, l.created_at
 		FROM admin_audit_logs l LEFT JOIN admin_users a ON a.id = l.admin_id
