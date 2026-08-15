@@ -74,6 +74,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 // MFAVerify 二次验证：校验挑战 token + TOTP 码，签发正式 token
+// 按 IP 限流，防止 TOTP 暴力枚举
 func (h *AuthHandler) MFAVerify(c *gin.Context) {
 	var req struct {
 		ChallengeToken string `json:"challengeToken" binding:"required"`
@@ -84,11 +85,19 @@ func (h *AuthHandler) MFAVerify(c *gin.Context) {
 		return
 	}
 	ip := middleware.ClientIP(c)
-	result, err := h.Svc.VerifyMFA(c.Request.Context(), req.ChallengeToken, req.Code, "", ip, c.Request.UserAgent(), requestID(c))
-	if err != nil {
-		response.Fail(c, http.StatusUnauthorized, err.Error())
+	key := "mfa:" + ip
+	if locked, remain := h.Limiter.IsLocked(key); locked {
+		response.FailWithCode(c, http.StatusTooManyRequests, 429,
+			fmt.Sprintf("验证失败次数过多，请 %s 后再试", remain.Round(time.Minute)))
 		return
 	}
+	result, err := h.Svc.VerifyMFA(c.Request.Context(), req.ChallengeToken, req.Code, "", ip, c.Request.UserAgent(), requestID(c))
+	if err != nil {
+		h.Limiter.RecordFailure(key)
+		response.FailErr(c, http.StatusUnauthorized, err.Error(), err)
+		return
+	}
+	h.Limiter.Clear(key)
 	response.OK(c, result)
 }
 
@@ -101,7 +110,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	}
 	result, err := h.Svc.Refresh(c.Request.Context(), req.RefreshToken, "", middleware.ClientIP(c))
 	if err != nil {
-		response.Unauthorized(c, err.Error())
+		response.FailErr(c, http.StatusUnauthorized, err.Error(), err)
 		return
 	}
 	response.OK(c, result)
@@ -115,7 +124,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.Logout(c.Request.Context(), req.RefreshToken); err != nil {
-		response.Fail(c, http.StatusBadRequest, err.Error())
+		response.FailErr(c, http.StatusBadRequest, err.Error(), err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -154,7 +163,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.ChangePassword(c.Request.Context(), middleware.AdminID(c), req.OldPassword, req.NewPassword); err != nil {
-		response.Fail(c, http.StatusBadRequest, err.Error())
+		response.FailErr(c, http.StatusBadRequest, err.Error(), err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -185,7 +194,7 @@ func (h *AuthHandler) MFASetup(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.SetupMFA(c.Request.Context(), middleware.AdminID(c), req.Code); err != nil {
-		response.Fail(c, http.StatusBadRequest, err.Error())
+		response.FailErr(c, http.StatusBadRequest, err.Error(), err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -201,7 +210,7 @@ func (h *AuthHandler) MFADisable(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.DisableMFA(c.Request.Context(), middleware.AdminID(c), req.Code); err != nil {
-		response.Fail(c, http.StatusBadRequest, err.Error())
+		response.FailErr(c, http.StatusBadRequest, err.Error(), err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})

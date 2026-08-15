@@ -116,7 +116,7 @@ func buildOpenAPI(routes gin.RoutesInfo) map[string]any {
 		"info": map[string]any{
 			"title":       "IM-APP 管理后台 API",
 			"version":     "1.0.0",
-			"description": "按《GOAL-管理后台分模块开发清单(1).md》实现。除 /health、/auth/login、/auth/mfa/verify 外，均需在请求头携带 `Authorization: Bearer <token>`。统一响应 `{code, message, data, requestId}`，code=0 成功；列表接口 data 为 `{items, total, page, pageSize}`。",
+			"description": "按《GOAL-管理后台分模块开发清单(1).md》实现。除 /health、/auth/login、/auth/mfa/verify、/auth/token/refresh 外，均需在请求头携带 `Authorization: Bearer <token>`。统一响应 `{code, message, data, requestId}`，code=0 成功；列表接口 data 为 `{items, total, page, pageSize}`。错误 message 为通用文案，底层详情仅记录在后端日志。",
 		},
 		"servers": []map[string]any{{"url": "http://localhost:8090/api/admin/v1"}},
 		"tags":    buildTags(),
@@ -132,10 +132,12 @@ func buildOpenAPI(routes gin.RoutesInfo) map[string]any {
 }
 
 // isPublic 判断是否为无需鉴权的公共接口
+// /auth/token/refresh 只依赖 refresh token，鉴权组之外（access 过期后仍可续期）
 func isPublic(p string) bool {
 	return p == "/api/admin/v1/health" ||
 		strings.HasSuffix(p, "/auth/login") ||
-		strings.HasSuffix(p, "/auth/mfa/verify")
+		strings.HasSuffix(p, "/auth/mfa/verify") ||
+		strings.HasSuffix(p, "/auth/token/refresh")
 }
 
 // openapiPath /users/:id -> /users/{id}

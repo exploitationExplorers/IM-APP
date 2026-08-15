@@ -59,7 +59,7 @@ func (r *OpsRepo) ImportSensitiveWords(ctx context.Context, words []string, cate
 
 func (r *OpsRepo) UpdateSensitiveWord(ctx context.Context, id string, w models.SensitiveWord) error {
 	_, err := r.DB.Exec(ctx, `
-		UPDATE sensitive_words SET word=COALESCE($2,word), category=COALESCE($3,category), status=COALESCE($4,status)
+		UPDATE sensitive_words SET word=COALESCE(NULLIF($2,''),word), category=COALESCE(NULLIF($3,''),category), status=COALESCE(NULLIF($4,''),status)
 		WHERE id=$1::uuid`, id, w.Word, w.Category, w.Status)
 	return err
 }
@@ -124,20 +124,14 @@ func (r *OpsRepo) ListProfileModerations(ctx context.Context, status string, pag
 }
 
 // upsertProfileStatus 按 user_id+field 更新当前审核状态；不存在则插入（资料审核状态机）
+// 用 ON CONFLICT 保证并发下不会重复插入（依赖 UNIQUE(user_id,field) 约束，见 migration 009）
 func (r *OpsRepo) upsertProfileStatus(ctx context.Context, userID, field, status, reason, handlerID string) error {
-	tag, err := r.DB.Exec(ctx, `
-		UPDATE profile_moderation_records
-		SET status=$3, reason=$4, handler_id=$5::uuid, handled_at=NOW()
-		WHERE user_id=$1::uuid AND field=$2`, userID, field, status, reason, handlerID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() > 0 {
-		return nil
-	}
-	_, err = r.DB.Exec(ctx, `
+	_, err := r.DB.Exec(ctx, `
 		INSERT INTO profile_moderation_records(user_id, field, old_value, new_value, status, reason, handler_id, handled_at)
-		VALUES($1::uuid,$2,'','',$3,$4,$5::uuid,NOW())`, userID, field, status, reason, handlerID)
+		VALUES($1::uuid,$2,'','',$3,$4,$5::uuid,NOW())
+		ON CONFLICT (user_id, field) DO UPDATE
+			SET status=EXCLUDED.status, reason=EXCLUDED.reason,
+			    handler_id=EXCLUDED.handler_id, handled_at=NOW()`, userID, field, status, reason, handlerID)
 	return err
 }
 

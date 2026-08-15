@@ -38,7 +38,7 @@ func (h *DataHandler) AssignReport(c *gin.Context) {
 		return
 	}
 	if err := h.Data.AssignReport(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -52,7 +52,7 @@ func (h *DataHandler) StartReport(c *gin.Context) {
 		return
 	}
 	if err := h.Data.StartReport(c.Request.Context(), c.Param("id"), middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -66,7 +66,7 @@ func (h *DataHandler) AddReportNote(c *gin.Context) {
 		return
 	}
 	if err := h.Data.AddReportNote(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -79,7 +79,7 @@ func (h *DataHandler) ResolveReport(c *gin.Context) {
 		return
 	}
 	if err := h.Data.ResolveReport(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -93,7 +93,7 @@ func (h *DataHandler) RejectReport(c *gin.Context) {
 		return
 	}
 	if err := h.Data.RejectReport(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -107,7 +107,7 @@ func (h *DataHandler) ReopenReport(c *gin.Context) {
 		return
 	}
 	if err := h.Data.ReopenReport(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)

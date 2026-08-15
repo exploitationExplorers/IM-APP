@@ -25,11 +25,11 @@ func (s *DataService) ListGroupReports(ctx context.Context, id string, page, siz
 }
 
 func (s *DataService) SetGroupMuteAll(ctx context.Context, id string, req models.MuteAllRequest, operatorID string) error {
-	return s.Repo.SetGroupMuteAll(ctx, id, req.Muted, req.Reason, operatorID)
+	return s.Repo.SetGroupMuteAll(ctx, id, *req.Muted, req.Reason, operatorID)
 }
 
 func (s *DataService) SetGroupAddFriend(ctx context.Context, id string, req models.MemberAddFriendRequest, operatorID string) error {
-	return s.Repo.SetGroupAddFriend(ctx, id, req.Enabled, req.Reason, operatorID)
+	return s.Repo.SetGroupAddFriend(ctx, id, *req.Enabled, req.Reason, operatorID)
 }
 
 func (s *DataService) DissolveGroup(ctx context.Context, id string, req models.DissolveRequest, operatorID string) error {

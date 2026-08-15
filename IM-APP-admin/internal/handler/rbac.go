@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"im-app-admin/internal/middleware"
 	"im-app-admin/internal/models"
 	"im-app-admin/internal/response"
 	"im-app-admin/internal/service"
@@ -43,6 +44,17 @@ func atoi(s string, def int) int {
 	return n
 }
 
+// clampInt 将 v 钳制到 [lo, hi]，用于 days 等查询参数防超大值
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 func id64(s string) (int64, error) {
 	return strconv.ParseInt(s, 10, 64)
 }
@@ -65,8 +77,8 @@ func (h *RBACHandler) CreateAdmin(c *gin.Context) {
 		response.BadRequest(c, "参数错误")
 		return
 	}
-	if err := h.Svc.CreateAdmin(c.Request.Context(), req); err != nil {
-		response.Fail(c, http.StatusBadRequest, "创建失败："+err.Error())
+	if err := h.Svc.CreateAdmin(c.Request.Context(), middleware.AdminID(c), req); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "创建失败", err)
 		return
 	}
 	c.Set("auditReason", "创建管理员 "+req.Username)
@@ -79,8 +91,8 @@ func (h *RBACHandler) UpdateAdmin(c *gin.Context) {
 		response.BadRequest(c, "参数错误")
 		return
 	}
-	if err := h.Svc.UpdateAdmin(c.Request.Context(), c.Param("id"), req); err != nil {
-		response.Fail(c, http.StatusBadRequest, "更新失败："+err.Error())
+	if err := h.Svc.UpdateAdmin(c.Request.Context(), middleware.AdminID(c), c.Param("id"), req); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "更新失败", err)
 		return
 	}
 	c.Set("auditReason", "修改管理员")
@@ -135,7 +147,7 @@ func (h *RBACHandler) CreateRole(c *gin.Context) {
 	}
 	id, err := h.Svc.CreateRole(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "创建失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "创建失败", err)
 		return
 	}
 	c.Set("auditReason", "创建角色 "+req.Name)
@@ -149,7 +161,7 @@ func (h *RBACHandler) UpdateRole(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.UpdateRole(c.Request.Context(), c.Param("id"), req); err != nil {
-		response.Fail(c, http.StatusBadRequest, "更新失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "更新失败", err)
 		return
 	}
 	c.Set("auditReason", "修改角色及权限")

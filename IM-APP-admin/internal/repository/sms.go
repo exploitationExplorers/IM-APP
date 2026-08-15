@@ -109,7 +109,7 @@ func (r *OpsRepo) SmsStatistics(ctx context.Context, days int) (*models.SmsStati
 		FROM sms_send_logs WHERE created_at >= NOW() - make_interval(days => $1)
 		GROUP BY d ORDER BY d`, days)
 	if err != nil {
-		return st, nil
+		return st, err
 	}
 	defer rows.Close()
 	for rows.Next() {

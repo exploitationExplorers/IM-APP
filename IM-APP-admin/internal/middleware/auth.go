@@ -50,7 +50,7 @@ func issueToken(secret, issuer, audience, adminID, scope string, ttl time.Durati
 
 // ValidateScopeToken 校验 scope token（用于 MFA 二次验证等）并返回管理员 ID
 func ValidateScopeToken(secret, issuer, audience, tokenStr, scope string) (string, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
 		return []byte(secret), nil
 	}, jwt.WithIssuer(issuer), jwt.WithAudience(audience), jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil || !token.Valid {
@@ -84,7 +84,7 @@ func AuthRequired(secret, issuer, audience string) gin.HandlerFunc {
 			return
 		}
 		raw := strings.TrimPrefix(h, "Bearer ")
-		token, err := jwt.ParseWithClaims(raw, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(raw, &Claims{}, func(t *jwt.Token) (any, error) {
 			return []byte(secret), nil
 		}, jwt.WithIssuer(issuer), jwt.WithAudience(audience), jwt.WithValidMethods([]string{"HS256"}))
 		if err != nil || !token.Valid {
@@ -94,6 +94,12 @@ func AuthRequired(secret, issuer, audience string) gin.HandlerFunc {
 		}
 		claims, ok := token.Claims.(*Claims)
 		if !ok || claims.AdminID == "" {
+			response.Unauthorized(c, "登录凭证无效")
+			c.Abort()
+			return
+		}
+		// 拒绝带 scope 的挑战 token 访问正式接口（MFA 二次验证挑战不可当 access token 使用）
+		if claims.Scope != "" {
 			response.Unauthorized(c, "登录凭证无效")
 			c.Abort()
 			return

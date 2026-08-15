@@ -47,16 +47,17 @@ func BuildRouter(d Deps) *gin.Engine {
 		v1.GET("/health", d.MetaH.Health)
 		v1.GET("/meta", middleware.AuthRequired(cfg.AdminJWTSecret, cfg.JWTIssuer, cfg.JWTAudience), middleware.RequirePermission(rbacRepo, "admin.login"), d.MetaH.Meta)
 
-		// 模块 01：登录 / MFA 挑战（公共）
+		// 模块 01：登录 / MFA 挑战 / 令牌刷新（公共）
+		// refresh 只依赖 refresh token 本身，放在鉴权组外，access token 过期后仍可续期
 		v1.POST("/auth/login", d.AuthH.Login)
 		v1.POST("/auth/mfa/verify", d.AuthH.MFAVerify)
+		v1.POST("/auth/token/refresh", d.AuthH.Refresh)
 
 		// 已登录区：认证 + 审计
 		auth := v1.Group("")
 		auth.Use(middleware.AuthRequired(cfg.AdminJWTSecret, cfg.JWTIssuer, cfg.JWTAudience))
 		auth.Use(middleware.Audit(auditRepo))
 		{
-			auth.POST("/auth/token/refresh", d.AuthH.Refresh)
 			auth.POST("/auth/logout", d.AuthH.Logout)
 			auth.POST("/auth/logout-all", d.AuthH.LogoutAll)
 			auth.GET("/me", d.AuthH.Me)

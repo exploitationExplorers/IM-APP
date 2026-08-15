@@ -7,10 +7,12 @@ import (
 	"im-app-admin/internal/models"
 	"im-app-admin/internal/repository"
 
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var ErrLastSuperAdmin = errors.New("不能停用/删除系统中最后一个可用超级管理员")
+var ErrSuperAdminRoleRequire = errors.New("仅超级管理员可分配/移除超级管理员角色")
 
 // RBACService 管理员账号、角色、权限与审计查询
 type RBACService struct {
@@ -29,7 +31,11 @@ func (s *RBACService) ListAdmins(ctx context.Context, keyword string, page, size
 	return s.Rbac.FillRoles(ctx, accounts), total, nil
 }
 
-func (s *RBACService) CreateAdmin(ctx context.Context, req models.AdminCreateRequest) error {
+func (s *RBACService) CreateAdmin(ctx context.Context, operatorID string, req models.AdminCreateRequest) error {
+	// 非超管不允许创建带 super_admin 角色的账号（防提权）
+	if err := s.ensureCanAssignRoles(ctx, operatorID, req.RoleIDs); err != nil {
+		return err
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -38,7 +44,39 @@ func (s *RBACService) CreateAdmin(ctx context.Context, req models.AdminCreateReq
 	return err
 }
 
-func (s *RBACService) UpdateAdmin(ctx context.Context, id string, req models.AdminUpdateRequest) error {
+func (s *RBACService) UpdateAdmin(ctx context.Context, operatorID, id string, req models.AdminUpdateRequest) error {
+	// 非超管不允许给账号分配/变更 super_admin 角色（防提权）
+	if err := s.ensureCanAssignRoles(ctx, operatorID, req.RoleIDs); err != nil {
+		return err
+	}
+	// 最后一个超管保护：目标当前是超管，且本次操作禁用它或移除其超管角色
+	if req.Status == "disabled" || req.RoleIDs != nil {
+		super, err := s.Rbac.IsSuperAdmin(ctx, id)
+		if err != nil {
+			return err
+		}
+		if super {
+			willLoseSuper := req.Status == "disabled"
+			if req.RoleIDs != nil {
+				has, err := s.roleIDsHasSuperAdmin(ctx, req.RoleIDs)
+				if err != nil {
+					return err
+				}
+				if !has {
+					willLoseSuper = true
+				}
+			}
+			if willLoseSuper {
+				active, err := s.countActiveSuperAdmins(ctx, id)
+				if err != nil {
+					return err
+				}
+				if active <= 1 {
+					return ErrLastSuperAdmin
+				}
+			}
+		}
+	}
 	newHash := ""
 	if req.Password != "" {
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -48,6 +86,45 @@ func (s *RBACService) UpdateAdmin(ctx context.Context, id string, req models.Adm
 		newHash = string(hash)
 	}
 	return s.Rbac.UpdateAdmin(ctx, id, req, newHash)
+}
+
+// ensureCanAssignRoles 非超管不允许分配/变更 super_admin 角色
+func (s *RBACService) ensureCanAssignRoles(ctx context.Context, operatorID string, roleIDs []string) error {
+	if len(roleIDs) == 0 {
+		return nil
+	}
+	super, err := s.Rbac.IsSuperAdmin(ctx, operatorID)
+	if err != nil {
+		return err
+	}
+	if super {
+		return nil
+	}
+	hasSuper, err := s.roleIDsHasSuperAdmin(ctx, roleIDs)
+	if err != nil {
+		return err
+	}
+	if hasSuper {
+		return ErrSuperAdminRoleRequire
+	}
+	return nil
+}
+
+// roleIDsHasSuperAdmin 判断角色 ID 列表中是否包含 super_admin 角色
+func (s *RBACService) roleIDsHasSuperAdmin(ctx context.Context, roleIDs []string) (bool, error) {
+	for _, rid := range roleIDs {
+		code, err := s.Rbac.RoleCodeByID(ctx, rid)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue // 无效角色 ID 跳过
+			}
+			return false, err
+		}
+		if code == "super_admin" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // SetAdminStatus 启用/停用管理员；停用时其全部会话立即失效
@@ -83,7 +160,7 @@ func (s *RBACService) countActiveSuperAdmins(ctx context.Context, excludeID stri
 		SELECT COUNT(*) FROM admin_users u
 		JOIN admin_user_roles ur ON ur.admin_id = u.id
 		JOIN admin_roles ro ON ro.id = ur.role_id
-		WHERE ro.code='super_admin' AND u.status='active' AND u.id<>$1::uuid`, excludeID).Scan(&n)
+		WHERE ro.code='super_admin' AND ro.status='active' AND u.status='active' AND u.id<>$1::uuid`, excludeID).Scan(&n)
 	return n, err
 }
 

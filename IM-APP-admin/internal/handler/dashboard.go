@@ -75,7 +75,7 @@ func (h *OpsHandler) DashboardOverview(c *gin.Context) {
 }
 
 func (h *OpsHandler) DashboardTrends(c *gin.Context) {
-	days := atoi(c.Query("days"), 7)
+	days := clampInt(atoi(c.Query("days"), 7), 1, 90)
 	list, err := h.Svc.DashboardTrends(c.Request.Context(), days)
 	if err != nil {
 		response.FailErr(c, 500, "查询失败", err)

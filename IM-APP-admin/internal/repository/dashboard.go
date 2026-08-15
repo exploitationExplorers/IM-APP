@@ -10,13 +10,22 @@ import (
 
 func (r *OpsRepo) DashboardOverview(ctx context.Context) (*models.DashboardOverview, error) {
 	o := &models.DashboardOverview{}
-	_ = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&o.Users)
-	_ = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE updated_at >= NOW() - interval '1 day'`).Scan(&o.ActiveToday)
-	_ = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM groups`).Scan(&o.Groups)
-	_ = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE created_at >= NOW() - interval '1 day'`).Scan(&o.MessagesToday)
-	_ = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM forward_tasks`).Scan(&o.ForwardTasks)
-	_ = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM sms_send_logs WHERE created_at >= NOW() - interval '1 day'`).Scan(&o.SmsSentToday)
-	_ = r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM reports WHERE status IN ('pending','processing','reopened')`).Scan(&o.PendingReports)
+	var firstErr error
+	check := func(err error) {
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	check(r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&o.Users))
+	check(r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE updated_at >= NOW() - interval '1 day'`).Scan(&o.ActiveToday))
+	check(r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM groups`).Scan(&o.Groups))
+	check(r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE created_at >= NOW() - interval '1 day'`).Scan(&o.MessagesToday))
+	check(r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM forward_tasks`).Scan(&o.ForwardTasks))
+	check(r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM sms_send_logs WHERE created_at >= NOW() - interval '1 day'`).Scan(&o.SmsSentToday))
+	check(r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM reports WHERE status IN ('pending','processing','reopened')`).Scan(&o.PendingReports))
+	if firstErr != nil {
+		return o, firstErr
+	}
 	return o, nil
 }
 

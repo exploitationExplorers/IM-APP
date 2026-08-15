@@ -63,7 +63,7 @@ func (h *OpsHandler) CancelForwardTask(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.CancelForwardTask(c.Request.Context(), c.Param("id"), middleware.AdminID(c), req.Reason); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -78,7 +78,7 @@ func (h *OpsHandler) RetryForwardTask(c *gin.Context) {
 	}
 	n, err := h.Svc.RetryFailedTargets(c.Request.Context(), c.Param("id"), middleware.AdminID(c))
 	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -101,7 +101,7 @@ func (h *OpsHandler) SetForwardUserLimit(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.SetForwardUserLimit(c.Request.Context(), c.Param("userId"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -127,7 +127,7 @@ func (h *OpsHandler) SetForwardSettings(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.SetForwardSettings(c.Request.Context(), req.Settings, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)

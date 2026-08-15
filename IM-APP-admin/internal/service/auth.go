@@ -50,9 +50,9 @@ func (s *AuthService) Login(ctx context.Context, username, password, device, ip,
 		return nil, ErrInvalidCredentials
 	}
 
-	// 已启用 MFA：签发挑战 token，要求二次验证
+	// 已启用 MFA：签发带 scope=mfa 的挑战 token，要求二次验证
 	if account.MFAEnabled {
-		challenge, err := middleware.IssueAccessToken(s.Secret, s.Issuer, s.Audience, account.ID, s.MFATTL)
+		challenge, err := middleware.IssueScopeToken(s.Secret, s.Issuer, s.Audience, account.ID, ScopeMFA, s.MFATTL)
 		if err != nil {
 			return nil, err
 		}

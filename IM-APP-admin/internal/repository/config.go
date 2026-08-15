@@ -30,17 +30,21 @@ func (r *OpsRepo) ListAppVersions(ctx context.Context) ([]models.AppVersion, err
 }
 
 func (r *OpsRepo) CreateAppVersion(ctx context.Context, v models.AppVersion) error {
+	forceUpgrade := false
+	if v.ForceUpgrade != nil {
+		forceUpgrade = *v.ForceUpgrade
+	}
 	_, err := r.DB.Exec(ctx, `
 		INSERT INTO app_versions(platform, version, description, download_url, force_upgrade)
-		VALUES($1,$2,$3,$4,$5)`, v.Platform, v.Version, v.Description, v.DownloadURL, v.ForceUpgrade)
+		VALUES($1,$2,$3,$4,$5)`, v.Platform, v.Version, v.Description, v.DownloadURL, forceUpgrade)
 	return err
 }
 
 func (r *OpsRepo) UpdateAppVersion(ctx context.Context, id string, v models.AppVersion) error {
 	_, err := r.DB.Exec(ctx, `
 		UPDATE app_versions SET
-			description=COALESCE($2, description),
-			download_url=COALESCE($3, download_url),
+			description=COALESCE(NULLIF($2,''), description),
+			download_url=COALESCE(NULLIF($3,''), download_url),
 			force_upgrade=COALESCE($4, force_upgrade)
 		WHERE id=$1::uuid`, id, v.Description, v.DownloadURL, v.ForceUpgrade)
 	return err
@@ -118,8 +122,8 @@ func (r *OpsRepo) CreateReportReason(ctx context.Context, x models.ReportReason)
 func (r *OpsRepo) UpdateReportReason(ctx context.Context, id string, x models.ReportReason) error {
 	_, err := r.DB.Exec(ctx, `
 		UPDATE report_reasons SET
-			target_type=COALESCE($2,target_type), reason=COALESCE($3,reason),
-			language=COALESCE($4,language), sort_order=COALESCE($5,sort_order)
+			target_type=COALESCE(NULLIF($2,''),target_type), reason=COALESCE(NULLIF($3,''),reason),
+			language=COALESCE(NULLIF($4,''),language), sort_order=COALESCE(NULLIF($5,0),sort_order)
 		WHERE id=$1::uuid`, id, x.TargetType, x.Reason, x.Language, x.SortOrder)
 	return err
 }

@@ -10,8 +10,8 @@ type AppVersion struct {
 	Version      string    `json:"version"`
 	Description  string    `json:"description"`
 	DownloadURL  string    `json:"downloadUrl"`
-	ForceUpgrade bool      `json:"forceUpgrade"`
-	Status       string    `json:"status"` // draft|published
+	ForceUpgrade *bool     `json:"forceUpgrade"` // *bool 区分"未传"与"false"，避免部分更新被零值覆盖
+	Status       string    `json:"status"`       // draft|published
 	CreatedAt    time.Time `json:"createdAt"`
 }
 

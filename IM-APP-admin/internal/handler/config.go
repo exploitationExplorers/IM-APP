@@ -28,7 +28,7 @@ func (h *OpsHandler) CreateAppVersion(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.CreateAppVersion(c.Request.Context(), v); err != nil {
-		response.Fail(c, http.StatusBadRequest, "创建失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "创建失败", err)
 		return
 	}
 	c.Set("auditReason", "创建版本 "+v.Version)
@@ -42,7 +42,7 @@ func (h *OpsHandler) UpdateAppVersion(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.UpdateAppVersion(c.Request.Context(), c.Param("id"), v); err != nil {
-		response.Fail(c, http.StatusBadRequest, "更新失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "更新失败", err)
 		return
 	}
 	c.Set("auditReason", "修改版本")
@@ -56,7 +56,7 @@ func (h *OpsHandler) SetAppVersionStatus(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.SetAppVersionStatus(c.Request.Context(), c.Param("id"), req.Status); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -80,7 +80,7 @@ func (h *OpsHandler) CreateLegalDocument(c *gin.Context) {
 	}
 	id, err := h.Svc.CreateLegalDocument(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "创建失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "创建失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -94,7 +94,7 @@ func (h *OpsHandler) PublishLegalDocument(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.PublishLegalDocument(c.Request.Context(), c.Param("id")); err != nil {
-		response.Fail(c, http.StatusBadRequest, "发布失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "发布失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -117,7 +117,7 @@ func (h *OpsHandler) CreateReportReason(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.CreateReportReason(c.Request.Context(), x); err != nil {
-		response.Fail(c, http.StatusBadRequest, "创建失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "创建失败", err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -130,7 +130,7 @@ func (h *OpsHandler) UpdateReportReason(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.UpdateReportReason(c.Request.Context(), c.Param("id"), x); err != nil {
-		response.Fail(c, http.StatusBadRequest, "更新失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "更新失败", err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -145,7 +145,7 @@ func (h *OpsHandler) SetReportReasonStatus(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.SetReportReasonStatus(c.Request.Context(), c.Param("id"), req.Status); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -167,7 +167,7 @@ func (h *OpsHandler) SaveSystemLimits(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.SaveSystemLimits(c.Request.Context(), req.Limits, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "保存失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "保存失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -181,7 +181,7 @@ func (h *OpsHandler) PublishSystemLimits(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.PublishSystemLimits(c.Request.Context(), middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "发布失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "发布失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)

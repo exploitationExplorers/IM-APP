@@ -1714,7 +1714,7 @@
     }
   },
   "info": {
-    "description": "按《GOAL-管理后台分模块开发清单(1).md》实现。除 /health、/auth/login、/auth/mfa/verify 外，均需在请求头携带 `Authorization: Bearer \u003ctoken\u003e`。统一响应 `{code, message, data, requestId}`，code=0 成功；列表接口 data 为 `{items, total, page, pageSize}`。",
+    "description": "按《GOAL-管理后台分模块开发清单(1).md》实现。除 /health、/auth/login、/auth/mfa/verify、/auth/token/refresh 外，均需在请求头携带 `Authorization: Bearer \u003ctoken\u003e`。统一响应 `{code, message, data, requestId}`，code=0 成功；列表接口 data 为 `{items, total, page, pageSize}`。错误 message 为通用文案，底层详情仅记录在后端日志。",
     "title": "IM-APP 管理后台 API",
     "version": "1.0.0"
   },
@@ -3275,6 +3275,7 @@
             "description": "服务异常"
           }
         },
+        "security": [],
         "summary": "用 refresh token 刷新 access token（自动轮换）",
         "tags": [
           "认证与我的"
