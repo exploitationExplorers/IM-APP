@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -22,6 +23,9 @@ type MinIO struct {
 	UseSSL    bool
 	AccessKey string
 	SecretKey string
+
+	signClient       *minio.Client
+	publicPathPrefix string
 }
 
 func NewMinIO(cfg config.MinIOConfig) (*MinIO, error) {
@@ -43,6 +47,12 @@ func NewMinIO(cfg config.MinIOConfig) (*MinIO, error) {
 		UseSSL:    cfg.UseSSL,
 		AccessKey: cfg.AccessKey,
 		SecretKey: cfg.SecretKey,
+	}
+	if cfg.PublicURL != "" {
+		m.signClient, m.publicPathPrefix, err = newPublicSignClient(cfg.PublicURL, cfg.AccessKey, cfg.SecretKey)
+		if err != nil {
+			return nil, err
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -84,18 +94,26 @@ func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, e
 		return PresignResult{}, fmt.Errorf("minio not configured")
 	}
 	signClient := m.Client
-	if m.PublicURL != "" {
-		host := strings.TrimPrefix(strings.TrimPrefix(m.PublicURL, "http://"), "https://")
-		if c, err := minio.New(host, &minio.Options{
-			Creds:  credentials.NewStaticV4(m.AccessKey, m.SecretKey, ""),
-			Secure: m.UseSSL,
-		}); err == nil {
-			signClient = c
+	publicPathPrefix := ""
+	if m.signClient != nil {
+		signClient = m.signClient
+		publicPathPrefix = m.publicPathPrefix
+	} else if m.PublicURL != "" {
+		var err error
+		signClient, publicPathPrefix, err = newPublicSignClient(m.PublicURL, m.AccessKey, m.SecretKey)
+		if err != nil {
+			return PresignResult{}, err
 		}
 	}
 	u, err := signClient.PresignedPutObject(ctx, m.Bucket, objectKey, expiry)
 	if err != nil {
 		return PresignResult{}, err
+	}
+	// 公网 URL 带代理前缀时，签名仍针对 MinIO 原始路径 /bucket/object；
+	// 返回客户端前添加 /minio，Nginx 转发时再剥离此前缀。
+	if publicPathPrefix != "" {
+		u.Path = path.Join(publicPathPrefix, u.Path)
+		u.RawPath = ""
 	}
 
 	var fileURL string
@@ -115,6 +133,25 @@ func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, e
 		ObjectKey: objectKey,
 		ExpiresIn: int(expiry.Seconds()),
 	}, nil
+}
+
+func newPublicSignClient(publicURL, accessKey, secretKey string) (*minio.Client, string, error) {
+	endpoint, err := url.Parse(publicURL)
+	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+		return nil, "", fmt.Errorf("invalid MINIO_PUBLIC_URL %q", publicURL)
+	}
+	if endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return nil, "", fmt.Errorf("MINIO_PUBLIC_URL must not contain user info, query, or fragment")
+	}
+	client, err := minio.New(endpoint.Host, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: endpoint.Scheme == "https",
+		Region: "us-east-1",
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("minio public signing client: %w", err)
+	}
+	return client, strings.TrimSuffix(endpoint.Path, "/"), nil
 }
 
 func escapeObjectKey(objectKey string) string {
