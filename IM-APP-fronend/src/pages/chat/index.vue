@@ -8,10 +8,12 @@ import { useChatStore } from '@/stores/chat'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
 import type { Conversation } from '@/types'
+import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
 useTabBar()
 
+const statusBarHeight = getStatusBarHeight()
 const chatStore = useChatStore()
 const keyword = ref('')
 const showAddMenu = ref(false)
@@ -73,7 +75,7 @@ function closeMenus() {
 
 <template>
   <view class="page" @click="closeMenus">
-    <view class="header">
+    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
       <text class="title">聊天</text>
       <view class="add-wrap" @click.stop="onAdd">
         <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />

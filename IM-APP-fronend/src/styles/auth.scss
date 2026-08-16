@@ -21,7 +21,7 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
   width: 100%;
   max-width: 750rpx;
   margin: 0 auto;
-  padding: 0 40rpx;
+  padding: var(--status-bar-height, 0px) 40rpx 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

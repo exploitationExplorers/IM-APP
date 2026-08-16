@@ -3,7 +3,9 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { fetchGroupMembers, updateMemberRemark } from '@/api/group'
 import type { GroupMember } from '@/types'
+import { getStatusBarHeight } from '@/utils/status-bar'
 
+const statusBarHeight = getStatusBarHeight()
 const groupId = ref('')
 const keyword = ref('')
 const members = ref<GroupMember[]>([])
@@ -67,7 +69,7 @@ async function editRemark(member: GroupMember) {
 
 <template>
   <view class="page">
-    <view class="header">
+    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
       <view class="back-btn" @click="goBack">‹</view>
       <text class="title">群聊成员</text>
       <text class="action">新增</text>
@@ -123,6 +125,7 @@ async function editRemark(member: GroupMember) {
   justify-content: space-between;
   height: 96rpx;
   padding: 0 28rpx;
+  box-sizing: content-box;
   background: #fff;
   border-bottom: 1rpx solid #f3f3f3;
 }

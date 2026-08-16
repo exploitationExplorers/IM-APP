@@ -20,6 +20,7 @@ import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
+import { getStatusBarHeight } from '@/utils/status-bar'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -27,8 +28,7 @@ const contactStore = useContactStore()
 const forwardStore = useForwardStore()
 const successVisible = ref(false)
 
-// App 端 navigationStyle:custom 页面从状态栏底部开始绘制，头部需让出状态栏高度；H5 端为 0
-const statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 0
+const statusBarHeight = getStatusBarHeight()
 
 const conversationId = ref('')
 const title = ref('聊天')
@@ -701,6 +701,7 @@ function pickImage() {
   align-items: center;
   height: 94rpx;
   padding: 0 26rpx;
+  box-sizing: content-box;
   background: #ffffff;
   border-bottom: 1rpx solid #ececec;
 }

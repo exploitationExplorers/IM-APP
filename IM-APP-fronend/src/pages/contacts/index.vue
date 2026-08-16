@@ -8,10 +8,12 @@ import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
 import type { Contact, ContactListSort, GroupPreview } from '@/types'
+import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
 useTabBar()
 
+const statusBarHeight = getStatusBarHeight()
 const contactStore = useContactStore()
 const { contacts, contactTotal, contactHasMore, contactsLoading, groups } = storeToRefs(contactStore)
 const keyword = ref('')
@@ -95,7 +97,8 @@ function closeMenus() {
 
 <template>
   <view class="page" @click="closeMenus">
-    <view class="header">
+    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
+      <view class="header-row">
       <text class="title">通讯录</text>
       <view class="add-wrap" @click.stop="onAdd">
         <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
@@ -113,6 +116,7 @@ function closeMenus() {
             <text>创建群聊</text>
           </view>
         </view>
+      </view>
       </view>
     </view>
 
@@ -212,12 +216,15 @@ function closeMenus() {
 }
 
 .header {
+  background: #fff;
+}
+
+.header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   height: 96rpx;
   padding: 0 40rpx;
-  background: #fff;
   box-sizing: border-box;
 }
 

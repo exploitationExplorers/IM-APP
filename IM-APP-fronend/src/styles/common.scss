@@ -27,6 +27,17 @@ page {
   box-sizing: border-box;
 }
 
+/*
+ * 自定义导航标题栏：App 从屏幕顶端绘制，用运行时注入的 --status-bar-height 让出状态栏。
+ * 已自行 padding 的 ImNavBar / chat-header / 带 status-bar 占位的页面不要用这些 class。
+ * content-box 保证原 height:96rpx 仍是标题行高度，不会被 padding 吃掉。
+ */
+.nav,
+.navbar {
+  box-sizing: content-box;
+  padding-top: var(--status-bar-height, 0px) !important;
+}
+
 .safe-bottom {
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);

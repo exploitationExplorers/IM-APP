@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { getStatusBarHeight } from '@/utils/status-bar'
+
 /**
  * 自定义导航栏。
  * App 端 navigationStyle:custom 时页面从状态栏底部开始绘制，
@@ -10,7 +12,7 @@ defineProps<{
 
 const emit = defineEmits<{ (e: 'back'): void }>()
 
-const statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 0
+const statusBarHeight = getStatusBarHeight()
 </script>
 
 <template>
