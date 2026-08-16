@@ -5,6 +5,7 @@ import ImSwitch from '@/components/ImSwitch.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
+import { clearConversationHistory } from '@/api/im'
 import {
   setConversationPin,
   setConversationRecvOpt,
@@ -216,7 +217,7 @@ async function selectJoinMode(mode: GroupJoinMode) {
 async function onClearHistory() {
   const res = await uni.showModal({
     title: '清除聊天记录',
-    content: '聊天记录只会从此设备中删除，不会从其他人的设备中删除',
+    content: '聊天记录将从你的所有设备中删除，不会影响其他群成员',
     confirmText: '确认',
     cancelText: '取消',
   })
@@ -224,6 +225,12 @@ async function onClearHistory() {
   try {
     const conversationId = convId.value || (await resolveGroupConversationID(groupId.value))
     convId.value = conversationId
+    // 服务端清漫游并同步多端；被禁言/群未激活时后端 403，降级为仅清本端
+    try {
+      await clearConversationHistory('group', groupId.value)
+    } catch (e) {
+      console.warn('服务端清除聊天记录失败，仅清除本端', e)
+    }
     await chatStore.clearHistory(conversationId)
     uni.showToast({ title: '已清除', icon: 'success' })
   } catch (e) {

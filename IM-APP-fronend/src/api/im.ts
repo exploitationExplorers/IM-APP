@@ -65,3 +65,18 @@ export async function resolveIMGroupByIM(imGroupId: string): Promise<IMGroupTarg
     method: 'GET',
   })
 }
+
+/**
+ * 清除当前用户在指定会话的服务端漫游历史，并同步到自己的其他登录设备。
+ * 不影响私聊对方或其他群成员；操作不可恢复。
+ */
+export async function clearConversationHistory(
+  peerType: 'c2c' | 'group',
+  peerId: string,
+): Promise<{ ok: boolean; scope: string }> {
+  return request<{ ok: boolean; scope: string }>({
+    url: '/im/conversation-messages/clear',
+    method: 'POST',
+    data: { peerType, peerId },
+  })
+}
