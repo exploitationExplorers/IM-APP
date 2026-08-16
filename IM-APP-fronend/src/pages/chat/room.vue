@@ -378,7 +378,10 @@ async function startVoiceRecord() {
       recording.value = false
       clearRecordingTimer()
       const path = res.tempFilePath || ''
-      const duration = Number(res.duration || recordingSeconds.value || 0)
+      // App 端 onStop 的 duration 单位是毫秒，统一换算成秒；缺失时退回计时器秒数
+      const rawDuration = Number(res.duration || 0)
+      const duration =
+        rawDuration > 0 ? Math.max(1, Math.round(rawDuration / 1000)) : Math.max(1, recordingSeconds.value)
       if (!path) {
         voiceMode.value = false
         return
@@ -495,16 +498,19 @@ async function sendVoiceDraft() {
     return
   }
 
+  const draft = voiceDraft.value
+  // 点了发送就退出语音条、恢复正常输入框；失败时气泡在列表里标红并 toast 提示
+  voiceDraft.value = null
+  voiceMode.value = false
+  recordingSeconds.value = 0
+
   try {
     await chatStore.sendVoice(
       conversationId.value,
-      voiceDraft.value.path,
-      voiceDraft.value.duration,
+      draft.path,
+      draft.duration,
       imUserId.value || myId.value,
     )
-    voiceDraft.value = null
-    voiceMode.value = false
-    recordingSeconds.value = 0
     await nextTick()
     scrollToBottom()
   } catch (e) {

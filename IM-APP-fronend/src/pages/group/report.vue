@@ -28,12 +28,6 @@ function chooseReason(reason: { value: GroupReportReason; label: string }) {
     url: `/pages/group/report-submit?id=${encodeURIComponent(groupId.value)}&reason=${reason.value}&label=${encodeURIComponent(reason.label)}`,
   })
 }
-
-function chooseReason(reason: { value: GroupReportReason; label: string }) {
-  uni.navigateTo({
-    url: `/pages/group/report-submit?id=${encodeURIComponent(groupId.value)}&reason=${reason.value}&label=${encodeURIComponent(reason.label)}`,
-  })
-}
 </script>
 
 <template>
