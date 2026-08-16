@@ -2,9 +2,11 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import ImSwitch from '@/components/ImSwitch.vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
+import { clearConversationHistory } from '@/api/im'
 import {
   setConversationPin,
   setConversationRecvOpt,
@@ -216,7 +218,7 @@ async function selectJoinMode(mode: GroupJoinMode) {
 async function onClearHistory() {
   const res = await uni.showModal({
     title: '清除聊天记录',
-    content: '聊天记录只会从此设备中删除，不会从其他人的设备中删除',
+    content: '聊天记录将从你的所有设备中删除，不会影响其他群成员',
     confirmText: '确认',
     cancelText: '取消',
   })
@@ -224,6 +226,12 @@ async function onClearHistory() {
   try {
     const conversationId = convId.value || (await resolveGroupConversationID(groupId.value))
     convId.value = conversationId
+    // 服务端清漫游并同步多端；被禁言/群未激活时后端 403，降级为仅清本端
+    try {
+      await clearConversationHistory('group', groupId.value)
+    } catch (e) {
+      console.warn('服务端清除聊天记录失败，仅清除本端', e)
+    }
     await chatStore.clearHistory(conversationId)
     uni.showToast({ title: '已清除', icon: 'success' })
   } catch (e) {
@@ -266,11 +274,7 @@ async function onLeaveOrDismiss() {
 
 <template>
   <view class="page">
-    <view class="header">
-      <view class="back-btn" @click="goBack">‹</view>
-      <text class="title">群组详情</text>
-      <view class="header-spacer" />
-    </view>
+    <ImNavBar title="群组详情" @back="goBack" />
 
     <view class="card">
       <view class="member-row" @click="goToMembers">
@@ -414,38 +418,6 @@ async function onLeaveOrDismiss() {
   min-height: 100vh;
   background: #f3f4f7;
   padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 96rpx;
-  padding: 0 26rpx;
-  background: #ffffff;
-}
-
-.back-btn {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #1f1f1f;
-}
-
-.header-spacer {
-  width: 52rpx;
-  height: 52rpx;
 }
 
 .card {

@@ -574,12 +574,15 @@ export async function sendVoiceMessage(
   filePath: string,
   duration: number,
 ): Promise<MessageItem> {
-  const seconds = Math.max(1, Math.round(duration))
+  // 录音上限 60 秒，超过 120 的入参只可能是毫秒，统一换算成秒
+  const seconds = Math.max(1, Math.round(duration > 120 ? duration / 1000 : duration))
   let message: MessageItem
   if (isAppPlatform) {
+    // 原生 SDK 按本地路径读文件，file:// 协议头会读不到
+    const soundPath = filePath.replace(/^file:\/\//, '')
     message = await imCall<MessageItem>(
       IMMethods.CreateSoundMessageFromFullPath,
-      filePath,
+      soundPath,
       seconds,
     )
   } else {

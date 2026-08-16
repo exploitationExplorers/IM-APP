@@ -277,6 +277,13 @@
       }
     },
     {
+      "path": "pages/group/report-submit",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "检举原因"
+      }
+    },
+    {
       "path": "pages/group/leave",
       "style": {
         "navigationStyle": "custom",
