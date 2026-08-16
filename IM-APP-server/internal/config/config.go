@@ -29,7 +29,7 @@ type MinIOConfig struct {
 	SecretKey  string
 	Bucket     string
 	UseSSL     bool
-	PublicURL  string // 对外可访问的 MinIO 地址（如 http://8.210.72.157:9000），空则用内部 Endpoint
+	PublicURL  string // 对外可访问的 MinIO 地址（如 https://www.ke58.com/minio），空则用内部 Endpoint
 	PublicRead bool   // true 时启动自动把桶设为公开读（外网可直接访问文件 URL）
 }
 

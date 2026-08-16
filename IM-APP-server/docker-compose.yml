@@ -96,7 +96,7 @@ services:
       MINIO_SECRET_KEY: minioadmin123
       MINIO_BUCKET: im-uploads
       MINIO_USE_SSL: "false"
-      # MinIO 对外访问地址（预签名 URL 用，值从同目录 .env 读取；如 http://8.210.72.157:9000）
+      # MinIO 对外访问地址（预签名 URL 用，值从同目录 .env 读取；如 https://www.ke58.com/minio）
       MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
       # 返回的图片 URL 需直接打开；设为 true 会公开读取整个 MINIO_BUCKET
       MINIO_PUBLIC_READ: ${MINIO_PUBLIC_READ:-true}
