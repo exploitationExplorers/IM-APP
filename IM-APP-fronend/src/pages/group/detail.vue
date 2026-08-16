@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import ImSwitch from '@/components/ImSwitch.vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
@@ -273,11 +274,7 @@ async function onLeaveOrDismiss() {
 
 <template>
   <view class="page">
-    <view class="header">
-      <view class="back-btn" @click="goBack">‹</view>
-      <text class="title">群组详情</text>
-      <view class="header-spacer" />
-    </view>
+    <ImNavBar title="群组详情" @back="goBack" />
 
     <view class="card">
       <view class="member-row" @click="goToMembers">
@@ -421,38 +418,6 @@ async function onLeaveOrDismiss() {
   min-height: 100vh;
   background: #f3f4f7;
   padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 96rpx;
-  padding: 0 26rpx;
-  background: #ffffff;
-}
-
-.back-btn {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #1f1f1f;
-}
-
-.header-spacer {
-  width: 52rpx;
-  height: 52rpx;
 }
 
 .card {

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import type { GroupReportReason } from '@/api/report'
+import { safeBack } from '@/utils/nav'
 
 /** 检举原因：文案按原型展示，value 为后端 /groups/reports 的 reason 枚举 */
 const REASONS: { value: GroupReportReason; label: string }[] = [
@@ -18,7 +20,13 @@ onLoad((query) => {
 })
 
 function goBack() {
-  uni.navigateBack()
+  safeBack('/pages/chat/index')
+}
+
+function chooseReason(reason: { value: GroupReportReason; label: string }) {
+  uni.navigateTo({
+    url: `/pages/group/report-submit?id=${encodeURIComponent(groupId.value)}&reason=${reason.value}&label=${encodeURIComponent(reason.label)}`,
+  })
 }
 
 function chooseReason(reason: { value: GroupReportReason; label: string }) {
@@ -30,11 +38,7 @@ function chooseReason(reason: { value: GroupReportReason; label: string }) {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">检举原因</text>
-      <view class="nav-space" />
-    </view>
+    <ImNavBar title="检举原因" @back="goBack" />
 
     <view class="card">
       <view
@@ -55,38 +59,6 @@ function chooseReason(reason: { value: GroupReportReason; label: string }) {
 .page {
   min-height: 100vh;
   background: #f5f5f5;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 96rpx;
-  padding: 0 26rpx;
-  background: #fff;
-}
-
-.nav-back {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #1f1f1f;
-}
-
-.nav-space {
-  width: 52rpx;
-  height: 52rpx;
 }
 
 .card {
