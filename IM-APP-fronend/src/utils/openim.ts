@@ -532,9 +532,19 @@ export async function sendAtTextMessage(
   return sendCreatedMessage(target, message)
 }
 
-async function sendCreatedMessage(target: IMTarget, message: MessageItem): Promise<MessageItem> {
+interface SendCreatedMessageOptions {
+  /** 媒体文件已经上传并写入消息 URL，此时不能再让 SDK 查找本地文件并重复上传 */
+  alreadyUploaded?: boolean
+}
+
+async function sendCreatedMessage(
+  target: IMTarget,
+  message: MessageItem,
+  options: SendCreatedMessageOptions = {},
+): Promise<MessageItem> {
   // sessionType=3 必须填 groupID，填 recvID 会被 OpenIM 拒绝
-  return imCall<MessageItem>(IMMethods.SendMessage, {
+  const method = options.alreadyUploaded ? IMMethods.SendMessageNotOss : IMMethods.SendMessage
+  return imCall<MessageItem>(method, {
     recvID: target.sessionType === SessionType.Single ? target.recvId : '',
     groupID: target.sessionType === SessionType.Single ? '' : target.groupId,
     message,
@@ -566,7 +576,7 @@ export async function sendImageMessage(target: IMTarget, filePath: string): Prom
       snapshotPicture: picture,
     })
   }
-  return sendCreatedMessage(target, message)
+  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
 }
 
 export async function sendVoiceMessage(
@@ -597,7 +607,7 @@ export async function sendVoiceMessage(
       soundType: file.type,
     })
   }
-  return sendCreatedMessage(target, message)
+  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
 }
 
 /** 走 OpenIM 自己的对象存储，不经过业务后端 */
