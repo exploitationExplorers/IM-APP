@@ -4,7 +4,7 @@ export const APP_CONFIG = {
   appName: 'Chat',
   displayName: '66快捷版',
   version: 'v0.1.0',
-  apiBaseUrl: env.VITE_API_BASE_URL || 'http://8.210.72.157:8080/api/v1',
+  apiBaseUrl: env.VITE_API_BASE_URL || 'https://www.ke58.com/api/v1',
   defaultCountryCode: '+86',
   /** 参考站默认头像 */
   defaultAvatarUrl:
