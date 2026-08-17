@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       "/api": {
         // target: "http://8.210.72.157:8090",
-        target: "https://admin.ke58.com",     
+        target: "https://admin.ke58.com",
         changeOrigin: true
       }
     }

@@ -49,6 +49,9 @@ class RequestHttp {
         if (config.loading) showFullScreenLoading();
         if (config.headers && typeof config.headers.set === "function") {
           config.headers.set("x-access-token", userStore.token);
+          if (userStore.token) {
+            config.headers.set("Authorization", `Bearer ${userStore.token}`);
+          }
         }
         return config;
       },
@@ -69,15 +72,17 @@ class RequestHttp {
         axiosCanceler.removePending(config);
         if (config.loading) tryHideFullScreenLoading();
         // 登录失效
+        const errMsg = data.msg || data.message;
         if (data.code == ResultEnum.OVERDUE) {
           userStore.logout();
           router.replace(LOGIN_URL);
-          ElMessage.error(data.msg);
+          ElMessage.error(errMsg);
           return Promise.reject(data);
         }
         // 全局错误信息拦截（防止下载文件的时候返回数据流，没有 code 直接报错）
-        if (data.code && data.code !== ResultEnum.SUCCESS) {
-          ElMessage.error(data.msg);
+        // 管理端约定 code=0 成功；模板遗留 code=200 亦视为成功
+        if (data.code !== undefined && data.code !== 0 && data.code !== ResultEnum.SUCCESS) {
+          ElMessage.error(errMsg);
           return Promise.reject(data);
         }
         // 成功请求（在页面上除非特殊情况，否则不用处理失败逻辑）
@@ -109,6 +114,9 @@ class RequestHttp {
   }
   put<T>(url: string, params?: object, _object = {}): Promise<ResultData<T>> {
     return this.service.put(url, params, _object);
+  }
+  patch<T>(url: string, params?: object, _object = {}): Promise<ResultData<T>> {
+    return this.service.patch(url, params, _object);
   }
   delete<T>(url: string, params?: any, _object = {}): Promise<ResultData<T>> {
     return this.service.delete(url, { params, ..._object });

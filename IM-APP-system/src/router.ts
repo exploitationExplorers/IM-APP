@@ -30,7 +30,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: "system/users",
         component: () => import("./views/UserManagementView.vue"),
-        meta: { title: "平台用户管理" },
+        meta: { title: "管理员" },
       },
       {
         path: "system/roles",

@@ -1,191 +1,188 @@
 <script setup lang="ts">
-import { computed, reactive, shallowRef } from "vue";
+import { onMounted, reactive, shallowRef, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { CirclePlus, Delete, Download, Search, Upload } from "@element-plus/icons-vue";
-import UserEditorDrawer from "../components/users/UserEditorDrawer.vue";
-import type { SystemUser, UserDraft, UserStatus } from "../types/system";
+import { CirclePlus, Delete, Search } from "@element-plus/icons-vue";
+import UserEditorDrawer, { type AdminDraft } from "../components/users/UserEditorDrawer.vue";
+import {
+  createAdmin,
+  listAdmins,
+  listRoles,
+  patchAdmin,
+  resetAdminMfa,
+  updateAdminStatus,
+  type Rbac,
+} from "../api/modules/rbac";
 
-interface UserFilters {
+interface AdminFilters {
   keyword: string;
-  status: "all" | UserStatus;
-  role: string;
 }
 
-const filters = reactive<UserFilters>({ keyword: "", status: "all", role: "" });
+const filters = reactive<AdminFilters>({ keyword: "" });
 const currentPage = shallowRef(1);
 const pageSize = shallowRef(10);
+const total = shallowRef(0);
+const loading = shallowRef(false);
 const drawerVisible = shallowRef(false);
-const selectedUser = shallowRef<SystemUser | null>(null);
+const selectedAdmin = shallowRef<Rbac.AdminAccount | null>(null);
+const admins = shallowRef<Rbac.AdminAccount[]>([]);
+const roleOptions = shallowRef<Rbac.Role[]>([]);
 
-const users = shallowRef<SystemUser[]>([
-  {
-    id: 1,
-    name: "陈安",
-    account: "chen.an",
-    email: "chen.an@imapp.io",
-    role: "超级管理员",
-    status: "active",
-    lastActiveAt: "2026-08-12 10:41",
-    createdAt: "2026-03-08",
-  },
-  {
-    id: 2,
-    name: "林诺",
-    account: "lin.nuo",
-    email: "lin.nuo@imapp.io",
-    role: "运营管理员",
-    status: "active",
-    lastActiveAt: "2026-08-12 09:36",
-    createdAt: "2026-03-13",
-  },
-  {
-    id: 3,
-    name: "周米娅",
-    account: "zhou.miya",
-    email: "zhou.miya@imapp.io",
-    role: "普通成员",
-    status: "active",
-    lastActiveAt: "2026-08-11 20:17",
-    createdAt: "2026-04-02",
-  },
-  {
-    id: 4,
-    name: "王磊",
-    account: "wang.lei",
-    email: "wang.lei@imapp.io",
-    role: "普通成员",
-    status: "disabled",
-    lastActiveAt: "2026-08-06 14:28",
-    createdAt: "2026-04-15",
-  },
-  {
-    id: 5,
-    name: "黄怡",
-    account: "huang.yi",
-    email: "huang.yi@imapp.io",
-    role: "运营管理员",
-    status: "active",
-    lastActiveAt: "2026-08-12 08:55",
-    createdAt: "2026-05-20",
-  },
-]);
+function formatTime(value?: string): string {
+  if (!value) return "-";
+  return value
+    .replace("T", " ")
+    .replace(/\.\d+/, "")
+    .replace(/\+08:00$/, "");
+}
 
-const filteredUsers = computed(() => {
-  const keyword = filters.keyword.trim().toLowerCase();
-  return users.value.filter((user) => {
-    const matchesKeyword =
-      !keyword ||
-      [user.name, user.account, user.email].some((value) => value.toLowerCase().includes(keyword));
-    const matchesStatus = filters.status === "all" || user.status === filters.status;
-    const matchesRole = !filters.role || user.role === filters.role;
-    return matchesKeyword && matchesStatus && matchesRole;
-  });
-});
+function displayName(admin: Rbac.AdminAccount): string {
+  return admin.nickname?.trim() || admin.username || "-";
+}
 
-const pageUsers = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  return filteredUsers.value.slice(start, start + pageSize.value);
-});
+async function loadRoles(): Promise<void> {
+  try {
+    const res = await listRoles();
+    roleOptions.value = res.data ?? [];
+  } catch {
+    roleOptions.value = [];
+  }
+}
 
-function queryUsers(): void {
+async function loadAdmins(): Promise<void> {
+  loading.value = true;
+  try {
+    const res = await listAdmins({
+      page: currentPage.value,
+      size: pageSize.value,
+      keyword: filters.keyword.trim() || undefined,
+    });
+    const data = res.data;
+    admins.value = data?.items ?? [];
+    total.value = data?.total ?? 0;
+  } catch {
+    admins.value = [];
+    total.value = 0;
+  } finally {
+    loading.value = false;
+  }
+}
+
+function queryAdmins(): void {
   currentPage.value = 1;
+  void loadAdmins();
 }
 
 function resetFilters(): void {
   filters.keyword = "";
-  filters.status = "all";
-  filters.role = "";
   currentPage.value = 1;
+  void loadAdmins();
 }
 
 function openCreateDrawer(): void {
-  selectedUser.value = null;
+  selectedAdmin.value = null;
   drawerVisible.value = true;
 }
 
-function openEditDrawer(user: SystemUser): void {
-  selectedUser.value = user;
+function openEditDrawer(admin: Rbac.AdminAccount): void {
+  selectedAdmin.value = admin;
   drawerVisible.value = true;
 }
 
-function saveUser(draft: UserDraft): void {
-  if (selectedUser.value) {
-    users.value = users.value.map((user) =>
-      user.id === selectedUser.value?.id ? { ...user, ...draft } : user,
-    );
-    ElMessage.success("用户更新成功");
-    return;
+async function saveAdmin(draft: AdminDraft): Promise<void> {
+  try {
+    if (selectedAdmin.value) {
+      const body: Rbac.PatchAdminBody = {
+        nickname: draft.nickname,
+        roleIds: draft.roleIds,
+        status: draft.status,
+      };
+      if (draft.password) body.password = draft.password;
+      await patchAdmin(selectedAdmin.value.id, body);
+      ElMessage.success("管理员更新成功");
+    } else {
+      await createAdmin({
+        username: draft.username,
+        password: draft.password,
+        nickname: draft.nickname || undefined,
+        roleIds: draft.roleIds,
+        status: draft.status,
+      });
+      ElMessage.success("管理员创建成功");
+    }
+    await loadAdmins();
+  } catch {
+    // 错误已由拦截器提示
   }
-  const newUser: SystemUser = {
-    id: Math.max(...users.value.map((user) => user.id), 0) + 1,
-    ...draft,
-    lastActiveAt: "暂无记录",
-    createdAt: new Date().toISOString().slice(0, 10),
-  };
-  users.value = [newUser, ...users.value];
-  ElMessage.success("用户创建成功");
 }
 
-async function toggleStatus(user: SystemUser): Promise<void> {
-  const nextStatus: UserStatus = user.status === "active" ? "disabled" : "active";
+async function toggleStatus(admin: Rbac.AdminAccount): Promise<void> {
+  const nextStatus: Rbac.Status = admin.status === "active" ? "disabled" : "active";
   const action = nextStatus === "active" ? "启用" : "停用";
   try {
-    await ElMessageBox.confirm(`${action}${user.name}的账号？`, `${action}用户`, {
-      type: "warning",
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-    });
-    users.value = users.value.map((item) =>
-      item.id === user.id ? { ...item, status: nextStatus } : item,
+    await ElMessageBox.confirm(
+      `${action}「${displayName(admin)}」？停用后其全部会话将立即失效。`,
+      `${action}管理员`,
+      { type: "warning", confirmButtonText: "确定", cancelButtonText: "取消" },
     );
-    ElMessage.success(`用户${action}成功`);
+    await updateAdminStatus(admin.id, { status: nextStatus });
+    ElMessage.success(`管理员${action}成功`);
+    await loadAdmins();
   } catch {
-    // The confirmation was dismissed.
+    // 取消或失败
   }
 }
 
-function exportUsers(): void {
-  ElMessage.success("用户数据导出任务已提交");
+async function handleResetMfa(admin: Rbac.AdminAccount): Promise<void> {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `重置「${displayName(admin)}」的 MFA？可填写操作原因。`,
+      "重置 MFA",
+      {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        inputPlaceholder: "操作原因（可选）",
+        inputValue: "",
+      },
+    );
+    await resetAdminMfa(admin.id, { reason: value?.trim() || undefined });
+    ElMessage.success("MFA 已重置");
+    await loadAdmins();
+  } catch {
+    // 取消或失败
+  }
 }
+
+watch([currentPage, pageSize], () => {
+  void loadAdmins();
+});
+
+onMounted(() => {
+  void loadRoles();
+  void loadAdmins();
+});
 </script>
 
 <template>
   <div class="table-box">
     <section class="card table-search">
-      <el-form :model="filters" @submit.prevent="queryUsers">
+      <el-form :model="filters" @submit.prevent="queryAdmins">
         <div class="search-grid">
           <div class="search-item">
             <el-form-item>
               <el-input
                 v-model="filters.keyword"
                 clearable
-                placeholder="用户姓名/账号/邮箱"
+                placeholder="用户名/昵称"
                 :prefix-icon="Search"
-                @keyup.enter="queryUsers"
+                @keyup.enter="queryAdmins"
+                @clear="queryAdmins"
               />
             </el-form-item>
           </div>
-          <div class="search-item">
-            <el-form-item>
-              <el-select v-model="filters.status" placeholder="状态" clearable>
-                <el-option label="全部状态" value="all" />
-                <el-option label="启用" value="active" />
-                <el-option label="停用" value="disabled" />
-              </el-select>
-            </el-form-item>
-          </div>
-          <div class="search-item">
-            <el-form-item>
-              <el-select v-model="filters.role" placeholder="角色" clearable>
-                <el-option label="全部角色" value="" />
-                <el-option label="超级管理员" value="超级管理员" />
-                <el-option label="运营管理员" value="运营管理员" />
-                <el-option label="普通成员" value="普通成员" />
-              </el-select>
-            </el-form-item>
-          </div>
+          <div class="search-item" />
+          <div class="search-item" />
           <div class="search-operation">
-            <el-button type="primary" :icon="Search" @click="queryUsers">搜索</el-button>
+            <el-button type="primary" :icon="Search" @click="queryAdmins">搜索</el-button>
             <el-button :icon="Delete" @click="resetFilters">重置</el-button>
           </div>
         </div>
@@ -195,47 +192,75 @@ function exportUsers(): void {
     <section class="card table-main">
       <div class="table-header">
         <div class="header-button-lf">
-          <el-button type="primary" :icon="CirclePlus" @click="openCreateDrawer"
-            >新增用户</el-button
-          >
+          <el-button type="primary" :icon="CirclePlus" @click="openCreateDrawer">
+            新增管理员
+          </el-button>
         </div>
       </div>
 
-      <el-table :data="pageUsers" style="width: 100%">
-        <el-table-column label="用户" min-width="220">
+      <el-table v-loading="loading" :data="admins" style="width: 100%">
+        <el-table-column label="管理员" min-width="200">
           <template #default="{ row }">
             <div class="user-cell">
-              <span class="user-avatar">{{ row.name.slice(0, 1) }}</span>
+              <span class="user-avatar">{{ displayName(row).slice(0, 1) }}</span>
               <div>
-                <strong>{{ row.name }}</strong>
-                <span>{{ row.account }}</span>
+                <strong>{{ displayName(row) }}</strong>
+                <span>{{ row.username }}</span>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="220" />
-        <el-table-column prop="role" label="角色" min-width="160">
+        <el-table-column label="角色" min-width="180">
           <template #default="{ row }">
-            <el-tag effect="plain" round>{{ row.role }}</el-tag>
+            <template v-if="row.roleNames?.length">
+              <el-tag
+                v-for="name in row.roleNames"
+                :key="name"
+                class="role-tag"
+                effect="plain"
+                round
+              >
+                {{ name }}
+              </el-tag>
+            </template>
+            <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="用户状态" min-width="120">
+        <el-table-column label="状态" min-width="100">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'active' ? 'success' : 'danger'" effect="light">{{
-              row.status === "active" ? "启用" : "停用"
-            }}</el-tag>
+            <el-tag :type="row.status === 'active' ? 'success' : 'danger'" effect="light">
+              {{ row.status === "active" ? "启用" : "停用" }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="lastActiveAt" label="最近活跃" min-width="170" />
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="MFA" min-width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.mfaEnabled ? 'success' : 'info'" effect="plain">
+              {{ row.mfaEnabled ? "已启用" : "未启用" }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近登录" min-width="170">
+          <template #default="{ row }">
+            {{ formatTime(row.lastLoginAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" min-width="170">
+          <template #default="{ row }">
+            {{ formatTime(row.createdAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEditDrawer(row)">编辑</el-button>
             <el-button
               link
               :type="row.status === 'active' ? 'danger' : 'success'"
               @click="toggleStatus(row)"
-              >{{ row.status === "active" ? "停用" : "启用" }}</el-button
             >
+              {{ row.status === "active" ? "停用" : "启用" }}
+            </el-button>
+            <el-button link type="warning" @click="handleResetMfa(row)">重置 MFA</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -247,12 +272,17 @@ function exportUsers(): void {
           v-model:page-size="pageSize"
           :page-sizes="[10, 25, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
-          :total="filteredUsers.length"
+          :total="total"
         />
       </div>
     </section>
 
-    <UserEditorDrawer v-model="drawerVisible" :user="selectedUser" @save="saveUser" />
+    <UserEditorDrawer
+      v-model="drawerVisible"
+      :admin="selectedAdmin"
+      :role-options="roleOptions"
+      @save="saveAdmin"
+    />
   </div>
 </template>
 
@@ -344,6 +374,11 @@ function exportUsers(): void {
   border-radius: 50%;
   font-size: 13px;
   font-weight: 700;
+}
+
+.role-tag {
+  margin-right: 6px;
+  margin-bottom: 4px;
 }
 
 :deep(.el-table) {

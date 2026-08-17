@@ -108,7 +108,7 @@ function toggleCollapse(): void {
                 </template>
                 <el-menu-item index="/system/users">
                   <el-icon><User /></el-icon>
-                  <template #title>平台用户管理</template>
+                  <template #title>管理员</template>
                 </el-menu-item>
                 <el-menu-item index="/system/roles">
                   <el-icon><Lock /></el-icon>
