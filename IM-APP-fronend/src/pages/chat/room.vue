@@ -41,6 +41,8 @@ const myRole = ref<'owner' | 'admin' | 'member'>('member')
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
 const convRef = ref<Conversation | null>(null)
 const memberRemarkMap = ref<Record<string, string>>({})
+/** 群成员业务头像（业务用户 ID 索引），IM 快照头像为空或损坏时兜底用 */
+const memberAvatarMap = ref<Record<string, string>>({})
 /** 群禁言状态（群详情接口）：本人被禁言 / 全员禁言时禁用输入区 */
 const canChat = ref(true)
 const denyReason = ref('')
@@ -105,10 +107,22 @@ function isMine(message: ChatMessage): boolean {
 }
 
 function avatarOf(message: ChatMessage): string {
+  return message.senderAvatar || fallbackAvatarOf(message)
+}
+
+/** 业务侧头像兜底：IM 快照头像为空或损坏时，用业务联系人 / 群成员头像，避免显示灰色占位 */
+function fallbackAvatarOf(message: ChatMessage): string {
   if (isMine(message)) {
-    return message.senderAvatar || myAvatar.value
+    return myAvatar.value
   }
-  if (message.senderAvatar) return message.senderAvatar
+  const uid = businessUserIdFromIM(message.senderId)
+  if (!uid) {
+    return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
+  }
+  const groupAvatar = chatType.value === 'group' ? memberAvatarMap.value[uid] : ''
+  if (groupAvatar) return groupAvatar
+  const contact = contactStore.contacts.find((c) => c.id === uid)
+  if (contact?.avatar) return contact.avatar
   return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
 }
 
@@ -365,13 +379,17 @@ async function refreshGroupMeta() {
       fetchGroupDetail(gid).catch(() => null),
     ])
     const map: Record<string, string> = {}
+    const avatarMap: Record<string, string> = {}
     const metaMap: Record<string, MemberMeta> = {}
     for (const m of ms) {
       const r = m.memberRemark?.trim()
       if (r) map[m.id] = r
+      const av = m.avatar?.trim()
+      if (av) avatarMap[m.id] = av
       metaMap[m.id] = { role: m.role, isMuted: !!m.isMuted }
     }
     memberRemarkMap.value = map
+    memberAvatarMap.value = avatarMap
     memberMetaMap.value = metaMap
     memberCount.value = ms.length
     const me = userStore.profile?.id
@@ -818,6 +836,7 @@ function pickFavorite() {
           :message="m"
           :mine="isMine(m)"
           :avatar="avatarOf(m)"
+          :fallback-avatar="fallbackAvatarOf(m)"
           :nickname="nicknameOf(m)"
           @avatar-click="onAvatarClick(m)"
           @card-view="onViewCard"

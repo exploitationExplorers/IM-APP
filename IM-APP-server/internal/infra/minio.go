@@ -91,6 +91,17 @@ func (m *MinIO) FileURL(objectKey string) string {
 	return fmt.Sprintf("%s://%s/%s/%s", scheme, m.Endpoint, m.Bucket, escapedObjectKey)
 }
 
+// ObjectExists 检查对象是否真实存在于 MinIO。
+// 用于上传完成确认：Android PUT 空包问题下 MinIO 可能返回 200 但对象为空/不存在，
+// 直接 MarkReady 会把死链 URL 标记为可用，导致头像等资源 404 后显示灰色。
+func (m *MinIO) ObjectExists(ctx context.Context, objectKey string) bool {
+	if !m.Available() {
+		return false
+	}
+	_, err := m.Client.StatObject(ctx, m.Bucket, objectKey, minio.StatObjectOptions{})
+	return err == nil
+}
+
 func (m *MinIO) signClientForPublic() (*minio.Client, string, error) {
 	if m.signClient != nil {
 		return m.signClient, m.publicPathPrefix, nil
