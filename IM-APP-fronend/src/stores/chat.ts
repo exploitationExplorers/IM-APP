@@ -116,10 +116,20 @@ export const useChatStore = defineStore('chat', () => {
     const merged = [...conversations.value]
     incoming.forEach((conv) => {
       const idx = merged.findIndex((c) => c.id === conv.id)
-      if (idx >= 0) merged[idx] = conv
+      if (idx >= 0) merged[idx] = keepNewerPreview(merged[idx], conv)
       else merged.push(conv)
     })
     conversations.value = sortConversations(merged)
+  }
+
+  /** SDK 会话预览偶发滞后时，不要把本地刚发出的 [图片] 盖回旧文本 */
+  function keepNewerPreview(prev: Conversation, next: Conversation): Conversation {
+    const prevTime = new Date(prev.lastMessageAt).getTime() || 0
+    const nextTime = new Date(next.lastMessageAt).getTime() || 0
+    if (prev.lastMessage && prevTime > nextTime) {
+      return { ...next, lastMessage: prev.lastMessage, lastMessageAt: prev.lastMessageAt }
+    }
+    return next
   }
 
   function dropRevokedMessage(conversationId: string, clientMsgId: string) {
@@ -166,7 +176,14 @@ export const useChatStore = defineStore('chat', () => {
       subscribeRealtime()
       const list = await getConversationList()
       console.log('[chat] getConversationList count:', list.length)
-      conversations.value = sortConversations(list.map(toConversation))
+      const prevById = new Map(conversations.value.map((c) => [c.id, c]))
+      conversations.value = sortConversations(
+        list.map((item) => {
+          const mapped = toConversation(item)
+          const prev = prevById.get(mapped.id)
+          return prev ? keepNewerPreview(prev, mapped) : mapped
+        }),
+      )
       console.log('[chat] conversations mapped, will refresh online status')
       refreshOnlineStatus().catch((e) => console.warn('[chat] 刷新在线状态失败', e))
     } finally {
@@ -312,9 +329,25 @@ export const useChatStore = defineStore('chat', () => {
       await markAsRead(conversationId)
       return
     }
-    messagesMap.value = { ...messagesMap.value, [conversationId]: mapped }
+    messagesMap.value = {
+      ...messagesMap.value,
+      [conversationId]: mergeLocalPending(mapped, existing),
+    }
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
     await markAsRead(conversationId)
+  }
+
+  /** 历史还没跟上 SDK 时，保留本地发送中 / 刚发出的图片，避免返回再进入就消失 */
+  function mergeLocalPending(history: ChatMessage[], existing: ChatMessage[]): ChatMessage[] {
+    const historyIds = new Set(history.map((m) => m.id))
+    const pending = existing.filter((m) => {
+      if (historyIds.has(m.id)) return false
+      if (m.status === 'sending' || m.status === 'failed') return true
+      if (m.status !== 'sent') return false
+      const age = Date.now() - new Date(m.createdAt).getTime()
+      return age >= 0 && age < 60_000
+    })
+    return pending.length ? [...history, ...pending] : history
   }
 
   /** 上滑加载更早的消息，返回本次是否有新增 */

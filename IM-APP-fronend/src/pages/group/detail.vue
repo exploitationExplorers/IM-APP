@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import ImSwitch from '@/components/ImSwitch.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
@@ -29,7 +29,9 @@ const memberList = computed(() => groupStore.members)
 const previewMembers = computed(() => memberList.value.slice(0, PREVIEW_MEMBER_LIMIT))
 const groupName = computed(() => groupDetail.value?.remark?.trim() || groupDetail.value?.name || '群聊')
 const avatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
-const memberCount = computed(() => groupDetail.value?.memberCount ?? memberList.value.length)
+const memberCount = computed(() =>
+  memberList.value.length || groupDetail.value?.memberCount || 0,
+)
 const myRole = computed(() => groupDetail.value?.myRole || 'member')
 const isOwner = computed(() => myRole.value === 'owner')
 const canManage = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
@@ -52,8 +54,11 @@ function memberPreviewAvatar(avatar: string | undefined) {
   return avatar || APP_CONFIG.defaultAvatarUrl
 }
 
-onLoad(async (query) => {
+onLoad((query) => {
   groupId.value = String(query?.id || '')
+})
+
+onShow(async () => {
   if (!groupId.value) {
     uni.showToast({ title: '缺少群聊 ID', icon: 'none' })
     return

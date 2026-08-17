@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ConversationItem from '@/components/ConversationItem.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
 import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
 import { useChatStore } from '@/stores/chat'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { usePullRefresh } from '@/composables/usePullRefresh'
 import { useTabBar } from '@/composables/useTabBar'
 import type { Conversation } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
@@ -33,17 +33,20 @@ const filtered = computed(() => {
   return list.filter((c) => c.title.includes(k) || c.lastMessage.includes(k))
 })
 
-// 会话变化平时由 SDK 事件推送，每次进入页面再兜底拉一次
-onShow(() => {
-  chatStore.loadConversations().catch((e: Error) => {
-    const message = e?.message || '会话加载失败'
+async function reloadConversations() {
+  try {
+    await chatStore.loadConversations()
+  } catch (e) {
+    const message = (e as Error)?.message || '会话加载失败'
     if (message.includes('自定义调试基座')) {
       uni.showModal({ title: '无法连接聊天', content: message, showCancel: false })
       return
     }
     uni.showToast({ title: message, icon: 'none' })
-  })
-})
+  }
+}
+
+const { refreshing, onRefresherRefresh } = usePullRefresh(reloadConversations)
 
 function openConversation(item: Conversation) {
   showAddMenu.value = false
@@ -118,7 +121,14 @@ function closeMenus() {
       </view>
     </view>
 
-    <scroll-view scroll-y class="list">
+    <scroll-view
+      scroll-y
+      class="list"
+      refresher-enabled
+      refresher-default-style="black"
+      :refresher-triggered="refreshing"
+      @refresherrefresh="onRefresherRefresh"
+    >
       <ConversationItem
         v-for="item in filtered"
         :key="item.id"

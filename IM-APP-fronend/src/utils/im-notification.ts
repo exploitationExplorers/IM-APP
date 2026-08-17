@@ -70,12 +70,24 @@ function namesOf(list?: NoticeUser[]): string {
  * 群改名通知。签名包含群、操作者和目标群名，因此真正改成不同名称时不会误合并。
  */
 export function imNotificationEventKey(item: MessageItem): string {
+  if (isGroupMembershipNotice(item.contentType)) {
+    return `group-member:${item.groupID || ''}:${item.clientMsgID}`
+  }
   if (item.contentType !== GroupNotice.NameSet) return ''
   const detail = parseDetail(item)
   const groupID = detail.group?.groupID || item.groupID || ''
   const operatorID = detail.opUser?.userID || item.sendID || ''
   const groupName = detail.group?.groupName?.trim() || ''
   return `group-name:${groupID}:${operatorID}:${groupName}`
+}
+
+export function isGroupMembershipNotice(contentType: number): boolean {
+  return (
+    contentType === GroupNotice.MemberQuit ||
+    contentType === GroupNotice.MemberKicked ||
+    contentType === GroupNotice.MemberInvited ||
+    contentType === GroupNotice.MemberEnter
+  )
 }
 
 /**

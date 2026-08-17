@@ -58,17 +58,37 @@ function formatVoiceDuration(seconds: number) {
 }
 
 function playVoice() {
-  if (!voiceMeta.value?.path) return
-  const inner = (uni as any).createInnerAudioContext?.()
+  const src = toPlayableMediaUrl(voiceMeta.value?.path || '')
+  if (!src) return
+  const inner = (uni as { createInnerAudioContext?: () => { src: string; play: () => void } }).createInnerAudioContext?.()
   if (inner) {
-    inner.src = voiceMeta.value.path
+    inner.src = src
     inner.play()
     return
   }
   if (typeof Audio !== 'undefined') {
-    const audio = new Audio(voiceMeta.value.path)
+    const audio = new Audio(src)
     audio.play().catch(() => undefined)
   }
+}
+
+function toPlayableMediaUrl(path: string): string {
+  if (!path) return ''
+  if (
+    path.startsWith('http://') ||
+    path.startsWith('https://') ||
+    path.startsWith('blob:') ||
+    path.startsWith('file://')
+  ) {
+    return path
+  }
+  try {
+    const converted = plus?.io?.convertLocalFileSystemURL?.(path)
+    if (converted) return converted.startsWith('file://') ? converted : `file://${converted}`
+  } catch {
+    /* H5 没有 plus */
+  }
+  return path.startsWith('/') ? `file://${path}` : path
 }
 
 function openLink(url: string) {

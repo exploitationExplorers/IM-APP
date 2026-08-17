@@ -610,7 +610,29 @@ function nativeOpenIM(): NativeOpenIM | null {
 function isSendProgressData(data: unknown): boolean {
   if (typeof data === 'number') return true
   if (typeof data === 'string' && /^\d+$/.test(data.trim())) return true
+  if (data && typeof data === 'object' && !('contentType' in data) && ('progress' in data || 'current' in data)) {
+    return true
+  }
   return false
+}
+
+/** 原生进度回调也可能带 clientMsgID，但不能当成发送完成 */
+function isCompleteSentMessage(msg: MessageItem | null): msg is MessageItem {
+  if (!msg?.clientMsgID || !msg.contentType) return false
+  if (msg.status === MessageStatus.Sending || msg.status === MessageStatus.Failed) return false
+  return true
+}
+
+/** OpenIM FullPath API 只要 POSIX 绝对路径，不能传 uni.chooseImage 的 file:// / _doc 临时路径 */
+function toNativeFullPath(filePath: string): string {
+  let path = filePath || ''
+  try {
+    const converted = plus?.io?.convertLocalFileSystemURL?.(path)
+    if (converted) path = converted
+  } catch {
+    /* H5 或转换失败时沿用原路径 */
+  }
+  return path.replace(/^file:\/\//, '')
 }
 
 async function sendCreatedMessage(
@@ -670,7 +692,7 @@ function sendOnAppNative(
       offFail()
       if (ok) {
         const msg = coerceMessage(payload)
-        if (msg) {
+        if (isCompleteSentMessage(msg)) {
           resolve(msg)
           return
         }
@@ -679,10 +701,10 @@ function sendOnAppNative(
     }
     const timer = setTimeout(() => {
       finish(false, undefined, new Error('发送超时'))
-    }, 15000)
+    }, useNotOss ? 15000 : 60000)
     const offOk = onIMEvent<MessageItem>(IMEvents.SendMessageSuccess, (msg) => {
       const parsed = coerceMessage(msg)
-      if (parsed?.clientMsgID === clientMsgID) finish(true, parsed)
+      if (parsed?.clientMsgID === clientMsgID && isCompleteSentMessage(parsed)) finish(true, parsed)
     })
     const offFail = onIMEvent<{ clientMsgID?: string; errMsg?: string }>(IMEvents.SendMessageFailed, (err) => {
       if (!err?.clientMsgID || err.clientMsgID === clientMsgID) {
@@ -709,6 +731,7 @@ function sendOnAppNative(
         finish(false, msg, new Error('发送失败'))
         return
       }
+      if (!isCompleteSentMessage(msg)) return
       finish(true, msg)
     }
     if (useNotOss) {
@@ -731,7 +754,10 @@ export async function sendTextMessage(target: IMTarget, text: string): Promise<M
 export async function sendImageMessage(target: IMTarget, filePath: string): Promise<MessageItem> {
   let message: MessageItem
   if (isAppPlatform) {
-    message = await imCall<MessageItem>(IMMethods.CreateImageMessageFromFullPath, filePath)
+    message = await imCall<MessageItem>(
+      IMMethods.CreateImageMessageFromFullPath,
+      toNativeFullPath(filePath),
+    )
   } else {
     const file = await pathToFile(filePath)
     const url = await uploadFile(file)
@@ -756,17 +782,20 @@ export async function sendVoiceMessage(
   const seconds = Math.max(1, Math.round(duration > 120 ? duration / 1000 : duration))
   let message: MessageItem
   if (isAppPlatform) {
-    let soundPath = filePath
+    const soundPath = toNativeFullPath(filePath)
     try {
-      const converted = plus?.io?.convertLocalFileSystemURL?.(filePath)
-      if (converted) soundPath = converted
-    } catch {}
-    soundPath = soundPath.replace(/^file:\/\//, '')
-    message = await imCall<MessageItem>(
-      IMMethods.CreateSoundMessageFromFullPath,
-      soundPath,
-      seconds,
-    )
+      message = await imCall<MessageItem>(
+        IMMethods.CreateSoundMessageFromFullPath,
+        soundPath,
+        seconds,
+      )
+    } catch {
+      // 部分原生插件把参数收成对象，而不是 (path, duration)
+      message = await imCall<MessageItem>(IMMethods.CreateSoundMessageFromFullPath, {
+        soundPath,
+        duration: seconds,
+      })
+    }
   } else {
     const file = await pathToFile(filePath)
     const url = await uploadFile(file)
@@ -926,6 +955,51 @@ function jsonContentField(raw: unknown, key: string): string {
   return raw
 }
 
+function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    if (obj.soundElem && typeof obj.soundElem === 'object') {
+      const nested = jsonSoundMeta(obj.soundElem)
+      if (nested.path || nested.duration) return nested
+    }
+    const path =
+      (typeof obj.sourceUrl === 'string' && obj.sourceUrl) ||
+      (typeof obj.soundPath === 'string' && obj.soundPath) ||
+      (typeof obj.path === 'string' && obj.path) ||
+      ''
+    return { path, duration: Number(obj.duration || 0) }
+  }
+  if (typeof raw === 'string' && raw) {
+    try {
+      return jsonSoundMeta(JSON.parse(raw))
+    } catch {
+      return { path: '', duration: 0 }
+    }
+  }
+  return { path: '', duration: 0 }
+}
+
+function jsonPictureUrl(raw: unknown): string {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    const pictures = [obj.snapshotPicture, obj.sourcePicture, obj.bigPicture]
+    for (const picture of pictures) {
+      if (picture && typeof picture === 'object' && 'url' in picture) {
+        const url = (picture as { url?: unknown }).url
+        if (typeof url === 'string' && url) return url
+      }
+    }
+    if (typeof obj.sourcePath === 'string' && obj.sourcePath) return obj.sourcePath
+    if (typeof obj.url === 'string' && obj.url) return obj.url
+  }
+  if (typeof raw !== 'string' || !raw) return ''
+  try {
+    return jsonPictureUrl(JSON.parse(raw))
+  } catch {
+    return ''
+  }
+}
+
 function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {
   const quoted = item.quoteElem?.quoteMessage
   if (!quoted) return undefined
@@ -949,13 +1023,19 @@ function extractContent(item: MessageItem): string {
         item.pictureElem?.snapshotPicture?.url ||
         item.pictureElem?.sourcePicture?.url ||
         item.pictureElem?.sourcePath ||
-        ''
+        jsonPictureUrl(item.content)
       )
-    case MessageType.VoiceMessage:
-      return JSON.stringify({
+    case MessageType.VoiceMessage: {
+      const fromElem = {
         path: item.soundElem?.sourceUrl || item.soundElem?.soundPath || '',
         duration: item.soundElem?.duration || 0,
+      }
+      const fromJson = jsonSoundMeta(item.content)
+      return JSON.stringify({
+        path: fromElem.path || fromJson.path,
+        duration: fromElem.duration || fromJson.duration,
       })
+    }
     case MessageType.FileMessage:
       return item.fileElem?.sourceUrl || ''
     case MessageType.VideoMessage:
