@@ -6,12 +6,13 @@ import {
   fetchGroupMembers,
   muteGroupMember,
   removeGroupMember,
+  unmuteGroupMember,
 } from '@/api/group'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import { APP_CONFIG } from '@/config'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useUserStore } from '@/stores/user'
-import type { GroupInfo, GroupMember } from '@/types'
+import type { GroupInfo, GroupMember, GroupMemberMuteResult } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
@@ -96,8 +97,17 @@ function canActOn(member: GroupMember) {
 
 function openProfile(member: GroupMember) {
   uni.navigateTo({
-    url: `/pages/contacts/user-profile?id=${encodeURIComponent(member.id)}`,
+    url: `/pages/contacts/user-profile?id=${encodeURIComponent(member.id)}&groupId=${encodeURIComponent(groupId.value)}`,
   })
+}
+
+/** 禁言/解禁接口都会返回最新状态，就地更新列表避免整页重拉 */
+function applyMuteResult(result: GroupMemberMuteResult) {
+  members.value = members.value.map((m) =>
+    m.id === result.memberUserId
+      ? { ...m, isMuted: result.isMuted, mutedUntil: result.mutedUntil }
+      : m,
+  )
 }
 
 async function onMute(member: GroupMember) {
@@ -112,10 +122,23 @@ async function onMute(member: GroupMember) {
   if (tapIndex < 0 || tapIndex >= MUTE_SECONDS.length) return
   busy.value = true
   try {
-    await muteGroupMember(groupId.value, member.id, MUTE_SECONDS[tapIndex])
+    applyMuteResult(await muteGroupMember(groupId.value, member.id, MUTE_SECONDS[tapIndex]))
     uni.showToast({ title: '已禁言', icon: 'success' })
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '禁言失败', icon: 'none' })
+  } finally {
+    busy.value = false
+  }
+}
+
+async function onUnmute(member: GroupMember) {
+  if (busy.value || !canActOn(member) || !member.isMuted) return
+  busy.value = true
+  try {
+    applyMuteResult(await unmuteGroupMember(groupId.value, member.id))
+    uni.showToast({ title: '已解禁', icon: 'success' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '解禁失败', icon: 'none' })
   } finally {
     busy.value = false
   }
@@ -173,9 +196,15 @@ async function onRemove(member: GroupMember) {
         <view v-else-if="member.role === 'admin'" class="badge badge-admin">
           <text class="badge-text">管理员</text>
         </view>
-        <view v-else-if="canActOn(member)" class="actions">
+        <view v-else-if="member.isMuted" class="badge badge-muted">
+          <text class="badge-text">已禁言</text>
+        </view>
+        <view v-if="canActOn(member)" class="actions">
           <view class="btn-mute" @click.stop="onMute(member)">
             <text class="btn-text">禁言</text>
+          </view>
+          <view v-if="member.isMuted" class="btn-unmute" @click.stop="onUnmute(member)">
+            <text class="btn-text">解禁</text>
           </view>
           <view class="btn-remove" @click.stop="onRemove(member)">
             <text class="btn-text">移除</text>
@@ -296,6 +325,14 @@ async function onRemove(member: GroupMember) {
   border: 2rpx solid $uni-color-primary;
 }
 
+.badge-muted {
+  border: 2rpx solid #fbc02d;
+}
+
+.badge-muted .badge-text {
+  color: #b8860b;
+}
+
 .badge-text {
   font-size: 24rpx;
   line-height: 1;
@@ -317,6 +354,7 @@ async function onRemove(member: GroupMember) {
 }
 
 .btn-mute,
+.btn-unmute,
 .btn-remove {
   height: 64rpx;
   min-width: 104rpx;
@@ -337,6 +375,10 @@ async function onRemove(member: GroupMember) {
 
 .btn-mute {
   background: #fbc02d;
+}
+
+.btn-unmute {
+  background: #4caf50;
 }
 
 .btn-remove {

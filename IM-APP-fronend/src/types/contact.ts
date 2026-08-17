@@ -65,3 +65,10 @@ export interface SendFriendResult {
   id?: string
   status: 'pending' | 'accepted'
 }
+
+/** POST /group-friend-requests 的返回（从群成员资料发起好友申请） */
+export interface GroupFriendRequestResult {
+  ok: boolean
+  requestId: string
+  status: string
+}

@@ -27,6 +27,13 @@ export interface GroupInfo {
   remark?: string
   myRole?: GroupRole
   allMuted?: boolean
+  /** 当前用户能否在该群发言，进群时据此禁用输入区 */
+  canChat?: boolean
+  /** canChat=false 时的原因（单人禁言 / 全员禁言等） */
+  denyReason?: string
+  /** 当前用户在本群是否被禁言 */
+  isMuted?: boolean
+  mutedUntil?: string | null
   permissions?: GroupPermissions
 }
 
@@ -71,7 +78,20 @@ export interface GroupMember {
   id: string
   nickname: string
   groupNickname?: string
+  displayName?: string
   avatar: string
   role: GroupRole
   memberRemark?: string
+  /** 是否被禁言（后端成员列表已带禁言状态） */
+  isMuted?: boolean
+  mutedUntil?: string | null
+}
+
+/** POST /group-members/mute、/group-members/unmute 的返回 */
+export interface GroupMemberMuteResult {
+  groupId: string
+  memberUserId: string
+  isMuted: boolean
+  mutedUntil: string | null
+  changedAt: string
 }

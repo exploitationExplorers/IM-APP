@@ -1,6 +1,14 @@
 /** 聊天相关类型 */
 
-export type MessageType = 'text' | 'image' | 'voice' | 'file' | 'system'
+export type MessageType = 'text' | 'image' | 'voice' | 'file' | 'card' | 'system'
+
+/** 名片消息内容（card 消息的 content，JSON 字符串） */
+export interface CardPayload {
+  /** 好友的业务用户 UUID，跳详情页用 */
+  userId: string
+  nickname: string
+  avatar: string
+}
 
 export interface MessageQuote {
   senderNickname: string
