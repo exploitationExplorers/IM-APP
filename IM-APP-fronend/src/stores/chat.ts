@@ -606,8 +606,26 @@ export const useChatStore = defineStore('chat', () => {
     opts?: { peerId?: string; reason?: string },
   ) {
     const conv = conversations.value.find((c) => c.id === conversationId)
+    if (!conv) throw new Error('该消息不支持撤回')
     const raw = rawMessages.value[messageId]
-    if (!conv || !raw?.seq) throw new Error('该消息不支持撤回')
+    let seq = raw?.seq || 0
+    // 刚发出的消息，SDK send 返回结果可能还没带服务端 seq（要等实时同步回写）；
+    // 此时先从本会话最新一页历史里按 clientMsgID 捞带 seq 的原始消息再撤，
+    // 避免撤回入口误判“该消息不支持撤回”，导致接口都没发出去。
+    if (!seq) {
+      const { messageList } = await getHistoryMessages(conversationId, 50).catch(() => ({
+        messageList: [] as MessageItem[],
+        isEnd: true,
+      }))
+      const found = messageList.find((m) => m.clientMsgID === messageId)
+      if (found?.seq) {
+        seq = found.seq
+        rememberRaw(found)
+      } else {
+        console.warn('[recall] 本地与最新历史都没拿到 seq，clientMsgID=', messageId)
+      }
+    }
+    if (!seq) throw new Error('该消息暂不可撤回，请稍后重试')
     const peerType = conv.type === 'group' ? ('group' as const) : ('c2c' as const)
     let peerId = opts?.peerId || ''
     if (!peerId) {
@@ -626,7 +644,7 @@ export const useChatStore = defineStore('chat', () => {
       peerType,
       peerId,
       clientMsgId: messageId,
-      seq: raw.seq,
+      seq,
       reason: opts?.reason,
     })
     // 管理员撤他人消息时提示要带原发送者，撤自己时提示「你」

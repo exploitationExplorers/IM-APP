@@ -135,9 +135,12 @@ services:
     # 接入与 OpenIM 共享的外部网络，使本服务能用服务名 openim-api:10002 访问 OpenIM，
     # 同时 OpenIM 也能用 im-app-api:8080 回调本服务的 webhook。
     # 启动前需先创建该网络：docker network create im-app-openim-net
+    # openim-docker_openim 是 openim 栈（/opt/openim-docker）实际使用的网络，
+    # 挂上去后 OpenIM 容器才能用服务名 im-app-api:8080 直连回调。
     networks:
       - default
       - im-app-openim-net
+      - openim-docker_openim
 
 volumes:
   im_pg_data:
@@ -148,4 +151,7 @@ volumes:
 # 启动前需先创建：docker network create im-app-openim-net
 networks:
   im-app-openim-net:
+    external: true
+  # openim 栈（/opt/openim-docker）实际网络名，部署时以 docker network ls 为准
+  openim-docker_openim:
     external: true

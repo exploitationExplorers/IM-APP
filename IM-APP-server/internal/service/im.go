@@ -671,7 +671,7 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 		operatorRole = group.Role
 	}
 
-	message, err := s.Access.FindMessageAudit(ctx, conversationID, req.Seq, req.ClientMsgID)
+	message, err := s.Access.FindMessageAudit(ctx, conversationID, req.ClientMsgID)
 	if err != nil {
 		if errors.Is(err, repository.ErrIMMessageNotFound) {
 			return result, ErrIMMessageNotFound

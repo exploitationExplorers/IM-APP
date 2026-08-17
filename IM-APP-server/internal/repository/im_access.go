@@ -107,15 +107,17 @@ func (r *IMAccessRepo) RecordMessageAudit(ctx context.Context, command, serverMs
 	return err
 }
 
-func (r *IMAccessRepo) FindMessageAudit(ctx context.Context, conversationID string, seq int64, clientMsgID string) (models.IMAuditedMessage, error) {
+func (r *IMAccessRepo) FindMessageAudit(ctx context.Context, conversationID, clientMsgID string) (models.IMAuditedMessage, error) {
 	var message models.IMAuditedMessage
+	// 注意：OpenIM 3.8 的 afterSend 回调不携带 seq（审计表 seq 恒为 0），
+	// 因此这里按 conversation_id + client_msg_id 匹配，clientMsgID 全局唯一足以定位消息。
 	err := r.DB.QueryRow(ctx, `
 		SELECT client_msg_id, conversation_id, sender_im_id, content_type, seq, send_time
 		FROM im_message_audit
-		WHERE conversation_id=$1 AND seq=$2 AND client_msg_id=$3
+		WHERE conversation_id=$1 AND client_msg_id=$2
 		  AND sender_im_id<>'' AND send_time>0
 		ORDER BY created_at DESC
-		LIMIT 1`, conversationID, seq, clientMsgID).Scan(
+		LIMIT 1`, conversationID, clientMsgID).Scan(
 		&message.ClientMsgID, &message.ConversationID, &message.SenderIMID,
 		&message.ContentType, &message.Seq, &message.SendTime)
 	if errors.Is(err, pgx.ErrNoRows) {
