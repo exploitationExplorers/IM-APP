@@ -89,6 +89,8 @@ docker compose up -d --build
 | `MINIO_PUBLIC_READ` | 举报图片等是否能通过返回 URL 直接打开；`true` 会允许公开读取整个 `MINIO_BUCKET`，Docker 默认开启 |
 | `MINIO_EXTERNAL_ADDRESS` | OpenIM 图片、语音和文件的公网预签名地址，如 `https://www.ke58.com/openim`；需配合 Nginx 将 `/openim/` 代理到 OpenIM MinIO |
 | `OPENIM_API_URL` / `OPENIM_SECRET` | 连 OpenIM 服务 |
+| `OPENIM_WEBHOOK_SECRET` / `OPENIM_WEBHOOK_ALLOW_CIDRS` | OpenIM 消息发送/撤回审计回调鉴权；消息撤回接口依赖发送后审计记录 |
+| `OPENIM_RECALL_WINDOW_SECONDS` | 普通用户撤回自己消息的时间窗，默认 120 秒 |
 | `KAFKA_BROKERS` | 万人转发 Kafka broker；未配置时转发提交/恢复/重试返回 503 |
 
 ### 关键约定

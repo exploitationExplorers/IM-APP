@@ -244,7 +244,7 @@
           "raw": "{\n  \"purpose\": \"avatar\",\n  \"fileName\": \"avatar.png\",\n  \"contentType\": \"image/png\",\n  \"size\": 1024\n}"
         },
         "url": "{{baseUrl}}/files/uploads",
-        "description": "创建上传任务：返回 fileId + 预签名上传地址 uploadUrl。\n需要登录态。\npurpose: avatar|image|voice|file|sticker\n会自动把 data.file.id 存入集合变量 fileId，供接口13/14使用。"
+        "description": "创建上传任务：返回 fileId + 预签名 POST 表单 formUrl/formData，文件字段名为 file。\n需要登录态。\npurpose: avatar|image|voice|file|sticker\n会自动把 data.file.id 存入集合变量 fileId，供接口13/14使用。"
       },
       "response": [],
       "event": [
@@ -270,8 +270,8 @@
           { "key": "Content-Type", "value": "application/json" },
           { "key": "Authorization", "value": "Bearer {{accessToken}}" }
         ],
-        "body": { "mode": "raw", "raw": "{}" },
-        "url": "{{baseUrl}}/files/uploads/{{fileId}}/complete",
+        "body": { "mode": "raw", "raw": "{\n  \"fileId\": \"{{fileId}}\"\n}" },
+        "url": "{{baseUrl}}/files/uploads/complete",
         "description": "确认文件上传完成（文件转 ready），之后才能用于头像/消息。\n需要登录态。\n先跑接口12会自动写入 fileId 变量。"
       },
       "response": []
@@ -281,7 +281,7 @@
       "request": {
         "method": "GET",
         "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
-        "url": "{{baseUrl}}/files/{{fileId}}",
+        "url": "{{baseUrl}}/files?fileId={{fileId}}",
         "description": "查询已完成文件信息（fileId 来自接口12写入的变量）。需要登录态。"
       },
       "response": []

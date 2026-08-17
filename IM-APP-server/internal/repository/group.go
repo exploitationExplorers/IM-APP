@@ -23,6 +23,9 @@ type GroupRepo struct {
 // UUID used by database relations and the existing OpenIM mapping.
 func (r *GroupRepo) InternalIDByPublicID(ctx context.Context, publicID string) (string, error) {
 	internalID, _, err := r.LookupGroupIDs(ctx, publicID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrGroupNotFound
+	}
 	return internalID, err
 }
 
@@ -146,15 +149,28 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 			COALESCE(g.announcement,''), COALESCE(g.allow_member_add_friend, true),
 			COALESCE(g.conversation_id::text,''),
 			gm.role, COALESCE(gm.nickname,''), COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false),
+			CASE WHEN gm.muted_until > NOW() THEN gm.muted_until ELSE NULL END,
 		COALESCE((SELECT remark FROM group_remarks gr WHERE gr.user_id=$2::uuid AND gr.group_id=g.id),'')
 		FROM groups g
 		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2::uuid
 		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID, uid).Scan(
 		&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.MemberCount,
 		&g.Announcement, &allow, &g.ConversationID, &g.MyRole, &g.MyNickname,
-		&g.JoinMode, &g.AllMuted, &g.Remark)
+		&g.JoinMode, &g.AllMuted, &g.MutedUntil, &g.Remark)
 	g.AllowMemberAddFriend = allow
 	if err == nil {
+		isMuted := g.MutedUntil != nil
+		canChat := true
+		switch {
+		case isMuted:
+			canChat = false
+			g.DenyReason = "member_muted"
+		case g.AllMuted && g.MyRole != "owner" && g.MyRole != "admin":
+			canChat = false
+			g.DenyReason = "group_muted"
+		}
+		g.IsMuted = &isMuted
+		g.CanChat = &canChat
 		canManage := g.MyRole == "owner" || g.MyRole == "admin"
 		g.Permissions = &models.GroupPermissions{
 			CanEditProfile: canManage, CanEditAnnouncement: canManage,
@@ -178,10 +194,11 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]mod
 	rows, err := r.DB.Query(ctx, `
 		SELECT u.id::text, COALESCE(u.nickname,''), COALESCE(gm.nickname,''),
 			CASE WHEN COALESCE(gm.nickname,'')='' THEN COALESCE(u.nickname,'') ELSE gm.nickname END,
-			COALESCE(u.avatar,''), gm.role
+			COALESCE(u.avatar,''), gm.role,
+			CASE WHEN gm.muted_until > NOW() THEN gm.muted_until ELSE NULL END
 		FROM group_members gm
 		JOIN users u ON u.id = gm.user_id
-		WHERE gm.group_id=$1::uuid
+		WHERE gm.group_id=$1::uuid AND COALESCE(u.status,'active')='active'
 		ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END`,
 		groupID)
 	if err != nil {
@@ -191,9 +208,10 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]mod
 	list := make([]models.GroupMember, 0)
 	for rows.Next() {
 		var m models.GroupMember
-		if err := rows.Scan(&m.ID, &m.Nickname, &m.GroupNickname, &m.DisplayName, &m.Avatar, &m.Role); err != nil {
+		if err := rows.Scan(&m.ID, &m.Nickname, &m.GroupNickname, &m.DisplayName, &m.Avatar, &m.Role, &m.MutedUntil); err != nil {
 			return nil, err
 		}
+		m.IsMuted = m.MutedUntil != nil
 		list = append(list, m)
 	}
 	if rm, rerr := r.GetMemberRemarks(ctx, groupID, uid); rerr == nil {
@@ -450,44 +468,75 @@ func (r *GroupRepo) UpdateMemberRole(ctx context.Context, groupID, operatorID, m
 	return tx.Commit(ctx)
 }
 
-func (r *GroupRepo) UpdateMemberMute(ctx context.Context, groupID, operatorID, memberID string, mutedSeconds int64) error {
+func (r *GroupRepo) UpdateMemberMute(ctx context.Context, groupID, operatorID, memberID string, mutedSeconds int64) (*time.Time, error) {
 	if mutedSeconds < 0 || mutedSeconds > 30*24*60*60 {
-		return ErrInvalidGroupOperation
+		return nil, ErrInvalidGroupOperation
 	}
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback(ctx)
 	var operatorRole, targetRole string
+	var currentMutedUntil *time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT operator.role, target.role
+		SELECT operator.role, target.role, target.muted_until
 		FROM groups g
 		JOIN group_members operator ON operator.group_id=g.id AND operator.user_id=$2::uuid
 		JOIN group_members target ON target.group_id=g.id AND target.user_id=$3::uuid
-		WHERE g.id=$1::uuid AND g.status='active'`, groupID, operatorID, memberID).Scan(&operatorRole, &targetRole)
+		WHERE g.id=$1::uuid AND g.status='active'
+		FOR UPDATE OF target`, groupID, operatorID, memberID).Scan(&operatorRole, &targetRole, &currentMutedUntil)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrForbidden
+		return nil, ErrForbidden
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if operatorID == memberID || operatorRole == "member" || targetRole == "owner" ||
 		(operatorRole == "admin" && targetRole != "member") {
-		return ErrForbidden
+		return nil, ErrForbidden
 	}
-	if _, err := tx.Exec(ctx, `
+	if mutedSeconds == 0 && (currentMutedUntil == nil || !currentMutedUntil.After(time.Now())) {
+		if currentMutedUntil != nil {
+			if _, err := tx.Exec(ctx, `UPDATE group_members SET muted_until=NULL WHERE group_id=$1 AND user_id=$2`, groupID, memberID); err != nil {
+				return nil, err
+			}
+		}
+		return nil, tx.Commit(ctx)
+	}
+	var mutedUntil *time.Time
+	if err := tx.QueryRow(ctx, `
 		UPDATE group_members SET muted_until=
 			CASE WHEN $3::bigint=0 THEN NULL ELSE NOW() + ($3 * INTERVAL '1 second') END
-		WHERE group_id=$1 AND user_id=$2`, groupID, memberID, mutedSeconds); err != nil {
-		return err
+		WHERE group_id=$1 AND user_id=$2
+		RETURNING muted_until`, groupID, memberID, mutedSeconds).Scan(&mutedUntil); err != nil {
+		return nil, err
 	}
 	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberMute, map[string]any{
 		"userId": memberID, "mutedSeconds": mutedSeconds,
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return mutedUntil, nil
+}
+
+func (r *GroupRepo) MessageRecallRoles(ctx context.Context, groupID, operatorID, senderID string) (operatorRole, senderRole string, err error) {
+	err = r.DB.QueryRow(ctx, `
+		SELECT operator.role,
+			COALESCE((SELECT target.role FROM group_members target
+				WHERE target.group_id=g.id AND target.user_id=$3::uuid), 'member')
+		FROM groups g
+		JOIN group_members operator ON operator.group_id=g.id AND operator.user_id=$2::uuid
+		JOIN users u ON u.id=operator.user_id AND COALESCE(u.status,'active')='active'
+		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`,
+		groupID, operatorID, senderID).Scan(&operatorRole, &senderRole)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrForbidden
+	}
+	return operatorRole, senderRole, err
 }
 
 func (r *GroupRepo) UpdateGroupMute(ctx context.Context, groupID, operatorID string, muted bool) error {
@@ -544,6 +593,8 @@ var ErrForbidden = errors.New("forbidden")
 var ErrInvalidGroupOperation = errors.New("invalid group operation")
 
 var ErrApprovalRequired = errors.New("group approval required")
+
+var ErrGroupNotFound = errors.New("group not found")
 
 func (r *GroupRepo) EnsureQRCode(ctx context.Context, groupID, uid string) (models.GroupQRCodeResult, error) {
 	tx, err := r.DB.Begin(ctx)

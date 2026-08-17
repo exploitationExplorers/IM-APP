@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -79,52 +78,17 @@ func (m *MinIO) Available() bool {
 	return m != nil && m.Client != nil
 }
 
-type PresignResult struct {
-	UploadURL string `json:"uploadUrl"`
-	FileURL   string `json:"fileUrl"`
-	ObjectKey string `json:"objectKey"`
-	ExpiresIn int    `json:"expiresIn"`
-}
-
-// PresignPut 生成预签名上传地址。
-// 若配置了 PublicURL，则用公网 host 生成预签名（host 与签名一致，外网可直接 PUT）；
-// 生成预签名是纯本地计算，不发起网络请求，无需能连通公网 MinIO。
-func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, expiry time.Duration) (PresignResult, error) {
-	if !m.Available() {
-		return PresignResult{}, fmt.Errorf("minio not configured")
-	}
-	signClient, publicPathPrefix, err := m.signClientForPublic()
-	if err != nil {
-		return PresignResult{}, err
-	}
-	u, err := signClient.PresignedPutObject(ctx, m.Bucket, objectKey, expiry)
-	if err != nil {
-		return PresignResult{}, err
-	}
-	// 公网 URL 带代理前缀时，签名仍针对 MinIO 原始路径 /bucket/object；
-	// 返回客户端前添加 /minio，Nginx 转发时再剥离此前缀。
-	if publicPathPrefix != "" {
-		u.Path = path.Join(publicPathPrefix, u.Path)
-		u.RawPath = ""
-	}
-
-	var fileURL string
+// FileURL 返回对象上传完成后的可访问地址。
+func (m *MinIO) FileURL(objectKey string) string {
 	escapedObjectKey := escapeObjectKey(objectKey)
 	if m.PublicURL != "" {
-		fileURL = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(m.PublicURL, "/"), m.Bucket, escapedObjectKey)
-	} else {
-		scheme := "http"
-		if m.UseSSL {
-			scheme = "https"
-		}
-		fileURL = fmt.Sprintf("%s://%s/%s/%s", scheme, m.Endpoint, m.Bucket, escapedObjectKey)
+		return fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(m.PublicURL, "/"), m.Bucket, escapedObjectKey)
 	}
-	return PresignResult{
-		UploadURL: u.String(),
-		FileURL:   fileURL,
-		ObjectKey: objectKey,
-		ExpiresIn: int(expiry.Seconds()),
-	}, nil
+	scheme := "http"
+	if m.UseSSL {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s/%s/%s", scheme, m.Endpoint, m.Bucket, escapedObjectKey)
 }
 
 func (m *MinIO) signClientForPublic() (*minio.Client, string, error) {
@@ -137,8 +101,7 @@ func (m *MinIO) signClientForPublic() (*minio.Client, string, error) {
 	return m.Client, "", nil
 }
 
-// PresignPost 生成 App 端 uni.uploadFile 可用的预签名 POST 表单。
-// Android 上 PUT ArrayBuffer 经常变成空包，MinIO 仍返回 200，头像就会是空白。
+// PresignPost 生成 H5/App 通用的预签名 multipart POST 表单。
 func (m *MinIO) PresignPost(ctx context.Context, objectKey, contentType string, expiry time.Duration) (string, map[string]string, error) {
 	if !m.Available() {
 		return "", nil, fmt.Errorf("minio not configured")

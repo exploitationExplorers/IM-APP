@@ -501,6 +501,19 @@ func (c *Client) SendTextMessage(ctx context.Context, receiverID string, session
 	return result, err
 }
 
+func (c *Client) RevokeMessage(ctx context.Context, userID, conversationID string, seq int64) (bool, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(conversationID) == "" || seq <= 0 {
+		return false, errors.New("invalid revoke message request")
+	}
+	err := c.postWithAdmin(ctx, "/msg/revoke_msg", map[string]any{
+		"userID": userID, "conversationID": conversationID, "seq": seq,
+	}, nil)
+	if isAlreadyRecalled(err) {
+		return true, nil
+	}
+	return false, err
+}
+
 // ConversationSettings 对应 OpenIM 的 Conversation 对象。
 // 字段名与 OpenIM JSON 完全一致，可直接作为 set_conversations 的 conversation 体回写。
 // recvMsgOpt 取值：0 正常接收 / 1 免打扰（不接收）/ 2 仅在线接收。
@@ -789,4 +802,17 @@ func ignoreAlreadyDesired(err error) error {
 		}
 	}
 	return err
+}
+
+func isAlreadyRecalled(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	message := strings.ToLower(apiErr.ErrMsg + " " + apiErr.ErrDlt)
+	already := strings.Contains(message, "already") || strings.Contains(message, "repeat") ||
+		strings.Contains(message, "重复") || strings.Contains(message, "已经")
+	recall := strings.Contains(message, "revoke") || strings.Contains(message, "withdraw") ||
+		strings.Contains(message, "撤回")
+	return already && recall
 }
