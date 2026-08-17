@@ -6,7 +6,11 @@ import SystemTabs from "./components/SystemTabs.vue";
 
 const route = useRoute();
 const isCollapse = shallowRef(false);
-const activeMenu = computed(() => route.path);
+const activeMenu = computed(() => {
+  const menu = route.meta.activeMenu;
+  if (typeof menu === "string" && menu.trim()) return menu;
+  return route.path;
+});
 
 function toggleCollapse(): void {
   isCollapse.value = !isCollapse.value;
@@ -24,12 +28,12 @@ function toggleCollapse(): void {
               :default-active="activeMenu"
               :collapse="isCollapse"
               :collapse-transition="false"
-              :default-openeds="['/system', '/forward-group-send', '/sms-operation-config', '/runtime-observe']"
+              :default-openeds="['/system', '/sms-operation-config', '/country-sms', '/runtime-observe']"
               router
             >
               <el-menu-item index="/home">
                 <el-icon><House /></el-icon>
-                <template #title>首页</template>
+                <template #title>工作台</template>
               </el-menu-item>
               <el-menu-item index="/app/users">
                 <el-icon><UserFilled /></el-icon>
@@ -39,16 +43,10 @@ function toggleCollapse(): void {
                 <el-icon><ChatSquare /></el-icon>
                 <template #title>群组管理</template>
               </el-menu-item>
-              <el-sub-menu index="/forward-group-send">
-                <template #title>
-                  <el-icon><Promotion /></el-icon>
-                  <span>转发和群发管理</span>
-                </template>
-                <el-menu-item index="/forward-group-send">
-                  <el-icon><List /></el-icon>
-                  <template #title>任务列表</template>
-                </el-menu-item>
-              </el-sub-menu>
+              <el-menu-item index="/forward-risk">
+                <el-icon><Warning /></el-icon>
+                <template #title>转发风控</template>
+              </el-menu-item>
               <el-sub-menu index="/sms-operation-config">
                 <template #title>
                   <el-icon><Message /></el-icon>
@@ -59,6 +57,24 @@ function toggleCollapse(): void {
                   <template #title>配置管理</template>
                 </el-menu-item>
               </el-sub-menu>
+              <el-sub-menu index="/country-sms">
+                <template #title>
+                  <el-icon><Message /></el-icon>
+                  <span>国家短信</span>
+                </template>
+                <el-menu-item index="/country-sms/countries">
+                  <el-icon><Location /></el-icon>
+                  <template #title>国家/地区</template>
+                </el-menu-item>
+                <el-menu-item index="/country-sms/sms-logs">
+                  <el-icon><Document /></el-icon>
+                  <template #title>短信发送日志</template>
+                </el-menu-item>
+                <el-menu-item index="/country-sms/sms-statistics">
+                  <el-icon><TrendCharts /></el-icon>
+                  <template #title>送达统计</template>
+                </el-menu-item>
+              </el-sub-menu>
               <el-sub-menu index="/runtime-observe">
                 <template #title>
                   <el-icon><Monitor /></el-icon>
@@ -67,6 +83,20 @@ function toggleCollapse(): void {
                 <el-menu-item index="/runtime-observe/exports">
                   <el-icon><Document /></el-icon>
                   <template #title>导出任务</template>
+                </el-menu-item>
+                <el-menu-item index="/runtime-observe/errors">
+                  <el-icon><Warning /></el-icon>
+                  <template #title>运行错误</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="/other">
+                <template #title>
+                  <el-icon><MoreFilled /></el-icon>
+                  <span>其他</span>
+                </template>
+                <el-menu-item index="/other/features">
+                  <el-icon><SwitchButton /></el-icon>
+                  <template #title>功能开关</template>
                 </el-menu-item>
               </el-sub-menu>
               <el-sub-menu index="/system">
