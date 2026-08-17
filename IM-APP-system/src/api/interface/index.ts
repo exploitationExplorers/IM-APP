@@ -40,8 +40,23 @@ export namespace Auth {
     password: string;
   }
 
+  export interface ReqMfaVerifyForm {
+    challengeToken: string;
+    code: string;
+  }
+
   export interface ReqRefreshForm {
     refreshToken: string;
+  }
+
+  export interface ReqLogoutForm {
+    refreshToken: string;
+  }
+
+  export interface ReqLogoutAllForm {
+    idempotencyKey?: string;
+    reason: string;
+    ticketNo?: string;
   }
 
   export interface AdminInfo {
@@ -56,9 +71,31 @@ export namespace Auth {
   }
 
   export interface ResLogin {
-    token: string;
-    refreshToken: string;
-    admin: AdminInfo;
+    admin?: AdminInfo;
+    mfaChallenge?: string;
+    refreshToken?: string;
+    token?: string;
+  }
+}
+
+export namespace Me {
+  export interface ResMeResult {
+    admin?: Auth.AdminInfo;
+    permissions?: string[];
+  }
+
+  export interface ResMfaStatus {
+    enabled: boolean;
+    secret?: string;
+  }
+
+  export interface ReqMfaCodeForm {
+    code: string;
+  }
+
+  export interface ReqPasswordChangeForm {
+    oldPassword: string;
+    newPassword: string;
   }
 }
 

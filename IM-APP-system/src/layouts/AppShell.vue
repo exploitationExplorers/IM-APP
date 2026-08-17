@@ -28,7 +28,7 @@ function toggleCollapse(): void {
               :default-active="activeMenu"
               :collapse="isCollapse"
               :collapse-transition="false"
-              :default-openeds="['/system', '/sms-operation-config', '/country-sms', '/runtime-observe']"
+              :default-openeds="['/system', '/sms-operation-config', '/country-sms', '/runtime-observe', '/app-config']"
               router
             >
               <el-menu-item index="/home">
@@ -43,10 +43,36 @@ function toggleCollapse(): void {
                 <el-icon><ChatSquare /></el-icon>
                 <template #title>群组管理</template>
               </el-menu-item>
+              <el-menu-item index="/auth-mine">
+                <el-icon><User /></el-icon>
+                <template #title>认证与我的</template>
+              </el-menu-item>
               <el-menu-item index="/forward-risk">
                 <el-icon><Warning /></el-icon>
                 <template #title>转发风控</template>
               </el-menu-item>
+              <el-sub-menu index="/app-config">
+                <template #title>
+                  <el-icon><Iphone /></el-icon>
+                  <span>APP配置</span>
+                </template>
+                <el-menu-item index="/app-config/app-versions">
+                  <el-icon><Document /></el-icon>
+                  <template #title>APP 版本</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/legal-documents">
+                  <el-icon><Tickets /></el-icon>
+                  <template #title>协议文档</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/report-reasons">
+                  <el-icon><Warning /></el-icon>
+                  <template #title>举报原因</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/system-limits">
+                  <el-icon><Setting /></el-icon>
+                  <template #title>系统限制</template>
+                </el-menu-item>
+              </el-sub-menu>
               <el-sub-menu index="/sms-operation-config">
                 <template #title>
                   <el-icon><Message /></el-icon>
