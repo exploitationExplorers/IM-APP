@@ -39,6 +39,15 @@ import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 
 const PAGE_SIZE = 20
 
+/** OnNewRecvMessageRevoked 事件载荷；conversationID 仅 App 原生插件可能携带 */
+interface RevokedNotice {
+  conversationID?: string
+  clientMsgID: string
+  revokerID?: string
+  revokerNickname?: string
+  seq?: number
+}
+
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
   const messagesMap = ref<Record<string, ChatMessage[]>>({})
@@ -135,17 +144,28 @@ export const useChatStore = defineStore('chat', () => {
     return next
   }
 
-  function dropRevokedMessage(conversationId: string, clientMsgId: string) {
+  function dropRevokedMessage(conversationId: string, clientMsgId: string, tip = '消息已撤回') {
     const list = messagesMap.value[conversationId]
     if (!list) return
     messagesMap.value = {
       ...messagesMap.value,
       [conversationId]: list.map((m) =>
         m.id === clientMsgId
-          ? { ...m, type: 'system' as const, content: '消息已撤回' }
+          ? { ...m, type: 'system' as const, content: tip }
           : m,
       ),
     }
+  }
+
+  /**
+   * 撤回通知里没有 conversationID（web SDK 的 RevokedInfo 不带该字段），
+   * 按 clientMsgID 在已加载的会话里反查；消息没加载过就无需处理。
+   */
+  function findConversationIdByMsgId(clientMsgId: string): string {
+    for (const [conversationId, list] of Object.entries(messagesMap.value)) {
+      if (list.some((m) => m.id === clientMsgId)) return conversationId
+    }
+    return ''
   }
 
   function subscribeRealtime() {
@@ -155,9 +175,18 @@ export const useChatStore = defineStore('chat', () => {
       onIMEvent<MessageItem[]>(IMEvents.OnRecvNewMessages, ingestIncoming),
       onIMEvent<ConversationItem[]>(IMEvents.OnConversationChanged, upsertConversations),
       onIMEvent<ConversationItem[]>(IMEvents.OnNewConversation, upsertConversations),
-      onIMEvent<{ conversationID: string; clientMsgID: string }>(
+      onIMEvent<RevokedNotice>(
         IMEvents.OnNewRecvMessageRevoked,
-        (info) => dropRevokedMessage(info.conversationID, info.clientMsgID),
+        (info) => {
+          const conversationId = info.conversationID || findConversationIdByMsgId(info.clientMsgID)
+          if (!conversationId) return
+          // App 原生插件回调可能带 conversationID，web SDK 不带（RevokedInfo 无此字段）
+          const tip =
+            info.revokerID && info.revokerID === imUserId.value
+              ? '你撤回了一条消息'
+              : `${info.revokerNickname || '对方'} 撤回了一条消息`
+          dropRevokedMessage(conversationId, info.clientMsgID, tip)
+        },
       ),
       onUserStatusChanged((state) => {
         console.log('[online] 状态变更事件:', state)
@@ -585,7 +614,13 @@ export const useChatStore = defineStore('chat', () => {
       seq: raw.seq,
       reason: opts?.reason,
     })
-    dropRevokedMessage(conversationId, messageId)
+    // 管理员撤他人消息时提示要带原发送者，撤自己时提示「你」
+    const original = (messagesMap.value[conversationId] || []).find((m) => m.id === messageId)
+    const tip =
+      original?.senderId === imUserId.value
+        ? '你撤回了一条消息'
+        : `你撤回了 ${original?.senderNickname || '成员'} 的一条消息`
+    dropRevokedMessage(conversationId, messageId, tip)
   }
 
   async function sendQuote(conversationId: string, text: string, quoteMessageId: string, senderId: string) {

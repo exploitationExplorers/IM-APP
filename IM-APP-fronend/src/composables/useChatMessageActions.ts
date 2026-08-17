@@ -1,22 +1,21 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
-import type { ChatMessage } from '@/types'
+import type { ChatMessage, GroupRole } from '@/types'
 import type { MessageMenuItem } from '@/components/ImMessageActionMenu.vue'
 import { createFavorite } from '@/api/favorites'
-import { muteGroupMember, removeGroupMember } from '@/api/group'
+import { muteGroupMember, removeGroupMember, unmuteGroupMember } from '@/api/group'
+import { MUTE_OPTIONS } from '@/constants/mute'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
 import { rememberConversationTitle } from '@/utils/favoriteMeta'
 import { businessUserIdFromIM } from '@/utils/openim'
 
 const REVOKE_MS = 2 * 60 * 1000
-const MUTE_OPTIONS = [
-  { label: '10分钟', seconds: 10 * 60 },
-  { label: '1小时', seconds: 60 * 60 },
-  { label: '12小时', seconds: 12 * 60 * 60 },
-  { label: '1天', seconds: 24 * 60 * 60 },
-  { label: '7天', seconds: 7 * 24 * 60 * 60 },
-  { label: '30天', seconds: 30 * 24 * 60 * 60 },
-]
+
+/** 群成员的发言管控元信息（房间页从群成员接口构建，业务用户 ID 索引） */
+export interface MemberMeta {
+  role: GroupRole
+  isMuted: boolean
+}
 
 export function useChatMessageActions(opts: {
   conversationId: Ref<string>
@@ -29,6 +28,10 @@ export function useChatMessageActions(opts: {
   isMine: (message: ChatMessage) => boolean
   visibleMessages: ComputedRef<ChatMessage[]>
   conversationTitle?: Ref<string>
+  /** 群成员角色/禁言元信息，用于撤回他人消息与禁言/解禁的权限判断 */
+  memberMeta?: Ref<Record<string, MemberMeta>>
+  /** 禁言/解禁成功后的回调（房间页用来刷新成员禁言状态） */
+  onMuteChanged?: () => void
 }) {
   const chatStore = useChatStore()
   const forwardStore = useForwardStore()
@@ -44,9 +47,34 @@ export function useChatMessageActions(opts: {
   const selectedCount = computed(() => selectedIds.value.size)
   const menuVisible = computed(() => !!menuMessage.value && !selecting.value)
 
+  /** 目标成员的角色/禁言状态（业务用户 ID 索引）；成员列表没加载到时返回 undefined */
+  function memberMetaOf(message: ChatMessage): MemberMeta | undefined {
+    const map = opts.memberMeta?.value
+    if (!map) return undefined
+    const userId = businessUserIdFromIM(message.senderId)
+    return userId ? map[userId] : undefined
+  }
+
+  /** 群主/管理员能否管控该消息的发送者：与后端权限矩阵一致（不可动群主，管理员不可动管理员） */
+  function canActOnTarget(message: ChatMessage) {
+    if (opts.chatType.value !== 'group') return false
+    const myRole = opts.myRole.value
+    if (myRole === 'member' || opts.isMine(message)) return false
+    const meta = memberMetaOf(message)
+    if (!meta || meta.role === 'owner') return false
+    return myRole === 'owner' || meta.role === 'member'
+  }
+
+  /**
+   * 撤回权限：自己的消息限 2 分钟内（后端撤回窗口默认 120s）；
+   * 群主可撤管理员/成员的消息、管理员可撤成员的消息，无时间窗。
+   */
   function canRevoke(message: ChatMessage) {
-    if (!opts.isMine(message) || message.status === 'sending') return false
-    return Date.now() - new Date(message.createdAt).getTime() < REVOKE_MS
+    if (message.status === 'sending') return false
+    if (opts.isMine(message)) {
+      return Date.now() - new Date(message.createdAt).getTime() < REVOKE_MS
+    }
+    return canActOnTarget(message)
   }
 
   const menuItems = computed<MessageMenuItem[]>(() => {
@@ -61,12 +89,13 @@ export function useChatMessageActions(opts: {
     if (!mine) {
       items.push({ key: 'report', label: '检举' })
       if (opts.chatType.value === 'group') items.push({ key: 'at', label: '@TA' })
-      if (opts.chatType.value === 'group' && opts.myRole.value !== 'member') {
-        items.push({ key: 'mute', label: '禁言' })
+      if (canActOnTarget(message)) {
+        const muted = !!memberMetaOf(message)?.isMuted
+        items.push(muted ? { key: 'unmute', label: '解除禁言' } : { key: 'mute', label: '禁言' })
       }
     }
     items.push({ key: 'delete', label: '删除' }, { key: 'multi', label: '多选' })
-    if (!mine && opts.chatType.value === 'group' && opts.myRole.value !== 'member') {
+    if (canActOnTarget(message)) {
       items.push({ key: 'kick', label: '移除该成员', wide: true })
       items.push({ key: 'kickAndDelete', label: '移除该成员并删除消息', wide: true })
     }
@@ -199,10 +228,30 @@ export function useChatMessageActions(opts: {
     }
   }
 
+  /** 撤他人消息（群主/管理员）后端要求必填原因：弹窗输入，取消返回 null，留空用默认文案 */
+  function promptRevokeReason(): Promise<string | null> {
+    return new Promise((resolve) => {
+      uni.showModal({
+        title: '撤回消息',
+        editable: true,
+        placeholderText: '请输入撤回原因',
+        success: (res) => resolve(res.confirm ? res.content?.trim() || '管理员撤回' : null),
+        fail: () => resolve(null),
+      })
+    })
+  }
+
   async function revoke(message: ChatMessage) {
+    let reason: string | undefined
+    if (!opts.isMine(message)) {
+      const input = await promptRevokeReason()
+      if (input === null) return
+      reason = input
+    }
     try {
       await chatStore.recall(opts.conversationId.value, message.id, {
         peerId: opts.businessId.value || undefined,
+        reason,
       })
     } catch (e) {
       uni.showToast({ title: (e as Error).message || '撤回失败', icon: 'none' })
@@ -247,11 +296,26 @@ export function useChatMessageActions(opts: {
         try {
           await muteGroupMember(opts.businessId.value, userId, option.seconds)
           uni.showToast({ title: `已禁言${option.label}`, icon: 'none' })
+          opts.onMuteChanged?.()
         } catch (e) {
           uni.showToast({ title: (e as Error).message || '禁言失败', icon: 'none' })
         }
       },
     })
+  }
+
+  async function unmuteUser(message: ChatMessage) {
+    const userId = businessUserIdFromIM(message.senderId)
+    if (!userId || !opts.businessId.value) return
+    const ok = await confirm('确定解除该成员的禁言吗？')
+    if (!ok) return
+    try {
+      await unmuteGroupMember(opts.businessId.value, userId)
+      uni.showToast({ title: '已解除禁言', icon: 'none' })
+      opts.onMuteChanged?.()
+    } catch (e) {
+      uni.showToast({ title: (e as Error).message || '解除禁言失败', icon: 'none' })
+    }
   }
 
   async function kickUser(message: ChatMessage, deleteMsgs: boolean) {
@@ -316,6 +380,10 @@ export function useChatMessageActions(opts: {
     }
     if (key === 'mute') {
       muteUser(message)
+      return
+    }
+    if (key === 'unmute') {
+      await unmuteUser(message)
       return
     }
     if (key === 'kick') {

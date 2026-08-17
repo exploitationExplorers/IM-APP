@@ -56,3 +56,36 @@ test('只折叠连续且语义相同的群改名通知', () => {
 
   assert.deepEqual(result.map((item) => item.id), ['1', '4', '5', '6'])
 })
+
+test('禁言/全员禁言通知生成 group-mute 事件 key', () => {
+  const base = { groupID: 'group-1', sendID: 'imAdmin', clientMsgID: 'msg-1' }
+  // 1512 成员禁言 / 1514 全员禁言
+  assert.equal(
+    imNotificationEventKey({ ...base, contentType: 1512 } as never),
+    'group-mute:group-1:msg-1',
+  )
+  assert.equal(
+    imNotificationEventKey({ ...base, contentType: 1514 } as never),
+    'group-mute:group-1:msg-1',
+  )
+  // 1513 解除成员禁言 / 1515 取消全员禁言
+  assert.equal(
+    imNotificationEventKey({ ...base, contentType: 1513 } as never),
+    'group-mute:group-1:msg-1',
+  )
+  assert.equal(
+    imNotificationEventKey({ ...base, contentType: 1515 } as never),
+    'group-mute:group-1:msg-1',
+  )
+})
+
+test('普通聊天消息没有事件 key', () => {
+  assert.equal(
+    imNotificationEventKey({
+      contentType: 101,
+      groupID: 'group-1',
+      clientMsgID: 'msg-2',
+    } as never),
+    '',
+  )
+})
