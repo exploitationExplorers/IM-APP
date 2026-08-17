@@ -3,8 +3,9 @@ import { ref, computed, watch } from 'vue'
 import { IMEvents, OnlineState, SessionType } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { ChatMessage, Conversation } from '@/types'
-import { resolveIMGroup, resolveIMPeer } from '@/api/im'
+import { recallMessage, resolveIMGroup, resolveIMGroupByIM, resolveIMPeer } from '@/api/im'
 import {
+  businessUserIdFromIM,
   ensureIMLogin,
   getConversationList,
   getHistoryMessages,
@@ -14,9 +15,11 @@ import {
   onIMEvent,
   onUserStatusChanged,
   deleteLocalMessage,
-  revokeMessage,
+  sendCardMessage,
+  sendFileMessage,
   sendForwardMessage,
   sendImageMessage,
+  sendImageUrlMessage,
   sendQuoteMessage,
   sendTextMessage,
   sendVoiceMessage,
@@ -438,6 +441,7 @@ export const useChatStore = defineStore('chat', () => {
     if (message.type === 'image') return '[图片]'
     if (message.type === 'voice') return '[语音]'
     if (message.type === 'file') return '[文件]'
+    if (message.type === 'card') return '[名片]'
     return message.content
   }
 
@@ -484,6 +488,55 @@ export const useChatStore = defineStore('chat', () => {
     )
   }
 
+  /** 发送好友名片：占位与气泡渲染共用同一份 content JSON */
+  async function sendCard(
+    conversationId: string,
+    friend: { id: string; nickname: string; avatar?: string },
+    senderId: string,
+  ) {
+    const target = targetOf(requireConversation(conversationId))
+    const card = {
+      userId: friend.id,
+      nickname: friend.nickname || '',
+      avatar: friend.avatar || '',
+    }
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'card', JSON.stringify(card)),
+      () =>
+        sendCardMessage(target, {
+          businessUserId: friend.id,
+          nickname: card.nickname,
+          avatar: card.avatar,
+        }),
+    )
+  }
+
+  /** 发送本地文件：占位阶段展示文件名，发送成功后替换为真实消息 */
+  async function sendFile(
+    conversationId: string,
+    filePath: string,
+    fileName: string,
+    senderId: string,
+  ) {
+    const target = targetOf(requireConversation(conversationId))
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'file', fileName),
+      () => sendFileMessage(target, filePath, fileName),
+    )
+  }
+
+  /** 发送已有 URL 的图片（收藏转发场景，不再二次上传） */
+  async function sendImageUrl(conversationId: string, url: string, senderId: string) {
+    const target = targetOf(requireConversation(conversationId))
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'image', url),
+      () => sendImageUrlMessage(target, url),
+    )
+  }
+
   async function sendVoice(
     conversationId: string,
     path: string,
@@ -498,9 +551,40 @@ export const useChatStore = defineStore('chat', () => {
     )
   }
 
-  /** 撤回权限由 OpenIM 与后端判定，这里只负责发起和本地回显 */
-  async function recall(conversationId: string, messageId: string) {
-    await revokeMessage(conversationId, messageId)
+  /**
+   * 撤回：统一走后端 POST /im/messages/recall，由服务端校验权限/时间窗并同步 OpenIM。
+   * peerId 用业务侧 ID（私聊=对方业务用户 UUID，群聊=数字群 ID）；
+   * 调用方已解析过业务 ID 时可通过 peerId 传入，避免群聊再反查一次。
+   */
+  async function recall(
+    conversationId: string,
+    messageId: string,
+    opts?: { peerId?: string; reason?: string },
+  ) {
+    const conv = conversations.value.find((c) => c.id === conversationId)
+    const raw = rawMessages.value[messageId]
+    if (!conv || !raw?.seq) throw new Error('该消息不支持撤回')
+    const peerType = conv.type === 'group' ? ('group' as const) : ('c2c' as const)
+    let peerId = opts?.peerId || ''
+    if (!peerId) {
+      if (peerType === 'c2c') {
+        peerId = businessUserIdFromIM(conv.peerUserId || '')
+      } else if (conv.groupId) {
+        try {
+          peerId = (await resolveIMGroupByIM(conv.groupId)).businessGroupId
+        } catch {
+          // 反查失败留给接口报“消息不存在”，不再额外提示
+        }
+      }
+    }
+    if (!peerId) throw new Error('缺少会话对方信息，无法撤回')
+    await recallMessage({
+      peerType,
+      peerId,
+      clientMsgId: messageId,
+      seq: raw.seq,
+      reason: opts?.reason,
+    })
     dropRevokedMessage(conversationId, messageId)
   }
 
@@ -577,6 +661,9 @@ export const useChatStore = defineStore('chat', () => {
     markAsRead,
     sendText,
     sendImage,
+    sendCard,
+    sendFile,
+    sendImageUrl,
     sendVoice,
     sendQuote,
     recall,

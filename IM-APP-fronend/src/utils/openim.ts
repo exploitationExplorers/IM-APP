@@ -538,9 +538,8 @@ export async function markConversationRead(conversationID: string): Promise<void
   }
 }
 
-export async function revokeMessage(conversationID: string, clientMsgID: string): Promise<void> {
-  await imCall(IMMethods.RevokeMessage, { conversationID, clientMsgID })
-}
+// 消息撤回不再直连 OpenIM SDK：统一走后端 POST /im/messages/recall（服务端审计 + 同步），
+// 见 src/api/im.ts 的 recallMessage。
 
 export async function deleteLocalMessage(conversationID: string, clientMsgID: string): Promise<void> {
   try {
@@ -748,6 +747,24 @@ export async function sendTextMessage(target: IMTarget, text: string): Promise<M
 }
 
 /**
+ * 好友名片消息（OpenIM contentType=108）。
+ * cardElem.userID 必须是 OpenIM 用户 ID（业务 UUID 去横线），
+ * 业务 UUID 冗余进 ex，接收端解析后可直接跳好友详情页。
+ */
+export async function sendCardMessage(
+  target: IMTarget,
+  card: { businessUserId: string; nickname: string; avatar: string },
+): Promise<MessageItem> {
+  const message = await imCall<MessageItem>(IMMethods.CreateCardMessage, {
+    userID: card.businessUserId.replace(/-/g, '').toLowerCase(),
+    nickname: card.nickname || '',
+    faceURL: card.avatar || '',
+    ex: JSON.stringify({ businessUserId: card.businessUserId }),
+  })
+  return sendCreatedMessage(target, message)
+}
+
+/**
  * 图片消息。app 端交给原生插件读本地全路径并自行上传；
  * web 端没有 createImageMessageFromFullPath，先把文件传到对象存储换 URL 再发。
  */
@@ -821,6 +838,90 @@ async function uploadFile(file: File): Promise<string> {
   })
   if (!res?.url) throw new Error('文件上传失败')
   return res.url
+}
+
+/**
+ * 文件消息。app 端走原生插件读本地全路径；
+ * web 端先传对象存储换 URL 再发。
+ */
+export async function sendFileMessage(
+  target: IMTarget,
+  filePath: string,
+  fileName: string,
+): Promise<MessageItem> {
+  let message: MessageItem
+  if (isAppPlatform) {
+    const fullPath = toNativeFullPath(filePath)
+    try {
+      message = await imCall<MessageItem>(IMMethods.CreateFileMessageFromFullPath, fullPath, fileName)
+    } catch {
+      // 部分原生插件把参数收成对象，而不是 (path, name)
+      message = await imCall<MessageItem>(IMMethods.CreateFileMessageFromFullPath, {
+        filePath: fullPath,
+        fileName,
+      })
+    }
+  } else {
+    const file = await pathToFile(filePath)
+    const url = await uploadFile(file)
+    message = await imCall<MessageItem>(IMMethods.CreateFileMessageByURL, {
+      filePath: '',
+      fileName: file.name || fileName,
+      uuid: IMSDK.uuid(),
+      sourceUrl: url,
+      fileSize: file.size,
+      fileType: file.type,
+    })
+  }
+  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
+}
+
+/** 图片 URL 直发（收藏的图片 / 已上传图片不再二次上传） */
+export async function sendImageUrlMessage(target: IMTarget, url: string): Promise<MessageItem> {
+  const picture = { uuid: IMSDK.uuid(), type: 'image/jpeg', size: 0, width: 0, height: 0, url }
+  const message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
+    sourcePath: url,
+    sourcePicture: picture,
+    bigPicture: picture,
+    snapshotPicture: picture,
+  })
+  return sendCreatedMessage(target, message, { alreadyUploaded: true })
+}
+
+/**
+ * 选一个本地文件，返回 { path, name }。
+ * app 端用 OpenIM 原生插件的文件选择器；小程序用 chooseMessageFile；H5 用 chooseFile。
+ */
+export async function chooseLocalFile(): Promise<{ path: string; name: string }> {
+  if (isAppPlatform) {
+    const path = await IMSDK.pickFile()
+    if (!path) throw new Error('未选择文件')
+    const idx = path.lastIndexOf('/')
+    return { path, name: idx >= 0 ? path.slice(idx + 1) : '文件' }
+  }
+  const anyUni = uni as unknown as {
+    chooseMessageFile?: (opt: unknown) => void
+    chooseFile?: (opt: unknown) => void
+  }
+  const pick = (fn: (opt: unknown) => void) =>
+    new Promise<{ path: string; name?: string } | null>((resolve) => {
+      fn({
+        count: 1,
+        type: 'file',
+        success: (res: { tempFiles?: Array<{ path: string; name?: string }> }) =>
+          resolve(res.tempFiles?.[0] || null),
+        fail: () => resolve(null),
+      })
+    })
+  let picked: { path: string; name?: string } | null = null
+  if (typeof anyUni.chooseMessageFile === 'function') {
+    picked = await pick(anyUni.chooseMessageFile)
+  }
+  if (!picked && typeof anyUni.chooseFile === 'function') {
+    picked = await pick(anyUni.chooseFile)
+  }
+  if (!picked?.path) throw new Error('当前平台暂不支持选择文件')
+  return { path: picked.path, name: picked.name || '文件' }
 }
 
 async function pathToFile(path: string): Promise<File> {
@@ -929,6 +1030,8 @@ function toAppMessageType(contentType: number): AppMessageType {
       return 'image'
     case MessageType.VoiceMessage:
       return 'voice'
+    case MessageType.CardMessage:
+      return 'card'
     case MessageType.FileMessage:
     case MessageType.VideoMessage:
       return 'file'
@@ -1040,6 +1143,24 @@ function extractContent(item: MessageItem): string {
       return item.fileElem?.sourceUrl || ''
     case MessageType.VideoMessage:
       return item.videoElem?.videoUrl || ''
+    case MessageType.CardMessage: {
+      // 名片：content 统一存 {userId, nickname, avatar}，userId 为业务 UUID。
+      // 发送时把业务 ID 冗余进 ex；旧消息没有 ex 则从 OpenIM userID 反推。
+      const card = item.cardElem
+      let userId = ''
+      try {
+        const ex = card?.ex ? (JSON.parse(card.ex) as { businessUserId?: string }) : null
+        userId = ex?.businessUserId || ''
+      } catch {
+        /* ex 不是 JSON 时走反推 */
+      }
+      if (!userId) userId = businessUserIdFromIM(card?.userID || '')
+      return JSON.stringify({
+        userId,
+        nickname: card?.nickname || '',
+        avatar: card?.faceURL || '',
+      })
+    }
     default:
       return formatIMNotification(item)
   }
@@ -1091,6 +1212,7 @@ function summarize(latestMsg: string | MessageItem | null | undefined): string {
   if (type === 'image') return '[图片]'
   if (type === 'voice') return '[语音]'
   if (type === 'file') return '[文件]'
+  if (type === 'card') return '[名片]'
   return extractContent(message)
 }
 

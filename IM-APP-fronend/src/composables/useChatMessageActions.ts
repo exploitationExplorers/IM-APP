@@ -145,12 +145,31 @@ export function useChatMessageActions(opts: {
   async function favoriteMessage(message: ChatMessage) {
     const ok = await confirm('确定加入收藏吗？', '加入收藏')
     if (!ok) return
-    const type = message.type === 'file' ? 'file' : message.type === 'image' ? 'image' : message.type === 'voice' ? 'voice' : 'text'
+    // 名片 content 是 JSON，收藏转成可读文本；其余按原内容存
+    const isCard = message.type === 'card'
+    const type = isCard
+      ? 'text'
+      : message.type === 'file'
+        ? 'file'
+        : message.type === 'image'
+          ? 'image'
+          : message.type === 'voice'
+            ? 'voice'
+            : 'text'
+    let content = message.content
+    if (isCard) {
+      try {
+        const card = JSON.parse(message.content) as { nickname?: string }
+        content = `[名片] ${card.nickname || ''}`.trim()
+      } catch {
+        content = '[名片]'
+      }
+    }
     try {
       await createFavorite({
         messageId: message.id,
         type,
-        content: message.content,
+        content,
         senderId: businessUserIdFromIM(message.senderId) || message.senderId,
         conversationId: message.conversationId,
       })
@@ -182,7 +201,9 @@ export function useChatMessageActions(opts: {
 
   async function revoke(message: ChatMessage) {
     try {
-      await chatStore.recall(opts.conversationId.value, message.id)
+      await chatStore.recall(opts.conversationId.value, message.id, {
+        peerId: opts.businessId.value || undefined,
+      })
     } catch (e) {
       uni.showToast({ title: (e as Error).message || '撤回失败', icon: 'none' })
     }

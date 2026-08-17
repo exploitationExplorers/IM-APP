@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ChatMessage } from '@/types'
+import { APP_CONFIG } from '@/config'
+import type { CardPayload, ChatMessage } from '@/types'
 import { formatClock, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -15,11 +16,31 @@ const showNickname = computed(() => !props.mine && !!props.nickname)
 const emit = defineEmits<{
   avatarClick: []
   longpress: []
+  cardView: [card: CardPayload]
 }>()
 
 function onAvatarClick() {
   if (props.mine) return
   emit('avatarClick')
+}
+
+/** 名片消息 content 为 JSON；解析失败时兜底成空名片，不影响其它类型渲染 */
+const cardMeta = computed<CardPayload | null>(() => {
+  if (props.message.type !== 'card') return null
+  try {
+    const parsed = JSON.parse(props.message.content) as Partial<CardPayload>
+    return {
+      userId: parsed.userId || '',
+      nickname: parsed.nickname || '',
+      avatar: parsed.avatar || '',
+    }
+  } catch {
+    return { userId: '', nickname: '', avatar: '' }
+  }
+})
+
+function onViewCard() {
+  if (cardMeta.value) emit('cardView', cardMeta.value)
 }
 
 function onLongPress() {
@@ -47,6 +68,28 @@ const voiceMeta = computed(() => {
     return { path: '', duration: 0 }
   }
 })
+
+/** 文件消息 content：占位阶段是文件名，发送成功后是 URL，都取最后一段当文件名 */
+const fileName = computed(() => {
+  if (props.message.type !== 'file') return ''
+  const raw = props.message.content || ''
+  const seg = raw.split(/[\\/]/).filter(Boolean).pop() || '文件'
+  try {
+    return decodeURIComponent(seg)
+  } catch {
+    return seg
+  }
+})
+
+function copyFileUrl() {
+  if (props.message.type !== 'file') return
+  const url = props.message.content || ''
+  if (!url.startsWith('http')) return
+  uni.setClipboardData({
+    data: url,
+    success: () => uni.showToast({ title: '文件链接已复制', icon: 'none' }),
+  })
+}
 
 const timeText = computed(() => formatClock(props.message.createdAt))
 
@@ -133,6 +176,42 @@ function openLink(url: string) {
             <text>▁▂▃▄▅▆▇</text>
           </view>
           <text class="voice-duration">{{ formatVoiceDuration(voiceMeta?.duration || 0) }}</text>
+        </view>
+      </view>
+      <view
+        v-else-if="message.type === 'card'"
+        class="bubble card-bubble"
+        @click="onViewCard"
+        @longpress="onLongPress"
+        @contextmenu.prevent="onContextMenu"
+      >
+        <view class="card-head">
+          <image
+            class="card-avatar"
+            :src="cardMeta?.avatar || APP_CONFIG.defaultAvatarUrl"
+            mode="aspectFill"
+          />
+          <text class="card-name">{{ cardMeta?.nickname || '好友名片' }}</text>
+        </view>
+        <view class="card-divider"></view>
+        <view class="card-foot">
+          <text class="card-view">查看</text>
+        </view>
+      </view>
+      <view
+        v-else-if="message.type === 'file'"
+        class="bubble file-bubble"
+        :class="mine ? 'bubble-mine' : 'bubble-other'"
+        @click="copyFileUrl"
+        @longpress="onLongPress"
+        @contextmenu.prevent="onContextMenu"
+      >
+        <view class="file-inner">
+          <view class="file-icon">📁</view>
+          <view class="file-meta">
+            <text class="file-name">{{ fileName }}</text>
+            <text class="file-sub">文件</text>
+          </view>
         </view>
       </view>
       <view v-else class="bubble" :class="mine ? 'bubble-mine' : 'bubble-other'" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
@@ -261,6 +340,105 @@ function openLink(url: string) {
   font-size: 22rpx;
   min-width: 70rpx;
   text-align: right;
+}
+
+.file-bubble {
+  min-width: 320rpx;
+  max-width: 420rpx;
+}
+
+.file-inner {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.file-icon {
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 12rpx;
+  background: rgba(43, 92, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40rpx;
+  flex-shrink: 0;
+}
+
+.file-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-name {
+  font-size: 26rpx;
+  line-height: 1.4;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.file-sub {
+  margin-top: 4rpx;
+  font-size: 20rpx;
+  opacity: 0.6;
+}
+
+.card-bubble {
+  width: 360rpx;
+  padding: 0;
+  background: #fff;
+  border: 1rpx solid #e3e8f0;
+  overflow: hidden;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 24rpx 24rpx 20rpx;
+}
+
+.card-avatar {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 12rpx;
+  background: #f3f4f7;
+  flex-shrink: 0;
+}
+
+.card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2d3d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-divider {
+  height: 1rpx;
+  background: #eef1f6;
+  margin: 0 24rpx;
+}
+
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 14rpx 24rpx;
+}
+
+.card-view {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #2b5cff;
 }
 
 .voice-other {

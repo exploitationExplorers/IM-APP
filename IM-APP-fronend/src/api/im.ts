@@ -31,6 +31,17 @@ export interface IMGroupTarget {
   mutedUntil: string | null
 }
 
+export interface MessageRecallResult {
+  peerType: 'c2c' | 'group'
+  peerId: string
+  clientMsgId: string
+  seq: number
+  status: 'recalled'
+  /** true 表示该消息此前已撤回，本次为幂等命中 */
+  alreadyRecalled: boolean
+  recalledAt: string
+}
+
 export async function fetchIMToken(platformId = 5): Promise<IMTokenResult> {
   return request<IMTokenResult>({
     url: '/im/token',
@@ -78,6 +89,25 @@ export async function clearConversationHistory(
     url: '/im/conversation-messages/clear',
     method: 'POST',
     data: { peerType, peerId },
+  })
+}
+
+/**
+ * 撤回单条消息（私聊/群聊统一入口）。
+ * peerId 传业务侧 ID：私聊为对方业务用户 UUID，群聊为数字群 ID；
+ * 权限与撤回时间窗由服务端校验，群主/管理员撤回他人消息时 reason 必填。
+ */
+export async function recallMessage(input: {
+  peerType: 'c2c' | 'group'
+  peerId: string
+  clientMsgId: string
+  seq: number
+  reason?: string
+}): Promise<MessageRecallResult> {
+  return request<MessageRecallResult>({
+    url: '/im/messages/recall',
+    method: 'POST',
+    data: input,
   })
 }
 

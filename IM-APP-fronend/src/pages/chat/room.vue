@@ -12,13 +12,13 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useForwardStore } from '@/stores/forward'
-import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
+import { businessUserIdFromIM, chooseLocalFile, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { resolveIMGroupByIM } from '@/api/im'
 import { fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
-import type { ChatMessage, Conversation } from '@/types'
+import type { CardPayload, ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 
@@ -340,14 +340,9 @@ function resolveSenderBusinessId(message: ChatMessage): string {
   return businessUserIdFromIM(message.senderId)
 }
 
-async function onAvatarClick(message: ChatMessage) {
-  if (message.senderId === myId.value) return
-  const userId = resolveSenderBusinessId(message)
-  if (!userId) {
-    uni.showToast({ title: '无法打开资料', icon: 'none' })
-    return
-  }
-
+/** 按业务用户 ID 打开资料页：好友进好友详情，非好友进公开资料页（群内带 groupId 便于加好友） */
+async function openProfileById(userId: string) {
+  if (!userId) return
   if (chatType.value === 'private') {
     uni.navigateTo({ url: `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}` })
     return
@@ -361,10 +356,34 @@ async function onAvatarClick(message: ChatMessage) {
     }
   }
   const isFriend = contactStore.contacts.some((c) => c.id === userId)
+  // 群内非好友资料页带 groupId，加好友时走群来源接口（受 allowMemberAddFriend 限制）
+  const groupParam =
+    chatType.value === 'group' && businessId.value
+      ? `&groupId=${encodeURIComponent(businessId.value)}`
+      : ''
   const path = isFriend
     ? `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}`
-    : `/pages/contacts/user-profile?id=${encodeURIComponent(userId)}`
+    : `/pages/contacts/user-profile?id=${encodeURIComponent(userId)}${groupParam}`
   uni.navigateTo({ url: path })
+}
+
+async function onAvatarClick(message: ChatMessage) {
+  if (message.senderId === myId.value) return
+  const userId = resolveSenderBusinessId(message)
+  if (!userId) {
+    uni.showToast({ title: '无法打开资料', icon: 'none' })
+    return
+  }
+  await openProfileById(userId)
+}
+
+/** 名片消息点「查看」：直接进对应好友详情页 */
+function onViewCard(card: CardPayload) {
+  if (!card.userId) {
+    uni.showToast({ title: '名片信息缺失', icon: 'none' })
+    return
+  }
+  void openProfileById(card.userId)
 }
 
 function requestAudioPermission(): Promise<boolean> {
@@ -597,6 +616,7 @@ function onPlus() {
 function pickImage() {
   uni.chooseImage({
     count: 1,
+    sourceType: ['album'],
     success: async (res) => {
       showPlusPanel.value = false
       try {
@@ -607,6 +627,56 @@ function pickImage() {
         uni.showToast({ title: (e as Error).message, icon: 'none' })
       }
     },
+  })
+}
+
+/** 相机拍照即发 */
+function pickCamera() {
+  uni.chooseImage({
+    count: 1,
+    sourceType: ['camera'],
+    success: async (res) => {
+      showPlusPanel.value = false
+      try {
+        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
+        await nextTick()
+        scrollToBottom()
+      } catch (e) {
+        uni.showToast({ title: (e as Error).message, icon: 'none' })
+      }
+    },
+  })
+}
+
+/** 选好友发名片：跳好友选择页，发送在 card-picker 内完成后返回本页 */
+function pickCard() {
+  showPlusPanel.value = false
+  uni.navigateTo({
+    url: `/pages/chat/card-picker?conversationId=${encodeURIComponent(conversationId.value)}&title=${encodeURIComponent(title.value)}`,
+  })
+}
+
+/** 选本地文件发送 */
+async function pickFile() {
+  showPlusPanel.value = false
+  try {
+    const file = await chooseLocalFile()
+    await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
+    await nextTick()
+    scrollToBottom()
+  } catch (e) {
+    const msg = (e as Error).message
+    if (msg && !msg.includes('未选择')) {
+      uni.showToast({ title: msg || '发送失败', icon: 'none' })
+    }
+  }
+}
+
+/** 从我的收藏挑一条发送 */
+function pickFavorite() {
+  showPlusPanel.value = false
+  uni.navigateTo({
+    url: `/pages/chat/favorite-picker?conversationId=${encodeURIComponent(conversationId.value)}&title=${encodeURIComponent(title.value)}`,
   })
 }
 </script>
@@ -650,6 +720,7 @@ function pickImage() {
           :avatar="avatarOf(m)"
           :nickname="nicknameOf(m)"
           @avatar-click="onAvatarClick(m)"
+          @card-view="onViewCard"
           @longpress="actions.openMenu(m)"
         />
       </view>
@@ -705,9 +776,25 @@ function pickImage() {
       </view>
 
       <view v-if="showPlusPanel" class="plus-panel">
+        <view class="plus-item" @click="pickCamera">
+          <view class="plus-icon">📷</view>
+          <text>相机</text>
+        </view>
         <view class="plus-item" @click="pickImage">
           <view class="plus-icon">🖼</view>
-          <text>图片</text>
+          <text>照片</text>
+        </view>
+        <view class="plus-item" @click="pickCard">
+          <view class="plus-icon">👤</view>
+          <text>名片</text>
+        </view>
+        <view class="plus-item" @click="pickFile">
+          <view class="plus-icon">📁</view>
+          <text>文件</text>
+        </view>
+        <view class="plus-item" @click="pickFavorite">
+          <view class="plus-icon">⭐</view>
+          <text>收藏</text>
         </view>
       </view>
 
@@ -1004,6 +1091,8 @@ function pickImage() {
 
 .plus-panel {
   display: flex;
+  flex-wrap: wrap;
+  gap: 28rpx 24rpx;
   padding: 24rpx 32rpx 32rpx;
   background: #f0f0f0;
 }
