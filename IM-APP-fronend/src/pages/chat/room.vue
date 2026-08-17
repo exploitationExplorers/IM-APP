@@ -79,6 +79,11 @@ const messages = computed(() =>
   ),
 )
 
+/** 图片预览列表：点开任意图片后可左右滑动查看本会话其它图片 */
+const imagePreviewUrls = computed(() =>
+  messages.value.filter((m) => m.type === 'image' && m.content).map((m) => m.content),
+)
+
 watch(
   () =>
     (chatStore.messagesMap[conversationId.value] || [])
@@ -278,10 +283,22 @@ function cleanupBrowserRecorder() {
   recorder = null
 }
 
+function scrollToAnchorBottom() {
+  // 先清空再指向锚点：连续发送/连续收消息时值相同不会重复触发滚动，跨一帧重设才能每次都滚
+  scrollInto.value = ''
+  nextTick(() => {
+    scrollInto.value = 'bottom-anchor'
+  })
+}
+
 function scrollToBottom() {
-  const list = messages.value
-  if (!list.length) return
-  scrollInto.value = `msg_${list[list.length - 1].id}`
+  scrollToAnchorBottom()
+  const last = messages.value[messages.value.length - 1]
+  // 图片等消息在资源加载完成后才撑开高度（占位换真实 URL 还会二次加载），
+  // 分多个时段重贴底部；直设 scrollTop 是绝对定位，重复校准幂等无副作用
+  if (last && last.type !== 'text' && last.type !== 'system') {
+    ;[150, 400, 900].forEach((delay) => setTimeout(scrollToAnchorBottom, delay))
+  }
 }
 
 watch(
@@ -810,11 +827,12 @@ function pickFavorite() {
       <view class="header-icon" @click="goToProfile">⋯</view>
     </view>
 
+    <!-- 不开 scroll-with-animation：uni 的滚动动画是 transform 假动画 + 过渡结束才提交 scrollTop，
+         发送后连续两次贴底会在动画中途重测位置，最终落点偏小导致最新消息下半截被视口切掉 -->
     <scroll-view
       scroll-y
       class="msg-list"
       :scroll-into-view="scrollInto"
-      scroll-with-animation
       @scrolltoupper="onScrollToUpper"
     >
       <view
@@ -838,11 +856,15 @@ function pickFavorite() {
           :avatar="avatarOf(m)"
           :fallback-avatar="fallbackAvatarOf(m)"
           :nickname="nicknameOf(m)"
+          :preview-urls="imagePreviewUrls"
           @avatar-click="onAvatarClick(m)"
           @card-view="onViewCard"
           @longpress="actions.openMenu(m)"
         />
       </view>
+      <!-- 底部锚点：scroll-into-view 只保证元素「顶部」进入视口，最后一条比视口高时会露出上半截；
+           滚到垫底的锚点等于滚到真正的底部，保证最新消息完整可见 -->
+      <view id="bottom-anchor" class="bottom-anchor"></view>
     </scroll-view>
 
     <view v-if="actions.selecting.value" class="composer safe-bottom">
@@ -1030,6 +1052,11 @@ function pickFavorite() {
 .msg-row {
   width: 100%;
   box-sizing: border-box;
+}
+
+/** 底部滚动锚点：不可见的 2rpx 垫底元素，滚到它 = 滚到列表真正的底部 */
+.bottom-anchor {
+  height: 2rpx;
 }
 
 .msg-row.selecting {
