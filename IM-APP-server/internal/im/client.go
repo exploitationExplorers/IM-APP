@@ -505,7 +505,21 @@ func (c *Client) RevokeMessage(ctx context.Context, userID, conversationID strin
 	if strings.TrimSpace(userID) == "" || strings.TrimSpace(conversationID) == "" || seq <= 0 {
 		return false, errors.New("invalid revoke message request")
 	}
-	err := c.postWithAdmin(ctx, "/msg/revoke_msg", map[string]any{
+	// 必须用撤回者本人的 token 调用：OpenIM 3.8 的 revoke_msg 会用登录 token 对应的用户
+	// 覆盖 body 里的 userID 作为撤回操作者。若用 admin token，撤回人会被记成 imAdmin，
+	// 前端 /msg 撤回事件拿到的 revokerID 就成了 imAdmin。
+	token := ""
+	// 平台取 Web(3)；get_user_token 校验 1-11，仅用于换取认证 token，与客户端实际平台无关。
+	if userToken, err := c.GetUserToken(ctx, userID, 3); err == nil {
+		token = userToken.Token
+	}
+	// 兜底：取用户 token 失败时退回 admin token，保证撤回功能仍可用（撤回人显示会退回 imAdmin）。
+	if token == "" {
+		if t, err := c.GetAdminToken(ctx); err == nil {
+			token = t
+		}
+	}
+	err := c.post(ctx, "/msg/revoke_msg", token, map[string]any{
 		"userID": userID, "conversationID": conversationID, "seq": seq,
 	}, nil)
 	if isAlreadyRecalled(err) {
