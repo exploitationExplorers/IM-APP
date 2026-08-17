@@ -107,3 +107,15 @@ type SendFriendResult struct {
 	ID     string `json:"id,omitempty"`
 	Status string `json:"status"`
 }
+
+type CreateGroupFriendRequest struct {
+	GroupID  string `json:"groupId"`
+	ToUserID string `json:"toUserId"`
+	Message  string `json:"message"`
+}
+
+type GroupFriendRequestResult struct {
+	OK        bool   `json:"ok"`
+	RequestID string `json:"requestId"`
+	Status    string `json:"status"`
+}

@@ -8,18 +8,7 @@ interface ImageBytes {
   size: number
 }
 
-interface AppXHR {
-  timeout: number
-  status: number
-  readyState: number
-  onreadystatechange: (() => void) | null
-  onerror: (() => void) | null
-  open: (method: string, url: string) => void
-  setRequestHeader: (name: string, value: string) => void
-  send: (data?: ArrayBuffer) => void
-}
-
-/** App WebView 也有 fetch，但不能用来读 file:// / _doc 本地图，也不能可靠 PUT MinIO */
+/** App WebView 也有 fetch，但不能用来读 file:// / _doc 本地图。 */
 function isAppPlatform(): boolean {
   try {
     return uni.getSystemInfoSync().uniPlatform === 'app'
@@ -162,98 +151,21 @@ async function loadImageBytes(localPath?: string, remoteUrl?: string): Promise<I
   throw new Error('请选择头像')
 }
 
-function putBytesWithXHR(
-  uploadUrl: string,
+async function postBytes(
+  formUrl: string,
+  formData: Record<string, string>,
   bytes: ArrayBuffer,
+  fileName: string,
   contentType: string,
-  headers: Record<string, string>,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let xhr: AppXHR
-    try {
-      const XHR = plus.net.XMLHttpRequest
-      if (typeof XHR !== 'function') {
-        reject(new Error('当前环境不支持文件上传'))
-        return
-      }
-      xhr = new XHR() as unknown as AppXHR
-    } catch {
-      reject(new Error('当前环境不支持文件上传'))
-      return
-    }
-    xhr.timeout = 60000
-    xhr.onreadystatechange = () => {
-      if (xhr.readyState !== 4) return
-      if ((xhr.status || 0) >= 200 && (xhr.status || 0) < 300) {
-        resolve()
-        return
-      }
-      reject(new Error(`上传失败(${xhr.status || 0})`))
-    }
-    xhr.onerror = () => reject(new Error('上传失败'))
-    xhr.open('PUT', uploadUrl)
-    xhr.setRequestHeader('Content-Type', contentType)
-    Object.entries(headers).forEach(([key, value]) => {
-      if (key.toLowerCase() !== 'content-type') xhr.setRequestHeader(key, value)
-    })
-    xhr.send(bytes)
-  })
-}
-
-function putBytesWithUniRequest(
-  uploadUrl: string,
-  bytes: ArrayBuffer,
-  contentType: string,
-  headers: Record<string, string>,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: uploadUrl,
-      method: 'PUT',
-      header: {
-        'Content-Type': contentType,
-        ...headers,
-      },
-      data: bytes,
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve()
-          return
-        }
-        reject(new Error(`上传失败(${res.statusCode})`))
-      },
-      fail: (err) => reject(new Error(err.errMsg || '上传失败')),
-    })
-  })
-}
-
-async function putBytes(
-  uploadUrl: string,
-  bytes: ArrayBuffer,
-  contentType: string,
-  headers: Record<string, string> = {},
-): Promise<void> {
-  if (!isAppPlatform() && typeof fetch === 'function') {
-    const res = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': contentType,
-        ...headers,
-      },
-      body: bytes,
-    })
-    if (!res.ok) throw new Error(`上传失败(${res.status})`)
-    return
+  if (typeof fetch !== 'function' || typeof FormData === 'undefined' || typeof Blob === 'undefined') {
+    throw new Error('当前环境不支持文件上传')
   }
-  try {
-    await putBytesWithXHR(uploadUrl, bytes, contentType, headers)
-  } catch (e) {
-    if ((e as Error).message === '当前环境不支持文件上传') {
-      await putBytesWithUniRequest(uploadUrl, bytes, contentType, headers)
-      return
-    }
-    throw e
-  }
+  const body = new FormData()
+  Object.entries(formData).forEach(([key, value]) => body.append(key, value))
+  body.append('file', new Blob([bytes], { type: contentType }), fileName)
+  const res = await fetch(formUrl, { method: 'POST', body })
+  if (!res.ok) throw new Error(`上传失败(${res.status})`)
 }
 
 async function uploadViaTask(
@@ -270,7 +182,10 @@ async function uploadViaTask(
   if (!fileId) {
     throw new Error('创建上传任务失败')
   }
-  await putBytes(init.uploadUrl, image.bytes, image.contentType, init.headers || {})
+  if (!init.formUrl || !init.formData) {
+    throw new Error('当前环境不支持文件上传')
+  }
+  await postBytes(init.formUrl, init.formData, image.bytes, image.fileName, image.contentType)
   const file = await completeUpload(fileId)
   return file.id
 }
@@ -332,7 +247,7 @@ function postLocalFile(
   })
 }
 
-/** App 端用本地路径直传，避免 PUT ArrayBuffer 被发成空包 */
+/** App 端用本地路径通过预签名 multipart POST 直传。 */
 async function uploadViaNativeFile(purpose: UploadPurpose, localPath: string): Promise<string> {
   const meta = await getLocalFileMeta(localPath)
   const init = await createUploadTask({
@@ -353,7 +268,7 @@ async function uploadViaNativeFile(purpose: UploadPurpose, localPath: string): P
   return file.id
 }
 
-/** 上传头像并返回 fileId（接口 12 → PUT/POST → 接口 13） */
+/** 上传头像并返回 fileId（创建任务 → multipart POST 直传 → 确认完成） */
 export async function uploadAvatarForProfile(
   localPath?: string,
   remoteUrl?: string,
@@ -364,7 +279,7 @@ export async function uploadAvatarForProfile(
   return uploadViaTask('avatar', await loadImageBytes(localPath, remoteUrl))
 }
 
-/** 上传举报截图并返回 fileId（接口 12 → PUT/POST → 接口 13，purpose=image） */
+/** 上传举报截图并返回 fileId（创建任务 → multipart POST 直传 → 确认完成） */
 export async function uploadReportImage(localPath: string): Promise<string> {
   if (isAppPlatform()) {
     return uploadViaNativeFile('image', localPath)

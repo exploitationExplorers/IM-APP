@@ -212,7 +212,9 @@ func (r *ContactRepo) IsGroupAddFriendAllowed(ctx context.Context, uid, toUserID
 		FROM groups g
 		JOIN group_members gm1 ON gm1.group_id=g.id AND gm1.user_id=$1
 		JOIN group_members gm2 ON gm2.group_id=g.id AND gm2.user_id=$2
-		WHERE g.id=$3::uuid`, uid, toUserID, groupID).Scan(&allow)
+		JOIN users u1 ON u1.id=gm1.user_id AND COALESCE(u1.status,'active')='active'
+		JOIN users u2 ON u2.id=gm2.user_id AND COALESCE(u2.status,'active')='active'
+		WHERE g.id=$3::uuid AND COALESCE(g.status,'active')='active'`, uid, toUserID, groupID).Scan(&allow)
 	if err != nil {
 		return false, err
 	}

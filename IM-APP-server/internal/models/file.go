@@ -23,7 +23,8 @@ type CreateUploadRequest struct {
 }
 
 type UploadInitResult struct {
-	File      FileObject        `json:"file"`
+	File FileObject `json:"file"`
+	// UploadURL 与 FormURL 均为预签名 multipart POST 地址；UploadURL 保留用于兼容旧客户端字段名。
 	UploadURL string            `json:"uploadUrl"`
 	FormURL   string            `json:"formUrl,omitempty"`
 	FormData  map[string]string `json:"formData,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"im-app-server/internal/middleware"
 	"im-app-server/internal/models"
@@ -38,10 +39,23 @@ func (h *GroupHandler) Create(c *gin.Context) {
 }
 
 func (h *GroupHandler) Detail(c *gin.Context) {
+	h.detail(c, c.Param("id"))
+}
+
+func (h *GroupHandler) DetailStatic(c *gin.Context) {
+	groupID := c.Query("groupId")
+	if groupID == "" {
+		response.Fail(c, http.StatusBadRequest, "groupId 必填")
+		return
+	}
+	h.detail(c, groupID)
+}
+
+func (h *GroupHandler) detail(c *gin.Context, groupID string) {
 	uid := middleware.UserID(c)
-	g, err := h.Svc.GetDetail(c.Request.Context(), c.Param("id"), uid)
+	g, err := h.Svc.GetDetail(c.Request.Context(), groupID, uid)
 	if err != nil {
-		log.Printf("get group %s: %v", c.Param("id"), err)
+		log.Printf("get group %s: %v", groupID, err)
 		if errors.Is(err, repository.ErrInvalidGroupOperation) {
 			response.Fail(c, http.StatusBadRequest, "群聊 ID 不正确")
 			return
@@ -54,8 +68,17 @@ func (h *GroupHandler) Detail(c *gin.Context) {
 
 func (h *GroupHandler) Members(c *gin.Context) {
 	uid := middleware.UserID(c)
-	list, err := h.Svc.ListMembers(c.Request.Context(), c.Param("id"), uid)
+	groupID := c.Query("groupId")
+	if groupID == "" {
+		response.Fail(c, http.StatusBadRequest, "groupId 必填")
+		return
+	}
+	list, err := h.Svc.ListMembers(c.Request.Context(), groupID, uid)
 	if err != nil {
+		if errors.Is(err, repository.ErrGroupNotFound) {
+			response.Fail(c, http.StatusNotFound, "群不存在")
+			return
+		}
 		if errors.Is(err, repository.ErrForbidden) {
 			response.Fail(c, http.StatusForbidden, "无权访问")
 			return
@@ -83,13 +106,17 @@ func (h *GroupHandler) Join(c *gin.Context) {
 func (h *GroupHandler) UpdateSettings(c *gin.Context) {
 	uid := middleware.UserID(c)
 	var req models.UpdateGroupSettingsReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindBusinessJSON(c, &req); err != nil || req.GroupID == "" {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	if err := h.Svc.UpdateSettings(c.Request.Context(), c.Param("id"), uid,
+	if err := h.Svc.UpdateSettings(c.Request.Context(), req.GroupID, uid,
 		req.Name, req.AvatarFileID, req.Announcement,
 		req.AllowMemberAddFriend, req.JoinMode, req.AllMuted); err != nil {
+		if errors.Is(err, repository.ErrGroupNotFound) {
+			response.Fail(c, http.StatusNotFound, "群不存在")
+			return
+		}
 		if errors.Is(err, repository.ErrForbidden) {
 			response.Fail(c, http.StatusForbidden, "无权限")
 			return
@@ -101,9 +128,9 @@ func (h *GroupHandler) UpdateSettings(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, "更新失败")
 		return
 	}
-	g, err := h.Svc.GetDetail(c.Request.Context(), c.Param("id"), uid)
+	g, err := h.Svc.GetDetail(c.Request.Context(), req.GroupID, uid)
 	if err != nil {
-		response.OK(c, gin.H{"ok": true})
+		response.Fail(c, http.StatusInternalServerError, "更新后查询群详情失败")
 		return
 	}
 	response.OK(c, g)
@@ -324,24 +351,54 @@ func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {
 	h.handleModerationResult(c, err)
 }
 
-func (h *GroupHandler) UpdateMemberMute(c *gin.Context) {
-	var req models.UpdateGroupMemberMuteReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+func (h *GroupHandler) MuteMember(c *gin.Context) {
+	var req models.MuteGroupMemberReq
+	if err := bindBusinessJSON(c, &req); err != nil || req.GroupID == "" || req.MemberUserID == "" ||
+		req.MutedSeconds == nil || *req.MutedSeconds < 1 || *req.MutedSeconds > 30*24*60*60 {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	err := h.Svc.UpdateMemberMute(c.Request.Context(), c.Param("id"), middleware.UserID(c), c.Param("userId"), req.MutedSeconds)
-	h.handleModerationResult(c, err)
+	mutedUntil, err := h.Svc.UpdateMemberMute(c.Request.Context(), req.GroupID, middleware.UserID(c), req.MemberUserID, *req.MutedSeconds)
+	if !h.handleMemberMuteError(c, err) {
+		return
+	}
+	response.OK(c, models.GroupMemberMuteResult{
+		GroupID: req.GroupID, MemberUserID: req.MemberUserID, IsMuted: mutedUntil != nil,
+		MutedUntil: mutedUntil, ChangedAt: time.Now().UTC(),
+	})
 }
 
-func (h *GroupHandler) UpdateMute(c *gin.Context) {
-	var req models.UpdateGroupMuteReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+func (h *GroupHandler) UnmuteMember(c *gin.Context) {
+	var req models.UnmuteGroupMemberReq
+	if err := bindBusinessJSON(c, &req); err != nil || req.GroupID == "" || req.MemberUserID == "" {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	err := h.Svc.UpdateGroupMute(c.Request.Context(), c.Param("id"), middleware.UserID(c), req.Muted)
-	h.handleModerationResult(c, err)
+	mutedUntil, err := h.Svc.UpdateMemberMute(c.Request.Context(), req.GroupID, middleware.UserID(c), req.MemberUserID, 0)
+	if !h.handleMemberMuteError(c, err) {
+		return
+	}
+	response.OK(c, models.GroupMemberMuteResult{
+		GroupID: req.GroupID, MemberUserID: req.MemberUserID, IsMuted: false,
+		MutedUntil: mutedUntil, ChangedAt: time.Now().UTC(),
+	})
+}
+
+func (h *GroupHandler) handleMemberMuteError(c *gin.Context, err error) bool {
+	if err == nil {
+		return true
+	}
+	switch {
+	case errors.Is(err, repository.ErrGroupNotFound):
+		response.Fail(c, http.StatusNotFound, "群不存在")
+	case errors.Is(err, repository.ErrForbidden):
+		response.Fail(c, http.StatusForbidden, "无权限")
+	case errors.Is(err, repository.ErrInvalidGroupOperation):
+		response.Fail(c, http.StatusBadRequest, "群操作参数错误")
+	default:
+		response.Fail(c, http.StatusInternalServerError, "群操作失败")
+	}
+	return false
 }
 
 func (h *GroupHandler) Dismiss(c *gin.Context) {

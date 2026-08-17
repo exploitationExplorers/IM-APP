@@ -34,13 +34,14 @@ type MinIOConfig struct {
 }
 
 type OpenIMConfig struct {
-	APIURL            string
-	PublicAPIURL      string
-	PublicWSURL       string
-	Secret            string
-	AdminUser         string
-	WebhookSecret     string
-	WebhookAllowCIDRs []string
+	APIURL              string
+	PublicAPIURL        string
+	PublicWSURL         string
+	Secret              string
+	AdminUser           string
+	WebhookSecret       string
+	WebhookAllowCIDRs   []string
+	RecallWindowSeconds int
 }
 
 type KafkaConfig struct {
@@ -90,13 +91,14 @@ func Load() Config {
 			PublicRead: getenv("MINIO_PUBLIC_READ", "false") == "true",
 		},
 		OpenIM: OpenIMConfig{
-			APIURL:            getenv("OPENIM_API_URL", ""),
-			PublicAPIURL:      getenv("OPENIM_PUBLIC_API_URL", ""),
-			PublicWSURL:       getenv("OPENIM_PUBLIC_WS_URL", ""),
-			Secret:            getenv("OPENIM_SECRET", ""),
-			AdminUser:         getenv("OPENIM_ADMIN_USER", "imAdmin"),
-			WebhookSecret:     getenv("OPENIM_WEBHOOK_SECRET", ""),
-			WebhookAllowCIDRs: splitCSV(getenv("OPENIM_WEBHOOK_ALLOW_CIDRS", "")),
+			APIURL:              getenv("OPENIM_API_URL", ""),
+			PublicAPIURL:        getenv("OPENIM_PUBLIC_API_URL", ""),
+			PublicWSURL:         getenv("OPENIM_PUBLIC_WS_URL", ""),
+			Secret:              getenv("OPENIM_SECRET", ""),
+			AdminUser:           getenv("OPENIM_ADMIN_USER", "imAdmin"),
+			WebhookSecret:       getenv("OPENIM_WEBHOOK_SECRET", ""),
+			WebhookAllowCIDRs:   splitCSV(getenv("OPENIM_WEBHOOK_ALLOW_CIDRS", "")),
+			RecallWindowSeconds: GetenvInt("OPENIM_RECALL_WINDOW_SECONDS", 120),
 		},
 		Kafka: KafkaConfig{
 			Brokers: getenv("KAFKA_BROKERS", ""),

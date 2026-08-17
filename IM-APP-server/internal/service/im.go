@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"im-app-server/internal/config"
@@ -29,7 +30,14 @@ var (
 	// ErrIMTargetNotChattable 表示当前用户与该好友/群不能聊天（非好友/被拉黑/群禁言等）。
 	ErrIMTargetNotChattable = errors.New("cannot chat with this peer")
 	// ErrIMInvalidPeerType 表示 peerType 不是 c2c 或 group。
-	ErrIMInvalidPeerType = errors.New("peerType must be c2c or group")
+	ErrIMInvalidPeerType      = errors.New("peerType must be c2c or group")
+	ErrIMInvalidRecallRequest = errors.New("invalid message recall request")
+	ErrIMRecallForbidden      = errors.New("message recall is forbidden")
+	ErrIMRecallExpired        = errors.New("message recall window expired")
+	ErrIMUnsupportedMessage   = errors.New("message type cannot be recalled")
+	ErrIMRecallConflict       = errors.New("message recall is in progress")
+	ErrIMMessageNotFound      = errors.New("message not found")
+	ErrIMRecallUpstream       = errors.New("OpenIM message recall failed")
 )
 
 type IMToken struct {
@@ -588,6 +596,171 @@ func (s *IMService) ClearConversationMessages(ctx context.Context, userID, peerT
 		return err
 	}
 	return s.Client.ClearConversationMessages(ctx, target.OpUserID, []string{target.ConversationID})
+}
+
+func (s *IMService) RecallMessage(ctx context.Context, userID string, req models.RecallMessageRequest) (models.MessageRecallResult, error) {
+	result := models.MessageRecallResult{
+		PeerType: req.PeerType, PeerID: req.PeerID, ClientMsgID: req.ClientMsgID,
+		Seq: req.Seq, Status: "recalled",
+	}
+	if s.Client == nil || !s.Client.Available() {
+		return result, ErrIMUnavailable
+	}
+	req.PeerType = strings.TrimSpace(req.PeerType)
+	req.PeerID = strings.TrimSpace(req.PeerID)
+	req.ClientMsgID = strings.TrimSpace(req.ClientMsgID)
+	req.Reason = strings.TrimSpace(req.Reason)
+	result.PeerType, result.PeerID, result.ClientMsgID = req.PeerType, req.PeerID, req.ClientMsgID
+	if (req.PeerType != "c2c" && req.PeerType != "group") || req.PeerID == "" ||
+		req.ClientMsgID == "" || len(req.ClientMsgID) > 128 || req.Seq <= 0 || len([]rune(req.Reason)) > 500 {
+		return result, ErrIMInvalidRecallRequest
+	}
+
+	operatorIMID, err := im.UserIDFromBusinessID(userID)
+	if err != nil {
+		return result, ErrIMInvalidRecallRequest
+	}
+	var conversationID, internalGroupID, operatorRole string
+	switch req.PeerType {
+	case "c2c":
+		parsedPeerID, err := uuid.Parse(req.PeerID)
+		if err != nil {
+			return result, ErrIMInvalidRecallRequest
+		}
+		req.PeerID = parsedPeerID.String()
+		result.PeerID = req.PeerID
+		peer, err := s.ResolvePeer(ctx, userID, req.PeerID)
+		if err != nil {
+			if errors.Is(err, repository.ErrIMTargetNotFound) {
+				return result, ErrIMMessageNotFound
+			}
+			return result, err
+		}
+		if peer.DenyReason == "sender_inactive" {
+			return result, ErrIMRecallForbidden
+		}
+		conversationID = buildC2CConversationID(operatorIMID, peer.IMUserID)
+		operatorRole = "member"
+	case "group":
+		if strings.IndexFunc(req.PeerID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+			return result, ErrIMInvalidRecallRequest
+		}
+		internalID, publicID, err := s.Groups.LookupGroupIDs(ctx, req.PeerID)
+		if errors.Is(err, pgx.ErrNoRows) || publicID != req.PeerID {
+			return result, ErrIMMessageNotFound
+		}
+		if err != nil {
+			return result, err
+		}
+		group, err := s.Access.ResolveGroup(ctx, userID, internalID)
+		if errors.Is(err, repository.ErrIMTargetNotFound) || group.DenyReason == "group_inactive" {
+			return result, ErrIMRecallForbidden
+		}
+		if err != nil {
+			return result, err
+		}
+		groupIMID, err := im.UserIDFromBusinessID(internalID)
+		if err != nil {
+			return result, ErrIMMessageNotFound
+		}
+		conversationID, err = s.resolveGroupConversationID(ctx, operatorIMID, groupIMID)
+		if err != nil {
+			return result, fmt.Errorf("%w: %v", ErrIMRecallUpstream, err)
+		}
+		internalGroupID = internalID
+		operatorRole = group.Role
+	}
+
+	message, err := s.Access.FindMessageAudit(ctx, conversationID, req.Seq, req.ClientMsgID)
+	if err != nil {
+		if errors.Is(err, repository.ErrIMMessageNotFound) {
+			return result, ErrIMMessageNotFound
+		}
+		return result, err
+	}
+	if message.ContentType <= 0 || message.ContentType >= 1000 || message.SenderIMID == s.Config.AdminUser {
+		return result, ErrIMUnsupportedMessage
+	}
+	senderID, err := im.BusinessIDFromUserID(message.SenderIMID)
+	if err != nil {
+		return result, ErrIMUnsupportedMessage
+	}
+	senderRole := "member"
+	if req.PeerType == "group" {
+		operatorRole, senderRole, err = s.Groups.MessageRecallRoles(ctx, internalGroupID, userID, senderID)
+		if err != nil {
+			if errors.Is(err, repository.ErrForbidden) {
+				return result, ErrIMRecallForbidden
+			}
+			return result, err
+		}
+	}
+	windowSeconds := s.Config.RecallWindowSeconds
+	if windowSeconds <= 0 {
+		windowSeconds = 120
+	}
+	if err := validateRecallPermission(req.PeerType, userID == senderID, operatorRole, senderRole,
+		req.Reason, message.SendTime, time.Now(), time.Duration(windowSeconds)*time.Second); err != nil {
+		return result, err
+	}
+
+	reservation, err := s.Access.ReserveMessageRecall(ctx, conversationID, req.Seq, req.ClientMsgID,
+		req.PeerType, req.PeerID, message.SenderIMID, userID, operatorIMID, operatorRole, req.Reason)
+	if err != nil {
+		if errors.Is(err, repository.ErrIMRecallInProgress) {
+			return result, ErrIMRecallConflict
+		}
+		return result, err
+	}
+	if !reservation.ShouldRecall && reservation.Status == "recalled" {
+		result.AlreadyRecalled = true
+		if reservation.RecalledAt != nil {
+			result.RecalledAt = *reservation.RecalledAt
+		} else {
+			result.RecalledAt = time.Now()
+		}
+		return result, nil
+	}
+
+	alreadyRecalled, err := s.Client.RevokeMessage(ctx, operatorIMID, conversationID, req.Seq)
+	if err != nil {
+		_ = s.Access.FailMessageRecall(ctx, reservation.ID, err.Error())
+		var apiErr *im.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrCode == 1004 {
+			return result, ErrIMMessageNotFound
+		}
+		return result, fmt.Errorf("%w: %v", ErrIMRecallUpstream, err)
+	}
+	recalledAt, err := s.Access.CompleteMessageRecall(ctx, reservation.ID)
+	if err != nil {
+		return result, err
+	}
+	result.AlreadyRecalled = alreadyRecalled
+	result.RecalledAt = recalledAt
+	return result, nil
+}
+
+func validateRecallPermission(peerType string, ownMessage bool, operatorRole, senderRole, reason string, sendTime int64, now time.Time, window time.Duration) error {
+	if sendTime <= 0 {
+		return ErrIMMessageNotFound
+	}
+	if ownMessage {
+		sentAt := time.UnixMilli(sendTime)
+		if sentAt.After(now.Add(5*time.Minute)) || now.Sub(sentAt) > window {
+			return ErrIMRecallExpired
+		}
+		return nil
+	}
+	if peerType != "group" || strings.TrimSpace(reason) == "" {
+		return ErrIMRecallForbidden
+	}
+	if operatorRole == "owner" && senderRole != "owner" {
+		return nil
+	}
+	if operatorRole == "admin" && senderRole == "member" {
+		return nil
+	}
+	return ErrIMRecallForbidden
 }
 
 // SetGlobalMsgRecvOpt 设置用户级全局免打扰（对所有会话生效）。

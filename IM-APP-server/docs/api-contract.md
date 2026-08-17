@@ -190,7 +190,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### PATCH `/api/v1/me`
 
-修改本人资料。**nickname、avatarFileId、bio 均需传入**（bio 无内容传空字符串）。头像 `avatarFileId` 须先走文件上传流程（接口 12 → PUT → 接口 13）。
+修改本人资料。**nickname、avatarFileId、bio 均需传入**（bio 无内容传空字符串）。头像 `avatarFileId` 须先走文件上传流程（接口 12 → multipart POST → 接口 13）。
 
 **Body**
 ```json
@@ -668,7 +668,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### POST `/api/v1/files/uploads`
 
-创建上传任务，获取预签名上传地址。H5 用 `uploadUrl` 做 PUT；App 用 `formUrl` + `formData` 走 `uni.uploadFile`（字段名 `file`），不要 PUT ArrayBuffer。
+创建上传任务，获取预签名 multipart POST 表单。H5 和 App 都使用 `formUrl` + `formData` 上传，文件字段名为 `file`；`uploadUrl` 仅为兼容字段，值与 `formUrl` 相同。
 
 **Body**
 ```json
@@ -684,7 +684,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ```json
 {
   "file": { "id": "uuid", "status": "pending" },
-  "uploadUrl": "https://...预签名 PUT...",
+  "uploadUrl": "https://...预签名 POST 表单地址...",
   "formUrl": "https://www.ke58.com/minio/im-uploads",
   "formData": {
     "key": "uploads/.../uuid.jpg",
@@ -696,24 +696,24 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 }
 ```
 
-### POST `/api/v1/files/uploads/:fileId/complete`
+### POST `/api/v1/files/uploads/complete`
 
-确认上传完成。
+确认上传完成，`fileId` 放在 JSON 请求体中。
 
 **Body**
 ```json
-{ "etag": "optional" }
+{ "fileId": "uuid", "etag": "optional" }
 ```
 
 **Response**：`FileInfo`（含 `url`、`status` 等）。
 
-### GET `/api/v1/files/:fileId`
+### GET `/api/v1/files?fileId=uuid`
 
 查询文件信息。
 
 ### POST `/api/v1/files/presign`（旧版 / 兼容）
 
-获取 MinIO 预签名上传 URL（MinIO 未配置时返回 dev 占位 URL）。
+获取 MinIO 预签名 multipart POST 表单（MinIO 未配置时返回 dev 占位 URL）。
 
 **Body**
 ```json
@@ -724,6 +724,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ```json
 {
   "uploadUrl": "https://...",
+  "formUrl": "https://...",
+  "formData": { "key": "users/{uid}/{uuid}.jpg", "policy": "..." },
   "fileUrl": "https://...",
   "objectKey": "users/{uid}/{uuid}.jpg",
   "expiresIn": 900
