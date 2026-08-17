@@ -11,14 +11,12 @@ import {
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import { APP_CONFIG } from '@/config'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { MUTE_OPTIONS } from '@/constants/mute'
 import { useUserStore } from '@/stores/user'
 import type { GroupInfo, GroupMember, GroupMemberMuteResult } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
-
-const MUTE_LABELS = ['10分钟', '1小时', '12小时', '1天', '7天']
-const MUTE_SECONDS = [10 * 60, 60 * 60, 12 * 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60]
 
 const statusBarHeight = getStatusBarHeight()
 const userStore = useUserStore()
@@ -89,10 +87,15 @@ function memberAvatar(member: GroupMember) {
   return member.avatar || APP_CONFIG.defaultAvatarUrl
 }
 
+/** 与后端权限矩阵一致：owner 可管 admin/member，admin 只可管 member；群主和自己不可操作 */
 function canActOn(member: GroupMember) {
   if (!canManage.value) return false
   if (member.id === myId.value) return false
-  return member.role === 'member'
+  if (member.role === 'owner') return false
+  const role = group.value?.myRole
+  if (role === 'owner') return true
+  if (role === 'admin') return member.role === 'member'
+  return false
 }
 
 function openProfile(member: GroupMember) {
@@ -114,15 +117,16 @@ async function onMute(member: GroupMember) {
   if (busy.value || !canActOn(member)) return
   let tapIndex = -1
   try {
-    const sheet = await uni.showActionSheet({ itemList: MUTE_LABELS })
+    const sheet = await uni.showActionSheet({ itemList: MUTE_OPTIONS.map((o) => o.label) })
     tapIndex = sheet.tapIndex
   } catch {
     return
   }
-  if (tapIndex < 0 || tapIndex >= MUTE_SECONDS.length) return
+  const option = MUTE_OPTIONS[tapIndex]
+  if (!option) return
   busy.value = true
   try {
-    applyMuteResult(await muteGroupMember(groupId.value, member.id, MUTE_SECONDS[tapIndex]))
+    applyMuteResult(await muteGroupMember(groupId.value, member.id, option.seconds))
     uni.showToast({ title: '已禁言', icon: 'success' })
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '禁言失败', icon: 'none' })

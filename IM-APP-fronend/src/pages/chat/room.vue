@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
-import { useChatMessageActions } from '@/composables/useChatMessageActions'
+import { useChatMessageActions, type MemberMeta } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
@@ -16,7 +16,7 @@ import { businessUserIdFromIM, chooseLocalFile, ensureIMLogin, imUserId } from '
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { resolveIMGroupByIM } from '@/api/im'
-import { fetchGroupMembers } from '@/api/group'
+import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
@@ -41,6 +41,13 @@ const myRole = ref<'owner' | 'admin' | 'member'>('member')
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
 const convRef = ref<Conversation | null>(null)
 const memberRemarkMap = ref<Record<string, string>>({})
+/** 群禁言状态（群详情接口）：本人被禁言 / 全员禁言时禁用输入区 */
+const canChat = ref(true)
+const denyReason = ref('')
+const myMutedUntil = ref<string | null>(null)
+/** 群成员角色 / 禁言元信息（业务用户 ID 索引），供长按菜单做权限与禁言项判断 */
+const memberMetaMap = ref<Record<string, MemberMeta>>({})
+let muteExpireTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
@@ -74,7 +81,10 @@ watch(
   () =>
     (chatStore.messagesMap[conversationId.value] || [])
       .map((m) => m.systemEventKey)
-      .filter((key): key is string => !!key && key.startsWith('group-member:'))
+      .filter(
+        (key): key is string =>
+          !!key && (key.startsWith('group-member:') || key.startsWith('group-mute:')),
+      )
       .join('|'),
   (keys, prev) => {
     if (!prev || keys === prev) return
@@ -117,6 +127,34 @@ const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 const hasInput = computed(() => input.value.trim().length > 0)
 
+/** 被禁言（单人 / 全员）时隐藏输入区，换成居中提示条 */
+const composerBlocked = computed(() => chatType.value === 'group' && !canChat.value)
+
+const blockTip = computed(() => {
+  if (denyReason.value === 'group_muted') return '群主已开启全员禁言'
+  if (denyReason.value === 'member_muted') {
+    const until = formatMuteUntil(myMutedUntil.value)
+    return until ? `你已被禁言，至 ${until} 解禁` : '你已被禁言'
+  }
+  return '当前群暂无法发言'
+})
+
+function formatMuteUntil(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+watch(composerBlocked, (blocked) => {
+  if (!blocked) return
+  showPlusPanel.value = false
+  showEmojiPanel.value = false
+  if (recording.value) stopVoiceRecord()
+  voiceMode.value = false
+})
+
 const actions = useChatMessageActions({
   conversationId,
   chatType,
@@ -128,6 +166,10 @@ const actions = useChatMessageActions({
   isMine,
   visibleMessages: messages,
   conversationTitle: title,
+  memberMeta: memberMetaMap,
+  onMuteChanged: () => {
+    void refreshGroupMeta()
+  },
 })
 
 onShow(() => {
@@ -135,6 +177,13 @@ onShow(() => {
   if (!forwardStore.consumeSucceeded()) return
   actions.cancelSelect()
   successVisible.value = true
+})
+
+onUnload(() => {
+  if (muteExpireTimer) {
+    clearTimeout(muteExpireTimer)
+    muteExpireTimer = null
+  }
 })
 
 onLoad(async (query) => {
@@ -231,6 +280,7 @@ watch(
 )
 
 async function onSend() {
+  if (composerBlocked.value) return
   const text = input.value.trim()
   if (!text) return
   input.value = ''
@@ -296,7 +346,7 @@ async function resolveBusinessTarget(): Promise<string> {
   return ''
 }
 
-/** 进群 / 退群 / 踢人后标题旁人数要跟着变，不能只在首次进入时拉一次 */
+/** 进群 / 退群 / 踢人 / 禁言后标题旁人数与禁言状态要跟着变，不能只在首次进入时拉一次 */
 async function refreshGroupMeta() {
   if (chatType.value !== 'group') return
   let gid = businessId.value
@@ -310,20 +360,58 @@ async function refreshGroupMeta() {
   if (!gid) return
   businessId.value = gid
   try {
-    const ms = await fetchGroupMembers(gid)
+    const [ms, detail] = await Promise.all([
+      fetchGroupMembers(gid),
+      fetchGroupDetail(gid).catch(() => null),
+    ])
     const map: Record<string, string> = {}
+    const metaMap: Record<string, MemberMeta> = {}
     for (const m of ms) {
       const r = m.memberRemark?.trim()
       if (r) map[m.id] = r
+      metaMap[m.id] = { role: m.role, isMuted: !!m.isMuted }
     }
     memberRemarkMap.value = map
+    memberMetaMap.value = metaMap
     memberCount.value = ms.length
     const me = userStore.profile?.id
     const self = me ? ms.find((m) => m.id === me) : undefined
     if (self) myRole.value = self.role
+    if (detail) applyGroupChatPermission(detail)
   } catch {
     // 人数刷新失败时保留当前值
   }
+}
+
+/** 群详情的发言权限 → 输入区禁用状态 */
+function applyGroupChatPermission(detail: { canChat?: boolean; denyReason?: string; mutedUntil?: string | null }) {
+  canChat.value = detail.canChat !== false
+  denyReason.value = detail.denyReason || ''
+  myMutedUntil.value = detail.mutedUntil || null
+  scheduleMuteExpiry()
+}
+
+/**
+ * 禁言自然到期时自动刷新恢复输入区。30 天禁言超出 setTimeout 上限（约 24.8 天），
+ * 单次最多等 12 小时，到期没解除就再续一期。
+ */
+function scheduleMuteExpiry() {
+  if (muteExpireTimer) {
+    clearTimeout(muteExpireTimer)
+    muteExpireTimer = null
+  }
+  if (!composerBlocked.value) return
+  const until = myMutedUntil.value ? new Date(myMutedUntil.value).getTime() : 0
+  if (!until || Number.isNaN(until)) return
+  if (until <= Date.now()) {
+    void refreshGroupMeta()
+    return
+  }
+  const delay = Math.min(until - Date.now(), 12 * 60 * 60 * 1000)
+  muteExpireTimer = setTimeout(() => {
+    muteExpireTimer = null
+    scheduleMuteExpiry()
+  }, delay)
 }
 
 async function goToProfile() {
@@ -559,6 +647,10 @@ async function waitForVoiceDraft(timeoutMs = 3000): Promise<{ path: string; dura
 }
 
 async function sendVoiceDraft() {
+  if (composerBlocked.value) {
+    uni.showToast({ title: blockTip.value, icon: 'none' })
+    return
+  }
   if (recording.value) {
     stopVoiceRecord()
     const draftAfterStop = await waitForVoiceDraft()
@@ -750,6 +842,9 @@ function pickFavorite() {
         :text="actions.quote.value.content"
         @close="actions.clearQuote"
       />
+      <view v-if="composerBlocked" class="composer-blocked">🔇 {{ blockTip }}</view>
+
+      <template v-else>
       <view v-if="voiceMode" class="voice-bar">
         <view class="voice-trash" @click="cancelVoiceDraft">🗑</view>
 
@@ -767,7 +862,9 @@ function pickFavorite() {
       </view>
 
       <view v-else class="composer-row">
-        <view class="tool" @click="startVoiceRecord">🎙</view>
+        <view class="tool" @click="startVoiceRecord">
+          <image class="tool-icon" src="/static/icon-mic.png" mode="aspectFit" />
+        </view>
         <view class="input-wrap">
           <input
             class="input"
@@ -782,32 +879,43 @@ function pickFavorite() {
         <view class="tool" @click="onPlus">＋</view>
         <view v-if="hasInput" class="send-btn" @click="onSend">传送</view>
       </view>
+      </template>
 
-      <view v-if="showPlusPanel" class="plus-panel">
+      <view v-if="showPlusPanel && !composerBlocked" class="plus-panel">
         <view class="plus-item" @click="pickCamera">
-          <view class="plus-icon">📷</view>
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-camera.png" mode="aspectFit" />
+          </view>
           <text>相机</text>
         </view>
         <view class="plus-item" @click="pickImage">
-          <view class="plus-icon">🖼</view>
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-photo.png" mode="aspectFit" />
+          </view>
           <text>照片</text>
         </view>
         <view class="plus-item" @click="pickCard">
-          <view class="plus-icon">👤</view>
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-card.png" mode="aspectFit" />
+          </view>
           <text>名片</text>
         </view>
         <view class="plus-item" @click="pickFile">
-          <view class="plus-icon">📁</view>
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-file.png" mode="aspectFit" />
+          </view>
           <text>文件</text>
         </view>
         <view class="plus-item" @click="pickFavorite">
-          <view class="plus-icon">⭐</view>
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-favorite.png" mode="aspectFit" />
+          </view>
           <text>收藏</text>
         </view>
       </view>
 
       <EmojiStickerPanel
-        v-if="showEmojiPanel"
+        v-if="showEmojiPanel && !composerBlocked"
         class="emoji-panel-shell"
         @select="onEmojiSelect"
         @close="showEmojiPanel = false"
@@ -966,6 +1074,16 @@ function pickFavorite() {
   gap: 12rpx;
 }
 
+/** 被禁言 / 全员禁言时替代输入区的居中提示条 */
+.composer-blocked {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96rpx;
+  color: #999;
+  font-size: 26rpx;
+}
+
 .tool {
   width: 64rpx;
   height: 64rpx;
@@ -974,6 +1092,11 @@ function pickFavorite() {
   justify-content: center;
   font-size: 40rpx;
   color: #333;
+}
+
+.tool-icon {
+  width: 44rpx;
+  height: 44rpx;
 }
 
 .send-btn {
@@ -1124,6 +1247,11 @@ function pickFavorite() {
   align-items: center;
   justify-content: center;
   font-size: 44rpx;
+}
+
+.plus-icon-img {
+  width: 56rpx;
+  height: 56rpx;
 }
 </style>
 
