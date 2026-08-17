@@ -554,9 +554,11 @@ export async function sendQuoteMessage(
   text: string,
   quote: MessageItem,
 ): Promise<MessageItem> {
+  // SDK 的 createQuoteMessage 要求 message 是被引用消息的 JSON 字符串（QuoteMsgParams.message: string），
+  // 直接传对象会被 JSON.parse 隐式转成 "[object Object]" 而报 errCode=10006。
   const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
     text,
-    message: quote,
+    message: JSON.stringify(quote),
   })
   return sendCreatedMessage(target, message)
 }

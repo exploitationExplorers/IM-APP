@@ -43,6 +43,8 @@ export function useChatMessageActions(opts: {
   const selectMode = ref<'forward' | 'multi'>('multi')
   const selectedIds = ref<Set<string>>(new Set())
   const quote = ref<ChatMessage | null>(null)
+  /** 长按 @TA 记下被 @ 的人（OpenIM userID + 群昵称），发送时走 AtText */
+  const atList = ref<Array<{ atUserID: string; groupNickname: string }>>([])
 
   const selectedCount = computed(() => selectedIds.value.size)
   const menuVisible = computed(() => !!menuMessage.value && !selecting.value)
@@ -271,6 +273,10 @@ export function useChatMessageActions(opts: {
     const token = `@${name} `
     if (!opts.input.value.includes(token)) {
       opts.input.value = `${token}${opts.input.value}`
+      // 记下被 @ 的人。atUserID 必须用 OpenIM userID（message.senderId 就是），不要转业务 ID
+      if (message.senderId && !atList.value.some((a) => a.atUserID === message.senderId)) {
+        atList.value.push({ atUserID: message.senderId, groupNickname: name })
+      }
     }
   }
 
@@ -413,6 +419,7 @@ export function useChatMessageActions(opts: {
     selectedIds,
     selectedCount,
     quote,
+    atList,
     openMenu,
     closeMenu,
     onMenuSelect,

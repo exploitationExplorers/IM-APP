@@ -294,6 +294,14 @@ async function onSend() {
         imUserId.value || myId.value,
       )
       actions.clearQuote()
+    } else if (actions.atList.value.length > 0) {
+      await chatStore.sendAtText(
+        conversationId.value,
+        text,
+        imUserId.value || myId.value,
+        actions.atList.value,
+      )
+      actions.atList.value = []
     } else {
       await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
     }
