@@ -9,8 +9,6 @@ import { useForwardStore } from '@/stores/forward'
 import { rememberConversationTitle } from '@/utils/favoriteMeta'
 import { businessUserIdFromIM } from '@/utils/openim'
 
-const REVOKE_MS = 2 * 60 * 1000
-
 /** 群成员的发言管控元信息（房间页从群成员接口构建，业务用户 ID 索引） */
 export interface MemberMeta {
   role: GroupRole
@@ -68,15 +66,20 @@ export function useChatMessageActions(opts: {
   }
 
   /**
-   * 撤回权限：自己的消息限 2 分钟内（后端撤回窗口默认 120s）；
-   * 群主可撤管理员/成员的消息、管理员可撤成员的消息，无时间窗。
+   * 撤回入口：自己的消息（非发送中）一律显示，超 2 分钟窗口由后端校验并 toast 提示；
+   * 他人的消息仅群主/管理员显示，目标角色已加载时按权限矩阵收敛，
+   * 没加载到也先显示，由后端最终判定（无权时返回明确报错）。
    */
   function canRevoke(message: ChatMessage) {
     if (message.status === 'sending') return false
-    if (opts.isMine(message)) {
-      return Date.now() - new Date(message.createdAt).getTime() < REVOKE_MS
-    }
-    return canActOnTarget(message)
+    if (opts.isMine(message)) return true
+    if (opts.chatType.value !== 'group') return false
+    const myRole = opts.myRole.value
+    if (myRole === 'member') return false
+    const meta = memberMetaOf(message)
+    if (!meta) return true
+    if (meta.role === 'owner') return false
+    return myRole === 'owner' || meta.role === 'member'
   }
 
   const menuItems = computed<MessageMenuItem[]>(() => {
