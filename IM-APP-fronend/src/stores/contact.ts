@@ -122,6 +122,16 @@ export const useContactStore = defineStore('contact', () => {
     groupsExpanded.value = !groupsExpanded.value
   }
 
+  function reset() {
+    contacts.value = []
+    contactTotal.value = 0
+    contactCursor.value = ''
+    contactHasMore.value = false
+    groups.value = []
+    friendRequests.value = []
+    groupsExpanded.value = false
+  }
+
   return {
     contacts,
     contactTotal,
@@ -145,5 +155,6 @@ export const useContactStore = defineStore('contact', () => {
     openChatWithContact,
     openChatWithGroup,
     toggleGroupsExpanded,
+    reset,
   }
 })

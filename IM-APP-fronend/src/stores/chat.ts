@@ -108,7 +108,10 @@ export const useChatStore = defineStore('chat', () => {
     if (settings.vibration) vibrateShort()
   }
 
-  function upsertConversations(items: ConversationItem[]) {
+  /** App 原生 OnConversationChanged 可能推单条对象，H5 WASM 则是数组 */
+  function upsertConversations(raw: ConversationItem | ConversationItem[] | null) {
+    const items = Array.isArray(raw) ? raw : raw ? [raw] : []
+    if (!items.length) return
     const incoming = items.map(toConversation)
     const merged = [...conversations.value]
     incoming.forEach((conv) => {
@@ -299,9 +302,17 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadMessages(conversationId: string) {
+    const existing = messagesMap.value[conversationId] || []
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
     messageList.forEach(rememberRaw)
-    messagesMap.value = { ...messagesMap.value, [conversationId]: messageList.map(toChatMessage) }
+    const mapped = messageList.map(toChatMessage)
+    // App 历史接口偶发空结果时不要把房间里刚发出的消息整表冲掉
+    if (!mapped.length && existing.length) {
+      historyEnd.value = { ...historyEnd.value, [conversationId]: false }
+      await markAsRead(conversationId)
+      return
+    }
+    messagesMap.value = { ...messagesMap.value, [conversationId]: mapped }
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
     await markAsRead(conversationId)
   }
@@ -378,11 +389,23 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const sent = await send()
       rememberRaw(sent)
-      replaceMessage(conversationId, placeholder.id, toChatMessage(sent))
+      const mapped = toChatMessage(sent)
+      replaceMessage(conversationId, placeholder.id, mapped)
+      patchConversation(conversationId, {
+        lastMessage: previewOf(mapped),
+        lastMessageAt: mapped.createdAt,
+      })
     } catch (e) {
       replaceMessage(conversationId, placeholder.id, { ...placeholder, status: 'failed' })
       throw new Error((e as Error)?.message || '发送失败')
     }
+  }
+
+  function previewOf(message: ChatMessage): string {
+    if (message.type === 'image') return '[图片]'
+    if (message.type === 'voice') return '[语音]'
+    if (message.type === 'file') return '[文件]'
+    return message.content
   }
 
   function replaceMessage(conversationId: string, tempId: string, message: ChatMessage) {

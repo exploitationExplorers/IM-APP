@@ -62,6 +62,11 @@ export const useGroupStore = defineStore('group', () => {
     members.value = []
   }
 
+  function reset() {
+    currentGroup.value = null
+    members.value = []
+  }
+
   return {
     currentGroup,
     members,
@@ -73,5 +78,6 @@ export const useGroupStore = defineStore('group', () => {
     setMemberRole,
     leave,
     dismiss,
+    reset,
   }
 })
