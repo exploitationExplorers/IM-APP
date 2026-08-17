@@ -257,57 +257,29 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		return w.sendGroupCreatedWelcome(ctx, state.ID, groupID)
 	}
 	if event.EventType == repository.IMEventGroupUpdated {
-		if err := w.Client.EnsureGroup(ctx, group); err != nil {
-			return err
+		var updatePayload repository.IMGroupUpdatePayload
+		if err := json.Unmarshal(event.Payload, &updatePayload); err != nil {
+			return fmt.Errorf("decode %s payload: %w", event.EventType, err)
 		}
-		// Reconciliation is intentionally state based: inviting an existing
-		// member and setting their current role/mute are idempotent operations.
-		allInvitees := append(append([]string{}, group.MemberUserIDs...), group.AdminUserIDs...)
-		if err := w.Client.InviteGroupMember(ctx, groupID, allInvitees); err != nil {
-			return err
+		// Old group.updated rows used an empty payload and cannot tell which field
+		// really changed. Replaying them as a full update would recreate the fake
+		// group-name notices, so completing them without a remote write is safer.
+		if updatePayload.Name == nil && updatePayload.Avatar == nil && updatePayload.Announcement == nil && updatePayload.AllowMemberAddFriend == nil {
+			return nil
 		}
-		remoteMembers, err := w.Client.ListGroupMemberIDs(ctx, groupID)
+		registered, err := w.Client.IsGroupRegistered(ctx, groupID)
 		if err != nil {
 			return err
 		}
-		expectedMembers := map[string]struct{}{ownerID: {}}
-		for memberID := range memberByID {
-			expectedMembers[memberID] = struct{}{}
+		if !registered {
+			return w.Client.EnsureGroup(ctx, group)
 		}
-		unexpectedMembers := make([]string, 0)
-		for _, memberID := range remoteMembers {
-			if _, exists := expectedMembers[memberID]; !exists {
-				unexpectedMembers = append(unexpectedMembers, memberID)
-			}
-		}
-		if err := w.Client.KickGroupMember(ctx, groupID, unexpectedMembers); err != nil {
-			return err
-		}
-		if err := w.Client.SetGroupMute(ctx, groupID, state.AllMuted); err != nil {
-			return err
-		}
-		for memberID, member := range memberByID {
-			if member.GroupNickname != "" {
-				if err := w.Client.SetGroupMemberNickname(ctx, groupID, memberID, member.GroupNickname); err != nil {
-					return err
-				}
-			}
-			if member.Role == "owner" {
-				continue
-			}
-			if member.Role == "admin" {
-				if err := w.Client.SetGroupMemberRole(ctx, groupID, memberID, 60); err != nil {
-					return err
-				}
-			}
-			mutedSeconds := remainingMuteSeconds(member.MutedUntil)
-			if mutedSeconds > 0 {
-				if err := w.Client.SetGroupMemberMute(ctx, groupID, memberID, mutedSeconds); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+		return w.Client.UpdateGroup(ctx, groupID, im.GroupUpdate{
+			GroupName:            updatePayload.Name,
+			FaceURL:              updatePayload.Avatar,
+			Notification:         updatePayload.Announcement,
+			AllowMemberAddFriend: updatePayload.AllowMemberAddFriend,
+		})
 	}
 	registered, err := w.Client.IsGroupRegistered(ctx, groupID)
 	if err != nil {

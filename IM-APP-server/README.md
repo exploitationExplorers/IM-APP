@@ -85,7 +85,9 @@ docker compose up -d --build
 | `JWT_SECRET` | 随机长密钥（生成：`openssl rand -hex 32`） |
 | `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` | 阿里云短信密钥（**敏感，勿提交 git**） |
 | `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE` | 阿里云短信签名 / 模板（审核通过） |
-| `MINIO_PUBLIC_URL` | MinIO 对外访问地址，如 `http://8.210.72.157:9000`（空则文件 URL 是内网，外部不可访问） |
+| `MINIO_PUBLIC_URL` | 业务 MinIO 对外访问地址，如 `https://www.ke58.com/minio`（空则文件 URL 是内网，外部不可访问） |
+| `MINIO_PUBLIC_READ` | 举报图片等是否能通过返回 URL 直接打开；`true` 会允许公开读取整个 `MINIO_BUCKET`，Docker 默认开启 |
+| `MINIO_EXTERNAL_ADDRESS` | OpenIM 图片、语音和文件的公网预签名地址，如 `https://www.ke58.com/openim`；需配合 Nginx 将 `/openim/` 代理到 OpenIM MinIO |
 | `OPENIM_API_URL` / `OPENIM_SECRET` | 连 OpenIM 服务 |
 | `KAFKA_BROKERS` | 万人转发 Kafka broker；未配置时转发提交/恢复/重试返回 503 |
 

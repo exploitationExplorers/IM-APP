@@ -1,8 +1,23 @@
 import { request } from '@/utils/request'
-import type { Contact, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
+import type { Contact, ContactListQuery, ContactPage, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 
-export async function fetchContacts(): Promise<Contact[]> {
-  return request<Contact[]>({ url: '/contacts', method: 'GET' })
+export async function fetchContacts(query: ContactListQuery = {}): Promise<ContactPage> {
+  const data: Record<string, string | number> = {
+    limit: query.limit ?? 50,
+  }
+  if (query.keyword?.trim()) data.keyword = query.keyword.trim()
+  if (query.sort) data.sort = query.sort
+  if (query.cursor) data.cursor = query.cursor
+  const result = await request<ContactPage | Contact[]>({
+    url: '/contacts',
+    method: 'GET',
+    data,
+  })
+
+  // 兼容仍直接返回数组的旧版服务，同时保持分页调用方的数据结构稳定。
+  return Array.isArray(result)
+    ? { items: result, hasMore: false, total: result.length }
+    : result
 }
 
 export async function fetchContact(contactId: string): Promise<Contact> {

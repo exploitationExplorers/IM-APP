@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Contact, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
+import type { Contact, ContactListSort, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 import {
   acceptFriendRequest,
   fetchContacts,
@@ -10,16 +10,65 @@ import {
   sendFriendRequest,
 } from '@/api/contact'
 
+const PAGE_SIZE = 50
+
 export const useContactStore = defineStore('contact', () => {
   const contacts = ref<Contact[]>([])
+  const contactTotal = ref(0)
+  const contactCursor = ref('')
+  const contactHasMore = ref(false)
+  const contactsLoading = ref(false)
+  const contactKeyword = ref('')
+  const contactSort = ref<ContactListSort>('recent')
   const groups = ref<GroupPreview[]>([])
   const friendRequests = ref<FriendRequest[]>([])
   const groupsExpanded = ref(false)
 
+  async function reloadContacts(opts?: { keyword?: string; sort?: ContactListSort }) {
+    if (opts?.keyword !== undefined) contactKeyword.value = opts.keyword
+    if (opts?.sort) contactSort.value = opts.sort
+    contactsLoading.value = true
+    try {
+      const page = await fetchContacts({
+        keyword: contactKeyword.value,
+        sort: contactSort.value,
+        limit: PAGE_SIZE,
+      })
+      contacts.value = page.items
+      contactTotal.value = page.total
+      contactCursor.value = page.nextCursor || ''
+      contactHasMore.value = page.hasMore
+    } finally {
+      contactsLoading.value = false
+    }
+  }
+
+  async function loadMoreContacts() {
+    if (!contactHasMore.value || contactsLoading.value || !contactCursor.value) return
+    contactsLoading.value = true
+    try {
+      const page = await fetchContacts({
+        keyword: contactKeyword.value,
+        sort: contactSort.value,
+        cursor: contactCursor.value,
+        limit: PAGE_SIZE,
+      })
+      const seen = new Set(contacts.value.map((c) => c.id))
+      contacts.value = contacts.value.concat(page.items.filter((c) => !seen.has(c.id)))
+      contactCursor.value = page.nextCursor || ''
+      contactHasMore.value = page.hasMore
+      contactTotal.value = page.total
+    } finally {
+      contactsLoading.value = false
+    }
+  }
+
+  async function loadGroups() {
+    groups.value = await fetchGroups()
+  }
+
   async function loadDirectory() {
-    const [c, g] = await Promise.all([fetchContacts(), fetchGroups()])
-    contacts.value = c
-    groups.value = g
+    await Promise.all([reloadContacts(), loadGroups()])
   }
 
   async function loadFriendRequests() {
@@ -75,9 +124,17 @@ export const useContactStore = defineStore('contact', () => {
 
   return {
     contacts,
+    contactTotal,
+    contactHasMore,
+    contactsLoading,
+    contactKeyword,
+    contactSort,
     groups,
     friendRequests,
     groupsExpanded,
+    reloadContacts,
+    loadMoreContacts,
+    loadGroups,
     loadAll,
     loadDirectory,
     loadFriendRequests,

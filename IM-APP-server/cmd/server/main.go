@@ -258,7 +258,7 @@ func main() {
 			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
 			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
 			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
-			auth.POST("/groups/:id/reports", groupH.CreateReport)
+			auth.POST("/groups/reports", groupH.CreateReport)
 			auth.PUT("/groups/:id/mute", groupH.UpdateMute)
 			auth.POST("/groups/:id/leave", groupH.Leave)
 			auth.POST("/groups/:id/dismiss", groupH.Dismiss)
@@ -274,8 +274,8 @@ func main() {
 				auth.POST("/files/presign", handler.DevPresign)
 			}
 			auth.POST("/files/uploads", fileH.Uploads)
-			auth.POST("/files/uploads/:fileId/complete", fileH.Complete)
-			auth.GET("/files/:fileId", fileH.Get)
+			auth.POST("/files/uploads/complete", fileH.Complete)
+			auth.GET("/files", fileH.Get)
 
 			auth.POST("/im/token", imH.Token)
 			auth.GET("/im/peers/:businessUserId", imH.Peer)
@@ -286,6 +286,7 @@ func main() {
 			// peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（后端拼 conversationId）
 			auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
+			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
 			auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
 			auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
 
@@ -378,22 +379,29 @@ func main() {
 // （并允许携带凭证）；未配置白名单时回退为通配 *（仅建议本地开发）。
 func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 	allowed := make(map[string]struct{}, len(allowedOrigins))
+	allowAll := len(allowedOrigins) == 0
 	for _, o := range allowedOrigins {
-		if o = strings.TrimSpace(o); o != "" {
+		o = strings.TrimSpace(o)
+		switch o {
+		case "":
+			continue
+		case "*":
+			allowAll = true
+		default:
 			allowed[o] = struct{}{}
 		}
 	}
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		switch {
-		case origin != "" && len(allowed) > 0:
+		case allowAll:
+			c.Header("Access-Control-Allow-Origin", "*")
+		case origin != "":
 			if _, ok := allowed[origin]; ok {
 				c.Header("Access-Control-Allow-Origin", origin)
 				c.Header("Access-Control-Allow-Credentials", "true")
 				c.Header("Vary", "Origin")
 			}
-		case len(allowed) == 0:
-			c.Header("Access-Control-Allow-Origin", "*")
 		}
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")

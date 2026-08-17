@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
+import ImSuccessToast from '@/components/ImSuccessToast.vue'
 import { useChatMessageActions } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
+import { useForwardStore } from '@/stores/forward'
 import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
@@ -17,10 +19,16 @@ import { resolveIMGroupByIM } from '@/api/im'
 import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { ChatMessage, Conversation } from '@/types'
+import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
+import { getStatusBarHeight } from '@/utils/status-bar'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
 const contactStore = useContactStore()
+const forwardStore = useForwardStore()
+const successVisible = ref(false)
+
+const statusBarHeight = getStatusBarHeight()
 
 const conversationId = ref('')
 const title = ref('聊天')
@@ -46,17 +54,19 @@ let recorder: any = null
 let browserRecorder: { stream: MediaStream; mediaRecorder: MediaRecorder } | null = null
 let recordingTimer: ReturnType<typeof setInterval> | null = null
 
-/** 通知类（加好友等）没有可展示正文，渲染成气泡就是空气泡；撤回提示保留为居中系统行 */
+/** 通知类没有可读正文时不渲染；群禁言等系统提示要保留，例如 `张三: [全体禁言]` */
 function isVisibleMessage(m: ChatMessage): boolean {
   if (m.type === 'system') {
     const text = m.content.trim()
-    return !!text && !text.startsWith('{') && !text.startsWith('[')
+    return !!text && !text.startsWith('{')
   }
   return !!m.content
 }
 
 const messages = computed(() =>
-  (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
+  collapseRepeatedGroupNameNotices(
+    (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
+  ),
 )
 // 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
 // 用 ref 快照而不是 computed：避免 H5/热更新下 computed 与全局 ref 不同步导致 mine 判断失效
@@ -105,6 +115,12 @@ const actions = useChatMessageActions({
   isMine,
   visibleMessages: messages,
   conversationTitle: title,
+})
+
+onShow(() => {
+  if (!forwardStore.consumeSucceeded()) return
+  actions.cancelSelect()
+  successVisible.value = true
 })
 
 onLoad(async (query) => {
@@ -362,7 +378,10 @@ async function startVoiceRecord() {
       recording.value = false
       clearRecordingTimer()
       const path = res.tempFilePath || ''
-      const duration = Number(res.duration || recordingSeconds.value || 0)
+      // App 端 onStop 的 duration 单位是毫秒，统一换算成秒；缺失时退回计时器秒数
+      const rawDuration = Number(res.duration || 0)
+      const duration =
+        rawDuration > 0 ? Math.max(1, Math.round(rawDuration / 1000)) : Math.max(1, recordingSeconds.value)
       if (!path) {
         voiceMode.value = false
         return
@@ -479,16 +498,19 @@ async function sendVoiceDraft() {
     return
   }
 
+  const draft = voiceDraft.value
+  // 点了发送就退出语音条、恢复正常输入框；失败时气泡在列表里标红并 toast 提示
+  voiceDraft.value = null
+  voiceMode.value = false
+  recordingSeconds.value = 0
+
   try {
     await chatStore.sendVoice(
       conversationId.value,
-      voiceDraft.value.path,
-      voiceDraft.value.duration,
+      draft.path,
+      draft.duration,
       imUserId.value || myId.value,
     )
-    voiceDraft.value = null
-    voiceMode.value = false
-    recordingSeconds.value = 0
     await nextTick()
     scrollToBottom()
   } catch (e) {
@@ -543,7 +565,7 @@ function pickImage() {
 
 <template>
   <view class="room">
-    <view class="chat-header">
+    <view class="chat-header" :style="{ paddingTop: statusBarHeight + 'px' }">
       <view class="back-btn" @click="goBack">‹</view>
       <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text>
       <view class="header-title" @click="goToProfile">
@@ -657,6 +679,12 @@ function pickImage() {
       @select="actions.onMenuSelect"
       @close="actions.closeMenu"
     />
+    <ImSuccessToast
+      :visible="successVisible"
+      text="转发成功"
+      placement="top"
+      @close="successVisible = false"
+    />
   </view>
 </template>
 
@@ -673,6 +701,7 @@ function pickImage() {
   align-items: center;
   height: 94rpx;
   padding: 0 26rpx;
+  box-sizing: content-box;
   background: #ffffff;
   border-bottom: 1rpx solid #ececec;
 }
@@ -769,8 +798,10 @@ function pickImage() {
 }
 
 .sys-tip-text {
-  font-size: 22rpx;
-  color: #999;
+  font-size: 24rpx;
+  color: #333333;
+  text-align: center;
+  line-height: 1.5;
 }
 
 .composer {

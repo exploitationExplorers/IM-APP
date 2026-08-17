@@ -135,7 +135,7 @@ type SystemLimits struct {
 | `GET /api/v1/public/bootstrap` | query: `platform,appVersion,locale` | `BootstrapResult` | 国家区号、协议版本、文件限制、最低版本 |
 | `GET /api/v1/public/countries` | query: `keyword,cursor,limit` | `Page[CountryItem]` | 登录前可用 |
 | `POST /api/v1/files/uploads` | `CreateUploadRequest` | `UploadInitResult` | 获取预签名地址 |
-| `POST /api/v1/files/uploads/:id/complete` | `CompleteUploadRequest` | `FileObject` | 校验对象、大小、MIME 后转 ready |
+| `POST /api/v1/files/uploads/complete` | `CompleteUploadRequest`（`fileId` 在 JSON body） | `FileObject` | 校验对象、大小、MIME 后转 ready |
 | `GET /api/v1/report-reasons` | query: `targetType` | `[]ReportReason` | 用户/群举报原因 |
 | `POST /api/v1/reports` | `CreateReportRequest` | `ReportResult` | APP 提交举报 |
 

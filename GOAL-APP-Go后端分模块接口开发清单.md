@@ -66,7 +66,7 @@ type CountResult struct {
 | APP 初始化配置 | `GET /public/bootstrap` | `BootstrapQuery` | `BootstrapResult` |
 | 国家区号列表 | `GET /public/countries` | `CountryListQuery` | `PageResult[CountryItem]` |
 | 创建上传任务 | `POST /files/uploads` | `CreateUploadRequest` | `UploadInitResult` |
-| 确认上传完成 | `POST /files/uploads/:fileId/complete` | `CompleteUploadRequest` | `FileInfo` |
+| 确认上传完成 | `POST /files/uploads/complete` | `CompleteUploadRequest`（`fileId` 在 JSON body） | `FileInfo` |
 | 查询文件信息 | `GET /files/:fileId` | path: `fileId` | `FileInfo` |
 | 举报原因列表 | `GET /report-reasons` | query: `targetType` | `[]ReportReasonItem` |
 

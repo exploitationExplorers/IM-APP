@@ -13,7 +13,7 @@ function onEnterChange(e: Event) {
 function onClear() {
   uni.showModal({
     title: '清除聊天记录',
-    content: '确定清除全部聊天记录吗？此操作不可恢复。',
+    content: '聊天记录只会从此设备中删除，不会从其他人的设备中删除',
     success: (res) => {
       if (res.confirm) {
         uni.showToast({ title: '已清除', icon: 'none' })

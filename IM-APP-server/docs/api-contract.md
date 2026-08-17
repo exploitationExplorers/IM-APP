@@ -294,7 +294,36 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/contacts`
 
-好友列表。每项含 `remark`（无备注时为空字符串）。通讯录展示优先用备注，没有则用昵称。
+好友列表（分页）。每项含 `remark`（无备注时为空字符串）。通讯录展示优先用备注，没有则用昵称。
+
+一次转发 9999+ 好友不要靠本接口拉全量，客户端全选后走 `POST /api/v1/forward-task-targets/generate` 的 `all_friends`。
+
+**Query**
+
+| 参数 | 说明 |
+|---|---|
+| `keyword` | 可选，匹配昵称 / 备注 / 公开 ID，最长 64 字 |
+| `sort` | `recent`（默认，最近加入）或 `name`（备注/昵称） |
+| `cursor` | 上一页最后一条好友 ID，首页省略 |
+| `limit` | 默认 50，最大 100 |
+
+**Response `data`**
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "publicId": "j8afsqh",
+      "nickname": "压测好友00001",
+      "avatar": "",
+      "remark": ""
+    }
+  ],
+  "nextCursor": "uuid",
+  "hasMore": true,
+  "total": 10002
+}
+```
 
 ### GET `/api/v1/contacts/:id`
 
@@ -564,11 +593,15 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 设置当前用户对指定群成员的备注，最多 64 个字。**Body** `{ "remark": "产品负责人" }`；传空字符串清除。群成员列表通过 `memberRemark` 返回。
 
-### POST `/api/v1/groups/:id/reports`
+### POST `/api/v1/groups/reports`
 
 举报当前群聊，仅群成员可提交；同一用户对同一群的待处理举报幂等。
 
-**Body** `{ "reason": "spam|fraud|pornography|violence|harassment|other", "description": "补充说明" }`
+图片先通过 `POST /api/v1/files/uploads`（`purpose=image`）上传，并调用 `POST /api/v1/files/uploads/complete` 完成上传。举报最多关联 9 张当前用户的已完成图片，每张不超过 10 MiB。
+
+**Body** `{ "groupId": "100001", "reason": "spam|fraud|pornography|violence|harassment|other", "description": "补充说明", "imageFileIds": ["图片文件 UUID"] }`
+
+响应的 `imagePaths` 仅包含可直接点击打开的 MinIO HTTP(S) URL，不返回 objectKey 等内部字符串。
 
 ### POST `/api/v1/groups/:id/leave`
 
@@ -839,7 +872,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ## 消息转发（Phase 5）
 
-万人转发采用“PostgreSQL 任务状态 + 事务 Outbox + Kafka 异步队列 + OpenIM 发消息”的链路，接口始终注册，不依赖 `LEGACY_CHAT_ENABLED`。转发目标总人数不设业务上限；worker 从 Kafka 逐批消费并逐个发送，不会在一个 HTTP 请求内同步发完。离线推送和前端对接不在本阶段范围内。
+万人转发采用“PostgreSQL 任务状态 + 事务 Outbox + Kafka 异步队列 + OpenIM 发消息”的链路，接口始终注册，不依赖 `LEGACY_CHAT_ENABLED`。转发目标总人数不设业务上限；worker 从 Kafka 逐批消费并逐个发送，不会在一个 HTTP 请求内同步发完。客户端聊天「转发给」走本接口：创建草稿、按全部好友/标签生成或分批写入目标后提交，发送由 worker 异步完成。离线推送不在本阶段范围内。
 
 接口约定：GET 使用 query 参数；新建的 POST 写接口全部使用静态路径和 JSON body，不把 `taskId` 拼入路径。`GET /api/v1/forward-tasks/:id` 只保留给旧客户端兼容，新客户端使用 `/forward-task-progress?taskId=...`。
 

@@ -577,6 +577,19 @@ func (s *IMService) MarkConversationRead(ctx context.Context, userID, peerType, 
 	return s.Client.MarkConversationAsRead(ctx, target.OpUserID, target.ConversationID)
 }
 
+// ClearConversationMessages 清除当前用户在指定会话中的服务端漫游历史，并同步到
+// 当前用户的其他设备。isSyncOther=false 保证不影响私聊对方或其他群成员。
+func (s *IMService) ClearConversationMessages(ctx context.Context, userID, peerType, peerId string) error {
+	if s.Client == nil || !s.Client.Available() {
+		return ErrIMUnavailable
+	}
+	target, err := s.resolveConversationID(ctx, userID, peerType, peerId)
+	if err != nil {
+		return err
+	}
+	return s.Client.ClearConversationMessages(ctx, target.OpUserID, []string{target.ConversationID})
+}
+
 // SetGlobalMsgRecvOpt 设置用户级全局免打扰（对所有会话生效）。
 func (s *IMService) SetGlobalMsgRecvOpt(ctx context.Context, userID string, opt int) error {
 	if s.Client == nil || !s.Client.Available() {

@@ -7,6 +7,33 @@ import SystemTabs from "./components/SystemTabs.vue";
 const route = useRoute();
 const isCollapse = shallowRef(false);
 const activeMenu = computed(() => route.path);
+const meta = shallowRef<Auth.ResMeta | null>(null);
+
+const metaSummary = computed(() => {
+  const data = meta.value;
+  if (!data) return "IM-APP 管理系统";
+  const parts = ["IM-APP 管理系统"];
+  if (data.version) parts.push(`v${data.version}`);
+  if (data.commit) parts.push(data.commit.slice(0, 8));
+  return parts.join(" · ");
+});
+
+const featureEntries = computed(() => {
+  const features = meta.value?.features;
+  if (!features || typeof features !== "object") return [];
+  return Object.entries(features).map(([key, value]) => ({
+    key,
+    value: typeof value === "boolean" ? (value ? "开启" : "关闭") : String(value ?? "-"),
+  }));
+});
+
+function formatBuildTime(value?: string): string {
+  if (!value) return "-";
+  return value
+    .replace("T", " ")
+    .replace(/\.\d+/, "")
+    .replace(/\+08:00$/, "");
+}
 
 function toggleCollapse(): void {
   isCollapse.value = !isCollapse.value;
@@ -24,7 +51,12 @@ function toggleCollapse(): void {
               :default-active="activeMenu"
               :collapse="isCollapse"
               :collapse-transition="false"
-              :default-openeds="['/system', '/forward-group-send', '/sms-operation-config', '/runtime-observe']"
+              :default-openeds="[
+                '/system',
+                '/forward-group-send',
+                '/sms-operation-config',
+                '/runtime-observe',
+              ]"
               router
             >
               <el-menu-item index="/home">
@@ -85,6 +117,20 @@ function toggleCollapse(): void {
                 <el-menu-item index="/system/logs">
                   <el-icon><Document /></el-icon>
                   <template #title>操作日志</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="/audit-log">
+                <template #title>
+                  <el-icon><Memo /></el-icon>
+                  <span>审计日志</span>
+                </template>
+                <el-menu-item index="/audit-log/admin-login-log">
+                  <el-icon><Memo /></el-icon>
+                  <template #title>管理员登录日志</template>
+                </el-menu-item>
+                <el-menu-item index="/audit-log/admin-audit-log">
+                  <el-icon><Memo /></el-icon>
+                  <template #title>管理操作审计日志</template>
                 </el-menu-item>
               </el-sub-menu>
             </el-menu>

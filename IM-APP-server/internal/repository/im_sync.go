@@ -37,6 +37,16 @@ type IMSyncEvent struct {
 	AttemptCount int
 }
 
+// IMGroupUpdatePayload stores the exact user-requested patch. Keeping values in
+// the outbox (instead of re-reading all fields later) preserves event ordering
+// and prevents two queued updates from both announcing the latest group name.
+type IMGroupUpdatePayload struct {
+	Name                 *string `json:"name,omitempty"`
+	Avatar               *string `json:"avatar,omitempty"`
+	Announcement         *string `json:"announcement,omitempty"`
+	AllowMemberAddFriend *bool   `json:"allowMemberAddFriend,omitempty"`
+}
+
 type IMSyncOutboxRepo struct {
 	DB *pgxpool.Pool
 }

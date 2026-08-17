@@ -2,9 +2,11 @@ import { request } from '@/utils/request'
 import { parseQrcodePayload } from '@/utils/qrcode'
 import type {
   GroupInfo,
+  GroupJoinRequestItem,
   GroupMember,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
+  GroupSettingsInput,
 } from '@/types'
 
 export async function createGroup(name: string, memberIds: string[]): Promise<GroupInfo> {
@@ -27,14 +29,51 @@ export async function joinGroup(groupId: string): Promise<GroupInfo> {
   return request<GroupInfo>({ url: `/groups/${groupId}/join`, method: 'POST' })
 }
 
-export async function updateGroupSettings(
-  groupId: string,
-  input: { announcement?: string; allowMemberAddFriend?: boolean },
-) {
-  return request<{ ok: boolean }>({
+export async function updateGroupSettings(groupId: string, input: GroupSettingsInput) {
+  return request<GroupInfo>({
     url: `/groups/${groupId}/settings`,
     method: 'PUT',
     data: input,
+  })
+}
+
+export async function fetchJoinRequests(groupId: string): Promise<GroupJoinRequestItem[]> {
+  return request<GroupJoinRequestItem[]>({
+    url: `/groups/${groupId}/join-requests`,
+    method: 'GET',
+  })
+}
+
+export async function approveJoinRequest(groupId: string, requestId: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: `/groups/${groupId}/join-requests/${requestId}/approve`,
+    method: 'POST',
+  })
+}
+
+export async function rejectJoinRequest(groupId: string, requestId: string): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/join-requests/${requestId}/reject`,
+    method: 'POST',
+  })
+}
+
+export async function updateMemberRole(
+  groupId: string,
+  userId: string,
+  role: 'admin' | 'member',
+): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${userId}/role`,
+    method: 'PUT',
+    data: { role },
+  })
+}
+
+export async function dismissGroup(groupId: string): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/dismiss`,
+    method: 'POST',
   })
 }
 

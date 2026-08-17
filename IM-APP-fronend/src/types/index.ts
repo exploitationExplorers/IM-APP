@@ -25,6 +25,9 @@ export type {
 
 export type {
   Contact,
+  ContactPage,
+  ContactListQuery,
+  ContactListSort,
   ContactTagItem,
   GroupPreview,
   FriendRequest,
@@ -36,8 +39,13 @@ export type {
 export type {
   GroupInfo,
   GroupMember,
+  GroupPermissions,
+  GroupSettingsInput,
+  GroupJoinRequestItem,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
+  GroupRole,
+  GroupJoinMode,
 } from './group'
 
 export type {
@@ -49,3 +57,19 @@ export type {
   FileInfo,
   PresignResult,
 } from './file'
+
+export type {
+  ForwardTaskStatus,
+  ForwardTargetStatus,
+  ForwardSelectorMode,
+  ForwardSelector,
+  ForwardMessageSnapshot,
+  ForwardTask,
+  ForwardTaskTarget,
+  ForwardTaskPage,
+  ForwardTaskTargetPage,
+  CreateForwardTaskInput,
+  AffectedCountResult,
+  OkResult,
+  FriendForwardPlan,
+} from './forward'

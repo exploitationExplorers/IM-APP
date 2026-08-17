@@ -14,6 +14,7 @@ import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
+import { formatIMNotification, imNotificationEventKey } from '@/utils/im-notification'
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
 export interface IMTarget {
@@ -447,6 +448,35 @@ export async function getHistoryMessages(
   )
 }
 
+/** 从新到旧分页拉出会话历史，供搜索 / 媒体页使用 */
+export async function collectHistoryMessages(
+  conversationID: string,
+  maxCount = 400,
+): Promise<MessageItem[]> {
+  const pages: MessageItem[][] = []
+  let startClientMsgID = ''
+  let loaded = 0
+  while (loaded < maxCount) {
+    const { messageList, isEnd } = await getHistoryMessages(conversationID, 50, startClientMsgID)
+    if (!messageList.length) break
+    pages.push(messageList)
+    loaded += messageList.length
+    if (isEnd) break
+    startClientMsgID = messageList[0]?.clientMsgID || ''
+    if (!startClientMsgID) break
+  }
+  return pages.flat()
+}
+
+/** 只清当前用户本端及云端副本，不影响其他人设备 */
+export async function clearConversationMessages(conversationID: string): Promise<void> {
+  try {
+    await imCall('clearConversationAndDeleteAllMsg' as IMMethods, conversationID)
+  } catch {
+    await imCall('clearConversationMsgs' as IMMethods, conversationID)
+  }
+}
+
 /** 会话已全部读完时 OpenIM 报 hasReadSeq equal max，对调用方等价于成功 */
 export async function markConversationRead(conversationID: string): Promise<void> {
   try {
@@ -502,9 +532,19 @@ export async function sendAtTextMessage(
   return sendCreatedMessage(target, message)
 }
 
-async function sendCreatedMessage(target: IMTarget, message: MessageItem): Promise<MessageItem> {
+interface SendCreatedMessageOptions {
+  /** 媒体文件已经上传并写入消息 URL，此时不能再让 SDK 查找本地文件并重复上传 */
+  alreadyUploaded?: boolean
+}
+
+async function sendCreatedMessage(
+  target: IMTarget,
+  message: MessageItem,
+  options: SendCreatedMessageOptions = {},
+): Promise<MessageItem> {
   // sessionType=3 必须填 groupID，填 recvID 会被 OpenIM 拒绝
-  return imCall<MessageItem>(IMMethods.SendMessage, {
+  const method = options.alreadyUploaded ? IMMethods.SendMessageNotOss : IMMethods.SendMessage
+  return imCall<MessageItem>(method, {
     recvID: target.sessionType === SessionType.Single ? target.recvId : '',
     groupID: target.sessionType === SessionType.Single ? '' : target.groupId,
     message,
@@ -536,7 +576,7 @@ export async function sendImageMessage(target: IMTarget, filePath: string): Prom
       snapshotPicture: picture,
     })
   }
-  return sendCreatedMessage(target, message)
+  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
 }
 
 export async function sendVoiceMessage(
@@ -544,12 +584,15 @@ export async function sendVoiceMessage(
   filePath: string,
   duration: number,
 ): Promise<MessageItem> {
-  const seconds = Math.max(1, Math.round(duration))
+  // 录音上限 60 秒，超过 120 的入参只可能是毫秒，统一换算成秒
+  const seconds = Math.max(1, Math.round(duration > 120 ? duration / 1000 : duration))
   let message: MessageItem
   if (isAppPlatform) {
+    // 原生 SDK 按本地路径读文件，file:// 协议头会读不到
+    const soundPath = filePath.replace(/^file:\/\//, '')
     message = await imCall<MessageItem>(
       IMMethods.CreateSoundMessageFromFullPath,
-      filePath,
+      soundPath,
       seconds,
     )
   } else {
@@ -564,7 +607,7 @@ export async function sendVoiceMessage(
       soundType: file.type,
     })
   }
-  return sendCreatedMessage(target, message)
+  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
 }
 
 /** 走 OpenIM 自己的对象存储，不经过业务后端 */
@@ -663,6 +706,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     type: toAppMessageType(item.contentType),
     content: extractContent(item),
     createdAt: toISOTime(item.sendTime),
+    systemEventKey: imNotificationEventKey(item) || undefined,
     quote: quotePreviewOf(item),
     status: item.status === MessageStatus.Failed ? 'failed' : 'sent',
   }
@@ -735,8 +779,7 @@ function extractContent(item: MessageItem): string {
     case MessageType.VideoMessage:
       return item.videoElem?.videoUrl || ''
     default:
-      // 好友通知等 detail 是 JSON，聊天气泡里展示不出来，交给页面过滤
-      return ''
+      return formatIMNotification(item)
   }
 }
 
@@ -749,7 +792,7 @@ function summarize(latestMsg: string): string {
     if (type === 'image') return '[图片]'
     if (type === 'voice') return '[语音]'
     if (type === 'file') return '[文件]'
-    return '[消息]'
+    return extractContent(message)
   } catch {
     return ''
   }

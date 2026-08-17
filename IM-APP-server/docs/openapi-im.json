@@ -58,6 +58,45 @@
           "draftText": { "type": "string", "description": "会话草稿" }
         }
       },
+      "ClearConversationMessagesRequest": {
+        "type": "object",
+        "required": ["peerType", "peerId"],
+        "additionalProperties": false,
+        "properties": {
+          "peerType": { "type": "string", "enum": ["c2c", "group"], "description": "c2c 私聊 / group 群聊", "example": "c2c" },
+          "peerId": { "type": "string", "description": "私聊传对方业务用户 ID，群聊传业务群 ID", "example": "b3c4d5e6-f7a8-4901-b234-5678c9d0e1f2" }
+        }
+      },
+      "CreateFileUploadRequest": {
+        "type": "object",
+        "required": ["purpose", "fileName", "contentType", "size"],
+        "properties": {
+          "purpose": { "type": "string", "enum": ["avatar", "image", "voice", "file", "sticker"], "example": "image" },
+          "fileName": { "type": "string", "example": "photo.jpg" },
+          "contentType": { "type": "string", "example": "image/jpeg" },
+          "size": { "type": "integer", "format": "int64", "example": 102400 },
+          "sha256": { "type": "string" }
+        }
+      },
+      "CompleteFileUploadRequest": {
+        "type": "object",
+        "required": ["fileId"],
+        "properties": {
+          "fileId": { "type": "string", "format": "uuid" },
+          "etag": { "type": "string" }
+        }
+      },
+      "FileObject": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "purpose": { "type": "string" },
+          "contentType": { "type": "string" },
+          "size": { "type": "integer", "format": "int64" },
+          "url": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "ready", "rejected"] }
+        }
+      },
       "PushTokenRequest": {
         "type": "object",
         "required": ["platform", "deviceToken"],
@@ -114,6 +153,37 @@
           "denyReason": { "type": "string", "description": "不可聊天原因" }
         }
       },
+      "CreateGroupReportRequest": {
+        "type": "object",
+        "required": ["groupId", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "groupId": { "type": "string", "pattern": "^[0-9]+$", "example": "100001" },
+          "reason": { "type": "string", "enum": ["spam", "fraud", "pornography", "violence", "harassment", "other"] },
+          "description": { "type": "string", "maxLength": 1000 },
+          "imageFileIds": {
+            "type": "array",
+            "maxItems": 9,
+            "uniqueItems": true,
+            "items": { "type": "string", "format": "uuid" },
+            "description": "当前用户已上传完成的 purpose=image 图片文件 ID"
+          }
+        }
+      },
+      "GroupReportResult": {
+        "type": "object",
+        "required": ["id", "status", "imagePaths", "createdAt"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "example": "pending" },
+          "imagePaths": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" },
+            "description": "可直接点击打开的 MinIO 图片 URL"
+          },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
       "ErrorResponse": {
         "type": "object",
         "properties": {
@@ -125,6 +195,78 @@
   },
   "security": [ { "bearerAuth": [] } ],
   "paths": {
+    "/api/v1/files/uploads": {
+      "post": {
+        "summary": "创建文件上传任务",
+        "operationId": "createFileUpload",
+        "tags": ["文件"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateFileUploadRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "成功，返回文件记录和预签名上传地址" },
+          "400": { "description": "请求参数错误", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/files/uploads/complete": {
+      "post": {
+        "summary": "确认文件上传完成",
+        "operationId": "completeFileUpload",
+        "tags": ["文件"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CompleteFileUploadRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FileObject" } } } },
+          "400": { "description": "fileId 无效或文件不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/files": {
+      "get": {
+        "summary": "查询当前用户上传的文件",
+        "operationId": "getFile",
+        "tags": ["文件"],
+        "parameters": [
+          { "name": "fileId", "in": "query", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FileObject" } } } },
+          "404": { "description": "文件不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/groups/reports": {
+      "post": {
+        "summary": "举报群聊（支持图片）",
+        "operationId": "reportGroup",
+        "tags": ["群聊"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateGroupReportRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "成功，imagePaths 为可直接访问的图片 URL", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GroupReportResult" } } } },
+          "400": { "description": "举报参数或图片文件无效", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "description": "不是有效群成员", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
     "/api/v1/im/token": {
       "post": {
         "summary": "获取 OpenIM 登录 Token",
@@ -233,6 +375,31 @@
         "responses": {
           "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OkResponse" } } } },
           "403": { "description": "与该好友/群不能聊天", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/im/conversation-messages/clear": {
+      "post": {
+        "summary": "清除当前用户的私聊或群聊历史消息",
+        "description": "只清除当前用户及其其他登录设备的历史，不影响私聊对方或其他群成员。操作不可恢复。",
+        "operationId": "clearConversationMessages",
+        "tags": ["IM", "会话设置"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ClearConversationMessagesRequest" },
+              "examples": {
+                "private": { "summary": "清除私聊记录", "value": { "peerType": "c2c", "peerId": "b3c4d5e6-f7a8-4901-b234-5678c9d0e1f2" } },
+                "group": { "summary": "清除群聊记录", "value": { "peerType": "group", "peerId": "100001" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "成功", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OkResponse" } } } },
+          "400": { "description": "peerType 或 peerId 不正确", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "description": "与该好友或群不能聊天", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
         }
       }
     },

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, shallowRef } from 'vue'
+import { computed, getCurrentInstance, ref, shallowRef } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import {
   FavoriteListType,
@@ -8,6 +8,7 @@ import {
 } from '@/api/favorites'
 import type { FavoriteItem } from '@/api/favorites'
 import EmptyState from '@/components/EmptyState.vue'
+import ImSuccessToast from '@/components/ImSuccessToast.vue'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
 import { conversationTitleOf } from '@/utils/favoriteMeta'
@@ -30,6 +31,7 @@ interface FavoriteGroup {
 const chatStore = useChatStore()
 const forwardStore = useForwardStore()
 const instance = getCurrentInstance()
+const successVisible = ref(false)
 
 const tab = shallowRef<FavoriteListType>(FavoriteListType.All)
 const tabs = [
@@ -106,6 +108,9 @@ function loadMore() {
 }
 
 onShow(() => {
+  if (forwardStore.consumeSucceeded()) {
+    successVisible.value = true
+  }
   if (!chatStore.conversations.length) {
     void chatStore.loadConversations().catch(() => undefined)
   }
@@ -328,6 +333,12 @@ function displayText(item: FavoriteItem) {
         <view class="menu-item" @click="handleAction('delete', activeMenuItem)">删除</view>
       </view>
     </view>
+    <ImSuccessToast
+      :visible="successVisible"
+      text="转发成功"
+      placement="top"
+      @close="successVisible = false"
+    />
   </view>
 </template>
 

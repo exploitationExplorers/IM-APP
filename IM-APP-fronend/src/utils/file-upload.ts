@@ -84,3 +84,10 @@ export async function uploadAvatarForProfile(
   const contentType = blob.type || guessContentType(fileName)
   return uploadViaTask('avatar', blob, fileName, contentType)
 }
+
+/** 上传举报截图并返回 fileId（接口 12 → PUT → 接口 13，purpose=image） */
+export async function uploadReportImage(localPath: string): Promise<string> {
+  const { blob, fileName } = await loadImageBlob(localPath)
+  const contentType = blob.type || guessContentType(fileName)
+  return uploadViaTask('image', blob, fileName, contentType)
+}

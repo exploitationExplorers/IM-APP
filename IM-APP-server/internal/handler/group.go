@@ -208,11 +208,11 @@ func (h *GroupHandler) UpdateMyNickname(c *gin.Context) {
 
 func (h *GroupHandler) CreateReport(c *gin.Context) {
 	var req models.CreateGroupReportReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID == "" || req.Reason == "" {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	result, err := h.Svc.CreateReport(c.Request.Context(), c.Param("id"), middleware.UserID(c), req.Reason, req.Description)
+	result, err := h.Svc.CreateReport(c.Request.Context(), req.GroupID, middleware.UserID(c), req.Reason, req.Description, req.ImageFileIDs)
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrForbidden):
@@ -393,4 +393,3 @@ func (h *GroupHandler) UpdateMemberRemark(c *gin.Context) {
 	}
 	response.OK(c, gin.H{"ok": true})
 }
-

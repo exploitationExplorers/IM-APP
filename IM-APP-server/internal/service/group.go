@@ -155,7 +155,7 @@ func (s *GroupService) UpdateMyNickname(ctx context.Context, groupID, uid, nickn
 	return s.Groups.UpdateMyNickname(ctx, internalID, uid, nickname)
 }
 
-func (s *GroupService) CreateReport(ctx context.Context, groupID, uid, reason, description string) (models.GroupReportResult, error) {
+func (s *GroupService) CreateReport(ctx context.Context, groupID, uid, reason, description string, imageFileIDs []string) (models.GroupReportResult, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
 		return models.GroupReportResult{}, err
@@ -166,10 +166,32 @@ func (s *GroupService) CreateReport(ctx context.Context, groupID, uid, reason, d
 		"spam": true, "fraud": true, "pornography": true,
 		"violence": true, "harassment": true, "other": true,
 	}
-	if !validReasons[reason] || len([]rune(description)) > 1000 {
+	if !validReasons[reason] || len([]rune(description)) > 1000 || len(imageFileIDs) > 9 {
 		return models.GroupReportResult{}, repository.ErrInvalidGroupOperation
 	}
-	return s.Groups.CreateReport(ctx, internalID, uid, reason, description)
+	imagePaths := make([]string, 0, len(imageFileIDs))
+	seen := make(map[string]struct{}, len(imageFileIDs))
+	for i, fileID := range imageFileIDs {
+		fileID = strings.TrimSpace(fileID)
+		if _, err := uuid.Parse(fileID); err != nil {
+			return models.GroupReportResult{}, repository.ErrInvalidGroupOperation
+		}
+		if _, exists := seen[fileID]; exists {
+			return models.GroupReportResult{}, repository.ErrInvalidGroupOperation
+		}
+		seen[fileID] = struct{}{}
+		imageFileIDs[i] = fileID
+	}
+	if len(imageFileIDs) > 0 {
+		if s.Files == nil {
+			return models.GroupReportResult{}, repository.ErrInvalidGroupOperation
+		}
+		imagePaths, err = s.Files.FindReadyReportImagePaths(ctx, imageFileIDs, uid)
+		if err != nil {
+			return models.GroupReportResult{}, repository.ErrInvalidGroupOperation
+		}
+	}
+	return s.Groups.CreateReport(ctx, internalID, uid, reason, description, imagePaths)
 }
 
 func (s *GroupService) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (int, error) {
@@ -302,4 +324,3 @@ func (s *GroupService) UpdateMemberRemark(ctx context.Context, groupID, uid, mem
 	}
 	return s.Groups.SetMemberRemark(ctx, uid, internalID, memberUserID, remark)
 }
-
