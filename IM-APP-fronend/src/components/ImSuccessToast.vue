@@ -5,8 +5,10 @@ const props = withDefaults(
   defineProps<{
     visible: boolean
     duration?: number
+    text?: string
+    placement?: 'center' | 'top'
   }>(),
-  { duration: 2000 },
+  { duration: 2000, text: '成功', placement: 'center' },
 )
 
 const emit = defineEmits<{ close: [] }>()
@@ -33,12 +35,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <view v-if="visible" class="toast-wrap">
+  <view v-if="visible" class="toast-wrap" :class="placement">
     <view class="toast">
       <view class="icon">
         <text class="check">✓</text>
       </view>
-      <text class="text">成功</text>
+      <text class="text">{{ text }}</text>
     </view>
   </view>
 </template>
@@ -48,30 +50,37 @@ onUnmounted(() => {
   position: fixed;
   left: 0;
   right: 0;
-  top: 0;
-  bottom: 0;
   z-index: 1000;
   display: flex;
-  align-items: center;
   justify-content: center;
   pointer-events: none;
+}
+
+.toast-wrap.center {
+  top: 0;
+  bottom: 0;
+  align-items: center;
+}
+
+.toast-wrap.top {
+  top: 180rpx;
 }
 
 .toast {
   display: flex;
   align-items: center;
   gap: 16rpx;
-  padding: 24rpx 40rpx;
+  padding: 18rpx 28rpx;
   background: #fff;
   border-radius: 16rpx;
-  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8rpx 72rpx rgba(0, 0, 0, 0.1);
 }
 
 .icon {
-  width: 48rpx;
-  height: 48rpx;
+  width: 40rpx;
+  height: 40rpx;
   border-radius: 50%;
-  background: #22c55e;
+  background: #07c160;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -79,16 +88,16 @@ onUnmounted(() => {
 }
 
 .check {
-  font-size: 28rpx;
+  font-size: 24rpx;
   font-weight: 700;
   color: #fff;
   line-height: 1;
 }
 
 .text {
-  font-size: 32rpx;
-  font-weight: 600;
+  font-size: 28rpx;
+  font-weight: 500;
   color: #212121;
-  line-height: 44rpx;
+  line-height: 40rpx;
 }
 </style>

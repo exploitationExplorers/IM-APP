@@ -4,24 +4,24 @@
       <view class="setting-content">
         <text class="setting-title">消息免打扰</text>
       </view>
-      <ImSwitch v-model="settings.noDisturb" />
+          <ImSwitch :modelValue="noDisturb" @change="onNoDisturbChange" />
     </view>
 
-    <template v-if="!settings.noDisturb">
+    <template v-if="!noDisturb">
       <view class="section-title section-title-first">应用未打开时</view>
 
       <view class="setting-item">
         <view class="setting-content">
           <text class="setting-title">新消息通知</text>
         </view>
-        <ImSwitch v-model="settings.message" />
+          <ImSwitch :modelValue="message" @change="onMessageChange" />
       </view>
 
       <view class="setting-item">
         <view class="setting-content">
           <text class="setting-title">语音邀请</text>
         </view>
-        <ImSwitch v-model="settings.voice" />
+          <ImSwitch :modelValue="voice" @change="onVoiceChange" />
       </view>
 
       <view class="section-title section-title-second">应用打开时</view>
@@ -30,7 +30,7 @@
         <view class="setting-content">
           <text class="setting-title">声音</text>
         </view>
-        <ImSwitch v-model="settings.sound" />
+          <ImSwitch :modelValue="sound" @change="onSoundChange" />
       </view>
 
       <!-- #ifdef APP-ANDROID -->
@@ -38,7 +38,7 @@
         <view class="setting-content">
           <text class="setting-title">震动</text>
         </view>
-        <ImSwitch v-model="settings.vibration" />
+          <ImSwitch :modelValue="vibration" @change="onVibrationChange" />
       </view>
       <!-- #endif -->
     </template>
@@ -50,20 +50,41 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { storeToRefs } from 'pinia'
 import ImSwitch from '@/components/ImSwitch.vue'
+import { useChatSettingsStore } from '@/stores/chatSettings'
+import { requestNotificationPermission } from '@/utils/notification-permission'
+import { syncPushRegistration, unregisterPushRegistration } from '@/utils/push-register'
 
-const settings = reactive({
-  noDisturb: false,
-  message: true,
-  voice: true,
-  sound: true,
-  vibration: false,
-})
+const settingsStore = useChatSettingsStore()
+const { noDisturb, message, voice, sound, vibration } = storeToRefs(settingsStore)
 
-// 页面内目前不使用 goBack，但保留字段不会影响功能
-const goBack = () => {
-  uni.navigateBack()
+function onNoDisturbChange(value: boolean) {
+  settingsStore.setNoDisturb(value)
+  void syncPushRegistration()
+}
+
+function onMessageChange(value: boolean) {
+  settingsStore.setMessage(value)
+  if (!value) {
+    void unregisterPushRegistration()
+    return
+  }
+  void requestNotificationPermission().then((granted) => {
+    if (granted) void syncPushRegistration()
+  })
+}
+
+function onVoiceChange(value: boolean) {
+  settingsStore.setVoice(value)
+}
+
+function onSoundChange(value: boolean) {
+  settingsStore.setSound(value)
+}
+
+function onVibrationChange(value: boolean) {
+  settingsStore.setVibration(value)
 }
 </script>
 

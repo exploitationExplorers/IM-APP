@@ -54,3 +54,50 @@ export async function resolveIMGroup(businessGroupId: string): Promise<IMGroupTa
     method: 'GET',
   })
 }
+
+/**
+ * OpenIM 群 ID（会话列表拿到的 groupID）→ 业务群资料。
+ * 聊天列表点进来时只有 OpenIM 群 ID，没有对外 public ID，靠它换出资料页所需的 ID。
+ */
+export async function resolveIMGroupByIM(imGroupId: string): Promise<IMGroupTarget> {
+  return request<IMGroupTarget>({
+    url: `/im/groups/by-im/${encodeURIComponent(imGroupId)}`,
+    method: 'GET',
+  })
+}
+
+/**
+ * 清除当前用户在指定会话的服务端漫游历史，并同步到自己的其他登录设备。
+ * 不影响私聊对方或其他群成员；操作不可恢复。
+ */
+export async function clearConversationHistory(
+  peerType: 'c2c' | 'group',
+  peerId: string,
+): Promise<{ ok: boolean; scope: string }> {
+  return request<{ ok: boolean; scope: string }>({
+    url: '/im/conversation-messages/clear',
+    method: 'POST',
+    data: { peerType, peerId },
+  })
+}
+
+export async function registerPushToken(input: {
+  platform: string
+  channel?: string
+  deviceToken: string
+  enabled?: boolean
+}): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>({
+    url: '/im/me/push-token',
+    method: 'POST',
+    data: input,
+  })
+}
+
+export async function unregisterPushToken(deviceToken: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>({
+    url: '/im/me/push-token',
+    method: 'DELETE',
+    data: { deviceToken },
+  })
+}

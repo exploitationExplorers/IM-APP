@@ -1,20 +1,33 @@
 <script setup lang="ts">
-const model = defineModel<boolean>({ default: false });
+const props = withDefaults(
+  defineProps<{
+    modelValue?: boolean
+    disabled?: boolean
+  }>(),
+  {
+    modelValue: false,
+    disabled: false,
+  },
+)
 
-defineProps<{
-  disabled?: boolean;
-}>();
+const emit = defineEmits<{
+  (e: 'update:modelValue', value: boolean): void
+  (e: 'change', value: boolean): void
+}>()
 
-const toggle = () => {
-  model.value = !model.value;
-};
+function toggle() {
+  if (props.disabled) return
+  const next = !props.modelValue
+  emit('update:modelValue', next)
+  emit('change', next)
+}
 </script>
 
 <template>
   <view
     class="im-switch"
-    :class="{ active: model, disabled }"
-    @click="!disabled && toggle()"
+    :class="{ active: props.modelValue, disabled: props.disabled }"
+    @click="toggle"
   >
     <view class="im-switch-dot" />
   </view>

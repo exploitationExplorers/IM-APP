@@ -21,9 +21,10 @@ import (
 const maxResponseBytes = 2 << 20
 
 var (
-	ErrUnavailable     = errors.New("openim is not configured")
-	ErrInvalidPlatform = errors.New("invalid OpenIM platform ID")
-	ErrInvalidUserID   = errors.New("invalid business user ID")
+	ErrUnavailable          = errors.New("openim is not configured")
+	ErrInvalidPlatform      = errors.New("invalid OpenIM platform ID")
+	ErrInvalidUserID        = errors.New("invalid business user ID")
+	ErrConversationNotFound = errors.New("openim conversation not found")
 )
 
 // UserIDFromBusinessID converts the PostgreSQL UUID into an OpenIM-compatible
@@ -102,6 +103,16 @@ type Group struct {
 	MemberUserIDs        []string
 	AdminUserIDs         []string
 	AllowMemberAddFriend bool
+}
+
+// GroupUpdate is intentionally sparse. OpenIM emits a persisted group notice
+// for every field present in set_group_info_ex, even when the supplied value is
+// unchanged. Callers must therefore only set fields changed by the user.
+type GroupUpdate struct {
+	GroupName            *string
+	Notification         *string
+	FaceURL              *string
+	AllowMemberAddFriend *bool
 }
 
 type SendMessageResult struct {
@@ -216,7 +227,8 @@ func (c *Client) IsUserRegistered(ctx context.Context, userID string) (bool, err
 			return result.AccountStatus == 1, nil
 		}
 	}
-	return false, errors.New("openim account check response did not contain requested user")
+	// OpenIM 对未注册账号可能省略 results 项，按未注册处理以便补注册。
+	return false, nil
 }
 
 // EnsureUser makes PostgreSQL's user visible to OpenIM and keeps the OpenIM
@@ -350,13 +362,15 @@ func (c *Client) EnsureGroup(ctx context.Context, group Group) error {
 		return err
 	}
 	if registered {
-		return c.UpdateGroup(ctx, group)
+		// EnsureGroup is used by creation/reconciliation jobs. Updating an
+		// existing group here would make OpenIM announce a fake profile change.
+		return nil
 	}
 	applyMemberFriend := 1
 	if group.AllowMemberAddFriend {
 		applyMemberFriend = 0
 	}
-	return c.postWithAdmin(ctx, "/group/create_group", map[string]any{
+	err = c.postWithAdmin(ctx, "/group/create_group", map[string]any{
 		"ownerUserID": group.OwnerUserID, "memberUserIDs": group.MemberUserIDs,
 		"adminUserIDs": group.AdminUserIDs,
 		"groupInfo": map[string]any{
@@ -366,18 +380,31 @@ func (c *Client) EnsureGroup(ctx context.Context, group Group) error {
 			"applyMemberFriend": applyMemberFriend,
 		},
 	}, nil)
+	return ignoreAlreadyDesired(err)
 }
 
-func (c *Client) UpdateGroup(ctx context.Context, group Group) error {
-	applyMemberFriend := 1
-	if group.AllowMemberAddFriend {
-		applyMemberFriend = 0
+func (c *Client) UpdateGroup(ctx context.Context, groupID string, update GroupUpdate) error {
+	request := map[string]any{"groupID": groupID}
+	if update.GroupName != nil {
+		request["groupName"] = *update.GroupName
 	}
-	return c.postWithAdmin(ctx, "/group/set_group_info_ex", map[string]any{
-		"groupID": group.GroupID, "groupName": group.GroupName,
-		"notification": group.Notification, "faceURL": group.FaceURL,
-		"applyMemberFriend": applyMemberFriend,
-	}, nil)
+	if update.Notification != nil {
+		request["notification"] = *update.Notification
+	}
+	if update.FaceURL != nil {
+		request["faceURL"] = *update.FaceURL
+	}
+	if update.AllowMemberAddFriend != nil {
+		applyMemberFriend := 1
+		if *update.AllowMemberAddFriend {
+			applyMemberFriend = 0
+		}
+		request["applyMemberFriend"] = applyMemberFriend
+	}
+	if len(request) == 1 {
+		return nil
+	}
+	return c.postWithAdmin(ctx, "/group/set_group_info_ex", request, nil)
 }
 
 func (c *Client) InviteGroupMember(ctx context.Context, groupID string, userIDs []string) error {
@@ -457,12 +484,207 @@ func (c *Client) SendBusinessNotification(ctx context.Context, receiverUserID, r
 
 func (c *Client) SendTextMessage(ctx context.Context, receiverID string, sessionType int, text string) (SendMessageResult, error) {
 	var result SendMessageResult
-	err := c.postWithAdmin(ctx, "/msg/send_msg", map[string]any{
-		"sendID": c.cfg.AdminUser, "recvID": receiverID,
-		"content": map[string]string{"content": text}, "contentType": 101,
-		"sessionType": sessionType, "isOnlineOnly": false, "notOfflinePush": false,
-	}, &result)
+	body := map[string]any{
+		"sendID":         c.cfg.AdminUser,
+		"content":        map[string]string{"content": text},
+		"contentType":    101,
+		"sessionType":    sessionType,
+		"isOnlineOnly":   false,
+		"notOfflinePush": false,
+	}
+	if sessionType == 3 {
+		body["groupID"] = receiverID
+	} else {
+		body["recvID"] = receiverID
+	}
+	err := c.postWithAdmin(ctx, "/msg/send_msg", body, &result)
 	return result, err
+}
+
+// ConversationSettings 对应 OpenIM 的 Conversation 对象。
+// 字段名与 OpenIM JSON 完全一致，可直接作为 set_conversations 的 conversation 体回写。
+// recvMsgOpt 取值：0 正常接收 / 1 免打扰（不接收）/ 2 仅在线接收。
+type ConversationSettings struct {
+	ConversationID   string `json:"conversationID"`
+	ConversationType int    `json:"conversationType"` // 1 单聊 2 群聊
+	OwnerUserID      string `json:"ownerUserID"`      // 当前用户 OpenIM ID
+	UserID           string `json:"userID"`           // 单聊对端 ID
+	GroupID          string `json:"groupID"`          // 群聊 ID
+	ShowName         string `json:"showName"`
+	FaceURL          string `json:"faceURL"`
+	RecvMsgOpt       int    `json:"recvMsgOpt"`
+	UnreadCount      int    `json:"unreadCount"`
+	GroupAtType      int    `json:"groupAtType"`   // 群 @ 强提醒档位
+	IsPinned         bool   `json:"isPinned"`      // 置顶
+	IsPrivateChat    bool   `json:"isPrivateChat"` // 阅后即焚开关
+	IsNotInGroup     bool   `json:"isNotInGroup"`
+	BurnDuration     int64  `json:"burnDuration"` // 阅后即焚时长（秒）
+	HasReadSeq       int64  `json:"hasReadSeq"`
+	MsgDestructTime  int64  `json:"msgDestructTime"` // 消息定时销毁时长（秒）
+	IsMsgDestruct    bool   `json:"isMsgDestruct"`   // 是否开启消息定时销毁
+	Ex               string `json:"ex"`              // 扩展字段（可存备注名）
+	DraftText        string `json:"draftText"`       // 会话草稿
+	AttachedInfo     string `json:"attachedInfo"`
+}
+
+type UpdateConversationSettings struct {
+	RecvMsgOpt    *int  `json:"recvMsgOpt,omitempty"`
+	IsPinned      *bool `json:"isPinned,omitempty"`
+	IsPrivateChat *bool `json:"isPrivateChat,omitempty"`
+	BurnDuration  *int  `json:"burnDuration,omitempty"`
+}
+
+// SendForwardMessage 以原发送者身份向单聊目标发送已经冻结的消息内容。
+// clientMsgID 由转发任务和目标用户确定性生成，Worker 重试时不会产生新的业务消息 ID。
+// 万人转发暂不接离线推送，因此明确设置 notOfflinePush=true。
+func (c *Client) SendForwardMessage(
+	ctx context.Context,
+	senderID, receiverID, clientMsgID string,
+	contentType int,
+	content json.RawMessage,
+) (SendMessageResult, error) {
+	if senderID == "" || receiverID == "" || clientMsgID == "" || contentType <= 0 || !json.Valid(content) {
+		return SendMessageResult{}, errors.New("invalid forward message")
+	}
+	var decoded any
+	if err := json.Unmarshal(content, &decoded); err != nil || decoded == nil {
+		return SendMessageResult{}, errors.New("invalid forward message content")
+	}
+	var result SendMessageResult
+	err := c.postWithAdmin(ctx, "/msg/send_msg", map[string]any{
+		"sendID":         senderID,
+		"recvID":         receiverID,
+		"clientMsgID":    clientMsgID,
+		"content":        decoded,
+		"contentType":    contentType,
+		"sessionType":    1,
+		"isOnlineOnly":   false,
+		"notOfflinePush": true,
+	}, &result)
+	if result.ClientMsgID == "" {
+		result.ClientMsgID = clientMsgID
+	}
+	return result, err
+}
+
+// GetConversations 拉取指定会话的当前设置（全量对象）。
+// v3.8.3 使用 ownerUserID；同时携带 opUserID/userID 兼容旧部署。
+func (c *Client) GetConversations(ctx context.Context, opUserID string, conversationIDs []string) ([]ConversationSettings, error) {
+	var data struct {
+		ConversationInfos []ConversationSettings `json:"conversationInfos"`
+		Conversations     []ConversationSettings `json:"conversations"`
+	}
+	err := c.postWithAdmin(ctx, "/conversation/get_conversations", map[string]any{
+		"opUserID":        opUserID,
+		"ownerUserID":     opUserID,
+		"userID":          opUserID,
+		"conversationIDs": conversationIDs,
+	}, &data)
+	if err != nil {
+		return nil, err
+	}
+	if len(data.ConversationInfos) > 0 {
+		return data.ConversationInfos, nil
+	}
+	return data.Conversations, nil
+}
+
+// GetConversationSettings 保留旧调用契约；新代码统一使用 GetConversations。
+func (c *Client) GetConversationSettings(ctx context.Context, opUserID, conversationID string) (ConversationSettings, error) {
+	items, err := c.GetConversations(ctx, opUserID, []string{conversationID})
+	if err != nil {
+		return ConversationSettings{}, err
+	}
+	if len(items) == 0 {
+		return ConversationSettings{}, ErrConversationNotFound
+	}
+	return items[0], nil
+}
+
+// SetConversationSettings 保留旧调用契约，并将部分更新合并到全量会话对象。
+func (c *Client) SetConversationSettings(ctx context.Context, opUserID string, current ConversationSettings, patch UpdateConversationSettings) error {
+	if patch.RecvMsgOpt != nil {
+		current.RecvMsgOpt = *patch.RecvMsgOpt
+	}
+	if patch.IsPinned != nil {
+		current.IsPinned = *patch.IsPinned
+	}
+	if patch.IsPrivateChat != nil {
+		current.IsPrivateChat = *patch.IsPrivateChat
+	}
+	if patch.BurnDuration != nil {
+		current.BurnDuration = int64(*patch.BurnDuration)
+	}
+	return c.SetConversation(ctx, opUserID, current)
+}
+
+// SetConversation 写回单个会话的设置。调用方应先 GetConversations 取全量再叠加变更，
+// 避免部分写入把未传字段按 protobuf 默认值清零。OpenIM v3.8.3 只公开复数路由 set_conversations。
+func (c *Client) SetConversation(ctx context.Context, opUserID string, conv ConversationSettings) error {
+	return c.postWithAdmin(ctx, "/conversation/set_conversations", map[string]any{
+		"opUserID":     opUserID,
+		"userID":       opUserID,
+		"userIDs":      []string{opUserID},
+		"conversation": conv,
+	}, nil)
+}
+
+// CreateConversation 主动创建一个会话（OpenIM 原本是「首次发消息/拉取时自动建」）。
+// 与前端 SDK 的 GetOneConversation 行为对齐：即使双方尚未发过消息，
+// 后端设置会话（置顶/免打扰等）时也能先确保会话存在，避免 404。
+//   - 单聊：conversationType=1，userID 为对端 OpenIM ID（opUserID 为创建者）。
+//   - 群聊：conversationType=2，groupID 为群 OpenIM ID。
+func (c *Client) CreateConversation(ctx context.Context, opUserID, conversationID string, conversationType int, userID, groupID string) error {
+	return c.postWithAdmin(ctx, "/conversation/set_conversations", map[string]any{
+		"opUserID": opUserID,
+		"userID":   opUserID,
+		"userIDs":  []string{opUserID},
+		"conversation": map[string]any{
+			"conversationID":   conversationID,
+			"conversationType": conversationType,
+			"ownerUserID":      opUserID,
+			"userID":           userID,
+			"groupID":          groupID,
+			"recvMsgOpt":       0,
+			"isPinned":         false,
+		},
+	}, nil)
+}
+
+// MarkConversationAsRead 清空指定会话未读数。
+func (c *Client) MarkConversationAsRead(ctx context.Context, opUserID, conversationID string) error {
+	return c.postWithAdmin(ctx, "/conversation/mark_conversation_as_read", map[string]any{
+		"opUserID":       opUserID,
+		"userID":         opUserID,
+		"conversationID": conversationID,
+	}, nil)
+}
+
+// ClearConversationMessages 删除指定用户在会话中的服务端漫游历史，并向该用户的
+// 其他在线/离线设备发送清理同步通知。不会删除其他会话参与者的消息。
+func (c *Client) ClearConversationMessages(ctx context.Context, userID string, conversationIDs []string) error {
+	if userID == "" || len(conversationIDs) == 0 {
+		return errors.New("userID and conversationIDs are required")
+	}
+	return c.postWithAdmin(ctx, "/msg/clear_conversation_msg", map[string]any{
+		"userID":          userID,
+		"conversationIDs": conversationIDs,
+		"deleteSyncOpt": map[string]bool{
+			"isSyncSelf":  true,
+			"isSyncOther": false,
+		},
+	}, nil)
+}
+
+// SetGlobalMsgRecvOpt 设置用户级全局免打扰（对所有会话生效）。
+// opt 取值同 recvMsgOpt：0 正常 / 1 免打扰 / 2 仅在线接收。
+func (c *Client) SetGlobalMsgRecvOpt(ctx context.Context, opUserID string, opt int) error {
+	return c.postWithAdmin(ctx, "/user/set_global_msg_recv_opt", map[string]any{
+		"opUserID":   opUserID,
+		"userID":     opUserID,
+		"opt":        opt,
+		"recvMsgOpt": opt,
+	}, nil)
 }
 
 func (c *Client) postWithAdmin(ctx context.Context, path string, request, response any) error {
@@ -558,7 +780,11 @@ func ignoreAlreadyDesired(err error) error {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		message := strings.ToLower(apiErr.ErrMsg + " " + apiErr.ErrDlt)
-		if apiErr.ErrCode == 1004 || strings.Contains(message, "already") || strings.Contains(message, "repeat") {
+		if apiErr.ErrCode == 1004 ||
+			strings.Contains(message, "already") ||
+			strings.Contains(message, "repeat") ||
+			strings.Contains(message, "已在群") ||
+			strings.Contains(message, "已经存在") {
 			return nil
 		}
 	}

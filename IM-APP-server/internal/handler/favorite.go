@@ -17,7 +17,7 @@ type FavoriteHandler struct {
 	Svc *service.FavoriteService
 }
 
-// Create 收藏一条消息 POST /favorites {messageId}
+// Create 收藏一条消息 POST /favorites {messageId,type,content,...}
 func (h *FavoriteHandler) Create(c *gin.Context) {
 	uid := middleware.UserID(c)
 	var req models.CreateFavoriteRequest
@@ -25,7 +25,7 @@ func (h *FavoriteHandler) Create(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	f, err := h.Svc.Create(c.Request.Context(), uid, req.MessageID)
+	f, err := h.Svc.Create(c.Request.Context(), uid, req)
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) {
 			response.Fail(c, http.StatusForbidden, "无权收藏该消息")

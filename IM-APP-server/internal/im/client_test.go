@@ -177,6 +177,187 @@ func TestSendBusinessNotificationUsesAdminToken(t *testing.T) {
 	}
 }
 
+func TestSendForwardMessageDisablesOfflinePush(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/msg/send_msg":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			content, _ := body["content"].(map[string]any)
+			if body["sendID"] != "sender" || body["recvID"] != "receiver" ||
+				body["clientMsgID"] != "fwd-id" || body["notOfflinePush"] != true ||
+				content["content"] != "hello" {
+				t.Fatalf("unexpected request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"serverMsgID":"server-1","sendTime":123}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	result, err := client.SendForwardMessage(context.Background(), "sender", "receiver", "fwd-id", 101,
+		json.RawMessage(`{"content":"hello"}`))
+	if err != nil {
+		t.Fatalf("SendForwardMessage() error = %v", err)
+	}
+	if result.ServerMsgID != "server-1" || result.ClientMsgID != "fwd-id" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestConversationSettingsUseV383API(t *testing.T) {
+	var getCalls, setCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/conversation/get_conversations":
+			getCalls.Add(1)
+			var body struct {
+				OwnerUserID     string   `json:"ownerUserID"`
+				ConversationIDs []string `json:"conversationIDs"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode get conversations request: %v", err)
+			}
+			if body.OwnerUserID != "owner" || !reflect.DeepEqual(body.ConversationIDs, []string{"si_owner_peer"}) {
+				t.Fatalf("unexpected get conversations request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"conversations":[{"conversationID":"si_owner_peer","conversationType":1,"ownerUserID":"owner","userID":"peer","recvMsgOpt":1,"isPinned":true,"isPrivateChat":true,"burnDuration":30,"msgDestructTime":3600,"isMsgDestruct":true,"groupAtType":2,"ex":"remark","draftText":"draft","attachedInfo":"meta"}]}}`))
+		case "/conversation/set_conversations":
+			setCalls.Add(1)
+			var body struct {
+				UserIDs      []string             `json:"userIDs"`
+				Conversation ConversationSettings `json:"conversation"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode set conversations request: %v", err)
+			}
+			if !reflect.DeepEqual(body.UserIDs, []string{"owner"}) ||
+				body.Conversation.ConversationID != "si_owner_peer" || body.Conversation.OwnerUserID != "owner" ||
+				!body.Conversation.IsPrivateChat || body.Conversation.BurnDuration != 30 ||
+				!body.Conversation.IsMsgDestruct || body.Conversation.MsgDestructTime != 3600 ||
+				body.Conversation.Ex != "remark" || body.Conversation.DraftText != "draft" {
+				t.Fatalf("unexpected set conversations request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	items, err := client.GetConversations(context.Background(), "owner", []string{"si_owner_peer"})
+	if err != nil {
+		t.Fatalf("GetConversations() error = %v", err)
+	}
+	if len(items) != 1 || items[0].OwnerUserID != "owner" || items[0].RecvMsgOpt != 1 ||
+		!items[0].IsPrivateChat || items[0].BurnDuration != 30 ||
+		!items[0].IsMsgDestruct || items[0].MsgDestructTime != 3600 ||
+		items[0].GroupAtType != 2 || items[0].Ex != "remark" ||
+		items[0].DraftText != "draft" || items[0].AttachedInfo != "meta" {
+		t.Fatalf("unexpected conversations: %#v", items)
+	}
+	if err := client.SetConversation(context.Background(), "owner", items[0]); err != nil {
+		t.Fatalf("SetConversation() error = %v", err)
+	}
+	if getCalls.Load() != 1 || setCalls.Load() != 1 {
+		t.Fatalf("get calls=%d set calls=%d", getCalls.Load(), setCalls.Load())
+	}
+}
+
+func TestClearConversationMessagesOnlyClearsRequestingUser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/msg/clear_conversation_msg":
+			if r.Header.Get("token") != "admin-token" {
+				t.Fatalf("missing admin token")
+			}
+			var body struct {
+				UserID          string   `json:"userID"`
+				ConversationIDs []string `json:"conversationIDs"`
+				DeleteSyncOpt   struct {
+					IsSyncSelf  bool `json:"isSyncSelf"`
+					IsSyncOther bool `json:"isSyncOther"`
+				} `json:"deleteSyncOpt"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode clear conversation request: %v", err)
+			}
+			if body.UserID != "owner" || !reflect.DeepEqual(body.ConversationIDs, []string{"si_owner_peer"}) ||
+				!body.DeleteSyncOpt.IsSyncSelf || body.DeleteSyncOpt.IsSyncOther {
+				t.Fatalf("unexpected clear conversation request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	if err := client.ClearConversationMessages(context.Background(), "owner", []string{"si_owner_peer"}); err != nil {
+		t.Fatalf("ClearConversationMessages() error = %v", err)
+	}
+}
+
+func TestCreateConversationUsesV383SetConversations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/conversation/set_conversations":
+			var body struct {
+				UserIDs      []string `json:"userIDs"`
+				Conversation struct {
+					ConversationID   string `json:"conversationID"`
+					ConversationType int    `json:"conversationType"`
+					OwnerUserID      string `json:"ownerUserID"`
+					UserID           string `json:"userID"`
+					GroupID          string `json:"groupID"`
+				} `json:"conversation"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode create conversation request: %v", err)
+			}
+			if !reflect.DeepEqual(body.UserIDs, []string{"owner"}) ||
+				body.Conversation.ConversationID != "si_owner_peer" ||
+				body.Conversation.ConversationType != 1 || body.Conversation.OwnerUserID != "owner" ||
+				body.Conversation.UserID != "peer" || body.Conversation.GroupID != "" {
+				t.Fatalf("unexpected create conversation request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin",
+	}, server.Client())
+	if err := client.CreateConversation(context.Background(), "owner", "si_owner_peer", 1, "peer", ""); err != nil {
+		t.Fatalf("CreateConversation() error = %v", err)
+	}
+}
+
 func TestGroupModerationRequests(t *testing.T) {
 	paths := make([]string, 0)
 	var nicknameBody map[string]any
@@ -229,6 +410,70 @@ func TestGroupModerationRequests(t *testing.T) {
 	member, ok := members[0].(map[string]any)
 	if !ok || member["nickName"] != "群昵称" {
 		t.Fatalf("nickname request member = %#v", members[0])
+	}
+}
+
+func TestUpdateGroupOnlySendsChangedFields(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/group/set_group_info_ex":
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode group update request: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin"}, server.Client())
+	avatar := "https://example.test/group.png"
+	allow := false
+	if err := client.UpdateGroup(context.Background(), "group-1", GroupUpdate{
+		FaceURL: &avatar, AllowMemberAddFriend: &allow,
+	}); err != nil {
+		t.Fatalf("UpdateGroup() error = %v", err)
+	}
+	if request["groupID"] != "group-1" || request["faceURL"] != avatar || request["applyMemberFriend"] != float64(1) {
+		t.Fatalf("unexpected group update request: %#v", request)
+	}
+	if _, exists := request["groupName"]; exists {
+		t.Fatalf("groupName must be omitted for a non-name update: %#v", request)
+	}
+	if _, exists := request["notification"]; exists {
+		t.Fatalf("notification must be omitted when unchanged: %#v", request)
+	}
+}
+
+func TestEnsureExistingGroupDoesNotWriteProfile(t *testing.T) {
+	var updateCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/group/get_groups_info":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"groupInfos":[{"groupID":"group-1"}]}}`))
+		case "/group/set_group_info_ex", "/group/create_group":
+			updateCalls.Add(1)
+			_, _ = w.Write([]byte(`{"errCode":0}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin"}, server.Client())
+	if err := client.EnsureGroup(context.Background(), Group{GroupID: "group-1", GroupName: "群聊"}); err != nil {
+		t.Fatalf("EnsureGroup() error = %v", err)
+	}
+	if got := updateCalls.Load(); got != 0 {
+		t.Fatalf("existing group profile write calls = %d, want 0", got)
 	}
 }
 

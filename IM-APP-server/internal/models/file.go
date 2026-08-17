@@ -30,5 +30,6 @@ type UploadInitResult struct {
 }
 
 type CompleteUploadRequest struct {
-	ETag string `json:"etag,omitempty"`
+	FileID string `json:"fileId"`
+	ETag   string `json:"etag,omitempty"`
 }

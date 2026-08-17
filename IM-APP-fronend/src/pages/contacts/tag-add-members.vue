@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
@@ -12,30 +12,23 @@ import type { Contact } from '@/types'
 useAuthGuard()
 
 const contactStore = useContactStore()
-const { contacts } = storeToRefs(contactStore)
+const { contacts, contactTotal } = storeToRefs(contactStore)
 
 const tagId = ref('')
 const keyword = ref('')
 const existingIds = ref<Set<string>>(new Set())
 const selected = ref<Set<string>>(new Set())
+const selectedById = ref<Map<string, Contact>>(new Map())
 const saving = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const candidates = computed(() =>
   contacts.value.filter((c) => !existingIds.value.has(c.id)),
 )
 
-const filtered = computed(() => {
-  const k = keyword.value.trim()
-  let list = candidates.value
-  if (k) {
-    list = list.filter((c) => displayName(c).includes(k) || (c.publicId || '').includes(k))
-  }
-  return list
-})
+const filtered = computed(() => candidates.value)
 
-const selectedList = computed(() =>
-  candidates.value.filter((c) => selected.value.has(c.id)),
-)
+const selectedList = computed(() => [...selectedById.value.values()])
 
 const selectedCount = computed(() => selected.value.size)
 const allFilteredSelected = computed(
@@ -51,7 +44,7 @@ onLoad(async (query) => {
   try {
     const [members] = await Promise.all([
       fetchTagMembers(tagId.value),
-      contacts.value.length ? Promise.resolve() : contactStore.loadDirectory(),
+      contactStore.reloadContacts({ keyword: '', sort: 'recent' }),
     ])
     existingIds.value = new Set(members.map((m) => m.id))
   } catch (e) {
@@ -59,31 +52,56 @@ onLoad(async (query) => {
   }
 })
 
+watch(keyword, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void contactStore.reloadContacts({ keyword: keyword.value, sort: 'recent' })
+  }, 300)
+})
+
 function goBack() {
   uni.navigateBack()
 }
 
-function toggle(id: string) {
+function toggle(c: Contact) {
   const next = new Set(selected.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
+  const map = new Map(selectedById.value)
+  if (next.has(c.id)) {
+    next.delete(c.id)
+    map.delete(c.id)
+  } else {
+    next.add(c.id)
+    map.set(c.id, c)
+  }
   selected.value = next
+  selectedById.value = map
 }
 
 function unselect(id: string) {
   const next = new Set(selected.value)
+  const map = new Map(selectedById.value)
   next.delete(id)
+  map.delete(id)
   selected.value = next
+  selectedById.value = map
 }
 
 function toggleAll() {
   const next = new Set(selected.value)
+  const map = new Map(selectedById.value)
   if (allFilteredSelected.value) {
-    filtered.value.forEach((c) => next.delete(c.id))
+    filtered.value.forEach((c) => {
+      next.delete(c.id)
+      map.delete(c.id)
+    })
   } else {
-    filtered.value.forEach((c) => next.add(c.id))
+    filtered.value.forEach((c) => {
+      next.add(c.id)
+      map.set(c.id, c)
+    })
   }
   selected.value = next
+  selectedById.value = map
 }
 
 async function onSubmit() {
@@ -135,19 +153,19 @@ async function onSubmit() {
     <AppSearchBar v-model="keyword" placeholder="搜索" />
 
     <view class="section-head">
-      <text class="section-count">联络人 ({{ candidates.length }})</text>
+      <text class="section-count">联络人 ({{ contactTotal }})</text>
     </view>
     <view class="select-all" @click="toggleAll">
       <text class="select-all-text">全选 ({{ selectedCount }}/{{ filtered.length }})</text>
       <view class="check" :class="{ on: allFilteredSelected }" />
     </view>
 
-    <scroll-view scroll-y class="body">
+    <scroll-view scroll-y class="body" :lower-threshold="80" @scrolltolower="contactStore.loadMoreContacts">
       <view
         v-for="c in filtered"
         :key="c.id"
         class="row"
-        @click="toggle(c.id)"
+        @click="toggle(c)"
       >
         <image
           class="avatar"

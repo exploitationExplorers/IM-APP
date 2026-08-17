@@ -14,6 +14,7 @@ type GroupInfo struct {
 	JoinMode             string            `json:"joinMode"`
 	AllMuted             bool              `json:"allMuted"`
 	Permissions          *GroupPermissions `json:"permissions,omitempty"`
+	Remark               string            `json:"remark,omitempty"`
 }
 
 type GroupPermissions struct {
@@ -32,6 +33,7 @@ type GroupMember struct {
 	DisplayName   string `json:"displayName"`
 	Avatar        string `json:"avatar"`
 	Role          string `json:"role"`
+	MemberRemark  string `json:"memberRemark,omitempty"`
 }
 
 type CreateGroupReq struct {
@@ -53,14 +55,17 @@ type UpdateMyGroupNicknameReq struct {
 }
 
 type CreateGroupReportReq struct {
-	Reason      string `json:"reason"`
-	Description string `json:"description"`
+	GroupID      string   `json:"groupId"`
+	Reason       string   `json:"reason"`
+	Description  string   `json:"description"`
+	ImageFileIDs []string `json:"imageFileIds"`
 }
 
 type GroupReportResult struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"createdAt"`
+	ID         string   `json:"id"`
+	Status     string   `json:"status"`
+	ImagePaths []string `json:"imagePaths"`
+	CreatedAt  string   `json:"createdAt"`
 }
 
 type InviteGroupMembersReq struct {
@@ -116,4 +121,12 @@ type UpdateGroupMemberMuteReq struct {
 
 type UpdateGroupMuteReq struct {
 	Muted bool `json:"muted"`
+}
+
+type UpdateGroupRemarkReq struct {
+	Remark string `json:"remark"`
+}
+
+type UpdateMemberRemarkReq struct {
+	Remark string `json:"remark"`
 }

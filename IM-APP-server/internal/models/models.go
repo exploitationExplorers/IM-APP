@@ -17,10 +17,10 @@ type User struct {
 }
 
 type QrcodePayload struct {
-	PublicID  string `json:"publicId"`
-	Nickname  string `json:"nickname"`
-	Avatar    string `json:"avatar"`
-	Payload   string `json:"payload"`
+	PublicID string `json:"publicId"`
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
+	Payload  string `json:"payload"`
 }
 
 type LoginResult struct {
@@ -57,6 +57,14 @@ type Contact struct {
 	Remark       string           `json:"remark"`
 	Tags         []ContactTagItem `json:"tags,omitempty"`
 	CommonGroups []GroupPreview   `json:"commonGroups"`
+}
+
+// ContactPage 通讯录分页。全量好友请走转发 generate all_friends，不要一次拉完。
+type ContactPage struct {
+	Items      []Contact `json:"items"`
+	NextCursor string    `json:"nextCursor,omitempty"`
+	HasMore    bool      `json:"hasMore"`
+	Total      int64     `json:"total"`
 }
 
 // PublicProfile 他人可见的公开资料（不含手机号）

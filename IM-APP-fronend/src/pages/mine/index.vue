@@ -5,10 +5,13 @@ import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
 import { APP_CONFIG } from '@/config'
 import ImTabBar from '@/components/ImTabBar.vue'
+import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
 useTabBar()
 const userStore = useUserStore()
+const statusBarHeight = getStatusBarHeight()
+const heroPadTop = `calc(144rpx + ${statusBarHeight}px)`
 
 const nickname = computed(() => userStore.profile?.nickname || '未登录')
 const avatarSrc = computed(
@@ -48,7 +51,7 @@ function onLogout() {
 <template>
   <view class="page">
     <view class="mine-header">
-      <view class="mine-hero-card">
+        <view class="mine-hero-card" :style="{ paddingTop: heroPadTop }">
         <view class="mine-profile">
           <view class="mine-avatar-ring">
             <image class="mine-avatar" :src="avatarSrc" mode="aspectFill" />
@@ -66,9 +69,11 @@ function onLogout() {
         </view>
       </view>
 
-      <view class="mine-nav">
-        <text class="mine-nav-title">个人中心</text>
-        <view class="mine-nav-spacer" />
+      <view class="mine-nav" :style="{ paddingTop: statusBarHeight + 'px' }">
+        <view class="mine-nav-row">
+          <text class="mine-nav-title">个人中心</text>
+          <view class="mine-nav-spacer" />
+        </view>
       </view>
     </view>
 
@@ -118,7 +123,7 @@ $primary: #0a2fc2;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: calc(144rpx + env(safe-area-inset-top)) 48rpx 48rpx;
+  padding: 144rpx 48rpx 48rpx;
   background-color: $primary;
   background-image: url('/static/mine/my-title.webp');
   background-size: cover;
@@ -194,13 +199,15 @@ $primary: #0a2fc2;
   left: 0;
   right: 0;
   z-index: 40;
-  display: flex;
-  align-items: center;
-  height: calc(96rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 40rpx 0;
-  box-sizing: border-box;
   background: transparent;
   pointer-events: none;
+}
+
+.mine-nav-row {
+  display: flex;
+  align-items: center;
+  height: 96rpx;
+  padding: 0 40rpx;
 }
 
 .mine-nav-title {

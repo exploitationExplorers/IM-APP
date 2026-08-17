@@ -17,7 +17,7 @@ func Connect(databaseURL string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
-	cfg.MaxConns = 10
+	cfg.MaxConns = 25
 	cfg.MinConns = 1
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -59,6 +59,31 @@ func RunMigrationsDir(ctx context.Context, pool *pgxpool.Pool, dir string) error
 		path := filepath.Join(dir, name)
 		if err := RunMigrations(ctx, pool, path); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// RequireColumns prevents a new binary from serving traffic against an old
+// schema when its migration directory was not deployed with it.
+func RequireColumns(ctx context.Context, pool *pgxpool.Pool, required map[string][]string) error {
+	for table, columns := range required {
+		for _, column := range columns {
+			var exists bool
+			err := pool.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1
+					FROM information_schema.columns
+					WHERE table_schema = current_schema()
+					  AND table_name = $1
+					  AND column_name = $2
+				)`, table, column).Scan(&exists)
+			if err != nil {
+				return fmt.Errorf("check schema %s.%s: %w", table, column, err)
+			}
+			if !exists {
+				return fmt.Errorf("required database column %s.%s is missing", table, column)
+			}
 		}
 	}
 	return nil

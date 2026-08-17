@@ -18,12 +18,16 @@ export type {
 
 export type {
   MessageType,
+  MessageQuote,
   ChatMessage,
   Conversation,
 } from './chat'
 
 export type {
   Contact,
+  ContactPage,
+  ContactListQuery,
+  ContactListSort,
   ContactTagItem,
   GroupPreview,
   FriendRequest,
@@ -32,7 +36,17 @@ export type {
   SendFriendResult,
 } from './contact'
 
-export type { GroupInfo, GroupMember } from './group'
+export type {
+  GroupInfo,
+  GroupMember,
+  GroupPermissions,
+  GroupSettingsInput,
+  GroupJoinRequestItem,
+  GroupQRCodeResolveResult,
+  JoinGroupByQRCodeResult,
+  GroupRole,
+  GroupJoinMode,
+} from './group'
 
 export type {
   UploadPurpose,
@@ -43,3 +57,19 @@ export type {
   FileInfo,
   PresignResult,
 } from './file'
+
+export type {
+  ForwardTaskStatus,
+  ForwardTargetStatus,
+  ForwardSelectorMode,
+  ForwardSelector,
+  ForwardMessageSnapshot,
+  ForwardTask,
+  ForwardTaskTarget,
+  ForwardTaskPage,
+  ForwardTaskTargetPage,
+  CreateForwardTaskInput,
+  AffectedCountResult,
+  OkResult,
+  FriendForwardPlan,
+} from './forward'

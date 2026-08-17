@@ -71,6 +71,22 @@ func (r *Redis) AllowSMS(ctx context.Context, phone string) (bool, error) {
 	return ok, nil
 }
 
+// AllowIP 按 key（如客户端 IP）做固定窗口限流：window 时间内最多 limit 次，超限返回 false
+func (r *Redis) AllowIP(ctx context.Context, key string, limit int, window time.Duration) bool {
+	if !r.Available() {
+		return true // Redis 不可用时不做限制
+	}
+	k := "rl:" + key
+	cnt, err := r.Client.Incr(ctx, k).Result()
+	if err != nil {
+		return true
+	}
+	if cnt == 1 {
+		r.Client.Expire(ctx, k, window)
+	}
+	return cnt <= int64(limit)
+}
+
 func (r *Redis) Close() error {
 	if !r.Available() {
 		return nil

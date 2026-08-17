@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { fetchGroups } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
 import { APP_CONFIG } from '@/config'
+import type { GroupPreview } from '@/types'
 
 const contactStore = useContactStore()
 const tab = ref<'created' | 'joined'>('created')
@@ -22,8 +23,9 @@ watch(tab, () => {
   void loadGroups()
 })
 
-function openGroup(id: string) {
-  uni.navigateTo({ url: `/pages/group/detail?id=${id}` })
+/** 与聊天列表保持一致：点群聊直接进会话，而不是先跳群资料页 */
+function openGroup(g: GroupPreview) {
+  contactStore.openChatWithGroup(g.id, g.name, g.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 }
 
 function goCreate() {
@@ -50,12 +52,12 @@ function goCreate() {
       v-for="g in visibleGroups"
       :key="g.id"
       class="row"
-      @click="openGroup(g.id)"
+      @click="openGroup(g)"
     >
       <image
         class="avatar"
         :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
-        mode="aspectFill"
+        mode="aspectFit"
       />
       <text class="name">{{ g.name }}</text>
       <text class="arrow">›</text>

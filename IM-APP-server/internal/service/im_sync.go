@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ type IMSyncWorker struct {
 	Outbox       *repository.IMSyncOutboxRepo
 	Users        *repository.UserRepo
 	Groups       *repository.GroupRepo
+	Access       *repository.IMAccessRepo
 	Client       *im.Client
 	WorkerID     string
 	BatchSize    int
@@ -246,56 +248,38 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		}
 	}
 
-	if event.EventType == repository.IMEventGroupCreated || event.EventType == repository.IMEventGroupUpdated {
+	if event.EventType == repository.IMEventGroupCreated {
 		if err := w.Client.EnsureGroup(ctx, group); err != nil {
 			return err
 		}
-		// Reconciliation is intentionally state based: inviting an existing
-		// member and setting their current role/mute are idempotent operations.
-		allInvitees := append(append([]string{}, group.MemberUserIDs...), group.AdminUserIDs...)
-		if err := w.Client.InviteGroupMember(ctx, groupID, allInvitees); err != nil {
-			return err
+		// 建群不要再跑邀请/改昵称/禁言/设角色：这些 OpenIM 通知会计入未读，
+		// 会话列表会显示十几条，聊天页又把空通知滤掉，只剩欢迎语。
+		return w.sendGroupCreatedWelcome(ctx, state.ID, groupID)
+	}
+	if event.EventType == repository.IMEventGroupUpdated {
+		var updatePayload repository.IMGroupUpdatePayload
+		if err := json.Unmarshal(event.Payload, &updatePayload); err != nil {
+			return fmt.Errorf("decode %s payload: %w", event.EventType, err)
 		}
-		remoteMembers, err := w.Client.ListGroupMemberIDs(ctx, groupID)
+		// Old group.updated rows used an empty payload and cannot tell which field
+		// really changed. Replaying them as a full update would recreate the fake
+		// group-name notices, so completing them without a remote write is safer.
+		if updatePayload.Name == nil && updatePayload.Avatar == nil && updatePayload.Announcement == nil && updatePayload.AllowMemberAddFriend == nil {
+			return nil
+		}
+		registered, err := w.Client.IsGroupRegistered(ctx, groupID)
 		if err != nil {
 			return err
 		}
-		expectedMembers := map[string]struct{}{ownerID: {}}
-		for memberID := range memberByID {
-			expectedMembers[memberID] = struct{}{}
+		if !registered {
+			return w.Client.EnsureGroup(ctx, group)
 		}
-		unexpectedMembers := make([]string, 0)
-		for _, memberID := range remoteMembers {
-			if _, exists := expectedMembers[memberID]; !exists {
-				unexpectedMembers = append(unexpectedMembers, memberID)
-			}
-		}
-		if err := w.Client.KickGroupMember(ctx, groupID, unexpectedMembers); err != nil {
-			return err
-		}
-		if err := w.Client.SetGroupMute(ctx, groupID, state.AllMuted); err != nil {
-			return err
-		}
-		for memberID, member := range memberByID {
-			if err := w.Client.SetGroupMemberNickname(ctx, groupID, memberID, member.GroupNickname); err != nil {
-				return err
-			}
-			if member.Role == "owner" {
-				continue
-			}
-			roleLevel := 20
-			if member.Role == "admin" {
-				roleLevel = 60
-			}
-			if err := w.Client.SetGroupMemberRole(ctx, groupID, memberID, roleLevel); err != nil {
-				return err
-			}
-			mutedSeconds := remainingMuteSeconds(member.MutedUntil)
-			if err := w.Client.SetGroupMemberMute(ctx, groupID, memberID, mutedSeconds); err != nil {
-				return err
-			}
-		}
-		return nil
+		return w.Client.UpdateGroup(ctx, groupID, im.GroupUpdate{
+			GroupName:            updatePayload.Name,
+			FaceURL:              updatePayload.Avatar,
+			Notification:         updatePayload.Announcement,
+			AllowMemberAddFriend: updatePayload.AllowMemberAddFriend,
+		})
 	}
 	registered, err := w.Client.IsGroupRegistered(ctx, groupID)
 	if err != nil {
@@ -350,6 +334,27 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		return w.Client.InviteGroupMember(ctx, groupID, []string{memberID})
 	}
 	return w.Client.KickGroupMember(ctx, groupID, []string{memberID})
+}
+
+func (w *IMSyncWorker) sendGroupCreatedWelcome(ctx context.Context, businessGroupID, imGroupID string) error {
+	if w.Access == nil || w.Client == nil {
+		return nil
+	}
+	key := "group-created-welcome:" + businessGroupID
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte("text:"+models.GroupCreatedWelcomeText)))
+	reservation, err := w.Access.ReserveSystemMessage(ctx, key, "group", businessGroupID, "text", hash)
+	if err != nil {
+		return err
+	}
+	if reservation.Status == "sent" || !reservation.ShouldSend {
+		return nil
+	}
+	sent, err := w.Client.SendTextMessage(ctx, imGroupID, 3, models.GroupCreatedWelcomeText)
+	if err != nil {
+		_ = w.Access.FailSystemMessage(ctx, reservation.ID, truncateError(err.Error(), 2000))
+		return err
+	}
+	return w.Access.CompleteSystemMessage(ctx, reservation.ID, sent.ServerMsgID, sent.ClientMsgID)
 }
 
 func remainingMuteSeconds(until *time.Time) int64 {

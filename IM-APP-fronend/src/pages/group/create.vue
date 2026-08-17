@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import { useContactStore } from '@/stores/contact'
 import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
+import { useChatStore } from '@/stores/chat'
+import { resolveIMGroup } from '@/api/im'
 import { APP_CONFIG } from '@/config'
+import type { Contact, ContactListSort } from '@/types'
 
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
 const userStore = useUserStore()
+const chatStore = useChatStore()
 const { contacts } = storeToRefs(contactStore)
 
 const step = ref<'select' | 'create'>('select')
@@ -16,8 +21,10 @@ const keyword = ref('')
 const sortKey = ref<'recent' | 'name' | 'chat'>('recent')
 const showSort = ref(false)
 const selected = ref<Set<string>>(new Set())
+const selectedById = ref<Map<string, Contact>>(new Map())
 const groupName = ref('')
 const loading = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const sortLabel = computed(() => {
   if (sortKey.value === 'name') return '名字'
@@ -25,19 +32,18 @@ const sortLabel = computed(() => {
   return '最近加入(默认)'
 })
 
-const filteredContacts = computed(() => {
-  let list = [...contacts.value]
-  const k = keyword.value.trim()
-  if (k) list = list.filter((c) => c.nickname.includes(k))
-  if (sortKey.value === 'name') {
-    list.sort((a, b) => a.nickname.localeCompare(b.nickname, 'zh-CN'))
-  }
-  return list
-})
+const listSort = computed<ContactListSort>(() => (sortKey.value === 'name' ? 'name' : 'recent'))
 
-const selectedContacts = computed(() =>
-  contacts.value.filter((c) => selected.value.has(c.id)),
-)
+function refreshContacts() {
+  return contactStore.reloadContacts({
+    keyword: keyword.value,
+    sort: listSort.value,
+  })
+}
+
+const filteredContacts = computed(() => contacts.value)
+
+const selectedContacts = computed(() => [...selectedById.value.values()])
 
 const selectedCount = computed(() => selected.value.size)
 
@@ -45,15 +51,29 @@ const nameLen = computed(() => groupName.value.length)
 
 const canConfirm = computed(() => selectedCount.value > 0)
 
+const myAvatar = computed(
+  () => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl,
+)
+
 const memberPreview = computed(() => {
   const meName = userStore.profile?.nickname || '我'
   const names = [meName, ...selectedContacts.value.map((c) => c.nickname)]
   return names
 })
 
-onMounted(() => {
-  contactStore.loadDirectory()
-  if (!userStore.profile) userStore.bootstrap()
+function contactAvatar(url: string) {
+  return url || APP_CONFIG.defaultAvatarUrl
+}
+
+onShow(() => {
+  void Promise.all([refreshContacts(), contactStore.loadGroups(), userStore.loadProfile().catch(() => undefined)])
+})
+
+watch(keyword, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void refreshContacts()
+  }, 300)
 })
 
 function goBack() {
@@ -68,22 +88,33 @@ function isSelected(id: string) {
   return selected.value.has(id)
 }
 
-function toggle(id: string) {
-  const next = new Set(selected.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selected.value = next
+function toggle(c: Contact) {
+  const ids = new Set(selected.value)
+  const map = new Map(selectedById.value)
+  if (ids.has(c.id)) {
+    ids.delete(c.id)
+    map.delete(c.id)
+  } else {
+    ids.add(c.id)
+    map.set(c.id, c)
+  }
+  selected.value = ids
+  selectedById.value = map
 }
 
 function removeSelected(id: string) {
-  const next = new Set(selected.value)
-  next.delete(id)
-  selected.value = next
+  const ids = new Set(selected.value)
+  const map = new Map(selectedById.value)
+  ids.delete(id)
+  map.delete(id)
+  selected.value = ids
+  selectedById.value = map
 }
 
 function setSort(key: 'recent' | 'name' | 'chat') {
   sortKey.value = key
   showSort.value = false
+  void refreshContacts()
 }
 
 function onConfirmSelect() {
@@ -92,6 +123,30 @@ function onConfirmSelect() {
   const draft = names.join('、')
   groupName.value = draft.length > 50 ? `${draft.slice(0, 47)}...` : draft
   step.value = 'create'
+}
+
+async function waitForGroupConversation(groupId: string) {
+  const deadline = Date.now() + 12000
+  const welcome = '新群创建成功，一起来聊天吧'
+  let found: { id: string; lastMessage: string } | undefined
+  while (Date.now() < deadline) {
+    try {
+      const target = await resolveIMGroup(groupId)
+      await chatStore.loadConversations()
+      found = chatStore.conversations.find(
+        (c) => c.type === 'group' && c.groupId === target.imGroupId,
+      )
+      // 等欢迎语落到会话后再标已读，避免随后到达又把红点加回来
+      if (found?.lastMessage.includes(welcome)) {
+        await chatStore.markAsRead(found.id)
+        return
+      }
+    } catch {
+      /* OpenIM 群尚未同步完成 */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+  if (found) await chatStore.markAsRead(found.id)
 }
 
 async function onCreate() {
@@ -104,14 +159,15 @@ async function onCreate() {
   uni.showLoading({ title: '创建中...', mask: true })
   try {
     const g = await groupStore.create(name, [...selected.value])
-    uni.showToast({ title: '创建成功', icon: 'success' })
-    if (g.conversationId) {
-      uni.redirectTo({
-        url: `/pages/chat/room?id=${g.conversationId}&title=${encodeURIComponent(g.name)}`,
-      })
-    } else {
-      uni.navigateBack()
-    }
+    await contactStore.loadDirectory().catch(() => undefined)
+    await waitForGroupConversation(g.id)
+    uni.hideLoading()
+    uni.switchTab({
+      url: '/pages/chat/index',
+      success: () => {
+        uni.showToast({ title: '创建成功', icon: 'success' })
+      },
+    })
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   } finally {
@@ -146,7 +202,7 @@ async function onCreate() {
           class="chip"
           @click.stop="removeSelected(c.id)"
         >
-          <image class="chip-avatar" :src="c.avatar || '/static/avatar-me.png'" mode="aspectFill" />
+          <image class="chip-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
           <text class="chip-name">{{ c.nickname }}</text>
         </view>
       </view>
@@ -188,14 +244,14 @@ async function onCreate() {
         </view>
       </view>
 
-      <scroll-view scroll-y class="list">
+      <scroll-view scroll-y class="list" :lower-threshold="80" @scrolltolower="contactStore.loadMoreContacts">
         <view
           v-for="c in filteredContacts"
           :key="c.id"
           class="row"
-          @click="toggle(c.id)"
+          @click="toggle(c)"
         >
-          <image class="avatar" :src="c.avatar || '/static/avatar-me.png'" mode="aspectFill" />
+          <image class="avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
           <text class="name">{{ c.nickname }}</text>
           <view class="check" :class="{ on: isSelected(c.id) }" />
         </view>
@@ -236,13 +292,13 @@ async function onCreate() {
           <view class="member">
             <image
               class="member-avatar"
-              :src="userStore.profile?.avatar || '/static/avatar-me.png'"
+              :src="myAvatar"
               mode="aspectFill"
             />
             <text class="member-name">{{ userStore.profile?.nickname || '我' }}</text>
           </view>
           <view v-for="c in selectedContacts" :key="c.id" class="member">
-            <image class="member-avatar" :src="c.avatar || '/static/avatar-me.png'" mode="aspectFill" />
+            <image class="member-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
             <text class="member-name">{{ c.nickname }}</text>
           </view>
         </view>

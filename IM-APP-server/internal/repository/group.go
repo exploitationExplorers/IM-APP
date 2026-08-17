@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"im-app-server/internal/models"
@@ -21,11 +22,44 @@ type GroupRepo struct {
 // InternalIDByPublicID resolves the short numeric ID used by clients to the
 // UUID used by database relations and the existing OpenIM mapping.
 func (r *GroupRepo) InternalIDByPublicID(ctx context.Context, publicID string) (string, error) {
-	var groupID string
+	internalID, _, err := r.LookupGroupIDs(ctx, publicID)
+	return internalID, err
+}
+
+// LookupGroupIDs accepts 纯数字群号、内部 UUID 或 OpenIM 无连字符群 ID。
+func (r *GroupRepo) LookupGroupIDs(ctx context.Context, id string) (internalID, publicID string, err error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", "", pgx.ErrNoRows
+	}
+	err = r.DB.QueryRow(ctx, `
+		SELECT id::text, public_id FROM groups WHERE public_id=$1`, id,
+	).Scan(&internalID, &publicID)
+	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
+		return internalID, publicID, err
+	}
+	normalized := strings.ToLower(strings.ReplaceAll(id, "-", ""))
+	if len(normalized) != 32 {
+		return "", "", pgx.ErrNoRows
+	}
+	err = r.DB.QueryRow(ctx, `
+		SELECT id::text, public_id FROM groups WHERE replace(id::text,'-','')=$1`, normalized,
+	).Scan(&internalID, &publicID)
+	return internalID, publicID, err
+}
+
+// PublicIDByInternalID is the inverse of InternalIDByPublicID: given the
+// database group UUID (which also doubles as the OpenIM group ID source),
+// return the public ID clients use in URLs.
+func (r *GroupRepo) PublicIDByInternalID(ctx context.Context, internalID string) (string, error) {
+	var publicID string
 	err := r.DB.QueryRow(ctx, `
-		SELECT id::text FROM groups WHERE public_id=$1`, publicID,
-	).Scan(&groupID)
-	return groupID, err
+		SELECT public_id FROM groups WHERE id=$1::uuid`, internalID,
+	).Scan(&publicID)
+	if err != nil {
+		return "", ErrIMTargetNotFound
+	}
+	return publicID, nil
 }
 
 func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs []string) (models.GroupInfo, error) {
@@ -107,16 +141,18 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 	var g models.GroupInfo
 	var allow bool
 	err := r.DB.QueryRow(ctx, `
-		SELECT g.public_id, g.name, g.avatar, g.owner_id::text,
+		SELECT g.public_id, g.name, COALESCE(g.avatar,''), g.owner_id::text,
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
-			g.announcement, g.allow_member_add_friend, COALESCE(g.conversation_id::text,''),
-			gm.role, gm.nickname, g.join_mode, g.all_muted
+			COALESCE(g.announcement,''), COALESCE(g.allow_member_add_friend, true),
+			COALESCE(g.conversation_id::text,''),
+			gm.role, COALESCE(gm.nickname,''), COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false),
+		COALESCE((SELECT remark FROM group_remarks gr WHERE gr.user_id=$2::uuid AND gr.group_id=g.id),'')
 		FROM groups g
-		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2
-		WHERE g.id=$1 AND g.status='active'`, groupID, uid).Scan(
+		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2::uuid
+		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID, uid).Scan(
 		&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.MemberCount,
 		&g.Announcement, &allow, &g.ConversationID, &g.MyRole, &g.MyNickname,
-		&g.JoinMode, &g.AllMuted)
+		&g.JoinMode, &g.AllMuted, &g.Remark)
 	g.AllowMemberAddFriend = allow
 	if err == nil {
 		canManage := g.MyRole == "owner" || g.MyRole == "admin"
@@ -140,12 +176,12 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]mod
 		return nil, ErrForbidden
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT u.id::text, u.nickname, gm.nickname,
-			CASE WHEN gm.nickname='' THEN u.nickname ELSE gm.nickname END,
-			u.avatar, gm.role
+		SELECT u.id::text, COALESCE(u.nickname,''), COALESCE(gm.nickname,''),
+			CASE WHEN COALESCE(gm.nickname,'')='' THEN COALESCE(u.nickname,'') ELSE gm.nickname END,
+			COALESCE(u.avatar,''), gm.role
 		FROM group_members gm
 		JOIN users u ON u.id = gm.user_id
-		WHERE gm.group_id=$1
+		WHERE gm.group_id=$1::uuid
 		ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END`,
 		groupID)
 	if err != nil {
@@ -159,6 +195,13 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]mod
 			return nil, err
 		}
 		list = append(list, m)
+	}
+	if rm, rerr := r.GetMemberRemarks(ctx, groupID, uid); rerr == nil {
+		for i := range list {
+			if r2, ok := rm[list[i].ID]; ok {
+				list[i].MemberRemark = r2
+			}
+		}
 	}
 	return list, nil
 }
@@ -224,12 +267,42 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var role string
+	var role, currentName, currentAvatar, currentAnnouncement, currentJoinMode string
+	var currentAllow, currentAllMuted bool
 	err = tx.QueryRow(ctx, `
-		SELECT gm.role FROM group_members gm JOIN groups g ON g.id=gm.group_id
-		WHERE gm.group_id=$1 AND gm.user_id=$2 AND g.status='active'`, groupID, uid).Scan(&role)
+		SELECT gm.role, g.name, g.avatar, g.announcement,
+		       g.allow_member_add_friend, g.join_mode, g.all_muted
+		FROM group_members gm JOIN groups g ON g.id=gm.group_id
+		WHERE gm.group_id=$1 AND gm.user_id=$2 AND g.status='active'`, groupID, uid).Scan(
+		&role, &currentName, &currentAvatar, &currentAnnouncement,
+		&currentAllow, &currentJoinMode, &currentAllMuted,
+	)
 	if err != nil || (role != "owner" && role != "admin") {
 		return ErrForbidden
+	}
+	// Suppress no-op writes before creating outbox work. Besides reducing load,
+	// this is required for correctness because OpenIM treats a present field as
+	// a change and emits a notification without comparing the old value.
+	if name != nil && *name == currentName {
+		name = nil
+	}
+	if avatarURL != nil && *avatarURL == currentAvatar {
+		avatarURL = nil
+	}
+	if announcement != nil && *announcement == currentAnnouncement {
+		announcement = nil
+	}
+	if allow != nil && *allow == currentAllow {
+		allow = nil
+	}
+	if joinMode != nil && *joinMode == currentJoinMode {
+		joinMode = nil
+	}
+	if allMuted != nil && *allMuted == currentAllMuted {
+		allMuted = nil
+	}
+	if name == nil && avatarURL == nil && announcement == nil && allow == nil && joinMode == nil && allMuted == nil {
+		return tx.Commit(ctx)
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE groups SET
@@ -251,10 +324,17 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 			return err
 		}
 	}
-	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, map[string]any{}); err != nil {
-		return err
+	if name != nil || avatarURL != nil || announcement != nil || allow != nil {
+		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, IMGroupUpdatePayload{
+			Name:                 name,
+			Avatar:               avatarURL,
+			Announcement:         announcement,
+			AllowMemberAddFriend: allow,
+		}); err != nil {
+			return err
+		}
 	}
-	// 全员禁言在 OpenIM 侧是独立能力，改这个字段要额外发一次同步
+	// 全员禁言在 OpenIM 侧是独立能力，改这个字段单独同步，避免和资料更新叠出多条通知
 	if allMuted != nil {
 		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMute, map[string]any{
 			"muted": *allMuted,
@@ -303,8 +383,8 @@ func (r *GroupRepo) Leave(ctx context.Context, groupID, uid string) error {
 func (r *GroupRepo) GetSyncState(ctx context.Context, groupID string) (models.IMGroupSyncState, error) {
 	var state models.IMGroupSyncState
 	err := r.DB.QueryRow(ctx, `
-		SELECT id::text, name, avatar, owner_id::text, announcement,
-			allow_member_add_friend, status, all_muted
+		SELECT id::text, name, COALESCE(avatar,''), owner_id::text, COALESCE(announcement,''),
+			COALESCE(allow_member_add_friend, true), COALESCE(status,'active'), COALESCE(all_muted, false)
 		FROM groups WHERE id=$1::uuid`, groupID).Scan(
 		&state.ID, &state.Name, &state.Avatar, &state.OwnerID, &state.Announcement,
 		&state.AllowMemberAddFriend, &state.Status, &state.AllMuted)
@@ -312,7 +392,8 @@ func (r *GroupRepo) GetSyncState(ctx context.Context, groupID string) (models.IM
 		return state, err
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT u.id::text, u.nickname, gm.nickname, u.avatar, COALESCE(u.status,'active'), gm.role, gm.muted_until
+		SELECT u.id::text, COALESCE(u.nickname,''), COALESCE(gm.nickname,''), COALESCE(u.avatar,''),
+			COALESCE(u.status,'active'), gm.role, gm.muted_until
 		FROM group_members gm JOIN users u ON u.id=gm.user_id
 		WHERE gm.group_id=$1::uuid
 		ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END`, groupID)
@@ -605,10 +686,11 @@ func (r *GroupRepo) GetByIDPublic(ctx context.Context, groupID string) (models.G
 	var g models.GroupInfo
 	var allow bool
 	err := r.DB.QueryRow(ctx, `
-		SELECT g.public_id, g.name, g.avatar, g.owner_id::text,
+		SELECT g.public_id, g.name, COALESCE(g.avatar,''), g.owner_id::text,
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
-			g.announcement, g.allow_member_add_friend, COALESCE(g.conversation_id::text,''),
-			g.join_mode, g.all_muted
+			COALESCE(g.announcement,''), COALESCE(g.allow_member_add_friend, true),
+			COALESCE(g.conversation_id::text,''),
+			COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false)
 		FROM groups g
 		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID,
 	).Scan(&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.MemberCount,
@@ -630,30 +712,82 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 	if err != nil || (role != "owner" && role != "admin") {
 		return 0, ErrForbidden
 	}
-	var convID string
-	if err := r.DB.QueryRow(ctx, `SELECT conversation_id::text FROM groups WHERE id=$1`, groupID).Scan(&convID); err != nil {
+
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
 		return 0, err
 	}
+	defer tx.Rollback(ctx)
+
+	var convID, status string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(conversation_id::text,''), status
+		FROM groups WHERE id=$1::uuid FOR UPDATE`, groupID).Scan(&convID, &status); err != nil {
+		return 0, err
+	}
+	if status != "active" {
+		return 0, ErrForbidden
+	}
+
+	seen := map[string]bool{uid: true}
 	count := 0
-	for _, inviteeID := range userIDs {
-		if inviteeID == uid {
+	for _, rawID := range userIDs {
+		inviteeID := strings.TrimSpace(rawID)
+		if inviteeID == "" || seen[inviteeID] {
 			continue
 		}
-		var exists bool
-		_ = r.DB.QueryRow(ctx, `
-			SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2)`,
-			groupID, inviteeID).Scan(&exists)
-		if exists {
+		if _, parseErr := uuid.Parse(inviteeID); parseErr != nil {
 			continue
 		}
-		token := uuid.NewString()
-		_, err := r.DB.Exec(ctx, `
-			INSERT INTO group_invitations(group_id, inviter_id, invitee_id, token, status)
-			VALUES($1::uuid,$2::uuid,$3::uuid,$4,'pending')`, groupID, uid, inviteeID, token)
-		if err != nil {
+		seen[inviteeID] = true
+
+		var eligible bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM friendships f
+				JOIN users u ON u.id=f.friend_id
+				WHERE f.user_id=$1::uuid AND f.friend_id=$2::uuid
+				  AND COALESCE(u.status,'active')='active'
+			)`, uid, inviteeID).Scan(&eligible); err != nil {
+			return 0, err
+		}
+		if !eligible {
 			continue
+		}
+
+		var alreadyMember bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)`,
+			groupID, inviteeID).Scan(&alreadyMember); err != nil {
+			return 0, err
+		}
+		if alreadyMember {
+			continue
+		}
+
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO group_members(group_id, user_id, role)
+			VALUES($1::uuid,$2::uuid,'member')
+			ON CONFLICT DO NOTHING`, groupID, inviteeID); err != nil {
+			return 0, err
+		}
+		if r.LegacyChatEnabled && convID != "" {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO conversation_members(conversation_id, user_id, unread_count)
+				VALUES($1::uuid, $2::uuid, 0) ON CONFLICT DO NOTHING`, convID, inviteeID); err != nil {
+				return 0, err
+			}
+		}
+		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, map[string]string{
+			"userId": inviteeID,
+		}); err != nil {
+			return 0, err
 		}
 		count++
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
 	}
 	return count, nil
 }
@@ -695,19 +829,20 @@ func (r *GroupRepo) UpdateMyNickname(ctx context.Context, groupID, uid, nickname
 	return tx.Commit(ctx)
 }
 
-func (r *GroupRepo) CreateReport(ctx context.Context, groupID, uid, reason, description string) (models.GroupReportResult, error) {
+func (r *GroupRepo) CreateReport(ctx context.Context, groupID, uid, reason, description string, imagePaths []string) (models.GroupReportResult, error) {
 	var result models.GroupReportResult
 	var createdAt time.Time
 	err := r.DB.QueryRow(ctx, `
-		INSERT INTO group_reports(group_id, reporter_id, reason, description)
-		SELECT $1::uuid,$2::uuid,$3,$4
+		INSERT INTO group_reports(group_id, reporter_id, reason, description, image_paths)
+		SELECT $1::uuid,$2::uuid,$3,$4,$5::text[]
 		WHERE EXISTS(
 			SELECT 1 FROM group_members gm JOIN groups g ON g.id=gm.group_id
 			WHERE gm.group_id=$1::uuid AND gm.user_id=$2::uuid AND g.status='active')
 		ON CONFLICT (group_id, reporter_id) WHERE status='pending'
-		DO UPDATE SET reason=EXCLUDED.reason, description=EXCLUDED.description, updated_at=NOW()
-		RETURNING id::text, status, created_at`, groupID, uid, reason, description,
-	).Scan(&result.ID, &result.Status, &createdAt)
+		DO UPDATE SET reason=EXCLUDED.reason, description=EXCLUDED.description,
+		              image_paths=EXCLUDED.image_paths, updated_at=NOW()
+		RETURNING id::text, status, image_paths, created_at`, groupID, uid, reason, description, imagePaths,
+	).Scan(&result.ID, &result.Status, &result.ImagePaths, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return result, ErrForbidden
 	}
@@ -828,4 +963,53 @@ func (r *GroupRepo) userSummary(ctx context.Context, uid string) (models.UserSum
 		SELECT id::text, COALESCE(public_id,''), nickname, avatar FROM users WHERE id=$1::uuid`, uid,
 	).Scan(&u.ID, &u.PublicID, &u.Nickname, &u.Avatar)
 	return u, err
+}
+
+func (r *GroupRepo) GetGroupRemark(ctx context.Context, uid, groupID string) (string, error) {
+	var remark string
+	err := r.DB.QueryRow(ctx, `
+		SELECT COALESCE(remark,'') FROM group_remarks
+		WHERE user_id=$1::uuid AND group_id=$2::uuid`, uid, groupID).Scan(&remark)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return remark, err
+}
+
+func (r *GroupRepo) SetGroupRemark(ctx context.Context, uid, groupID, remark string) error {
+	_, err := r.DB.Exec(ctx, `
+		INSERT INTO group_remarks(user_id, group_id, remark, updated_at)
+		VALUES($1::uuid, $2::uuid, $3, now())
+		ON CONFLICT (user_id, group_id)
+		DO UPDATE SET remark=EXCLUDED.remark, updated_at=now()`, uid, groupID, remark)
+	return err
+}
+
+func (r *GroupRepo) GetMemberRemarks(ctx context.Context, uid, groupID string) (map[string]string, error) {
+	rows, err := r.DB.Query(ctx, `
+		SELECT member_user_id::text, COALESCE(remark,'')
+		FROM group_member_remarks
+		WHERE user_id=$1::uuid AND group_id=$2::uuid`, uid, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var mid, remark string
+		if err := rows.Scan(&mid, &remark); err != nil {
+			return nil, err
+		}
+		out[mid] = remark
+	}
+	return out, nil
+}
+
+func (r *GroupRepo) SetMemberRemark(ctx context.Context, uid, groupID, memberUserID, remark string) error {
+	_, err := r.DB.Exec(ctx, `
+		INSERT INTO group_member_remarks(user_id, group_id, member_user_id, remark, updated_at)
+		VALUES($1::uuid, $2::uuid, $3::uuid, $4, now())
+		ON CONFLICT (user_id, group_id, member_user_id)
+		DO UPDATE SET remark=EXCLUDED.remark, updated_at=now()`, uid, groupID, memberUserID, remark)
+	return err
 }

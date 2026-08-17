@@ -1,24 +1,146 @@
 import { request } from '@/utils/request'
+import type {
+  AffectedCountResult,
+  CreateForwardTaskInput,
+  ForwardSelector,
+  ForwardTask,
+  ForwardTaskPage,
+  ForwardTaskTargetPage,
+  OkResult,
+} from '@/types/forward'
 
-export interface ForwardTask {
-  id: string
-  status: string
-  targetCount: number
-  doneCount: number
-  sourceMessageId: string
+const TARGET_WRITE_BATCH = 1000
+
+export function forwardTargetWriteBatch(): number {
+  return TARGET_WRITE_BATCH
 }
 
-export async function createForwardTask(
-  sourceMessageId: string,
-  targetConvIds: string[],
-): Promise<ForwardTask> {
+export async function createForwardTask(input: CreateForwardTaskInput): Promise<ForwardTask> {
   return request<ForwardTask>({
     url: '/forward-tasks',
     method: 'POST',
-    data: { sourceMessageId, targetConvIds },
+    data: input,
   })
 }
 
-export async function fetchForwardTask(taskId: string): Promise<ForwardTask> {
-  return request<ForwardTask>({ url: `/forward-tasks/${taskId}`, method: 'GET' })
+export async function fetchForwardTasks(params?: {
+  status?: string
+  cursor?: string
+  limit?: number
+}): Promise<ForwardTaskPage> {
+  const data: Record<string, string | number> = {}
+  if (params?.status) data.status = params.status
+  if (params?.cursor) data.cursor = params.cursor
+  if (params?.limit) data.limit = params.limit
+  return request<ForwardTaskPage>({
+    url: '/forward-tasks',
+    method: 'GET',
+    data,
+  })
+}
+
+export async function fetchForwardTaskProgress(taskId: string): Promise<ForwardTask> {
+  return request<ForwardTask>({
+    url: '/forward-task-progress',
+    method: 'GET',
+    data: { taskId },
+  })
+}
+
+export async function fetchForwardTaskTargets(params: {
+  taskId: string
+  status?: string
+  cursor?: string
+  limit?: number
+}): Promise<ForwardTaskTargetPage> {
+  const data: Record<string, string | number> = { taskId: params.taskId }
+  if (params.status) data.status = params.status
+  if (params.cursor) data.cursor = params.cursor
+  if (params.limit) data.limit = params.limit
+  return request<ForwardTaskTargetPage>({
+    url: '/forward-task-targets',
+    method: 'GET',
+    data,
+  })
+}
+
+export async function addForwardTaskTargets(
+  taskId: string,
+  targetUserIds: string[],
+): Promise<AffectedCountResult> {
+  return request<AffectedCountResult>({
+    url: '/forward-task-targets/add',
+    method: 'POST',
+    data: { taskId, targetUserIds },
+  })
+}
+
+export async function generateForwardTaskTargets(
+  taskId: string,
+  selector: ForwardSelector,
+): Promise<AffectedCountResult> {
+  return request<AffectedCountResult>({
+    url: '/forward-task-targets/generate',
+    method: 'POST',
+    data: { taskId, selector },
+  })
+}
+
+export async function removeForwardTaskTargets(
+  taskId: string,
+  targetUserIds: string[],
+): Promise<AffectedCountResult> {
+  return request<AffectedCountResult>({
+    url: '/forward-task-targets/remove',
+    method: 'POST',
+    data: { taskId, targetUserIds },
+  })
+}
+
+export async function submitForwardTask(taskId: string): Promise<OkResult> {
+  return request<OkResult>({
+    url: '/forward-tasks/submit',
+    method: 'POST',
+    data: { taskId },
+  })
+}
+
+export async function cancelForwardTask(taskId: string, reason?: string): Promise<OkResult> {
+  return request<OkResult>({
+    url: '/forward-tasks/cancel',
+    method: 'POST',
+    data: { taskId, reason },
+  })
+}
+
+export async function retryForwardTask(
+  taskId: string,
+  onlyFailed = true,
+  targetUserIds?: string[],
+): Promise<AffectedCountResult> {
+  return request<AffectedCountResult>({
+    url: '/forward-tasks/retry',
+    method: 'POST',
+    data: {
+      taskId,
+      onlyFailed,
+      ...(targetUserIds?.length ? { targetUserIds } : {}),
+    },
+  })
+}
+
+export async function pauseForwardTask(taskId: string): Promise<OkResult> {
+  return request<OkResult>({
+    url: '/forward-tasks/pause',
+    method: 'POST',
+    data: { taskId },
+  })
+}
+
+export async function resumeForwardTask(taskId: string): Promise<OkResult> {
+  return request<OkResult>({
+    url: '/forward-tasks/resume',
+    method: 'POST',
+    data: { taskId },
+  })
 }

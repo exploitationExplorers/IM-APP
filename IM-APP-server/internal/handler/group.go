@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"im-app-server/internal/middleware"
@@ -40,6 +41,11 @@ func (h *GroupHandler) Detail(c *gin.Context) {
 	uid := middleware.UserID(c)
 	g, err := h.Svc.GetDetail(c.Request.Context(), c.Param("id"), uid)
 	if err != nil {
+		log.Printf("get group %s: %v", c.Param("id"), err)
+		if errors.Is(err, repository.ErrInvalidGroupOperation) {
+			response.Fail(c, http.StatusBadRequest, "群聊 ID 不正确")
+			return
+		}
 		response.Fail(c, http.StatusNotFound, "群不存在或无权访问")
 		return
 	}
@@ -202,11 +208,11 @@ func (h *GroupHandler) UpdateMyNickname(c *gin.Context) {
 
 func (h *GroupHandler) CreateReport(c *gin.Context) {
 	var req models.CreateGroupReportReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID == "" || req.Reason == "" {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	result, err := h.Svc.CreateReport(c.Request.Context(), c.Param("id"), middleware.UserID(c), req.Reason, req.Description)
+	result, err := h.Svc.CreateReport(c.Request.Context(), req.GroupID, middleware.UserID(c), req.Reason, req.Description, req.ImageFileIDs)
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrForbidden):
@@ -352,6 +358,37 @@ func (h *GroupHandler) handleModerationResult(c *gin.Context, err error) {
 		default:
 			response.Fail(c, http.StatusInternalServerError, "群操作失败")
 		}
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
+func (h *GroupHandler) UpdateGroupRemark(c *gin.Context) {
+	var req models.UpdateGroupRemarkReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := h.Svc.UpdateGroupRemark(c.Request.Context(), c.Param("id"), middleware.UserID(c), req.Remark); err != nil {
+		response.Fail(c, http.StatusBadRequest, "群备注最多 64 个字")
+		return
+	}
+	g, err := h.Svc.GetDetail(c.Request.Context(), c.Param("id"), middleware.UserID(c))
+	if err != nil {
+		response.OK(c, gin.H{"ok": true})
+		return
+	}
+	response.OK(c, g)
+}
+
+func (h *GroupHandler) UpdateMemberRemark(c *gin.Context) {
+	var req models.UpdateMemberRemarkReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := h.Svc.UpdateMemberRemark(c.Request.Context(), c.Param("id"), middleware.UserID(c), c.Param("userId"), req.Remark); err != nil {
+		response.Fail(c, http.StatusBadRequest, "成员备注最多 64 个字")
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
