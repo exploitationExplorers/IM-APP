@@ -85,6 +85,13 @@ interface PlusNative {
     Bitmap?: new (id: string) => PlusNativeObjBitmap
   }
   io?: PlusIo
+  barcode?: {
+    scan: (
+      path: string,
+      success: (type: number, result: string) => void,
+      error?: (error: unknown) => void,
+    ) => void
+  }
   os?: {
     name?: string
     version?: string

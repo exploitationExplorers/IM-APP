@@ -40,9 +40,9 @@ export function parseQrcodePayload(raw: string): ParsedQrcodePayload {
   }
 }
 
-/** H5：从本地图片路径解码二维码内容 */
+/** 从本地图片解码二维码。H5 走 canvas，App 走原生 Barcode */
 export async function decodeQrcodeFromImage(path: string): Promise<string> {
-  // #ifdef H5
+  if (isAppPlatform()) return scanAppImage(path)
   const img = await loadImage(path)
   const canvas = document.createElement('canvas')
   canvas.width = img.naturalWidth || img.width
@@ -51,13 +51,34 @@ export async function decodeQrcodeFromImage(path: string): Promise<string> {
   if (!ctx) throw new Error('无法读取图片')
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  const code = jsQR(imageData.data, canvas.width, canvas.height)
-  if (!code?.data) throw new Error('未识别到二维码')
-  return code.data
-  // #endif
-  // #ifndef H5
-  throw new Error('请使用扫码功能识别二维码')
-  // #endif
+  const code = tryDecodeQrcode(imageData.data, canvas.width, canvas.height)
+  if (!code) throw new Error('未识别到二维码')
+  return code
+}
+
+export function tryDecodeQrcode(data: Uint8ClampedArray, width: number, height: number): string {
+  return jsQR(data, width, height)?.data || ''
+}
+
+function scanAppImage(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const barcode = plus?.barcode
+    if (!barcode?.scan) {
+      reject(new Error('当前环境不支持识别相册二维码'))
+      return
+    }
+    barcode.scan(
+      path,
+      (_type, code) => {
+        if (code) {
+          resolve(code)
+          return
+        }
+        reject(new Error('未识别到二维码'))
+      },
+      () => reject(new Error('未识别到二维码')),
+    )
+  })
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

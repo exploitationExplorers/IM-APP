@@ -103,7 +103,12 @@
       "path": "pages/contacts/scan",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "扫二维码"
+        "navigationBarTitleText": "扫二维码",
+        "backgroundColor": "#000000",
+        "disableScroll": true,
+        "app-plus": {
+          "background": "#000000"
+        }
       }
     },
     {
