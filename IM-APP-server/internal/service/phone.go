@@ -3,14 +3,12 @@ package service
 import (
 	"errors"
 	"strings"
-
-	"github.com/nyaruka/phonenumbers"
 )
 
-// NormalizeE164 手机号 E.164 归一化 + 严格校验（libphonenumber 规则）
-// countryCode: 国家区号，如 "+86" / "86" / "0086"
+// NormalizeE164 手机号 E.164 归一化（宽松校验，测试阶段）
+// countryCode: 国家区号，如 "+86" / "86"
 // national:    本地号码，如 "13800138000"
-// 返回标准 E.164，如 "+8613800138000"；号码无效时报错
+// 返回标准 E.164，如 "+8613800138000"
 func NormalizeE164(countryCode, national string) (string, error) {
 	dial := digitsOnly(countryCode)
 	num := digitsOnly(national)
@@ -26,15 +24,11 @@ func NormalizeE164(countryCode, national string) (string, error) {
 	if num == "" {
 		return "", errors.New("phone required")
 	}
-	// libphonenumber 严格校验（按各国号码规则）
-	parsed, err := phonenumbers.Parse("+"+dial+num, "")
-	if err != nil {
-		return "", errors.New("invalid phone number")
+	digits := len(dial) + len(num)
+	if digits < 8 || digits > 15 {
+		return "", errors.New("invalid phone length")
 	}
-	if !phonenumbers.IsValidNumber(parsed) {
-		return "", errors.New("invalid phone number")
-	}
-	return phonenumbers.Format(parsed, phonenumbers.E164), nil
+	return "+" + dial + num, nil
 }
 
 // 取纯数字（去掉 +、空格、-、括号等）
