@@ -16,7 +16,7 @@ import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { resolveIMGroupByIM } from '@/api/im'
-import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
+import { fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
@@ -56,6 +56,7 @@ let recordingTimer: ReturnType<typeof setInterval> | null = null
 
 /** 通知类没有可读正文时不渲染；群禁言等系统提示要保留，例如 `张三: [全体禁言]` */
 function isVisibleMessage(m: ChatMessage): boolean {
+  if (m.type === 'image' || m.type === 'voice' || m.type === 'file') return true
   if (m.type === 'system') {
     const text = m.content.trim()
     return !!text && !text.startsWith('{')
@@ -67,6 +68,18 @@ const messages = computed(() =>
   collapseRepeatedGroupNameNotices(
     (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
   ),
+)
+
+watch(
+  () =>
+    (chatStore.messagesMap[conversationId.value] || [])
+      .map((m) => m.systemEventKey)
+      .filter((key): key is string => !!key && key.startsWith('group-member:'))
+      .join('|'),
+  (keys, prev) => {
+    if (!prev || keys === prev) return
+    void refreshGroupMeta()
+  },
 )
 // 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
 // 用 ref 快照而不是 computed：避免 H5/热更新下 computed 与全局 ref 不同步导致 mine 判断失效
@@ -118,6 +131,7 @@ const actions = useChatMessageActions({
 })
 
 onShow(() => {
+  if (chatType.value === 'group') void refreshGroupMeta()
   if (!forwardStore.consumeSucceeded()) return
   actions.cancelSelect()
   successVisible.value = true
@@ -150,36 +164,18 @@ onLoad(async (query) => {
       throw new Error('当前 IM 用户 ID 未初始化，请重新登录')
     }
 
-    if (chatType.value === 'group') {
+    if (chatType.value === 'group' && !businessId.value) {
       try {
-        const gid = businessId.value || (await resolveBusinessTarget())
-        if (gid) {
-          const detail = await fetchGroupDetail(gid)
-          memberCount.value = detail.memberCount || 0
-        }
+        businessId.value = await resolveBusinessTarget()
       } catch {
-        memberCount.value = 0
+        businessId.value = ''
       }
     }
 
-    await chatStore.loadMessages(conv.id)
-    if (chatType.value === 'group' && businessId.value) {
-      try {
-        const ms = await fetchGroupMembers(businessId.value)
-        const map: Record<string, string> = {}
-        for (const m of ms) {
-          const r = m.memberRemark?.trim()
-          if (r) map[m.id] = r
-        }
-        memberRemarkMap.value = map
-        memberCount.value = ms.length
-        const me = userStore.profile?.id
-        const self = me ? ms.find((m) => m.id === me) : undefined
-        if (self) myRole.value = self.role
-      } catch {
-        // 成员备注加载失败时不影响聊天
-      }
-    }
+    await Promise.all([
+      chatStore.loadMessages(conv.id),
+      chatType.value === 'group' ? refreshGroupMeta() : Promise.resolve(),
+    ])
     await nextTick()
     scrollToBottom()
   } catch (e) {
@@ -292,6 +288,36 @@ async function resolveBusinessTarget(): Promise<string> {
   return ''
 }
 
+/** 进群 / 退群 / 踢人后标题旁人数要跟着变，不能只在首次进入时拉一次 */
+async function refreshGroupMeta() {
+  if (chatType.value !== 'group') return
+  let gid = businessId.value
+  if (!gid) {
+    try {
+      gid = await resolveBusinessTarget()
+    } catch {
+      return
+    }
+  }
+  if (!gid) return
+  businessId.value = gid
+  try {
+    const ms = await fetchGroupMembers(gid)
+    const map: Record<string, string> = {}
+    for (const m of ms) {
+      const r = m.memberRemark?.trim()
+      if (r) map[m.id] = r
+    }
+    memberRemarkMap.value = map
+    memberCount.value = ms.length
+    const me = userStore.profile?.id
+    const self = me ? ms.find((m) => m.id === me) : undefined
+    if (self) myRole.value = self.role
+  } catch {
+    // 人数刷新失败时保留当前值
+  }
+}
+
 async function goToProfile() {
   const id = await resolveBusinessTarget()
   if (!id) {
@@ -399,7 +425,9 @@ async function startVoiceRecord() {
       uni.showToast({ title: '录音失败', icon: 'none' })
     })
 
-    recorder.start({ format: 'mp3' })
+    recorder.start({
+      format: uni.getSystemInfoSync().platform === 'ios' ? 'aac' : 'mp3',
+    })
     recordingTimer = setInterval(() => {
       recordingSeconds.value += 1
       if (recordingSeconds.value >= 60) {

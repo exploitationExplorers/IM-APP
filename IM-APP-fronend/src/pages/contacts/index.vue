@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { usePullRefresh } from '@/composables/usePullRefresh'
 import { useTabBar } from '@/composables/useTabBar'
 import type { Contact, ContactListSort, GroupPreview } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
@@ -41,10 +41,11 @@ function refreshContacts() {
   })
 }
 
-// tabBar 页会常驻，onMounted 只跑一次，切回来必须重新拉才能看到新加的好友
-onShow(() => {
-  void Promise.all([refreshContacts(), contactStore.loadGroups()])
-})
+function refreshDirectory() {
+  return Promise.all([refreshContacts(), contactStore.loadGroups()])
+}
+
+const { refreshing, onRefresherRefresh } = usePullRefresh(refreshDirectory)
 
 watch(keyword, () => {
   clearTimeout(searchTimer)
@@ -125,7 +126,11 @@ function closeMenus() {
     <scroll-view
       scroll-y
       class="body"
+      refresher-enabled
+      refresher-default-style="black"
+      :refresher-triggered="refreshing"
       :lower-threshold="80"
+      @refresherrefresh="onRefresherRefresh"
       @scrolltolower="onLoadMore"
       @scroll="onScroll"
     >
