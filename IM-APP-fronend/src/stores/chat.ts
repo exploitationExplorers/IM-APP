@@ -15,6 +15,7 @@ import {
   onIMEvent,
   onUserStatusChanged,
   deleteLocalMessage,
+  sendAtTextMessage,
   sendCardMessage,
   sendFileMessage,
   sendForwardMessage,
@@ -479,6 +480,20 @@ export const useChatStore = defineStore('chat', () => {
     )
   }
 
+  async function sendAtText(
+    conversationId: string,
+    content: string,
+    senderId: string,
+    atUsers: Array<{ atUserID: string; groupNickname: string }>,
+  ) {
+    const target = targetOf(requireConversation(conversationId))
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'text', content),
+      () => sendAtTextMessage(target, content, atUsers.map((a) => a.atUserID), atUsers),
+    )
+  }
+
   async function sendImage(conversationId: string, filePath: string, senderId: string) {
     const target = targetOf(requireConversation(conversationId))
     await sendWithPlaceholder(
@@ -660,6 +675,7 @@ export const useChatStore = defineStore('chat', () => {
     loadMoreMessages,
     markAsRead,
     sendText,
+    sendAtText,
     sendImage,
     sendCard,
     sendFile,
