@@ -137,17 +137,17 @@ func (r *DataRepo) SetGroupAddFriend(ctx context.Context, groupID string, enable
 	return err
 }
 
-// DissolveGroup 解散群：标记 dissolved + 状态日志（不扩展 groups 列）
+// DissolveGroup 解散群：标记 dismissed（与 server 群状态规范一致）+ 状态日志（不扩展 groups 列）
 func (r *DataRepo) DissolveGroup(ctx context.Context, groupID, reason, operatorID string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `UPDATE groups SET status='dissolved' WHERE id=$1::uuid`, groupID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE groups SET status='dismissed' WHERE id=$1::uuid`, groupID); err != nil {
 		return err
 	}
-	if err := r.logGroupStatusTx(ctx, tx, groupID, "dissolved", reason, operatorID); err != nil {
+	if err := r.logGroupStatusTx(ctx, tx, groupID, "dismissed", reason, operatorID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

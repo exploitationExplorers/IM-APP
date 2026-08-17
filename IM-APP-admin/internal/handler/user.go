@@ -98,7 +98,7 @@ func (h *DataHandler) setRestriction(c *gin.Context, restrType string) {
 		return
 	}
 	if err := h.Data.SetRestriction(c.Request.Context(), c.Param("id"), restrType, req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -112,7 +112,7 @@ func (h *DataHandler) BanUser(c *gin.Context) {
 		return
 	}
 	if err := h.Data.BanUser(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason+" 封禁状态->"+boolStr(*req.Banned))

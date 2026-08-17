@@ -35,7 +35,8 @@ type Config struct {
 func Load() Config {
 	return Config{
 		HTTPAddr:           getenv("HTTP_ADDR", ":8081"),
-		DatabaseURL:        getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
+		// 默认值不携带口令，避免弱默认口令被复用；生产必须显式配置 DATABASE_URL
+		DatabaseURL:        getenv("DATABASE_URL", "postgres://im@127.0.0.1:5433/im_app?sslmode=disable"),
 		AdminJWTSecret:     adminJWTSecret(),
 		JWTIssuer:          "im-admin",
 		JWTAudience:        "im-admin-web",
@@ -101,6 +102,19 @@ func adminJWTSecret() string {
 		return v
 	}
 	return "im-admin-dev-secret-change-me"
+}
+
+// WeakJWTSecret 报告 JWT 密钥是否过弱（长度 <32 字节，或命中已知默认值）。
+// 生产环境应拒绝使用弱密钥，否则攻击者可伪造任意管理员 token。
+func (c Config) WeakJWTSecret() bool {
+	if len(c.AdminJWTSecret) < 32 {
+		return true
+	}
+	switch c.AdminJWTSecret {
+	case "im-admin-dev-secret-change-me", "im-local-dev-secret-change-me":
+		return true
+	}
+	return false
 }
 
 func getenv(key, fallback string) string {

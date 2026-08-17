@@ -17,7 +17,7 @@ type DataRepo struct{ DB *pgxpool.Pool }
 // ===== 用户管理（清单 03） =====
 
 const userSelect = `
-	SELECT u.id::text, COALESCE(u.public_id,''), u.phone_e164, u.country_code, u.nickname, u.avatar,
+	SELECT u.id::text, COALESCE(u.public_id,''), COALESCE(u.phone_e164,''), u.country_code, u.nickname, u.avatar,
 	       COALESCE(u.status,'active'), u.created_at,
 	       (SELECT COUNT(*) FROM friendships f WHERE f.user_id=u.id),
 	       (SELECT COUNT(*) FROM group_members gm WHERE gm.user_id=u.id),

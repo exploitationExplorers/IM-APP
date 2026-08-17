@@ -60,6 +60,14 @@ func (s *OpsService) SaveSystemLimits(ctx context.Context, l *models.SystemLimit
 	return s.Repo.SaveSystemLimits(ctx, l, operatorID)
 }
 
+func (s *OpsService) GetFeatureFlags(ctx context.Context) (*models.FeatureFlags, error) {
+	return s.Repo.GetFeatureFlags(ctx)
+}
+
+func (s *OpsService) SaveFeatureFlags(ctx context.Context, flags *models.FeatureFlags, operatorID string) error {
+	return s.Repo.SaveFeatureFlags(ctx, flags, operatorID)
+}
+
 func (s *OpsService) PublishSystemLimits(ctx context.Context, operatorID string) error {
 	return s.Repo.PublishSystemLimits(ctx, operatorID)
 }

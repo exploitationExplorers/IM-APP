@@ -126,7 +126,7 @@ func (r *AuthRepo) CreateSession(ctx context.Context, adminID, refreshHash, devi
 	err := r.DB.QueryRow(ctx, `
 		INSERT INTO admin_sessions(admin_id, refresh_token_hash, device, ip, user_agent, expires_at)
 		VALUES($1,$2,$3,$4,$5,$6) RETURNING id::text`,
-		adminID, refreshHash, device, ip, ua, expiresAt).Scan(&id)
+		adminID, refreshHash, truncateStr(device, 128), truncateStr(ip, 64), truncateStr(ua, 256), expiresAt).Scan(&id)
 	return id, err
 }
 
@@ -160,7 +160,7 @@ func (r *AuthRepo) InsertLoginLog(ctx context.Context, adminID string, success b
 	_, err := r.DB.Exec(ctx, `
 		INSERT INTO admin_login_logs(admin_id, success, fail_reason, ip, user_agent, request_id)
 		VALUES($1,$2,$3,$4,$5,$6)`,
-		nullableUUID(adminID), success, failReason, ip, ua, requestID)
+		nullableUUID(adminID), success, truncateStr(failReason, 128), truncateStr(ip, 64), truncateStr(ua, 256), truncateStr(requestID, 64))
 	return err
 }
 
@@ -170,7 +170,7 @@ func (r *AuthRepo) ListLoginLogs(ctx context.Context, limit, offset int) ([]mode
 		return nil, 0, err
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT l.id, l.admin_id::text, COALESCE(a.nickname,''), l.success, l.fail_reason,
+		SELECT l.id, COALESCE(l.admin_id::text, ''), COALESCE(a.nickname,''), l.success, l.fail_reason,
 		       l.ip, l.user_agent, l.request_id, l.created_at
 		FROM admin_login_logs l LEFT JOIN admin_users a ON a.id = l.admin_id
 		ORDER BY l.created_at DESC LIMIT $1 OFFSET $2`, limit, offset)

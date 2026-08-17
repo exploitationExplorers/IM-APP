@@ -27,7 +27,7 @@ func (h *OpsHandler) CreateCountry(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.CreateCountry(c.Request.Context(), c2); err != nil {
-		response.Fail(c, http.StatusBadRequest, "创建失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "创建失败", err)
 		return
 	}
 	c.Set("auditReason", "新增国家 "+c2.Code)
@@ -41,7 +41,7 @@ func (h *OpsHandler) UpdateCountryStatus(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.UpdateCountryEnabled(c.Request.Context(), c.Param("code"), *req.Enabled); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -73,7 +73,7 @@ func (h *OpsHandler) GetSmsLog(c *gin.Context) {
 }
 
 func (h *OpsHandler) SmsStatistics(c *gin.Context) {
-	days := atoi(c.Query("days"), 7)
+	days := clampInt(atoi(c.Query("days"), 7), 1, 90)
 	st, err := h.Svc.SmsStatistics(c.Request.Context(), days)
 	if err != nil {
 		response.FailErr(c, 500, "查询失败", err)

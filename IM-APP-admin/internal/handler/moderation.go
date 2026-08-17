@@ -28,7 +28,7 @@ func (h *OpsHandler) CreateSensitiveWord(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.CreateSensitiveWord(c.Request.Context(), w); err != nil {
-		response.Fail(c, http.StatusBadRequest, "创建失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "创建失败", err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -42,7 +42,7 @@ func (h *OpsHandler) ImportSensitiveWords(c *gin.Context) {
 	}
 	n, err := h.Svc.ImportSensitiveWords(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "导入失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "导入失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -56,7 +56,7 @@ func (h *OpsHandler) UpdateSensitiveWord(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.UpdateSensitiveWord(c.Request.Context(), c.Param("id"), w); err != nil {
-		response.Fail(c, http.StatusBadRequest, "更新失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "更新失败", err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -71,7 +71,7 @@ func (h *OpsHandler) SetSensitiveWordStatus(c *gin.Context) {
 		return
 	}
 	if err := h.Svc.SetSensitiveWordStatus(c.Request.Context(), c.Param("id"), req.Status); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
@@ -97,6 +97,24 @@ func (h *OpsHandler) ListProfileModerations(c *gin.Context) {
 	response.OKPage(c, list, total, page, size)
 }
 
+// ApproveProfile 同意资料审核：pending → approved
+func (h *OpsHandler) ApproveProfile(c *gin.Context) {
+	var req struct {
+		Field  string `json:"field" binding:"required"`
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "必须填写原因")
+		return
+	}
+	if err := h.Svc.ApproveProfile(c.Request.Context(), c.Param("userId"), req.Field, middleware.AdminID(c)); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
+		return
+	}
+	c.Set("auditReason", "同意资料审核："+req.Field)
+	response.OK(c, gin.H{"ok": true})
+}
+
 func (h *OpsHandler) RejectProfile(c *gin.Context) {
 	var req struct {
 		Field  string `json:"field" binding:"required"`
@@ -106,14 +124,15 @@ func (h *OpsHandler) RejectProfile(c *gin.Context) {
 		response.BadRequest(c, "必须填写原因")
 		return
 	}
-	if err := h.Svc.HandleProfileModeration(c.Request.Context(), c.Param("userId"), req.Field, "rejected", req.Reason, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+	if err := h.Svc.RejectProfile(c.Request.Context(), c.Param("userId"), req.Field, req.Reason, middleware.AdminID(c)); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
 	response.OK(c, gin.H{"ok": true})
 }
 
+// RestoreProfile 恢复待审核（重新进入队列）：rejected/approved → pending
 func (h *OpsHandler) RestoreProfile(c *gin.Context) {
 	var req struct {
 		Field  string `json:"field" binding:"required"`
@@ -123,10 +142,10 @@ func (h *OpsHandler) RestoreProfile(c *gin.Context) {
 		response.BadRequest(c, "必须填写原因")
 		return
 	}
-	if err := h.Svc.HandleProfileModeration(c.Request.Context(), c.Param("userId"), req.Field, "restored", req.Reason, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+	if err := h.Svc.ReopenProfile(c.Request.Context(), c.Param("userId"), req.Field, middleware.AdminID(c)); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
-	c.Set("auditReason", req.Reason)
+	c.Set("auditReason", "恢复待审核："+req.Field)
 	response.OK(c, gin.H{"ok": true})
 }

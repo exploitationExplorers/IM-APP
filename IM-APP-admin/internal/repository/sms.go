@@ -95,7 +95,7 @@ func (r *OpsRepo) SmsStatistics(ctx context.Context, days int) (*models.SmsStati
 		SELECT COUNT(*),
 		       COALESCE(SUM(CASE WHEN status='sent' OR status='success' THEN 1 ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0)
-		FROM sms_send_logs WHERE created_at >= NOW() - ($1 || ' days')::interval`, days).Scan(&st.Total, &st.Success, &st.Failed); err != nil {
+		FROM sms_send_logs WHERE created_at >= NOW() - make_interval(days => $1)`, days).Scan(&st.Total, &st.Success, &st.Failed); err != nil {
 		return nil, err
 	}
 	if st.Total > 0 {
@@ -106,10 +106,10 @@ func (r *OpsRepo) SmsStatistics(ctx context.Context, days int) (*models.SmsStati
 		       COUNT(*),
 		       COALESCE(SUM(CASE WHEN status='sent' OR status='success' THEN 1 ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0)
-		FROM sms_send_logs WHERE created_at >= NOW() - ($1 || ' days')::interval
+		FROM sms_send_logs WHERE created_at >= NOW() - make_interval(days => $1)
 		GROUP BY d ORDER BY d`, days)
 	if err != nil {
-		return st, nil
+		return st, err
 	}
 	defer rows.Close()
 	for rows.Next() {

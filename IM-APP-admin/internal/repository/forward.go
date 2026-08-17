@@ -131,10 +131,14 @@ func (r *OpsRepo) CancelForwardTask(ctx context.Context, taskID, operatorID, rea
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE forward_tasks SET status='cancelled', updated_at=NOW()
-		WHERE id=$1::uuid AND status IN ('pending','processing')`, taskID); err != nil {
+		WHERE id=$1::uuid AND status IN ('pending','processing')`, taskID)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return tx.Commit(ctx) // 终态任务无需取消，也不写取消审计
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE forward_task_targets SET status='cancelled', finished_at=NOW()
@@ -155,11 +159,23 @@ func (r *OpsRepo) RetryFailedTargets(ctx context.Context, taskID, operatorID str
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
+	// 终态任务（cancelled/success）不可重试，先校验任务状态
+	var taskStatus string
+	if err := tx.QueryRow(ctx, `SELECT status FROM forward_tasks WHERE id=$1::uuid`, taskID).Scan(&taskStatus); err != nil {
+		return 0, err
+	}
+	if taskStatus != "pending" && taskStatus != "processing" && taskStatus != "failed" {
+		return 0, tx.Commit(ctx) // 终态任务不重试
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE forward_task_targets SET status='pending', fail_code='', finished_at=NULL
 		WHERE task_id=$1::uuid AND status='failed' AND attempts < 3`, taskID)
 	if err != nil {
 		return 0, err
+	}
+	if tag.RowsAffected() == 0 {
+		// 无 failed 目标可重试：不改任务状态、不写审计
+		return 0, tx.Commit(ctx)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE forward_tasks SET status='processing', updated_at=NOW() WHERE id=$1::uuid`, taskID); err != nil {

@@ -10,8 +10,8 @@ type AppVersion struct {
 	Version      string    `json:"version"`
 	Description  string    `json:"description"`
 	DownloadURL  string    `json:"downloadUrl"`
-	ForceUpgrade bool      `json:"forceUpgrade"`
-	Status       string    `json:"status"` // draft|published
+	ForceUpgrade *bool     `json:"forceUpgrade"` // *bool 区分"未传"与"false"，避免部分更新被零值覆盖
+	Status       string    `json:"status"`       // draft|published
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
@@ -60,4 +60,16 @@ type SystemLimits struct {
 type SystemLimitsRequest struct {
 	Limits *SystemLimits `json:"limits" binding:"required"`
 	Reason string        `json:"reason" binding:"required"`
+}
+
+// FeatureFlags 功能开关（供 meta /features 返回，APP 端读取）
+type FeatureFlags struct {
+	MFA    bool `json:"mfa"`    // MFA 多因素认证
+	Report bool `json:"report"` // 举报功能
+}
+
+type FeatureFlagsRequest struct {
+	MFA    *bool  `json:"mfa"`
+	Report *bool  `json:"report"`
+	Reason string `json:"reason" binding:"required"`
 }

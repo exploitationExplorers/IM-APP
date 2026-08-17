@@ -11,7 +11,7 @@ type AppGroup struct {
 	OwnerID     string    `json:"ownerId"`
 	OwnerName   string    `json:"ownerName,omitempty"`
 	MemberCount int64     `json:"memberCount"`
-	Status      string    `json:"status"` // normal|banned|dissolved|muted
+	Status      string    `json:"status"` // normal|banned|dismissed|muted
 	AllMuted    bool      `json:"allMuted"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
@@ -32,12 +32,14 @@ type AppGroupMember struct {
 }
 
 type MuteAllRequest struct {
-	Muted  bool   `json:"muted" binding:"required"`
+	// *bool 允许显式传 false（解除全员禁言），validator 对指针 required 判空而非零值
+	Muted  *bool  `json:"muted" binding:"required"`
 	Reason string `json:"reason" binding:"required"`
 }
 
 type MemberAddFriendRequest struct {
-	Enabled bool   `json:"enabled" binding:"required"`
+	// *bool 允许显式传 false（关闭加好友），validator 对指针 required 判空而非零值
+	Enabled *bool  `json:"enabled" binding:"required"`
 	Reason  string `json:"reason" binding:"required"`
 }
 
