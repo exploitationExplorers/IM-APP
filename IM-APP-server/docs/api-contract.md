@@ -520,7 +520,9 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### POST `/api/v1/groups/:id/invitations`
 
-邀请好友入群。**Body** `{ "userIds": ["uuid"] }`
+群主/管理员邀请好友入群：直接写入群成员并同步 OpenIM（不走待接受邀请）。已在群中或非好友会被跳过。
+
+**Body** `{ "userIds": ["uuid"] }`
 
 ### POST `/api/v1/group-invitations/:token/accept`
 

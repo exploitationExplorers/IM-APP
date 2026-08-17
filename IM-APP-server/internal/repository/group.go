@@ -712,30 +712,82 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 	if err != nil || (role != "owner" && role != "admin") {
 		return 0, ErrForbidden
 	}
-	var convID string
-	if err := r.DB.QueryRow(ctx, `SELECT conversation_id::text FROM groups WHERE id=$1`, groupID).Scan(&convID); err != nil {
+
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
 		return 0, err
 	}
+	defer tx.Rollback(ctx)
+
+	var convID, status string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(conversation_id::text,''), status
+		FROM groups WHERE id=$1::uuid FOR UPDATE`, groupID).Scan(&convID, &status); err != nil {
+		return 0, err
+	}
+	if status != "active" {
+		return 0, ErrForbidden
+	}
+
+	seen := map[string]bool{uid: true}
 	count := 0
-	for _, inviteeID := range userIDs {
-		if inviteeID == uid {
+	for _, rawID := range userIDs {
+		inviteeID := strings.TrimSpace(rawID)
+		if inviteeID == "" || seen[inviteeID] {
 			continue
 		}
-		var exists bool
-		_ = r.DB.QueryRow(ctx, `
-			SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2)`,
-			groupID, inviteeID).Scan(&exists)
-		if exists {
+		if _, parseErr := uuid.Parse(inviteeID); parseErr != nil {
 			continue
 		}
-		token := uuid.NewString()
-		_, err := r.DB.Exec(ctx, `
-			INSERT INTO group_invitations(group_id, inviter_id, invitee_id, token, status)
-			VALUES($1::uuid,$2::uuid,$3::uuid,$4,'pending')`, groupID, uid, inviteeID, token)
-		if err != nil {
+		seen[inviteeID] = true
+
+		var eligible bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM friendships f
+				JOIN users u ON u.id=f.friend_id
+				WHERE f.user_id=$1::uuid AND f.friend_id=$2::uuid
+				  AND COALESCE(u.status,'active')='active'
+			)`, uid, inviteeID).Scan(&eligible); err != nil {
+			return 0, err
+		}
+		if !eligible {
 			continue
+		}
+
+		var alreadyMember bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)`,
+			groupID, inviteeID).Scan(&alreadyMember); err != nil {
+			return 0, err
+		}
+		if alreadyMember {
+			continue
+		}
+
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO group_members(group_id, user_id, role)
+			VALUES($1::uuid,$2::uuid,'member')
+			ON CONFLICT DO NOTHING`, groupID, inviteeID); err != nil {
+			return 0, err
+		}
+		if r.LegacyChatEnabled && convID != "" {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO conversation_members(conversation_id, user_id, unread_count)
+				VALUES($1::uuid, $2::uuid, 0) ON CONFLICT DO NOTHING`, convID, inviteeID); err != nil {
+				return 0, err
+			}
+		}
+		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, map[string]string{
+			"userId": inviteeID,
+		}); err != nil {
+			return 0, err
 		}
 		count++
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
 	}
 	return count, nil
 }
