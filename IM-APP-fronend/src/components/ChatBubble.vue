@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage } from '@/types'
 import { formatClock, splitTextWithLinks } from '@/utils/format'
@@ -8,8 +8,25 @@ const props = defineProps<{
   message: ChatMessage
   mine: boolean
   avatar: string
+  fallbackAvatar?: string
   nickname?: string
 }>()
+
+/** 头像加载失败（死链/空对象）时切换到业务侧兜底头像，避免一直显示灰色占位 */
+const avatarSrc = ref(props.avatar)
+
+watch(
+  () => props.avatar,
+  (v) => {
+    avatarSrc.value = v
+  },
+)
+
+function onAvatarError() {
+  if (props.fallbackAvatar && avatarSrc.value !== props.fallbackAvatar) {
+    avatarSrc.value = props.fallbackAvatar
+  }
+}
 
 const showNickname = computed(() => !props.mine && !!props.nickname)
 
@@ -153,9 +170,10 @@ function openLink(url: string) {
     <image
       v-if="!mine"
       class="avatar"
-      :src="avatar"
+      :src="avatarSrc"
       mode="aspectFill"
       @click="onAvatarClick"
+      @error="onAvatarError"
     />
     <view class="content-wrap">
       <text v-if="showNickname" class="nickname">{{ nickname }}</text>
@@ -228,7 +246,7 @@ function openLink(url: string) {
       </view>
       <text class="time">{{ timeText }}</text>
     </view>
-    <image v-if="mine" class="avatar" :src="avatar" mode="aspectFill" />
+    <image v-if="mine" class="avatar" :src="avatarSrc" mode="aspectFill" @error="onAvatarError" />
   </view>
 </template>
 

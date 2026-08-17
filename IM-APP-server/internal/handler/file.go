@@ -141,7 +141,18 @@ func (h *FileHandler) Complete(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "fileId 必填")
 		return
 	}
-	f, err := h.Files.MarkReady(c.Request.Context(), req.FileID, middleware.UserID(c))
+	userID := middleware.UserID(c)
+	objectKey, err := h.Files.FindPendingByID(c.Request.Context(), req.FileID, userID)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "文件不存在或已处理")
+		return
+	}
+	// 校验对象真实存在于 MinIO，避免空包/上传失败的 URL 被标记 ready（Android PUT 空包问题导致头像 404）
+	if h.MinIO != nil && h.MinIO.Available() && !h.MinIO.ObjectExists(c.Request.Context(), objectKey) {
+		response.Fail(c, http.StatusBadRequest, "文件未上传成功，请重新上传")
+		return
+	}
+	f, err := h.Files.MarkReady(c.Request.Context(), req.FileID, userID)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "文件不存在或已处理")
 		return
