@@ -374,7 +374,7 @@ async function startVoiceRecord() {
     voiceDraft.value = null
     clearRecordingTimer()
 
-    recorder.onStop = (res: { tempFilePath?: string; duration?: number }) => {
+    recorder.onStop((res: { tempFilePath?: string; duration?: number }) => {
       recording.value = false
       clearRecordingTimer()
       const path = res.tempFilePath || ''
@@ -384,19 +384,20 @@ async function startVoiceRecord() {
         rawDuration > 0 ? Math.max(1, Math.round(rawDuration / 1000)) : Math.max(1, recordingSeconds.value)
       if (!path) {
         voiceMode.value = false
+        uni.showToast({ title: '录音文件无效', icon: 'none' })
         return
       }
       voiceDraft.value = { path, duration }
-    }
+    })
 
-    recorder.onError = () => {
+    recorder.onError(() => {
       recording.value = false
       clearRecordingTimer()
       voiceMode.value = false
       voiceDraft.value = null
       cleanupBrowserRecorder()
       uni.showToast({ title: '录音失败', icon: 'none' })
-    }
+    })
 
     recorder.start({ format: 'mp3' })
     recordingTimer = setInterval(() => {
@@ -492,7 +493,26 @@ function stopVoiceRecord() {
   recorder.stop()
 }
 
+async function waitForVoiceDraft(timeoutMs = 3000): Promise<{ path: string; duration: number } | null> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (voiceDraft.value?.path) return voiceDraft.value
+    if (!recording.value && !voiceDraft.value?.path) return null
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return voiceDraft.value?.path ? voiceDraft.value : null
+}
+
 async function sendVoiceDraft() {
+  if (recording.value) {
+    stopVoiceRecord()
+    const draftAfterStop = await waitForVoiceDraft()
+    if (!draftAfterStop?.path) {
+      uni.showToast({ title: '请先录音', icon: 'none' })
+      return
+    }
+  }
+
   if (!voiceDraft.value?.path) {
     uni.showToast({ title: '请先录音', icon: 'none' })
     return
@@ -690,10 +710,11 @@ function pickImage() {
 
 <style scoped lang="scss">
 .room {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #f5f5f5;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -704,6 +725,7 @@ function pickImage() {
   box-sizing: content-box;
   background: #ffffff;
   border-bottom: 1rpx solid #ececec;
+  flex-shrink: 0;
 }
 
 .back-btn {
@@ -807,6 +829,7 @@ function pickImage() {
 .composer {
   background: #f7f7f7;
   border-top: 1rpx solid #e8e8e8;
+  flex-shrink: 0;
 }
 
 .emoji-panel-shell {
@@ -976,5 +999,12 @@ function pickImage() {
   align-items: center;
   justify-content: center;
   font-size: 44rpx;
+}
+</style>
+
+<style lang="scss">
+page {
+  height: 100%;
+  overflow: hidden;
 }
 </style>

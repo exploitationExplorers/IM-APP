@@ -66,7 +66,10 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "聊天",
-        "navigationBarBackgroundColor": "#FFFFFF"
+        "navigationBarBackgroundColor": "#FFFFFF",
+        "app-plus": {
+          "softinputMode": "adjustResize"
+        }
       }
     },
     {

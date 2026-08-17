@@ -2,7 +2,8 @@
     "version" : "1.0",
     "configurations" : [
         {
-            "customPlaygroundType" : "local",
+            "customPlaygroundType" : "device",
+            "packageName" : "com.myim.chat",
             "playground" : "custom",
             "type" : "uni-app:app-android"
         }
