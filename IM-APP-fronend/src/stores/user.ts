@@ -19,7 +19,9 @@ import {
 } from '@/utils/request'
 import { initOpenIM, logoutOpenIM } from '@/utils/openim'
 import { applyLoginPhone, clearLoginPhone, saveLoginPhone } from '@/utils/login-phone'
+import { syncPushRegistration, unregisterPushRegistration } from '@/utils/push-register'
 import { useChatStore } from '@/stores/chat'
+import { useChatSettingsStore } from '@/stores/chatSettings'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(getToken())
@@ -37,6 +39,10 @@ export const useUserStore = defineStore('user', () => {
     setRefreshToken(res.refreshToken)
     // IM 登录失败不应挡住业务登录，进聊天页时还会再试一次
     startIMSession()
+    const settings = useChatSettingsStore()
+    if (settings.notificationPermissionAsked && settings.message) {
+      void syncPushRegistration()
+    }
   }
 
   async function loginPassword(phone: string, password: string, countryCode?: string) {
@@ -77,6 +83,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function logout() {
+    await unregisterPushRegistration().catch(() => undefined)
     try {
       if (refreshToken.value) {
         await logoutCurrentDevice()
@@ -113,6 +120,10 @@ export const useUserStore = defineStore('user', () => {
     if (token.value) {
       startIMSession()
       loadProfile().catch(() => undefined)
+      const settings = useChatSettingsStore()
+      if (settings.notificationPermissionAsked && settings.message) {
+        void syncPushRegistration()
+      }
     }
   }
 

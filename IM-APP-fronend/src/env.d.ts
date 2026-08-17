@@ -74,6 +74,21 @@ interface PlusNative {
     Bitmap?: new (id: string) => PlusNativeObjBitmap
   }
   io?: PlusIo
+  os?: {
+    name?: string
+    version?: string
+  }
+  android?: {
+    requestPermissions?: (
+      permissions: string[],
+      successCallback: (result: {
+        granted?: string[]
+        deniedPresent?: string[]
+        deniedAlways?: string[]
+      }) => void,
+      errorCallback?: (err: unknown) => void,
+    ) => void
+  }
 }
 
 declare const plus: PlusNative | undefined

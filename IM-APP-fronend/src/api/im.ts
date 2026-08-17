@@ -80,3 +80,24 @@ export async function clearConversationHistory(
     data: { peerType, peerId },
   })
 }
+
+export async function registerPushToken(input: {
+  platform: string
+  channel?: string
+  deviceToken: string
+  enabled?: boolean
+}): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>({
+    url: '/im/me/push-token',
+    method: 'POST',
+    data: input,
+  })
+}
+
+export async function unregisterPushToken(deviceToken: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>({
+    url: '/im/me/push-token',
+    method: 'DELETE',
+    data: { deviceToken },
+  })
+}
