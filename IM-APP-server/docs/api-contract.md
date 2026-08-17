@@ -668,7 +668,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### POST `/api/v1/files/uploads`
 
-创建上传任务，获取预签名 PUT 地址。
+创建上传任务，获取预签名上传地址。H5 用 `uploadUrl` 做 PUT；App 用 `formUrl` + `formData` 走 `uni.uploadFile`（字段名 `file`），不要 PUT ArrayBuffer。
 
 **Body**
 ```json
@@ -684,13 +684,17 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ```json
 {
   "file": { "id": "uuid", "status": "pending" },
-  "uploadUrl": "https://...",
+  "uploadUrl": "https://...预签名 PUT...",
+  "formUrl": "https://www.ke58.com/minio/im-uploads",
+  "formData": {
+    "key": "uploads/.../uuid.jpg",
+    "policy": "...",
+    "x-amz-algorithm": "AWS4-HMAC-SHA256"
+  },
   "headers": {},
   "expiresIn": 900
 }
 ```
-
-客户端 PUT 二进制到 `uploadUrl` 后，调用完成接口。
 
 ### POST `/api/v1/files/uploads/:fileId/complete`
 

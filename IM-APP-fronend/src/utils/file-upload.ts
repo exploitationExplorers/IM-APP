@@ -19,7 +19,14 @@ interface AppXHR {
   send: (data?: ArrayBuffer) => void
 }
 
-const canUseFetch = typeof fetch === 'function'
+/** App WebView 也有 fetch，但不能用来读 file:// / _doc 本地图，也不能可靠 PUT MinIO */
+function isAppPlatform(): boolean {
+  try {
+    return uni.getSystemInfoSync().uniPlatform === 'app'
+  } catch {
+    return false
+  }
+}
 
 function guessContentType(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase() || ''
@@ -95,10 +102,11 @@ function readAppFile(filePath: string, fallbackName = 'avatar.jpg'): Promise<Ima
             }
             const bytes = dataUrlToArrayBuffer(result)
             const fileName = file.name || getFileName(filePath, fallbackName)
+            const meta = withImageMeta(fileName, file.type || '')
             resolve({
               bytes,
-              fileName,
-              contentType: file.type || guessContentType(fileName),
+              fileName: meta.fileName,
+              contentType: meta.contentType,
               size: bytes.byteLength,
             })
           }
@@ -111,28 +119,40 @@ function readAppFile(filePath: string, fallbackName = 'avatar.jpg'): Promise<Ima
   })
 }
 
+function withImageMeta(fileName: string, contentType: string): { fileName: string; contentType: string } {
+  const type = contentType && contentType !== 'application/octet-stream'
+    ? contentType
+    : guessContentType(fileName)
+  if (type !== 'application/octet-stream' && fileName.includes('.')) {
+    return { fileName, contentType: type }
+  }
+  return { fileName: fileName.includes('.') ? fileName : 'avatar.jpg', contentType: 'image/jpeg' }
+}
+
 async function loadImageBytes(localPath?: string, remoteUrl?: string): Promise<ImageBytes> {
   if (localPath) {
-    if (canUseFetch) {
+    if (!isAppPlatform() && typeof fetch === 'function') {
       const blob = await fetch(localPath).then((res) => res.blob())
       const fileName = getFileName(localPath)
+      const meta = withImageMeta(fileName, blob.type)
       return {
         bytes: await blob.arrayBuffer(),
-        fileName,
-        contentType: blob.type || guessContentType(fileName),
+        fileName: meta.fileName,
+        contentType: meta.contentType,
         size: blob.size,
       }
     }
     return readAppFile(localPath)
   }
   if (remoteUrl) {
-    if (canUseFetch) {
+    if (!isAppPlatform() && typeof fetch === 'function') {
       const blob = await fetch(remoteUrl).then((res) => res.blob())
       const ext = blob.type.split('/')[1] || 'jpg'
+      const meta = withImageMeta(`avatar.${ext}`, blob.type)
       return {
         bytes: await blob.arrayBuffer(),
-        fileName: `avatar.${ext}`,
-        contentType: blob.type || 'image/jpeg',
+        fileName: meta.fileName,
+        contentType: meta.contentType,
         size: blob.size,
       }
     }
@@ -213,7 +233,7 @@ async function putBytes(
   contentType: string,
   headers: Record<string, string> = {},
 ): Promise<void> {
-  if (canUseFetch) {
+  if (!isAppPlatform() && typeof fetch === 'function') {
     const res = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
@@ -255,15 +275,99 @@ async function uploadViaTask(
   return file.id
 }
 
-/** 上传头像并返回 fileId（接口 12 → PUT → 接口 13） */
+function getLocalFileMeta(filePath: string): Promise<{ fileName: string; contentType: string; size: number }> {
+  return new Promise((resolve, reject) => {
+    const fail = () => reject(new Error('读取图片失败'))
+    const finish = (size: number, name: string, type: string) => {
+      const meta = withImageMeta(name || 'avatar.jpg', type)
+      if (size <= 0) {
+        fail()
+        return
+      }
+      resolve({ fileName: meta.fileName, contentType: meta.contentType, size })
+    }
+    uni.getFileInfo({
+      filePath,
+      success: (res) => finish(res.size, getFileName(filePath), ''),
+      fail: () => {
+        plus.io.resolveLocalFileSystemURL(
+          toAppFileUrl(filePath),
+          (rawEntry) => {
+            const entry = rawEntry as unknown as PlusIoFileEntry
+            if (typeof entry.file !== 'function') {
+              fail()
+              return
+            }
+            entry.file((file) => {
+              finish(file.size || 0, file.name || getFileName(filePath), file.type || '')
+            }, fail)
+          },
+          fail,
+        )
+      },
+    })
+  })
+}
+
+function postLocalFile(
+  formUrl: string,
+  filePath: string,
+  formData: Record<string, string>,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    uni.uploadFile({
+      url: formUrl,
+      filePath,
+      name: 'file',
+      formData,
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve()
+          return
+        }
+        reject(new Error(`上传失败(${res.statusCode})`))
+      },
+      fail: (err) => reject(new Error(err.errMsg || '上传失败')),
+    })
+  })
+}
+
+/** App 端用本地路径直传，避免 PUT ArrayBuffer 被发成空包 */
+async function uploadViaNativeFile(purpose: UploadPurpose, localPath: string): Promise<string> {
+  const meta = await getLocalFileMeta(localPath)
+  const init = await createUploadTask({
+    purpose,
+    fileName: meta.fileName,
+    contentType: meta.contentType,
+    size: meta.size,
+  })
+  const fileId = init.file.id
+  if (!fileId) {
+    throw new Error('创建上传任务失败')
+  }
+  if (!init.formUrl || !init.formData) {
+    throw new Error('当前环境不支持文件上传')
+  }
+  await postLocalFile(init.formUrl, localPath, init.formData)
+  const file = await completeUpload(fileId)
+  return file.id
+}
+
+/** 上传头像并返回 fileId（接口 12 → PUT/POST → 接口 13） */
 export async function uploadAvatarForProfile(
   localPath?: string,
   remoteUrl?: string,
 ): Promise<string> {
+  if (isAppPlatform() && localPath) {
+    return uploadViaNativeFile('avatar', localPath)
+  }
   return uploadViaTask('avatar', await loadImageBytes(localPath, remoteUrl))
 }
 
-/** 上传举报截图并返回 fileId（接口 12 → PUT → 接口 13，purpose=image） */
+/** 上传举报截图并返回 fileId（接口 12 → PUT/POST → 接口 13，purpose=image） */
 export async function uploadReportImage(localPath: string): Promise<string> {
+  if (isAppPlatform()) {
+    return uploadViaNativeFile('image', localPath)
+  }
   return uploadViaTask('image', await loadImageBytes(localPath))
 }

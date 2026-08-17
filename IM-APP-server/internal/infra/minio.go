@@ -93,17 +93,9 @@ func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, e
 	if !m.Available() {
 		return PresignResult{}, fmt.Errorf("minio not configured")
 	}
-	signClient := m.Client
-	publicPathPrefix := ""
-	if m.signClient != nil {
-		signClient = m.signClient
-		publicPathPrefix = m.publicPathPrefix
-	} else if m.PublicURL != "" {
-		var err error
-		signClient, publicPathPrefix, err = newPublicSignClient(m.PublicURL, m.AccessKey, m.SecretKey)
-		if err != nil {
-			return PresignResult{}, err
-		}
+	signClient, publicPathPrefix, err := m.signClientForPublic()
+	if err != nil {
+		return PresignResult{}, err
 	}
 	u, err := signClient.PresignedPutObject(ctx, m.Bucket, objectKey, expiry)
 	if err != nil {
@@ -133,6 +125,61 @@ func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, e
 		ObjectKey: objectKey,
 		ExpiresIn: int(expiry.Seconds()),
 	}, nil
+}
+
+func (m *MinIO) signClientForPublic() (*minio.Client, string, error) {
+	if m.signClient != nil {
+		return m.signClient, m.publicPathPrefix, nil
+	}
+	if m.PublicURL != "" {
+		return newPublicSignClient(m.PublicURL, m.AccessKey, m.SecretKey)
+	}
+	return m.Client, "", nil
+}
+
+// PresignPost 生成 App 端 uni.uploadFile 可用的预签名 POST 表单。
+// Android 上 PUT ArrayBuffer 经常变成空包，MinIO 仍返回 200，头像就会是空白。
+func (m *MinIO) PresignPost(ctx context.Context, objectKey, contentType string, expiry time.Duration) (string, map[string]string, error) {
+	if !m.Available() {
+		return "", nil, fmt.Errorf("minio not configured")
+	}
+	signClient, _, err := m.signClientForPublic()
+	if err != nil {
+		return "", nil, err
+	}
+	policy := minio.NewPostPolicy()
+	if err := policy.SetBucket(m.Bucket); err != nil {
+		return "", nil, err
+	}
+	if err := policy.SetKey(objectKey); err != nil {
+		return "", nil, err
+	}
+	if err := policy.SetExpires(time.Now().UTC().Add(expiry)); err != nil {
+		return "", nil, err
+	}
+	if contentType != "" && contentType != "application/octet-stream" {
+		if err := policy.SetContentType(contentType); err != nil {
+			return "", nil, err
+		}
+	}
+	if err := policy.SetContentLengthRange(1, 20<<20); err != nil {
+		return "", nil, err
+	}
+	_, formData, err := signClient.PresignedPostPolicy(ctx, policy)
+	if err != nil {
+		return "", nil, err
+	}
+	var postURL string
+	if m.PublicURL != "" {
+		postURL = fmt.Sprintf("%s/%s", strings.TrimSuffix(m.PublicURL, "/"), m.Bucket)
+	} else {
+		scheme := "http"
+		if m.UseSSL {
+			scheme = "https"
+		}
+		postURL = fmt.Sprintf("%s://%s/%s", scheme, m.Endpoint, m.Bucket)
+	}
+	return postURL, formData, nil
 }
 
 func newPublicSignClient(publicURL, accessKey, secretKey string) (*minio.Client, string, error) {

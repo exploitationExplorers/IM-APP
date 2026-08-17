@@ -93,7 +93,8 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 	}
 	objectKey := fmt.Sprintf("uploads/%s/%s%s", userID, uuid.NewString(), ext)
 
-	var uploadURL, fileURL string
+	var uploadURL, fileURL, formURL string
+	var formData map[string]string
 	if h.MinIO != nil && h.MinIO.Available() {
 		res, err := h.MinIO.PresignPut(c.Request.Context(), objectKey, req.ContentType, 15*time.Minute)
 		if err != nil {
@@ -102,6 +103,11 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 		}
 		uploadURL = res.UploadURL
 		fileURL = res.FileURL
+		formURL, formData, err = h.MinIO.PresignPost(c.Request.Context(), objectKey, req.ContentType, 15*time.Minute)
+		if err != nil {
+			response.Fail(c, http.StatusInternalServerError, "生成上传凭证失败")
+			return
+		}
 	} else {
 		// 开发模式：直接给一个可访问地址
 		base := strings.TrimSuffix(c.Request.Host, ":8080")
@@ -117,6 +123,8 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 	response.OK(c, models.UploadInitResult{
 		File:      f,
 		UploadURL: uploadURL,
+		FormURL:   formURL,
+		FormData:  formData,
 		ExpiresIn: 900,
 	})
 }

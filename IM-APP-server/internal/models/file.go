@@ -25,6 +25,8 @@ type CreateUploadRequest struct {
 type UploadInitResult struct {
 	File      FileObject        `json:"file"`
 	UploadURL string            `json:"uploadUrl"`
+	FormURL   string            `json:"formUrl,omitempty"`
+	FormData  map[string]string `json:"formData,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	ExpiresIn int               `json:"expiresIn"`
 }
