@@ -22,6 +22,9 @@ import { applyLoginPhone, clearLoginPhone, saveLoginPhone } from '@/utils/login-
 import { syncPushRegistration, unregisterPushRegistration } from '@/utils/push-register'
 import { useChatStore } from '@/stores/chat'
 import { useChatSettingsStore } from '@/stores/chatSettings'
+import { useContactStore } from '@/stores/contact'
+import { useGroupStore } from '@/stores/group'
+import { useMassSendStore } from '@/stores/massSend'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(getToken())
@@ -97,6 +100,9 @@ export const useUserStore = defineStore('user', () => {
     clearLoginPhone()
     clearToken()
     useChatStore().reset()
+    useContactStore().reset()
+    useGroupStore().reset()
+    useMassSendStore().resetAll()
     await logoutOpenIM().catch(() => undefined)
     uni.reLaunch({ url: '/pages/auth/sign-in' })
   }
