@@ -30,6 +30,10 @@ type Config struct {
 	MaxBodyBytes    int64
 	TrustedProxies  []string
 	RequestIDHeader string
+
+	// 与 server 服务的内部调用（方案 A：写操作走 server 执行业务 + OpenIM 同步）
+	ServerBaseURL     string // server 地址，如 http://127.0.0.1:8080
+	ServerInternalKey string // 与 server 的 IM_INTERNAL_API_KEY 一致
 }
 
 func Load() Config {
@@ -50,6 +54,8 @@ func Load() Config {
 		MaxBodyBytes:       1 << 20, // 1MB
 		TrustedProxies:     splitCSV(getenv("ADMIN_TRUSTED_PROXIES", "")),
 		RequestIDHeader:    "X-Request-Id",
+		ServerBaseURL:      getenv("SERVER_BASE_URL", ""),
+		ServerInternalKey:  getenv("SERVER_INTERNAL_KEY", ""),
 	}
 }
 

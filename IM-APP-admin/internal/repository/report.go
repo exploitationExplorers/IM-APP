@@ -63,6 +63,15 @@ func (r *DataRepo) ListReports(ctx context.Context, status, targetType, keyword 
 	return out, total, nil
 }
 
+// CountResolvedReports 统计某对象被结案（成立）的举报数（举报联动用）
+func (r *DataRepo) CountResolvedReports(ctx context.Context, targetType, targetID string) (int64, error) {
+	var n int64
+	err := r.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM reports
+		WHERE target_type=$1 AND target_id=$2 AND status='resolved'`, targetType, targetID).Scan(&n)
+	return n, err
+}
+
 func (r *DataRepo) GetReport(ctx context.Context, reportID string) (*models.ReportDetail, error) {
 	rp, err := scanReport(r.DB.QueryRow(ctx, `
 		SELECT id::text, report_no, COALESCE(reporter_id::text,''), target_type, target_id,

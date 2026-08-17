@@ -120,6 +120,9 @@ INSERT INTO admin_permissions (code, name, module, description) VALUES
   ('users.restrict.message','发消息限制', 'user',  '禁止/恢复用户发消息'),
   ('users.ban',            '封禁用户', 'user',     '封禁/解封用户'),
   ('users.sessions.revoke', '强制下线', 'user',    '强制用户全部设备下线'),
+  ('users.reset.profile',   '重置头像昵称', 'user', '强制重置用户头像/昵称'),
+  ('users.phone.search',    '手机号查询', 'user',   '按手机号搜索用户（保护隐私）'),
+  ('users.cancel',          '注销用户', 'user',     '注销用户账号'),
   ('reports.read',         '查看举报', 'report',   '查看举报列表/详情/历史'),
   ('reports.assign',       '指派举报', 'report',   '领取/指派举报工单'),
   ('reports.handle',       '处理举报', 'report',   '标记处理中/补充备注'),
@@ -166,3 +169,77 @@ INSERT INTO admin_permissions (code, name, module, description) VALUES
   ('exports.create',       '创建导出任务', 'audit', '创建异步导出任务'),
   ('exports.read.all',     '查看全部导出', 'audit', '查询/下载任意导出任务')
 ON CONFLICT (code) DO NOTHING;
+
+-- ============================================================
+-- 表 / 字段注释
+-- ============================================================
+
+COMMENT ON TABLE admin_users IS '管理员账号（管理端独立账号，不复用 APP users 表）';
+COMMENT ON COLUMN admin_users.id IS '管理员ID';
+COMMENT ON COLUMN admin_users.username IS '登录账号（唯一）';
+COMMENT ON COLUMN admin_users.password_hash IS '密码哈希（bcrypt）';
+COMMENT ON COLUMN admin_users.nickname IS '昵称';
+COMMENT ON COLUMN admin_users.status IS '状态：active=启用 / disabled=停用';
+COMMENT ON COLUMN admin_users.mfa_secret IS 'MFA 密钥（启用时；空=未启用）';
+COMMENT ON COLUMN admin_users.last_login_at IS '最后登录时间';
+COMMENT ON COLUMN admin_users.created_at IS '创建时间';
+COMMENT ON COLUMN admin_users.updated_at IS '更新时间';
+
+COMMENT ON TABLE admin_sessions IS '管理员登录会话（refresh token 只存哈希，可撤销）';
+COMMENT ON COLUMN admin_sessions.id IS '会话ID';
+COMMENT ON COLUMN admin_sessions.admin_id IS '管理员ID';
+COMMENT ON COLUMN admin_sessions.refresh_token_hash IS 'refresh token 哈希（唯一）';
+COMMENT ON COLUMN admin_sessions.device IS '设备标识';
+COMMENT ON COLUMN admin_sessions.ip IS '登录IP';
+COMMENT ON COLUMN admin_sessions.user_agent IS '登录 UA';
+COMMENT ON COLUMN admin_sessions.expires_at IS '过期时间';
+COMMENT ON COLUMN admin_sessions.revoked_at IS '撤销时间（NULL=有效）';
+COMMENT ON COLUMN admin_sessions.created_at IS '创建时间';
+
+COMMENT ON TABLE admin_roles IS '管理角色（支持启停；super_admin 为内置超管角色）';
+COMMENT ON COLUMN admin_roles.id IS '角色ID';
+COMMENT ON COLUMN admin_roles.name IS '角色名称';
+COMMENT ON COLUMN admin_roles.code IS '角色编码（唯一；super_admin=超级管理员）';
+COMMENT ON COLUMN admin_roles.description IS '角色描述';
+COMMENT ON COLUMN admin_roles.status IS '状态：active=启用 / disabled=停用（停用后权限不生效）';
+COMMENT ON COLUMN admin_roles.created_at IS '创建时间';
+
+COMMENT ON TABLE admin_permissions IS '权限码字典（模块/权限点）';
+COMMENT ON COLUMN admin_permissions.id IS '权限ID';
+COMMENT ON COLUMN admin_permissions.code IS '权限码（唯一）';
+COMMENT ON COLUMN admin_permissions.name IS '权限名称';
+COMMENT ON COLUMN admin_permissions.module IS '所属模块，如 system/user/group/report';
+COMMENT ON COLUMN admin_permissions.description IS '权限说明';
+
+COMMENT ON TABLE admin_role_permissions IS '角色-权限关联';
+COMMENT ON COLUMN admin_role_permissions.role_id IS '角色ID';
+COMMENT ON COLUMN admin_role_permissions.permission_id IS '权限ID';
+
+COMMENT ON TABLE admin_user_roles IS '管理员-角色关联（一个管理员可多个角色）';
+COMMENT ON COLUMN admin_user_roles.admin_id IS '管理员ID';
+COMMENT ON COLUMN admin_user_roles.role_id IS '角色ID';
+
+COMMENT ON TABLE admin_login_logs IS '管理员登录日志（失败锁定依据）';
+COMMENT ON COLUMN admin_login_logs.id IS '日志ID';
+COMMENT ON COLUMN admin_login_logs.admin_id IS '管理员ID（登录失败时可为空）';
+COMMENT ON COLUMN admin_login_logs.success IS '是否成功';
+COMMENT ON COLUMN admin_login_logs.fail_reason IS '失败原因（account_not_found/bad_password/locked 等）';
+COMMENT ON COLUMN admin_login_logs.ip IS '登录IP';
+COMMENT ON COLUMN admin_login_logs.user_agent IS '登录 UA';
+COMMENT ON COLUMN admin_login_logs.request_id IS '请求ID（联查用）';
+COMMENT ON COLUMN admin_login_logs.created_at IS '登录时间';
+
+COMMENT ON TABLE admin_audit_logs IS '管理员操作审计日志（不可删除，普通管理员无权删除）';
+COMMENT ON COLUMN admin_audit_logs.id IS '日志ID';
+COMMENT ON COLUMN admin_audit_logs.admin_id IS '操作管理员ID';
+COMMENT ON COLUMN admin_audit_logs.action IS '操作动作码';
+COMMENT ON COLUMN admin_audit_logs.resource IS '资源类型';
+COMMENT ON COLUMN admin_audit_logs.resource_id IS '资源ID';
+COMMENT ON COLUMN admin_audit_logs.reason IS '操作原因（写操作必须填写）';
+COMMENT ON COLUMN admin_audit_logs.before_value IS '变更前值';
+COMMENT ON COLUMN admin_audit_logs.after_value IS '变更后值';
+COMMENT ON COLUMN admin_audit_logs.ip IS '操作者IP';
+COMMENT ON COLUMN admin_audit_logs.user_agent IS '操作者 UA';
+COMMENT ON COLUMN admin_audit_logs.request_id IS '请求ID';
+COMMENT ON COLUMN admin_audit_logs.result IS '结果：success=成功 / denied=被拒 / failed=失败';
+COMMENT ON COLUMN admin_audit_logs.created_at IS '操作时间';

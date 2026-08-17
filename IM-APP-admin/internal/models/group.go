@@ -18,9 +18,13 @@ type AppGroup struct {
 
 type AppGroupDetail struct {
 	AppGroup
-	JoinMode             string `json:"joinMode"`
-	AllowMemberAddFriend bool   `json:"allowMemberAddFriend"`
-	Announcement         string `json:"announcement"`
+	JoinMode             string     `json:"joinMode"`
+	AllowMemberAddFriend bool       `json:"allowMemberAddFriend"`
+	Announcement         string     `json:"announcement"`
+	MaxMembers           int        `json:"maxMembers"`              // 群成员上限（server 024）
+	DissolvedAt          *time.Time `json:"dissolvedAt,omitempty"`   // 解散时间
+	DissolvedByAdminId   string     `json:"dissolvedByAdminId,omitempty"` // 解散操作管理员ID
+	DissolveReason       string     `json:"dissolveReason,omitempty"`     // 解散原因
 }
 
 type AppGroupMember struct {
@@ -53,6 +57,9 @@ type AdminRecallRequest struct {
 	Reason         string `json:"reason" binding:"required"`
 	TicketNo       string `json:"ticketNo,omitempty"`
 	IdempotencyKey string `json:"idempotencyKey"`
+	ClientMsgID    string `json:"clientMsgId"`    // OpenIM 消息 clientMsgID（server 反查定位撤回）
+	ConversationID string `json:"conversationId"` // 或直接提供定位
+	Seq            int64  `json:"seq"`
 }
 
 type RecallLog struct {

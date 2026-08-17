@@ -17,6 +17,7 @@ type ForwardTask struct {
 	RiskLevel      string     `json:"riskLevel,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
+	IsDuplicate    bool       `json:"isDuplicate"` // 同 idempotency_key 存在更早任务时为重复提交
 }
 
 type ForwardTarget struct {

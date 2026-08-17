@@ -10092,6 +10092,68 @@
         ]
       }
     },
+    "/api/admin/v1/users/phone-search": {
+      "get": {
+        "operationId": "GET_api_admin_v1_users_phone-search",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "/api/admin/v1/users/phone-search",
+        "tags": [
+          "用户管理"
+        ]
+      }
+    },
     "/api/admin/v1/users/{id}": {
       "get": {
         "description": "用户详情（资料/好友/群/限制/举报统计）。接口路径：/api/admin/v1/users/:id",
@@ -10263,6 +10325,89 @@
           }
         },
         "summary": "封禁/解封用户（封禁撤销其全部登录会话）",
+        "tags": [
+          "用户管理"
+        ]
+      }
+    },
+    "/api/admin/v1/users/{id}/cancel": {
+      "post": {
+        "operationId": "POST_api_admin_v1_users_{id}_cancel",
+        "parameters": [
+          {
+            "description": "资源 ID（UUID）",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "/api/admin/v1/users/:id/cancel",
         "tags": [
           "用户管理"
         ]
@@ -10845,6 +10990,89 @@
           }
         },
         "summary": "用户被举报记录",
+        "tags": [
+          "用户管理"
+        ]
+      }
+    },
+    "/api/admin/v1/users/{id}/reset-profile": {
+      "post": {
+        "operationId": "POST_api_admin_v1_users_{id}_reset-profile",
+        "parameters": [
+          {
+            "description": "资源 ID（UUID）",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "/api/admin/v1/users/:id/reset-profile",
         "tags": [
           "用户管理"
         ]

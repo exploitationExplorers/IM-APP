@@ -5,3 +5,5 @@
 -- ============================================================
 
 ALTER TABLE app_versions ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'draft';
+
+COMMENT ON COLUMN app_versions.status IS '发布状态：draft=草稿 / published=已发布（见 001 建表其余字段注释）';

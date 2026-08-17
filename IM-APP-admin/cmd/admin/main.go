@@ -70,8 +70,16 @@ func main() {
 		MFATTL:     5 * time.Minute,
 	}
 	rbacSvc := &service.RBACService{Rbac: rbacRepo, Auth: authRepo, Audit: auditRepo}
-	dataSvc := &service.DataService{Repo: &repository.DataRepo{DB: pool}}
-	opsSvc := &service.OpsService{Repo: &repository.OpsRepo{DB: pool}}
+	dataSvc := &service.DataService{
+		Repo:              &repository.DataRepo{DB: pool},
+		ServerBaseURL:     cfg.ServerBaseURL,
+		ServerInternalKey: cfg.ServerInternalKey,
+	}
+	opsSvc := &service.OpsService{
+		Repo:              &repository.OpsRepo{DB: pool},
+		ServerBaseURL:     cfg.ServerBaseURL,
+		ServerInternalKey: cfg.ServerInternalKey,
+	}
 
 	authH := &handler.AuthHandler{
 		Svc:     authSvc,
