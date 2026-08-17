@@ -588,8 +588,12 @@ export async function sendVoiceMessage(
   const seconds = Math.max(1, Math.round(duration > 120 ? duration / 1000 : duration))
   let message: MessageItem
   if (isAppPlatform) {
-    // 原生 SDK 按本地路径读文件，file:// 协议头会读不到
-    const soundPath = filePath.replace(/^file:\/\//, '')
+    let soundPath = filePath
+    try {
+      const converted = plus?.io?.convertLocalFileSystemURL?.(filePath)
+      if (converted) soundPath = converted
+    } catch {}
+    soundPath = soundPath.replace(/^file:\/\//, '')
     message = await imCall<MessageItem>(
       IMMethods.CreateSoundMessageFromFullPath,
       soundPath,
