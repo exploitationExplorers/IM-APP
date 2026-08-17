@@ -501,6 +501,17 @@ func (c *Client) SendTextMessage(ctx context.Context, receiverID string, session
 	return result, err
 }
 
+// RevokeMessage 撤回 OpenIM 消息（按 conversationID + seq）
+func (c *Client) RevokeMessage(ctx context.Context, conversationID string, seq int64) error {
+	var result any
+	body := map[string]any{
+		"conversationID": conversationID,
+		"seq":            seq,
+		"userID":         c.cfg.AdminUser,
+	}
+	return c.postWithAdmin(ctx, "/msg/revoke_msg", body, &result)
+}
+
 // ConversationSettings 对应 OpenIM 的 Conversation 对象。
 // 字段名与 OpenIM JSON 完全一致，可直接作为 set_conversations 的 conversation 体回写。
 // recvMsgOpt 取值：0 正常接收 / 1 免打扰（不接收）/ 2 仅在线接收。

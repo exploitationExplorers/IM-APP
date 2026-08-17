@@ -236,6 +236,17 @@ func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJ
 	if enforceJoinMode && joinMode != "open" {
 		return models.GroupInfo{}, ErrApprovalRequired
 	}
+	// 校验群成员上限（024 扩展列 groups.max_members）
+	var curCount, maxMembers int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM group_members WHERE group_id=$1`, groupID).Scan(&curCount); err != nil {
+		return models.GroupInfo{}, err
+	}
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(max_members,200) FROM groups WHERE id=$1::uuid`, groupID).Scan(&maxMembers); err != nil {
+		return models.GroupInfo{}, err
+	}
+	if curCount >= maxMembers {
+		return models.GroupInfo{}, ErrGroupFull
+	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO group_members(group_id, user_id, role) VALUES($1,$2,'member')
 		ON CONFLICT DO NOTHING`, groupID, uid)
@@ -522,7 +533,8 @@ func (r *GroupRepo) Dismiss(ctx context.Context, groupID, operatorID string) err
 	}
 	defer tx.Rollback(ctx)
 	tag, err := tx.Exec(ctx, `
-		UPDATE groups g SET status='dismissed', updated_at=NOW()
+		UPDATE groups g SET status='dismissed', updated_at=NOW(),
+		       dissolved_at=NOW(), dissolved_by_admin_id=$2::uuid
 		FROM group_members gm
 		WHERE g.id=$1 AND gm.group_id=g.id AND gm.user_id=$2
 			AND gm.role='owner' AND g.status='active'`, groupID, operatorID)
@@ -538,12 +550,38 @@ func (r *GroupRepo) Dismiss(ctx context.Context, groupID, operatorID string) err
 	return tx.Commit(ctx)
 }
 
+// DismissByAdmin 管理端解散群（运营操作，无 owner 校验；同步 OpenIM）
+func (r *GroupRepo) DismissByAdmin(ctx context.Context, groupID, adminID, reason string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+		UPDATE groups SET status='dismissed', updated_at=NOW(),
+		       dissolved_at=NOW(), dissolved_by_admin_id=$2::uuid,
+		       dissolve_reason=$3
+		WHERE id=$1::uuid AND status<>'dismissed'`, groupID, adminID, reason)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrInvalidGroupOperation
+	}
+	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupDismissed, map[string]any{}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // ErrForbidden 无权访问
 var ErrForbidden = errors.New("forbidden")
 
 var ErrInvalidGroupOperation = errors.New("invalid group operation")
 
 var ErrApprovalRequired = errors.New("group approval required")
+
+var ErrGroupFull = errors.New("group member limit reached")
 
 func (r *GroupRepo) EnsureQRCode(ctx context.Context, groupID, uid string) (models.GroupQRCodeResult, error) {
 	tx, err := r.DB.Begin(ctx)

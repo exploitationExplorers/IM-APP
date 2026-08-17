@@ -42,18 +42,19 @@ type openIMWebhookResponse struct {
 }
 
 type OpenIMWebhookHandler struct {
-	Access    *repository.IMAccessRepo
-	Client    *im.Client
-	Secret    string
-	AdminUser string
-	AllowNets []*net.IPNet
+	Access       *repository.IMAccessRepo
+	Client       *im.Client
+	Restrictions *repository.RestrictionRepo
+	Secret       string
+	AdminUser    string
+	AllowNets    []*net.IPNet
 	// Pusher 消息推送服务（日志桩或真实 APNs/FCM 通道），AfterMessage 回调时触发。
 	Pusher service.PushService
 }
 
-func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, client *im.Client, secret, adminUser string, allowCIDRs []string, pusher service.PushService) *OpenIMWebhookHandler {
+func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, client *im.Client, restrictions *repository.RestrictionRepo, secret, adminUser string, allowCIDRs []string, pusher service.PushService) *OpenIMWebhookHandler {
 	return &OpenIMWebhookHandler{
-		Access: access, Client: client, Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
+		Access: access, Client: client, Restrictions: restrictions, Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
 		AllowNets: parseAllowNets(allowCIDRs), Pusher: pusher,
 	}
 }
@@ -90,6 +91,9 @@ func (h *OpenIMWebhookHandler) BeforeSingle(c *gin.Context) {
 			reason = "chat is not allowed"
 		}
 		c.JSON(http.StatusOK, denyWebhook(reason))
+		return
+	}
+	if h.checkMessageRestriction(c, senderID) {
 		return
 	}
 	c.JSON(http.StatusOK, allowWebhook())
@@ -129,7 +133,23 @@ func (h *OpenIMWebhookHandler) BeforeGroup(c *gin.Context) {
 		c.JSON(http.StatusOK, denyWebhook(reason))
 		return
 	}
+	if h.checkMessageRestriction(c, senderID) {
+		return
+	}
 	c.JSON(http.StatusOK, allowWebhook())
+}
+
+// checkMessageRestriction 检查发送者是否被管理端限制发消息（message 限制；命中则 deny 并返回 true）
+func (h *OpenIMWebhookHandler) checkMessageRestriction(c *gin.Context, senderID string) bool {
+	if h.Restrictions == nil {
+		return false
+	}
+	_, _, messageBanned, err := h.Restrictions.UserRestrictions(c.Request.Context(), senderID)
+	if err == nil && messageBanned {
+		c.JSON(http.StatusOK, denyWebhook("message restricted by admin"))
+		return true
+	}
+	return false
 }
 
 func (h *OpenIMWebhookHandler) AfterMessage(c *gin.Context) {

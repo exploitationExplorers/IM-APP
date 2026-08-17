@@ -24,6 +24,8 @@ import (
 var (
 	ErrForwardInvalidRequest = errors.New("invalid forward request")
 	ErrForwardUnavailable    = errors.New("forward service unavailable")
+	ErrForwardLimit          = errors.New("forward limit exceeded")
+	ErrForwardDisabled       = errors.New("forward disabled by admin")
 )
 
 // 单次 HTTP 请求只控制写库批次大小，不限制一个任务最终可以包含多少目标。
@@ -203,7 +205,46 @@ func (s *ForwardService) Submit(ctx context.Context, userID, taskID string) erro
 	if s.Kafka == nil || !s.Kafka.Available() {
 		return fmt.Errorf("%w: kafka is not configured", ErrForwardUnavailable)
 	}
+	if err := s.enforceLimit(ctx, userID, taskID); err != nil {
+		return err
+	}
 	return s.Repo.SubmitTask(ctx, userID, taskID)
+}
+
+// enforceLimit 提交前强制检查用户转发限额（enabled / 单次 / 每日 / 每小时）
+func (s *ForwardService) enforceLimit(ctx context.Context, userID, taskID string) error {
+	daily, hourly, single, enabled, err := s.Repo.GetForwardLimit(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return ErrForwardDisabled
+	}
+	task, err := s.Repo.GetTask(ctx, userID, taskID)
+	if err != nil {
+		return err
+	}
+	if task.TargetCount > int64(single) {
+		return fmt.Errorf("%w: 单次目标数 %d 超过上限 %d", ErrForwardLimit, task.TargetCount, single)
+	}
+	now := time.Now()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	dailyUsed, err := s.Repo.CountForwardTargetsSince(ctx, userID, dayStart)
+	if err != nil {
+		return err
+	}
+	if dailyUsed+task.TargetCount > int64(daily) {
+		return fmt.Errorf("%w: 今日转发量 %d 已超上限 %d", ErrForwardLimit, dailyUsed, daily)
+	}
+	hourStart := now.Truncate(time.Hour)
+	hourlyUsed, err := s.Repo.CountForwardTargetsSince(ctx, userID, hourStart)
+	if err != nil {
+		return err
+	}
+	if hourlyUsed+task.TargetCount > int64(hourly) {
+		return fmt.Errorf("%w: 本小时转发量 %d 已超上限 %d", ErrForwardLimit, hourlyUsed, hourly)
+	}
+	return nil
 }
 
 func (s *ForwardService) Cancel(ctx context.Context, userID, taskID, reason string) error {

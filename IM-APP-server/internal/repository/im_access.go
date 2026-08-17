@@ -105,6 +105,20 @@ func (r *IMAccessRepo) RecordMessageAudit(ctx context.Context, command, serverMs
 	return err
 }
 
+// FindAuditByClientMsgID 按 client_msg_id 反查消息审计（用于撤回定位 OpenIM 消息的 conversation_id + seq）
+func (r *IMAccessRepo) FindAuditByClientMsgID(ctx context.Context, clientMsgID string) (conversationID string, seq int64, found bool, err error) {
+	err = r.DB.QueryRow(ctx, `
+		SELECT conversation_id, seq FROM im_message_audit
+		WHERE client_msg_id=$1 ORDER BY id DESC LIMIT 1`, clientMsgID).Scan(&conversationID, &seq)
+	if err == pgx.ErrNoRows {
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, false, err
+	}
+	return conversationID, seq, true, nil
+}
+
 type IMSystemMessageReservation struct {
 	ID                 int64
 	Status             string

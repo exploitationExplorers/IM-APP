@@ -133,6 +133,7 @@ func main() {
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
+	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc}
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Service: imSvc}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
@@ -140,7 +141,7 @@ func main() {
 	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
 	pushSvc := service.NewLoggingPushService()
 	openIMWebhookH := handler.NewOpenIMWebhookHandler(
-		imAccessRepo, imClient, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
+		imAccessRepo, imClient, &repository.RestrictionRepo{DB: pool}, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
 	)
 	// 安全提醒：配置了 webhook 密钥却没配来源 CIDR 白名单时，authorized 会整体拒绝所有回调，
 	// 等同于 webhook 功能静默失效——显式打 warning，避免排查时一脸懵。
@@ -149,6 +150,9 @@ func main() {
 			"OpenIM 回调来源 IP 不在白名单内将被全部拒绝（webhook 实际失效）")
 	}
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
+	adminForwardH := &handler.AdminForwardHandler{Forward: forwardSvc}
+	adminUserH := &handler.AdminUserHandler{Restrictions: &repository.RestrictionRepo{DB: pool}, Client: imClient}
+	adminMessageH := &handler.AdminMessageHandler{Client: imClient, DB: pool, IMAccess: imAccessRepo}
 	favH := &handler.FavoriteHandler{Svc: favSvc}
 
 	r := gin.New()
@@ -186,6 +190,22 @@ func main() {
 		internalIM.POST("/reconcile", imInternalH.Reconcile)
 		internalIM.GET("/outbox", imInternalH.ListOutbox)
 		internalIM.POST("/outbox/:id/replay", imInternalH.ReplayOutbox)
+	}
+
+	// 管理后台内部接口（方案 A：admin 经 HTTP 调 server 执行业务逻辑 + OpenIM 同步）
+	internalAdmin := r.Group("/internal/admin")
+	internalAdmin.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+	{
+		internalAdmin.POST("/groups/:id/dismiss", adminGroupH.DismissGroup)
+		internalAdmin.POST("/groups/:id/mute", adminGroupH.MuteGroup)
+		internalAdmin.POST("/groups/:id/add-friend", adminGroupH.SetAddFriend)
+		internalAdmin.POST("/forward-tasks/:id/cancel", adminForwardH.CancelForwardTask)
+		internalAdmin.POST("/forward-tasks/:id/retry", adminForwardH.RetryForwardTask)
+		internalAdmin.POST("/users/:id/restriction", adminUserH.SetRestriction)
+		internalAdmin.POST("/users/:id/status", adminUserH.SetUserStatus)
+		internalAdmin.POST("/users/:id/sessions/revoke", adminUserH.RevokeSessions)
+		internalAdmin.POST("/users/:id/reset-profile", adminUserH.ResetProfile)
+		internalAdmin.POST("/messages/:id/recall", adminMessageH.RecallMessage)
 	}
 
 	api := r.Group("/api/v1")

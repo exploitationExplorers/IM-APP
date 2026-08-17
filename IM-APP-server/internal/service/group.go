@@ -282,6 +282,15 @@ func (s *GroupService) Dismiss(ctx context.Context, groupID, operatorID string) 
 	return s.Groups.Dismiss(ctx, internalID, operatorID)
 }
 
+// DismissByAdmin 管理端解散群（运营操作，无 owner 校验；同步 OpenIM）
+func (s *GroupService) DismissByAdmin(ctx context.Context, groupID, adminID, reason string) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.DismissByAdmin(ctx, internalID, adminID, reason)
+}
+
 func (s *GroupService) GetGroupRemark(ctx context.Context, groupID, uid string) (string, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
