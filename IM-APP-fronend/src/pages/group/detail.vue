@@ -17,7 +17,7 @@ import { APP_CONFIG } from '@/config'
 import { uploadAvatarForProfile } from '@/utils/file-upload'
 import type { GroupJoinMode } from '@/types'
 
-const PREVIEW_MEMBER_LIMIT = 6
+const PREVIEW_MEMBER_LIMIT = 4
 
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
@@ -46,6 +46,10 @@ const pinned = ref(false)
 
 function getMemberDisplayName(member: { nickname?: string; groupNickname?: string }) {
   return member.groupNickname || member.nickname || '成员'
+}
+
+function memberPreviewAvatar(avatar: string | undefined) {
+  return avatar || APP_CONFIG.defaultAvatarUrl
 }
 
 onLoad(async (query) => {
@@ -277,13 +281,22 @@ async function onLeaveOrDismiss() {
     <ImNavBar title="群组详情" @back="goBack" />
 
     <view class="card">
-      <view class="member-row" @click="goToMembers">
-        <view v-for="member in previewMembers" :key="member.id" class="member-item">
-          <image class="member-avatar" :src="member.avatar" mode="aspectFill" />
+      <view class="member-row">
+        <view
+          v-for="member in previewMembers"
+          :key="member.id"
+          class="member-item"
+          @click="goToMembers"
+        >
+          <image class="member-avatar" :src="memberPreviewAvatar(member.avatar)" mode="aspectFill" />
           <text class="member-name">{{ getMemberDisplayName(member) }}</text>
         </view>
-        <view v-if="memberList.length" class="add-member" @click.stop="goToMembers">
-          <view class="add-circle">＋</view>
+        <view class="member-item" @click.stop="goToMembers">
+          <image
+            class="add-circle-icon"
+            src="/static/icons/icon-add-member.svg"
+            mode="aspectFit"
+          />
         </view>
       </view>
       <view class="group-row" @click="goToMembers">
@@ -428,22 +441,27 @@ async function onLeaveOrDismiss() {
 .member-row {
   display: flex;
   align-items: flex-start;
-  gap: 18rpx;
-  padding: 20rpx 22rpx 8rpx;
+  gap: 12rpx;
+  padding: 24rpx 24rpx 8rpx;
   overflow: hidden;
 }
 
 .member-item {
-  width: 112rpx;
+  width: 128rpx;
+  flex: none;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8rpx;
 }
 
+.member-avatar,
+.add-circle-icon {
+  width: 96rpx;
+  height: 96rpx;
+}
+
 .member-avatar {
-  width: 92rpx;
-  height: 92rpx;
   border-radius: 50%;
   background: #eaeaea;
 }
@@ -456,26 +474,6 @@ async function onLeaveOrDismiss() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.add-member {
-  width: 112rpx;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding-top: 2rpx;
-}
-
-.add-circle {
-  width: 90rpx;
-  height: 90rpx;
-  border-radius: 50%;
-  border: 2rpx dashed #b8b8b8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 50rpx;
-  color: #8a8a8a;
 }
 
 .group-row,

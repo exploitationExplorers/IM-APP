@@ -193,6 +193,13 @@
       }
     },
     {
+      "path": "pages/group/invite",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "选择联络人"
+      }
+    },
+    {
       "path": "pages/group/admin",
       "style": {
         "navigationStyle": "custom",

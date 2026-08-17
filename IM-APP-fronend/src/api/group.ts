@@ -179,3 +179,14 @@ export async function removeGroupMember(groupId: string, memberUserId: string): 
   })
 }
 
+export async function inviteGroupMembers(
+  groupId: string,
+  userIds: string[],
+): Promise<{ ok: boolean; invitedCount: number }> {
+  return request<{ ok: boolean; invitedCount: number }>({
+    url: `/groups/${groupId}/invitations`,
+    method: 'POST',
+    data: { userIds },
+  })
+}
+

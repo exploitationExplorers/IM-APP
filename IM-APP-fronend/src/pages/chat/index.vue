@@ -4,6 +4,7 @@ import { onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ConversationItem from '@/components/ConversationItem.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
+import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
 import { useChatStore } from '@/stores/chat'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
@@ -128,6 +129,7 @@ function closeMenus() {
     </scroll-view>
 
     <ImTabBar current="chat" />
+    <ImNotificationPermissionDialog />
   </view>
 </template>
 

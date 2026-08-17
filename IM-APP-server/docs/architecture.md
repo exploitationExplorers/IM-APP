@@ -92,6 +92,7 @@ internal/
 ## 相关文档
 
 - [api-contract.md](./api-contract.md) — REST API 契约
+- [离线推送实现分析.md](./离线推送实现分析.md) — 与参考站对齐的离线推送：OpenIM 在线 vs 系统推送、前后端分工
 - [OpenIM对话后端接口与WebSocket开发规划.md](./OpenIM对话后端接口与WebSocket开发规划.md) — 后端实现与验收
 - [OpenIM服务器Webhook部署步骤.md](./OpenIM服务器Webhook部署步骤.md) — OpenIM 服务器回调启用步骤
 - [../README.md](../README.md) — 本地启动说明

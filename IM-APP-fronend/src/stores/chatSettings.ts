@@ -13,6 +13,8 @@ type ChatSettingsState = {
   sound: boolean
   /** 应用打开时是否震动（仅 Android 有效） */
   vibration: boolean
+  /** 是否已经弹出过参考站同款的通知授权询问（确认或取消都算问过） */
+  notificationPermissionAsked: boolean
 }
 
 const STORAGE_KEY = 'im_chat_settings_v1'
@@ -33,6 +35,7 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
   const voice = ref(true)
   const sound = ref(true)
   const vibration = ref(false)
+  const notificationPermissionAsked = ref(false)
 
   let hydrated = false
   function hydrate() {
@@ -47,6 +50,9 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     if (typeof parsed.voice === 'boolean') voice.value = parsed.voice
     if (typeof parsed.sound === 'boolean') sound.value = parsed.sound
     if (typeof parsed.vibration === 'boolean') vibration.value = parsed.vibration
+    if (typeof parsed.notificationPermissionAsked === 'boolean') {
+      notificationPermissionAsked.value = parsed.notificationPermissionAsked
+    }
   }
 
   function persist() {
@@ -57,6 +63,7 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
       voice: voice.value,
       sound: sound.value,
       vibration: vibration.value,
+      notificationPermissionAsked: notificationPermissionAsked.value,
     }
     uni.setStorageSync(STORAGE_KEY, JSON.stringify(payload))
   }
@@ -91,6 +98,11 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     persist()
   }
 
+  function setNotificationPermissionAsked(v: boolean) {
+    notificationPermissionAsked.value = v
+    persist()
+  }
+
   hydrate()
 
   return {
@@ -100,6 +112,7 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     voice,
     sound,
     vibration,
+    notificationPermissionAsked,
     hydrate,
     persist,
     setEnterToSend,
@@ -108,5 +121,6 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     setVoice,
     setSound,
     setVibration,
+    setNotificationPermissionAsked,
   }
 })

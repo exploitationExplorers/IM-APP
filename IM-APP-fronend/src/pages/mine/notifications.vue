@@ -4,7 +4,7 @@
       <view class="setting-content">
         <text class="setting-title">消息免打扰</text>
       </view>
-      <ImSwitch v-model="noDisturb" />
+          <ImSwitch :modelValue="noDisturb" @change="onNoDisturbChange" />
     </view>
 
     <template v-if="!noDisturb">
@@ -14,14 +14,14 @@
         <view class="setting-content">
           <text class="setting-title">新消息通知</text>
         </view>
-        <ImSwitch v-model="message" />
+          <ImSwitch :modelValue="message" @change="onMessageChange" />
       </view>
 
       <view class="setting-item">
         <view class="setting-content">
           <text class="setting-title">语音邀请</text>
         </view>
-        <ImSwitch v-model="voice" />
+          <ImSwitch :modelValue="voice" @change="onVoiceChange" />
       </view>
 
       <view class="section-title section-title-second">应用打开时</view>
@@ -30,7 +30,7 @@
         <view class="setting-content">
           <text class="setting-title">声音</text>
         </view>
-        <ImSwitch v-model="sound" />
+          <ImSwitch :modelValue="sound" @change="onSoundChange" />
       </view>
 
       <!-- #ifdef APP-ANDROID -->
@@ -38,7 +38,7 @@
         <view class="setting-content">
           <text class="setting-title">震动</text>
         </view>
-        <ImSwitch v-model="vibration" />
+          <ImSwitch :modelValue="vibration" @change="onVibrationChange" />
       </view>
       <!-- #endif -->
     </template>
@@ -53,9 +53,39 @@
 import { storeToRefs } from 'pinia'
 import ImSwitch from '@/components/ImSwitch.vue'
 import { useChatSettingsStore } from '@/stores/chatSettings'
+import { requestNotificationPermission } from '@/utils/notification-permission'
+import { syncPushRegistration, unregisterPushRegistration } from '@/utils/push-register'
 
 const settingsStore = useChatSettingsStore()
 const { noDisturb, message, voice, sound, vibration } = storeToRefs(settingsStore)
+
+function onNoDisturbChange(value: boolean) {
+  settingsStore.setNoDisturb(value)
+  void syncPushRegistration()
+}
+
+function onMessageChange(value: boolean) {
+  settingsStore.setMessage(value)
+  if (!value) {
+    void unregisterPushRegistration()
+    return
+  }
+  void requestNotificationPermission().then((granted) => {
+    if (granted) void syncPushRegistration()
+  })
+}
+
+function onVoiceChange(value: boolean) {
+  settingsStore.setVoice(value)
+}
+
+function onSoundChange(value: boolean) {
+  settingsStore.setSound(value)
+}
+
+function onVibrationChange(value: boolean) {
+  settingsStore.setVibration(value)
+}
 </script>
 
 <style scoped>
