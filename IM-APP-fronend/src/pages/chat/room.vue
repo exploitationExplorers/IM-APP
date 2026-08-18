@@ -12,7 +12,7 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useForwardStore } from '@/stores/forward'
-import { businessUserIdFromIM, chooseLocalFile, ensureIMLogin, imUserId } from '@/utils/openim'
+import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { resolveIMGroupByIM } from '@/api/im'
@@ -843,14 +843,18 @@ function onPlus() {
   }
 }
 
-/** 相册多选：一次最多 100 张，逐张发送保持顺序，单张失败不中断并汇总提示 */
+/** 相册 / 文件一次最多可选数量 */
+const MAX_PICK_COUNT = 9
+
+/** 相册多选：一次最多 9 张，逐张发送保持顺序，单张失败不中断并汇总提示 */
 function pickImage() {
   uni.chooseImage({
-    count: 100,
+    count: MAX_PICK_COUNT,
     sourceType: ['album'],
     success: async (res) => {
       showPlusPanel.value = false
-      const paths = res.tempFilePaths || []
+      // 各端选择器一般已按 count 限制，这里再截一次兜底
+      const paths = (res.tempFilePaths || []).slice(0, MAX_PICK_COUNT)
       let failed = 0
       for (const path of paths) {
         try {
@@ -894,14 +898,24 @@ function pickCard() {
   })
 }
 
-/** 选本地文件发送 */
+/** 选本地文件发送：一次最多 9 个（app 端原生选择器仅支持单选），逐个发送保持顺序，单个失败不中断并汇总提示 */
 async function pickFile() {
   showPlusPanel.value = false
   try {
-    const file = await chooseLocalFile()
-    await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
-    await nextTick()
-    scrollToBottom()
+    const files = await chooseLocalFiles(MAX_PICK_COUNT)
+    let failed = 0
+    for (const file of files) {
+      try {
+        await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
+        await nextTick()
+        scrollToBottom()
+      } catch {
+        failed++
+      }
+    }
+    if (failed) {
+      uni.showToast({ title: `${failed} 个文件发送失败`, icon: 'none' })
+    }
   } catch (e) {
     const msg = (e as Error).message
     if (msg && !msg.includes('未选择')) {
