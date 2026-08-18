@@ -129,6 +129,27 @@ func (r *ForwardRepo) GetTaskForWorker(ctx context.Context, taskID string) (mode
 	return task, err
 }
 
+// GetForwardLimit 查用户转发限额（无记录返回默认值：日 100 / 时 20 / 单次 10000 / 启用）
+func (r *ForwardRepo) GetForwardLimit(ctx context.Context, userID string) (daily, hourly, single int, enabled bool, err error) {
+	daily, hourly, single, enabled = 100, 20, 10000, true
+	err = r.DB.QueryRow(ctx, `
+		SELECT daily_limit, hourly_limit, single_targets, enabled
+		FROM forward_user_limits WHERE user_id=$1::uuid`, userID).Scan(&daily, &hourly, &single, &enabled)
+	if err == pgx.ErrNoRows {
+		return daily, hourly, single, enabled, nil
+	}
+	return daily, hourly, single, enabled, err
+}
+
+// CountForwardTargetsSince 统计用户某时间点后创建的转发任务目标总数（不含已取消）
+func (r *ForwardRepo) CountForwardTargetsSince(ctx context.Context, userID string, since time.Time) (int64, error) {
+	var n int64
+	err := r.DB.QueryRow(ctx, `
+		SELECT COALESCE(SUM(target_count),0) FROM forward_tasks
+		WHERE user_id=$1::uuid AND created_at >= $2 AND status <> 'cancelled'`, userID, since).Scan(&n)
+	return n, err
+}
+
 func (r *ForwardRepo) ListTasks(ctx context.Context, userID, status, cursor string, limit int) (models.ForwardTaskPage, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20

@@ -28,6 +28,17 @@ func (r *FileRepo) CreateFile(ctx context.Context, ownerID, purpose, fileName, c
 	return f, err
 }
 
+// FindPendingByID 查询待确认上传的文件，返回其对象键，供 Complete 做 MinIO 存在性校验
+func (r *FileRepo) FindPendingByID(ctx context.Context, fileID, ownerID string) (string, error) {
+	var objectKey string
+	err := r.DB.QueryRow(ctx, `
+		SELECT object_key FROM files
+		WHERE id=$1::uuid AND owner_id=$2::uuid AND status='pending'`,
+		fileID, ownerID,
+	).Scan(&objectKey)
+	return objectKey, err
+}
+
 // MarkReady 标记上传完成（仅 pending → ready）
 func (r *FileRepo) MarkReady(ctx context.Context, fileID, ownerID string) (models.FileObject, error) {
 	var f models.FileObject

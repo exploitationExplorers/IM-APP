@@ -2,17 +2,21 @@
 import { ref, onMounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { fetchUserProfile } from '@/api/user'
+import { sendGroupFriendRequest } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
 import type { UserInfo } from '@/types'
 
 const contactStore = useContactStore()
 const userId = ref('')
+/** 从群成员进入时带上，加好友走群来源接口（受群 allowMemberAddFriend 限制） */
+const groupId = ref('')
 const user = ref<UserInfo | null>(null)
 const message = ref('你好，我想加你为好友')
 const loading = ref(false)
 
 onLoad((query) => {
   userId.value = (query?.id as string) || ''
+  groupId.value = (query?.groupId as string) || ''
 })
 
 onMounted(async () => {
@@ -33,11 +37,20 @@ const isFriend = () => contactStore.contacts.some((c) => c.id === userId.value)
 async function onAddFriend() {
   if (!user.value) return
   try {
-    const res = await contactStore.addFriend(user.value.id, message.value)
-    uni.showToast({
-      title: res.status === 'accepted' ? '已添加好友' : '已发送好友申请',
-      icon: 'success',
-    })
+    if (groupId.value) {
+      // 群来源加好友走独立接口，受群设置 allowMemberAddFriend 约束
+      const res = await sendGroupFriendRequest(groupId.value, user.value.id, message.value)
+      uni.showToast({
+        title: res.status === 'accepted' ? '已添加好友' : '已发送好友申请',
+        icon: 'success',
+      })
+    } else {
+      const res = await contactStore.addFriend(user.value.id, message.value)
+      uni.showToast({
+        title: res.status === 'accepted' ? '已添加好友' : '已发送好友申请',
+        icon: 'success',
+      })
+    }
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }

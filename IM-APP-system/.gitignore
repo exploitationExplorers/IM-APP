@@ -2,3 +2,6 @@ node_modules/
 dist/
 .vite/
 *.local
+
+# Apifox 导出文档（本地参考，不入库）
+im.md

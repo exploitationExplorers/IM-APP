@@ -37,7 +37,10 @@ function goBack() {
 }
 
 function goScan() {
-  uni.navigateTo({ url: '/pages/contacts/scan' })
+  uni.navigateTo({
+    url: '/pages/contacts/scan',
+    fail: () => uni.showToast({ title: '无法打开扫码页', icon: 'none' }),
+  })
 }
 
 function viewProfile() {

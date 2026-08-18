@@ -1,386 +1,351 @@
 <script setup lang="ts">
-import { onMounted, reactive, shallowRef, watch } from "vue";
-import { ElMessage } from "element-plus";
-import { Delete, RefreshLeft, Search } from "@element-plus/icons-vue";
-import { getGroups, getGroupDetail, dissolveGroup as dissolveGroupApi, muteGroupAll, getGroupRecallLogs, getGroupReports } from "@/api/modules/admin";
-import type { Groups, Reports } from "@/api/interface";
+import { computed, reactive, shallowRef } from "vue";
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
+import { Search, Delete } from "@element-plus/icons-vue";
+import { getGroupMembersApi, postGroupRecallMessageApi, putGroupMemberAddFriendApi } from "@/api/modules/adminGroups";
+import type { AdminGroups } from "@/api/modules/adminGroups";
 
-type GroupStatus = "normal" | "muted" | "banned" | "dissolved" | "dismissed";
+type GroupStatus = "normal" | "muted" | "banned" | "dissolved";
 
-const statusLabels: Record<string, string> = {
+interface GroupMember {
+  userId: string;
+  nickname: string;
+  role: "member" | "owner";
+  joinedAt?: string;
+  mutedUntil?: string | null;
+}
+
+interface RecallRecord {
+  id: number;
+  operator: string;
+  operatorRole: string;
+  targetSender: string;
+  messagePreview: string;
+  reason: string;
+  createdAt: string;
+}
+
+interface GroupInfo {
+  id: number;
+  groupId: string;
+  name: string;
+  avatar: string;
+  owner: string;
+  ownerInternalId: string;
+  memberCount: number;
+  adminCount: number;
+  status: GroupStatus;
+  muted: boolean;
+  memberAddFriendEnabled: boolean;
+  createdAt: string;
+  notice: string;
+  recallCount: number;
+}
+
+interface GroupFilters {
+  keyword: string;
+  status: "" | GroupStatus;
+}
+
+const statusLabels: Record<GroupStatus, string> = {
   normal: "正常",
   muted: "全员禁言",
-  banned: "已封禁",
+  banned: "封禁",
   dissolved: "已解散",
-  dismissed: "已解散",
 };
 
-const statusTagTypes: Record<string, "info" | "warning" | "success" | "danger" | "primary"> = {
+const statusTagTypes: Record<GroupStatus, string> = {
   normal: "success",
   muted: "warning",
   banned: "danger",
   dissolved: "info",
-  dismissed: "info",
 };
 
-const joinModeLabels: Record<string, string> = {
-  open: "开放加入",
-  direct: "直接加入",
-  approval: "需审批",
-};
-
-const filters = reactive({
-  keyword: "",
-  status: "" as "" | GroupStatus,
-});
-const page = shallowRef(1);
-const size = shallowRef(20);
-const total = shallowRef(0);
-const loading = shallowRef(false);
-const items = shallowRef<Groups.GroupItem[]>([]);
-
+const filters = reactive<GroupFilters>({ keyword: "", status: "" });
+const currentPage = shallowRef(1);
+const pageSize = shallowRef(10);
 const detailVisible = shallowRef(false);
-const detailLoading = shallowRef(false);
-const selectedGroup = shallowRef<Groups.GroupDetail | null>(null);
-
-const dissolveVisible = shallowRef(false);
-const dissolveSubmitting = shallowRef(false);
-const dissolveTarget = shallowRef<Groups.GroupItem | Groups.GroupDetail | null>(null);
-const dissolveForm = reactive({
-  reason: "",
-  ticketNo: "",
-});
-
-const muteVisible = shallowRef(false);
-const muteSubmitting = shallowRef(false);
-const muteTarget = shallowRef<Groups.GroupItem | Groups.GroupDetail | null>(null);
-const muteNext = shallowRef(false);
-const muteForm = reactive({
-  reason: "",
-});
-
-const recallLogs = shallowRef<Groups.RecallLogItem[]>([]);
+const selectedGroup = shallowRef<GroupInfo | null>(null);
+const groupMembers = shallowRef<GroupMember[]>([]);
+const recallRecords = shallowRef<RecallRecord[]>([]);
+const recallFormRef = shallowRef<FormInstance>();
 const recallLoading = shallowRef(false);
-const recallPage = shallowRef(1);
-const recallSize = shallowRef(10);
-const recallTotal = shallowRef(0);
 
-const groupReports = shallowRef<Reports.ReportItem[]>([]);
-const groupReportsLoading = shallowRef(false);
-const groupReportsPage = shallowRef(1);
-const groupReportsSize = shallowRef(10);
-const groupReportsTotal = shallowRef(0);
+const groups = shallowRef<GroupInfo[]>([
+  {
+    id: 1,
+    groupId: "G200001",
+    name: "产品研发组",
+    avatar: "研",
+    owner: "陈安",
+    ownerInternalId: "U100001",
+    memberCount: 28,
+    adminCount: 3,
+    status: "normal",
+    muted: false,
+    memberAddFriendEnabled: true,
+    createdAt: "2026-03-10",
+    notice: "每周五下午3点开周会",
+    recallCount: 0,
+  },
+  {
+    id: 2,
+    groupId: "G200002",
+    name: "海外运营交流",
+    avatar: "运",
+    owner: "林诺",
+    ownerInternalId: "U100002",
+    memberCount: 156,
+    adminCount: 5,
+    status: "normal",
+    muted: false,
+    memberAddFriendEnabled: false,
+    createdAt: "2026-03-20",
+    notice: "禁止在群内发送广告",
+    recallCount: 2,
+  },
+  {
+    id: 3,
+    groupId: "G200003",
+    name: "技术分享群",
+    avatar: "技",
+    owner: "黄怡",
+    ownerInternalId: "U100005",
+    memberCount: 89,
+    adminCount: 2,
+    status: "muted",
+    muted: true,
+    memberAddFriendEnabled: true,
+    createdAt: "2026-04-05",
+    notice: "全员禁言中，仅管理员可发言",
+    recallCount: 1,
+  },
+  {
+    id: 4,
+    groupId: "G200004",
+    name: "游戏交流群",
+    avatar: "游",
+    owner: "王磊",
+    ownerInternalId: "U100004",
+    memberCount: 500,
+    adminCount: 8,
+    status: "banned",
+    muted: true,
+    memberAddFriendEnabled: false,
+    createdAt: "2026-04-18",
+    notice: "该群因违规已被封禁",
+    recallCount: 15,
+  },
+  {
+    id: 5,
+    groupId: "G200005",
+    name: "旧版公告群",
+    avatar: "公",
+    owner: "张博",
+    ownerInternalId: "U100006",
+    memberCount: 12,
+    adminCount: 1,
+    status: "dissolved",
+    muted: false,
+    memberAddFriendEnabled: true,
+    createdAt: "2026-05-01",
+    notice: "",
+    recallCount: 0,
+  },
+  {
+    id: 6,
+    groupId: "G200006",
+    name: "客户支持群",
+    avatar: "客",
+    owner: "周米娅",
+    ownerInternalId: "U100003",
+    memberCount: 42,
+    adminCount: 3,
+    status: "normal",
+    muted: false,
+    memberAddFriendEnabled: false,
+    createdAt: "2026-06-15",
+    notice: "工作时间：9:00-18:00",
+    recallCount: 0,
+  },
+]);
 
-const operatorTypeLabels: Record<string, string> = {
-  owner: "群主",
-  admin: "管理员",
-  member: "成员",
-  system: "系统",
+const allRecalls: Record<number, RecallRecord[]> = {
+  2: [
+    { id: 1, operator: "陈安", operatorRole: "管理员", targetSender: "某用户", messagePreview: "[图片消息]", reason: "广告推广", createdAt: "2026-08-10 14:30" },
+    { id: 2, operator: "林诺", operatorRole: "群主", targetSender: "某用户", messagePreview: "加我微信xxx", reason: "违规引流", createdAt: "2026-08-08 10:15" },
+  ],
+  3: [
+    { id: 3, operator: "黄怡", operatorRole: "群主", targetSender: "某用户", messagePreview: "[不当言论]", reason: "违反群规", createdAt: "2026-08-05 16:20" },
+  ],
+  4: [
+    { id: 4, operator: "王磊", operatorRole: "群主", targetSender: "用户A", messagePreview: "[违规图片]", reason: "传播违规内容", createdAt: "2026-08-06 12:00" },
+    { id: 5, operator: "管理员A", operatorRole: "管理员", targetSender: "用户B", messagePreview: "赌博网站链接", reason: "违法信息", createdAt: "2026-08-05 18:30" },
+  ],
 };
 
-const reportStatusLabels: Record<string, string> = {
-  pending: "待处理",
-  processing: "处理中",
-  resolved: "已处理",
-  rejected: "已驳回",
-  reopened: "已重开",
-};
+const filteredGroups = computed(() => {
+  const keyword = filters.keyword.trim().toLowerCase();
+  return groups.value.filter((g) => {
+    const matchesKeyword =
+      !keyword ||
+      [g.name, g.groupId, g.owner].some((v) => v.toLowerCase().includes(keyword));
+    const matchesStatus = !filters.status || g.status === filters.status;
+    return matchesKeyword && matchesStatus;
+  });
+});
 
-const reportStatusTagTypes: Record<string, "info" | "warning" | "success" | "danger" | "primary"> = {
-  pending: "warning",
-  processing: "primary",
-  resolved: "success",
-  rejected: "danger",
-  reopened: "info",
-};
-
-const actionTakenLabels: Record<string, string> = {
-  ban: "封禁",
-  mute: "禁言",
-  warn: "警告",
-  none: "无处置",
-  restrict_login: "限制登录",
-  restrict_message: "限制发消息",
-  mute_all: "全员禁言",
-  recall: "撤回",
-  dissolve: "解散",
-};
-
-function formatStatus(status?: string): string {
-  if (!status) return "-";
-  return statusLabels[status] ?? status;
-}
-
-function isGroupDissolved(status?: string): boolean {
-  return status === "dismissed" || status === "dissolved";
-}
-
-function formatJoinMode(mode?: string): string {
-  if (!mode) return "-";
-  return joinModeLabels[mode] ?? mode;
-}
-
-function formatOperatorType(type?: string): string {
-  if (!type) return "-";
-  return operatorTypeLabels[type] ?? type;
-}
-
-function formatReportStatus(status?: string): string {
-  if (!status) return "-";
-  return reportStatusLabels[status] ?? status;
-}
-
-function formatActionTaken(action?: string): string {
-  if (!action) return "-";
-  return actionTakenLabels[action] ?? action;
-}
-
-function formatTime(value?: string): string {
-  if (!value) return "-";
-  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
-}
-
-function avatarText(row: Pick<Groups.GroupItem, "name">): string {
-  const name = (row.name || "").trim();
-  return name ? name.slice(0, 1) : "群";
-}
-
-function isImageAvatar(avatar?: string): boolean {
-  const value = (avatar || "").trim();
-  return /^https?:\/\//i.test(value) || value.startsWith("/");
-}
-
-async function loadGroups(): Promise<void> {
-  loading.value = true;
-  try {
-    const res = await getGroups({
-      page: page.value,
-      size: size.value,
-      keyword: filters.keyword.trim() || undefined,
-      status: filters.status || undefined,
-    });
-    items.value = res.data?.items ?? [];
-    total.value = res.data?.total ?? 0;
-  } catch {
-    items.value = [];
-    total.value = 0;
-  } finally {
-    loading.value = false;
-  }
-}
+const pageGroups = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return filteredGroups.value.slice(start, start + pageSize.value);
+});
 
 function queryGroups(): void {
-  page.value = 1;
-  void loadGroups();
+  currentPage.value = 1;
 }
 
 function resetFilters(): void {
   filters.keyword = "";
   filters.status = "";
-  page.value = 1;
-  void loadGroups();
+  currentPage.value = 1;
 }
 
-async function loadRecallLogs(groupId: string): Promise<void> {
+const recallForm = reactive({ messageId: "", reason: "", ticketNo: "" });
+
+const recallRules: FormRules<typeof recallForm> = {
+  messageId: [{ required: true, message: "请输入消息 ID", trigger: "blur" }],
+  reason: [{ required: true, message: "请填写撤回原因", trigger: "blur" }],
+};
+
+async function fetchGroupMembers(groupId: string): Promise<void> {
+  try {
+    const res = await getGroupMembersApi(groupId);
+    const list: AdminGroups.GroupMember[] = Array.isArray(res.data) ? res.data : [];
+    groupMembers.value = list.map((m) => ({
+      userId: m.userId,
+      nickname: m.nickname || m.userId,
+      role: m.role === "owner" ? "owner" : "member",
+      joinedAt: m.joinedAt,
+      mutedUntil: m.mutedUntil ?? null,
+    }));
+  } catch {
+    groupMembers.value = [];
+  }
+}
+
+function openGroupDetail(group: GroupInfo): void {
+  selectedGroup.value = group;
+  groupMembers.value = [];
+  recallRecords.value = allRecalls[group.id] ?? [];
+  recallForm.messageId = "";
+  recallForm.reason = "";
+  recallForm.ticketNo = "";
+  detailVisible.value = true;
+  fetchGroupMembers(group.groupId);
+}
+
+async function toggleMute(group: GroupInfo): Promise<void> {
+  if (group.status === "dissolved" || group.status === "banned") return;
+  const next = !group.muted;
+  const action = next ? "全员禁言" : "解除禁言";
+  try {
+    await ElMessageBox.confirm(`确认对群「${group.name}」${action}？`, action, {
+      type: "warning",
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+    });
+    groups.value = groups.value.map((g) =>
+      g.id === group.id ? { ...g, muted: next, status: next ? "muted" : "normal" } : g,
+    );
+    ElMessage.success(`${action}操作成功`);
+    if (selectedGroup.value?.id === group.id) {
+      selectedGroup.value = { ...selectedGroup.value, muted: next, status: next ? "muted" : "normal" };
+    }
+  } catch {
+    // dismissed
+  }
+}
+
+async function toggleMemberAddFriend(group: GroupInfo, next?: boolean): Promise<void> {
+  if (group.status === "dissolved") return;
+  const enabled = typeof next === "boolean" ? next : !group.memberAddFriendEnabled;
+  const action = enabled ? "允许群内互加好友" : "禁止群内互加好友";
+  try {
+    const { value: reason } = await ElMessageBox.prompt("请输入操作原因", action, {
+      type: "warning",
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+      inputType: "textarea",
+      inputPlaceholder: "必填",
+      inputValidator: (value) => (String(value).trim() ? true : "请填写操作原因"),
+    });
+    await putGroupMemberAddFriendApi(group.groupId, { enabled, reason: String(reason).trim() });
+    groups.value = groups.value.map((g) => (g.id === group.id ? { ...g, memberAddFriendEnabled: enabled } : g));
+    ElMessage.success("操作成功");
+    if (selectedGroup.value?.id === group.id) {
+      selectedGroup.value = { ...selectedGroup.value, memberAddFriendEnabled: enabled };
+    }
+  } catch {
+    // dismissed
+  }
+}
+
+async function submitRecall(): Promise<void> {
+  const ok = await recallFormRef.value
+    ?.validate()
+    .then(() => true)
+    .catch(() => false);
+  if (!ok || recallLoading.value || !selectedGroup.value) return;
+
+  const messageId = recallForm.messageId.trim();
+  const reason = recallForm.reason.trim();
+  const ticketNo = recallForm.ticketNo.trim();
+
+  const idempotencyKey =
+    typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function"
+      ? (crypto as any).randomUUID()
+      : undefined;
+
   recallLoading.value = true;
   try {
-    const res = await getGroupRecallLogs(groupId, {
-      page: recallPage.value,
-      size: recallSize.value,
+    await postGroupRecallMessageApi(selectedGroup.value.groupId, messageId, {
+      idempotencyKey,
+      reason,
+      ticketNo: ticketNo || undefined,
     });
-    recallLogs.value = res.data?.items ?? [];
-    recallTotal.value = res.data?.total ?? 0;
+    ElMessage.success("已提交撤回请求");
+    recallForm.messageId = "";
+    recallForm.reason = "";
+    recallForm.ticketNo = "";
+    recallFormRef.value?.clearValidate();
   } catch {
-    recallLogs.value = [];
-    recallTotal.value = 0;
   } finally {
     recallLoading.value = false;
   }
 }
 
-async function loadGroupReports(groupId: string): Promise<void> {
-  groupReportsLoading.value = true;
+async function dissolveGroup(group: GroupInfo): Promise<void> {
+  if (group.status === "dissolved") return;
   try {
-    const res = await getGroupReports(groupId, {
-      page: groupReportsPage.value,
-      size: groupReportsSize.value,
-    });
-    groupReports.value = res.data?.items ?? [];
-    groupReportsTotal.value = res.data?.total ?? 0;
-  } catch {
-    groupReports.value = [];
-    groupReportsTotal.value = 0;
-  } finally {
-    groupReportsLoading.value = false;
-  }
-}
-
-async function openGroupDetail(group: Groups.GroupItem): Promise<void> {
-  detailVisible.value = true;
-  selectedGroup.value = null;
-  recallLogs.value = [];
-  recallTotal.value = 0;
-  recallPage.value = 1;
-  groupReports.value = [];
-  groupReportsTotal.value = 0;
-  groupReportsPage.value = 1;
-  detailLoading.value = true;
-  try {
-    const [detailRes] = await Promise.all([
-      getGroupDetail(group.id),
-      loadRecallLogs(group.id),
-      loadGroupReports(group.id),
-    ]);
-    selectedGroup.value = detailRes.data ?? null;
-  } catch {
-    selectedGroup.value = null;
-  } finally {
-    detailLoading.value = false;
-  }
-}
-
-function closeGroupDetail(): void {
-  detailVisible.value = false;
-  selectedGroup.value = null;
-  recallLogs.value = [];
-  recallTotal.value = 0;
-  recallPage.value = 1;
-  groupReports.value = [];
-  groupReportsTotal.value = 0;
-  groupReportsPage.value = 1;
-  closeDissolveDialog();
-  closeMuteDialog();
-}
-
-function openMuteDialog(group: Groups.GroupItem | Groups.GroupDetail): void {
-  if (isGroupDissolved(group.status) || group.status === "banned") return;
-  muteTarget.value = group;
-  muteNext.value = !group.allMuted;
-  muteForm.reason = "";
-  muteVisible.value = true;
-}
-
-function closeMuteDialog(): void {
-  muteVisible.value = false;
-  muteTarget.value = null;
-  muteForm.reason = "";
-}
-
-async function submitMute(): Promise<void> {
-  const target = muteTarget.value;
-  const reason = muteForm.reason.trim();
-  if (!target) return;
-  if (!reason) {
-    ElMessage.warning("请填写操作原因");
-    return;
-  }
-  if (muteSubmitting.value) return;
-
-  muteSubmitting.value = true;
-  try {
-    await muteGroupAll(target.id, {
-      muted: muteNext.value,
-      reason,
-    });
-    ElMessage.success(muteNext.value ? "已全员禁言" : "已解除禁言");
-    closeMuteDialog();
-    if (detailVisible.value && selectedGroup.value?.id === target.id) {
-      try {
-        const res = await getGroupDetail(target.id);
-        selectedGroup.value = res.data ?? null;
-      } catch {
-        if (selectedGroup.value) {
-          selectedGroup.value = {
-            ...selectedGroup.value,
-            allMuted: muteNext.value,
-            status: muteNext.value ? "muted" : selectedGroup.value.status === "muted" ? "normal" : selectedGroup.value.status,
-          };
-        }
-      }
-    }
-    await loadGroups();
-  } catch {
-  } finally {
-    muteSubmitting.value = false;
-  }
-}
-
-function createIdempotencyKey(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `dissolve-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function openDissolveDialog(group: Groups.GroupItem | Groups.GroupDetail): void {
-  if (isGroupDissolved(group.status)) return;
-  dissolveTarget.value = group;
-  dissolveForm.reason = "";
-  dissolveForm.ticketNo = "";
-  dissolveVisible.value = true;
-}
-
-function closeDissolveDialog(): void {
-  dissolveVisible.value = false;
-  dissolveTarget.value = null;
-  dissolveForm.reason = "";
-  dissolveForm.ticketNo = "";
-}
-
-async function submitDissolve(): Promise<void> {
-  const target = dissolveTarget.value;
-  const reason = dissolveForm.reason.trim();
-  const ticketNo = dissolveForm.ticketNo.trim();
-  if (!target) return;
-  if (!reason) {
-    ElMessage.warning("请填写解散原因");
-    return;
-  }
-  if (dissolveSubmitting.value) return;
-
-  dissolveSubmitting.value = true;
-  try {
-    await dissolveGroupApi(target.id, {
-      reason,
-      ticketNo: ticketNo || undefined,
-      idempotencyKey: createIdempotencyKey(),
-    });
+    await ElMessageBox.confirm(
+      `确认解散群「${group.name}」？解散后所有成员将被移出，不可恢复。`,
+      "解散违规群",
+      { type: "error", confirmButtonText: "确认解散", cancelButtonText: "取消" },
+    );
+    groups.value = groups.value.map((g) =>
+      g.id === group.id ? { ...g, status: "dissolved", muted: false } : g,
+    );
     ElMessage.success("群已解散");
-    closeDissolveDialog();
-    if (detailVisible.value && selectedGroup.value?.id === target.id) {
-      try {
-        const res = await getGroupDetail(target.id);
-        selectedGroup.value = res.data ?? null;
-      } catch {
-        if (selectedGroup.value) {
-          selectedGroup.value = { ...selectedGroup.value, status: "dismissed" };
-        }
-      }
+    if (selectedGroup.value?.id === group.id) {
+      selectedGroup.value = { ...selectedGroup.value, status: "dissolved", muted: false };
     }
-    await loadGroups();
   } catch {
-  } finally {
-    dissolveSubmitting.value = false;
+    // dismissed
   }
 }
 
-watch([page, size], () => {
-  void loadGroups();
-});
-
-watch([recallPage, recallSize], () => {
-  if (!detailVisible.value || !selectedGroup.value?.id) return;
-  void loadRecallLogs(selectedGroup.value.id);
-});
-
-watch([groupReportsPage, groupReportsSize], () => {
-  if (!detailVisible.value || !selectedGroup.value?.id) return;
-  void loadGroupReports(selectedGroup.value.id);
-});
-
-onMounted(() => {
-  void loadGroups();
-});
+const roleLabels: Record<string, string> = { owner: "群主", admin: "管理员", member: "成员" };
+const roleTagTypes: Record<string, string> = { owner: "danger", admin: "warning", member: "info" };
 </script>
 
 <template>
@@ -393,9 +358,8 @@ onMounted(() => {
               <el-input
                 v-model="filters.keyword"
                 clearable
-                placeholder="群名称/群ID"
+                placeholder="群名称/群ID/群主"
                 :prefix-icon="Search"
-                @clear="queryGroups"
                 @keyup.enter="queryGroups"
               />
             </el-form-item>
@@ -405,8 +369,8 @@ onMounted(() => {
               <el-select v-model="filters.status" placeholder="群状态" clearable>
                 <el-option label="正常" value="normal" />
                 <el-option label="全员禁言" value="muted" />
-                <el-option label="已封禁" value="banned" />
-                <el-option label="已解散" value="dismissed" />
+                <el-option label="封禁" value="banned" />
+                <el-option label="已解散" value="dissolved" />
               </el-select>
             </el-form-item>
           </div>
@@ -414,69 +378,75 @@ onMounted(() => {
           <div class="search-operation">
             <el-button type="primary" :icon="Search" @click="queryGroups">搜索</el-button>
             <el-button :icon="Delete" @click="resetFilters">重置</el-button>
-            <el-button :icon="RefreshLeft" :loading="loading" @click="loadGroups">刷新</el-button>
           </div>
         </div>
       </el-form>
     </section>
 
     <section class="card table-main">
-      <el-table v-loading="loading" :data="items" style="width: 100%">
-        <el-table-column label="群名称" min-width="220" show-overflow-tooltip>
+      <el-table :data="pageGroups" style="width: 100%">
+        <el-table-column label="群名称" min-width="180">
           <template #default="{ row }">
             <div class="group-cell">
-              <el-avatar v-if="isImageAvatar(row.avatar)" :src="row.avatar" :size="36" shape="square" />
-              <span v-else class="group-avatar">{{ avatarText(row) }}</span>
-              <div class="group-meta">
-                <strong>{{ row.name || "-" }}</strong>
-                <span>{{ row.id }}</span>
+              <span class="group-avatar">{{ row.avatar }}</span>
+              <div>
+                <strong>{{ row.name }}</strong>
+                <span>{{ row.groupId }}</span>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="群主" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.ownerName || "-" }}</template>
-        </el-table-column>
-        <el-table-column label="群主 ID" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.ownerId || "-" }}</template>
-        </el-table-column>
+        <el-table-column prop="owner" label="群主" min-width="100" />
         <el-table-column label="成员数" min-width="90" align="center">
-          <template #default="{ row }">{{ row.memberCount ?? 0 }}</template>
+          <template #default="{ row }">
+            {{ row.memberCount }}
+          </template>
         </el-table-column>
         <el-table-column label="群状态" min-width="110">
           <template #default="{ row }">
-            <el-tag :type="statusTagTypes[row.status] ?? 'info'" effect="light">
-              {{ formatStatus(row.status) }}
+            <el-tag :type="statusTagTypes[row.status as GroupStatus]" effect="light">
+              {{ statusLabels[row.status as GroupStatus] }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="全员禁言" min-width="100" align="center">
+        <el-table-column label="禁言" min-width="80" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.allMuted ? 'danger' : 'success'" size="small" effect="plain">
-              {{ row.allMuted ? "是" : "否" }}
+            <el-tag :type="row.muted ? 'danger' : 'success'" size="small" effect="plain">
+              {{ row.muted ? "是" : "否" }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" min-width="170">
-          <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+        <el-table-column label="群内互加好友" min-width="110" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.memberAddFriendEnabled ? 'success' : 'danger'" size="small" effect="plain">
+              {{ row.memberAddFriendEnabled ? "允许" : "禁止" }}
+            </el-tag>
+          </template>
         </el-table-column>
+        <el-table-column label="撤回记录" min-width="90" align="center">
+          <template #default="{ row }">
+            <el-badge v-if="row.recallCount > 0" :value="row.recallCount" type="warning" />
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="createdAt" label="创建时间" min-width="120" />
         <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <div class="action-buttons">
               <el-button link type="primary" @click="openGroupDetail(row)">详情</el-button>
               <el-button
                 link
-                :type="row.allMuted ? 'success' : 'warning'"
-                :disabled="isGroupDissolved(row.status) || row.status === 'banned'"
-                @click="openMuteDialog(row)"
+                :type="row.muted ? 'success' : 'warning'"
+                :disabled="row.status === 'dissolved' || row.status === 'banned'"
+                @click="toggleMute(row)"
               >
-                {{ row.allMuted ? "解除禁言" : "全员禁言" }}
+                {{ row.muted ? "解除禁言" : "全员禁言" }}
               </el-button>
               <el-button
                 link
                 type="danger"
-                :disabled="isGroupDissolved(row.status)"
-                @click="openDissolveDialog(row)"
+                :disabled="row.status === 'dissolved'"
+                @click="dissolveGroup(row)"
               >
                 解散
               </el-button>
@@ -488,251 +458,138 @@ onMounted(() => {
       <div class="table-footer">
         <el-pagination
           background
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :page-sizes="[10, 20, 50, 100]"
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 25, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
-          :total="total"
+          :total="filteredGroups.length"
         />
       </div>
     </section>
 
-    <el-drawer v-model="detailVisible" title="群详情" size="720px" @closed="closeGroupDetail">
-      <div v-loading="detailLoading">
-        <template v-if="selectedGroup">
-          <div class="detail-header">
-            <el-avatar
-              v-if="isImageAvatar(selectedGroup.avatar)"
-              :src="selectedGroup.avatar"
-              :size="56"
-              shape="square"
-            />
-            <span v-else class="group-avatar lg">{{ avatarText(selectedGroup) }}</span>
-            <div class="detail-header-info">
-              <h3>{{ selectedGroup.name || "-" }}</h3>
-              <span>{{ selectedGroup.id }}</span>
-            </div>
-            <el-tag :type="statusTagTypes[selectedGroup.status] ?? 'info'" effect="light">
-              {{ formatStatus(selectedGroup.status) }}
+    <!-- 群详情抽屉 -->
+    <el-drawer v-model="detailVisible" title="群详情" size="600px">
+      <template v-if="selectedGroup">
+        <div class="detail-header">
+          <span class="group-avatar lg">{{ selectedGroup.avatar }}</span>
+          <div class="detail-header-info">
+            <h3>{{ selectedGroup.name }}</h3>
+            <span>{{ selectedGroup.groupId }}</span>
+          </div>
+          <el-tag :type="statusTagTypes[selectedGroup.status]" effect="light">
+            {{ statusLabels[selectedGroup.status] }}
+          </el-tag>
+        </div>
+
+        <el-descriptions :column="2" border size="small" class="detail-desc">
+          <el-descriptions-item label="群主">{{ selectedGroup.owner }}</el-descriptions-item>
+          <el-descriptions-item label="群主ID">{{ selectedGroup.ownerInternalId }}</el-descriptions-item>
+          <el-descriptions-item label="成员数">{{ selectedGroup.memberCount }}</el-descriptions-item>
+          <el-descriptions-item label="管理员数">{{ selectedGroup.adminCount }}</el-descriptions-item>
+          <el-descriptions-item label="全员禁言">
+            <el-tag :type="selectedGroup.muted ? 'danger' : 'success'" size="small">
+              {{ selectedGroup.muted ? "是" : "否" }}
             </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="群内互加好友">
+            <el-tag :type="selectedGroup.memberAddFriendEnabled ? 'success' : 'danger'" size="small">
+              {{ selectedGroup.memberAddFriendEnabled ? "允许" : "禁止" }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="创建时间">{{ selectedGroup.createdAt }}</el-descriptions-item>
+          <el-descriptions-item label="撤回记录">{{ selectedGroup.recallCount }} 条</el-descriptions-item>
+          <el-descriptions-item label="群公告" :span="2">
+            {{ selectedGroup.notice || "未设置" }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 开关操作 -->
+        <div class="detail-section">
+          <h4>群设置</h4>
+          <div class="switch-row">
+            <span>全员禁言</span>
+            <el-switch
+              :model-value="selectedGroup.muted"
+              :disabled="selectedGroup.status === 'dissolved' || selectedGroup.status === 'banned'"
+              @change="() => toggleMute(selectedGroup!)"
+            />
           </div>
-
-          <el-descriptions :column="2" border size="small" class="detail-desc">
-            <el-descriptions-item label="群主">{{ selectedGroup.ownerName || "-" }}</el-descriptions-item>
-            <el-descriptions-item label="群主 ID">{{ selectedGroup.ownerId || "-" }}</el-descriptions-item>
-            <el-descriptions-item label="成员数">{{ selectedGroup.memberCount ?? 0 }}</el-descriptions-item>
-            <el-descriptions-item label="加群方式">{{ formatJoinMode(selectedGroup.joinMode) }}</el-descriptions-item>
-            <el-descriptions-item label="全员禁言">
-              <el-tag :type="selectedGroup.allMuted ? 'danger' : 'success'" size="small">
-                {{ selectedGroup.allMuted ? "是" : "否" }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="允许互加好友">
-              <el-tag :type="selectedGroup.allowMemberAddFriend ? 'success' : 'danger'" size="small">
-                {{ selectedGroup.allowMemberAddFriend ? "是" : "否" }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="创建时间" :span="2">
-              {{ formatTime(selectedGroup.createdAt) }}
-            </el-descriptions-item>
-            <el-descriptions-item label="群公告" :span="2">
-              {{ selectedGroup.announcement || "未设置" }}
-            </el-descriptions-item>
-          </el-descriptions>
-
-          <div class="detail-section">
-            <h4>群设置</h4>
-            <div class="switch-row">
-              <span>全员禁言</span>
-              <el-switch
-                :model-value="!!selectedGroup.allMuted"
-                :disabled="isGroupDissolved(selectedGroup.status) || selectedGroup.status === 'banned'"
-                @change="() => openMuteDialog(selectedGroup!)"
-              />
-            </div>
-            <div class="switch-row">
-              <span>允许群内互加好友</span>
-              <el-switch
-                :model-value="!!selectedGroup.allowMemberAddFriend"
-                disabled
-              />
-            </div>
-            <el-button
-              v-if="!isGroupDissolved(selectedGroup.status)"
-              type="danger"
-              plain
-              class="dissolve-btn"
-              @click="openDissolveDialog(selectedGroup)"
-            >
-              解散该群
-            </el-button>
+          <div class="switch-row">
+            <span>群内互加好友</span>
+            <el-switch
+              :model-value="selectedGroup.memberAddFriendEnabled"
+              :disabled="selectedGroup.status === 'dissolved'"
+              @change="(val: boolean) => toggleMemberAddFriend(selectedGroup!, val)"
+            />
           </div>
+          <el-button
+            v-if="selectedGroup.status !== 'dissolved'"
+            type="danger"
+            plain
+            class="dissolve-btn"
+            @click="dissolveGroup(selectedGroup)"
+          >
+            解散该群
+          </el-button>
+        </div>
 
-          <div class="detail-section">
-            <div class="detail-section-header">
-              <h4>群管理撤回记录</h4>
-              <el-tag v-if="recallTotal > 0" type="warning" size="small">{{ recallTotal }} 条</el-tag>
-            </div>
-            <template v-if="recallLogs.length || recallLoading">
-              <el-table
-                v-loading="recallLoading"
-                :data="recallLogs"
-                size="small"
-                style="width: 100%"
-              >
-                <el-table-column label="操作人" min-width="100" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.operatorName || "-" }}</template>
-                </el-table-column>
-                <el-table-column label="角色" min-width="80">
-                  <template #default="{ row }">{{ formatOperatorType(row.operatorType) }}</template>
-                </el-table-column>
-                <el-table-column label="消息 ID" min-width="160" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.messageId || "-" }}</template>
-                </el-table-column>
-                <el-table-column label="撤回原因" min-width="120" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.reason || "-" }}</template>
-                </el-table-column>
-                <el-table-column label="时间" min-width="160">
-                  <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
-                </el-table-column>
-              </el-table>
-              <div v-if="recallTotal > 0" class="recall-footer">
-                <el-pagination
-                  background
-                  small
-                  v-model:current-page="recallPage"
-                  v-model:page-size="recallSize"
-                  :page-sizes="[10, 20, 50]"
-                  layout="total, sizes, prev, pager, next"
-                  :total="recallTotal"
-                />
+        <!-- 成员列表 -->
+        <div class="detail-section">
+          <h4>群成员（部分）</h4>
+          <div v-if="groupMembers.length" class="member-list">
+            <div v-for="m in groupMembers" :key="m.userId" class="member-item">
+              <span class="member-avatar">{{ m.nickname.slice(0, 1) }}</span>
+              <div class="member-content">
+                <span class="member-name">{{ m.nickname }}</span>
+                <span class="member-sub mono-text">{{ m.userId }}</span>
               </div>
-            </template>
-            <el-empty v-else description="暂无撤回记录" :image-size="60" />
-          </div>
-
-          <div class="detail-section">
-            <div class="detail-section-header">
-              <h4>群被举报记录</h4>
-              <el-tag v-if="groupReportsTotal > 0" type="danger" size="small">{{ groupReportsTotal }} 条</el-tag>
+              <el-tag :type="roleTagTypes[m.role]" size="small" effect="plain">{{ roleLabels[m.role] }}</el-tag>
             </div>
-            <template v-if="groupReports.length || groupReportsLoading">
-              <el-table
-                v-loading="groupReportsLoading"
-                :data="groupReports"
-                size="small"
-                style="width: 100%"
-              >
-                <el-table-column label="举报单号" min-width="140" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.reportNo || "-" }}</template>
-                </el-table-column>
-                <el-table-column label="举报人 ID" min-width="160" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.reporterId || "-" }}</template>
-                </el-table-column>
-                <el-table-column label="原因" min-width="100" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.reasonText || "-" }}</template>
-                </el-table-column>
-                <el-table-column label="状态" min-width="90">
-                  <template #default="{ row }">
-                    <el-tag :type="reportStatusTagTypes[row.status] ?? 'info'" effect="plain" size="small">
-                      {{ formatReportStatus(row.status) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="处理结论" min-width="120" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.conclusion || "-" }}</template>
-                </el-table-column>
-                <el-table-column label="处置动作" min-width="90">
-                  <template #default="{ row }">{{ formatActionTaken(row.actionTaken) }}</template>
-                </el-table-column>
-                <el-table-column label="创建时间" min-width="160">
-                  <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
-                </el-table-column>
-              </el-table>
-              <div v-if="groupReportsTotal > 0" class="recall-footer">
-                <el-pagination
-                  background
-                  small
-                  v-model:current-page="groupReportsPage"
-                  v-model:page-size="groupReportsSize"
-                  :page-sizes="[10, 20, 50]"
-                  layout="total, sizes, prev, pager, next"
-                  :total="groupReportsTotal"
-                />
-              </div>
-            </template>
-            <el-empty v-else description="暂无举报记录" :image-size="60" />
           </div>
-        </template>
-        <el-empty v-else-if="!detailLoading" description="暂无详情" :image-size="64" />
-      </div>
+          <el-empty v-else description="暂无成员数据" :image-size="60" />
+        </div>
+
+        <div class="detail-section">
+          <h4>管理撤回指定消息</h4>
+          <el-form
+            ref="recallFormRef"
+            :model="recallForm"
+            :rules="recallRules"
+            label-width="90px"
+            @submit.prevent="submitRecall"
+          >
+            <el-form-item label="消息ID" prop="messageId">
+              <el-input v-model="recallForm.messageId" placeholder="UUID" />
+            </el-form-item>
+            <el-form-item label="撤回原因" prop="reason">
+              <el-input v-model="recallForm.reason" type="textarea" :rows="2" placeholder="必填" />
+            </el-form-item>
+            <el-form-item label="工单号" prop="ticketNo">
+              <el-input v-model="recallForm.ticketNo" placeholder="可选" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="danger" :loading="recallLoading" @click="submitRecall">撤回消息</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+
+        <!-- 撤回记录 -->
+        <div class="detail-section">
+          <div class="detail-section-header">
+            <h4>群管理撤回记录</h4>
+            <el-tag v-if="recallRecords.length" type="warning" size="small">{{ recallRecords.length }} 条</el-tag>
+          </div>
+          <el-table v-if="recallRecords.length" :data="recallRecords" size="small" style="width: 100%">
+            <el-table-column prop="operator" label="操作人" min-width="90" />
+            <el-table-column prop="operatorRole" label="角色" min-width="80" />
+            <el-table-column prop="messagePreview" label="消息内容" min-width="100" show-overflow-tooltip />
+            <el-table-column prop="reason" label="撤回原因" min-width="100" />
+            <el-table-column prop="createdAt" label="时间" min-width="150" />
+          </el-table>
+          <el-empty v-else description="暂无撤回记录" :image-size="60" />
+        </div>
+      </template>
     </el-drawer>
-
-    <el-dialog
-      v-model="dissolveVisible"
-      title="解散违规群"
-      width="480px"
-      destroy-on-close
-      @closed="closeDissolveDialog"
-    >
-      <el-alert
-        type="error"
-        :closable="false"
-        show-icon
-        title="解散后所有成员将被移出，不可恢复。"
-        style="margin-bottom: 16px"
-      />
-      <el-form label-width="96px" @submit.prevent>
-        <el-form-item label="目标群">
-          <span>{{ dissolveTarget?.name || "-" }}</span>
-        </el-form-item>
-        <el-form-item label="解散原因" required>
-          <el-input
-            v-model="dissolveForm.reason"
-            type="textarea"
-            :rows="3"
-            maxlength="200"
-            show-word-limit
-            placeholder="请填写解散原因"
-          />
-        </el-form-item>
-        <el-form-item label="关联工单">
-          <el-input v-model="dissolveForm.ticketNo" clearable placeholder="可选" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="closeDissolveDialog">取消</el-button>
-        <el-button type="danger" :loading="dissolveSubmitting" @click="submitDissolve">确认解散</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog
-      v-model="muteVisible"
-      :title="muteNext ? '全员禁言' : '解除禁言'"
-      width="480px"
-      destroy-on-close
-      @closed="closeMuteDialog"
-    >
-      <el-form label-width="96px" @submit.prevent>
-        <el-form-item label="目标群">
-          <span>{{ muteTarget?.name || "-" }}</span>
-        </el-form-item>
-        <el-form-item label="操作原因" required>
-          <el-input
-            v-model="muteForm.reason"
-            type="textarea"
-            :rows="3"
-            maxlength="200"
-            show-word-limit
-            :placeholder="muteNext ? '请填写禁言原因' : '请填写解除禁言原因'"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="closeMuteDialog">取消</el-button>
-        <el-button type="primary" :loading="muteSubmitting" @click="submitMute">确定</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -744,11 +601,6 @@ onMounted(() => {
   flex-direction: column;
   width: 100%;
   height: 100%;
-}
-
-.card {
-  background: var(--el-bg-color);
-  border-radius: 4px;
 }
 
 .table-search {
@@ -810,29 +662,21 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;
 
-  .group-meta {
+  div {
     display: flex;
     flex-direction: column;
     gap: 3px;
-    min-width: 0;
   }
 
   strong {
-    overflow: hidden;
     color: var(--el-text-color-primary);
     font-size: 14px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
-  .group-meta span {
-    overflow: hidden;
+  div span {
     color: var(--el-text-color-secondary);
     font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 }
 
@@ -850,21 +694,31 @@ onMounted(() => {
   &.lg {
     width: 56px;
     height: 56px;
-    font-size: 20px;
+    font-size: 22px;
+    border-radius: 10px;
+    flex-shrink: 0;
   }
 }
 
 .action-buttons {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
+
+  :deep(.el-button) {
+    margin-left: 0;
+    padding: 0 4px;
+  }
 }
 
+/* Drawer */
 .detail-header {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 20px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .detail-header-info {
@@ -882,16 +736,16 @@ onMounted(() => {
 }
 
 .detail-desc {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .detail-section {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 
   h4 {
     margin: 0 0 12px;
     font-size: 15px;
-    font-weight: 600;
+    color: var(--el-text-color-primary);
   }
 }
 
@@ -900,28 +754,86 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
-
-  h4 {
-    margin: 0;
-  }
-}
-
-.recall-footer {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
 }
 
 .switch-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 10px 0;
 }
 
 .dissolve-btn {
-  margin-top: 16px;
   width: 100%;
+  margin-top: 12px;
+}
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.member-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.member-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color-light);
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.member-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.member-name {
+  font-size: 14px;
+}
+
+.member-sub {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .table-search .search-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .table-search .search-operation {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 700px) {
+  .table-search .search-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table-search .search-operation {
+    justify-content: flex-start;
+  }
+
+  .table-footer {
+    justify-content: center;
+  }
 }
 </style>

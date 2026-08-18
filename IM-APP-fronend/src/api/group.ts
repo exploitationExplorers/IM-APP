@@ -4,6 +4,7 @@ import type {
   GroupInfo,
   GroupJoinRequestItem,
   GroupMember,
+  GroupMemberMuteResult,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
   GroupSettingsInput,
@@ -17,23 +18,26 @@ export async function createGroup(name: string, memberIds: string[]): Promise<Gr
   })
 }
 
+/** 群详情：后端已改为 /groups/detail?groupId=，带 canChat/isMuted 等实时发言权限 */
 export async function fetchGroupDetail(groupId: string): Promise<GroupInfo> {
-  return request<GroupInfo>({ url: `/groups/${groupId}`, method: 'GET' })
+  return request<GroupInfo>({ url: '/groups/detail', method: 'GET', data: { groupId } })
 }
 
+/** 群成员列表：后端已改为 /group-members?groupId=，成员带禁言状态 */
 export async function fetchGroupMembers(groupId: string): Promise<GroupMember[]> {
-  return request<GroupMember[]>({ url: `/groups/${groupId}/members`, method: 'GET' })
+  return request<GroupMember[]>({ url: '/group-members', method: 'GET', data: { groupId } })
 }
 
 export async function joinGroup(groupId: string): Promise<GroupInfo> {
   return request<GroupInfo>({ url: `/groups/${groupId}/join`, method: 'POST' })
 }
 
+/** 更新群设置：后端已改为 POST /groups/settings/update，groupId 放请求体 */
 export async function updateGroupSettings(groupId: string, input: GroupSettingsInput) {
   return request<GroupInfo>({
-    url: `/groups/${groupId}/settings`,
-    method: 'PUT',
-    data: input,
+    url: '/groups/settings/update',
+    method: 'POST',
+    data: { groupId, ...input },
   })
 }
 
@@ -160,15 +164,28 @@ export async function updateMemberRemark(
   })
 }
 
+/** 禁言成员：后端已改为 POST /group-members/mute，groupId/成员放请求体 */
 export async function muteGroupMember(
   groupId: string,
   memberUserId: string,
   mutedSeconds: number,
-): Promise<void> {
-  await request<{ ok: boolean }>({
-    url: `/groups/${groupId}/members/${memberUserId}/mute`,
-    method: 'PUT',
-    data: { mutedSeconds },
+): Promise<GroupMemberMuteResult> {
+  return request<GroupMemberMuteResult>({
+    url: '/group-members/mute',
+    method: 'POST',
+    data: { groupId, memberUserId, mutedSeconds },
+  })
+}
+
+/** 解除禁言：POST /group-members/unmute，未禁言时幂等成功 */
+export async function unmuteGroupMember(
+  groupId: string,
+  memberUserId: string,
+): Promise<GroupMemberMuteResult> {
+  return request<GroupMemberMuteResult>({
+    url: '/group-members/unmute',
+    method: 'POST',
+    data: { groupId, memberUserId },
   })
 }
 

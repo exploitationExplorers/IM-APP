@@ -21,8 +21,6 @@ export interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   loading?: boolean;
   cancel?: boolean;
   _retry?: boolean;
-  /** 401 时不刷新、不强制登出（用于可选接口如 meta） */
-  skipAuthRefresh?: boolean;
 }
 
 const config = {
@@ -43,13 +41,8 @@ function pickMessage(data: { message?: string; msg?: string } | undefined, fallb
   return data?.message || data?.msg || fallback;
 }
 
-function setAuthorizationHeader(headers: InternalAxiosRequestConfig["headers"], token: string): void {
-  if (!headers) return;
-  if (typeof (headers as { set?: unknown }).set === "function") {
-    (headers as { set: (key: string, value: string) => void }).set("Authorization", `Bearer ${token}`);
-    return;
-  }
-  (headers as Record<string, string>).Authorization = `Bearer ${token}`;
+function isSuccessCode(code: unknown): boolean {
+  return code === ResultEnum.SUCCESS || code === 200;
 }
 
 async function refreshAccessToken(): Promise<string> {
@@ -58,26 +51,18 @@ async function refreshAccessToken(): Promise<string> {
   refreshPromise = (async () => {
     const authStore = useAuthStore();
     const currentRefresh = authStore.refreshToken;
-    const currentToken = authStore.token;
     if (!currentRefresh) {
       throw new Error("missing refresh token");
-    }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json"
-    };
-    if (currentToken) {
-      headers.Authorization = `Bearer ${currentToken}`;
     }
 
     const response = await axios.post<ResultData<Auth.ResLogin>>(
       `${config.baseURL}/admin/v1/auth/token/refresh`,
       { refreshToken: currentRefresh },
-      { timeout: ResultEnum.TIMEOUT as number, headers }
+      { timeout: ResultEnum.TIMEOUT as number }
     );
 
     const body = response.data;
-    if (body.code !== ResultEnum.SUCCESS || !body.data?.token) {
+    if (!isSuccessCode(body.code) || !body.data?.token) {
       throw new Error(pickMessage(body, "登录已过期"));
     }
 
@@ -109,8 +94,9 @@ class RequestHttp {
         if (requestConfig.cancel) axiosCanceler.addPending(requestConfig);
         requestConfig.loading ??= true;
         if (requestConfig.loading) showFullScreenLoading();
-        if (authStore.token) {
-          setAuthorizationHeader(requestConfig.headers, authStore.token);
+        if (authStore.token && requestConfig.headers && typeof requestConfig.headers.set === "function") {
+          requestConfig.headers.set("x-access-token", authStore.token);
+          requestConfig.headers.set("Authorization", `Bearer ${authStore.token}`);
         }
         return requestConfig;
       },
@@ -128,7 +114,7 @@ class RequestHttp {
           return Promise.reject(data);
         }
 
-        if (typeof data?.code === "number" && data.code !== ResultEnum.SUCCESS) {
+        if (typeof data?.code === "number" && !isSuccessCode(data.code)) {
           ElMessage.error(pickMessage(data, "请求失败"));
           return Promise.reject(data);
         }
@@ -145,10 +131,6 @@ class RequestHttp {
         if (error.message.includes("timeout")) ElMessage.error("请求超时！请您稍后重试");
         if (error.message.includes("Network Error")) ElMessage.error("网络错误！请您稍后重试");
 
-        if (requestConfig?.skipAuthRefresh && response?.status === 401) {
-          return Promise.reject(error);
-        }
-
         if (
           response?.status === 401 &&
           requestConfig &&
@@ -158,7 +140,10 @@ class RequestHttp {
           try {
             requestConfig._retry = true;
             const newToken = await refreshAccessToken();
-            setAuthorizationHeader(requestConfig.headers, newToken);
+            if (requestConfig.headers && typeof requestConfig.headers.set === "function") {
+              requestConfig.headers.set("x-access-token", newToken);
+              requestConfig.headers.set("Authorization", `Bearer ${newToken}`);
+            }
             return this.service.request(requestConfig);
           } catch {
             forceLogout("登录失效！请您重新登录");
@@ -191,6 +176,9 @@ class RequestHttp {
   }
   put<T>(url: string, params?: object, _object = {}): Promise<ResultData<T>> {
     return this.service.put(url, params, _object);
+  }
+  patch<T>(url: string, params?: object, _object = {}): Promise<ResultData<T>> {
+    return this.service.patch(url, params, _object);
   }
   delete<T>(url: string, params?: any, _object = {}): Promise<ResultData<T>> {
     return this.service.delete(url, { params, ..._object });

@@ -24,7 +24,7 @@
           "raw": "{\n  \"purpose\": \"image\",\n  \"fileName\": \"report.jpg\",\n  \"contentType\": \"image/jpeg\",\n  \"size\": 1024\n}"
         },
         "url": "{{baseUrl}}/api/v1/files/uploads",
-        "description": "成功后用响应 data.uploadUrl PUT 图片二进制，并把 data.file.id 保存到 imageFileId。"
+        "description": "成功后将 data.formData 和名为 file 的图片使用 multipart/form-data POST 到 data.formUrl，并把 data.file.id 保存到 imageFileId。"
       }
     },
     {

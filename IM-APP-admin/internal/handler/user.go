@@ -105,6 +105,57 @@ func (h *DataHandler) setRestriction(c *gin.Context, restrType string) {
 	response.OK(c, gin.H{"ok": true})
 }
 
+// ResetUserProfile 强制重置用户头像/昵称（方案 A：走 server 更新 + OpenIM 同步）
+func (h *DataHandler) ResetUserProfile(c *gin.Context) {
+	var req struct {
+		Field  string `json:"field" binding:"required,oneof=avatar nickname"`
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "必须填写字段和原因")
+		return
+	}
+	if err := h.Data.ResetProfile(c.Request.Context(), c.Param("id"), req.Field, middleware.AdminID(c), req.Reason); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "重置失败", err)
+		return
+	}
+	c.Set("auditReason", req.Reason+" 重置"+req.Field)
+	response.OK(c, gin.H{"ok": true})
+}
+
+// SearchUserByPhone 按手机号查询用户（需 users.phone.search 权限）
+func (h *DataHandler) SearchUserByPhone(c *gin.Context) {
+	page, size := pageParams(c)
+	phone := c.Query("phone")
+	if phone == "" {
+		response.BadRequest(c, "phone 必填")
+		return
+	}
+	list, total, err := h.Data.SearchUserByPhone(c.Request.Context(), phone, page, size)
+	if err != nil {
+		response.FailErr(c, 500, "查询失败", err)
+		return
+	}
+	response.OKPage(c, list, total, page, size)
+}
+
+// CancelUser 注销用户（方案 A：调 server 改状态 + 撤销会话）
+func (h *DataHandler) CancelUser(c *gin.Context) {
+	var req struct {
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "必须填写原因")
+		return
+	}
+	if err := h.Data.CancelUser(c.Request.Context(), c.Param("id"), req.Reason, middleware.AdminID(c)); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "注销失败", err)
+		return
+	}
+	c.Set("auditReason", req.Reason+" 注销用户")
+	response.OK(c, gin.H{"ok": true})
+}
+
 func (h *DataHandler) BanUser(c *gin.Context) {
 	var req models.BanRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" || req.Banned == nil {

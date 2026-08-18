@@ -12,3 +12,6 @@ IM-APP-admin/release/
 
 # 前端依赖锁文件
 IM-APP-fronend/pnpm-lock.yaml
+
+# Apifox 导出文档（本地参考，不入库）
+IM-APP-system/im.md

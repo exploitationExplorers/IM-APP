@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
@@ -73,6 +74,9 @@ func (s *GroupService) Join(ctx context.Context, groupID, uid string) (models.Gr
 }
 
 func (s *GroupService) UpdateSettings(ctx context.Context, groupID, uid string, name, avatarFileID, announcement *string, allow *bool, joinMode *string, allMuted *bool) error {
+	if name == nil && avatarFileID == nil && announcement == nil && allow == nil && joinMode == nil && allMuted == nil {
+		return repository.ErrInvalidGroupOperation
+	}
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
 		return err
@@ -258,11 +262,16 @@ func (s *GroupService) UpdateMemberRole(ctx context.Context, groupID, operatorID
 	return s.Groups.UpdateMemberRole(ctx, internalID, operatorID, memberID, role)
 }
 
-func (s *GroupService) UpdateMemberMute(ctx context.Context, groupID, operatorID, memberID string, mutedSeconds int64) error {
+func (s *GroupService) UpdateMemberMute(ctx context.Context, groupID, operatorID, memberID string, mutedSeconds int64) (*time.Time, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	parsedMemberID, err := uuid.Parse(memberID)
+	if err != nil {
+		return nil, repository.ErrInvalidGroupOperation
+	}
+	memberID = parsedMemberID.String()
 	return s.Groups.UpdateMemberMute(ctx, internalID, operatorID, memberID, mutedSeconds)
 }
 
@@ -280,6 +289,15 @@ func (s *GroupService) Dismiss(ctx context.Context, groupID, operatorID string) 
 		return err
 	}
 	return s.Groups.Dismiss(ctx, internalID, operatorID)
+}
+
+// DismissByAdmin 管理端解散群（运营操作，无 owner 校验；同步 OpenIM）
+func (s *GroupService) DismissByAdmin(ctx context.Context, groupID, adminID, reason string) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.DismissByAdmin(ctx, internalID, adminID, reason)
 }
 
 func (s *GroupService) GetGroupRemark(ctx context.Context, groupID, uid string) (string, error) {

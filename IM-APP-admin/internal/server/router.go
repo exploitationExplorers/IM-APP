@@ -102,6 +102,9 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.PUT("/users/:id/message-restriction", middleware.RequirePermission(rbacRepo, "users.restrict.message"), d.DataH.SetMessageRestriction)
 			auth.PUT("/users/:id/ban", middleware.RequirePermission(rbacRepo, "users.ban"), d.DataH.BanUser)
 			auth.POST("/users/:id/sessions/revoke", middleware.RequirePermission(rbacRepo, "users.sessions.revoke"), d.DataH.RevokeSessions)
+			auth.POST("/users/:id/reset-profile", middleware.RequirePermission(rbacRepo, "users.reset.profile"), d.DataH.ResetUserProfile)
+			auth.POST("/users/:id/cancel", middleware.RequirePermission(rbacRepo, "users.cancel"), d.DataH.CancelUser)
+			auth.GET("/users/phone-search", middleware.RequirePermission(rbacRepo, "users.phone.search"), d.DataH.SearchUserByPhone)
 
 			// 模块 04：群组管理
 			auth.GET("/groups", middleware.RequirePermission(rbacRepo, "groups.read"), d.DataH.ListGroups)

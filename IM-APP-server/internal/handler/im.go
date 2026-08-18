@@ -8,6 +8,7 @@ import (
 
 	"im-app-server/internal/im"
 	"im-app-server/internal/middleware"
+	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
 	"im-app-server/internal/response"
 	"im-app-server/internal/service"
@@ -204,6 +205,39 @@ func (h *IMHandler) ClearConversationMessages(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"ok": true, "scope": "self"})
+}
+
+func (h *IMHandler) RecallMessage(c *gin.Context) {
+	var req models.RecallMessageRequest
+	if err := bindBusinessJSON(c, &req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+	result, err := h.Service.RecallMessage(c.Request.Context(), middleware.UserID(c), req)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrIMInvalidRecallRequest):
+			response.Fail(c, http.StatusBadRequest, "撤回参数错误")
+		case errors.Is(err, service.ErrIMUnsupportedMessage):
+			response.Fail(c, http.StatusBadRequest, "该消息类型不允许撤回")
+		case errors.Is(err, service.ErrIMRecallForbidden):
+			response.Fail(c, http.StatusForbidden, "无权撤回该消息")
+		case errors.Is(err, service.ErrIMMessageNotFound):
+			response.Fail(c, http.StatusNotFound, "消息不存在或消息标识不匹配")
+		case errors.Is(err, service.ErrIMRecallExpired):
+			response.Fail(c, http.StatusConflict, "消息已超过撤回时间")
+		case errors.Is(err, service.ErrIMRecallConflict):
+			response.Fail(c, http.StatusConflict, "该消息正在撤回，请稍后重试")
+		case errors.Is(err, service.ErrIMUnavailable), errors.Is(err, im.ErrUnavailable):
+			response.Fail(c, http.StatusServiceUnavailable, "OpenIM 服务不可用")
+		case errors.Is(err, service.ErrIMRecallUpstream):
+			response.Fail(c, http.StatusBadGateway, "OpenIM 撤回失败")
+		default:
+			response.Fail(c, http.StatusInternalServerError, "消息撤回处理失败")
+		}
+		return
+	}
+	response.OK(c, result)
 }
 
 // parsePeer 从路径参数解析 peerType/peerId，并校验 peerType 合法性。

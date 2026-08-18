@@ -71,10 +71,13 @@ func (r *DataRepo) GetGroupDetail(ctx context.Context, groupID string) (*models.
 		       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
 		       COALESCE(g.status,'active'), COALESCE(g.all_muted,false), g.created_at,
 		       COALESCE(g.join_mode,'open'), COALESCE(g.allow_member_add_friend,true),
-		       COALESCE(g.announcement,'')
+		       COALESCE(g.announcement,''),
+		       COALESCE(g.max_members,200),
+		       g.dissolved_at, COALESCE(g.dissolved_by_admin_id::text,''), COALESCE(g.dissolve_reason,'')
 		FROM groups g LEFT JOIN users ou ON ou.id=g.owner_id WHERE g.id=$1::uuid`, groupID,
 	).Scan(&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.OwnerName, &g.MemberCount, &g.Status,
-		&g.AllMuted, &g.CreatedAt, &g.JoinMode, &g.AllowMemberAddFriend, &g.Announcement)
+		&g.AllMuted, &g.CreatedAt, &g.JoinMode, &g.AllowMemberAddFriend, &g.Announcement,
+		&g.MaxMembers, &g.DissolvedAt, &g.DissolvedByAdminId, &g.DissolveReason)
 	if err != nil {
 		return nil, err
 	}
@@ -113,15 +116,13 @@ func (r *DataRepo) logGroupStatus(ctx context.Context, groupID, toStatus, reason
 	return err
 }
 
-func (r *DataRepo) SetGroupMuteAll(ctx context.Context, groupID string, muted bool, reason, operatorID string) error {
+// LogGroupMute 记录群禁言审计（禁言动作已由 server 内部接口执行并同步 OpenIM；本方法只写 group_status_logs）
+func (r *DataRepo) LogGroupMute(ctx context.Context, groupID string, muted bool, reason, operatorID string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `UPDATE groups SET all_muted=$2 WHERE id=$1::uuid`, groupID, muted); err != nil {
-		return err
-	}
 	to := "normal"
 	if muted {
 		to = "muted"
@@ -132,21 +133,13 @@ func (r *DataRepo) SetGroupMuteAll(ctx context.Context, groupID string, muted bo
 	return tx.Commit(ctx)
 }
 
-func (r *DataRepo) SetGroupAddFriend(ctx context.Context, groupID string, enabled bool, reason, operatorID string) error {
-	_, err := r.DB.Exec(ctx, `UPDATE groups SET allow_member_add_friend=$2 WHERE id=$1::uuid`, groupID, enabled)
-	return err
-}
-
-// DissolveGroup 解散群：标记 dismissed（与 server 群状态规范一致）+ 状态日志（不扩展 groups 列）
-func (r *DataRepo) DissolveGroup(ctx context.Context, groupID, reason, operatorID string) error {
+// LogGroupDissolve 记录群解散审计（解散动作已由 server 内部接口执行并同步 OpenIM；本方法只写 group_status_logs）
+func (r *DataRepo) LogGroupDissolve(ctx context.Context, groupID, reason, operatorID string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `UPDATE groups SET status='dismissed' WHERE id=$1::uuid`, groupID); err != nil {
-		return err
-	}
 	if err := r.logGroupStatusTx(ctx, tx, groupID, "dismissed", reason, operatorID); err != nil {
 		return err
 	}
@@ -186,8 +179,29 @@ func (r *DataRepo) ListGroupReports(ctx context.Context, groupID string, limit, 
 	return out, total, nil
 }
 
-// RecallMessage 管理撤回：写 message_recall_logs + 状态日志（保留占位与审计，不物理删除消息）
+// RecallMessage 管理撤回：消息表打撤回标记（024 扩展列）+ 写撤回审计（不物理删除消息）
 func (r *DataRepo) RecallMessage(ctx context.Context, groupID, messageID, reason, operatorID string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	// 消息表打撤回标记（依赖 server 024 migration 的 messages.recalled_at/recalled_by）
+	if _, err := tx.Exec(ctx, `
+		UPDATE messages SET recalled_at=NOW(), recalled_by=$2::uuid
+		WHERE id=$1::uuid`, messageID, operatorID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO message_recall_logs(message_id, group_id, operator_type, operator_id, reason)
+		VALUES($1::uuid,$2::uuid,'admin',$3::uuid,$4)`, messageID, groupID, operatorID, reason); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// LogMessageRecall 记录撤回审计（撤回动作已由 server 内部接口执行 + OpenIM 撤回；本方法只写 message_recall_logs）
+func (r *DataRepo) LogMessageRecall(ctx context.Context, groupID, messageID, reason, operatorID string) error {
 	_, err := r.DB.Exec(ctx, `
 		INSERT INTO message_recall_logs(message_id, group_id, operator_type, operator_id, reason)
 		VALUES($1::uuid,$2::uuid,'admin',$3::uuid,$4)`, messageID, groupID, operatorID, reason)

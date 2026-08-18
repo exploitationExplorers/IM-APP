@@ -47,12 +47,19 @@ func (h *FileHandler) Presign(c *gin.Context) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	result, err := h.MinIO.PresignPut(c.Request.Context(), objectKey, contentType, 15*time.Minute)
+	uploadURL, formData, err := h.MinIO.PresignPost(c.Request.Context(), objectKey, contentType, 15*time.Minute)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "生成上传凭证失败")
 		return
 	}
-	response.OK(c, result)
+	response.OK(c, gin.H{
+		"uploadUrl": uploadURL,
+		"formUrl":   uploadURL,
+		"formData":  formData,
+		"fileUrl":   h.MinIO.FileURL(objectKey),
+		"objectKey": objectKey,
+		"expiresIn": 900,
+	})
 }
 
 // DevPresign returns a fake upload URL when MinIO is unavailable (Mock/dev).
@@ -72,6 +79,8 @@ func DevPresign(c *gin.Context) {
 	fileURL := fmt.Sprintf("http://%s/static/%s", base, path.Base(objectKey))
 	response.OK(c, gin.H{
 		"uploadUrl": fileURL,
+		"formUrl":   fileURL,
+		"formData":  gin.H{},
 		"fileUrl":   fileURL,
 		"objectKey": objectKey,
 		"expiresIn": 900,
@@ -93,15 +102,17 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 	}
 	objectKey := fmt.Sprintf("uploads/%s/%s%s", userID, uuid.NewString(), ext)
 
-	var uploadURL, fileURL string
+	var uploadURL, fileURL, formURL string
+	var formData map[string]string
 	if h.MinIO != nil && h.MinIO.Available() {
-		res, err := h.MinIO.PresignPut(c.Request.Context(), objectKey, req.ContentType, 15*time.Minute)
+		var err error
+		formURL, formData, err = h.MinIO.PresignPost(c.Request.Context(), objectKey, req.ContentType, 15*time.Minute)
 		if err != nil {
 			response.Fail(c, http.StatusInternalServerError, "生成上传凭证失败")
 			return
 		}
-		uploadURL = res.UploadURL
-		fileURL = res.FileURL
+		uploadURL = formURL
+		fileURL = h.MinIO.FileURL(objectKey)
 	} else {
 		// 开发模式：直接给一个可访问地址
 		base := strings.TrimSuffix(c.Request.Host, ":8080")
@@ -117,6 +128,8 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 	response.OK(c, models.UploadInitResult{
 		File:      f,
 		UploadURL: uploadURL,
+		FormURL:   formURL,
+		FormData:  formData,
 		ExpiresIn: 900,
 	})
 }
@@ -128,7 +141,18 @@ func (h *FileHandler) Complete(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "fileId 必填")
 		return
 	}
-	f, err := h.Files.MarkReady(c.Request.Context(), req.FileID, middleware.UserID(c))
+	userID := middleware.UserID(c)
+	objectKey, err := h.Files.FindPendingByID(c.Request.Context(), req.FileID, userID)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "文件不存在或已处理")
+		return
+	}
+	// 校验对象真实存在于 MinIO，避免空包/上传失败的 URL 被标记 ready（Android PUT 空包问题导致头像 404）
+	if h.MinIO != nil && h.MinIO.Available() && !h.MinIO.ObjectExists(c.Request.Context(), objectKey) {
+		response.Fail(c, http.StatusBadRequest, "文件未上传成功，请重新上传")
+		return
+	}
+	f, err := h.Files.MarkReady(c.Request.Context(), req.FileID, userID)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "文件不存在或已处理")
 		return

@@ -538,9 +538,8 @@ export async function markConversationRead(conversationID: string): Promise<void
   }
 }
 
-export async function revokeMessage(conversationID: string, clientMsgID: string): Promise<void> {
-  await imCall(IMMethods.RevokeMessage, { conversationID, clientMsgID })
-}
+// 消息撤回不再直连 OpenIM SDK：统一走后端 POST /im/messages/recall（服务端审计 + 同步），
+// 见 src/api/im.ts 的 recallMessage。
 
 export async function deleteLocalMessage(conversationID: string, clientMsgID: string): Promise<void> {
   try {
@@ -555,9 +554,11 @@ export async function sendQuoteMessage(
   text: string,
   quote: MessageItem,
 ): Promise<MessageItem> {
+  // SDK 的 createQuoteMessage 要求 message 是被引用消息的 JSON 字符串（QuoteMsgParams.message: string），
+  // 直接传对象会被 JSON.parse 隐式转成 "[object Object]" 而报 errCode=10006。
   const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
     text,
-    message: quote,
+    message: JSON.stringify(quote),
   })
   return sendCreatedMessage(target, message)
 }
@@ -610,7 +611,29 @@ function nativeOpenIM(): NativeOpenIM | null {
 function isSendProgressData(data: unknown): boolean {
   if (typeof data === 'number') return true
   if (typeof data === 'string' && /^\d+$/.test(data.trim())) return true
+  if (data && typeof data === 'object' && !('contentType' in data) && ('progress' in data || 'current' in data)) {
+    return true
+  }
   return false
+}
+
+/** 原生进度回调也可能带 clientMsgID，但不能当成发送完成 */
+function isCompleteSentMessage(msg: MessageItem | null): msg is MessageItem {
+  if (!msg?.clientMsgID || !msg.contentType) return false
+  if (msg.status === MessageStatus.Sending || msg.status === MessageStatus.Failed) return false
+  return true
+}
+
+/** OpenIM FullPath API 只要 POSIX 绝对路径，不能传 uni.chooseImage 的 file:// / _doc 临时路径 */
+function toNativeFullPath(filePath: string): string {
+  let path = filePath || ''
+  try {
+    const converted = plus?.io?.convertLocalFileSystemURL?.(path)
+    if (converted) path = converted
+  } catch {
+    /* H5 或转换失败时沿用原路径 */
+  }
+  return path.replace(/^file:\/\//, '')
 }
 
 async function sendCreatedMessage(
@@ -670,7 +693,7 @@ function sendOnAppNative(
       offFail()
       if (ok) {
         const msg = coerceMessage(payload)
-        if (msg) {
+        if (isCompleteSentMessage(msg)) {
           resolve(msg)
           return
         }
@@ -679,10 +702,10 @@ function sendOnAppNative(
     }
     const timer = setTimeout(() => {
       finish(false, undefined, new Error('发送超时'))
-    }, 15000)
+    }, useNotOss ? 15000 : 60000)
     const offOk = onIMEvent<MessageItem>(IMEvents.SendMessageSuccess, (msg) => {
       const parsed = coerceMessage(msg)
-      if (parsed?.clientMsgID === clientMsgID) finish(true, parsed)
+      if (parsed?.clientMsgID === clientMsgID && isCompleteSentMessage(parsed)) finish(true, parsed)
     })
     const offFail = onIMEvent<{ clientMsgID?: string; errMsg?: string }>(IMEvents.SendMessageFailed, (err) => {
       if (!err?.clientMsgID || err.clientMsgID === clientMsgID) {
@@ -709,6 +732,7 @@ function sendOnAppNative(
         finish(false, msg, new Error('发送失败'))
         return
       }
+      if (!isCompleteSentMessage(msg)) return
       finish(true, msg)
     }
     if (useNotOss) {
@@ -725,13 +749,34 @@ export async function sendTextMessage(target: IMTarget, text: string): Promise<M
 }
 
 /**
+ * 好友名片消息（OpenIM contentType=108）。
+ * cardElem.userID 必须是 OpenIM 用户 ID（业务 UUID 去横线），
+ * 业务 UUID 冗余进 ex，接收端解析后可直接跳好友详情页。
+ */
+export async function sendCardMessage(
+  target: IMTarget,
+  card: { businessUserId: string; nickname: string; avatar: string },
+): Promise<MessageItem> {
+  const message = await imCall<MessageItem>(IMMethods.CreateCardMessage, {
+    userID: card.businessUserId.replace(/-/g, '').toLowerCase(),
+    nickname: card.nickname || '',
+    faceURL: card.avatar || '',
+    ex: JSON.stringify({ businessUserId: card.businessUserId }),
+  })
+  return sendCreatedMessage(target, message)
+}
+
+/**
  * 图片消息。app 端交给原生插件读本地全路径并自行上传；
  * web 端没有 createImageMessageFromFullPath，先把文件传到对象存储换 URL 再发。
  */
 export async function sendImageMessage(target: IMTarget, filePath: string): Promise<MessageItem> {
   let message: MessageItem
   if (isAppPlatform) {
-    message = await imCall<MessageItem>(IMMethods.CreateImageMessageFromFullPath, filePath)
+    message = await imCall<MessageItem>(
+      IMMethods.CreateImageMessageFromFullPath,
+      toNativeFullPath(filePath),
+    )
   } else {
     const file = await pathToFile(filePath)
     const url = await uploadFile(file)
@@ -756,17 +801,20 @@ export async function sendVoiceMessage(
   const seconds = Math.max(1, Math.round(duration > 120 ? duration / 1000 : duration))
   let message: MessageItem
   if (isAppPlatform) {
-    let soundPath = filePath
+    const soundPath = toNativeFullPath(filePath)
     try {
-      const converted = plus?.io?.convertLocalFileSystemURL?.(filePath)
-      if (converted) soundPath = converted
-    } catch {}
-    soundPath = soundPath.replace(/^file:\/\//, '')
-    message = await imCall<MessageItem>(
-      IMMethods.CreateSoundMessageFromFullPath,
-      soundPath,
-      seconds,
-    )
+      message = await imCall<MessageItem>(
+        IMMethods.CreateSoundMessageFromFullPath,
+        soundPath,
+        seconds,
+      )
+    } catch {
+      // 部分原生插件把参数收成对象，而不是 (path, duration)
+      message = await imCall<MessageItem>(IMMethods.CreateSoundMessageFromFullPath, {
+        soundPath,
+        duration: seconds,
+      })
+    }
   } else {
     const file = await pathToFile(filePath)
     const url = await uploadFile(file)
@@ -792,6 +840,90 @@ async function uploadFile(file: File): Promise<string> {
   })
   if (!res?.url) throw new Error('文件上传失败')
   return res.url
+}
+
+/**
+ * 文件消息。app 端走原生插件读本地全路径；
+ * web 端先传对象存储换 URL 再发。
+ */
+export async function sendFileMessage(
+  target: IMTarget,
+  filePath: string,
+  fileName: string,
+): Promise<MessageItem> {
+  let message: MessageItem
+  if (isAppPlatform) {
+    const fullPath = toNativeFullPath(filePath)
+    try {
+      message = await imCall<MessageItem>(IMMethods.CreateFileMessageFromFullPath, fullPath, fileName)
+    } catch {
+      // 部分原生插件把参数收成对象，而不是 (path, name)
+      message = await imCall<MessageItem>(IMMethods.CreateFileMessageFromFullPath, {
+        filePath: fullPath,
+        fileName,
+      })
+    }
+  } else {
+    const file = await pathToFile(filePath)
+    const url = await uploadFile(file)
+    message = await imCall<MessageItem>(IMMethods.CreateFileMessageByURL, {
+      filePath: '',
+      fileName: file.name || fileName,
+      uuid: IMSDK.uuid(),
+      sourceUrl: url,
+      fileSize: file.size,
+      fileType: file.type,
+    })
+  }
+  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
+}
+
+/** 图片 URL 直发（收藏的图片 / 已上传图片不再二次上传） */
+export async function sendImageUrlMessage(target: IMTarget, url: string): Promise<MessageItem> {
+  const picture = { uuid: IMSDK.uuid(), type: 'image/jpeg', size: 0, width: 0, height: 0, url }
+  const message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
+    sourcePath: url,
+    sourcePicture: picture,
+    bigPicture: picture,
+    snapshotPicture: picture,
+  })
+  return sendCreatedMessage(target, message, { alreadyUploaded: true })
+}
+
+/**
+ * 选一个本地文件，返回 { path, name }。
+ * app 端用 OpenIM 原生插件的文件选择器；小程序用 chooseMessageFile；H5 用 chooseFile。
+ */
+export async function chooseLocalFile(): Promise<{ path: string; name: string }> {
+  if (isAppPlatform) {
+    const path = await IMSDK.pickFile()
+    if (!path) throw new Error('未选择文件')
+    const idx = path.lastIndexOf('/')
+    return { path, name: idx >= 0 ? path.slice(idx + 1) : '文件' }
+  }
+  const anyUni = uni as unknown as {
+    chooseMessageFile?: (opt: unknown) => void
+    chooseFile?: (opt: unknown) => void
+  }
+  const pick = (fn: (opt: unknown) => void) =>
+    new Promise<{ path: string; name?: string } | null>((resolve) => {
+      fn({
+        count: 1,
+        type: 'file',
+        success: (res: { tempFiles?: Array<{ path: string; name?: string }> }) =>
+          resolve(res.tempFiles?.[0] || null),
+        fail: () => resolve(null),
+      })
+    })
+  let picked: { path: string; name?: string } | null = null
+  if (typeof anyUni.chooseMessageFile === 'function') {
+    picked = await pick(anyUni.chooseMessageFile)
+  }
+  if (!picked && typeof anyUni.chooseFile === 'function') {
+    picked = await pick(anyUni.chooseFile)
+  }
+  if (!picked?.path) throw new Error('当前平台暂不支持选择文件')
+  return { path: picked.path, name: picked.name || '文件' }
 }
 
 async function pathToFile(path: string): Promise<File> {
@@ -900,6 +1032,8 @@ function toAppMessageType(contentType: number): AppMessageType {
       return 'image'
     case MessageType.VoiceMessage:
       return 'voice'
+    case MessageType.CardMessage:
+      return 'card'
     case MessageType.FileMessage:
     case MessageType.VideoMessage:
       return 'file'
@@ -926,6 +1060,51 @@ function jsonContentField(raw: unknown, key: string): string {
   return raw
 }
 
+function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    if (obj.soundElem && typeof obj.soundElem === 'object') {
+      const nested = jsonSoundMeta(obj.soundElem)
+      if (nested.path || nested.duration) return nested
+    }
+    const path =
+      (typeof obj.sourceUrl === 'string' && obj.sourceUrl) ||
+      (typeof obj.soundPath === 'string' && obj.soundPath) ||
+      (typeof obj.path === 'string' && obj.path) ||
+      ''
+    return { path, duration: Number(obj.duration || 0) }
+  }
+  if (typeof raw === 'string' && raw) {
+    try {
+      return jsonSoundMeta(JSON.parse(raw))
+    } catch {
+      return { path: '', duration: 0 }
+    }
+  }
+  return { path: '', duration: 0 }
+}
+
+function jsonPictureUrl(raw: unknown): string {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    const pictures = [obj.snapshotPicture, obj.sourcePicture, obj.bigPicture]
+    for (const picture of pictures) {
+      if (picture && typeof picture === 'object' && 'url' in picture) {
+        const url = (picture as { url?: unknown }).url
+        if (typeof url === 'string' && url) return url
+      }
+    }
+    if (typeof obj.sourcePath === 'string' && obj.sourcePath) return obj.sourcePath
+    if (typeof obj.url === 'string' && obj.url) return obj.url
+  }
+  if (typeof raw !== 'string' || !raw) return ''
+  try {
+    return jsonPictureUrl(JSON.parse(raw))
+  } catch {
+    return ''
+  }
+}
+
 function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {
   const quoted = item.quoteElem?.quoteMessage
   if (!quoted) return undefined
@@ -949,17 +1128,41 @@ function extractContent(item: MessageItem): string {
         item.pictureElem?.snapshotPicture?.url ||
         item.pictureElem?.sourcePicture?.url ||
         item.pictureElem?.sourcePath ||
-        ''
+        jsonPictureUrl(item.content)
       )
-    case MessageType.VoiceMessage:
-      return JSON.stringify({
+    case MessageType.VoiceMessage: {
+      const fromElem = {
         path: item.soundElem?.sourceUrl || item.soundElem?.soundPath || '',
         duration: item.soundElem?.duration || 0,
+      }
+      const fromJson = jsonSoundMeta(item.content)
+      return JSON.stringify({
+        path: fromElem.path || fromJson.path,
+        duration: fromElem.duration || fromJson.duration,
       })
+    }
     case MessageType.FileMessage:
       return item.fileElem?.sourceUrl || ''
     case MessageType.VideoMessage:
       return item.videoElem?.videoUrl || ''
+    case MessageType.CardMessage: {
+      // 名片：content 统一存 {userId, nickname, avatar}，userId 为业务 UUID。
+      // 发送时把业务 ID 冗余进 ex；旧消息没有 ex 则从 OpenIM userID 反推。
+      const card = item.cardElem
+      let userId = ''
+      try {
+        const ex = card?.ex ? (JSON.parse(card.ex) as { businessUserId?: string }) : null
+        userId = ex?.businessUserId || ''
+      } catch {
+        /* ex 不是 JSON 时走反推 */
+      }
+      if (!userId) userId = businessUserIdFromIM(card?.userID || '')
+      return JSON.stringify({
+        userId,
+        nickname: card?.nickname || '',
+        avatar: card?.faceURL || '',
+      })
+    }
     default:
       return formatIMNotification(item)
   }
@@ -1011,6 +1214,7 @@ function summarize(latestMsg: string | MessageItem | null | undefined): string {
   if (type === 'image') return '[图片]'
   if (type === 'voice') return '[语音]'
   if (type === 'file') return '[文件]'
+  if (type === 'card') return '[名片]'
   return extractContent(message)
 }
 

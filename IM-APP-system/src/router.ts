@@ -15,7 +15,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: "home",
         component: () => import("./views/HomeView.vue"),
-        meta: { title: "首页" },
+        meta: { title: "工作台", icon: "House" },
       },
       {
         path: "app/users",
@@ -35,7 +35,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: "system/users",
         component: () => import("./views/UserManagementView.vue"),
-        meta: { title: "平台用户管理" },
+        meta: { title: "管理员" },
       },
       {
         path: "system/roles",
@@ -53,6 +53,31 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "转发和群发管理" },
       },
       {
+        path: "forward-risk",
+        component: () => import("./views/forwardRisk/ForwardRiskView.vue"),
+        meta: { title: "转发风控" },
+      },
+      {
+        path: "app-config/app-versions",
+        component: () => import("./views/appConfig/AppVersionsView.vue"),
+        meta: { title: "APP配置-APP版本", icon: "Iphone" },
+      },
+      {
+        path: "app-config/legal-documents",
+        component: () => import("./views/appConfig/LegalDocumentsView.vue"),
+        meta: { title: "APP配置-协议文档", icon: "Tickets" },
+      },
+      {
+        path: "app-config/report-reasons",
+        component: () => import("./views/appConfig/ReportReasonsView.vue"),
+        meta: { title: "APP配置-举报原因", icon: "Warning" },
+      },
+      {
+        path: "app-config/system-limits",
+        component: () => import("./views/appConfig/SystemLimitsView.vue"),
+        meta: { title: "APP配置-系统限制", icon: "Setting" },
+      },
+      {
         path: "sms-operation-config",
         component: () => import("./views/smsOperationConfig/SmsOperationConfigView.vue"),
         meta: { title: "短信和运营配置" },
@@ -68,9 +93,44 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "管理操作审计日志" },
       },
       {
+        path: "country-sms/countries",
+        component: () => import("./views/countrySms/CountriesView.vue"),
+        meta: { title: "国家短信-国家/地区" },
+      },
+      {
+        path: "country-sms/sms-logs",
+        component: () => import("./views/countrySms/SmsLogsView.vue"),
+        meta: { title: "国家短信-短信发送日志" },
+      },
+      {
+        path: "country-sms/sms-logs/:id",
+        component: () => import("./views/countrySms/SmsLogDetailView.vue"),
+        meta: { title: "国家短信-短信日志详情", activeMenu: "/country-sms/sms-logs" },
+      },
+      {
+        path: "country-sms/sms-statistics",
+        component: () => import("./views/countrySms/SmsStatisticsView.vue"),
+        meta: { title: "国家短信-送达统计" },
+      },
+      {
         path: "runtime-observe/exports",
         component: () => import("./views/runtimeObserve/ExportTasksView.vue"),
         meta: { title: "导出任务" },
+      },
+      {
+        path: "runtime-observe/errors",
+        component: () => import("./views/runtimeObserve/SystemErrorsView.vue"),
+        meta: { title: "运行错误" },
+      },
+      {
+        path: "other/features",
+        component: () => import("./views/other/FeaturesView.vue"),
+        meta: { title: "功能开关" },
+      },
+      {
+        path: "auth-mine",
+        component: () => import("./views/authMine/AuthMineView.vue"),
+        meta: { title: "认证与我的" },
       },
     ],
   },

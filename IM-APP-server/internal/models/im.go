@@ -93,3 +93,30 @@ type IMOutboxItem struct {
 	NextAttemptAt time.Time       `json:"nextAttemptAt"`
 	UpdatedAt     time.Time       `json:"updatedAt"`
 }
+
+type IMAuditedMessage struct {
+	ClientMsgID    string
+	ConversationID string
+	SenderIMID     string
+	ContentType    int
+	Seq            int64
+	SendTime       int64
+}
+
+type RecallMessageRequest struct {
+	PeerType    string `json:"peerType"`
+	PeerID      string `json:"peerId"`
+	ClientMsgID string `json:"clientMsgId"`
+	Seq         int64  `json:"seq"`
+	Reason      string `json:"reason"`
+}
+
+type MessageRecallResult struct {
+	PeerType        string    `json:"peerType"`
+	PeerID          string    `json:"peerId"`
+	ClientMsgID     string    `json:"clientMsgId"`
+	Seq             int64     `json:"seq"`
+	Status          string    `json:"status"`
+	AlreadyRecalled bool      `json:"alreadyRecalled"`
+	RecalledAt      time.Time `json:"recalledAt"`
+}

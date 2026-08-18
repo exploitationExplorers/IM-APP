@@ -204,6 +204,11 @@ var queryParamSpecs = map[string][]queryParamSpec{
 		{"keyword", "string", false, "关键字（按昵称/公共ID/手机号匹配）"},
 		{"status", "string", false, "状态筛选：active|banned|cancelled"},
 	},
+	"GET /api/admin/v1/users/phone-search": {
+		{"phone", "string", true, "完整手机号"},
+		{"page", "integer", false, "页码（默认1）"},
+		{"size", "integer", false, "每页条数（默认20，最大100）"},
+	},
 	"GET /api/admin/v1/admins": {
 		{"page", "integer", false, "页码（默认1）"},
 		{"size", "integer", false, "每页条数（默认20，最大100）"},
@@ -344,6 +349,7 @@ var fieldEnums = map[string][]string{
 	"POST /api/admin/v1/moderation/profiles/{userId}/approve field": {"avatar", "nickname"},
 	"POST /api/admin/v1/moderation/profiles/{userId}/reject field":  {"avatar", "nickname"},
 	"POST /api/admin/v1/moderation/profiles/{userId}/restore field": {"avatar", "nickname"},
+	"POST /api/admin/v1/users/{id}/reset-profile field":             {"avatar", "nickname"},
 	"POST /api/admin/v1/legal-documents type":                       {"user_agreement", "privacy_policy"},
 	// ---- 响应模型字段枚举 ----
 	"AppUser status":            {"active", "banned", "cancelled"},
@@ -386,6 +392,7 @@ var fieldEnumDescs = map[string][]string{
 	"POST /api/admin/v1/moderation/profiles/{userId}/approve field": {"头像", "昵称"},
 	"POST /api/admin/v1/moderation/profiles/{userId}/reject field":  {"头像", "昵称"},
 	"POST /api/admin/v1/moderation/profiles/{userId}/restore field": {"头像", "昵称"},
+	"POST /api/admin/v1/users/{id}/reset-profile field":             {"头像", "昵称"},
 	"POST /api/admin/v1/legal-documents type":                       {"用户服务协议", "隐私政策"},
 	// ---- 响应模型字段枚举说明 ----
 	"AppUser status":            {"正常", "已封禁", "已注销"},
@@ -664,6 +671,13 @@ var writeBodyFields = map[string][]fieldSpec{
 		{"ticketNo", "string", false, "关联工单号"},
 		{"idempotencyKey", "string", false, "幂等键"},
 	},
+	"POST /api/admin/v1/users/{id}/reset-profile": {
+		{"field", "string", true, "avatar|nickname"},
+		{"reason", "string", true, "操作原因"},
+	},
+	"POST /api/admin/v1/users/{id}/cancel": {
+		{"reason", "string", true, "注销原因"},
+	},
 	"PUT /api/admin/v1/groups/{id}/mute-all": {
 		{"muted", "boolean", true, "是否全员禁言"},
 		{"reason", "string", true, "操作原因"},
@@ -914,6 +928,9 @@ var apiDescriptions = map[string]string{
 	"PUT /api/admin/v1/users/{id}/message-restriction":           "设置/解除用户发消息限制",
 	"PUT /api/admin/v1/users/{id}/ban":                           "封禁/解封用户（封禁撤销其全部登录会话）",
 	"POST /api/admin/v1/users/{id}/sessions/revoke":              "强制用户全部设备下线",
+	"POST /api/admin/v1/users/{id}/reset-profile":                "重置用户头像/昵称（需原因，写回 server 并同步 OpenIM）",
+	"POST /api/admin/v1/users/{id}/cancel":                       "注销用户（状态置为已注销并撤销全部会话）",
+	"GET /api/admin/v1/users/phone-search":                       "按手机号搜索用户（需 users.phone.search 权限）",
 	"GET /api/admin/v1/groups":                                   "群列表（按关键字/状态筛选）",
 	"GET /api/admin/v1/groups/{id}":                              "群详情（设置/公告/全员禁言等）",
 	"GET /api/admin/v1/groups/{id}/members":                      "群成员列表",
@@ -995,6 +1012,7 @@ type dataKind struct {
 var responseData = map[string]dataKind{
 	// ---- 分页 {items,total,page,pageSize} ----
 	"GET /api/admin/v1/users":                      {Kind: "page", Model: "AppUser"},
+	"GET /api/admin/v1/users/phone-search":         {Kind: "page", Model: "AppUser"},
 	"GET /api/admin/v1/admins":                     {Kind: "page", Model: "AdminAccount"},
 	"GET /api/admin/v1/groups":                     {Kind: "page", Model: "AppGroup"},
 	"GET /api/admin/v1/reports":                    {Kind: "page", Model: "Report"},

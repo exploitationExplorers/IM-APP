@@ -635,7 +635,9 @@ function stopRecord() {
   <view class="composer safe-bottom">
     <view v-if="panelVisible" class="mask" @click="closePanel"></view>
     <view class="row">
-      <view class="icon-btn" @click="toggleVoiceMode">🎙</view>
+      <view class="icon-btn" @click="toggleVoiceMode">
+        <image class="icon-btn-img" src="/static/icon-mic.png" mode="aspectFit" />
+      </view>
 
       <view class="center">
         <view v-if="voiceMode" class="hold-wrap">
@@ -672,15 +674,21 @@ function stopRecord() {
         <view v-if="panelType === 'plus'" class="plus-panel">
           <view class="grid">
             <view class="grid-item" @click="pickImages">
-              <view class="grid-icon">🖼</view>
+              <view class="grid-icon">
+                <image class="grid-icon-img" src="/static/icon-photo.png" mode="aspectFit" />
+              </view>
               <text class="grid-text">照片</text>
             </view>
             <view class="grid-item" @click="pickFile">
-              <view class="grid-icon">📄</view>
+              <view class="grid-icon">
+                <image class="grid-icon-img" src="/static/icon-file.png" mode="aspectFit" />
+              </view>
               <text class="grid-text">文件</text>
             </view>
             <view class="grid-item" @click="pickFavorite">
-              <view class="grid-icon">⭐</view>
+              <view class="grid-icon">
+                <image class="grid-icon-img" src="/static/icon-favorite.png" mode="aspectFit" />
+              </view>
               <text class="grid-text">收藏</text>
             </view>
           </view>
@@ -753,6 +761,11 @@ function stopRecord() {
   justify-content: center;
   font-size: 40rpx;
   color: #333;
+}
+
+.icon-btn-img {
+  width: 44rpx;
+  height: 44rpx;
 }
 
 .center {
@@ -885,6 +898,11 @@ function stopRecord() {
   align-items: center;
   justify-content: center;
   font-size: 44rpx;
+}
+
+.grid-icon-img {
+  width: 56rpx;
+  height: 56rpx;
 }
 
 .grid-text {

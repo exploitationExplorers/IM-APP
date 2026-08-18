@@ -34,10 +34,11 @@ const (
 )
 
 type AuthHandler struct {
-	DB    *pgxpool.Pool
-	Cfg   config.Config
-	Redis *infra.Redis
-	SMS   service.SMSGateway
+	DB           *pgxpool.Pool
+	Cfg          config.Config
+	Redis        *infra.Redis
+	SMS          service.SMSGateway
+	Restrictions *repository.RestrictionRepo
 }
 
 // ---- 短信验证码 ----
@@ -213,6 +214,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		response.Fail(c, http.StatusUnauthorized, "账号或密码错误")
 		return
 	}
+	// 账号状态与登录限制检查（方案 A：server 强制；admin 封禁/限制后立即生效）
+	status, loginBanned, _, rerr := h.Restrictions.UserRestrictions(c.Request.Context(), user.ID)
+	if rerr == nil {
+		if status == "banned" {
+			response.Fail(c, http.StatusUnauthorized, "账号已被封禁")
+			return
+		}
+		if loginBanned {
+			response.Fail(c, http.StatusUnauthorized, "账号已限制登录")
+			return
+		}
+	}
 	h.respondAuth(c, user, req.DeviceID)
 }
 
@@ -237,6 +250,18 @@ func (h *AuthHandler) LoginSMS(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, http.StatusNotFound, "该手机号未注册，请先注册")
 		return
+	}
+	// 账号状态与登录限制检查（方案 A：server 强制）
+	status, loginBanned, _, rerr := h.Restrictions.UserRestrictions(ctx, user.ID)
+	if rerr == nil {
+		if status == "banned" {
+			response.Fail(c, http.StatusUnauthorized, "账号已被封禁")
+			return
+		}
+		if loginBanned {
+			response.Fail(c, http.StatusUnauthorized, "账号已限制登录")
+			return
+		}
 	}
 	h.respondAuth(c, user, req.DeviceID)
 }

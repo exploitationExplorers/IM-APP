@@ -3,8 +3,9 @@ import { ref, computed, watch } from 'vue'
 import { IMEvents, OnlineState, SessionType } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { ChatMessage, Conversation } from '@/types'
-import { resolveIMGroup, resolveIMPeer } from '@/api/im'
+import { recallMessage, resolveIMGroup, resolveIMGroupByIM, resolveIMPeer } from '@/api/im'
 import {
+  businessUserIdFromIM,
   ensureIMLogin,
   getConversationList,
   getHistoryMessages,
@@ -14,9 +15,12 @@ import {
   onIMEvent,
   onUserStatusChanged,
   deleteLocalMessage,
-  revokeMessage,
+  sendAtTextMessage,
+  sendCardMessage,
+  sendFileMessage,
   sendForwardMessage,
   sendImageMessage,
+  sendImageUrlMessage,
   sendQuoteMessage,
   sendTextMessage,
   sendVoiceMessage,
@@ -35,6 +39,15 @@ import { useChatSettingsStore } from '@/stores/chatSettings'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 
 const PAGE_SIZE = 20
+
+/** OnNewRecvMessageRevoked 事件载荷；conversationID 仅 App 原生插件可能携带 */
+interface RevokedNotice {
+  conversationID?: string
+  clientMsgID: string
+  revokerID?: string
+  revokerNickname?: string
+  seq?: number
+}
 
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
@@ -116,23 +129,44 @@ export const useChatStore = defineStore('chat', () => {
     const merged = [...conversations.value]
     incoming.forEach((conv) => {
       const idx = merged.findIndex((c) => c.id === conv.id)
-      if (idx >= 0) merged[idx] = conv
+      if (idx >= 0) merged[idx] = keepNewerPreview(merged[idx], conv)
       else merged.push(conv)
     })
     conversations.value = sortConversations(merged)
   }
 
-  function dropRevokedMessage(conversationId: string, clientMsgId: string) {
+  /** SDK 会话预览偶发滞后时，不要把本地刚发出的 [图片] 盖回旧文本 */
+  function keepNewerPreview(prev: Conversation, next: Conversation): Conversation {
+    const prevTime = new Date(prev.lastMessageAt).getTime() || 0
+    const nextTime = new Date(next.lastMessageAt).getTime() || 0
+    if (prev.lastMessage && prevTime > nextTime) {
+      return { ...next, lastMessage: prev.lastMessage, lastMessageAt: prev.lastMessageAt }
+    }
+    return next
+  }
+
+  function dropRevokedMessage(conversationId: string, clientMsgId: string, tip = '消息已撤回') {
     const list = messagesMap.value[conversationId]
     if (!list) return
     messagesMap.value = {
       ...messagesMap.value,
       [conversationId]: list.map((m) =>
         m.id === clientMsgId
-          ? { ...m, type: 'system' as const, content: '消息已撤回' }
+          ? { ...m, type: 'system' as const, content: tip }
           : m,
       ),
     }
+  }
+
+  /**
+   * 撤回通知里没有 conversationID（web SDK 的 RevokedInfo 不带该字段），
+   * 按 clientMsgID 在已加载的会话里反查；消息没加载过就无需处理。
+   */
+  function findConversationIdByMsgId(clientMsgId: string): string {
+    for (const [conversationId, list] of Object.entries(messagesMap.value)) {
+      if (list.some((m) => m.id === clientMsgId)) return conversationId
+    }
+    return ''
   }
 
   function subscribeRealtime() {
@@ -142,9 +176,18 @@ export const useChatStore = defineStore('chat', () => {
       onIMEvent<MessageItem[]>(IMEvents.OnRecvNewMessages, ingestIncoming),
       onIMEvent<ConversationItem[]>(IMEvents.OnConversationChanged, upsertConversations),
       onIMEvent<ConversationItem[]>(IMEvents.OnNewConversation, upsertConversations),
-      onIMEvent<{ conversationID: string; clientMsgID: string }>(
+      onIMEvent<RevokedNotice>(
         IMEvents.OnNewRecvMessageRevoked,
-        (info) => dropRevokedMessage(info.conversationID, info.clientMsgID),
+        (info) => {
+          const conversationId = info.conversationID || findConversationIdByMsgId(info.clientMsgID)
+          if (!conversationId) return
+          // App 原生插件回调可能带 conversationID，web SDK 不带（RevokedInfo 无此字段）
+          const tip =
+            info.revokerID && info.revokerID === imUserId.value
+              ? '你撤回了一条消息'
+              : `${info.revokerNickname || '对方'} 撤回了一条消息`
+          dropRevokedMessage(conversationId, info.clientMsgID, tip)
+        },
       ),
       onUserStatusChanged((state) => {
         console.log('[online] 状态变更事件:', state)
@@ -166,7 +209,14 @@ export const useChatStore = defineStore('chat', () => {
       subscribeRealtime()
       const list = await getConversationList()
       console.log('[chat] getConversationList count:', list.length)
-      conversations.value = sortConversations(list.map(toConversation))
+      const prevById = new Map(conversations.value.map((c) => [c.id, c]))
+      conversations.value = sortConversations(
+        list.map((item) => {
+          const mapped = toConversation(item)
+          const prev = prevById.get(mapped.id)
+          return prev ? keepNewerPreview(prev, mapped) : mapped
+        }),
+      )
       console.log('[chat] conversations mapped, will refresh online status')
       refreshOnlineStatus().catch((e) => console.warn('[chat] 刷新在线状态失败', e))
     } finally {
@@ -312,9 +362,25 @@ export const useChatStore = defineStore('chat', () => {
       await markAsRead(conversationId)
       return
     }
-    messagesMap.value = { ...messagesMap.value, [conversationId]: mapped }
+    messagesMap.value = {
+      ...messagesMap.value,
+      [conversationId]: mergeLocalPending(mapped, existing),
+    }
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
     await markAsRead(conversationId)
+  }
+
+  /** 历史还没跟上 SDK 时，保留本地发送中 / 刚发出的图片，避免返回再进入就消失 */
+  function mergeLocalPending(history: ChatMessage[], existing: ChatMessage[]): ChatMessage[] {
+    const historyIds = new Set(history.map((m) => m.id))
+    const pending = existing.filter((m) => {
+      if (historyIds.has(m.id)) return false
+      if (m.status === 'sending' || m.status === 'failed') return true
+      if (m.status !== 'sent') return false
+      const age = Date.now() - new Date(m.createdAt).getTime()
+      return age >= 0 && age < 60_000
+    })
+    return pending.length ? [...history, ...pending] : history
   }
 
   /** 上滑加载更早的消息，返回本次是否有新增 */
@@ -405,6 +471,7 @@ export const useChatStore = defineStore('chat', () => {
     if (message.type === 'image') return '[图片]'
     if (message.type === 'voice') return '[语音]'
     if (message.type === 'file') return '[文件]'
+    if (message.type === 'card') return '[名片]'
     return message.content
   }
 
@@ -442,12 +509,75 @@ export const useChatStore = defineStore('chat', () => {
     )
   }
 
+  async function sendAtText(
+    conversationId: string,
+    content: string,
+    senderId: string,
+    atUsers: Array<{ atUserID: string; groupNickname: string }>,
+  ) {
+    const target = targetOf(requireConversation(conversationId))
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'text', content),
+      () => sendAtTextMessage(target, content, atUsers.map((a) => a.atUserID), atUsers),
+    )
+  }
+
   async function sendImage(conversationId: string, filePath: string, senderId: string) {
     const target = targetOf(requireConversation(conversationId))
     await sendWithPlaceholder(
       conversationId,
       placeholderOf(conversationId, senderId, 'image', filePath),
       () => sendImageMessage(target, filePath),
+    )
+  }
+
+  /** 发送好友名片：占位与气泡渲染共用同一份 content JSON */
+  async function sendCard(
+    conversationId: string,
+    friend: { id: string; nickname: string; avatar?: string },
+    senderId: string,
+  ) {
+    const target = targetOf(requireConversation(conversationId))
+    const card = {
+      userId: friend.id,
+      nickname: friend.nickname || '',
+      avatar: friend.avatar || '',
+    }
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'card', JSON.stringify(card)),
+      () =>
+        sendCardMessage(target, {
+          businessUserId: friend.id,
+          nickname: card.nickname,
+          avatar: card.avatar,
+        }),
+    )
+  }
+
+  /** 发送本地文件：占位阶段展示文件名，发送成功后替换为真实消息 */
+  async function sendFile(
+    conversationId: string,
+    filePath: string,
+    fileName: string,
+    senderId: string,
+  ) {
+    const target = targetOf(requireConversation(conversationId))
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'file', fileName),
+      () => sendFileMessage(target, filePath, fileName),
+    )
+  }
+
+  /** 发送已有 URL 的图片（收藏转发场景，不再二次上传） */
+  async function sendImageUrl(conversationId: string, url: string, senderId: string) {
+    const target = targetOf(requireConversation(conversationId))
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'image', url),
+      () => sendImageUrlMessage(target, url),
     )
   }
 
@@ -465,10 +595,65 @@ export const useChatStore = defineStore('chat', () => {
     )
   }
 
-  /** 撤回权限由 OpenIM 与后端判定，这里只负责发起和本地回显 */
-  async function recall(conversationId: string, messageId: string) {
-    await revokeMessage(conversationId, messageId)
-    dropRevokedMessage(conversationId, messageId)
+  /**
+   * 撤回：统一走后端 POST /im/messages/recall，由服务端校验权限/时间窗并同步 OpenIM。
+   * peerId 用业务侧 ID（私聊=对方业务用户 UUID，群聊=数字群 ID）；
+   * 调用方已解析过业务 ID 时可通过 peerId 传入，避免群聊再反查一次。
+   */
+  async function recall(
+    conversationId: string,
+    messageId: string,
+    opts?: { peerId?: string; reason?: string },
+  ) {
+    const conv = conversations.value.find((c) => c.id === conversationId)
+    if (!conv) throw new Error('该消息不支持撤回')
+    const raw = rawMessages.value[messageId]
+    let seq = raw?.seq || 0
+    // 刚发出的消息，SDK send 返回结果可能还没带服务端 seq（要等实时同步回写）；
+    // 此时先从本会话最新一页历史里按 clientMsgID 捞带 seq 的原始消息再撤，
+    // 避免撤回入口误判“该消息不支持撤回”，导致接口都没发出去。
+    if (!seq) {
+      const { messageList } = await getHistoryMessages(conversationId, 50).catch(() => ({
+        messageList: [] as MessageItem[],
+        isEnd: true,
+      }))
+      const found = messageList.find((m) => m.clientMsgID === messageId)
+      if (found?.seq) {
+        seq = found.seq
+        rememberRaw(found)
+      } else {
+        console.warn('[recall] 本地与最新历史都没拿到 seq，clientMsgID=', messageId)
+      }
+    }
+    if (!seq) throw new Error('该消息暂不可撤回，请稍后重试')
+    const peerType = conv.type === 'group' ? ('group' as const) : ('c2c' as const)
+    let peerId = opts?.peerId || ''
+    if (!peerId) {
+      if (peerType === 'c2c') {
+        peerId = businessUserIdFromIM(conv.peerUserId || '')
+      } else if (conv.groupId) {
+        try {
+          peerId = (await resolveIMGroupByIM(conv.groupId)).businessGroupId
+        } catch {
+          // 反查失败留给接口报“消息不存在”，不再额外提示
+        }
+      }
+    }
+    if (!peerId) throw new Error('缺少会话对方信息，无法撤回')
+    await recallMessage({
+      peerType,
+      peerId,
+      clientMsgId: messageId,
+      seq,
+      reason: opts?.reason,
+    })
+    // 管理员撤他人消息时提示要带原发送者，撤自己时提示「你」
+    const original = (messagesMap.value[conversationId] || []).find((m) => m.id === messageId)
+    const tip =
+      original?.senderId === imUserId.value
+        ? '你撤回了一条消息'
+        : `你撤回了 ${original?.senderNickname || '成员'} 的一条消息`
+    dropRevokedMessage(conversationId, messageId, tip)
   }
 
   async function sendQuote(conversationId: string, text: string, quoteMessageId: string, senderId: string) {
@@ -543,7 +728,11 @@ export const useChatStore = defineStore('chat', () => {
     loadMoreMessages,
     markAsRead,
     sendText,
+    sendAtText,
     sendImage,
+    sendCard,
+    sendFile,
+    sendImageUrl,
     sendVoice,
     sendQuote,
     recall,

@@ -15,7 +15,8 @@ import {
   postAdminUserRevokeSessionsApi,
   putAdminUserBanApi,
   putAdminUserForwardLimitApi,
-  putAdminUserLoginRestrictionApi
+  putAdminUserLoginRestrictionApi,
+  putAdminUserMessageRestrictionApi,
 } from "@/api/modules/adminUsers";
 
 type AppUserStatus = "normal" | "restricted" | "banned" | "cancelled";
@@ -296,13 +297,26 @@ async function submitAction(): Promise<void> {
         typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function"
           ? (crypto as any).randomUUID()
           : undefined;
-      await putAdminUserBanApi(userId, {
-        banned: actionNext.value,
-        idempotencyKey,
-        reason,
-        ticketNo: actionForm.ticketNo.trim(),
-        until: toIsoString(actionForm.until),
-      });
+      try {
+        await putAdminUserMessageRestrictionApi(userId, {
+          banned: actionNext.value,
+          reason,
+          until: toIsoString(actionForm.until),
+        });
+      } catch (error: any) {
+        const status = error?.response?.status;
+        if (status === 404 || status === 405) {
+          await putAdminUserBanApi(userId, {
+            banned: actionNext.value,
+            idempotencyKey,
+            reason,
+            ticketNo: actionForm.ticketNo.trim(),
+            until: toIsoString(actionForm.until),
+          });
+        } else {
+          throw error;
+        }
+      }
       syncUserPatch(userId, { bannedSendMessage: actionNext.value });
       ElMessage.success(actionNext.value ? "已禁止发送消息" : "已恢复发送消息");
     }

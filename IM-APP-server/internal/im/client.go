@@ -501,6 +501,34 @@ func (c *Client) SendTextMessage(ctx context.Context, receiverID string, session
 	return result, err
 }
 
+// RevokeMessage 撤回 OpenIM 消息（按 conversationID + seq）
+func (c *Client) RevokeMessage(ctx context.Context, userID, conversationID string, seq int64) (bool, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(conversationID) == "" || seq <= 0 {
+		return false, errors.New("invalid revoke message request")
+	}
+	// 必须用撤回者本人的 token 调用：OpenIM 3.8 的 revoke_msg 会用登录 token 对应的用户
+	// 覆盖 body 里的 userID 作为撤回操作者。若用 admin token，撤回人会被记成 imAdmin，
+	// 前端 /msg 撤回事件拿到的 revokerID 就成了 imAdmin。
+	token := ""
+	// 平台取 Web(3)；get_user_token 校验 1-11，仅用于换取认证 token，与客户端实际平台无关。
+	if userToken, err := c.GetUserToken(ctx, userID, 3); err == nil {
+		token = userToken.Token
+	}
+	// 兜底：取用户 token 失败时退回 admin token，保证撤回功能仍可用（撤回人显示会退回 imAdmin）。
+	if token == "" {
+		if t, err := c.GetAdminToken(ctx); err == nil {
+			token = t
+		}
+	}
+	err := c.post(ctx, "/msg/revoke_msg", token, map[string]any{
+		"userID": userID, "conversationID": conversationID, "seq": seq,
+	}, nil)
+	if isAlreadyRecalled(err) {
+		return true, nil
+	}
+	return false, err
+}
+
 // ConversationSettings 对应 OpenIM 的 Conversation 对象。
 // 字段名与 OpenIM JSON 完全一致，可直接作为 set_conversations 的 conversation 体回写。
 // recvMsgOpt 取值：0 正常接收 / 1 免打扰（不接收）/ 2 仅在线接收。
@@ -789,4 +817,17 @@ func ignoreAlreadyDesired(err error) error {
 		}
 	}
 	return err
+}
+
+func isAlreadyRecalled(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	message := strings.ToLower(apiErr.ErrMsg + " " + apiErr.ErrDlt)
+	already := strings.Contains(message, "already") || strings.Contains(message, "repeat") ||
+		strings.Contains(message, "重复") || strings.Contains(message, "已经")
+	recall := strings.Contains(message, "revoke") || strings.Contains(message, "withdraw") ||
+		strings.Contains(message, "撤回")
+	return already && recall
 }

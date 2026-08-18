@@ -5,12 +5,14 @@ import { storeToRefs } from 'pinia'
 import { inviteGroupMembers, fetchGroupMembers } from '@/api/group'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useContactStore } from '@/stores/contact'
+import { useGroupStore } from '@/stores/group'
 import { APP_CONFIG } from '@/config'
 import type { Contact, ContactListSort } from '@/types'
 
 useAuthGuard()
 
 const contactStore = useContactStore()
+const groupStore = useGroupStore()
 const { contacts } = storeToRefs(contactStore)
 
 const groupId = ref('')
@@ -145,6 +147,7 @@ async function onConfirm() {
       icon: res.invitedCount > 0 ? 'success' : 'none',
     })
     if (res.invitedCount > 0) {
+      await groupStore.loadDetail(groupId.value).catch(() => undefined)
       setTimeout(() => uni.navigateBack(), 400)
     }
   } catch (e) {

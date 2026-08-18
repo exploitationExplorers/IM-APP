@@ -44,8 +44,9 @@ func main() {
 		"forward_tasks":        {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
 		"forward_task_targets": {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
 		"forward_kafka_outbox": {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
+		"im_message_recalls":   {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql", err)
+		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql, 024_im_message_recalls.sql", err)
 	}
 	log.Println("migrations applied")
 
@@ -133,6 +134,7 @@ func main() {
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
+	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc}
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Service: imSvc}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
@@ -140,7 +142,7 @@ func main() {
 	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
 	pushSvc := service.NewLoggingPushService()
 	openIMWebhookH := handler.NewOpenIMWebhookHandler(
-		imAccessRepo, imClient, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
+		imAccessRepo, imClient, &repository.RestrictionRepo{DB: pool}, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
 	)
 	// 安全提醒：配置了 webhook 密钥却没配来源 CIDR 白名单时，authorized 会整体拒绝所有回调，
 	// 等同于 webhook 功能静默失效——显式打 warning，避免排查时一脸懵。
@@ -149,6 +151,9 @@ func main() {
 			"OpenIM 回调来源 IP 不在白名单内将被全部拒绝（webhook 实际失效）")
 	}
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
+	adminForwardH := &handler.AdminForwardHandler{Forward: forwardSvc}
+	adminUserH := &handler.AdminUserHandler{Restrictions: &repository.RestrictionRepo{DB: pool}, Client: imClient}
+	adminMessageH := &handler.AdminMessageHandler{Client: imClient, DB: pool, IMAccess: imAccessRepo}
 	favH := &handler.FavoriteHandler{Svc: favSvc}
 
 	r := gin.New()
@@ -186,6 +191,22 @@ func main() {
 		internalIM.POST("/reconcile", imInternalH.Reconcile)
 		internalIM.GET("/outbox", imInternalH.ListOutbox)
 		internalIM.POST("/outbox/:id/replay", imInternalH.ReplayOutbox)
+	}
+
+	// 管理后台内部接口（方案 A：admin 经 HTTP 调 server 执行业务逻辑 + OpenIM 同步）
+	internalAdmin := r.Group("/internal/admin")
+	internalAdmin.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+	{
+		internalAdmin.POST("/groups/:id/dismiss", adminGroupH.DismissGroup)
+		internalAdmin.POST("/groups/:id/mute", adminGroupH.MuteGroup)
+		internalAdmin.POST("/groups/:id/add-friend", adminGroupH.SetAddFriend)
+		internalAdmin.POST("/forward-tasks/:id/cancel", adminForwardH.CancelForwardTask)
+		internalAdmin.POST("/forward-tasks/:id/retry", adminForwardH.RetryForwardTask)
+		internalAdmin.POST("/users/:id/restriction", adminUserH.SetRestriction)
+		internalAdmin.POST("/users/:id/status", adminUserH.SetUserStatus)
+		internalAdmin.POST("/users/:id/sessions/revoke", adminUserH.RevokeSessions)
+		internalAdmin.POST("/users/:id/reset-profile", adminUserH.ResetProfile)
+		internalAdmin.POST("/messages/:id/recall", adminMessageH.RecallMessage)
 	}
 
 	api := r.Group("/api/v1")
@@ -242,8 +263,9 @@ func main() {
 			auth.POST("/groups", groupH.Create)
 			auth.POST("/groups/qrcode/resolve", groupH.ResolveQRCode)
 			auth.POST("/groups/qrcode/join", groupH.JoinByQRCode)
+			auth.GET("/groups/detail", groupH.DetailStatic)
 			auth.GET("/groups/:id", groupH.Detail)
-			auth.GET("/groups/:id/members", groupH.Members)
+			auth.GET("/group-members", groupH.Members)
 			auth.GET("/groups/:id/qrcode", groupH.Qrcode)
 			auth.POST("/groups/:id/join", groupH.Join)
 			auth.POST("/groups/:id/invitations", groupH.InviteMembers)
@@ -252,19 +274,20 @@ func main() {
 			auth.POST("/groups/:id/join-requests/:requestId/approve", groupH.ApproveJoinRequest)
 			auth.POST("/groups/:id/join-requests/:requestId/reject", groupH.RejectJoinRequest)
 			auth.PUT("/groups/:id/members/:userId/role", groupH.UpdateMemberRole)
-			auth.PUT("/groups/:id/members/:userId/mute", groupH.UpdateMemberMute)
+			auth.POST("/group-members/mute", groupH.MuteMember)
+			auth.POST("/group-members/unmute", groupH.UnmuteMember)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
 			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
 			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
 			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
-			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
+			auth.POST("/groups/settings/update", groupH.UpdateSettings)
 			auth.POST("/groups/reports", groupH.CreateReport)
-			auth.PUT("/groups/:id/mute", groupH.UpdateMute)
 			auth.POST("/groups/:id/leave", groupH.Leave)
 			auth.POST("/groups/:id/dismiss", groupH.Dismiss)
 			auth.POST("/group-invitations/:token/accept", groupH.AcceptInvitation)
 			auth.GET("/friend-requests", contactH.ListFriendRequests)
 			auth.POST("/friend-requests", contactH.CreateFriendRequest)
+			auth.POST("/group-friend-requests", contactH.CreateGroupFriendRequest)
 			auth.POST("/friend-requests/:id/accept", contactH.AcceptFriendRequest)
 			auth.POST("/friend-requests/:id/reject", contactH.RejectFriendRequest)
 
@@ -287,6 +310,7 @@ func main() {
 			auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
 			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
+			auth.POST("/im/messages/recall", imH.RecallMessage)
 			auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
 			auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
 

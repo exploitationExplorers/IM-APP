@@ -1,56 +1,69 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
-import type { SystemUser, UserDraft, UserStatus } from "../../types/system";
+import type { Rbac } from "../../api/modules/rbac";
+
+export interface AdminDraft {
+  username: string;
+  nickname: string;
+  password: string;
+  roleIds: string[];
+  status: Rbac.Status;
+}
 
 const props = defineProps<{
   modelValue: boolean;
-  user: SystemUser | null;
+  admin: Rbac.AdminAccount | null;
+  roleOptions: Rbac.Role[];
 }>();
 
 const emit = defineEmits<{
   "update:modelValue": [value: boolean];
-  save: [draft: UserDraft];
+  save: [draft: AdminDraft];
 }>();
 
 const formRef = ref<FormInstance>();
-const isEditing = computed(() => props.user !== null);
-const title = computed(() => (isEditing.value ? "编辑用户" : "新增用户"));
+const isEditing = computed(() => props.admin !== null);
+const title = computed(() => (isEditing.value ? "编辑管理员" : "新增管理员"));
 
-const draft = reactive<UserDraft>({
-  name: "",
-  account: "",
-  email: "",
-  role: "普通成员",
+const draft = reactive<AdminDraft>({
+  username: "",
+  nickname: "",
+  password: "",
+  roleIds: [],
   status: "active",
 });
 
-const rules: FormRules<UserDraft> = {
-  name: [{ required: true, message: "请输入用户姓名", trigger: "blur" }],
-  account: [{ required: true, message: "请输入登录账号", trigger: "blur" }],
-  email: [
-    {
-      required: true,
-      type: "email",
-      message: "请输入有效的邮箱地址",
-      trigger: "blur",
-    },
-  ],
-  role: [{ required: true, message: "请选择用户角色", trigger: "change" }],
-};
+const rules = computed<FormRules<AdminDraft>>(() => ({
+  username: [{ required: true, message: "请输入登录账号", trigger: "blur" }],
+  password: isEditing.value
+    ? [
+        {
+          validator: (_rule, value: string, callback) => {
+            if (value && value.length < 6) callback(new Error("密码至少 6 位"));
+            else callback();
+          },
+          trigger: "blur",
+        },
+      ]
+    : [
+        { required: true, message: "请输入初始密码", trigger: "blur" },
+        { min: 6, message: "密码至少 6 位", trigger: "blur" },
+      ],
+}));
 
-function resetDraft(user: SystemUser | null): void {
-  draft.name = user?.name ?? "";
-  draft.account = user?.account ?? "";
-  draft.email = user?.email ?? "";
-  draft.role = user?.role ?? "普通成员";
-  draft.status = user?.status ?? "active";
+function resetDraft(admin: Rbac.AdminAccount | null): void {
+  draft.username = admin?.username ?? "";
+  draft.nickname = admin?.nickname ?? "";
+  draft.password = "";
+  draft.roleIds = [...(admin?.roleIds ?? [])];
+  draft.status = admin?.status === "disabled" ? "disabled" : "active";
 }
 
 watch(
-  () => [props.modelValue, props.user] as const,
-  ([isVisible, user]) => {
-    if (isVisible) resetDraft(user);
+  () => [props.modelValue, props.admin] as const,
+  ([isVisible, admin]) => {
+    if (isVisible) resetDraft(admin);
   },
   { immediate: true },
 );
@@ -66,7 +79,13 @@ async function submit(): Promise<void> {
     .catch(() => false);
   if (!isValid) return;
 
-  emit("save", { ...draft, status: draft.status as UserStatus });
+  emit("save", {
+    username: draft.username.trim(),
+    nickname: draft.nickname.trim(),
+    password: draft.password,
+    roleIds: [...draft.roleIds],
+    status: draft.status,
+  });
   close();
 }
 </script>
@@ -79,20 +98,41 @@ async function submit(): Promise<void> {
     @update:model-value="emit('update:modelValue', $event)"
   >
     <el-form ref="formRef" :model="draft" :rules="rules" label-position="top">
-      <el-form-item label="用户姓名" prop="name">
-        <el-input v-model="draft.name" placeholder="例如：陈安" />
+      <el-form-item label="登录账号" prop="username">
+        <el-input
+          v-model="draft.username"
+          placeholder="登录账号"
+          :disabled="isEditing"
+          autocomplete="off"
+        />
       </el-form-item>
-      <el-form-item label="登录账号" prop="account">
-        <el-input v-model="draft.account" placeholder="例如：chen.an" />
+      <el-form-item label="昵称">
+        <el-input v-model="draft.nickname" placeholder="昵称（可选）" />
       </el-form-item>
-      <el-form-item label="邮箱" prop="email">
-        <el-input v-model="draft.email" placeholder="name@example.com" />
+      <el-form-item :label="isEditing ? '新密码' : '初始密码'" prop="password">
+        <el-input
+          v-model="draft.password"
+          type="password"
+          show-password
+          :placeholder="isEditing ? '不填则不修改' : '至少 6 位'"
+          autocomplete="new-password"
+        />
       </el-form-item>
-      <el-form-item label="角色" prop="role">
-        <el-select v-model="draft.role" class="full-width">
-          <el-option label="超级管理员" value="超级管理员" />
-          <el-option label="运营管理员" value="运营管理员" />
-          <el-option label="普通成员" value="普通成员" />
+      <el-form-item label="角色">
+        <el-select
+          v-model="draft.roleIds"
+          multiple
+          clearable
+          filterable
+          class="full-width"
+          placeholder="选择角色"
+        >
+          <el-option
+            v-for="role in roleOptions"
+            :key="role.id"
+            :label="role.name"
+            :value="role.id"
+          />
         </el-select>
       </el-form-item>
       <el-form-item label="状态">
@@ -106,7 +146,7 @@ async function submit(): Promise<void> {
       <div class="drawer-footer">
         <el-button @click="close">取消</el-button>
         <el-button type="primary" @click="submit">
-          {{ isEditing ? "保存修改" : "新增用户" }}
+          {{ isEditing ? "保存修改" : "新增管理员" }}
         </el-button>
       </div>
     </template>
