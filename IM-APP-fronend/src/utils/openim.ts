@@ -908,39 +908,42 @@ export async function sendImageUrlMessage(target: IMTarget, url: string): Promis
 }
 
 /**
- * 选一个本地文件，返回 { path, name }。
- * app 端用 OpenIM 原生插件的文件选择器；小程序用 chooseMessageFile；H5 用 chooseFile。
+ * 选本地文件，返回 { path, name } 列表（一次最多 count 个）。
+ * app 端用 OpenIM 原生插件的文件选择器（原生仅支持单选）；
+ * 小程序用 chooseMessageFile；H5 用 chooseFile，两者支持 count 多选。
  */
-export async function chooseLocalFile(): Promise<{ path: string; name: string }> {
+export async function chooseLocalFiles(
+  count = 1,
+): Promise<Array<{ path: string; name: string }>> {
   if (isAppPlatform) {
     const path = await IMSDK.pickFile()
     if (!path) throw new Error('未选择文件')
     const idx = path.lastIndexOf('/')
-    return { path, name: idx >= 0 ? path.slice(idx + 1) : '文件' }
+    return [{ path, name: idx >= 0 ? path.slice(idx + 1) : '文件' }]
   }
   const anyUni = uni as unknown as {
     chooseMessageFile?: (opt: unknown) => void
     chooseFile?: (opt: unknown) => void
   }
   const pick = (fn: (opt: unknown) => void) =>
-    new Promise<{ path: string; name?: string } | null>((resolve) => {
+    new Promise<Array<{ path: string; name?: string }>>((resolve) => {
       fn({
-        count: 1,
+        count,
         type: 'file',
         success: (res: { tempFiles?: Array<{ path: string; name?: string }> }) =>
-          resolve(res.tempFiles?.[0] || null),
-        fail: () => resolve(null),
+          resolve(res.tempFiles || []),
+        fail: () => resolve([]),
       })
     })
-  let picked: { path: string; name?: string } | null = null
+  let picked: Array<{ path: string; name?: string }> = []
   if (typeof anyUni.chooseMessageFile === 'function') {
     picked = await pick(anyUni.chooseMessageFile)
   }
-  if (!picked && typeof anyUni.chooseFile === 'function') {
+  if (!picked.length && typeof anyUni.chooseFile === 'function') {
     picked = await pick(anyUni.chooseFile)
   }
-  if (!picked?.path) throw new Error('当前平台暂不支持选择文件')
-  return { path: picked.path, name: picked.name || '文件' }
+  if (!picked.length) throw new Error('当前平台暂不支持选择文件')
+  return picked.map((f) => ({ path: f.path, name: f.name || '文件' }))
 }
 
 async function pathToFile(path: string): Promise<File> {
