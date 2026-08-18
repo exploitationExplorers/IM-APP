@@ -15,18 +15,60 @@ import (
 type DataHandler struct {
 	Data  *service.DataService
 	Audit *service.RBACService
+	// Perms 用于 handler 内二次权限校验（如按手机号查询需 users.phone.search 权限）
+	Perms middleware.PermissionChecker
 }
 
 // ===== 用户管理（清单 03） =====
 
 func (h *DataHandler) ListUsers(c *gin.Context) {
 	page, size := pageParams(c)
-	list, total, err := h.Data.ListUsers(c.Request.Context(), c.Query("keyword"), c.Query("status"), page, size)
+	searchType := c.Query("searchType")
+	keyword := c.Query("keyword")
+	status := c.Query("status")
+
+	// 手机号查询：隐私操作，须有 users.phone.search 权限，且仅按 phone_e164 匹配
+	if searchType == "phone" {
+		if !h.canSearchPhone(c) {
+			return
+		}
+		list, total, err := h.Data.SearchUserByPhone(c.Request.Context(), keyword, page, size)
+		if err != nil {
+			response.FailErr(c, 500, "查询失败", err)
+			return
+		}
+		response.OKPage(c, list, total, page, size)
+		return
+	}
+
+	list, total, err := h.Data.ListUsers(c.Request.Context(), keyword, status, page, size)
 	if err != nil {
 		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
 	response.OKPage(c, list, total, page, size)
+}
+
+// canSearchPhone 校验当前管理员是否有按手机号查询权限（超级管理员直接放行）
+func (h *DataHandler) canSearchPhone(c *gin.Context) bool {
+	if h.Perms == nil {
+		response.Forbidden(c, "无权限操作")
+		return false
+	}
+	adminID := middleware.AdminID(c)
+	if adminID == "" {
+		response.Unauthorized(c, "缺少登录凭证")
+		return false
+	}
+	if super, err := h.Perms.IsSuperAdmin(c.Request.Context(), adminID); err == nil && super {
+		return true
+	}
+	ok, err := h.Perms.HasPermission(c.Request.Context(), adminID, "users.phone.search")
+	if err != nil || !ok {
+		response.Forbidden(c, "无权限操作")
+		return false
+	}
+	return true
 }
 
 func (h *DataHandler) GetUser(c *gin.Context) {

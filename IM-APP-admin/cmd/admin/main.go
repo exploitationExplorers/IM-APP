@@ -86,7 +86,7 @@ func main() {
 		Limiter: middleware.NewLoginLimiter(cfg.LoginFailThreshold, cfg.LoginLockMinutes),
 	}
 	rbacH := &handler.RBACHandler{Svc: rbacSvc}
-	dataH := &handler.DataHandler{Data: dataSvc}
+	dataH := &handler.DataHandler{Data: dataSvc, Perms: rbacRepo}
 	opsH := &handler.OpsHandler{Svc: opsSvc}
 	metaH := &handler.MetaHandler{Version: "1.0.0", Commit: "dev", BuildTime: time.Now().UTC().Format(time.RFC3339), Svc: opsSvc}
 
