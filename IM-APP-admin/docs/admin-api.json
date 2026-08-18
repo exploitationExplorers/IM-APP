@@ -10094,7 +10094,37 @@
     },
     "/api/admin/v1/users/phone-search": {
       "get": {
+        "description": "按手机号搜索用户（需 users.phone.search 权限）。接口路径：/api/admin/v1/users/phone-search",
         "operationId": "GET_api_admin_v1_users_phone-search",
+        "parameters": [
+          {
+            "description": "完整手机号",
+            "in": "query",
+            "name": "phone",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "页码（默认1）",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "每页条数（默认20，最大100）",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10107,12 +10137,27 @@
                     },
                     "data": {
                       "properties": {
-                        "ok": {
-                          "type": "boolean"
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/AppUser"
+                          },
+                          "type": "array"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pageSize": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
                         }
                       },
                       "required": [
-                        "ok"
+                        "items",
+                        "total",
+                        "page",
+                        "pageSize"
                       ],
                       "type": "object"
                     },
@@ -10148,7 +10193,7 @@
             "description": "服务异常"
           }
         },
-        "summary": "/api/admin/v1/users/phone-search",
+        "summary": "按手机号搜索用户（需 users.phone.search 权限）",
         "tags": [
           "用户管理"
         ]
@@ -10332,6 +10377,7 @@
     },
     "/api/admin/v1/users/{id}/cancel": {
       "post": {
+        "description": "注销用户（状态置为已注销并撤销全部会话）。接口路径：/api/admin/v1/users/:id/cancel",
         "operationId": "POST_api_admin_v1_users_{id}_cancel",
         "parameters": [
           {
@@ -10348,7 +10394,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "reason": {
+                    "description": "注销原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -10407,7 +10462,7 @@
             "description": "服务异常"
           }
         },
-        "summary": "/api/admin/v1/users/:id/cancel",
+        "summary": "注销用户（状态置为已注销并撤销全部会话）",
         "tags": [
           "用户管理"
         ]
@@ -10997,6 +11052,7 @@
     },
     "/api/admin/v1/users/{id}/reset-profile": {
       "post": {
+        "description": "重置用户头像/昵称（需原因，写回 server 并同步 OpenIM）。接口路径：/api/admin/v1/users/:id/reset-profile",
         "operationId": "POST_api_admin_v1_users_{id}_reset-profile",
         "parameters": [
           {
@@ -11013,7 +11069,29 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminActionRequest"
+                "properties": {
+                  "field": {
+                    "description": "avatar|nickname（可选值：avatar=头像, nickname=昵称）",
+                    "enum": [
+                      "avatar",
+                      "nickname"
+                    ],
+                    "type": "string",
+                    "x-enum-descriptions": [
+                      "头像",
+                      "昵称"
+                    ]
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "field",
+                  "reason"
+                ],
+                "type": "object"
               }
             }
           },
@@ -11072,7 +11150,7 @@
             "description": "服务异常"
           }
         },
-        "summary": "/api/admin/v1/users/:id/reset-profile",
+        "summary": "重置用户头像/昵称（需原因，写回 server 并同步 OpenIM）",
         "tags": [
           "用户管理"
         ]
