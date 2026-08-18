@@ -593,6 +593,13 @@ func (r *GroupRepo) Dismiss(ctx context.Context, groupID, operatorID string) err
 	if tag.RowsAffected() != 1 {
 		return ErrForbidden
 	}
+	// 用户端群主解散：写群状态变更审计（from 必为 active，归一化后为 normal）。
+	// 与 admin 004 的 group_status_logs 同结构；管理端解散由 admin 侧 LogGroupDissolve 负责，此处不重复。
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO group_status_logs(group_id, from_status, to_status, reason, operator_id)
+		VALUES($1::uuid, 'normal', 'dismissed', '群主解散', $2::uuid)`, groupID, operatorID); err != nil {
+		return err
+	}
 	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupDismissed, map[string]any{}); err != nil {
 		return err
 	}

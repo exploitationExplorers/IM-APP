@@ -115,6 +115,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.PUT("/groups/:id/member-add-friend", middleware.RequirePermission(rbacRepo, "groups.settings"), d.DataH.SetGroupAddFriend)
 			auth.POST("/groups/:id/dissolve", middleware.RequirePermission(rbacRepo, "groups.dissolve"), d.DataH.DissolveGroup)
 			auth.GET("/groups/:id/recall-logs", middleware.RequirePermission(rbacRepo, "messages.audit.read"), d.DataH.ListGroupRecallLogs)
+			auth.GET("/groups/:id/status-logs", middleware.RequirePermission(rbacRepo, "groups.read"), d.DataH.ListGroupStatusLogs)
 			auth.POST("/groups/:id/messages/:messageId/recall", middleware.RequirePermission(rbacRepo, "messages.recall.admin"), d.DataH.RecallMessage)
 
 			// 模块 05：举报与内容处置
