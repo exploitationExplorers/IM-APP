@@ -110,7 +110,7 @@ export const useUserStore = defineStore('user', () => {
   /** 登录 SDK 后立刻挂上收消息监听，不能等到用户点开会话列表才订阅 */
   function startIMSession() {
     initOpenIM()
-      .then(() => useChatStore().subscribeRealtime())
+      .then(() => useChatStore().loadConversations())
       .catch(() => undefined)
   }
 

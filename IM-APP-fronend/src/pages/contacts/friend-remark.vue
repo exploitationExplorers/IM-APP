@@ -3,9 +3,13 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { updateContact } from '@/api/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { useContactStore } from '@/stores/contact'
+import { useChatStore } from '@/stores/chat'
 
 useAuthGuard()
 
+const contactStore = useContactStore()
+const chatStore = useChatStore()
 const REMARK_MAX = 50
 const contactId = ref('')
 const nickname = ref('')
@@ -35,6 +39,11 @@ async function onSubmit() {
   saving.value = true
   try {
     await updateContact(contactId.value, { remark: value })
+    await contactStore.reloadContacts({
+      keyword: contactStore.contactKeyword,
+      sort: contactStore.contactSort,
+    })
+    chatStore.applyContactRemarks()
     uni.showToast({ title: '已保存', icon: 'success' })
     setTimeout(() => uni.navigateBack(), 300)
   } catch (e) {

@@ -36,9 +36,10 @@ import {
   resetConversationGroupAtType,
   seqOf,
 } from '@/utils/openim'
-import { isIMNotification, isGroupAnnouncementNotice } from '@/utils/im-notification'
+import { isIMNotification, isGroupAnnouncementNotice, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { playMessageSound, vibrateShort } from '@/utils/notify'
 import { useChatSettingsStore } from '@/stores/chatSettings'
+import { useContactStore } from '@/stores/contact'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import {
   GroupAtType,
@@ -103,8 +104,32 @@ export const useChatStore = defineStore('chat', () => {
     if (stored === undefined && conv.groupAtType === GroupAtType.AtGroupNotice) {
       writeUnreadAnnouncement(announcementOwnerId(), conv.id, true)
     }
-    return { ...conv, highlightTags: highlightTagsOf(conv.groupAtType, unread) }
+    const next = { ...conv, highlightTags: highlightTagsOf(conv.groupAtType, unread) }
+    if (next.lastMessage) {
+      next.lastMessage = replaceOpenIMAdminLabel(next.lastMessage)
+    }
+    if (next.type === 'private' && next.peerUserId) {
+      const contactStore = useContactStore()
+      const bizId = businessUserIdFromIM(next.peerUserId)
+      const contact = contactStore.contacts.find((c) => c.id === bizId)
+      const remark = contact?.remark?.trim()
+      if (remark) next.title = remark
+    }
+    return next
   }
+
+  function applyContactRemarks() {
+    if (!conversations.value.length) return
+    conversations.value = conversations.value.map((c) => decorateConversation(c))
+  }
+
+  watch(
+    () =>
+      useContactStore()
+        .contacts.map((c) => `${c.id}:${c.remark || ''}`)
+        .join('|'),
+    () => applyContactRemarks(),
+  )
 
   function appendMessage(item: MessageItem) {
     if (!item?.clientMsgID) return
@@ -794,6 +819,7 @@ export const useChatStore = defineStore('chat', () => {
     subscribeRealtime,
     unsubscribeRealtime,
     patchConversation,
+    applyContactRemarks,
     dismissGroupAnnouncement,
     clearHistory,
     reset,

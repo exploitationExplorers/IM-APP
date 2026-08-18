@@ -54,10 +54,24 @@ function parseDetail(item: MessageItem): NoticeDetail {
   }
 }
 
+function isOpenIMAdmin(user?: NoticeUser): boolean {
+  const id = user?.userID?.trim() || ''
+  const nickname = user?.nickname?.trim() || ''
+  return id === 'imAdmin' || nickname === 'imAdmin'
+}
+
 function nameOf(user?: NoticeUser, fallback = ''): string {
+  if (isOpenIMAdmin(user)) return fallback || '群主'
   const nickname = user?.nickname?.trim()
   if (nickname) return nickname
   return fallback
+}
+
+/** OpenIM 管理账号会出现在系统通知里，展示时换成群主昵称。 */
+export function replaceOpenIMAdminLabel(text: string, ownerName = '群主'): string {
+  if (!text.includes('imAdmin')) return text
+  const alias = ownerName.trim() || '群主'
+  return text.replace(/imAdmin/g, alias)
 }
 
 function namesOf(list?: NoticeUser[]): string {

@@ -128,15 +128,17 @@ function currentPlatformId(): number {
 /**
  * App 端 OpenIM 本地库目录。
  * uni.env.USER_DATA_PATH 是小程序字段，App 上为空，SDK 会把库建到 `/OpenIM_v3_xxx.db` 然后 10006。
+ * 目录按 OpenIM 用户 ID 隔离，避免换号后读到上个账号的本地会话/消息库。
  */
-function getAppSdkDataDir(): Promise<string> {
+function getAppSdkDataDir(userId: string): Promise<string> {
   const io = plus?.io
   if (!io) {
     return Promise.reject(new Error('当前 App 环境无法获取本地存储目录'))
   }
+  const safeUserId = userId.replace(/[^0-9a-z_-]/gi, '') || 'default'
 
   const fromUrl = (): string => {
-    const raw = io.convertLocalFileSystemURL('_doc/openim/') || ''
+    const raw = io.convertLocalFileSystemURL(`_doc/openim/${safeUserId}/`) || ''
     return raw.replace(/^file:\/\//, '')
   }
 
@@ -159,12 +161,26 @@ function getAppSdkDataDir(): Promise<string> {
           'openim',
           { create: true },
           (entry) => {
-            const path = (entry.fullPath || fromUrl()).replace(/^file:\/\//, '')
-            if (!path || path === '/') {
-              reject(new Error('OpenIM 数据目录无效'))
-              return
-            }
-            resolve(path.endsWith('/') ? path : `${path}/`)
+            entry.getDirectory(
+              safeUserId,
+              { create: true },
+              (userEntry) => {
+                const path = (userEntry.fullPath || fromUrl()).replace(/^file:\/\//, '')
+                if (!path || path === '/') {
+                  reject(new Error('OpenIM 数据目录无效'))
+                  return
+                }
+                resolve(path.endsWith('/') ? path : `${path}/`)
+              },
+              (err) => {
+                const fallback = fromUrl()
+                if (fallback && fallback !== '/') {
+                  resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
+                  return
+                }
+                reject(err)
+              },
+            )
           },
           (err) => {
             const fallback = fromUrl()
@@ -299,7 +315,7 @@ async function doLogin(): Promise<string> {
   }
 
   if (isAppPlatform) {
-    const dataDir = await getAppSdkDataDir()
+    const dataDir = await getAppSdkDataDir(imToken.userId)
     await imCall(IMMethods.InitSDK, {
       platformID: imToken.platform,
       apiAddr: imToken.apiAddr,

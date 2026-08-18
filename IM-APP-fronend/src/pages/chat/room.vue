@@ -19,7 +19,7 @@ import { resolveIMGroupByIM } from '@/api/im'
 import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation } from '@/types'
-import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
+import { collapseRepeatedGroupNameNotices, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import {
   isAnnouncementDismissed,
@@ -45,6 +45,8 @@ const myRole = ref<'owner' | 'admin' | 'member'>('member')
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
 const convRef = ref<Conversation | null>(null)
 const memberRemarkMap = ref<Record<string, string>>({})
+/** 群主展示名，系统通知里的 imAdmin 用这个替换 */
+const groupOwnerName = ref('')
 /** 群成员业务头像（业务用户 ID 索引），IM 快照头像为空或损坏时兜底用 */
 const memberAvatarMap = ref<Record<string, string>>({})
 /** 群禁言状态（群详情接口）：本人被禁言 / 全员禁言时禁用输入区 */
@@ -55,6 +57,11 @@ const myMutedUntil = ref<string | null>(null)
 const memberMetaMap = ref<Record<string, MemberMeta>>({})
 /** 当前群公告正文，房间顶栏横幅用 */
 const announcementText = ref('')
+/**
+ * `uni.setStorageSync` 不是响应式数据源。
+ * 当用户点「不再提示」后，需要显式触发一次 computed 重算，保证横幅立刻收起。
+ */
+const announcementDismissEpoch = ref(0)
 let muteExpireTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const scrollInto = ref('')
@@ -151,6 +158,21 @@ function nicknameOf(message: ChatMessage): string {
   return contact?.remark?.trim() || contact?.nickname || ''
 }
 
+function systemTextOf(message: ChatMessage): string {
+  return replaceOpenIMAdminLabel(message.content, groupOwnerName.value)
+}
+
+function refreshPrivateTitle() {
+  if (chatType.value !== 'private' || !businessId.value) return
+  const contact = contactStore.contacts.find((c) => c.id === businessId.value)
+  const remark = contact?.remark?.trim()
+  if (remark) {
+    title.value = remark
+    return
+  }
+  if (contact?.nickname) title.value = contact.nickname
+}
+
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 const hasInput = computed(() => input.value.trim().length > 0)
@@ -160,6 +182,8 @@ const composerBlocked = computed(() => chatType.value === 'group' && !canChat.va
 
 const showAnnouncementBanner = computed(() => {
   if (chatType.value !== 'group') return false
+  // 依赖这个 epoch：否则存储变化后 computed 不会自动重算
+  void announcementDismissEpoch.value
   const text = announcementText.value.trim()
   if (!text) return false
   return !isAnnouncementDismissed(imUserId.value || myId.value, conversationId.value, text)
@@ -209,6 +233,7 @@ const actions = useChatMessageActions({
 
 onShow(() => {
   if (chatType.value === 'group') void refreshGroupMeta()
+  if (chatType.value === 'private') refreshPrivateTitle()
   if (!forwardStore.consumeSucceeded()) return
   actions.cancelSelect()
   successVisible.value = true
@@ -425,6 +450,13 @@ async function refreshGroupMeta() {
     memberAvatarMap.value = avatarMap
     memberMetaMap.value = metaMap
     memberCount.value = ms.length
+    const owner = ms.find((m) => m.role === 'owner')
+    groupOwnerName.value =
+      owner?.memberRemark?.trim() ||
+      owner?.displayName?.trim() ||
+      owner?.groupNickname?.trim() ||
+      owner?.nickname?.trim() ||
+      ''
     const me = userStore.profile?.id
     const self = me ? ms.find((m) => m.id === me) : undefined
     if (self) myRole.value = self.role
@@ -529,6 +561,7 @@ async function dismissAnnouncementBanner() {
   if (text) {
     rememberDismissedAnnouncement(imUserId.value || myId.value, conversationId.value, text)
   }
+  announcementDismissEpoch.value += 1
   await chatStore.dismissGroupAnnouncement(conversationId.value)
 }
 
@@ -856,7 +889,7 @@ function pickFavorite() {
       <view class="back-btn" @click="goBack">‹</view>
       <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text>
       <view class="header-title" @click="goToProfile">
-        <text>{{ title }}</text>
+        <text class="header-title-text">{{ title }}</text>
       </view>
       <view class="header-icon" @click="goToProfile">⋯</view>
     </view>
@@ -887,7 +920,7 @@ function pickFavorite() {
           <text v-if="actions.selectedIds.value.has(m.id)">✓</text>
         </view>
         <view v-if="m.type === 'system'" class="sys-tip">
-          <text class="sys-tip-text">{{ m.content }}</text>
+          <text class="sys-tip-text">{{ systemTextOf(m) }}</text>
         </view>
         <ChatBubble
           v-else
@@ -1064,13 +1097,19 @@ function pickFavorite() {
 .header-title {
   flex: 1;
   min-width: 0;
-  text-align: left;
+  overflow: hidden;
+}
+
+.header-title-text {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  lines: 1;
   font-size: 38rpx;
   font-weight: 700;
   color: #111;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .header-icon {
