@@ -40,6 +40,62 @@ export function parseQrcodePayload(raw: string): ParsedQrcodePayload {
   }
 }
 
+function isGroupQrcode(type?: string) {
+  return type === 'group' || type === 'g'
+}
+
+/** 扫码成功后按内容跳转到个人 / 群结果页。无法识别返回 false。 */
+export function routeQrcodeScanResult(raw: string): boolean {
+  const parsed = parseQrcodePayload(raw)
+  if (isGroupQrcode(parsed.type) && parsed.token) {
+    uni.navigateTo({
+      url: `/pages/contacts/scan-group-result?token=${encodeURIComponent(parsed.token)}`,
+    })
+    return true
+  }
+  if (parsed.token) {
+    uni.navigateTo({
+      url: `/pages/contacts/scan-result?token=${encodeURIComponent(parsed.token)}`,
+    })
+    return true
+  }
+  if (parsed.publicId) {
+    uni.navigateTo({
+      url: `/pages/contacts/scan-result?publicId=${encodeURIComponent(parsed.publicId)}`,
+    })
+    return true
+  }
+  return false
+}
+
+/**
+ * 打开扫码。App 走官方 uni.scanCode（H5 不支持该 API），
+ * 其它端进入自定义扫码页。
+ */
+export function openQrScanner() {
+  if (isAppPlatform()) {
+    uni.scanCode({
+      onlyFromCamera: false,
+      scanType: ['qrCode'],
+      autoDecodeCharset: true,
+      success: (res) => {
+        if (!res.result || !routeQrcodeScanResult(res.result)) {
+          uni.showToast({ title: '未识别到有效二维码', icon: 'none' })
+        }
+      },
+      fail: (err) => {
+        if ((err.errMsg || '').includes('cancel')) return
+        uni.showToast({ title: '无法打开扫码', icon: 'none' })
+      },
+    })
+    return
+  }
+  uni.navigateTo({
+    url: '/pages/contacts/scan',
+    fail: () => uni.showToast({ title: '无法打开扫码页', icon: 'none' }),
+  })
+}
+
 /** 从本地图片解码二维码。H5 走 canvas，App 走原生 Barcode */
 export async function decodeQrcodeFromImage(path: string): Promise<string> {
   if (isAppPlatform()) return scanAppImage(path)

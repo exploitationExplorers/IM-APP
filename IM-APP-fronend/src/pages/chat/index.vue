@@ -10,6 +10,7 @@ import { usePullRefresh } from '@/composables/usePullRefresh'
 import { useTabBar } from '@/composables/useTabBar'
 import type { Conversation } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
+import { openQrScanner } from '@/utils/qrcode'
 
 useAuthGuard()
 useTabBar()
@@ -66,6 +67,11 @@ function go(url: string) {
   uni.navigateTo({ url })
 }
 
+function goScan() {
+  showAddMenu.value = false
+  openQrScanner()
+}
+
 function setFilter(key: 'all' | 'unread') {
   filterKey.value = key
   showFilter.value = false
@@ -88,7 +94,7 @@ function closeMenus() {
             <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
             <text>添加朋友</text>
           </view>
-          <view class="popup-item" @click="go('/pages/contacts/scan')">
+          <view class="popup-item" @click="goScan">
             <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
             <text>添加群聊</text>
           </view>
