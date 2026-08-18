@@ -191,20 +191,9 @@ const showAnnouncementBanner = computed(() => {
 
 const blockTip = computed(() => {
   if (denyReason.value === 'group_muted') return '群主已开启全员禁言'
-  if (denyReason.value === 'member_muted') {
-    const until = formatMuteUntil(myMutedUntil.value)
-    return until ? `你已被禁言，至 ${until} 解禁` : '你已被禁言'
-  }
+  if (denyReason.value === 'member_muted') return '您已经被禁言'
   return '当前群暂无法发言'
 })
-
-function formatMuteUntil(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
 
 watch(composerBlocked, (blocked) => {
   if (!blocked) return
@@ -213,6 +202,25 @@ watch(composerBlocked, (blocked) => {
   if (recording.value) stopVoiceRecord()
   voiceMode.value = false
 })
+
+/** 禁言条右侧「检查禁言状态」：重新拉群详情，已解禁则输入区自动恢复，未解禁提示剩余时间 */
+const checkingMute = ref(false)
+async function checkMuteStatus() {
+  if (checkingMute.value) return
+  checkingMute.value = true
+  try {
+    const ok = await refreshGroupMeta()
+    if (!ok) {
+      uni.showToast({ title: '检查失败，请稍后重试', icon: 'none' })
+    } else if (composerBlocked.value) {
+      uni.showToast({ title: blockTip.value, icon: 'none' })
+    } else {
+      uni.showToast({ title: '禁言已解除，可以正常发言', icon: 'none' })
+    }
+  } finally {
+    checkingMute.value = false
+  }
+}
 
 const actions = useChatMessageActions({
   conversationId,
@@ -418,19 +426,20 @@ async function resolveBusinessTarget(): Promise<string> {
   return ''
 }
 
-/** 进群 / 退群 / 踢人 / 禁言后标题旁人数与禁言状态要跟着变，不能只在首次进入时拉一次 */
-async function refreshGroupMeta() {
-  if (chatType.value !== 'group') return
+/** 进群 / 退群 / 踢人 / 禁言后标题旁人数与禁言状态要跟着变，不能只在首次进入时拉一次。返回群详情是否拉取成功（「检查禁言状态」用它区分失败） */
+async function refreshGroupMeta(): Promise<boolean> {
+  if (chatType.value !== 'group') return false
   let gid = businessId.value
   if (!gid) {
     try {
       gid = await resolveBusinessTarget()
     } catch {
-      return
+      return false
     }
   }
-  if (!gid) return
+  if (!gid) return false
   businessId.value = gid
+  let detailApplied = false
   try {
     const [ms, detail] = await Promise.all([
       fetchGroupMembers(gid),
@@ -461,19 +470,38 @@ async function refreshGroupMeta() {
     const self = me ? ms.find((m) => m.id === me) : undefined
     if (self) myRole.value = self.role
     if (detail) {
-      applyGroupChatPermission(detail)
+      applyGroupChatPermission(detail, self)
       announcementText.value = (detail.announcement || '').trim()
+      detailApplied = true
     }
   } catch {
     // 人数刷新失败时保留当前值
   }
+  return detailApplied
 }
 
-/** 群详情的发言权限 → 输入区禁用状态 */
-function applyGroupChatPermission(detail: { canChat?: boolean; denyReason?: string; mutedUntil?: string | null }) {
+/**
+ * 群详情的发言权限 → 输入区禁用状态。
+ * detail 实际返回 canChat/isMuted/allMuted，不下发 denyReason/mutedUntil：
+ * 禁言原因本地推导（服务端若下发 denyReason 则优先）；截止时间从成员列表里自己的 mutedUntil 兜底。
+ */
+function applyGroupChatPermission(
+  detail: { canChat?: boolean; denyReason?: string; isMuted?: boolean; allMuted?: boolean; mutedUntil?: string | null },
+  self?: { isMuted?: boolean; mutedUntil?: string | null },
+) {
   canChat.value = detail.canChat !== false
-  denyReason.value = detail.denyReason || ''
-  myMutedUntil.value = detail.mutedUntil || null
+  myMutedUntil.value = detail.mutedUntil || self?.mutedUntil || null
+  if (canChat.value) {
+    denyReason.value = ''
+  } else if (detail.denyReason) {
+    denyReason.value = detail.denyReason
+  } else if (detail.isMuted || self?.isMuted) {
+    denyReason.value = 'member_muted'
+  } else if (detail.allMuted) {
+    denyReason.value = 'group_muted'
+  } else {
+    denyReason.value = 'unknown'
+  }
   scheduleMuteExpiry()
 }
 
@@ -815,18 +843,26 @@ function onPlus() {
   }
 }
 
+/** 相册多选：一次最多 100 张，逐张发送保持顺序，单张失败不中断并汇总提示 */
 function pickImage() {
   uni.chooseImage({
-    count: 1,
+    count: 100,
     sourceType: ['album'],
     success: async (res) => {
       showPlusPanel.value = false
-      try {
-        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
-        await nextTick()
-        scrollToBottom()
-      } catch (e) {
-        uni.showToast({ title: (e as Error).message, icon: 'none' })
+      const paths = res.tempFilePaths || []
+      let failed = 0
+      for (const path of paths) {
+        try {
+          await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
+          await nextTick()
+          scrollToBottom()
+        } catch {
+          failed++
+        }
+      }
+      if (failed) {
+        uni.showToast({ title: `${failed} 张图片发送失败`, icon: 'none' })
       }
     },
   })
@@ -956,7 +992,12 @@ function pickFavorite() {
         :text="actions.quote.value.content"
         @close="actions.clearQuote"
       />
-      <view v-if="composerBlocked" class="composer-blocked">🔇 {{ blockTip }}</view>
+      <view v-if="composerBlocked" class="composer-blocked">
+        <text class="composer-blocked-tip">🔇 {{ blockTip }}</text>
+        <view class="mute-check-btn" :class="{ checking: checkingMute }" @click="checkMuteStatus">
+          {{ checkingMute ? '检查中…' : '检查禁言状态' }}
+        </view>
+      </view>
 
       <template v-else>
       <view v-if="voiceMode" class="voice-bar">
@@ -1233,14 +1274,39 @@ function pickFavorite() {
   gap: 12rpx;
 }
 
-/** 被禁言 / 全员禁言时替代输入区的居中提示条 */
+/** 被禁言 / 全员禁言时替代输入区：左侧禁言提示，右侧检查禁言状态按钮 */
 .composer-blocked {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   height: 96rpx;
+  padding: 0 32rpx;
+}
+
+.composer-blocked-tip {
+  flex: 1;
   color: #999;
   font-size: 26rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mute-check-btn {
+  flex-shrink: 0;
+  margin-left: 24rpx;
+  height: 56rpx;
+  padding: 0 24rpx;
+  display: flex;
+  align-items: center;
+  border-radius: 28rpx;
+  border: 1rpx solid #0a2fc2;
+  color: #0a2fc2;
+  font-size: 24rpx;
+}
+
+.mute-check-btn.checking {
+  opacity: 0.5;
 }
 
 .tool {
