@@ -1,24 +1,24 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
-import { useChatMessageActions } from '@/composables/useChatMessageActions'
+import { useChatMessageActions, type MemberMeta } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useForwardStore } from '@/stores/forward'
-import { businessUserIdFromIM, ensureIMLogin, imUserId } from '@/utils/openim'
+import { businessUserIdFromIM, chooseLocalFile, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { resolveIMGroupByIM } from '@/api/im'
 import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
-import type { ChatMessage, Conversation } from '@/types'
+import type { CardPayload, ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 
@@ -41,6 +41,15 @@ const myRole = ref<'owner' | 'admin' | 'member'>('member')
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
 const convRef = ref<Conversation | null>(null)
 const memberRemarkMap = ref<Record<string, string>>({})
+/** 群成员业务头像（业务用户 ID 索引），IM 快照头像为空或损坏时兜底用 */
+const memberAvatarMap = ref<Record<string, string>>({})
+/** 群禁言状态（群详情接口）：本人被禁言 / 全员禁言时禁用输入区 */
+const canChat = ref(true)
+const denyReason = ref('')
+const myMutedUntil = ref<string | null>(null)
+/** 群成员角色 / 禁言元信息（业务用户 ID 索引），供长按菜单做权限与禁言项判断 */
+const memberMetaMap = ref<Record<string, MemberMeta>>({})
+let muteExpireTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
@@ -56,6 +65,7 @@ let recordingTimer: ReturnType<typeof setInterval> | null = null
 
 /** 通知类没有可读正文时不渲染；群禁言等系统提示要保留，例如 `张三: [全体禁言]` */
 function isVisibleMessage(m: ChatMessage): boolean {
+  if (m.type === 'image' || m.type === 'voice' || m.type === 'file') return true
   if (m.type === 'system') {
     const text = m.content.trim()
     return !!text && !text.startsWith('{')
@@ -67,6 +77,21 @@ const messages = computed(() =>
   collapseRepeatedGroupNameNotices(
     (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
   ),
+)
+
+watch(
+  () =>
+    (chatStore.messagesMap[conversationId.value] || [])
+      .map((m) => m.systemEventKey)
+      .filter(
+        (key): key is string =>
+          !!key && (key.startsWith('group-member:') || key.startsWith('group-mute:')),
+      )
+      .join('|'),
+  (keys, prev) => {
+    if (!prev || keys === prev) return
+    void refreshGroupMeta()
+  },
 )
 // 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
 // 用 ref 快照而不是 computed：避免 H5/热更新下 computed 与全局 ref 不同步导致 mine 判断失效
@@ -82,10 +107,22 @@ function isMine(message: ChatMessage): boolean {
 }
 
 function avatarOf(message: ChatMessage): string {
+  return message.senderAvatar || fallbackAvatarOf(message)
+}
+
+/** 业务侧头像兜底：IM 快照头像为空或损坏时，用业务联系人 / 群成员头像，避免显示灰色占位 */
+function fallbackAvatarOf(message: ChatMessage): string {
   if (isMine(message)) {
-    return message.senderAvatar || myAvatar.value
+    return myAvatar.value
   }
-  if (message.senderAvatar) return message.senderAvatar
+  const uid = businessUserIdFromIM(message.senderId)
+  if (!uid) {
+    return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
+  }
+  const groupAvatar = chatType.value === 'group' ? memberAvatarMap.value[uid] : ''
+  if (groupAvatar) return groupAvatar
+  const contact = contactStore.contacts.find((c) => c.id === uid)
+  if (contact?.avatar) return contact.avatar
   return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
 }
 
@@ -104,6 +141,34 @@ const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 const hasInput = computed(() => input.value.trim().length > 0)
 
+/** 被禁言（单人 / 全员）时隐藏输入区，换成居中提示条 */
+const composerBlocked = computed(() => chatType.value === 'group' && !canChat.value)
+
+const blockTip = computed(() => {
+  if (denyReason.value === 'group_muted') return '群主已开启全员禁言'
+  if (denyReason.value === 'member_muted') {
+    const until = formatMuteUntil(myMutedUntil.value)
+    return until ? `你已被禁言，至 ${until} 解禁` : '你已被禁言'
+  }
+  return '当前群暂无法发言'
+})
+
+function formatMuteUntil(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+watch(composerBlocked, (blocked) => {
+  if (!blocked) return
+  showPlusPanel.value = false
+  showEmojiPanel.value = false
+  if (recording.value) stopVoiceRecord()
+  voiceMode.value = false
+})
+
 const actions = useChatMessageActions({
   conversationId,
   chatType,
@@ -115,12 +180,24 @@ const actions = useChatMessageActions({
   isMine,
   visibleMessages: messages,
   conversationTitle: title,
+  memberMeta: memberMetaMap,
+  onMuteChanged: () => {
+    void refreshGroupMeta()
+  },
 })
 
 onShow(() => {
+  if (chatType.value === 'group') void refreshGroupMeta()
   if (!forwardStore.consumeSucceeded()) return
   actions.cancelSelect()
   successVisible.value = true
+})
+
+onUnload(() => {
+  if (muteExpireTimer) {
+    clearTimeout(muteExpireTimer)
+    muteExpireTimer = null
+  }
 })
 
 onLoad(async (query) => {
@@ -150,36 +227,18 @@ onLoad(async (query) => {
       throw new Error('当前 IM 用户 ID 未初始化，请重新登录')
     }
 
-    if (chatType.value === 'group') {
+    if (chatType.value === 'group' && !businessId.value) {
       try {
-        const gid = businessId.value || (await resolveBusinessTarget())
-        if (gid) {
-          const detail = await fetchGroupDetail(gid)
-          memberCount.value = detail.memberCount || 0
-        }
+        businessId.value = await resolveBusinessTarget()
       } catch {
-        memberCount.value = 0
+        businessId.value = ''
       }
     }
 
-    await chatStore.loadMessages(conv.id)
-    if (chatType.value === 'group' && businessId.value) {
-      try {
-        const ms = await fetchGroupMembers(businessId.value)
-        const map: Record<string, string> = {}
-        for (const m of ms) {
-          const r = m.memberRemark?.trim()
-          if (r) map[m.id] = r
-        }
-        memberRemarkMap.value = map
-        memberCount.value = ms.length
-        const me = userStore.profile?.id
-        const self = me ? ms.find((m) => m.id === me) : undefined
-        if (self) myRole.value = self.role
-      } catch {
-        // 成员备注加载失败时不影响聊天
-      }
-    }
+    await Promise.all([
+      chatStore.loadMessages(conv.id),
+      chatType.value === 'group' ? refreshGroupMeta() : Promise.resolve(),
+    ])
     await nextTick()
     scrollToBottom()
   } catch (e) {
@@ -235,6 +294,7 @@ watch(
 )
 
 async function onSend() {
+  if (composerBlocked.value) return
   const text = input.value.trim()
   if (!text) return
   input.value = ''
@@ -248,6 +308,14 @@ async function onSend() {
         imUserId.value || myId.value,
       )
       actions.clearQuote()
+    } else if (actions.atList.value.length > 0) {
+      await chatStore.sendAtText(
+        conversationId.value,
+        text,
+        imUserId.value || myId.value,
+        actions.atList.value,
+      )
+      actions.atList.value = []
     } else {
       await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
     }
@@ -292,6 +360,78 @@ async function resolveBusinessTarget(): Promise<string> {
   return ''
 }
 
+/** 进群 / 退群 / 踢人 / 禁言后标题旁人数与禁言状态要跟着变，不能只在首次进入时拉一次 */
+async function refreshGroupMeta() {
+  if (chatType.value !== 'group') return
+  let gid = businessId.value
+  if (!gid) {
+    try {
+      gid = await resolveBusinessTarget()
+    } catch {
+      return
+    }
+  }
+  if (!gid) return
+  businessId.value = gid
+  try {
+    const [ms, detail] = await Promise.all([
+      fetchGroupMembers(gid),
+      fetchGroupDetail(gid).catch(() => null),
+    ])
+    const map: Record<string, string> = {}
+    const avatarMap: Record<string, string> = {}
+    const metaMap: Record<string, MemberMeta> = {}
+    for (const m of ms) {
+      const r = m.memberRemark?.trim()
+      if (r) map[m.id] = r
+      const av = m.avatar?.trim()
+      if (av) avatarMap[m.id] = av
+      metaMap[m.id] = { role: m.role, isMuted: !!m.isMuted }
+    }
+    memberRemarkMap.value = map
+    memberAvatarMap.value = avatarMap
+    memberMetaMap.value = metaMap
+    memberCount.value = ms.length
+    const me = userStore.profile?.id
+    const self = me ? ms.find((m) => m.id === me) : undefined
+    if (self) myRole.value = self.role
+    if (detail) applyGroupChatPermission(detail)
+  } catch {
+    // 人数刷新失败时保留当前值
+  }
+}
+
+/** 群详情的发言权限 → 输入区禁用状态 */
+function applyGroupChatPermission(detail: { canChat?: boolean; denyReason?: string; mutedUntil?: string | null }) {
+  canChat.value = detail.canChat !== false
+  denyReason.value = detail.denyReason || ''
+  myMutedUntil.value = detail.mutedUntil || null
+  scheduleMuteExpiry()
+}
+
+/**
+ * 禁言自然到期时自动刷新恢复输入区。30 天禁言超出 setTimeout 上限（约 24.8 天），
+ * 单次最多等 12 小时，到期没解除就再续一期。
+ */
+function scheduleMuteExpiry() {
+  if (muteExpireTimer) {
+    clearTimeout(muteExpireTimer)
+    muteExpireTimer = null
+  }
+  if (!composerBlocked.value) return
+  const until = myMutedUntil.value ? new Date(myMutedUntil.value).getTime() : 0
+  if (!until || Number.isNaN(until)) return
+  if (until <= Date.now()) {
+    void refreshGroupMeta()
+    return
+  }
+  const delay = Math.min(until - Date.now(), 12 * 60 * 60 * 1000)
+  muteExpireTimer = setTimeout(() => {
+    muteExpireTimer = null
+    scheduleMuteExpiry()
+  }, delay)
+}
+
 async function goToProfile() {
   const id = await resolveBusinessTarget()
   if (!id) {
@@ -314,14 +454,9 @@ function resolveSenderBusinessId(message: ChatMessage): string {
   return businessUserIdFromIM(message.senderId)
 }
 
-async function onAvatarClick(message: ChatMessage) {
-  if (message.senderId === myId.value) return
-  const userId = resolveSenderBusinessId(message)
-  if (!userId) {
-    uni.showToast({ title: '无法打开资料', icon: 'none' })
-    return
-  }
-
+/** 按业务用户 ID 打开资料页：好友进好友详情，非好友进公开资料页（群内带 groupId 便于加好友） */
+async function openProfileById(userId: string) {
+  if (!userId) return
   if (chatType.value === 'private') {
     uni.navigateTo({ url: `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}` })
     return
@@ -335,10 +470,34 @@ async function onAvatarClick(message: ChatMessage) {
     }
   }
   const isFriend = contactStore.contacts.some((c) => c.id === userId)
+  // 群内非好友资料页带 groupId，加好友时走群来源接口（受 allowMemberAddFriend 限制）
+  const groupParam =
+    chatType.value === 'group' && businessId.value
+      ? `&groupId=${encodeURIComponent(businessId.value)}`
+      : ''
   const path = isFriend
     ? `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}`
-    : `/pages/contacts/user-profile?id=${encodeURIComponent(userId)}`
+    : `/pages/contacts/user-profile?id=${encodeURIComponent(userId)}${groupParam}`
   uni.navigateTo({ url: path })
+}
+
+async function onAvatarClick(message: ChatMessage) {
+  if (message.senderId === myId.value) return
+  const userId = resolveSenderBusinessId(message)
+  if (!userId) {
+    uni.showToast({ title: '无法打开资料', icon: 'none' })
+    return
+  }
+  await openProfileById(userId)
+}
+
+/** 名片消息点「查看」：直接进对应好友详情页 */
+function onViewCard(card: CardPayload) {
+  if (!card.userId) {
+    uni.showToast({ title: '名片信息缺失', icon: 'none' })
+    return
+  }
+  void openProfileById(card.userId)
 }
 
 function requestAudioPermission(): Promise<boolean> {
@@ -374,7 +533,7 @@ async function startVoiceRecord() {
     voiceDraft.value = null
     clearRecordingTimer()
 
-    recorder.onStop = (res: { tempFilePath?: string; duration?: number }) => {
+    recorder.onStop((res: { tempFilePath?: string; duration?: number }) => {
       recording.value = false
       clearRecordingTimer()
       const path = res.tempFilePath || ''
@@ -384,21 +543,24 @@ async function startVoiceRecord() {
         rawDuration > 0 ? Math.max(1, Math.round(rawDuration / 1000)) : Math.max(1, recordingSeconds.value)
       if (!path) {
         voiceMode.value = false
+        uni.showToast({ title: '录音文件无效', icon: 'none' })
         return
       }
       voiceDraft.value = { path, duration }
-    }
+    })
 
-    recorder.onError = () => {
+    recorder.onError(() => {
       recording.value = false
       clearRecordingTimer()
       voiceMode.value = false
       voiceDraft.value = null
       cleanupBrowserRecorder()
       uni.showToast({ title: '录音失败', icon: 'none' })
-    }
+    })
 
-    recorder.start({ format: 'mp3' })
+    recorder.start({
+      format: uni.getSystemInfoSync().platform === 'ios' ? 'aac' : 'mp3',
+    })
     recordingTimer = setInterval(() => {
       recordingSeconds.value += 1
       if (recordingSeconds.value >= 60) {
@@ -492,7 +654,30 @@ function stopVoiceRecord() {
   recorder.stop()
 }
 
+async function waitForVoiceDraft(timeoutMs = 3000): Promise<{ path: string; duration: number } | null> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (voiceDraft.value?.path) return voiceDraft.value
+    if (!recording.value && !voiceDraft.value?.path) return null
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return voiceDraft.value?.path ? voiceDraft.value : null
+}
+
 async function sendVoiceDraft() {
+  if (composerBlocked.value) {
+    uni.showToast({ title: blockTip.value, icon: 'none' })
+    return
+  }
+  if (recording.value) {
+    stopVoiceRecord()
+    const draftAfterStop = await waitForVoiceDraft()
+    if (!draftAfterStop?.path) {
+      uni.showToast({ title: '请先录音', icon: 'none' })
+      return
+    }
+  }
+
   if (!voiceDraft.value?.path) {
     uni.showToast({ title: '请先录音', icon: 'none' })
     return
@@ -549,6 +734,7 @@ function onPlus() {
 function pickImage() {
   uni.chooseImage({
     count: 1,
+    sourceType: ['album'],
     success: async (res) => {
       showPlusPanel.value = false
       try {
@@ -559,6 +745,56 @@ function pickImage() {
         uni.showToast({ title: (e as Error).message, icon: 'none' })
       }
     },
+  })
+}
+
+/** 相机拍照即发 */
+function pickCamera() {
+  uni.chooseImage({
+    count: 1,
+    sourceType: ['camera'],
+    success: async (res) => {
+      showPlusPanel.value = false
+      try {
+        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
+        await nextTick()
+        scrollToBottom()
+      } catch (e) {
+        uni.showToast({ title: (e as Error).message, icon: 'none' })
+      }
+    },
+  })
+}
+
+/** 选好友发名片：跳好友选择页，发送在 card-picker 内完成后返回本页 */
+function pickCard() {
+  showPlusPanel.value = false
+  uni.navigateTo({
+    url: `/pages/chat/card-picker?conversationId=${encodeURIComponent(conversationId.value)}&title=${encodeURIComponent(title.value)}`,
+  })
+}
+
+/** 选本地文件发送 */
+async function pickFile() {
+  showPlusPanel.value = false
+  try {
+    const file = await chooseLocalFile()
+    await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
+    await nextTick()
+    scrollToBottom()
+  } catch (e) {
+    const msg = (e as Error).message
+    if (msg && !msg.includes('未选择')) {
+      uni.showToast({ title: msg || '发送失败', icon: 'none' })
+    }
+  }
+}
+
+/** 从我的收藏挑一条发送 */
+function pickFavorite() {
+  showPlusPanel.value = false
+  uni.navigateTo({
+    url: `/pages/chat/favorite-picker?conversationId=${encodeURIComponent(conversationId.value)}&title=${encodeURIComponent(title.value)}`,
   })
 }
 </script>
@@ -600,8 +836,10 @@ function pickImage() {
           :message="m"
           :mine="isMine(m)"
           :avatar="avatarOf(m)"
+          :fallback-avatar="fallbackAvatarOf(m)"
           :nickname="nicknameOf(m)"
           @avatar-click="onAvatarClick(m)"
+          @card-view="onViewCard"
           @longpress="actions.openMenu(m)"
         />
       </view>
@@ -623,6 +861,9 @@ function pickImage() {
         :text="actions.quote.value.content"
         @close="actions.clearQuote"
       />
+      <view v-if="composerBlocked" class="composer-blocked">🔇 {{ blockTip }}</view>
+
+      <template v-else>
       <view v-if="voiceMode" class="voice-bar">
         <view class="voice-trash" @click="cancelVoiceDraft">🗑</view>
 
@@ -640,7 +881,9 @@ function pickImage() {
       </view>
 
       <view v-else class="composer-row">
-        <view class="tool" @click="startVoiceRecord">🎙</view>
+        <view class="tool" @click="startVoiceRecord">
+          <image class="tool-icon" src="/static/icon-mic.png" mode="aspectFit" />
+        </view>
         <view class="input-wrap">
           <input
             class="input"
@@ -655,16 +898,43 @@ function pickImage() {
         <view class="tool" @click="onPlus">＋</view>
         <view v-if="hasInput" class="send-btn" @click="onSend">传送</view>
       </view>
+      </template>
 
-      <view v-if="showPlusPanel" class="plus-panel">
+      <view v-if="showPlusPanel && !composerBlocked" class="plus-panel">
+        <view class="plus-item" @click="pickCamera">
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-camera.png" mode="aspectFit" />
+          </view>
+          <text>相机</text>
+        </view>
         <view class="plus-item" @click="pickImage">
-          <view class="plus-icon">🖼</view>
-          <text>图片</text>
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-photo.png" mode="aspectFit" />
+          </view>
+          <text>照片</text>
+        </view>
+        <view class="plus-item" @click="pickCard">
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-card.png" mode="aspectFit" />
+          </view>
+          <text>名片</text>
+        </view>
+        <view class="plus-item" @click="pickFile">
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-file.png" mode="aspectFit" />
+          </view>
+          <text>文件</text>
+        </view>
+        <view class="plus-item" @click="pickFavorite">
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-favorite.png" mode="aspectFit" />
+          </view>
+          <text>收藏</text>
         </view>
       </view>
 
       <EmojiStickerPanel
-        v-if="showEmojiPanel"
+        v-if="showEmojiPanel && !composerBlocked"
         class="emoji-panel-shell"
         @select="onEmojiSelect"
         @close="showEmojiPanel = false"
@@ -690,10 +960,11 @@ function pickImage() {
 
 <style scoped lang="scss">
 .room {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #f5f5f5;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -704,6 +975,7 @@ function pickImage() {
   box-sizing: content-box;
   background: #ffffff;
   border-bottom: 1rpx solid #ececec;
+  flex-shrink: 0;
 }
 
 .back-btn {
@@ -807,6 +1079,7 @@ function pickImage() {
 .composer {
   background: #f7f7f7;
   border-top: 1rpx solid #e8e8e8;
+  flex-shrink: 0;
 }
 
 .emoji-panel-shell {
@@ -820,6 +1093,16 @@ function pickImage() {
   gap: 12rpx;
 }
 
+/** 被禁言 / 全员禁言时替代输入区的居中提示条 */
+.composer-blocked {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96rpx;
+  color: #999;
+  font-size: 26rpx;
+}
+
 .tool {
   width: 64rpx;
   height: 64rpx;
@@ -828,6 +1111,11 @@ function pickImage() {
   justify-content: center;
   font-size: 40rpx;
   color: #333;
+}
+
+.tool-icon {
+  width: 44rpx;
+  height: 44rpx;
 }
 
 .send-btn {
@@ -953,6 +1241,8 @@ function pickImage() {
 
 .plus-panel {
   display: flex;
+  flex-wrap: wrap;
+  gap: 28rpx 24rpx;
   padding: 24rpx 32rpx 32rpx;
   background: #f0f0f0;
 }
@@ -976,5 +1266,17 @@ function pickImage() {
   align-items: center;
   justify-content: center;
   font-size: 44rpx;
+}
+
+.plus-icon-img {
+  width: 56rpx;
+  height: 56rpx;
+}
+</style>
+
+<style lang="scss">
+page {
+  height: 100%;
+  overflow: hidden;
 }
 </style>

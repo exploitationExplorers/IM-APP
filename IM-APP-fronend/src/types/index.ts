@@ -20,6 +20,7 @@ export type {
   MessageType,
   MessageQuote,
   ChatMessage,
+  CardPayload,
   Conversation,
 } from './chat'
 
@@ -34,6 +35,7 @@ export type {
   FriendRequestAction,
   PrivacySettings,
   SendFriendResult,
+  GroupFriendRequestResult,
 } from './contact'
 
 export type {
@@ -44,6 +46,7 @@ export type {
   GroupJoinRequestItem,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
+  GroupMemberMuteResult,
   GroupRole,
   GroupJoinMode,
 } from './group'

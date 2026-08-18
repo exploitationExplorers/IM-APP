@@ -66,7 +66,10 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "聊天",
-        "navigationBarBackgroundColor": "#FFFFFF"
+        "navigationBarBackgroundColor": "#FFFFFF",
+        "app-plus": {
+          "softinputMode": "adjustResize"
+        }
       }
     },
     {
@@ -74,6 +77,20 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "转发给"
+      }
+    },
+    {
+      "path": "pages/chat/card-picker",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "选择好友"
+      }
+    },
+    {
+      "path": "pages/chat/favorite-picker",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "我的收藏"
       }
     },
     {
@@ -100,7 +117,12 @@
       "path": "pages/contacts/scan",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "扫二维码"
+        "navigationBarTitleText": "扫二维码",
+        "backgroundColor": "#000000",
+        "disableScroll": true,
+        "app-plus": {
+          "background": "#000000"
+        }
       }
     },
     {

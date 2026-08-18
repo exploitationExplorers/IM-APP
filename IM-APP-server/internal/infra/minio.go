@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -79,60 +78,82 @@ func (m *MinIO) Available() bool {
 	return m != nil && m.Client != nil
 }
 
-type PresignResult struct {
-	UploadURL string `json:"uploadUrl"`
-	FileURL   string `json:"fileUrl"`
-	ObjectKey string `json:"objectKey"`
-	ExpiresIn int    `json:"expiresIn"`
-}
-
-// PresignPut 生成预签名上传地址。
-// 若配置了 PublicURL，则用公网 host 生成预签名（host 与签名一致，外网可直接 PUT）；
-// 生成预签名是纯本地计算，不发起网络请求，无需能连通公网 MinIO。
-func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, expiry time.Duration) (PresignResult, error) {
-	if !m.Available() {
-		return PresignResult{}, fmt.Errorf("minio not configured")
-	}
-	signClient := m.Client
-	publicPathPrefix := ""
-	if m.signClient != nil {
-		signClient = m.signClient
-		publicPathPrefix = m.publicPathPrefix
-	} else if m.PublicURL != "" {
-		var err error
-		signClient, publicPathPrefix, err = newPublicSignClient(m.PublicURL, m.AccessKey, m.SecretKey)
-		if err != nil {
-			return PresignResult{}, err
-		}
-	}
-	u, err := signClient.PresignedPutObject(ctx, m.Bucket, objectKey, expiry)
-	if err != nil {
-		return PresignResult{}, err
-	}
-	// 公网 URL 带代理前缀时，签名仍针对 MinIO 原始路径 /bucket/object；
-	// 返回客户端前添加 /minio，Nginx 转发时再剥离此前缀。
-	if publicPathPrefix != "" {
-		u.Path = path.Join(publicPathPrefix, u.Path)
-		u.RawPath = ""
-	}
-
-	var fileURL string
+// FileURL 返回对象上传完成后的可访问地址。
+func (m *MinIO) FileURL(objectKey string) string {
 	escapedObjectKey := escapeObjectKey(objectKey)
 	if m.PublicURL != "" {
-		fileURL = fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(m.PublicURL, "/"), m.Bucket, escapedObjectKey)
+		return fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(m.PublicURL, "/"), m.Bucket, escapedObjectKey)
+	}
+	scheme := "http"
+	if m.UseSSL {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s/%s/%s", scheme, m.Endpoint, m.Bucket, escapedObjectKey)
+}
+
+// ObjectExists 检查对象是否真实存在于 MinIO。
+// 用于上传完成确认：Android PUT 空包问题下 MinIO 可能返回 200 但对象为空/不存在，
+// 直接 MarkReady 会把死链 URL 标记为可用，导致头像等资源 404 后显示灰色。
+func (m *MinIO) ObjectExists(ctx context.Context, objectKey string) bool {
+	if !m.Available() {
+		return false
+	}
+	_, err := m.Client.StatObject(ctx, m.Bucket, objectKey, minio.StatObjectOptions{})
+	return err == nil
+}
+
+func (m *MinIO) signClientForPublic() (*minio.Client, string, error) {
+	if m.signClient != nil {
+		return m.signClient, m.publicPathPrefix, nil
+	}
+	if m.PublicURL != "" {
+		return newPublicSignClient(m.PublicURL, m.AccessKey, m.SecretKey)
+	}
+	return m.Client, "", nil
+}
+
+// PresignPost 生成 H5/App 通用的预签名 multipart POST 表单。
+func (m *MinIO) PresignPost(ctx context.Context, objectKey, contentType string, expiry time.Duration) (string, map[string]string, error) {
+	if !m.Available() {
+		return "", nil, fmt.Errorf("minio not configured")
+	}
+	signClient, _, err := m.signClientForPublic()
+	if err != nil {
+		return "", nil, err
+	}
+	policy := minio.NewPostPolicy()
+	if err := policy.SetBucket(m.Bucket); err != nil {
+		return "", nil, err
+	}
+	if err := policy.SetKey(objectKey); err != nil {
+		return "", nil, err
+	}
+	if err := policy.SetExpires(time.Now().UTC().Add(expiry)); err != nil {
+		return "", nil, err
+	}
+	if contentType != "" && contentType != "application/octet-stream" {
+		if err := policy.SetContentType(contentType); err != nil {
+			return "", nil, err
+		}
+	}
+	if err := policy.SetContentLengthRange(1, 20<<20); err != nil {
+		return "", nil, err
+	}
+	_, formData, err := signClient.PresignedPostPolicy(ctx, policy)
+	if err != nil {
+		return "", nil, err
+	}
+	var postURL string
+	if m.PublicURL != "" {
+		postURL = fmt.Sprintf("%s/%s", strings.TrimSuffix(m.PublicURL, "/"), m.Bucket)
 	} else {
 		scheme := "http"
 		if m.UseSSL {
 			scheme = "https"
 		}
-		fileURL = fmt.Sprintf("%s://%s/%s/%s", scheme, m.Endpoint, m.Bucket, escapedObjectKey)
+		postURL = fmt.Sprintf("%s://%s/%s", scheme, m.Endpoint, m.Bucket)
 	}
-	return PresignResult{
-		UploadURL: u.String(),
-		FileURL:   fileURL,
-		ObjectKey: objectKey,
-		ExpiresIn: int(expiry.Seconds()),
-	}, nil
+	return postURL, formData, nil
 }
 
 func newPublicSignClient(publicURL, accessKey, secretKey string) (*minio.Client, string, error) {

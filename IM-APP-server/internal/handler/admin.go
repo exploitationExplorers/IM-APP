@@ -113,7 +113,12 @@ func (h *AdminMessageHandler) RecallMessage(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "conversationId 或 clientMsgId 必填")
 		return
 	}
-	if err := h.Client.RevokeMessage(c.Request.Context(), convID, seq); err != nil {
+	operatorIMID, err := im.UserIDFromBusinessID(req.AdminID)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "OpenIM ID 转换失败")
+		return
+	}
+	if _, err := h.Client.RevokeMessage(c.Request.Context(), operatorIMID, convID, seq); err != nil {
 		response.Fail(c, http.StatusBadRequest, "OpenIM 撤回失败："+err.Error())
 		return
 	}

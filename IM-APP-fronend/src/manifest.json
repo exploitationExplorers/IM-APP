@@ -47,7 +47,11 @@
             },
             /* ios打包配置 */
             "ios" : {
-                "dSYMs" : false
+                "dSYMs" : false,
+                "privacyDescription" : {
+                    "NSCameraUsageDescription" : "用于扫描二维码添加好友或加入群聊",
+                    "NSPhotoLibraryUsageDescription" : "用于从相册选取二维码"
+                }
             },
             /* SDK配置 */
             "sdkConfigs" : {}

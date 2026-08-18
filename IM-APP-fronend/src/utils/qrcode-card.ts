@@ -85,52 +85,56 @@ function drawNickname(ctx: CanvasRenderingContext2D, nickname: string, x: number
 /** 合成头像 + 昵称 + 品牌 logo + 二维码的分享图 */
 export async function buildQrcodeCardDataUrl(options: QrcodeCardOptions): Promise<string> {
   if (typeof document === 'undefined') {
-    throw new Error('当前环境不支持生成分享图')
+    return options.qrDataUrl
   }
 
-  const captionH = options.caption ? 64 : 0
-  const height = PADDING + AVATAR_SIZE + SECTION_GAP + QR_SIZE + captionH + PADDING
-  const canvas = document.createElement('canvas')
-  canvas.width = CARD_WIDTH
-  canvas.height = height
-
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('无法创建画布')
-
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, CARD_WIDTH, height)
-
-  const rowY = PADDING
-  await drawAvatar(ctx, PADDING, rowY, options.avatarUrl, options.nicknameInitial)
-
-  const nicknameX = PADDING + AVATAR_SIZE + ROW_GAP
-  const nicknameMaxWidth = CARD_WIDTH - nicknameX - LOGO_SIZE - ROW_GAP - PADDING
-  drawNickname(ctx, options.nickname, nicknameX, rowY + AVATAR_SIZE / 2, nicknameMaxWidth)
-
-  const brandLogoUrl = options.brandLogoUrl || '/static/auth/logo-full.png'
   try {
-    const logo = await loadImage(brandLogoUrl)
-    const logoX = CARD_WIDTH - PADDING - LOGO_SIZE
-    const logoY = rowY + (AVATAR_SIZE - LOGO_SIZE) / 2
-    ctx.drawImage(logo, logoX, logoY, LOGO_SIZE, LOGO_SIZE)
+    const captionH = options.caption ? 64 : 0
+    const height = PADDING + AVATAR_SIZE + SECTION_GAP + QR_SIZE + captionH + PADDING
+    const canvas = document.createElement('canvas')
+    canvas.width = CARD_WIDTH
+    canvas.height = height
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return options.qrDataUrl
+
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, CARD_WIDTH, height)
+
+    const rowY = PADDING
+    await drawAvatar(ctx, PADDING, rowY, options.avatarUrl, options.nicknameInitial)
+
+    const nicknameX = PADDING + AVATAR_SIZE + ROW_GAP
+    const nicknameMaxWidth = CARD_WIDTH - nicknameX - LOGO_SIZE - ROW_GAP - PADDING
+    drawNickname(ctx, options.nickname, nicknameX, rowY + AVATAR_SIZE / 2, nicknameMaxWidth)
+
+    const brandLogoUrl = options.brandLogoUrl || '/static/auth/logo-full.png'
+    try {
+      const logo = await loadImage(brandLogoUrl)
+      const logoX = CARD_WIDTH - PADDING - LOGO_SIZE
+      const logoY = rowY + (AVATAR_SIZE - LOGO_SIZE) / 2
+      ctx.drawImage(logo, logoX, logoY, LOGO_SIZE, LOGO_SIZE)
+    } catch {
+      // logo 缺失时不阻断保存
+    }
+
+    const qr = await loadImage(options.qrDataUrl)
+    const qrX = (CARD_WIDTH - QR_SIZE) / 2
+    const qrY = rowY + AVATAR_SIZE + SECTION_GAP
+    ctx.drawImage(qr, qrX, qrY, QR_SIZE, QR_SIZE)
+
+    if (options.caption) {
+      ctx.fillStyle = '#9aa3b5'
+      ctx.font = '400 28px PingFang SC, Microsoft YaHei, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText(options.caption, CARD_WIDTH / 2, qrY + QR_SIZE + 24)
+    }
+
+    return canvas.toDataURL('image/png')
   } catch {
-    // logo 缺失时不阻断保存
+    return options.qrDataUrl
   }
-
-  const qr = await loadImage(options.qrDataUrl)
-  const qrX = (CARD_WIDTH - QR_SIZE) / 2
-  const qrY = rowY + AVATAR_SIZE + SECTION_GAP
-  ctx.drawImage(qr, qrX, qrY, QR_SIZE, QR_SIZE)
-
-  if (options.caption) {
-    ctx.fillStyle = '#9aa3b5'
-    ctx.font = '400 28px PingFang SC, Microsoft YaHei, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    ctx.fillText(options.caption, CARD_WIDTH / 2, qrY + QR_SIZE + 24)
-  }
-
-  return canvas.toDataURL('image/png')
 }
 
 /** APP 端将 base64 图片保存到相册 */

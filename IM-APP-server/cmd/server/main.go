@@ -44,8 +44,9 @@ func main() {
 		"forward_tasks":        {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
 		"forward_task_targets": {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
 		"forward_kafka_outbox": {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
+		"im_message_recalls":   {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql", err)
+		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql, 024_im_message_recalls.sql", err)
 	}
 	log.Println("migrations applied")
 
@@ -262,8 +263,9 @@ func main() {
 			auth.POST("/groups", groupH.Create)
 			auth.POST("/groups/qrcode/resolve", groupH.ResolveQRCode)
 			auth.POST("/groups/qrcode/join", groupH.JoinByQRCode)
+			auth.GET("/groups/detail", groupH.DetailStatic)
 			auth.GET("/groups/:id", groupH.Detail)
-			auth.GET("/groups/:id/members", groupH.Members)
+			auth.GET("/group-members", groupH.Members)
 			auth.GET("/groups/:id/qrcode", groupH.Qrcode)
 			auth.POST("/groups/:id/join", groupH.Join)
 			auth.POST("/groups/:id/invitations", groupH.InviteMembers)
@@ -272,19 +274,20 @@ func main() {
 			auth.POST("/groups/:id/join-requests/:requestId/approve", groupH.ApproveJoinRequest)
 			auth.POST("/groups/:id/join-requests/:requestId/reject", groupH.RejectJoinRequest)
 			auth.PUT("/groups/:id/members/:userId/role", groupH.UpdateMemberRole)
-			auth.PUT("/groups/:id/members/:userId/mute", groupH.UpdateMemberMute)
+			auth.POST("/group-members/mute", groupH.MuteMember)
+			auth.POST("/group-members/unmute", groupH.UnmuteMember)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
 			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
 			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
 			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
-			auth.PUT("/groups/:id/settings", groupH.UpdateSettings)
+			auth.POST("/groups/settings/update", groupH.UpdateSettings)
 			auth.POST("/groups/reports", groupH.CreateReport)
-			auth.PUT("/groups/:id/mute", groupH.UpdateMute)
 			auth.POST("/groups/:id/leave", groupH.Leave)
 			auth.POST("/groups/:id/dismiss", groupH.Dismiss)
 			auth.POST("/group-invitations/:token/accept", groupH.AcceptInvitation)
 			auth.GET("/friend-requests", contactH.ListFriendRequests)
 			auth.POST("/friend-requests", contactH.CreateFriendRequest)
+			auth.POST("/group-friend-requests", contactH.CreateGroupFriendRequest)
 			auth.POST("/friend-requests/:id/accept", contactH.AcceptFriendRequest)
 			auth.POST("/friend-requests/:id/reject", contactH.RejectFriendRequest)
 
@@ -307,6 +310,7 @@ func main() {
 			auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
 			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
+			auth.POST("/im/messages/recall", imH.RecallMessage)
 			auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
 			auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
 

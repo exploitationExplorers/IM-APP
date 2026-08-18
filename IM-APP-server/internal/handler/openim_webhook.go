@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -167,8 +168,14 @@ func (h *OpenIMWebhookHandler) AfterMessage(c *gin.Context) {
 	if senderID == "" {
 		senderID = req.UserID
 	}
+	// OpenIM 3.8 的 afterSend 回调不携带 conversationID，需要按同一套规则补齐，
+	// 否则审计表 conversation_id 为空，撤回时无法匹配。
+	conversationID := req.ConversationID
+	if conversationID == "" {
+		conversationID = h.resolveAuditConversationID(c.Request.Context(), senderID, req.RecvID, req.GroupID)
+	}
 	if err := h.Access.RecordMessageAudit(c.Request.Context(), req.CallbackCommand,
-		req.ServerMsgID, req.ClientMsgID, req.ConversationID, senderID,
+		req.ServerMsgID, req.ClientMsgID, conversationID, senderID,
 		req.RecvID, req.GroupID, req.ContentType, req.Seq, req.SendTime); err != nil {
 		c.JSON(http.StatusInternalServerError, denyWebhook("audit storage failed"))
 		return
@@ -179,6 +186,27 @@ func (h *OpenIMWebhookHandler) AfterMessage(c *gin.Context) {
 		go h.dispatchPush(req, senderID)
 	}
 	c.JSON(http.StatusOK, allowWebhook())
+}
+
+// resolveAuditConversationID 在回调未携带 conversationID 时按 OpenIM 规则补齐，
+// 与撤回侧 buildC2CConversationID / resolveGroupConversationID 保持一致，保证能对上。
+func (h *OpenIMWebhookHandler) resolveAuditConversationID(ctx context.Context, senderID, recvID, groupID string) string {
+	if groupID != "" {
+		if h.Client != nil {
+			for _, cid := range []string{"sg_" + groupID, "g_" + groupID} {
+				if list, err := h.Client.GetConversations(ctx, senderID, []string{cid}); err == nil && len(list) > 0 {
+					return cid
+				}
+			}
+		}
+		return "sg_" + groupID
+	}
+	if recvID != "" {
+		ids := []string{senderID, recvID}
+		sort.Strings(ids)
+		return "si_" + strings.Join(ids, "_")
+	}
+	return ""
 }
 
 // dispatchPush 在独立 goroutine 中解析推送收件人并下发。

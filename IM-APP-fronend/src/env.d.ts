@@ -21,13 +21,24 @@ declare module 'qrcode' {
   interface QRCodeToDataURLOptions {
     width?: number
     margin?: number
+    errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
     color?: {
       dark?: string
       light?: string
     }
   }
 
+  interface QRCodeModules {
+    size: number
+    get(row: number, col: number): number
+  }
+
+  interface QRCodeCreateResult {
+    modules: QRCodeModules
+  }
+
   const QRCode: {
+    create(text: string, options?: QRCodeToDataURLOptions): QRCodeCreateResult
     toDataURL(text: string, options?: QRCodeToDataURLOptions): Promise<string>
   }
 
@@ -74,6 +85,13 @@ interface PlusNative {
     Bitmap?: new (id: string) => PlusNativeObjBitmap
   }
   io?: PlusIo
+  barcode?: {
+    scan: (
+      path: string,
+      success: (type: number, result: string) => void,
+      error?: (error: unknown) => void,
+    ) => void
+  }
   os?: {
     name?: string
     version?: string

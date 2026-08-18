@@ -12,7 +12,10 @@ import (
 	"im-app-server/internal/repository"
 )
 
-var ErrInvalidContactQuery = errors.New("invalid contact query")
+var (
+	ErrInvalidContactQuery  = errors.New("invalid contact query")
+	ErrInvalidFriendRequest = errors.New("invalid friend request")
+)
 
 type ContactService struct {
 	Contacts *repository.ContactRepo
@@ -59,6 +62,27 @@ func (s *ContactService) ListFriendRequests(ctx context.Context, uid, direction 
 
 func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, message, source, sourceGroupID string) (models.SendFriendResult, error) {
 	empty := models.SendFriendResult{}
+	toUserID = strings.TrimSpace(toUserID)
+	message = strings.TrimSpace(message)
+	source = strings.TrimSpace(source)
+	sourceGroupID = strings.TrimSpace(sourceGroupID)
+	parsedTargetID, err := uuid.Parse(toUserID)
+	if err != nil || utf8.RuneCountInString(message) > 500 {
+		return empty, ErrInvalidFriendRequest
+	}
+	toUserID = parsedTargetID.String()
+	if source == "" {
+		source = "public_id"
+	}
+	if source != "public_id" && source != "user_qrcode" && source != "group" {
+		return empty, ErrInvalidFriendRequest
+	}
+	if source == "group" && sourceGroupID == "" {
+		return empty, ErrInvalidFriendRequest
+	}
+	if source != "group" && sourceGroupID != "" {
+		return empty, ErrInvalidFriendRequest
+	}
 	if uid == toUserID {
 		return empty, ErrSelfAction
 	}
@@ -73,12 +97,12 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 	if ok {
 		return empty, ErrAlreadyFriend
 	}
-	if source == "" {
-		source = "public_id"
-	}
-	if source == "group" && sourceGroupID != "" {
+	if source == "group" {
 		internalID, err := s.Groups.InternalIDByPublicID(ctx, sourceGroupID)
 		if err != nil {
+			if errors.Is(err, repository.ErrGroupNotFound) {
+				return empty, ErrNotFound
+			}
 			return empty, ErrForbidden
 		}
 		allowed, err := s.Contacts.IsGroupAddFriendAllowed(ctx, uid, toUserID, internalID)
@@ -109,6 +133,16 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 		return empty, err
 	}
 	return models.SendFriendResult{OK: true, ID: id, Status: "pending"}, nil
+}
+
+func (s *ContactService) SendGroupFriendRequest(ctx context.Context, uid string, req models.CreateGroupFriendRequest) (models.GroupFriendRequestResult, error) {
+	result, err := s.SendFriendRequest(ctx, uid, req.ToUserID, req.Message, "group", req.GroupID)
+	if err != nil {
+		return models.GroupFriendRequestResult{}, err
+	}
+	return models.GroupFriendRequestResult{
+		OK: result.OK, RequestID: result.ID, Status: result.Status,
+	}, nil
 }
 
 func (s *ContactService) AcceptFriendRequest(ctx context.Context, uid, requestID string) error {

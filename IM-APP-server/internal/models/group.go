@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 type GroupInfo struct {
 	ID                   string            `json:"id"`
 	Name                 string            `json:"name"`
@@ -13,6 +15,10 @@ type GroupInfo struct {
 	MyNickname           string            `json:"myNickname,omitempty"`
 	JoinMode             string            `json:"joinMode"`
 	AllMuted             bool              `json:"allMuted"`
+	CanChat              *bool             `json:"canChat,omitempty"`
+	DenyReason           string            `json:"denyReason,omitempty"`
+	IsMuted              *bool             `json:"isMuted,omitempty"`
+	MutedUntil           *time.Time        `json:"mutedUntil,omitempty"`
 	Permissions          *GroupPermissions `json:"permissions,omitempty"`
 	Remark               string            `json:"remark,omitempty"`
 }
@@ -27,13 +33,15 @@ type GroupPermissions struct {
 }
 
 type GroupMember struct {
-	ID            string `json:"id"`
-	Nickname      string `json:"nickname"`
-	GroupNickname string `json:"groupNickname"`
-	DisplayName   string `json:"displayName"`
-	Avatar        string `json:"avatar"`
-	Role          string `json:"role"`
-	MemberRemark  string `json:"memberRemark,omitempty"`
+	ID            string     `json:"id"`
+	Nickname      string     `json:"nickname"`
+	GroupNickname string     `json:"groupNickname"`
+	DisplayName   string     `json:"displayName"`
+	Avatar        string     `json:"avatar"`
+	Role          string     `json:"role"`
+	MemberRemark  string     `json:"memberRemark,omitempty"`
+	IsMuted       bool       `json:"isMuted"`
+	MutedUntil    *time.Time `json:"mutedUntil"`
 }
 
 type CreateGroupReq struct {
@@ -42,6 +50,7 @@ type CreateGroupReq struct {
 }
 
 type UpdateGroupSettingsReq struct {
+	GroupID              string  `json:"groupId"`
 	Name                 *string `json:"name"`
 	AvatarFileID         *string `json:"avatarFileId"`
 	Announcement         *string `json:"announcement"`
@@ -115,12 +124,23 @@ type UpdateGroupMemberRoleReq struct {
 	Role string `json:"role"`
 }
 
-type UpdateGroupMemberMuteReq struct {
-	MutedSeconds int64 `json:"mutedSeconds"`
+type MuteGroupMemberReq struct {
+	GroupID      string `json:"groupId"`
+	MemberUserID string `json:"memberUserId"`
+	MutedSeconds *int64 `json:"mutedSeconds"`
 }
 
-type UpdateGroupMuteReq struct {
-	Muted bool `json:"muted"`
+type UnmuteGroupMemberReq struct {
+	GroupID      string `json:"groupId"`
+	MemberUserID string `json:"memberUserId"`
+}
+
+type GroupMemberMuteResult struct {
+	GroupID      string     `json:"groupId"`
+	MemberUserID string     `json:"memberUserId"`
+	IsMuted      bool       `json:"isMuted"`
+	MutedUntil   *time.Time `json:"mutedUntil"`
+	ChangedAt    time.Time  `json:"changedAt"`
 }
 
 type UpdateGroupRemarkReq struct {

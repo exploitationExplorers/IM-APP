@@ -11,7 +11,7 @@ if (import.meta.env.DEV) {
 export const APP_CONFIG = {
   appName: 'Chat',
   displayName: '66快捷版',
-  version: 'v0.1.0',
+  version: 'v1.0.0',
   apiBaseUrl,
   defaultCountryCode: '+86',
   /** 参考站默认头像 */
