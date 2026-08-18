@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { fetchGroupDetail, updateGroupRemark } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
+import { useChatStore } from '@/stores/chat'
+import { resolveGroupConversationID, setConversationGroupRemark } from '@/utils/openim'
 
 const REMARK_MAX = 64
 const groupId = ref('')
@@ -42,6 +44,13 @@ async function onSubmit() {
   saving.value = true
   try {
     await updateGroupRemark(groupId.value, value)
+    try {
+      const conversationId = await resolveGroupConversationID(groupId.value)
+      await setConversationGroupRemark(conversationId, value)
+      useChatStore().patchConversation(conversationId, { title: value || name.value })
+    } catch {
+      // 备注已写入业务库；OpenIM 会话标题下次拉列表再对齐
+    }
     const store = useGroupStore()
     await store.loadDetail(groupId.value)
     uni.showToast({ title: '已保存', icon: 'success' })

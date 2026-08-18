@@ -6,6 +6,7 @@ import ImNavBar from '@/components/ImNavBar.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
+import { useUserStore } from '@/stores/user'
 import { clearConversationHistory } from '@/api/im'
 import {
   setConversationPin,
@@ -21,20 +22,49 @@ const PREVIEW_MEMBER_LIMIT = 4
 
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
+const userStore = useUserStore()
 const groupId = ref('')
 const showJoinMode = ref(false)
+const leaving = ref(false)
 
 const groupDetail = computed(() => groupStore.currentGroup)
 const memberList = computed(() => groupStore.members)
 const previewMembers = computed(() => memberList.value.slice(0, PREVIEW_MEMBER_LIMIT))
-const groupName = computed(() => groupDetail.value?.remark?.trim() || groupDetail.value?.name || '群聊')
+const groupName = computed(() => groupDetail.value?.name || '群聊')
 const avatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 const memberCount = computed(() =>
   memberList.value.length || groupDetail.value?.memberCount || 0,
 )
-const myRole = computed(() => groupDetail.value?.myRole || 'member')
-const isOwner = computed(() => myRole.value === 'owner')
-const canManage = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
+function sameUserId(a?: string, b?: string) {
+  if (!a || !b) return false
+  if (a === b) return true
+  return a.replace(/-/g, '').toLowerCase() === b.replace(/-/g, '').toLowerCase()
+}
+
+function isOwnerRole(role?: string) {
+  const r = (role || '').trim().toLowerCase()
+  return r === 'owner' || r === '100'
+}
+
+const myRole = computed(() => {
+  const me = userStore.profile
+  const self = me
+    ? memberList.value.find((m) => sameUserId(m.id, me.id) || sameUserId(m.id, me.publicId))
+    : undefined
+  if (isOwnerRole(groupDetail.value?.myRole) || isOwnerRole(self?.role)) return 'owner'
+  if (groupDetail.value?.myRole) return groupDetail.value.myRole
+  return self?.role || 'member'
+})
+const isOwner = computed(() => {
+  if (isOwnerRole(myRole.value)) return true
+  const me = userStore.profile
+  const ownerId = groupDetail.value?.ownerId
+  if (me && (sameUserId(ownerId, me.id) || sameUserId(ownerId, me.publicId))) return true
+  return !!me && memberList.value.some(
+    (m) => isOwnerRole(m.role) && (sameUserId(m.id, me.id) || sameUserId(m.id, me.publicId)),
+  )
+})
+const canManage = computed(() => isOwner.value || myRole.value === 'admin')
 const canEditProfile = computed(
   () => groupDetail.value?.permissions?.canEditProfile ?? canManage.value,
 )
@@ -64,6 +94,7 @@ onShow(async () => {
     return
   }
   try {
+    if (!userStore.profile) await userStore.loadProfile()
     await groupStore.loadDetail(groupId.value)
     await initConversationSettings()
   } catch (e) {
@@ -158,11 +189,13 @@ function goToMyNickname() {
   })
 }
 
-function goToRemark() {
-  uni.navigateTo({
-    url: `/pages/group/remark?id=${encodeURIComponent(groupId.value)}`,
-  })
-}
+// 参考站无群备注入口，暂隐藏
+// function goToRemark() {
+//   uni.navigateTo({
+//     url: `/pages/group/remark?id=${encodeURIComponent(groupId.value)}`,
+//     fail: () => uni.showToast({ title: '无法打开群备注', icon: 'none' }),
+//   })
+// }
 
 function goToMedia() {
   uni.navigateTo({
@@ -248,23 +281,28 @@ async function onClearHistory() {
   }
 }
 
-async function onLeaveOrDismiss() {
-  if (isOwner.value) {
-    const res = await uni.showModal({
-      title: '解散群',
-      content: '解散后群聊将不可恢复，确定继续吗？',
-      confirmText: '确定',
-      cancelText: '取消',
-    })
-    if (!res.confirm) return
-    try {
-      await groupStore.dismiss(groupId.value)
-      uni.reLaunch({ url: '/pages/chat/index' })
-    } catch (e) {
-      uni.showToast({ title: (e as Error)?.message || '解散失败', icon: 'none' })
-    }
-    return
+async function onDismiss() {
+  if (!isOwner.value || leaving.value) return
+  const res = await uni.showModal({
+    title: '解散群',
+    content: '解散后群聊将不可恢复，确定继续吗？',
+    confirmText: '确定',
+    cancelText: '取消',
+  })
+  if (!res.confirm) return
+  leaving.value = true
+  try {
+    await groupStore.dismiss(groupId.value)
+    uni.reLaunch({ url: '/pages/chat/index' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '解散失败', icon: 'none' })
+  } finally {
+    leaving.value = false
   }
+}
+
+async function onLeave() {
+  if (isOwner.value || leaving.value) return
   const res = await uni.showModal({
     title: '退出群聊',
     content: '退出后将删除本群对话，确定继续吗？',
@@ -272,17 +310,21 @@ async function onLeaveOrDismiss() {
     cancelText: '取消',
   })
   if (!res.confirm) return
+  leaving.value = true
   try {
     await groupStore.leave(groupId.value)
     uni.reLaunch({ url: '/pages/chat/index' })
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '退出失败', icon: 'none' })
+  } finally {
+    leaving.value = false
   }
 }
 </script>
 
 <template>
-  <view class="page">
+  <view class="page-wrap">
+    <scroll-view scroll-y class="page" :show-scrollbar="false">
     <ImNavBar title="群组详情" @back="goBack" />
 
     <view class="card">
@@ -368,6 +410,7 @@ async function onLeaveOrDismiss() {
         <text class="arrow">›</text>
       </view>
 
+      <!-- 参考站无群备注，暂隐藏
       <view class="info-row nav-row" @click="goToRemark">
         <text class="label">群备注</text>
         <view class="row-right">
@@ -375,6 +418,7 @@ async function onLeaveOrDismiss() {
           <text class="arrow">›</text>
         </view>
       </view>
+      -->
 
       <view class="info-row nav-row last" @click="goToMyNickname">
         <text class="label">我在本群的昵称</text>
@@ -415,12 +459,18 @@ async function onLeaveOrDismiss() {
       </view>
     </view>
 
-    <view class="card">
-      <view class="leave-row" @click="onLeaveOrDismiss">
-        <text class="leave-label">{{ isOwner ? '解散群' : '退出群并删除对话' }}</text>
+    <view v-if="isOwner" class="card">
+      <view class="leave-row" @click="onDismiss">
+        <text class="leave-label">解散群</text>
+      </view>
+    </view>
+    <view v-else class="card">
+      <view class="leave-row" @click="onLeave">
+        <text class="leave-label">退出群并删除对话</text>
       </view>
     </view>
 
+    </scroll-view>
     <view v-if="showJoinMode" class="sheet-mask" @click="showJoinMode = false">
       <view class="sheet" @click.stop>
         <view class="sheet-item" @click="selectJoinMode('open')">公开群（扫码入群）</view>
@@ -432,10 +482,17 @@ async function onLeaveOrDismiss() {
 </template>
 
 <style scoped lang="scss">
-.page {
-  min-height: 100vh;
+.page-wrap {
+  height: 100vh;
+  height: 100dvh;
   background: #f3f4f7;
-  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+
+.page {
+  height: 100%;
+  box-sizing: border-box;
+  padding-bottom: calc(48rpx + env(safe-area-inset-bottom));
 }
 
 .card {

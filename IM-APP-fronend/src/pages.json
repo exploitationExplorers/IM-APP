@@ -264,6 +264,13 @@
       }
     },
     {
+      "path": "pages/group/remark",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "群备注"
+      }
+    },
+    {
       "path": "pages/group/qrcode",
       "style": {
         "navigationStyle": "custom",

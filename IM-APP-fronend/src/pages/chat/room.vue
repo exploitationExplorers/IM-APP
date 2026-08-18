@@ -1022,7 +1022,8 @@ function pickFavorite() {
 
 <style scoped lang="scss">
 .room {
-  height: 100%;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: #f5f5f5;
@@ -1371,12 +1372,5 @@ function pickFavorite() {
 .plus-icon-img {
   width: 56rpx;
   height: 56rpx;
-}
-</style>
-
-<style lang="scss">
-page {
-  height: 100%;
-  overflow: hidden;
 }
 </style>

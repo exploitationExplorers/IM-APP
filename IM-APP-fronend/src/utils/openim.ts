@@ -985,10 +985,11 @@ export function targetOf(conversation: ConversationItem | Conversation): IMTarge
 export function toConversation(item: ConversationItem): Conversation {
   const isGroup = item.conversationType !== SessionType.Single
   const groupId = item.groupID || groupIdFromConversationId(item.conversationID)
+  const remark = isGroup ? groupRemarkFromEx(conversationEx(item)) : ''
   return {
     id: item.conversationID,
     type: isGroup ? 'group' : 'private',
-    title: item.showName,
+    title: remark || item.showName,
     avatar:
       item.faceURL ||
       (isGroup ? APP_CONFIG.defaultGroupAvatarUrl : APP_CONFIG.defaultAvatarUrl),
@@ -1359,6 +1360,42 @@ export async function setConversationPin(conversationID: string, isPinned: boole
  */
 export async function setConversationRecvOpt(conversationID: string, opt: number): Promise<void> {
   await imCall('setConversation' as IMMethods, { conversationID, recvMsgOpt: opt })
+}
+
+function conversationEx(item: ConversationItem): string {
+  return (item as ConversationItem & { ex?: string }).ex || ''
+}
+
+function parseConversationEx(ex: string): Record<string, unknown> {
+  if (!ex) return {}
+  try {
+    const parsed: unknown = JSON.parse(ex)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return { ...(parsed as Record<string, unknown>) }
+    }
+  } catch {
+    /* 非 JSON 的旧 ex 不沿用，避免污染备注结构 */
+  }
+  return {}
+}
+
+export function groupRemarkFromEx(ex: string | undefined): string {
+  const remark = parseConversationEx(ex || '').groupRemark
+  return typeof remark === 'string' ? remark.trim() : ''
+}
+
+/** 群备注仅自己可见：写进 OpenIM 会话 ex，随账号云同步，列表标题优先展示备注 */
+export async function setConversationGroupRemark(conversationID: string, remark: string): Promise<void> {
+  const list = await getConversationList().catch(() => [] as ConversationItem[])
+  const current = list.find((item) => item.conversationID === conversationID)
+  const extra = parseConversationEx(current ? conversationEx(current) : '')
+  const next = remark.trim()
+  if (next) extra.groupRemark = next
+  else delete extra.groupRemark
+  await imCall('setConversation' as IMMethods, {
+    conversationID,
+    ex: Object.keys(extra).length ? JSON.stringify(extra) : '',
+  })
 }
 
 /** 清掉会话上的 @ / 新公告强提醒，对应参考站「不再提示」 */
