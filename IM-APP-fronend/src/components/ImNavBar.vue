@@ -62,9 +62,12 @@ const statusBarHeight = getStatusBarHeight()
 }
 
 .im-nav-side {
-  width: 52rpx;
+  min-width: 52rpx;
+  width: auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-shrink: 0;
+  gap: 8rpx;
 }
 </style>

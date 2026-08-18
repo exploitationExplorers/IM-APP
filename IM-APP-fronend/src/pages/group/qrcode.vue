@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { fetchGroupDetail, fetchGroupQrcode } from '@/api/group'
 import { APP_CONFIG } from '@/config'
 import { buildQrcodeDataUrl } from '@/utils/qrcode'
@@ -109,15 +110,13 @@ async function onSave() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">群二维码</text>
-      <view class="nav-action" @click="onShare">
-        <image class="nav-action-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
-      </view>
-    </view>
+    <ImNavBar title="群二维码" @back="goBack">
+      <template #right>
+        <view class="nav-action" @click="onShare">
+          <image class="nav-action-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
+        </view>
+      </template>
+    </ImNavBar>
 
     <view class="body">
       <view class="user-row">
@@ -162,45 +161,18 @@ async function onSave() {
   flex-direction: column;
 }
 
-.nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: calc(88rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 24rpx 0;
-  background: #fff;
-  box-sizing: border-box;
-}
-
-.nav-back,
 .nav-action {
-  width: 72rpx;
-  height: 72rpx;
+  width: 64rpx;
+  height: 64rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.nav-back {
-  justify-content: flex-start;
-}
-
-.nav-back-icon,
 .nav-action-icon {
   width: 44rpx;
   height: 44rpx;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 34rpx;
-  font-weight: 700;
-  color: #212121;
 }
 
 .body {

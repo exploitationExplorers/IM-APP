@@ -3,7 +3,7 @@
     "configurations" : [
         {
             "customPlaygroundType" : "device",
-            "packageName" : "uni.app.UNIEC9D1AE",
+            "packageName" : "com.myim.chat",
             "playground" : "custom",
             "type" : "uni-app:app-android"
         }

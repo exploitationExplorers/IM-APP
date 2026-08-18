@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { changePassword } from '@/api/user'
 import { markSecuritySaveSuccess } from '@/utils/profile-feedback'
@@ -82,13 +83,7 @@ async function onConfirm() {
 
 <template>
   <view class="page">
-    <view class="nav-row">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-    </view>
-
-    <text class="page-title">重置密码</text>
+    <ImNavBar title="重置密码" @back="goBack" />
 
     <view class="form">
       <view class="input-box">
@@ -150,34 +145,8 @@ async function onConfirm() {
   flex-direction: column;
 }
 
-.nav-row {
-  padding: env(safe-area-inset-top) 24rpx 0;
-}
-
-.nav-back {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.nav-back-icon {
-  width: 40rpx;
-  height: 40rpx;
-}
-
-.page-title {
-  display: block;
-  padding: 8rpx 40rpx 32rpx;
-  font-size: 48rpx;
-  font-weight: 700;
-  color: #212121;
-  line-height: 64rpx;
-}
-
 .form {
-  padding: 0 40rpx;
+  padding: 32rpx 40rpx 0;
 }
 
 .input-box {
