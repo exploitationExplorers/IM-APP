@@ -21,6 +21,10 @@ import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
+import {
+  isAnnouncementDismissed,
+  rememberDismissedAnnouncement,
+} from '@/utils/group-announcement'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -49,6 +53,8 @@ const denyReason = ref('')
 const myMutedUntil = ref<string | null>(null)
 /** 群成员角色 / 禁言元信息（业务用户 ID 索引），供长按菜单做权限与禁言项判断 */
 const memberMetaMap = ref<Record<string, MemberMeta>>({})
+/** 当前群公告正文，房间顶栏横幅用 */
+const announcementText = ref('')
 let muteExpireTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const scrollInto = ref('')
@@ -90,7 +96,10 @@ watch(
       .map((m) => m.systemEventKey)
       .filter(
         (key): key is string =>
-          !!key && (key.startsWith('group-member:') || key.startsWith('group-mute:')),
+          !!key &&
+          (key.startsWith('group-member:') ||
+            key.startsWith('group-mute:') ||
+            key.startsWith('group-announce:')),
       )
       .join('|'),
   (keys, prev) => {
@@ -148,6 +157,13 @@ const hasInput = computed(() => input.value.trim().length > 0)
 
 /** 被禁言（单人 / 全员）时隐藏输入区，换成居中提示条 */
 const composerBlocked = computed(() => chatType.value === 'group' && !canChat.value)
+
+const showAnnouncementBanner = computed(() => {
+  if (chatType.value !== 'group') return false
+  const text = announcementText.value.trim()
+  if (!text) return false
+  return !isAnnouncementDismissed(imUserId.value || myId.value, conversationId.value, text)
+})
 
 const blockTip = computed(() => {
   if (denyReason.value === 'group_muted') return '群主已开启全员禁言'
@@ -412,7 +428,10 @@ async function refreshGroupMeta() {
     const me = userStore.profile?.id
     const self = me ? ms.find((m) => m.id === me) : undefined
     if (self) myRole.value = self.role
-    if (detail) applyGroupChatPermission(detail)
+    if (detail) {
+      applyGroupChatPermission(detail)
+      announcementText.value = (detail.announcement || '').trim()
+    }
   } catch {
     // 人数刷新失败时保留当前值
   }
@@ -496,6 +515,21 @@ async function openProfileById(userId: string) {
     ? `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}`
     : `/pages/contacts/user-profile?id=${encodeURIComponent(userId)}${groupParam}`
   uni.navigateTo({ url: path })
+}
+
+function openAnnouncement() {
+  if (!businessId.value) return
+  uni.navigateTo({
+    url: `/pages/group/announcement?id=${encodeURIComponent(businessId.value)}`,
+  })
+}
+
+async function dismissAnnouncementBanner() {
+  const text = announcementText.value.trim()
+  if (text) {
+    rememberDismissedAnnouncement(imUserId.value || myId.value, conversationId.value, text)
+  }
+  await chatStore.dismissGroupAnnouncement(conversationId.value)
 }
 
 async function onAvatarClick(message: ChatMessage) {
@@ -827,6 +861,12 @@ function pickFavorite() {
       <view class="header-icon" @click="goToProfile">⋯</view>
     </view>
 
+    <view v-if="showAnnouncementBanner" class="announce-bar">
+      <image class="announce-icon" src="/static/icons/icon-megaphone.svg" mode="aspectFit" />
+      <text class="announce-text" @click="openAnnouncement">{{ announcementText }}</text>
+      <text class="announce-dismiss" @click.stop="dismissAnnouncementBanner">不再提示</text>
+    </view>
+
     <!-- 不开 scroll-with-animation：uni 的滚动动画是 transform 假动画 + 过渡结束才提交 scrollTop，
          发送后连续两次贴底会在动画中途重测位置，最终落点偏小导致最新消息下半截被视口切掉 -->
     <scroll-view
@@ -1041,6 +1081,39 @@ function pickFavorite() {
   font-size: 42rpx;
   color: #444;
   flex-shrink: 0;
+}
+
+.announce-bar {
+  display: flex;
+  align-items: center;
+  height: 72rpx;
+  padding: 0 24rpx;
+  background: #ffffff;
+  border-bottom: 1rpx solid #ececec;
+  flex-shrink: 0;
+}
+
+.announce-icon {
+  width: 36rpx;
+  height: 36rpx;
+  flex-shrink: 0;
+}
+
+.announce-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0 16rpx;
+  font-size: 26rpx;
+  color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.announce-dismiss {
+  flex-shrink: 0;
+  font-size: 26rpx;
+  color: #0a2fc2;
 }
 
 .msg-list {

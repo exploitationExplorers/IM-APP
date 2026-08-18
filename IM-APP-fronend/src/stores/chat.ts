@@ -33,12 +33,20 @@ import {
   conversationIdOf,
   imUserId,
   resolveMessageSeq,
+  resetConversationGroupAtType,
   seqOf,
 } from '@/utils/openim'
-import { isIMNotification } from '@/utils/im-notification'
+import { isIMNotification, isGroupAnnouncementNotice } from '@/utils/im-notification'
 import { playMessageSound, vibrateShort } from '@/utils/notify'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
+import {
+  GroupAtType,
+  highlightTagsOf,
+  isAtMeType,
+  unreadAnnouncementState,
+  writeUnreadAnnouncement,
+} from '@/utils/group-announcement'
 
 const PAGE_SIZE = 20
 
@@ -74,11 +82,38 @@ export const useChatStore = defineStore('chat', () => {
     rawMessages.value = { ...rawMessages.value, [item.clientMsgID]: item }
   }
 
+  function announcementOwnerId() {
+    return imUserId.value || 'anon'
+  }
+
+  function setUnreadAnnouncement(conversationId: string, unread: boolean) {
+    if (!conversationId) return
+    writeUnreadAnnouncement(announcementOwnerId(), conversationId, unread)
+    const conv = conversations.value.find((c) => c.id === conversationId)
+    if (!conv) return
+    patchConversation(conversationId, {
+      highlightTags: highlightTagsOf(unread ? conv.groupAtType : GroupAtType.AtNormal, unread),
+    })
+  }
+
+  function decorateConversation(conv: Conversation): Conversation {
+    const stored = unreadAnnouncementState(announcementOwnerId(), conv.id)
+    const unread =
+      stored === true || (stored !== false && conv.groupAtType === GroupAtType.AtGroupNotice)
+    if (stored === undefined && conv.groupAtType === GroupAtType.AtGroupNotice) {
+      writeUnreadAnnouncement(announcementOwnerId(), conv.id, true)
+    }
+    return { ...conv, highlightTags: highlightTagsOf(conv.groupAtType, unread) }
+  }
+
   function appendMessage(item: MessageItem) {
     if (!item?.clientMsgID) return
     rememberRaw(item)
     const message = toChatMessage(item)
     if (!message.conversationId) return
+    if (isGroupAnnouncementNotice(item.contentType)) {
+      setUnreadAnnouncement(message.conversationId, true)
+    }
     const list = messagesMap.value[message.conversationId] || []
     if (list.some((m) => m.id === message.id)) return
     messagesMap.value = {
@@ -127,7 +162,7 @@ export const useChatStore = defineStore('chat', () => {
   function upsertConversations(raw: ConversationItem | ConversationItem[] | null) {
     const items = Array.isArray(raw) ? raw : raw ? [raw] : []
     if (!items.length) return
-    const incoming = items.map(toConversation)
+    const incoming = items.map((item) => decorateConversation(toConversation(item)))
     const merged = [...conversations.value]
     incoming.forEach((conv) => {
       const idx = merged.findIndex((c) => c.id === conv.id)
@@ -214,7 +249,7 @@ export const useChatStore = defineStore('chat', () => {
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       conversations.value = sortConversations(
         list.map((item) => {
-          const mapped = toConversation(item)
+          const mapped = decorateConversation(toConversation(item))
           const prev = prevById.get(mapped.id)
           return prev ? keepNewerPreview(prev, mapped) : mapped
         }),
@@ -453,6 +488,20 @@ export const useChatStore = defineStore('chat', () => {
     const copy = [...conversations.value]
     copy[idx] = { ...copy[idx], ...patch }
     conversations.value = sortConversations(copy)
+  }
+
+  /** 「不再提示」：清掉会话列表 [有新公告]；若当前不是 @ 强提醒，再清 OpenIM groupAtType */
+  async function dismissGroupAnnouncement(conversationId: string) {
+    const conv = conversations.value.find((c) => c.id === conversationId)
+    writeUnreadAnnouncement(announcementOwnerId(), conversationId, false)
+    const keepAt = isAtMeType(conv?.groupAtType) ? conv?.groupAtType : GroupAtType.AtNormal
+    patchConversation(conversationId, {
+      groupAtType: keepAt,
+      highlightTags: highlightTagsOf(keepAt, false),
+    })
+    if (!isAtMeType(conv?.groupAtType)) {
+      await resetConversationGroupAtType(conversationId).catch(() => undefined)
+    }
   }
 
   /** 发送前先占位，SDK 返回后用真实消息替换，失败则标红 */
@@ -745,6 +794,7 @@ export const useChatStore = defineStore('chat', () => {
     subscribeRealtime,
     unsubscribeRealtime,
     patchConversation,
+    dismissGroupAnnouncement,
     clearHistory,
     reset,
   }

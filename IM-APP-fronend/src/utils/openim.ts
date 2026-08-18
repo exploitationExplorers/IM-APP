@@ -16,6 +16,7 @@ import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
 import { formatIMNotification, imNotificationEventKey } from '@/utils/im-notification'
+import { highlightTagsOf } from '@/utils/group-announcement'
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
 export interface IMTarget {
@@ -998,6 +999,8 @@ export function toConversation(item: ConversationItem): Conversation {
     recvMsgOpt: item.recvMsgOpt,
     peerUserId: item.userID || undefined,
     groupId: groupId || undefined,
+    groupAtType: item.groupAtType || 0,
+    highlightTags: highlightTagsOf(item.groupAtType || 0, false),
   }
 }
 
@@ -1356,6 +1359,15 @@ export async function setConversationPin(conversationID: string, isPinned: boole
  */
 export async function setConversationRecvOpt(conversationID: string, opt: number): Promise<void> {
   await imCall('setConversation' as IMMethods, { conversationID, recvMsgOpt: opt })
+}
+
+/** 清掉会话上的 @ / 新公告强提醒，对应参考站「不再提示」 */
+export async function resetConversationGroupAtType(conversationID: string): Promise<void> {
+  try {
+    await imCall('resetConversationGroupAtType' as IMMethods, conversationID)
+  } catch {
+    await imCall('setConversation' as IMMethods, { conversationID, groupAtType: 0 })
+  }
 }
 
 /**

@@ -42,8 +42,10 @@ export interface Conversation {
   lastMessage: string
   lastMessageAt: string
   unreadCount: number
-  /** 如 [有新公告] */
-  highlightTag?: string
+  /** 会话预览红色提醒，如 [有人@你]、[有新公告] */
+  highlightTags?: string[]
+  /** OpenIM ConversationItem.groupAtType：0 无 / 1 @我 / 2 @所有人 / 3 两者 / 4 有新公告 */
+  groupAtType?: number
   pinned?: boolean
   /**
    * 会话级消息接收选项，来自 OpenIM ConversationItem.recvMsgOpt。

@@ -76,6 +76,9 @@ export function imNotificationEventKey(item: MessageItem): string {
   if (isGroupMuteNotice(item.contentType)) {
     return `group-mute:${item.groupID || ''}:${item.clientMsgID}`
   }
+  if (isGroupAnnouncementNotice(item.contentType)) {
+    return `group-announce:${item.groupID || ''}`
+  }
   if (item.contentType !== GroupNotice.NameSet) return ''
   const detail = parseDetail(item)
   const groupID = detail.group?.groupID || item.groupID || ''
@@ -91,6 +94,10 @@ export function isGroupMembershipNotice(contentType: number): boolean {
     contentType === GroupNotice.MemberInvited ||
     contentType === GroupNotice.MemberEnter
   )
+}
+
+export function isGroupAnnouncementNotice(contentType: number): boolean {
+  return contentType === GroupNotice.Announcement
 }
 
 /** 禁言/解禁通知（单成员或全员）：房间页据此即时刷新成员禁言状态与输入区 */
