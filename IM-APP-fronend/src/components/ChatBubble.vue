@@ -10,6 +10,8 @@ const props = defineProps<{
   avatar: string
   fallbackAvatar?: string
   nickname?: string
+  /** 本会话全部图片消息的地址：预览时可左右滑动切换，缺省只预览本条 */
+  previewUrls?: string[]
 }>()
 
 /** 头像加载失败（死链/空对象）时切换到业务侧兜底头像，避免一直显示灰色占位 */
@@ -62,6 +64,19 @@ function onViewCard() {
 
 function onLongPress() {
   emit('longpress')
+}
+
+/**
+ * 点按图片全屏预览（uni.previewImage：H5 内置查看器 / App 原生画廊）。
+ * 传入会话内全部图片时可左右滑动切换；长按菜单不受影响。
+ */
+function previewImage() {
+  if (props.message.type !== 'image') return
+  const current = toPlayableMediaUrl(props.message.content || '')
+  const raw = props.previewUrls?.length ? props.previewUrls : [props.message.content]
+  const urls = raw.map((url) => toPlayableMediaUrl(url || '')).filter(Boolean)
+  if (!current || !urls.length) return
+  uni.previewImage({ urls, current })
 }
 
 function onContextMenu(event: Event) {
@@ -132,6 +147,7 @@ function playVoice() {
   }
 }
 
+/** 归一化媒体地址：网络/blob 路径原样返回，App 本地临时路径转 file:// 绝对路径（语音播放与图片预览共用） */
 function toPlayableMediaUrl(path: string): string {
   if (!path) return ''
   if (
@@ -177,7 +193,7 @@ function openLink(url: string) {
     />
     <view class="content-wrap">
       <text v-if="showNickname" class="nickname">{{ nickname }}</text>
-      <view v-if="message.type === 'image'" class="bubble image-bubble" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
+      <view v-if="message.type === 'image'" class="bubble image-bubble" @click="previewImage" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
         <image class="msg-image" :src="message.content" mode="widthFix" />
       </view>
       <view
