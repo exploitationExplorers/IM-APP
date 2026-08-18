@@ -32,6 +32,8 @@ import {
   toConversation,
   conversationIdOf,
   imUserId,
+  resolveMessageSeq,
+  seqOf,
 } from '@/utils/openim'
 import { isIMNotification } from '@/utils/im-notification'
 import { playMessageSound, vibrateShort } from '@/utils/notify'
@@ -351,6 +353,15 @@ export const useChatStore = defineStore('chat', () => {
     return list.find((c) => c.conversationID === conversationId)
   }
 
+  async function conversationOf(conversationId: string): Promise<Conversation | undefined> {
+    const cached = conversations.value.find((c) => c.id === conversationId)
+    if (cached) return cached
+    const item = await findConversationById(conversationId).catch(() => undefined)
+    if (!item) return undefined
+    upsertConversations([item])
+    return toConversation(item)
+  }
+
   async function loadMessages(conversationId: string) {
     const existing = messagesMap.value[conversationId] || []
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
@@ -605,27 +616,17 @@ export const useChatStore = defineStore('chat', () => {
     messageId: string,
     opts?: { peerId?: string; reason?: string },
   ) {
-    const conv = conversations.value.find((c) => c.id === conversationId)
-    if (!conv) throw new Error('该消息不支持撤回')
-    const raw = rawMessages.value[messageId]
-    let seq = raw?.seq || 0
-    // 刚发出的消息，SDK send 返回结果可能还没带服务端 seq（要等实时同步回写）；
-    // 此时先从本会话最新一页历史里按 clientMsgID 捞带 seq 的原始消息再撤，
-    // 避免撤回入口误判“该消息不支持撤回”，导致接口都没发出去。
+    const conv = await conversationOf(conversationId)
+    if (!conv) throw new Error('会话信息丢失，请返回聊天列表后重试')
+    // H5 WASM 发送成功通常已带 seq；App 原生回调经常 seq=0，且历史接口偶发空结果，
+    // 不能在这里直接判「不支持撤回」，否则接口根本发不出去。
+    const resolved = await resolveMessageSeq(conversationId, messageId, rawMessages.value[messageId])
+    const seq = seqOf(resolved.message) || resolved.seq
+    if (resolved.message) rememberRaw(resolved.message)
     if (!seq) {
-      const { messageList } = await getHistoryMessages(conversationId, 50).catch(() => ({
-        messageList: [] as MessageItem[],
-        isEnd: true,
-      }))
-      const found = messageList.find((m) => m.clientMsgID === messageId)
-      if (found?.seq) {
-        seq = found.seq
-        rememberRaw(found)
-      } else {
-        console.warn('[recall] 本地与最新历史都没拿到 seq，clientMsgID=', messageId)
-      }
+      console.warn('[recall] 本地与最新历史都没拿到 seq，clientMsgID=', messageId)
+      throw new Error('该消息暂不可撤回，请稍后重试')
     }
-    if (!seq) throw new Error('该消息暂不可撤回，请稍后重试')
     const peerType = conv.type === 'group' ? ('group' as const) : ('c2c' as const)
     let peerId = opts?.peerId || ''
     if (!peerId) {

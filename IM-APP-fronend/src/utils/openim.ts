@@ -1172,19 +1172,131 @@ function groupIdFromConversationId(conversationId: string): string {
   return conversationId.startsWith('sg_') ? conversationId.slice(3) : ''
 }
 
+function pickString(obj: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = obj[key]
+    if (typeof value === 'string' && value) return value
+  }
+  return ''
+}
+
+/** 取出 OpenIM 消息序号。App 原生插件可能用 Seq，或把数字编成字符串，且刚发送成功时经常是 0。 */
+export function seqOf(item: unknown): number {
+  if (!item || typeof item !== 'object') return 0
+  const obj = item as Record<string, unknown>
+  return toPositiveSeq(obj.seq) || toPositiveSeq(obj.Seq)
+}
+
+function toPositiveSeq(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0
+}
+
+function unwrapRawMessage(raw: unknown, depth = 0): Record<string, unknown> | null {
+  if (raw == null || depth > 3) return null
+  if (typeof raw === 'string') {
+    if (!raw) return null
+    try {
+      return unwrapRawMessage(JSON.parse(raw) as unknown, depth + 1)
+    } catch {
+      return null
+    }
+  }
+  if (typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  if (!pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId']) && obj.data != null) {
+    return unwrapRawMessage(obj.data, depth + 1)
+  }
+  return obj
+}
+
 function isMessageItem(value: unknown): value is MessageItem {
   return !!value && typeof value === 'object' && typeof (value as MessageItem).clientMsgID === 'string'
 }
 
 function coerceMessage(raw: unknown): MessageItem | null {
-  if (isMessageItem(raw)) return raw
-  if (typeof raw !== 'string' || !raw) return null
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return isMessageItem(parsed) ? parsed : null
-  } catch {
-    return null
+  const obj = unwrapRawMessage(raw)
+  if (!obj) return null
+  const clientMsgID = pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
+  if (!clientMsgID) return null
+  const contentType = Number(obj.contentType ?? obj.ContentType ?? 0)
+  return {
+    ...(obj as unknown as MessageItem),
+    clientMsgID,
+    seq: seqOf(obj),
+    contentType: Number.isFinite(contentType) ? contentType : 0,
   }
+}
+
+function parseFindMessageResult(res: unknown, clientMsgID: string): MessageItem | null {
+  const obj = unwrapRawMessage(res) || (res && typeof res === 'object' ? (res as Record<string, unknown>) : null)
+  if (!obj) return null
+  const items = obj.findResultItems ?? obj.FindResultItems
+  const groups = Array.isArray(items) ? items : []
+  for (const group of groups) {
+    if (!group || typeof group !== 'object') continue
+    const rec = group as Record<string, unknown>
+    const rawList = rec.messageList ?? rec.MessageList
+    const list = Array.isArray(rawList) ? rawList : []
+    for (const msg of list) {
+      const parsed = coerceMessage(msg)
+      if (parsed?.clientMsgID === clientMsgID) return parsed
+    }
+  }
+  const direct = coerceMessage(obj)
+  return direct?.clientMsgID === clientMsgID ? direct : null
+}
+
+/** 按 clientMsgID 查本地库。App 刚发出时历史接口可能还是空的，这条比翻历史更稳。 */
+export async function findLocalMessage(
+  conversationID: string,
+  clientMsgID: string,
+): Promise<MessageItem | null> {
+  if (!conversationID || !clientMsgID) return null
+  const tryCall = (params: unknown) => imCall<unknown>('findMessageList' as IMMethods, params)
+  try {
+    return parseFindMessageResult(await tryCall([{ conversationID, clientMsgIDList: [clientMsgID] }]), clientMsgID)
+  } catch {
+    try {
+      return parseFindMessageResult(await tryCall({ conversationID, clientMsgIDList: [clientMsgID] }), clientMsgID)
+    } catch {
+      return null
+    }
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * 撤回需要服务端 seq。H5 WASM 发送成功时通常已带上；
+ * App 原生回调经常先成功、seq 仍为 0，要等本地库写完再查。
+ */
+export async function resolveMessageSeq(
+  conversationID: string,
+  clientMsgID: string,
+  cached?: MessageItem,
+): Promise<{ seq: number; message?: MessageItem }> {
+  const take = (item: MessageItem | null | undefined) => {
+    const seq = seqOf(item)
+    return seq > 0 ? { seq, message: item || undefined } : null
+  }
+  const immediate = take(cached)
+  if (immediate) return immediate
+
+  const delays = isAppPlatform ? [0, 400, 1000] : [0]
+  for (const delay of delays) {
+    if (delay) await sleep(delay)
+    const found = take(await findLocalMessage(conversationID, clientMsgID))
+    if (found) return found
+    const { messageList } = await getHistoryMessages(conversationID, 50).catch(() => ({
+      messageList: [] as MessageItem[],
+    }))
+    const hist = take(messageList.find((m) => m.clientMsgID === clientMsgID))
+    if (hist) return hist
+  }
+  return { seq: 0 }
 }
 
 function normalizeHistoryResult(res: unknown): { messageList: MessageItem[]; isEnd: boolean } {
