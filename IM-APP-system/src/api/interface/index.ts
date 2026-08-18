@@ -1,15 +1,14 @@
-// 请求响应参数（不包含data）
 export interface Result {
-  code: string;
-  msg: string;
+  code: number;
+  message?: string;
+  msg?: string;
+  requestId?: string;
 }
 
-// 请求响应参数（包含data）
 export interface ResultData<T = any> extends Result {
   data: T;
 }
 
-// 分页响应参数
 export interface ResPage<T> {
   list: T[];
   pageNum: number;
@@ -17,20 +16,89 @@ export interface ResPage<T> {
   total: number;
 }
 
-// 分页请求参数
+export interface AdminPage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface ReqPage {
   pageNum: number;
   pageSize: number;
 }
 
-// 文件上传模块
 export namespace Upload {
   export interface ResFileUrl {
     fileUrl: string;
   }
 }
 
-// 登录模块
+export namespace Auth {
+  export interface ReqLoginForm {
+    username: string;
+    password: string;
+  }
+
+  export interface ReqMfaVerifyForm {
+    challengeToken: string;
+    code: string;
+  }
+
+  export interface ReqRefreshForm {
+    refreshToken: string;
+  }
+
+  export interface ReqLogoutForm {
+    refreshToken: string;
+  }
+
+  export interface ReqLogoutAllForm {
+    idempotencyKey?: string;
+    reason: string;
+    ticketNo?: string;
+  }
+
+  export interface AdminInfo {
+    id: string;
+    username: string;
+    nickname: string;
+    status: string;
+    roleNames: string[];
+    mfaEnabled?: boolean;
+    lastLoginAt?: string;
+    createdAt?: string;
+  }
+
+  export interface ResLogin {
+    admin?: AdminInfo;
+    mfaChallenge?: string;
+    refreshToken?: string;
+    token?: string;
+  }
+}
+
+export namespace Me {
+  export interface ResMeResult {
+    admin?: Auth.AdminInfo;
+    permissions?: string[];
+  }
+
+  export interface ResMfaStatus {
+    enabled: boolean;
+    secret?: string;
+  }
+
+  export interface ReqMfaCodeForm {
+    code: string;
+  }
+
+  export interface ReqPasswordChangeForm {
+    oldPassword: string;
+    newPassword: string;
+  }
+}
+
 export namespace Login {
   export interface ReqLoginForm {
     username: string;
@@ -44,7 +112,24 @@ export namespace Login {
   }
 }
 
-// 用户管理模块
+export namespace Moderation {
+  export interface ReqHitsParams {
+    page?: number;
+    size?: number;
+  }
+
+  export interface HitItem {
+    id: number;
+    userId: string;
+    field: string;
+    content: string;
+    matchedWord: string;
+    category: string;
+    disposition: string;
+    createdAt: string;
+  }
+}
+
 export namespace User {
   export interface ReqUserParams extends ReqPage {
     username: string;

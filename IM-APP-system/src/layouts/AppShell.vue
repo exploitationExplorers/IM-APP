@@ -6,34 +6,11 @@ import SystemTabs from "./components/SystemTabs.vue";
 
 const route = useRoute();
 const isCollapse = shallowRef(false);
-const activeMenu = computed(() => route.path);
-const meta = shallowRef<Auth.ResMeta | null>(null);
-
-const metaSummary = computed(() => {
-  const data = meta.value;
-  if (!data) return "IM-APP 管理系统";
-  const parts = ["IM-APP 管理系统"];
-  if (data.version) parts.push(`v${data.version}`);
-  if (data.commit) parts.push(data.commit.slice(0, 8));
-  return parts.join(" · ");
+const activeMenu = computed(() => {
+  const menu = route.meta.activeMenu;
+  if (typeof menu === "string" && menu.trim()) return menu;
+  return route.path;
 });
-
-const featureEntries = computed(() => {
-  const features = meta.value?.features;
-  if (!features || typeof features !== "object") return [];
-  return Object.entries(features).map(([key, value]) => ({
-    key,
-    value: typeof value === "boolean" ? (value ? "开启" : "关闭") : String(value ?? "-"),
-  }));
-});
-
-function formatBuildTime(value?: string): string {
-  if (!value) return "-";
-  return value
-    .replace("T", " ")
-    .replace(/\.\d+/, "")
-    .replace(/\+08:00$/, "");
-}
 
 function toggleCollapse(): void {
   isCollapse.value = !isCollapse.value;
@@ -55,13 +32,16 @@ function toggleCollapse(): void {
                 '/system',
                 '/forward-group-send',
                 '/sms-operation-config',
+                '/country-sms',
                 '/runtime-observe',
+                '/app-config',
+                '/audit-log',
               ]"
               router
             >
               <el-menu-item index="/home">
                 <el-icon><House /></el-icon>
-                <template #title>首页</template>
+                <template #title>工作台</template>
               </el-menu-item>
               <el-menu-item index="/app/users">
                 <el-icon><UserFilled /></el-icon>
@@ -71,6 +51,10 @@ function toggleCollapse(): void {
                 <el-icon><ChatSquare /></el-icon>
                 <template #title>群组管理</template>
               </el-menu-item>
+              <el-menu-item index="/auth-mine">
+                <el-icon><User /></el-icon>
+                <template #title>认证与我的</template>
+              </el-menu-item>
               <el-sub-menu index="/forward-group-send">
                 <template #title>
                   <el-icon><Promotion /></el-icon>
@@ -79,6 +63,32 @@ function toggleCollapse(): void {
                 <el-menu-item index="/forward-group-send">
                   <el-icon><List /></el-icon>
                   <template #title>任务列表</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-menu-item index="/forward-risk">
+                <el-icon><Warning /></el-icon>
+                <template #title>转发风控</template>
+              </el-menu-item>
+              <el-sub-menu index="/app-config">
+                <template #title>
+                  <el-icon><Iphone /></el-icon>
+                  <span>APP配置</span>
+                </template>
+                <el-menu-item index="/app-config/app-versions">
+                  <el-icon><Document /></el-icon>
+                  <template #title>APP 版本</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/legal-documents">
+                  <el-icon><Tickets /></el-icon>
+                  <template #title>协议文档</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/report-reasons">
+                  <el-icon><Warning /></el-icon>
+                  <template #title>举报原因</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/system-limits">
+                  <el-icon><Setting /></el-icon>
+                  <template #title>系统限制</template>
                 </el-menu-item>
               </el-sub-menu>
               <el-sub-menu index="/sms-operation-config">
@@ -91,6 +101,24 @@ function toggleCollapse(): void {
                   <template #title>配置管理</template>
                 </el-menu-item>
               </el-sub-menu>
+              <el-sub-menu index="/country-sms">
+                <template #title>
+                  <el-icon><Message /></el-icon>
+                  <span>国家短信</span>
+                </template>
+                <el-menu-item index="/country-sms/countries">
+                  <el-icon><Location /></el-icon>
+                  <template #title>国家/地区</template>
+                </el-menu-item>
+                <el-menu-item index="/country-sms/sms-logs">
+                  <el-icon><Document /></el-icon>
+                  <template #title>短信发送日志</template>
+                </el-menu-item>
+                <el-menu-item index="/country-sms/sms-statistics">
+                  <el-icon><TrendCharts /></el-icon>
+                  <template #title>送达统计</template>
+                </el-menu-item>
+              </el-sub-menu>
               <el-sub-menu index="/runtime-observe">
                 <template #title>
                   <el-icon><Monitor /></el-icon>
@@ -99,6 +127,20 @@ function toggleCollapse(): void {
                 <el-menu-item index="/runtime-observe/exports">
                   <el-icon><Document /></el-icon>
                   <template #title>导出任务</template>
+                </el-menu-item>
+                <el-menu-item index="/runtime-observe/errors">
+                  <el-icon><Warning /></el-icon>
+                  <template #title>运行错误</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="/other">
+                <template #title>
+                  <el-icon><MoreFilled /></el-icon>
+                  <span>其他</span>
+                </template>
+                <el-menu-item index="/other/features">
+                  <el-icon><SwitchButton /></el-icon>
+                  <template #title>功能开关</template>
                 </el-menu-item>
               </el-sub-menu>
               <el-sub-menu index="/system">

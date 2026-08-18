@@ -12,7 +12,7 @@ interface TabItem {
 
 const route = useRoute();
 const router = useRouter();
-const tabs = shallowRef<TabItem[]>([{ path: "/home", title: "首页", icon: "House", close: false }]);
+const tabs = shallowRef<TabItem[]>([{ path: "/home", title: "工作台", icon: "House", close: false }]);
 const activeTab = computed(() => route.fullPath);
 
 watch(

@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowRight } from "@element-plus/icons-vue";
 import { useRoute, useRouter } from "vue-router";
 import logo from "../../assets/images/logo.svg";
+import { logoutApi } from "@/api/modules/auth";
 import { useAuthStore } from "../../stores/auth";
 
 const props = defineProps<{ collapsed: boolean }>();
@@ -49,6 +50,13 @@ async function handleLogout(): Promise<void> {
       confirmButtonText: "确定",
       cancelButtonText: "取消",
     });
+    const refreshToken = auth.refreshToken;
+    if (refreshToken) {
+      try {
+        await logoutApi({ refreshToken });
+      } catch {
+      }
+    }
     auth.logout();
     ElMessage.success("退出登录成功");
     await router.push("/login");

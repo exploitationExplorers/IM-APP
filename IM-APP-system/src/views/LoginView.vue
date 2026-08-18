@@ -3,6 +3,8 @@ import { reactive, shallowRef } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import { CircleClose, Lock, User, UserFilled } from "@element-plus/icons-vue";
 import { useRouter } from "vue-router";
+import { loginApi, verifyMfaApi } from "@/api/modules/auth";
+import { getMeApi } from "@/api/modules/me";
 import loginBackground from "../assets/images/login_bg.svg";
 import loginIllustration from "../assets/images/login_left.png";
 import logo from "../assets/images/logo.svg";
@@ -13,23 +15,46 @@ interface LoginForm {
   password: string;
 }
 
+interface MfaForm {
+  code: string;
+}
+
 const router = useRouter();
 const auth = useAuthStore();
 const formRef = shallowRef<FormInstance>();
+const mfaFormRef = shallowRef<FormInstance>();
 const loading = shallowRef(false);
+const mfaVisible = shallowRef(false);
+const mfaLoading = shallowRef(false);
+const mfaChallengeToken = shallowRef("");
 
 const form = reactive<LoginForm>({
   username: "admin",
-  password: "123456",
+  password: "admin123",
 });
+
+const mfaForm = reactive<MfaForm>({ code: "" });
 
 const rules: FormRules<LoginForm> = {
   username: [{ required: true, message: "请输入管理员账号", trigger: "blur" }],
   password: [{ required: true, message: "请输入登录密码", trigger: "blur" }],
 };
 
+const mfaRules: FormRules<MfaForm> = {
+  code: [
+    { required: true, message: "请输入 6 位验证码", trigger: "blur" },
+    { pattern: /^\d{6}$/, message: "验证码格式不正确", trigger: "blur" },
+  ],
+};
+
 function resetForm(): void {
   formRef.value?.resetFields();
+}
+
+function resetMfa(): void {
+  mfaForm.code = "";
+  mfaChallengeToken.value = "";
+  mfaVisible.value = false;
 }
 
 async function submit(): Promise<void> {
@@ -40,12 +65,64 @@ async function submit(): Promise<void> {
   if (!isValid || loading.value) return;
 
   loading.value = true;
-  window.setTimeout(async () => {
-    auth.login(form.username);
-    loading.value = false;
+  try {
+    const res = await loginApi({
+      username: form.username.trim(),
+      password: form.password,
+    });
+    if (res.data?.mfaChallenge && !res.data?.token) {
+      mfaChallengeToken.value = res.data.mfaChallenge;
+      mfaForm.code = "";
+      mfaVisible.value = true;
+      ElMessage.warning("需要进行二次验证");
+      return;
+    }
+    auth.setSession(res.data);
+    try {
+      const me = await getMeApi();
+      auth.setMe(me.data);
+    } catch {
+    }
     ElMessage.success("欢迎回来");
     await router.push("/home");
-  }, 420);
+  } catch {
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function submitMfa(): Promise<void> {
+  const isValid = await mfaFormRef.value
+    ?.validate()
+    .then(() => true)
+    .catch(() => false);
+  if (!isValid || mfaLoading.value) return;
+
+  if (!mfaChallengeToken.value) {
+    ElMessage.error("挑战凭证已失效，请重新登录");
+    resetMfa();
+    return;
+  }
+
+  mfaLoading.value = true;
+  try {
+    const res = await verifyMfaApi({
+      challengeToken: mfaChallengeToken.value,
+      code: mfaForm.code,
+    });
+    auth.setSession(res.data);
+    try {
+      const me = await getMeApi();
+      auth.setMe(me.data);
+    } catch {
+    }
+    ElMessage.success("验证通过");
+    resetMfa();
+    await router.push("/home");
+  } catch {
+  } finally {
+    mfaLoading.value = false;
+  }
 }
 </script>
 
@@ -73,7 +150,7 @@ async function submit(): Promise<void> {
               v-model="form.password"
               type="password"
               show-password
-              placeholder="登录密码：123456"
+              placeholder="登录密码：admin123"
               :prefix-icon="Lock"
               autocomplete="current-password"
           /></el-form-item>
@@ -90,9 +167,21 @@ async function submit(): Promise<void> {
             >登录</el-button
           >
         </div>
-        <p class="login-hint">演示账号：admin · 密码：123456</p>
+        <p class="login-hint">演示账号：admin · 密码：admin123</p>
       </section>
     </section>
+
+    <el-dialog v-model="mfaVisible" title="二次验证" width="420px" :close-on-click-modal="false" @closed="resetMfa">
+      <el-form ref="mfaFormRef" :model="mfaForm" :rules="mfaRules" size="large" @submit.prevent="submitMfa">
+        <el-form-item prop="code">
+          <el-input v-model="mfaForm.code" placeholder="请输入 6 位 TOTP 验证码" maxlength="6" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetMfa">取消</el-button>
+        <el-button type="primary" :loading="mfaLoading" @click="submitMfa">验证</el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 

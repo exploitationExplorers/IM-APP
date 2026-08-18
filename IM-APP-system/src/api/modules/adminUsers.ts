@@ -80,6 +80,12 @@ export namespace AdminUsers {
     until?: string;
   }
 
+  export interface ReqMessageRestrictionBody {
+    banned: boolean;
+    reason: string;
+    until?: string;
+  }
+
   export interface ReqRevokeSessionsBody {
     reason: string;
   }
@@ -136,6 +142,10 @@ export const putAdminUserBanApi = (id: string, body: AdminUsers.ReqBanUserBody) 
 
 export const putAdminUserLoginRestrictionApi = (id: string, body: AdminUsers.ReqLoginRestrictionBody) => {
   return http.put<null>(`${USERS_BASE}/${id}/login-restriction`, body, { loading: false });
+};
+
+export const putAdminUserMessageRestrictionApi = (id: string, body: AdminUsers.ReqMessageRestrictionBody) => {
+  return http.put<null>(`${USERS_BASE}/${id}/message-restriction`, body, { loading: false });
 };
 
 export const postAdminUserRevokeSessionsApi = (id: string, body: AdminUsers.ReqRevokeSessionsBody) => {

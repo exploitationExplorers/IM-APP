@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, reactive, shallowRef } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { Search, Delete } from "@element-plus/icons-vue";
+import { getGroupMembersApi, postGroupRecallMessageApi, putGroupMemberAddFriendApi } from "@/api/modules/adminGroups";
+import type { AdminGroups } from "@/api/modules/adminGroups";
 
 type GroupStatus = "normal" | "muted" | "banned" | "dissolved";
 
 interface GroupMember {
-  id: string;
+  userId: string;
   nickname: string;
-  role: "owner" | "admin" | "member";
-  avatar: string;
+  role: "member" | "owner";
+  joinedAt?: string;
+  mutedUntil?: string | null;
 }
 
 interface RecallRecord {
@@ -33,7 +36,7 @@ interface GroupInfo {
   adminCount: number;
   status: GroupStatus;
   muted: boolean;
-  banAddFriend: boolean;
+  memberAddFriendEnabled: boolean;
   createdAt: string;
   notice: string;
   recallCount: number;
@@ -65,6 +68,8 @@ const detailVisible = shallowRef(false);
 const selectedGroup = shallowRef<GroupInfo | null>(null);
 const groupMembers = shallowRef<GroupMember[]>([]);
 const recallRecords = shallowRef<RecallRecord[]>([]);
+const recallFormRef = shallowRef<FormInstance>();
+const recallLoading = shallowRef(false);
 
 const groups = shallowRef<GroupInfo[]>([
   {
@@ -78,7 +83,7 @@ const groups = shallowRef<GroupInfo[]>([
     adminCount: 3,
     status: "normal",
     muted: false,
-    banAddFriend: false,
+    memberAddFriendEnabled: true,
     createdAt: "2026-03-10",
     notice: "每周五下午3点开周会",
     recallCount: 0,
@@ -94,7 +99,7 @@ const groups = shallowRef<GroupInfo[]>([
     adminCount: 5,
     status: "normal",
     muted: false,
-    banAddFriend: true,
+    memberAddFriendEnabled: false,
     createdAt: "2026-03-20",
     notice: "禁止在群内发送广告",
     recallCount: 2,
@@ -110,7 +115,7 @@ const groups = shallowRef<GroupInfo[]>([
     adminCount: 2,
     status: "muted",
     muted: true,
-    banAddFriend: false,
+    memberAddFriendEnabled: true,
     createdAt: "2026-04-05",
     notice: "全员禁言中，仅管理员可发言",
     recallCount: 1,
@@ -126,7 +131,7 @@ const groups = shallowRef<GroupInfo[]>([
     adminCount: 8,
     status: "banned",
     muted: true,
-    banAddFriend: true,
+    memberAddFriendEnabled: false,
     createdAt: "2026-04-18",
     notice: "该群因违规已被封禁",
     recallCount: 15,
@@ -142,7 +147,7 @@ const groups = shallowRef<GroupInfo[]>([
     adminCount: 1,
     status: "dissolved",
     muted: false,
-    banAddFriend: false,
+    memberAddFriendEnabled: true,
     createdAt: "2026-05-01",
     notice: "",
     recallCount: 0,
@@ -158,26 +163,12 @@ const groups = shallowRef<GroupInfo[]>([
     adminCount: 3,
     status: "normal",
     muted: false,
-    banAddFriend: true,
+    memberAddFriendEnabled: false,
     createdAt: "2026-06-15",
     notice: "工作时间：9:00-18:00",
     recallCount: 0,
   },
 ]);
-
-const allMembers: Record<number, GroupMember[]> = {
-  1: [
-    { id: "U100001", nickname: "陈安", role: "owner", avatar: "陈" },
-    { id: "U100002", nickname: "林诺", role: "admin", avatar: "林" },
-    { id: "U100003", nickname: "周米娅", role: "admin", avatar: "周" },
-    { id: "U100005", nickname: "黄怡", role: "member", avatar: "黄" },
-  ],
-  2: [
-    { id: "U100002", nickname: "林诺", role: "owner", avatar: "林" },
-    { id: "U100001", nickname: "陈安", role: "admin", avatar: "陈" },
-    { id: "U100005", nickname: "黄怡", role: "member", avatar: "黄" },
-  ],
-};
 
 const allRecalls: Record<number, RecallRecord[]> = {
   2: [
@@ -219,11 +210,38 @@ function resetFilters(): void {
   currentPage.value = 1;
 }
 
+const recallForm = reactive({ messageId: "", reason: "", ticketNo: "" });
+
+const recallRules: FormRules<typeof recallForm> = {
+  messageId: [{ required: true, message: "请输入消息 ID", trigger: "blur" }],
+  reason: [{ required: true, message: "请填写撤回原因", trigger: "blur" }],
+};
+
+async function fetchGroupMembers(groupId: string): Promise<void> {
+  try {
+    const res = await getGroupMembersApi(groupId);
+    const list: AdminGroups.GroupMember[] = Array.isArray(res.data) ? res.data : [];
+    groupMembers.value = list.map((m) => ({
+      userId: m.userId,
+      nickname: m.nickname || m.userId,
+      role: m.role === "owner" ? "owner" : "member",
+      joinedAt: m.joinedAt,
+      mutedUntil: m.mutedUntil ?? null,
+    }));
+  } catch {
+    groupMembers.value = [];
+  }
+}
+
 function openGroupDetail(group: GroupInfo): void {
   selectedGroup.value = group;
-  groupMembers.value = allMembers[group.id] ?? [];
+  groupMembers.value = [];
   recallRecords.value = allRecalls[group.id] ?? [];
+  recallForm.messageId = "";
+  recallForm.reason = "";
+  recallForm.ticketNo = "";
   detailVisible.value = true;
+  fetchGroupMembers(group.groupId);
 }
 
 async function toggleMute(group: GroupInfo): Promise<void> {
@@ -248,25 +266,61 @@ async function toggleMute(group: GroupInfo): Promise<void> {
   }
 }
 
-async function toggleBanAddFriend(group: GroupInfo): Promise<void> {
+async function toggleMemberAddFriend(group: GroupInfo, next?: boolean): Promise<void> {
   if (group.status === "dissolved") return;
-  const next = !group.banAddFriend;
-  const action = next ? "禁止群内互加好友" : "允许群内互加好友";
+  const enabled = typeof next === "boolean" ? next : !group.memberAddFriendEnabled;
+  const action = enabled ? "允许群内互加好友" : "禁止群内互加好友";
   try {
-    await ElMessageBox.confirm(`确认对群「${group.name}」${action}？`, action, {
+    const { value: reason } = await ElMessageBox.prompt("请输入操作原因", action, {
       type: "warning",
       confirmButtonText: "确定",
       cancelButtonText: "取消",
+      inputType: "textarea",
+      inputPlaceholder: "必填",
+      inputValidator: (value) => (String(value).trim() ? true : "请填写操作原因"),
     });
-    groups.value = groups.value.map((g) =>
-      g.id === group.id ? { ...g, banAddFriend: next } : g,
-    );
-    ElMessage.success(`${action}操作成功`);
+    await putGroupMemberAddFriendApi(group.groupId, { enabled, reason: String(reason).trim() });
+    groups.value = groups.value.map((g) => (g.id === group.id ? { ...g, memberAddFriendEnabled: enabled } : g));
+    ElMessage.success("操作成功");
     if (selectedGroup.value?.id === group.id) {
-      selectedGroup.value = { ...selectedGroup.value, banAddFriend: next };
+      selectedGroup.value = { ...selectedGroup.value, memberAddFriendEnabled: enabled };
     }
   } catch {
     // dismissed
+  }
+}
+
+async function submitRecall(): Promise<void> {
+  const ok = await recallFormRef.value
+    ?.validate()
+    .then(() => true)
+    .catch(() => false);
+  if (!ok || recallLoading.value || !selectedGroup.value) return;
+
+  const messageId = recallForm.messageId.trim();
+  const reason = recallForm.reason.trim();
+  const ticketNo = recallForm.ticketNo.trim();
+
+  const idempotencyKey =
+    typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function"
+      ? (crypto as any).randomUUID()
+      : undefined;
+
+  recallLoading.value = true;
+  try {
+    await postGroupRecallMessageApi(selectedGroup.value.groupId, messageId, {
+      idempotencyKey,
+      reason,
+      ticketNo: ticketNo || undefined,
+    });
+    ElMessage.success("已提交撤回请求");
+    recallForm.messageId = "";
+    recallForm.reason = "";
+    recallForm.ticketNo = "";
+    recallFormRef.value?.clearValidate();
+  } catch {
+  } finally {
+    recallLoading.value = false;
   }
 }
 
@@ -362,10 +416,10 @@ const roleTagTypes: Record<string, string> = { owner: "danger", admin: "warning"
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="禁止互加" min-width="90" align="center">
+        <el-table-column label="群内互加好友" min-width="110" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.banAddFriend ? 'danger' : 'success'" size="small" effect="plain">
-              {{ row.banAddFriend ? "是" : "否" }}
+            <el-tag :type="row.memberAddFriendEnabled ? 'success' : 'danger'" size="small" effect="plain">
+              {{ row.memberAddFriendEnabled ? "允许" : "禁止" }}
             </el-tag>
           </template>
         </el-table-column>
@@ -437,9 +491,9 @@ const roleTagTypes: Record<string, string> = { owner: "danger", admin: "warning"
               {{ selectedGroup.muted ? "是" : "否" }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="禁止互加好友">
-            <el-tag :type="selectedGroup.banAddFriend ? 'danger' : 'success'" size="small">
-              {{ selectedGroup.banAddFriend ? "是" : "否" }}
+          <el-descriptions-item label="群内互加好友">
+            <el-tag :type="selectedGroup.memberAddFriendEnabled ? 'success' : 'danger'" size="small">
+              {{ selectedGroup.memberAddFriendEnabled ? "允许" : "禁止" }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ selectedGroup.createdAt }}</el-descriptions-item>
@@ -461,11 +515,11 @@ const roleTagTypes: Record<string, string> = { owner: "danger", admin: "warning"
             />
           </div>
           <div class="switch-row">
-            <span>禁止群内互加好友</span>
+            <span>群内互加好友</span>
             <el-switch
-              :model-value="selectedGroup.banAddFriend"
+              :model-value="selectedGroup.memberAddFriendEnabled"
               :disabled="selectedGroup.status === 'dissolved'"
-              @change="() => toggleBanAddFriend(selectedGroup!)"
+              @change="(val: boolean) => toggleMemberAddFriend(selectedGroup!, val)"
             />
           </div>
           <el-button
@@ -483,13 +537,40 @@ const roleTagTypes: Record<string, string> = { owner: "danger", admin: "warning"
         <div class="detail-section">
           <h4>群成员（部分）</h4>
           <div v-if="groupMembers.length" class="member-list">
-            <div v-for="m in groupMembers" :key="m.id" class="member-item">
-              <span class="member-avatar">{{ m.avatar }}</span>
-              <span class="member-name">{{ m.nickname }}</span>
+            <div v-for="m in groupMembers" :key="m.userId" class="member-item">
+              <span class="member-avatar">{{ m.nickname.slice(0, 1) }}</span>
+              <div class="member-content">
+                <span class="member-name">{{ m.nickname }}</span>
+                <span class="member-sub mono-text">{{ m.userId }}</span>
+              </div>
               <el-tag :type="roleTagTypes[m.role]" size="small" effect="plain">{{ roleLabels[m.role] }}</el-tag>
             </div>
           </div>
           <el-empty v-else description="暂无成员数据" :image-size="60" />
+        </div>
+
+        <div class="detail-section">
+          <h4>管理撤回指定消息</h4>
+          <el-form
+            ref="recallFormRef"
+            :model="recallForm"
+            :rules="recallRules"
+            label-width="90px"
+            @submit.prevent="submitRecall"
+          >
+            <el-form-item label="消息ID" prop="messageId">
+              <el-input v-model="recallForm.messageId" placeholder="UUID" />
+            </el-form-item>
+            <el-form-item label="撤回原因" prop="reason">
+              <el-input v-model="recallForm.reason" type="textarea" :rows="2" placeholder="必填" />
+            </el-form-item>
+            <el-form-item label="工单号" prop="ticketNo">
+              <el-input v-model="recallForm.ticketNo" placeholder="可选" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="danger" :loading="recallLoading" @click="submitRecall">撤回消息</el-button>
+            </el-form-item>
+          </el-form>
         </div>
 
         <!-- 撤回记录 -->
@@ -712,9 +793,24 @@ const roleTagTypes: Record<string, string> = { owner: "danger", admin: "warning"
   font-weight: 600;
 }
 
-.member-name {
+.member-content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.member-name {
   font-size: 14px;
+}
+
+.member-sub {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1100px) {
