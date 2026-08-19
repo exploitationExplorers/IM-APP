@@ -114,6 +114,23 @@ export function isGroupAnnouncementNotice(contentType: number): boolean {
   return contentType === GroupNotice.Announcement
 }
 
+/**
+ * 把 OpenIM 通知类 contentType 映射成简短字符串，用于 ChatMessage.notificationKind 字段，
+ * 方便 chat-room 等页面针对特定通知触发副作用（如 Dismissed → 自动返回上一页）。
+ */
+export function notificationKindOf(contentType: number): string {
+  switch (contentType) {
+    case GroupNotice.Dismissed:
+      return 'dissolved'
+    case GroupNotice.GroupMuted:
+      return 'group-muted'
+    case GroupNotice.GroupCancelMuted:
+      return 'group-cancel-muted'
+    default:
+      return ''
+  }
+}
+
 /** 禁言/解禁通知（单成员或全员）：房间页据此即时刷新成员禁言状态与输入区 */
 export function isGroupMuteNotice(contentType: number): boolean {
   return (

@@ -134,7 +134,7 @@ func main() {
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
-	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc}
+	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc, Repo: groupSvc.Groups}
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Service: imSvc}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
@@ -166,6 +166,7 @@ func main() {
 			base + "/callbackAfterSendSingleMsgCommand",
 			base + "/callbackAfterSendGroupMsgCommand",
 			base + "/callbackBeforeAfterMsgCommand",
+			base + "/callbackAfterDismissGroupCommand",
 		}
 	}
 	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
@@ -183,6 +184,7 @@ func main() {
 	r.POST("/internal/openim/webhooks/:secret/callbackAfterSendSingleMsgCommand", openIMWebhookH.AfterMessage)
 	r.POST("/internal/openim/webhooks/:secret/callbackAfterSendGroupMsgCommand", openIMWebhookH.AfterMessage)
 	r.POST("/internal/openim/webhooks/:secret/callbackBeforeAfterMsgCommand", openIMWebhookH.AfterMessage)
+	r.POST("/internal/openim/webhooks/:secret/callbackAfterDismissGroupCommand", openIMWebhookH.AfterDismissGroup)
 	internalIM := r.Group("/internal/im")
 	internalIM.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
 	{
@@ -284,6 +286,8 @@ func main() {
 			auth.POST("/groups/reports", groupH.CreateReport)
 			auth.POST("/groups/:id/leave", groupH.Leave)
 			auth.POST("/groups/:id/dismiss", groupH.Dismiss)
+			auth.GET("/groups/:id/dissolved", groupH.DissolvedInfo)
+			auth.POST("/groups/:id/dissolved/remove", groupH.RemoveDissolvedGroup)
 			auth.POST("/group-invitations/:token/accept", groupH.AcceptInvitation)
 			auth.GET("/friend-requests", contactH.ListFriendRequests)
 			auth.POST("/friend-requests", contactH.CreateFriendRequest)

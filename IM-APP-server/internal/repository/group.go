@@ -140,6 +140,22 @@ func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs 
 	return r.GetByID(ctx, groupID, ownerID)
 }
 
+// GetDissolvedInfo 已解散群的轻量资料（不校验请求者成员身份，仅用于通讯录只读展示）
+func (r *GroupRepo) GetDissolvedInfo(ctx context.Context, groupID string) (models.DissolvedGroupInfo, error) {
+	var g models.DissolvedGroupInfo
+	err := r.DB.QueryRow(ctx, `
+		SELECT public_id, name, COALESCE(avatar,''), status
+		FROM groups WHERE id=$1::uuid AND status='dismissed'`, groupID).Scan(
+		&g.ID, &g.Name, &g.Avatar, &g.Status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.DissolvedGroupInfo{}, ErrGroupNotFound
+		}
+		return models.DissolvedGroupInfo{}, err
+	}
+	return g, nil
+}
+
 func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.GroupInfo, error) {
 	var g models.GroupInfo
 	var allow bool
@@ -570,6 +586,81 @@ func (r *GroupRepo) UpdateGroupMute(ctx context.Context, groupID, operatorID str
 		return err
 	}
 	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMute, map[string]any{"muted": muted}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// UpdateGroupMuteByAdmin 管理端全员禁言/解除：使用 UUID 直接定位，跳过群成员角色校验，同步 OpenIM
+func (r *GroupRepo) UpdateGroupMuteByAdmin(ctx context.Context, groupID, adminID string, muted bool) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+		UPDATE groups SET all_muted=$2, updated_at=NOW()
+		WHERE id=$1::uuid AND status='active'`, groupID, muted)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrInvalidGroupOperation
+	}
+	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMute, map[string]any{"muted": muted}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// UpdateSettingsByAdmin 管理端群设置（目前仅 allow_member_add_friend）：跳过群成员角色校验，同步 OpenIM
+func (r *GroupRepo) UpdateSettingsByAdmin(ctx context.Context, groupID, adminID string, allow *bool) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+		UPDATE groups SET allow_member_add_friend=COALESCE($2, allow_member_add_friend), updated_at=NOW()
+		WHERE id=$1::uuid AND status='active'`, groupID, allow)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrInvalidGroupOperation
+	}
+	if allow != nil {
+		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, IMGroupUpdatePayload{
+			AllowMemberAddFriend: allow,
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// RemoveDissolvedMembership 成员从通讯录隐藏已解散群：仅把 group_members 软标记为已退群，
+// 保留记录使管理后台成员数不变（admin 用 COUNT(*) 统计，见 IM-APP-admin/internal/repository/group.go）。
+func (r *GroupRepo) RemoveDissolvedMembership(ctx context.Context, groupID, uid string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var status string
+	err = tx.QueryRow(ctx, `SELECT status FROM groups WHERE id=$1::uuid`, groupID).Scan(&status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrGroupNotFound
+		}
+		return err
+	}
+	if status != "dismissed" {
+		return ErrInvalidGroupOperation
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE group_members SET status='left', left_at=NOW()
+		WHERE group_id=$1::uuid AND user_id=$2::uuid`, groupID, uid); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

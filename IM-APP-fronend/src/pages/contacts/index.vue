@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
@@ -46,6 +47,11 @@ function refreshDirectory() {
   return Promise.all([refreshContacts(), contactStore.loadGroups()])
 }
 
+/** 切回通讯录页面时刷新群列表（已解散群由服务端过滤后自动消失） */
+onShow(() => {
+  void refreshDirectory()
+})
+
 const { refreshing, onRefresherRefresh } = usePullRefresh(refreshDirectory)
 
 watch(keyword, () => {
@@ -83,6 +89,10 @@ function openContact(c: Contact) {
 }
 
 function openGroupChat(g: GroupPreview) {
+  if (g.status === 'dismissed') {
+    uni.navigateTo({ url: `/pages/group/detail?id=${encodeURIComponent(g.id)}&dissolved=1` })
+    return
+  }
   contactStore.openChatWithGroup(g.id, g.name, g.avatar || '/static/icons/menu-group.svg')
 }
 
@@ -168,6 +178,7 @@ function closeMenus() {
         >
           <image class="group-avatar" :src="g.avatar || '/static/icons/menu-group.svg'" mode="aspectFill" />
           <text class="group-name">{{ g.name }}</text>
+          <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
         </view>
       </view>
       <view class="section-divider" />
@@ -380,6 +391,16 @@ function closeMenus() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dissolved-tag {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  color: #999;
+  border: 1rpx solid #c9cdd4;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 12rpx;
 }
 
 .section-divider {

@@ -8,6 +8,7 @@ import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { clearConversationHistory } from '@/api/im'
+import { fetchDissolvedGroup, removeDissolvedGroup } from '@/api/group'
 import {
   setConversationPin,
   setConversationRecvOpt,
@@ -26,6 +27,8 @@ const userStore = useUserStore()
 const groupId = ref('')
 const showJoinMode = ref(false)
 const leaving = ref(false)
+const dissolved = ref(false)
+const dissolvedInfo = ref<{ id: string; name: string; avatar: string; status: string } | null>(null)
 
 const groupDetail = computed(() => groupStore.currentGroup)
 const memberList = computed(() => groupStore.members)
@@ -86,11 +89,21 @@ function memberPreviewAvatar(avatar: string | undefined) {
 
 onLoad((query) => {
   groupId.value = String(query?.id || '')
+  dissolved.value = String(query?.dissolved || '') === '1'
 })
 
 onShow(async () => {
   if (!groupId.value) {
     uni.showToast({ title: '缺少群聊 ID', icon: 'none' })
+    return
+  }
+  if (dissolved.value) {
+    try {
+      dissolvedInfo.value = await fetchDissolvedGroup(groupId.value)
+    } catch (e) {
+      uni.showToast({ title: (e as Error)?.message || '群不存在或不是已解散状态', icon: 'none' })
+      safeBack('/pages/contacts/index')
+    }
     return
   }
   try {
@@ -320,11 +333,41 @@ async function onLeave() {
     leaving.value = false
   }
 }
+
+async function onRemoveDissolved() {
+  const res = await uni.showModal({
+    title: '删除该群',
+    content: '确定删除该群聊吗？',
+    confirmText: '删除',
+    cancelText: '取消',
+  })
+  if (!res.confirm) return
+  uni.showLoading({ title: '删除中…', mask: true })
+  try {
+    await removeDissolvedGroup(groupId.value)
+    uni.reLaunch({ url: '/pages/contacts/index' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '删除失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
+}
 </script>
 
 <template>
   <view class="page-wrap">
-    <scroll-view scroll-y class="page" :show-scrollbar="false">
+    <view v-if="dissolved" class="dissolved-page">
+      <ImNavBar title="群组详情" @back="goBack" />
+      <view class="dissolved-card">
+        <image class="dissolved-avatar" :src="dissolvedInfo?.avatar || APP_CONFIG.defaultGroupAvatarUrl" mode="aspectFit" />
+        <text class="dissolved-name">{{ dissolvedInfo?.name || '群聊' }}</text>
+        <text class="dissolved-tip">该群已解散</text>
+      </view>
+      <view class="dissolved-delete-row" @click="onRemoveDissolved">
+        <text class="dissolved-delete-label">删除该群</text>
+      </view>
+    </view>
+    <scroll-view v-else scroll-y class="page" :show-scrollbar="false">
     <ImNavBar title="群组详情" @back="goBack" />
 
     <view class="card">
@@ -487,6 +530,56 @@ async function onLeave() {
   height: 100dvh;
   background: #f3f4f7;
   overflow: hidden;
+}
+
+.dissolved-page {
+  height: 100vh;
+  height: 100dvh;
+  background: #f3f4f7;
+  box-sizing: border-box;
+}
+
+.dissolved-card {
+  margin-top: 16rpx;
+  background: #fff;
+  padding: 64rpx 40rpx 48rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.dissolved-avatar {
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: 24rpx;
+  background: #eee;
+}
+
+.dissolved-name {
+  font-size: 36rpx;
+  font-weight: 600;
+  color: #212121;
+}
+
+.dissolved-tip {
+  font-size: 26rpx;
+  color: #999;
+}
+
+.dissolved-delete-row {
+  margin-top: 48rpx;
+  background: #fff;
+  min-height: 100rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dissolved-delete-label {
+  font-size: 30rpx;
+  color: #ff4d4f;
+  font-weight: 500;
 }
 
 .page {

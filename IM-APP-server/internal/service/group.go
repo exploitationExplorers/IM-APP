@@ -57,6 +57,22 @@ func (s *GroupService) GetDetail(ctx context.Context, groupID, uid string) (mode
 	return s.Groups.GetByID(ctx, internalID, uid)
 }
 
+func (s *GroupService) GetDissolvedInfo(ctx context.Context, groupID string) (models.DissolvedGroupInfo, error) {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return models.DissolvedGroupInfo{}, err
+	}
+	return s.Groups.GetDissolvedInfo(ctx, internalID)
+}
+
+func (s *GroupService) RemoveDissolvedGroup(ctx context.Context, groupID, uid string) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.RemoveDissolvedMembership(ctx, internalID, uid)
+}
+
 func (s *GroupService) ListMembers(ctx context.Context, groupID, uid string) ([]models.GroupMember, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {

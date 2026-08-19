@@ -66,6 +66,42 @@ func (h *GroupHandler) detail(c *gin.Context, groupID string) {
 	response.OK(c, g)
 }
 
+// DissolvedInfo 已解散群轻量资料（通讯录只读展示用）
+func (h *GroupHandler) DissolvedInfo(c *gin.Context) {
+	g, err := h.Svc.GetDissolvedInfo(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		if errors.Is(err, repository.ErrGroupNotFound) {
+			response.Fail(c, http.StatusNotFound, "群不存在")
+			return
+		}
+		if errors.Is(err, repository.ErrInvalidGroupOperation) {
+			response.Fail(c, http.StatusBadRequest, "群聊 ID 不正确")
+			return
+		}
+		response.Fail(c, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	response.OK(c, g)
+}
+
+// RemoveDissolvedGroup 成员删除已解散群（仅移除自己的成员记录）
+func (h *GroupHandler) RemoveDissolvedGroup(c *gin.Context) {
+	uid := middleware.UserID(c)
+	if err := h.Svc.RemoveDissolvedGroup(c.Request.Context(), c.Param("id"), uid); err != nil {
+		if errors.Is(err, repository.ErrGroupNotFound) {
+			response.Fail(c, http.StatusNotFound, "群不存在")
+			return
+		}
+		if errors.Is(err, repository.ErrInvalidGroupOperation) {
+			response.Fail(c, http.StatusBadRequest, "该群不是已解散状态")
+			return
+		}
+		response.Fail(c, http.StatusInternalServerError, "操作失败")
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
 func (h *GroupHandler) Members(c *gin.Context) {
 	uid := middleware.UserID(c)
 	groupID := c.Query("groupId")

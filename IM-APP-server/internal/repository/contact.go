@@ -77,10 +77,10 @@ func (r *ContactRepo) ListContacts(ctx context.Context, uid, keyword, sort, curs
 
 func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]models.GroupPreview, error) {
 	query := `
-		SELECT g.public_id, g.name, g.avatar, gm.role, COALESCE(g.conversation_id::text,'')
+		SELECT g.public_id, g.name, g.avatar, gm.role, COALESCE(g.conversation_id::text,''), COALESCE(g.status,'active')
 		FROM groups g
 		JOIN group_members gm ON gm.group_id = g.id
-		WHERE gm.user_id=$1 AND COALESCE(g.status,'active')='active'`
+		WHERE gm.user_id=$1 AND COALESCE(gm.status,'active')='active' AND COALESCE(g.status,'active') IN ('active','dismissed')`
 	args := []interface{}{uid}
 	if role == "owner" {
 		query += ` AND gm.role='owner'`
@@ -89,7 +89,7 @@ func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]model
 	} else if role == "admin" {
 		query += ` AND gm.role='admin'`
 	}
-	query += ` ORDER BY g.created_at DESC`
+	query += ` ORDER BY CASE g.status WHEN 'active' THEN 0 ELSE 1 END, g.created_at DESC`
 	rows, err := r.DB.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]model
 	list := make([]models.GroupPreview, 0)
 	for rows.Next() {
 		var g models.GroupPreview
-		if err := rows.Scan(&g.ID, &g.Name, &g.Avatar, &g.Role, &g.ConversationID); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.Avatar, &g.Role, &g.ConversationID, &g.Status); err != nil {
 			return nil, err
 		}
 		list = append(list, g)

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { fetchGroups } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
 import { APP_CONFIG } from '@/config'
@@ -19,12 +20,21 @@ onMounted(() => {
   void loadGroups()
 })
 
+/** 切回此页时刷新群列表，确保已解散群能立即消失 */
+onShow(() => {
+  void loadGroups()
+})
+
 watch(tab, () => {
   void loadGroups()
 })
 
 /** 与聊天列表保持一致：点群聊直接进会话，而不是先跳群资料页 */
 function openGroup(g: GroupPreview) {
+  if (g.status === 'dismissed') {
+    uni.navigateTo({ url: `/pages/group/detail?id=${encodeURIComponent(g.id)}&dissolved=1` })
+    return
+  }
   contactStore.openChatWithGroup(g.id, g.name, g.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 }
 
@@ -60,6 +70,7 @@ function goCreate() {
         mode="aspectFit"
       />
       <text class="name">{{ g.name }}</text>
+      <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
       <text class="arrow">›</text>
     </view>
 
@@ -124,6 +135,16 @@ function goCreate() {
   flex: 1;
   font-size: 30rpx;
   color: #212121;
+}
+
+.dissolved-tag {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  color: #999;
+  border: 1rpx solid #c9cdd4;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 12rpx;
 }
 
 .arrow {
