@@ -21,6 +21,8 @@ export interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   loading?: boolean;
   cancel?: boolean;
   _retry?: boolean;
+  /** 401 时不刷新、不强制登出（用于可选接口如 meta） */
+  skipAuthRefresh?: boolean;
 }
 
 const config = {
@@ -130,6 +132,10 @@ class RequestHttp {
 
         if (error.message.includes("timeout")) ElMessage.error("请求超时！请您稍后重试");
         if (error.message.includes("Network Error")) ElMessage.error("网络错误！请您稍后重试");
+
+        if (requestConfig?.skipAuthRefresh && response?.status === 401) {
+          return Promise.reject(error);
+        }
 
         if (
           response?.status === 401 &&

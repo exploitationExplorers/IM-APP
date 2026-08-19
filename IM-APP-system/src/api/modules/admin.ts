@@ -150,7 +150,7 @@ export const dissolveGroup = (id: string, body: Groups.ReqDissolveGroup) => {
 };
 
 export const muteGroupAll = (id: string, body: Groups.ReqMuteAllGroup) => {
-  return http.post<Groups.ActionResult>(`${GROUPS_BASE}/${encodeURIComponent(id)}/mute-all`, body);
+  return http.put<Groups.ActionResult>(`${GROUPS_BASE}/${encodeURIComponent(id)}/mute-all`, body);
 };
 
 export const getGroupRecallLogs = (id: string, params: Groups.ReqRecallLogsParams = {}) => {
