@@ -142,6 +142,11 @@ function formatStatus(status?: string): string {
   return statusLabels[status] ?? status;
 }
 
+/** 群是否已解散：前端筛选用 dissolved，后端 normalize 保留 server 原始值 dismissed，两值都算已解散 */
+function isDissolved(status?: string): boolean {
+  return status === "dissolved" || status === "dismissed";
+}
+
 function formatJoinMode(mode?: string): string {
   if (!mode) return "-";
   return joinModeLabels[mode] ?? mode;
@@ -334,7 +339,7 @@ function closeGroupDetail(): void {
 }
 
 async function toggleMemberAddFriend(group: Groups.GroupDetail, next?: boolean): Promise<void> {
-  if (group.status === "dissolved") return;
+  if (isDissolved(group.status)) return;
   const enabled = typeof next === "boolean" ? next : !group.allowMemberAddFriend;
   const action = enabled ? "允许群内互加好友" : "禁止群内互加好友";
   try {
@@ -392,7 +397,7 @@ async function submitRecallMessage(): Promise<void> {
 }
 
 function openMuteDialog(group: Groups.GroupItem | Groups.GroupDetail): void {
-  if (group.status === "dissolved" || group.status === "banned") return;
+  if (isDissolved(group.status) || group.status === "banned") return;
   muteTarget.value = group;
   muteNext.value = !group.allMuted;
   muteForm.reason = "";
@@ -452,7 +457,7 @@ function createIdempotencyKey(): string {
 }
 
 function openDissolveDialog(group: Groups.GroupItem | Groups.GroupDetail): void {
-  if (group.status === "dissolved") return;
+  if (isDissolved(group.status)) return;
   dissolveTarget.value = group;
   dissolveForm.reason = "";
   dissolveForm.ticketNo = "";
@@ -611,7 +616,7 @@ onMounted(() => {
               <el-button
                 link
                 :type="row.allMuted ? 'success' : 'warning'"
-                :disabled="row.status === 'dissolved' || row.status === 'banned'"
+                :disabled="isDissolved(row.status) || row.status === 'banned'"
                 @click="openMuteDialog(row)"
               >
                 {{ row.allMuted ? "解除禁言" : "全员禁言" }}
@@ -619,7 +624,7 @@ onMounted(() => {
               <el-button
                 link
                 type="danger"
-                :disabled="row.status === 'dissolved'"
+                :disabled="isDissolved(row.status)"
                 @click="openDissolveDialog(row)"
               >
                 解散
@@ -679,10 +684,10 @@ onMounted(() => {
             <el-descriptions-item label="创建时间" :span="2">
               {{ formatTime(selectedGroup.createdAt) }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="selectedGroup.status === 'dissolved'" label="解散时间" :span="2">
+            <el-descriptions-item v-if="isDissolved(selectedGroup.status)" label="解散时间" :span="2">
               {{ formatTime(selectedGroup.dissolvedAt) }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="selectedGroup.status === 'dissolved'" label="解散原因" :span="2">
+            <el-descriptions-item v-if="isDissolved(selectedGroup.status)" label="解散原因" :span="2">
               {{ selectedGroup.dissolveReason || "-" }}
             </el-descriptions-item>
             <el-descriptions-item label="群公告" :span="2">
@@ -696,7 +701,7 @@ onMounted(() => {
               <span>全员禁言</span>
               <el-switch
                 :model-value="!!selectedGroup.allMuted"
-                :disabled="selectedGroup.status === 'dissolved' || selectedGroup.status === 'banned'"
+                :disabled="isDissolved(selectedGroup.status) || selectedGroup.status === 'banned'"
                 @change="() => openMuteDialog(selectedGroup!)"
               />
             </div>
@@ -704,12 +709,12 @@ onMounted(() => {
               <span>允许群内互加好友</span>
               <el-switch
                 :model-value="!!selectedGroup.allowMemberAddFriend"
-                :disabled="selectedGroup.status === 'dissolved'"
+                :disabled="isDissolved(selectedGroup.status)"
                 @change="(val: boolean) => toggleMemberAddFriend(selectedGroup!, val)"
               />
             </div>
             <el-button
-              v-if="selectedGroup.status !== 'dissolved'"
+              v-if="!isDissolved(selectedGroup.status)"
               type="danger"
               plain
               class="dissolve-btn"
