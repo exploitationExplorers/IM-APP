@@ -639,7 +639,8 @@ func (r *GroupRepo) UpdateSettingsByAdmin(ctx context.Context, groupID, adminID 
 	return tx.Commit(ctx)
 }
 
-// RemoveDissolvedMembership 成员从已解散群中移除自己（owner/普通成员均可，不碰 OpenIM）
+// RemoveDissolvedMembership 成员从通讯录隐藏已解散群：仅把 group_members 软标记为已退群，
+// 保留记录使管理后台成员数不变（admin 用 COUNT(*) 统计，见 IM-APP-admin/internal/repository/group.go）。
 func (r *GroupRepo) RemoveDissolvedMembership(ctx context.Context, groupID, uid string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -657,7 +658,9 @@ func (r *GroupRepo) RemoveDissolvedMembership(ctx context.Context, groupID, uid 
 	if status != "dismissed" {
 		return ErrInvalidGroupOperation
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid`, groupID, uid); err != nil {
+	if _, err := tx.Exec(ctx, `
+		UPDATE group_members SET status='left', left_at=NOW()
+		WHERE group_id=$1::uuid AND user_id=$2::uuid`, groupID, uid); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

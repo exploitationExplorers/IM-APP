@@ -337,7 +337,7 @@ async function onLeave() {
 async function onRemoveDissolved() {
   const res = await uni.showModal({
     title: '删除该群',
-    content: '删除后通讯录将不再显示该群，聊天记录保留。确定删除吗？',
+    content: '确定删除该群聊吗？',
     confirmText: '删除',
     cancelText: '取消',
   })

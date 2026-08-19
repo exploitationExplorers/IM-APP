@@ -8,7 +8,7 @@
 
 1. 通讯录群列表显示已解散群，混在列表中，加灰色「已解散」标签，排在正常群后面。
 2. 通讯录点已解散群 → 复用群资料页（`group/detail.vue`），已解散模式下仅展示：群头像、群名、「已解散」提示、底部红色「删除该群」按钮，隐藏其余功能。
-3. 点「删除该群」→ 仅删除当前用户在该群的 `group_members` 记录（owner/成员均可），**不碰 OpenIM**（会话与历史消息保留）。
+3. 点「删除该群」→ 软删除当前用户在该群的 `group_members` 记录（置 `status='left'`、`left_at=NOW()`，owner/成员均可），**不碰 OpenIM**（会话与历史消息保留）。保留成员记录使管理后台成员数（admin 用 `COUNT(*)` 统计）不变。
 4. 聊天列表入口行为保持现状：点已解散群会话 → toast「群已解散」+ 返回上一页。
 
 ## 服务端改动（IM-APP-server）
@@ -31,7 +31,8 @@
 - handler：`GroupHandler` 新增方法，从鉴权上下文取当前用户 ID。
 - repo：`GroupRepo.RemoveDissolvedMembership(ctx, groupID, uid)`：
   - 校验 `groups.status='dismissed'`，否则 `ErrInvalidGroupOperation`。
-  - `DELETE FROM group_members WHERE group_id=$1 AND user_id=$2`。
+  - `UPDATE group_members SET status='left', left_at=NOW() WHERE group_id=$1 AND user_id=$2`（软删，保留记录，管理后台 `COUNT(*)` 成员数不变）。
+  - `ListGroups` 查询增加 `COALESCE(gm.status,'active')='active'` 过滤，软删后通讯录不再显示该群。
   - 不涉及 OpenIM 同步。
 - 路由：`auth.POST("/groups/:id/dissolved/remove", groupH.RemoveDissolvedGroup)`。
 
