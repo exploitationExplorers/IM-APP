@@ -140,6 +140,22 @@ func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs 
 	return r.GetByID(ctx, groupID, ownerID)
 }
 
+// GetDissolvedInfo 已解散群的轻量资料（不校验请求者成员身份，仅用于通讯录只读展示）
+func (r *GroupRepo) GetDissolvedInfo(ctx context.Context, groupID string) (models.DissolvedGroupInfo, error) {
+	var g models.DissolvedGroupInfo
+	err := r.DB.QueryRow(ctx, `
+		SELECT public_id, name, COALESCE(avatar,''), status
+		FROM groups WHERE id=$1::uuid AND status='dismissed'`, groupID).Scan(
+		&g.ID, &g.Name, &g.Avatar, &g.Status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.DissolvedGroupInfo{}, ErrGroupNotFound
+		}
+		return models.DissolvedGroupInfo{}, err
+	}
+	return g, nil
+}
+
 func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.GroupInfo, error) {
 	var g models.GroupInfo
 	var allow bool
@@ -619,6 +635,30 @@ func (r *GroupRepo) UpdateSettingsByAdmin(ctx context.Context, groupID, adminID 
 		}); err != nil {
 			return err
 		}
+	}
+	return tx.Commit(ctx)
+}
+
+// RemoveDissolvedMembership 成员从已解散群中移除自己（owner/普通成员均可，不碰 OpenIM）
+func (r *GroupRepo) RemoveDissolvedMembership(ctx context.Context, groupID, uid string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var status string
+	err = tx.QueryRow(ctx, `SELECT status FROM groups WHERE id=$1::uuid`, groupID).Scan(&status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrGroupNotFound
+		}
+		return err
+	}
+	if status != "dismissed" {
+		return ErrInvalidGroupOperation
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid`, groupID, uid); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

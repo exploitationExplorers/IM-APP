@@ -41,6 +41,7 @@ export interface GroupPreview {
   avatar: string
   role?: string
   conversationId?: string
+  status?: 'active' | 'dismissed'
 }
 
 export interface FriendRequest {

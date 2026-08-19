@@ -81,6 +81,21 @@ export async function dismissGroup(groupId: string): Promise<void> {
   })
 }
 
+/** 已解散群轻量资料（通讯录只读展示用） */
+export async function fetchDissolvedGroup(groupId: string): Promise<{
+  id: string
+  name: string
+  avatar: string
+  status: string
+}> {
+  return request({ url: `/groups/${groupId}/dissolved`, method: 'GET' })
+}
+
+/** 成员删除已解散群（仅移除自己的成员记录，不碰 OpenIM） */
+export async function removeDissolvedGroup(groupId: string): Promise<void> {
+  await request({ url: `/groups/${groupId}/dissolved/remove`, method: 'POST' })
+}
+
 export async function updateGroupMyNickname(groupId: string, nickname: string) {
   return request<{ nickname: string } | null>({
     url: `/groups/${groupId}/me/nickname`,

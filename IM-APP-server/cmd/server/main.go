@@ -286,6 +286,8 @@ func main() {
 			auth.POST("/groups/reports", groupH.CreateReport)
 			auth.POST("/groups/:id/leave", groupH.Leave)
 			auth.POST("/groups/:id/dismiss", groupH.Dismiss)
+			auth.GET("/groups/:id/dissolved", groupH.DissolvedInfo)
+			auth.POST("/groups/:id/dissolved/remove", groupH.RemoveDissolvedGroup)
 			auth.POST("/group-invitations/:token/accept", groupH.AcceptInvitation)
 			auth.GET("/friend-requests", contactH.ListFriendRequests)
 			auth.POST("/friend-requests", contactH.CreateFriendRequest)
