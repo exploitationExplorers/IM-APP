@@ -105,6 +105,12 @@ type Group struct {
 	AllowMemberAddFriend bool
 }
 
+// GroupMemberLite 群成员的最小字段集，用于已读状态计算（joinTime 判断成员是否晚于消息入群）。
+type GroupMemberLite struct {
+	UserID   string `json:"userID"`
+	JoinTime int64  `json:"joinTime"` // 毫秒时间戳
+}
+
 // GroupUpdate is intentionally sparse. OpenIM emits a persisted group notice
 // for every field present in set_group_info_ex, even when the supplied value is
 // unchanged. Callers must therefore only set fields changed by the user.
@@ -354,6 +360,55 @@ func (c *Client) ListGroupMemberIDs(ctx context.Context, groupID string) ([]stri
 			return members, nil
 		}
 	}
+}
+
+// ListGroupMembers 分页拉取群成员列表，附带加入时间（毫秒），
+// 供群聊已读状态计算时判断"消息发送后才入群"的成员。
+func (c *Client) ListGroupMembers(ctx context.Context, groupID string) ([]GroupMemberLite, error) {
+	const pageSize = 1000
+	members := make([]GroupMemberLite, 0)
+	for page := 1; ; page++ {
+		var data struct {
+			Total   int `json:"total"`
+			Members []struct {
+				UserID   string `json:"userID"`
+				JoinTime int64  `json:"joinTime"`
+			} `json:"members"`
+		}
+		if err := c.postWithAdmin(ctx, "/group/get_group_member_list", map[string]any{
+			"groupID": groupID, "keyword": "",
+			"pagination": map[string]int{"pageNumber": page, "showNumber": pageSize},
+		}, &data); err != nil {
+			return nil, err
+		}
+		for _, member := range data.Members {
+			members = append(members, GroupMemberLite{UserID: member.UserID, JoinTime: member.JoinTime})
+		}
+		if len(data.Members) == 0 || len(members) >= data.Total {
+			return members, nil
+		}
+	}
+}
+
+// GetConversationHasReadSeq 查询某用户在某条会话上的已读游标 hasReadSeq。
+// 用户从未打开该会话（或无会话记录）时返回 0，即视为未读。
+// 端点 GetConversationsHasReadAndMaxSeq 返回 { seqs: { conversationID: { hasReadSeq, maxSeq, maxSeqTime } } }。
+func (c *Client) GetConversationHasReadSeq(ctx context.Context, userID, conversationID string) (int64, error) {
+	var data struct {
+		Seqs map[string]struct {
+			HasReadSeq int64 `json:"hasReadSeq"`
+		} `json:"seqs"`
+	}
+	if err := c.postWithAdmin(ctx, "/msg/get_conversations_has_read_and_max_seq", map[string]any{
+		"userID":          userID,
+		"conversationIDs": []string{conversationID},
+	}, &data); err != nil {
+		return 0, err
+	}
+	if seq, ok := data.Seqs[conversationID]; ok {
+		return seq.HasReadSeq, nil
+	}
+	return 0, nil
 }
 
 func (c *Client) EnsureGroup(ctx context.Context, group Group) error {

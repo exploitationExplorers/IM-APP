@@ -240,6 +240,24 @@ func (h *IMHandler) RecallMessage(c *gin.Context) {
 	response.OK(c, result)
 }
 
+// MessageReadStatus 查询发送者自己的群消息的已读状态（已读人数 / 已读成员）。
+func (h *IMHandler) MessageReadStatus(c *gin.Context) {
+	var req struct {
+		ConversationID string                     `json:"conversationID"`
+		Messages       []service.MessageReadQuery `json:"messages"`
+	}
+	if err := bindBusinessJSON(c, &req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+	results, err := h.Service.MessageReadStatus(c.Request.Context(), middleware.UserID(c), req.ConversationID, req.Messages)
+	if err != nil {
+		h.handleIMError(c, err)
+		return
+	}
+	response.OK(c, results)
+}
+
 // parsePeer 从路径参数解析 peerType/peerId，并校验 peerType 合法性。
 // 校验失败已直接写响应，调用方见返回值 ok=false 即可返回。
 func (h *IMHandler) parsePeer(c *gin.Context) (string, string, bool) {
@@ -342,6 +360,10 @@ func (h *IMHandler) handleIMError(c *gin.Context, err error) {
 		response.Fail(c, http.StatusNotFound, "会话不存在")
 	case errors.Is(err, service.ErrIMTargetNotChattable):
 		response.Fail(c, http.StatusForbidden, "与该好友/群不能聊天")
+	case errors.Is(err, service.ErrIMInvalidReadStatusRequest):
+		response.Fail(c, http.StatusBadRequest, "已读状态查询参数不正确")
+	case errors.Is(err, service.ErrIMNotGroupMember):
+		response.Fail(c, http.StatusForbidden, "你不是该群成员")
 	case errors.Is(err, service.ErrIMUnavailable), errors.Is(err, im.ErrUnavailable):
 		response.Fail(c, http.StatusServiceUnavailable, "OpenIM 服务不可用")
 	default:

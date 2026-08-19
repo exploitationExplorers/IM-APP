@@ -318,6 +318,7 @@ func main() {
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
 			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
 			auth.POST("/im/messages/recall", imH.RecallMessage)
+			auth.POST("/im/messages/read-status", imH.MessageReadStatus)
 			auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
 			auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
 
