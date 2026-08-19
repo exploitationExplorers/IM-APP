@@ -188,6 +188,19 @@ func (h *OpenIMWebhookHandler) AfterMessage(c *gin.Context) {
 	c.JSON(http.StatusOK, allowWebhook())
 }
 
+// AfterDismissGroup 群解散回调：OpenIM 已经原生给所有成员推系统通知（contentType 1511 Dismissed），
+// 前端 chatStore 会通过 OnRecvNewMessage 收到并渲染成「群主 解散了群聊」居中提示，
+// 同时 room.vue 通过 watch 这个通知触发自动返回。这里保留 handler 是为了让
+// OpenIM webhook URL 有个 200 响应，避免日志噪音。
+func (h *OpenIMWebhookHandler) AfterDismissGroup(c *gin.Context) {
+	if !h.authorized(c) {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	limitWebhookBody(c)
+	c.JSON(http.StatusOK, allowWebhook())
+}
+
 // resolveAuditConversationID 在回调未携带 conversationID 时按 OpenIM 规则补齐，
 // 与撤回侧 buildC2CConversationID / resolveGroupConversationID 保持一致，保证能对上。
 func (h *OpenIMWebhookHandler) resolveAuditConversationID(ctx context.Context, senderID, recvID, groupID string) string {

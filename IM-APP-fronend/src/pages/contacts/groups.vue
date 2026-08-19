@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onShow, ref, watch } from 'vue'
 import { fetchGroups } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
 import { APP_CONFIG } from '@/config'
@@ -16,6 +16,11 @@ async function loadGroups() {
 }
 
 onMounted(() => {
+  void loadGroups()
+})
+
+/** 切回此页时刷新群列表，确保已解散群能立即消失 */
+onShow(() => {
   void loadGroups()
 })
 

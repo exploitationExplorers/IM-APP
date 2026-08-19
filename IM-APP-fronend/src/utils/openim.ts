@@ -15,7 +15,7 @@ import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
-import { formatIMNotification, imNotificationEventKey } from '@/utils/im-notification'
+import { formatIMNotification, imNotificationEventKey, notificationKindOf } from '@/utils/im-notification'
 import { highlightTagsOf } from '@/utils/group-announcement'
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
@@ -1025,6 +1025,7 @@ export function toConversation(item: ConversationItem): Conversation {
 }
 
 export function toChatMessage(item: MessageItem): ChatMessage {
+  const notificationKind = notificationKindOf(item.contentType)
   return {
     id: item.clientMsgID,
     conversationId: conversationIdOf(item),
@@ -1035,6 +1036,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     content: extractContent(item),
     createdAt: toISOTime(item.sendTime),
     systemEventKey: imNotificationEventKey(item) || undefined,
+    notificationKind: notificationKind || undefined,
     quote: quotePreviewOf(item),
     status:
       item.status === MessageStatus.Failed

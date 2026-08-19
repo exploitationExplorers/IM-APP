@@ -28,6 +28,11 @@ export interface ChatMessage {
   createdAt: string
   /** 用于折叠 OpenIM 重试产生的连续重复系统通知；普通消息不设置。 */
   systemEventKey?: string
+  /**
+   * OpenIM 系统通知细分类型（如 'dissolved' / 'group-muted'），便于 chat-room 监听特定事件触发副作用。
+   * 群普通文本/图片/语音消息不设置此字段。
+   */
+  notificationKind?: 'dissolved' | 'group-muted' | 'group-cancel-muted' | string
   /** 引用回复时展示的原消息摘要 */
   quote?: MessageQuote
   /** 本地发送中状态 */

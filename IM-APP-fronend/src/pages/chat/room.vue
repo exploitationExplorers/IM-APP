@@ -62,6 +62,8 @@ const announcementText = ref('')
  * 当用户点「不再提示」后，需要显式触发一次 computed 重算，保证横幅立刻收起。
  */
 const announcementDismissEpoch = ref(0)
+/** 群是否已被解散（APP 端 GetByID 已过滤 status<>'active'，进入时 404 即视为解散） */
+const groupDissolved = ref(false)
 let muteExpireTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const scrollInto = ref('')
@@ -252,7 +254,24 @@ onUnload(() => {
     clearTimeout(muteExpireTimer)
     muteExpireTimer = null
   }
+  chatStore.setOnIncomingForDissolve(null)
 })
+
+/**
+ * 用户在房间时收到群解散通知时，自动 toast + 返回上一页。
+ * 通过 chatStore.setOnIncomingForDissolve 注册回调，避开 messagesMap 的 reactive watch。
+ */
+let dissolvedInRoom = false
+function handleIncomingForDissolve(message: { conversationId?: string; notificationKind?: string }) {
+  if (dissolvedInRoom) return
+  if (chatType.value !== 'group') return
+  if (message.conversationId !== conversationId.value) return
+  if (message.notificationKind !== 'dissolved') return
+  dissolvedInRoom = true
+  uni.showToast({ title: '群已解散', icon: 'none', duration: 2000 })
+  setTimeout(() => uni.navigateBack(), 0)
+}
+chatStore.setOnIncomingForDissolve(handleIncomingForDissolve)
 
 onLoad(async (query) => {
   title.value = decodeURIComponent(String(query?.title || '聊天'))
@@ -289,8 +308,28 @@ onLoad(async (query) => {
       }
     }
 
+    // 群聊先查群详情：群已解散时弹 toast 后直接返回上一页，不再调 OpenIM 拉历史
+    // （避免触发 getAdvancedHistoryMessageList errCode=10006）
+    if (chatType.value === 'group' && businessId.value) {
+      await refreshGroupMeta()
+      if (groupDissolved.value) {
+        uni.showToast({ title: '群已解散', icon: 'none', duration: 2000 })
+        setTimeout(() => uni.navigateBack(), 0)
+        return
+      }
+    }
+
     await Promise.all([
-      chatStore.loadMessages(conv.id),
+      chatStore.loadMessages(conv.id).catch((e: any) => {
+        // 兜底：预检测失败时 OpenIM SDK 直接抛 getAdvancedHistoryMessageList errCode=10006，
+        // 同样弹 toast 后返回上一页
+        if (chatType.value === 'group' && e?.message?.includes('10006')) {
+          uni.showToast({ title: '群已解散', icon: 'none', duration: 2000 })
+          setTimeout(() => uni.navigateBack(), 0)
+          return
+        }
+        throw e
+      }),
       chatType.value === 'group' ? refreshGroupMeta() : Promise.resolve(),
     ])
     await nextTick()
@@ -443,8 +482,20 @@ async function refreshGroupMeta(): Promise<boolean> {
   try {
     const [ms, detail] = await Promise.all([
       fetchGroupMembers(gid),
-      fetchGroupDetail(gid).catch(() => null),
+      fetchGroupDetail(gid).catch((e: any) => {
+        // APP 端 GetByID 过滤了已解散群，返回 404「群不存在或无权访问」，
+        // 与已解散语义对齐，避免被静默吞掉后还继续去 OpenIM 拉历史（errCode 10006）
+        if (e?.message?.includes('群不存在')) {
+          groupDissolved.value = true
+          return null
+        }
+        return null
+      }),
     ])
+    // 拿到 detail 说明群有效，重置解散标记
+    if (detail) {
+      groupDissolved.value = false
+    }
     const map: Record<string, string> = {}
     const avatarMap: Record<string, string> = {}
     const metaMap: Record<string, MemberMeta> = {}

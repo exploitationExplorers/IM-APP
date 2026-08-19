@@ -73,6 +73,11 @@ export const useChatStore = defineStore('chat', () => {
   /** 当前已订阅在线状态的用户 ID 集合 */
   const subscribedUserIDs = ref<Set<string>>(new Set())
   let unsubscribers: Array<() => void> = []
+  /**
+   * 群解散通知 hook：chat-room 页面注册，实时收到 notificationKind === 'dissolved'
+   * 时自动 toast + 返回。挂在 store 外避免大 messagesMap 的 reactive watch 触发循环。
+   */
+  let onIncomingForDissolve: ((m: ChatMessage) => void) | null = null
 
   const totalUnread = computed(() =>
     conversations.value.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
@@ -138,6 +143,10 @@ export const useChatStore = defineStore('chat', () => {
     if (!message.conversationId) return
     if (isGroupAnnouncementNotice(item.contentType)) {
       setUnreadAnnouncement(message.conversationId, true)
+    }
+    // 群解散通知时通知当前房间自动返回；hook 由 room.vue 注册
+    if (message.notificationKind === 'dissolved') {
+      onIncomingForDissolve?.(message)
     }
     const list = messagesMap.value[message.conversationId] || []
     if (list.some((m) => m.id === message.id)) return
@@ -789,6 +798,10 @@ export const useChatStore = defineStore('chat', () => {
     subscribedUserIDs.value.clear()
   }
 
+  function setOnIncomingForDissolve(fn: ((m: ChatMessage) => void) | null) {
+    onIncomingForDissolve = fn
+  }
+
   return {
     conversations,
     messagesMap,
@@ -804,6 +817,7 @@ export const useChatStore = defineStore('chat', () => {
     markAsRead,
     sendText,
     sendAtText,
+    setOnIncomingForDissolve,
     sendImage,
     sendCard,
     sendFile,

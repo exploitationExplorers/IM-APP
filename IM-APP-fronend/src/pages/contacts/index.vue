@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
@@ -45,6 +46,11 @@ function refreshContacts() {
 function refreshDirectory() {
   return Promise.all([refreshContacts(), contactStore.loadGroups()])
 }
+
+/** 切回通讯录页面时刷新群列表（已解散群由服务端过滤后自动消失） */
+onShow(() => {
+  void refreshDirectory()
+})
 
 const { refreshing, onRefresherRefresh } = usePullRefresh(refreshDirectory)
 

@@ -14,8 +14,10 @@ import (
 )
 
 // AdminGroupHandler 管理端群操作（由管理后台经 /internal/admin 内部密钥调用）
+// Repo 直接走 DB，避开 service.GroupService（后者只服务 APP 端，用数字 publicID 做转换）
 type AdminGroupHandler struct {
 	Groups *service.GroupService
+	Repo   *repository.GroupRepo
 }
 
 // AdminForwardHandler 管理端转发任务操作（由管理后台经 /internal/admin 内部密钥调用）
@@ -223,7 +225,7 @@ func (h *AdminGroupHandler) DismissGroup(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "adminId 必填")
 		return
 	}
-	if err := h.Groups.DismissByAdmin(c.Request.Context(), c.Param("id"), req.AdminID, req.Reason); err != nil {
+	if err := h.Repo.DismissByAdmin(c.Request.Context(), c.Param("id"), req.AdminID, req.Reason); err != nil {
 		response.Fail(c, http.StatusBadRequest, "解散失败："+err.Error())
 		return
 	}
@@ -241,7 +243,7 @@ func (h *AdminGroupHandler) MuteGroup(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "adminId 必填")
 		return
 	}
-	if err := h.Groups.UpdateGroupMute(c.Request.Context(), c.Param("id"), req.AdminID, req.Muted); err != nil {
+	if err := h.Repo.UpdateGroupMuteByAdmin(c.Request.Context(), c.Param("id"), req.AdminID, req.Muted); err != nil {
 		response.Fail(c, http.StatusBadRequest, "禁言操作失败："+err.Error())
 		return
 	}
@@ -258,7 +260,7 @@ func (h *AdminGroupHandler) SetAddFriend(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "adminId 必填")
 		return
 	}
-	if err := h.Groups.UpdateSettings(c.Request.Context(), c.Param("id"), req.AdminID, nil, nil, nil, &req.Enabled, nil, nil); err != nil {
+	if err := h.Repo.UpdateSettingsByAdmin(c.Request.Context(), c.Param("id"), req.AdminID, &req.Enabled); err != nil {
 		response.Fail(c, http.StatusBadRequest, "设置失败："+err.Error())
 		return
 	}

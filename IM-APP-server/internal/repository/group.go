@@ -575,6 +575,54 @@ func (r *GroupRepo) UpdateGroupMute(ctx context.Context, groupID, operatorID str
 	return tx.Commit(ctx)
 }
 
+// UpdateGroupMuteByAdmin 管理端全员禁言/解除：使用 UUID 直接定位，跳过群成员角色校验，同步 OpenIM
+func (r *GroupRepo) UpdateGroupMuteByAdmin(ctx context.Context, groupID, adminID string, muted bool) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+		UPDATE groups SET all_muted=$2, updated_at=NOW()
+		WHERE id=$1::uuid AND status='active'`, groupID, muted)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrInvalidGroupOperation
+	}
+	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMute, map[string]any{"muted": muted}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// UpdateSettingsByAdmin 管理端群设置（目前仅 allow_member_add_friend）：跳过群成员角色校验，同步 OpenIM
+func (r *GroupRepo) UpdateSettingsByAdmin(ctx context.Context, groupID, adminID string, allow *bool) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+		UPDATE groups SET allow_member_add_friend=COALESCE($2, allow_member_add_friend), updated_at=NOW()
+		WHERE id=$1::uuid AND status='active'`, groupID, allow)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrInvalidGroupOperation
+	}
+	if allow != nil {
+		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, IMGroupUpdatePayload{
+			AllowMemberAddFriend: allow,
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 func (r *GroupRepo) Dismiss(ctx context.Context, groupID, operatorID string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
