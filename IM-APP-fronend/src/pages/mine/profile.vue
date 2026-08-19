@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
@@ -11,12 +11,21 @@ import ImSuccessToast from '@/components/ImSuccessToast.vue'
 useAuthGuard()
 const userStore = useUserStore()
 const successVisible = ref(false)
+const avatarFailed = ref(false)
 
 const nickname = computed(() => userStore.profile?.nickname || '')
 const bio = computed(() => userStore.profile?.bio || '')
 const publicId = computed(() => userStore.profile?.publicId || '')
-const avatarSrc = computed(
-  () => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl,
+const avatarSrc = computed(() => {
+  if (avatarFailed.value) return APP_CONFIG.defaultAvatarUrl
+  return userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl
+})
+
+watch(
+  () => userStore.profile?.avatar,
+  () => {
+    avatarFailed.value = false
+  },
 )
 
 const phoneDisplay = computed(() => {
@@ -66,6 +75,10 @@ function onCopyPublicId() {
     data: publicId.value,
     success: () => uni.showToast({ title: '已复制', icon: 'none' }),
   })
+}
+
+function onAvatarError() {
+  avatarFailed.value = true
 }
 
 async function onChooseAvatar() {
@@ -124,7 +137,15 @@ function onDeleteAccount() {
     </view>
 
     <view class="avatar-row" @click="onChooseAvatar">
-      <image class="avatar" :src="avatarSrc" mode="aspectFill" />
+      <view class="avatar-wrap">
+        <image
+          class="avatar"
+          :key="avatarSrc"
+          :src="avatarSrc"
+          mode="aspectFill"
+          @error="onAvatarError"
+        />
+      </view>
       <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
     </view>
 
@@ -233,12 +254,19 @@ function onDeleteAccount() {
   box-sizing: border-box;
 }
 
-.avatar {
+.avatar-wrap {
   width: 120rpx;
   height: 120rpx;
   border-radius: 50%;
+  overflow: hidden;
   flex-shrink: 0;
-  background: #fff;
+  background: #d8dde8;
+}
+
+.avatar {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .section {

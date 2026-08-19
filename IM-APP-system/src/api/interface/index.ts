@@ -40,8 +40,23 @@ export namespace Auth {
     password: string;
   }
 
+  export interface ReqMfaVerifyForm {
+    challengeToken: string;
+    code: string;
+  }
+
   export interface ReqRefreshForm {
     refreshToken: string;
+  }
+
+  export interface ReqLogoutForm {
+    refreshToken: string;
+  }
+
+  export interface ReqLogoutAllForm {
+    idempotencyKey?: string;
+    reason: string;
+    ticketNo?: string;
   }
 
   export interface AdminInfo {
@@ -56,9 +71,87 @@ export namespace Auth {
   }
 
   export interface ResLogin {
-    token: string;
-    refreshToken: string;
-    admin: AdminInfo;
+    admin?: AdminInfo;
+    mfaChallenge?: string;
+    refreshToken?: string;
+    token?: string;
+  }
+
+  export interface ResHealth {
+    status?: string;
+  }
+
+  export interface ResMeta {
+    version?: string;
+    commit?: string;
+    buildTime?: string;
+    features?: Record<string, unknown>;
+  }
+}
+
+export namespace Sms {
+  export interface ProviderHealthItem {
+    provider?: string;
+    healthy?: boolean;
+    latencyMs?: number;
+  }
+}
+
+export namespace Me {
+  export interface ResMeResult {
+    admin?: Auth.AdminInfo;
+    permissions?: string[];
+  }
+
+  export interface ResMfaStatus {
+    enabled: boolean;
+    secret?: string;
+  }
+
+  export interface ReqMfaCodeForm {
+    code: string;
+  }
+
+  export interface ReqPasswordChangeForm {
+    oldPassword: string;
+    newPassword: string;
+  }
+}
+
+export namespace SensitiveWords {
+  export interface ReqListParams {
+    page?: number;
+    size?: number;
+    keyword?: string;
+  }
+
+  export interface WordItem {
+    id: string;
+    word: string;
+    category: string;
+    status: string;
+    createdAt: string;
+  }
+
+  export interface ReqCreateWord {
+    word: string;
+    category?: string;
+  }
+
+  export interface ReqImportWords {
+    words: string[];
+    reason: string;
+    category?: string;
+  }
+
+  export interface ReqUpdateWord {
+    word?: string;
+    category?: string;
+    status?: string;
+  }
+
+  export interface ReqUpdateWordStatus {
+    status: string;
   }
 
   export interface ResHealth {

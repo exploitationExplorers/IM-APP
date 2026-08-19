@@ -25,6 +25,8 @@ export interface FileObject {
 export interface UploadInitResult {
   file: FileObject
   uploadUrl: string
+  formUrl?: string
+  formData?: Record<string, string>
   headers?: Record<string, string>
   expiresIn: number
 }

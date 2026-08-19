@@ -1,54 +1,98 @@
 <script setup lang="ts">
-import { decodeQrcodeFromImage, parseQrcodePayload } from '@/utils/qrcode'
+import { nextTick } from 'vue'
+import { onHide, onShow, onUnload } from '@dcloudio/uni-app'
+import { decodeQrcodeFromImage, routeQrcodeScanResult, tryDecodeQrcode } from '@/utils/qrcode'
+
+let navigating = false
+let h5Video: HTMLVideoElement | null = null
+let h5Stream: MediaStream | null = null
+let h5Timer: ReturnType<typeof setTimeout> | null = null
+let h5Canvas: HTMLCanvasElement | null = null
 
 function goBack() {
+  stopH5Scan()
   uni.navigateBack()
 }
 
 function goMyQrcode() {
+  stopH5Scan()
   uni.navigateTo({ url: '/pages/mine/qrcode' })
 }
 
-function openScanResultByToken(token: string) {
-  uni.navigateTo({
-    url: `/pages/contacts/scan-result?token=${encodeURIComponent(token)}`,
-  })
-}
-
-function openScanResultByPublicId(publicId: string) {
-  uni.navigateTo({
-    url: `/pages/contacts/scan-result?publicId=${encodeURIComponent(publicId)}`,
-  })
-}
-
-async function handleScanRaw(raw: string) {
-  const parsed = parseQrcodePayload(raw)
-  if (parsed.type === 'group' && parsed.token) {
-    uni.showToast({ title: '请使用添加群聊扫描群二维码', icon: 'none' })
+function handleScanRaw(raw: string) {
+  if (navigating) return
+  if (!routeQrcodeScanResult(raw)) {
+    uni.showToast({ title: '未识别到有效二维码', icon: 'none' })
     return
   }
-  if (parsed.token) {
-    openScanResultByToken(parsed.token)
-    return
-  }
-  if (parsed.publicId) {
-    openScanResultByPublicId(parsed.publicId)
-    return
-  }
-  uni.showToast({ title: '未识别到有效二维码', icon: 'none' })
+  navigating = true
+  stopH5Scan()
 }
 
-function startScan() {
-  uni.scanCode({
-    onlyFromCamera: true,
-    scanType: ['qrCode'],
-    success: (res) => {
-      void handleScanRaw(res.result)
-    },
-    fail: () => {
-      uni.showToast({ title: '扫码取消', icon: 'none' })
-    },
-  })
+function stopH5Scan() {
+  if (h5Timer) {
+    clearTimeout(h5Timer)
+    h5Timer = null
+  }
+  if (h5Stream) {
+    h5Stream.getTracks().forEach((track) => track.stop())
+    h5Stream = null
+  }
+  h5Video = null
+  const wrap = typeof document !== 'undefined' ? document.getElementById('h5-scan-camera') : null
+  if (wrap) wrap.innerHTML = ''
+}
+
+function tickH5Scan() {
+  if (navigating || !h5Video) return
+  const width = h5Video.videoWidth
+  const height = h5Video.videoHeight
+  if (width && height) {
+    if (!h5Canvas) h5Canvas = document.createElement('canvas')
+    h5Canvas.width = width
+    h5Canvas.height = height
+    const ctx = h5Canvas.getContext('2d')
+    if (ctx) {
+      ctx.drawImage(h5Video, 0, 0, width, height)
+      const imageData = ctx.getImageData(0, 0, width, height)
+      const raw = tryDecodeQrcode(imageData.data, width, height)
+      if (raw) {
+        handleScanRaw(raw)
+        return
+      }
+    }
+  }
+  h5Timer = setTimeout(tickH5Scan, 220)
+}
+
+async function startH5Scan() {
+  if (typeof document === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    uni.showToast({ title: '当前环境不支持摄像头扫码', icon: 'none' })
+    return
+  }
+  stopH5Scan()
+  const wrap = document.getElementById('h5-scan-camera')
+  if (!wrap) return
+  const video = document.createElement('video')
+  video.setAttribute('playsinline', 'true')
+  video.setAttribute('webkit-playsinline', 'true')
+  video.muted = true
+  video.autoplay = true
+  video.style.cssText = 'width:100%;height:100%;object-fit:cover;background:#000;display:block;'
+  wrap.appendChild(video)
+  h5Video = video
+  try {
+    h5Stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' } },
+    })
+    video.srcObject = h5Stream
+    await video.play()
+    tickH5Scan()
+  } catch {
+    stopH5Scan()
+    uni.showToast({ title: '无法打开相机，请允许摄像头权限', icon: 'none' })
+  }
 }
 
 function chooseFromAlbum() {
@@ -61,7 +105,7 @@ function chooseFromAlbum() {
       uni.showLoading({ title: '识别中...', mask: true })
       try {
         const raw = await decodeQrcodeFromImage(path)
-        await handleScanRaw(raw)
+        handleScanRaw(raw)
       } catch (e) {
         uni.showToast({ title: (e as Error).message || '未识别到有效二维码', icon: 'none' })
       } finally {
@@ -70,19 +114,33 @@ function chooseFromAlbum() {
     },
   })
 }
+
+onShow(() => {
+  navigating = false
+  // #ifdef H5
+  void nextTick(() => startH5Scan())
+  // #endif
+})
+
+onHide(() => {
+  stopH5Scan()
+})
+
+onUnload(() => {
+  stopH5Scan()
+})
 </script>
 
 <template>
   <view class="page">
+    <view id="h5-scan-camera" class="camera-feed" />
     <view class="back-btn" @click="goBack">
       <image class="back-icon" src="/static/icons/icon-back-white.svg" mode="aspectFit" />
     </view>
-
     <view class="scan-area">
-      <view class="scan-frame" @click="startScan" />
-      <text class="hint">将二维码放入框内，点击取景框开始扫描</text>
+      <view class="scan-frame" />
+      <text class="hint">将二维码放入框内，即可自动扫描</text>
     </view>
-
     <view class="actions">
       <view class="action" @click="goMyQrcode">
         <image class="action-icon" src="/static/icons/icon-qrcode-white.svg" mode="aspectFit" />
@@ -99,12 +157,23 @@ function chooseFromAlbum() {
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 93.13%);
+  height: 100vh;
+  background: #000;
   display: flex;
   flex-direction: column;
   position: relative;
   box-sizing: border-box;
   overflow: hidden;
+}
+
+.camera-feed {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  background: #000;
 }
 
 .back-btn {
@@ -144,7 +213,7 @@ function chooseFromAlbum() {
   border-radius: 48rpx;
   background: transparent;
   box-sizing: border-box;
-  box-shadow: 0 0 1px 100vw rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 1px 100vw rgba(0, 0, 0, 0.45);
 }
 
 .hint {
@@ -158,7 +227,10 @@ function chooseFromAlbum() {
 }
 
 .actions {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 20;
   display: flex;
   justify-content: space-evenly;

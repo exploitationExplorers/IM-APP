@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Conversation } from '@/types'
+import { APP_CONFIG } from '@/config'
 import { formatRelativeTime } from '@/utils/format'
+import { useChatStore } from '@/stores/chat'
 
 const props = defineProps<{
   item: Conversation
@@ -11,12 +13,25 @@ const emit = defineEmits<{
   (e: 'click', item: Conversation): void
 }>()
 
+const chatStore = useChatStore()
 const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
+const isMuted = computed(() => props.item.recvMsgOpt === 1 || props.item.recvMsgOpt === 2)
+const isOnline = computed(
+  () =>
+    props.item.type === 'private' &&
+    !!props.item.peerUserId &&
+    chatStore.isPeerOnline(props.item.peerUserId),
+)
+console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.item.peerUserId, 'isOnline=', isOnline.value)
 </script>
 
 <template>
   <view class="conv" @click="emit('click', item)">
-    <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
+    <view class="avatar-wrap">
+      <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
+      <image v-if="item.pinned" class="pin-badge" src="/static/icons/icon-pin.svg" mode="aspectFit" />
+      <view v-if="isOnline" class="online-dot" />
+    </view>
     <view class="body">
       <view class="top">
         <text class="title">{{ item.title }}</text>
@@ -24,7 +39,8 @@ const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
       </view>
       <view class="bottom">
         <view class="preview">
-          <text v-if="item.highlightTag" class="tag">{{ item.highlightTag }}</text>
+          <image v-if="isMuted" class="mute-icon" src="/static/icons/icon-bell-slash.svg" mode="aspectFit" />
+          <text v-for="tag in item.highlightTags" :key="tag" class="tag">{{ tag }}</text>
           <text class="msg">{{ item.lastMessage }}</text>
         </view>
         <view v-if="item.unreadCount > 0" class="badge">
@@ -42,13 +58,41 @@ const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
   background: #fff;
 }
 
+.avatar-wrap {
+  position: relative;
+  width: 96rpx;
+  height: 96rpx;
+  margin-right: 24rpx;
+  flex-shrink: 0;
+}
+
 .avatar {
   width: 96rpx;
   height: 96rpx;
   border-radius: 50%;
-  margin-right: 24rpx;
-  flex-shrink: 0;
   background: #eee;
+}
+
+.pin-badge {
+  position: absolute;
+  top: -4rpx;
+  right: -4rpx;
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 50%;
+  background: #297bfb;
+}
+
+.online-dot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22rpx;
+  height: 22rpx;
+  border-radius: 50%;
+  background: #52c41a;
+  border: 4rpx solid #fff;
+  box-sizing: border-box;
 }
 
 .body {
@@ -89,20 +133,31 @@ const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
 .preview {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .tag {
   color: #e54d42;
   font-size: 26rpx;
+  flex-shrink: 0;
+}
+
+.mute-icon {
+  width: 24rpx;
+  height: 24rpx;
   margin-right: 6rpx;
+  flex-shrink: 0;
 }
 
 .msg {
   color: #999;
   font-size: 26rpx;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .badge {

@@ -59,7 +59,7 @@ func (r *OpsRepo) ImportSensitiveWords(ctx context.Context, words []string, cate
 
 func (r *OpsRepo) UpdateSensitiveWord(ctx context.Context, id string, w models.SensitiveWord) error {
 	_, err := r.DB.Exec(ctx, `
-		UPDATE sensitive_words SET word=COALESCE($2,word), category=COALESCE($3,category), status=COALESCE($4,status)
+		UPDATE sensitive_words SET word=COALESCE(NULLIF($2,''),word), category=COALESCE(NULLIF($3,''),category), status=COALESCE(NULLIF($4,''),status)
 		WHERE id=$1::uuid`, id, w.Word, w.Category, w.Status)
 	return err
 }
@@ -123,10 +123,29 @@ func (r *OpsRepo) ListProfileModerations(ctx context.Context, status string, pag
 	return out, total, nil
 }
 
-func (r *OpsRepo) HandleProfileModeration(ctx context.Context, userID, field, toStatus, reason, handlerID string) error {
+// upsertProfileStatus 按 user_id+field 更新当前审核状态；不存在则插入（资料审核状态机）
+// 用 ON CONFLICT 保证并发下不会重复插入（依赖 UNIQUE(user_id,field) 约束，见 migration 009）
+func (r *OpsRepo) upsertProfileStatus(ctx context.Context, userID, field, status, reason, handlerID string) error {
 	_, err := r.DB.Exec(ctx, `
 		INSERT INTO profile_moderation_records(user_id, field, old_value, new_value, status, reason, handler_id, handled_at)
-		VALUES($1::uuid,$2, '', '', $3,$4,$5::uuid, NOW())
-		ON CONFLICT DO NOTHING`, userID, field, toStatus, reason, handlerID)
+		VALUES($1::uuid,$2,'','',$3,$4,$5::uuid,NOW())
+		ON CONFLICT (user_id, field) DO UPDATE
+			SET status=EXCLUDED.status, reason=EXCLUDED.reason,
+			    handler_id=EXCLUDED.handler_id, handled_at=NOW()`, userID, field, status, reason, handlerID)
 	return err
+}
+
+// ApproveProfile 同意资料审核：pending → approved
+func (r *OpsRepo) ApproveProfile(ctx context.Context, userID, field, handlerID string) error {
+	return r.upsertProfileStatus(ctx, userID, field, "approved", "", handlerID)
+}
+
+// RejectProfile 驳回资料审核：pending → rejected
+func (r *OpsRepo) RejectProfile(ctx context.Context, userID, field, reason, handlerID string) error {
+	return r.upsertProfileStatus(ctx, userID, field, "rejected", reason, handlerID)
+}
+
+// ReopenProfile 恢复待审核：rejected/approved → pending（重新进入队列，可再同意/驳回）
+func (r *OpsRepo) ReopenProfile(ctx context.Context, userID, field, handlerID string) error {
+	return r.upsertProfileStatus(ctx, userID, field, "pending", "", handlerID)
 }

@@ -1,8 +1,21 @@
 <script setup lang="ts">
 import { onMounted, reactive, shallowRef, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { Delete, RefreshLeft, Search } from "@element-plus/icons-vue";
-import { getGroups, getGroupDetail, dissolveGroup as dissolveGroupApi, muteGroupAll, getGroupRecallLogs, getGroupReports } from "@/api/modules/admin";
+import {
+  getGroups,
+  getGroupDetail,
+  dissolveGroup as dissolveGroupApi,
+  muteGroupAll,
+  getGroupRecallLogs,
+  getGroupReports,
+} from "@/api/modules/admin";
+import {
+  getGroupMembersApi,
+  postGroupRecallMessageApi,
+  putGroupMemberAddFriendApi,
+} from "@/api/modules/adminGroups";
+import type { AdminGroups } from "@/api/modules/adminGroups";
 import type { Groups, Reports } from "@/api/interface";
 
 type GroupStatus = "normal" | "muted" | "banned" | "dissolved";
@@ -69,6 +82,28 @@ const groupReportsPage = shallowRef(1);
 const groupReportsSize = shallowRef(10);
 const groupReportsTotal = shallowRef(0);
 
+const groupMembers = shallowRef<AdminGroups.GroupMember[]>([]);
+const membersLoading = shallowRef(false);
+
+const recallFormRef = shallowRef<FormInstance>();
+const recallSubmitting = shallowRef(false);
+const recallForm = reactive({
+  messageId: "",
+  reason: "",
+  ticketNo: "",
+});
+const recallRules: FormRules<typeof recallForm> = {
+  messageId: [{ required: true, message: "请输入消息 ID", trigger: "blur" }],
+  reason: [{ required: true, message: "请填写撤回原因", trigger: "blur" }],
+};
+
+const roleLabels: Record<string, string> = { owner: "群主", admin: "管理员", member: "成员" };
+const roleTagTypes: Record<string, "info" | "warning" | "success" | "danger" | "primary"> = {
+  owner: "danger",
+  admin: "warning",
+  member: "info",
+};
+
 const operatorTypeLabels: Record<string, string> = {
   owner: "群主",
   admin: "管理员",
@@ -84,13 +119,14 @@ const reportStatusLabels: Record<string, string> = {
   reopened: "已重开",
 };
 
-const reportStatusTagTypes: Record<string, "info" | "warning" | "success" | "danger" | "primary"> = {
-  pending: "warning",
-  processing: "primary",
-  resolved: "success",
-  rejected: "danger",
-  reopened: "info",
-};
+const reportStatusTagTypes: Record<string, "info" | "warning" | "success" | "danger" | "primary"> =
+  {
+    pending: "warning",
+    processing: "primary",
+    resolved: "success",
+    rejected: "danger",
+    reopened: "info",
+  };
 
 const actionTakenLabels: Record<string, string> = {
   ban: "封禁",
@@ -131,7 +167,10 @@ function formatActionTaken(action?: string): string {
 
 function formatTime(value?: string): string {
   if (!value) return "-";
-  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+  return value
+    .replace("T", " ")
+    .replace(/\.\d+/, "")
+    .replace(/\+08:00$/, "");
 }
 
 function avatarText(row: Pick<Groups.GroupItem, "name">): string {
@@ -209,6 +248,25 @@ async function loadGroupReports(groupId: string): Promise<void> {
   }
 }
 
+async function loadGroupMembers(groupId: string): Promise<void> {
+  membersLoading.value = true;
+  try {
+    const res = await getGroupMembersApi(groupId);
+    groupMembers.value = Array.isArray(res.data) ? res.data : [];
+  } catch {
+    groupMembers.value = [];
+  } finally {
+    membersLoading.value = false;
+  }
+}
+
+function resetRecallForm(): void {
+  recallForm.messageId = "";
+  recallForm.reason = "";
+  recallForm.ticketNo = "";
+  recallFormRef.value?.clearValidate();
+}
+
 async function openGroupDetail(group: Groups.GroupItem): Promise<void> {
   detailVisible.value = true;
   selectedGroup.value = null;
@@ -218,12 +276,15 @@ async function openGroupDetail(group: Groups.GroupItem): Promise<void> {
   groupReports.value = [];
   groupReportsTotal.value = 0;
   groupReportsPage.value = 1;
+  groupMembers.value = [];
+  resetRecallForm();
   detailLoading.value = true;
   try {
     const [detailRes] = await Promise.all([
       getGroupDetail(group.id),
       loadRecallLogs(group.id),
       loadGroupReports(group.id),
+      loadGroupMembers(group.id),
     ]);
     selectedGroup.value = detailRes.data ?? null;
   } catch {
@@ -242,8 +303,69 @@ function closeGroupDetail(): void {
   groupReports.value = [];
   groupReportsTotal.value = 0;
   groupReportsPage.value = 1;
+  groupMembers.value = [];
+  resetRecallForm();
   closeDissolveDialog();
   closeMuteDialog();
+}
+
+async function toggleMemberAddFriend(group: Groups.GroupDetail, next?: boolean): Promise<void> {
+  if (group.status === "dissolved") return;
+  const enabled = typeof next === "boolean" ? next : !group.allowMemberAddFriend;
+  const action = enabled ? "允许群内互加好友" : "禁止群内互加好友";
+  try {
+    const { value: reason } = await ElMessageBox.prompt("请输入操作原因", action, {
+      type: "warning",
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+      inputType: "textarea",
+      inputPlaceholder: "必填",
+      inputValidator: (value) => (String(value).trim() ? true : "请填写操作原因"),
+    });
+    await putGroupMemberAddFriendApi(group.id, { enabled, reason: String(reason).trim() });
+    ElMessage.success("操作成功");
+    try {
+      const res = await getGroupDetail(group.id);
+      selectedGroup.value = res.data ?? { ...group, allowMemberAddFriend: enabled };
+    } catch {
+      selectedGroup.value = { ...group, allowMemberAddFriend: enabled };
+    }
+    await loadGroups();
+  } catch {
+  } finally {
+    muteSubmitting.value = false;
+  }
+}
+
+async function submitRecallMessage(): Promise<void> {
+  const ok = await recallFormRef.value
+    ?.validate()
+    .then(() => true)
+    .catch(() => false);
+  if (!ok || recallSubmitting.value || !selectedGroup.value) return;
+
+  const messageId = recallForm.messageId.trim();
+  const reason = recallForm.reason.trim();
+  const ticketNo = recallForm.ticketNo.trim();
+  const idempotencyKey =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : undefined;
+
+  recallSubmitting.value = true;
+  try {
+    await postGroupRecallMessageApi(selectedGroup.value.id, messageId, {
+      idempotencyKey,
+      reason,
+      ticketNo: ticketNo || undefined,
+    });
+    ElMessage.success("已提交撤回请求");
+    resetRecallForm();
+    await loadRecallLogs(selectedGroup.value.id);
+  } catch {
+  } finally {
+    recallSubmitting.value = false;
+  }
 }
 
 function openMuteDialog(group: Groups.GroupItem | Groups.GroupDetail): void {
@@ -287,7 +409,11 @@ async function submitMute(): Promise<void> {
           selectedGroup.value = {
             ...selectedGroup.value,
             allMuted: muteNext.value,
-            status: muteNext.value ? "muted" : selectedGroup.value.status === "muted" ? "normal" : selectedGroup.value.status,
+            status: muteNext.value
+              ? "muted"
+              : selectedGroup.value.status === "muted"
+                ? "normal"
+                : selectedGroup.value.status,
           };
         }
       }
@@ -419,7 +545,12 @@ onMounted(() => {
         <el-table-column label="群名称" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="group-cell">
-              <el-avatar v-if="isImageAvatar(row.avatar)" :src="row.avatar" :size="36" shape="square" />
+              <el-avatar
+                v-if="isImageAvatar(row.avatar)"
+                :src="row.avatar"
+                :size="36"
+                shape="square"
+              />
               <span v-else class="group-avatar">{{ avatarText(row) }}</span>
               <div class="group-meta">
                 <strong>{{ row.name || "-" }}</strong>
@@ -512,17 +643,28 @@ onMounted(() => {
           </div>
 
           <el-descriptions :column="2" border size="small" class="detail-desc">
-            <el-descriptions-item label="群主">{{ selectedGroup.ownerName || "-" }}</el-descriptions-item>
-            <el-descriptions-item label="群主 ID">{{ selectedGroup.ownerId || "-" }}</el-descriptions-item>
-            <el-descriptions-item label="成员数">{{ selectedGroup.memberCount ?? 0 }}</el-descriptions-item>
-            <el-descriptions-item label="加群方式">{{ formatJoinMode(selectedGroup.joinMode) }}</el-descriptions-item>
+            <el-descriptions-item label="群主">{{
+              selectedGroup.ownerName || "-"
+            }}</el-descriptions-item>
+            <el-descriptions-item label="群主 ID">{{
+              selectedGroup.ownerId || "-"
+            }}</el-descriptions-item>
+            <el-descriptions-item label="成员数">{{
+              selectedGroup.memberCount ?? 0
+            }}</el-descriptions-item>
+            <el-descriptions-item label="加群方式">{{
+              formatJoinMode(selectedGroup.joinMode)
+            }}</el-descriptions-item>
             <el-descriptions-item label="全员禁言">
               <el-tag :type="selectedGroup.allMuted ? 'danger' : 'success'" size="small">
                 {{ selectedGroup.allMuted ? "是" : "否" }}
               </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="允许互加好友">
-              <el-tag :type="selectedGroup.allowMemberAddFriend ? 'success' : 'danger'" size="small">
+              <el-tag
+                :type="selectedGroup.allowMemberAddFriend ? 'success' : 'danger'"
+                size="small"
+              >
                 {{ selectedGroup.allowMemberAddFriend ? "是" : "否" }}
               </el-tag>
             </el-descriptions-item>
@@ -540,7 +682,9 @@ onMounted(() => {
               <span>全员禁言</span>
               <el-switch
                 :model-value="!!selectedGroup.allMuted"
-                :disabled="selectedGroup.status === 'dissolved' || selectedGroup.status === 'banned'"
+                :disabled="
+                  selectedGroup.status === 'dissolved' || selectedGroup.status === 'banned'
+                "
                 @change="() => openMuteDialog(selectedGroup!)"
               />
             </div>
@@ -548,7 +692,8 @@ onMounted(() => {
               <span>允许群内互加好友</span>
               <el-switch
                 :model-value="!!selectedGroup.allowMemberAddFriend"
-                disabled
+                :disabled="selectedGroup.status === 'dissolved'"
+                @change="(val: boolean) => toggleMemberAddFriend(selectedGroup!, val)"
               />
             </div>
             <el-button
@@ -563,9 +708,65 @@ onMounted(() => {
           </div>
 
           <div class="detail-section">
+            <h4>群成员</h4>
+            <div v-loading="membersLoading">
+              <div v-if="groupMembers.length" class="member-list">
+                <div v-for="m in groupMembers" :key="m.userId" class="member-item">
+                  <span class="member-avatar">{{ (m.nickname || m.userId).slice(0, 1) }}</span>
+                  <div class="member-content">
+                    <span class="member-name">{{ m.nickname || m.userId }}</span>
+                    <span class="member-sub">{{ m.userId }}</span>
+                  </div>
+                  <el-tag
+                    :type="roleTagTypes[m.role || 'member'] ?? 'info'"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ roleLabels[m.role || "member"] ?? (m.role || "成员") }}
+                  </el-tag>
+                </div>
+              </div>
+              <el-empty v-else-if="!membersLoading" description="暂无成员数据" :image-size="60" />
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <h4>管理撤回指定消息</h4>
+            <el-form
+              ref="recallFormRef"
+              :model="recallForm"
+              :rules="recallRules"
+              label-width="90px"
+              @submit.prevent="submitRecallMessage"
+            >
+              <el-form-item label="消息ID" prop="messageId">
+                <el-input v-model="recallForm.messageId" placeholder="UUID" />
+              </el-form-item>
+              <el-form-item label="撤回原因" prop="reason">
+                <el-input
+                  v-model="recallForm.reason"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="必填"
+                />
+              </el-form-item>
+              <el-form-item label="工单号" prop="ticketNo">
+                <el-input v-model="recallForm.ticketNo" placeholder="可选" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="danger" :loading="recallSubmitting" @click="submitRecallMessage"
+                  >撤回消息</el-button
+                >
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <div class="detail-section">
             <div class="detail-section-header">
               <h4>群管理撤回记录</h4>
-              <el-tag v-if="recallTotal > 0" type="warning" size="small">{{ recallTotal }} 条</el-tag>
+              <el-tag v-if="recallTotal > 0" type="warning" size="small"
+                >{{ recallTotal }} 条</el-tag
+              >
             </div>
             <template v-if="recallLogs.length || recallLoading">
               <el-table
@@ -608,7 +809,9 @@ onMounted(() => {
           <div class="detail-section">
             <div class="detail-section-header">
               <h4>群被举报记录</h4>
-              <el-tag v-if="groupReportsTotal > 0" type="danger" size="small">{{ groupReportsTotal }} 条</el-tag>
+              <el-tag v-if="groupReportsTotal > 0" type="danger" size="small"
+                >{{ groupReportsTotal }} 条</el-tag
+              >
             </div>
             <template v-if="groupReports.length || groupReportsLoading">
               <el-table
@@ -628,7 +831,11 @@ onMounted(() => {
                 </el-table-column>
                 <el-table-column label="状态" min-width="90">
                   <template #default="{ row }">
-                    <el-tag :type="reportStatusTagTypes[row.status] ?? 'info'" effect="plain" size="small">
+                    <el-tag
+                      :type="reportStatusTagTypes[row.status] ?? 'info'"
+                      effect="plain"
+                      size="small"
+                    >
                       {{ formatReportStatus(row.status) }}
                     </el-tag>
                   </template>
@@ -696,7 +903,9 @@ onMounted(() => {
       </el-form>
       <template #footer>
         <el-button @click="closeDissolveDialog">取消</el-button>
-        <el-button type="danger" :loading="dissolveSubmitting" @click="submitDissolve">确认解散</el-button>
+        <el-button type="danger" :loading="dissolveSubmitting" @click="submitDissolve"
+          >确认解散</el-button
+        >
       </template>
     </el-dialog>
 
@@ -917,5 +1126,55 @@ onMounted(() => {
 .dissolve-btn {
   margin-top: 16px;
   width: 100%;
+}
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.member-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.member-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: #fff;
+  background: var(--el-color-primary);
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.member-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.member-name {
+  overflow: hidden;
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-sub {
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

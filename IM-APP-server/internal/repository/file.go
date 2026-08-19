@@ -2,11 +2,14 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"im-app-server/internal/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrInvalidReportImage = errors.New("invalid report image")
 
 type FileRepo struct {
 	DB *pgxpool.Pool
@@ -23,6 +26,17 @@ func (r *FileRepo) CreateFile(ctx context.Context, ownerID, purpose, fileName, c
 	).Scan(&f.ID, &f.Purpose, &f.ContentType, &f.Size, &f.Status, &f.URL)
 	f.FileName = fileName
 	return f, err
+}
+
+// FindPendingByID 查询待确认上传的文件，返回其对象键，供 Complete 做 MinIO 存在性校验
+func (r *FileRepo) FindPendingByID(ctx context.Context, fileID, ownerID string) (string, error) {
+	var objectKey string
+	err := r.DB.QueryRow(ctx, `
+		SELECT object_key FROM files
+		WHERE id=$1::uuid AND owner_id=$2::uuid AND status='pending'`,
+		fileID, ownerID,
+	).Scan(&objectKey)
+	return objectKey, err
 }
 
 // MarkReady 标记上传完成（仅 pending → ready）
@@ -58,4 +72,25 @@ func (r *FileRepo) FindReadyAvatarByID(ctx context.Context, fileID, ownerID stri
 		fileID, ownerID,
 	).Scan(&f.ID, &f.Purpose, &f.ContentType, &f.Size, &f.Status, &f.URL)
 	return f, err
+}
+
+// FindReadyReportImagePaths resolves uploaded report images to public, directly accessible URLs.
+func (r *FileRepo) FindReadyReportImagePaths(ctx context.Context, fileIDs []string, ownerID string) ([]string, error) {
+	paths := make([]string, 0, len(fileIDs))
+	for _, fileID := range fileIDs {
+		var imagePath string
+		err := r.DB.QueryRow(ctx, `
+			SELECT url
+			FROM files
+			WHERE id=$1::uuid AND owner_id=$2::uuid AND status='ready'
+			  AND purpose='image' AND content_type LIKE 'image/%'
+			  AND size > 0 AND size <= 10485760 AND url <> ''`,
+			fileID, ownerID,
+		).Scan(&imagePath)
+		if err != nil {
+			return nil, ErrInvalidReportImage
+		}
+		paths = append(paths, imagePath)
+	}
+	return paths, nil
 }

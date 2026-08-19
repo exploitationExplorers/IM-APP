@@ -1,8 +1,32 @@
 import { request } from '@/utils/request'
-import type { Contact, ContactTagItem, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
+import type {
+  Contact,
+  ContactListQuery,
+  ContactPage,
+  ContactTagItem,
+  FriendRequest,
+  GroupFriendRequestResult,
+  GroupPreview,
+  SendFriendResult,
+} from '@/types'
 
-export async function fetchContacts(): Promise<Contact[]> {
-  return request<Contact[]>({ url: '/contacts', method: 'GET' })
+export async function fetchContacts(query: ContactListQuery = {}): Promise<ContactPage> {
+  const data: Record<string, string | number> = {
+    limit: query.limit ?? 50,
+  }
+  if (query.keyword?.trim()) data.keyword = query.keyword.trim()
+  if (query.sort) data.sort = query.sort
+  if (query.cursor) data.cursor = query.cursor
+  const result = await request<ContactPage | Contact[]>({
+    url: '/contacts',
+    method: 'GET',
+    data,
+  })
+
+  // 兼容仍直接返回数组的旧版服务，同时保持分页调用方的数据结构稳定。
+  return Array.isArray(result)
+    ? { items: result, hasMore: false, total: result.length }
+    : result
 }
 
 export async function fetchContact(contactId: string): Promise<Contact> {
@@ -36,6 +60,23 @@ export async function sendFriendRequest(toUserId: string, message: string): Prom
     url: '/friend-requests',
     method: 'POST',
     data: { toUserId, message },
+  })
+}
+
+/**
+ * 从群成员资料发起好友申请。
+ * 服务端校验双方均为该群有效成员且群开启 allowMemberAddFriend；
+ * 群内关闭加好友只限制该来源，不影响公开 ID / 二维码加好友。
+ */
+export async function sendGroupFriendRequest(
+  groupId: string,
+  toUserId: string,
+  message = '',
+): Promise<GroupFriendRequestResult> {
+  return request<GroupFriendRequestResult>({
+    url: '/group-friend-requests',
+    method: 'POST',
+    data: { groupId, toUserId, message },
   })
 }
 

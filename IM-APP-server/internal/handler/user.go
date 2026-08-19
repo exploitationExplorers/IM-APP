@@ -175,12 +175,20 @@ type ContactHandler struct {
 
 func (h *ContactHandler) ListContacts(c *gin.Context) {
 	uid := middleware.UserID(c)
-	list, err := h.Svc.ListContacts(c.Request.Context(), uid)
+	sort := c.DefaultQuery("sort", "recent")
+	if sort == "chat" {
+		sort = "recent"
+	}
+	page, err := h.Svc.ListContacts(c.Request.Context(), uid, c.Query("keyword"), sort, c.Query("cursor"), queryInt(c, "limit", 50))
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidContactQuery) {
+			response.Fail(c, http.StatusBadRequest, "参数错误")
+			return
+		}
 		response.Fail(c, http.StatusInternalServerError, "查询失败")
 		return
 	}
-	response.OK(c, list)
+	response.OK(c, page)
 }
 
 func (h *ContactHandler) ListGroups(c *gin.Context) {
@@ -222,14 +230,41 @@ func (h *ContactHandler) CreateFriendRequest(c *gin.Context) {
 	result, err := h.Svc.SendFriendRequest(c.Request.Context(), uid, req.ToUserID, req.Message, req.Source, req.SourceGroupID)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrInvalidFriendRequest):
+			response.Fail(c, http.StatusBadRequest, "好友申请参数错误")
 		case errors.Is(err, service.ErrSelfAction):
 			response.Fail(c, http.StatusBadRequest, "不能添加自己")
 		case errors.Is(err, service.ErrAlreadyFriend):
 			response.Fail(c, http.StatusBadRequest, "已经是好友")
 		case errors.Is(err, service.ErrNotFound):
-			response.Fail(c, http.StatusNotFound, "用户不存在")
+			response.Fail(c, http.StatusNotFound, "用户或群不存在")
 		case errors.Is(err, service.ErrForbidden):
 			response.Fail(c, http.StatusForbidden, "无法发送好友申请")
+		default:
+			response.Fail(c, http.StatusInternalServerError, "发送失败")
+		}
+		return
+	}
+	response.OK(c, result)
+}
+
+func (h *ContactHandler) CreateGroupFriendRequest(c *gin.Context) {
+	var req models.CreateGroupFriendRequest
+	if err := bindBusinessJSON(c, &req); err != nil || req.GroupID == "" || req.ToUserID == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	result, err := h.Svc.SendGroupFriendRequest(c.Request.Context(), middleware.UserID(c), req)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidFriendRequest), errors.Is(err, service.ErrSelfAction):
+			response.Fail(c, http.StatusBadRequest, "好友申请参数错误")
+		case errors.Is(err, service.ErrAlreadyFriend):
+			response.Fail(c, http.StatusConflict, "已经是好友")
+		case errors.Is(err, service.ErrNotFound):
+			response.Fail(c, http.StatusNotFound, "用户或群不存在")
+		case errors.Is(err, service.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, "群内禁止添加好友或无权访问")
 		default:
 			response.Fail(c, http.StatusInternalServerError, "发送失败")
 		}

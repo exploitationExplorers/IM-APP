@@ -3,7 +3,7 @@ import axios, {
   AxiosInstance,
   AxiosRequestConfig,
   AxiosResponse,
-  InternalAxiosRequestConfig
+  InternalAxiosRequestConfig,
 } from "axios";
 import { ElMessage } from "element-plus";
 
@@ -28,7 +28,7 @@ export interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
 const config = {
   baseURL: import.meta.env.VITE_API_URL as string,
   timeout: ResultEnum.TIMEOUT as number,
-  withCredentials: false
+  withCredentials: false,
 };
 
 const axiosCanceler = new AxiosCanceler();
@@ -39,17 +39,27 @@ function isAuthEndpoint(url = ""): boolean {
   return url.includes("/auth/login") || url.includes("/auth/token/refresh");
 }
 
-function pickMessage(data: { message?: string; msg?: string } | undefined, fallback: string): string {
+function pickMessage(
+  data: { message?: string; msg?: string } | undefined,
+  fallback: string,
+): string {
   return data?.message || data?.msg || fallback;
+}
+
+function isSuccessCode(code: unknown): boolean {
+  return code === ResultEnum.SUCCESS || code === 200;
 }
 
 function setAuthorizationHeader(headers: InternalAxiosRequestConfig["headers"], token: string): void {
   if (!headers) return;
   if (typeof (headers as { set?: unknown }).set === "function") {
+    (headers as { set: (key: string, value: string) => void }).set("x-access-token", token);
     (headers as { set: (key: string, value: string) => void }).set("Authorization", `Bearer ${token}`);
     return;
   }
-  (headers as Record<string, string>).Authorization = `Bearer ${token}`;
+  const target = headers as Record<string, string>;
+  target["x-access-token"] = token;
+  target.Authorization = `Bearer ${token}`;
 }
 
 async function refreshAccessToken(): Promise<string> {
@@ -64,7 +74,7 @@ async function refreshAccessToken(): Promise<string> {
     }
 
     const headers: Record<string, string> = {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     };
     if (currentToken) {
       headers.Authorization = `Bearer ${currentToken}`;
@@ -73,11 +83,11 @@ async function refreshAccessToken(): Promise<string> {
     const response = await axios.post<ResultData<Auth.ResLogin>>(
       `${config.baseURL}/admin/v1/auth/token/refresh`,
       { refreshToken: currentRefresh },
-      { timeout: ResultEnum.TIMEOUT as number, headers }
+      { timeout: ResultEnum.TIMEOUT as number, headers },
     );
 
     const body = response.data;
-    if (body.code !== ResultEnum.SUCCESS || !body.data?.token) {
+    if (!isSuccessCode(body.code) || !body.data?.token) {
       throw new Error(pickMessage(body, "登录已过期"));
     }
 
@@ -109,12 +119,10 @@ class RequestHttp {
         if (requestConfig.cancel) axiosCanceler.addPending(requestConfig);
         requestConfig.loading ??= true;
         if (requestConfig.loading) showFullScreenLoading();
-        if (authStore.token) {
-          setAuthorizationHeader(requestConfig.headers, authStore.token);
-        }
+        if (authStore.token) setAuthorizationHeader(requestConfig.headers, authStore.token);
         return requestConfig;
       },
-      (error: AxiosError) => Promise.reject(error)
+      (error: AxiosError) => Promise.reject(error),
     );
 
     this.service.interceptors.response.use(
@@ -128,7 +136,7 @@ class RequestHttp {
           return Promise.reject(data);
         }
 
-        if (typeof data?.code === "number" && data.code !== ResultEnum.SUCCESS) {
+        if (typeof data?.code === "number" && !isSuccessCode(data.code)) {
           ElMessage.error(pickMessage(data, "请求失败"));
           return Promise.reject(data);
         }
@@ -179,7 +187,7 @@ class RequestHttp {
 
         if (!window.navigator.onLine) router.replace("/500");
         return Promise.reject(error);
-      }
+      },
     );
   }
 
@@ -191,6 +199,9 @@ class RequestHttp {
   }
   put<T>(url: string, params?: object, _object = {}): Promise<ResultData<T>> {
     return this.service.put(url, params, _object);
+  }
+  patch<T>(url: string, params?: object, _object = {}): Promise<ResultData<T>> {
+    return this.service.patch(url, params, _object);
   }
   delete<T>(url: string, params?: any, _object = {}): Promise<ResultData<T>> {
     return this.service.delete(url, { params, ..._object });

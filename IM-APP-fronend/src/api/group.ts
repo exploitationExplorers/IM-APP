@@ -1,5 +1,14 @@
 import { request } from '@/utils/request'
-import type { GroupInfo, GroupMember } from '@/types'
+import { parseQrcodePayload } from '@/utils/qrcode'
+import type {
+  GroupInfo,
+  GroupJoinRequestItem,
+  GroupMember,
+  GroupMemberMuteResult,
+  GroupQRCodeResolveResult,
+  JoinGroupByQRCodeResult,
+  GroupSettingsInput,
+} from '@/types'
 
 export async function createGroup(name: string, memberIds: string[]): Promise<GroupInfo> {
   return request<GroupInfo>({
@@ -9,29 +18,192 @@ export async function createGroup(name: string, memberIds: string[]): Promise<Gr
   })
 }
 
+/** 群详情：后端已改为 /groups/detail?groupId=，带 canChat/isMuted 等实时发言权限 */
 export async function fetchGroupDetail(groupId: string): Promise<GroupInfo> {
-  return request<GroupInfo>({ url: `/groups/${groupId}`, method: 'GET' })
+  return request<GroupInfo>({ url: '/groups/detail', method: 'GET', data: { groupId } })
 }
 
+/** 群成员列表：后端已改为 /group-members?groupId=，成员带禁言状态 */
 export async function fetchGroupMembers(groupId: string): Promise<GroupMember[]> {
-  return request<GroupMember[]>({ url: `/groups/${groupId}/members`, method: 'GET' })
+  return request<GroupMember[]>({ url: '/group-members', method: 'GET', data: { groupId } })
 }
 
 export async function joinGroup(groupId: string): Promise<GroupInfo> {
   return request<GroupInfo>({ url: `/groups/${groupId}/join`, method: 'POST' })
 }
 
-export async function updateGroupSettings(
+/** 更新群设置：后端已改为 POST /groups/settings/update，groupId 放请求体 */
+export async function updateGroupSettings(groupId: string, input: GroupSettingsInput) {
+  return request<GroupInfo>({
+    url: '/groups/settings/update',
+    method: 'POST',
+    data: { groupId, ...input },
+  })
+}
+
+export async function fetchJoinRequests(groupId: string): Promise<GroupJoinRequestItem[]> {
+  return request<GroupJoinRequestItem[]>({
+    url: `/groups/${groupId}/join-requests`,
+    method: 'GET',
+  })
+}
+
+export async function approveJoinRequest(groupId: string, requestId: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: `/groups/${groupId}/join-requests/${requestId}/approve`,
+    method: 'POST',
+  })
+}
+
+export async function rejectJoinRequest(groupId: string, requestId: string): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/join-requests/${requestId}/reject`,
+    method: 'POST',
+  })
+}
+
+export async function updateMemberRole(
   groupId: string,
-  input: { announcement?: string; allowMemberAddFriend?: boolean },
-) {
-  return request<{ ok: boolean }>({
-    url: `/groups/${groupId}/settings`,
+  userId: string,
+  role: 'admin' | 'member',
+): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${userId}/role`,
     method: 'PUT',
-    data: input,
+    data: { role },
+  })
+}
+
+export async function dismissGroup(groupId: string): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/dismiss`,
+    method: 'POST',
+  })
+}
+
+export async function updateGroupMyNickname(groupId: string, nickname: string) {
+  return request<{ nickname: string } | null>({
+    url: `/groups/${groupId}/me/nickname`,
+    method: 'PUT',
+    data: { nickname },
   })
 }
 
 export async function leaveGroup(groupId: string) {
   return request<{ ok: boolean }>({ url: `/groups/${groupId}/leave`, method: 'POST' })
 }
+
+export interface GroupQRCodeResult {
+  groupId: string
+  payload: string
+  expiresAt?: string
+}
+
+export async function fetchGroupQrcode(groupId: string): Promise<GroupQRCodeResult> {
+  return request<GroupQRCodeResult>({ url: `/groups/${groupId}/qrcode`, method: 'GET' })
+}
+
+export async function resolveGroupQRCode(tokenOrPayload: string): Promise<GroupQRCodeResolveResult> {
+  const parsed = parseQrcodePayload(tokenOrPayload)
+  const token = parsed.token || tokenOrPayload
+  return request<GroupQRCodeResolveResult>({
+    url: '/groups/qrcode/resolve',
+    method: 'POST',
+    data: {
+      token,
+      payload: tokenOrPayload,
+      qrcode: tokenOrPayload.startsWith('http') ? tokenOrPayload : undefined,
+    },
+  })
+}
+
+export async function joinGroupByQRCode(
+  tokenOrPayload: string,
+  remark = '',
+): Promise<JoinGroupByQRCodeResult> {
+  const parsed = parseQrcodePayload(tokenOrPayload)
+  const token = parsed.token || tokenOrPayload
+  return request<JoinGroupByQRCodeResult>({
+    url: '/groups/qrcode/join',
+    method: 'POST',
+    data: {
+      token,
+      payload: tokenOrPayload,
+      qrcode: tokenOrPayload.startsWith('http') ? tokenOrPayload : undefined,
+      remark,
+    },
+  })
+}
+
+
+export async function updateMyNickname(groupId: string, nickname: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: `/groups/${groupId}/me/nickname`,
+    method: 'PUT',
+    data: { nickname },
+  })
+}
+
+export async function updateGroupRemark(groupId: string, remark: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: `/groups/${groupId}/remark`,
+    method: 'PUT',
+    data: { remark },
+  })
+}
+
+export async function updateMemberRemark(
+  groupId: string,
+  memberUserId: string,
+  remark: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${memberUserId}/remark`,
+    method: 'PUT',
+    data: { remark },
+  })
+}
+
+/** 禁言成员：后端已改为 POST /group-members/mute，groupId/成员放请求体 */
+export async function muteGroupMember(
+  groupId: string,
+  memberUserId: string,
+  mutedSeconds: number,
+): Promise<GroupMemberMuteResult> {
+  return request<GroupMemberMuteResult>({
+    url: '/group-members/mute',
+    method: 'POST',
+    data: { groupId, memberUserId, mutedSeconds },
+  })
+}
+
+/** 解除禁言：POST /group-members/unmute，未禁言时幂等成功 */
+export async function unmuteGroupMember(
+  groupId: string,
+  memberUserId: string,
+): Promise<GroupMemberMuteResult> {
+  return request<GroupMemberMuteResult>({
+    url: '/group-members/unmute',
+    method: 'POST',
+    data: { groupId, memberUserId },
+  })
+}
+
+export async function removeGroupMember(groupId: string, memberUserId: string): Promise<void> {
+  await request<{ ok: boolean }>({
+    url: `/groups/${groupId}/members/${memberUserId}`,
+    method: 'DELETE',
+  })
+}
+
+export async function inviteGroupMembers(
+  groupId: string,
+  userIds: string[],
+): Promise<{ ok: boolean; invitedCount: number }> {
+  return request<{ ok: boolean; invitedCount: number }>({
+    url: `/groups/${groupId}/invitations`,
+    method: 'POST',
+    data: { userIds },
+  })
+}
+

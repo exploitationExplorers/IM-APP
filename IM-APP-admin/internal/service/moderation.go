@@ -36,6 +36,14 @@ func (s *OpsService) ListProfileModerations(ctx context.Context, status string, 
 	return s.Repo.ListProfileModerations(ctx, status, page, size)
 }
 
-func (s *OpsService) HandleProfileModeration(ctx context.Context, userID, field, toStatus, reason, handlerID string) error {
-	return s.Repo.HandleProfileModeration(ctx, userID, field, toStatus, reason, handlerID)
+func (s *OpsService) ApproveProfile(ctx context.Context, userID, field, handlerID string) error {
+	return s.Repo.ApproveProfile(ctx, userID, field, handlerID)
+}
+
+func (s *OpsService) RejectProfile(ctx context.Context, userID, field, reason, handlerID string) error {
+	return s.Repo.RejectProfile(ctx, userID, field, reason, handlerID)
+}
+
+func (s *OpsService) ReopenProfile(ctx context.Context, userID, field, handlerID string) error {
+	return s.Repo.ReopenProfile(ctx, userID, field, handlerID)
 }

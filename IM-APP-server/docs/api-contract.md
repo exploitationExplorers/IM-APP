@@ -14,9 +14,15 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 失败时 `code: 1`，HTTP 状态码：400 / 401 / 403 / 404 / 500。
 
+例外：`GET /health` 为无需登录的基础存活检查，直接返回 `{ "status": "ok" }`，并按来源 IP 限制为每分钟最多 20 次。
+
 ---
 
 ## 认证（无需 JWT，除标注外）
+
+### GET `/api/v1/public/countries`
+
+登录、注册前查询已启用的国家/地区和国际电话区号。响应项包含 `code`、`dialCode`、`cnName`、`enName`、`enabled`。注册、密码登录、验证码登录、发送验证码和重置密码均传 `countryCode + phone`；`countryCode` 不传时兼容默认 `+86`，传入时按 libphonenumber 的各国规则校验并统一存为 E.164。
 
 ### POST `/api/v1/auth/sms/send`
 
@@ -184,7 +190,7 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### PATCH `/api/v1/me`
 
-修改本人资料。**nickname、avatarFileId、bio 均需传入**（bio 无内容传空字符串）。头像 `avatarFileId` 须先走文件上传流程（接口 12 → PUT → 接口 13）。
+修改本人资料。**nickname、avatarFileId、bio 均需传入**（bio 无内容传空字符串）。头像 `avatarFileId` 须先走文件上传流程（接口 12 → multipart POST → 接口 13）。
 
 **Body**
 ```json
@@ -288,7 +294,36 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/contacts`
 
-好友列表。每项含 `remark`（无备注时为空字符串）。通讯录展示优先用备注，没有则用昵称。
+好友列表（分页）。每项含 `remark`（无备注时为空字符串）。通讯录展示优先用备注，没有则用昵称。
+
+一次转发 9999+ 好友不要靠本接口拉全量，客户端全选后走 `POST /api/v1/forward-task-targets/generate` 的 `all_friends`。
+
+**Query**
+
+| 参数 | 说明 |
+|---|---|
+| `keyword` | 可选，匹配昵称 / 备注 / 公开 ID，最长 64 字 |
+| `sort` | `recent`（默认，最近加入）或 `name`（备注/昵称） |
+| `cursor` | 上一页最后一条好友 ID，首页省略 |
+| `limit` | 默认 50，最大 100 |
+
+**Response `data`**
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "publicId": "j8afsqh",
+      "nickname": "压测好友00001",
+      "avatar": "",
+      "remark": ""
+    }
+  ],
+  "nextCursor": "uuid",
+  "hasMore": true,
+  "total": 10002
+}
+```
 
 ### GET `/api/v1/contacts/:id`
 
@@ -445,6 +480,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 }
 ```
 
+群同步到 OpenIM 后，系统向该群发送一条欢迎消息：`新群创建成功，一起来聊天吧`。
+
 ### GET `/api/v1/groups`
 
 见通讯录章节（支持 `role` 筛选）。
@@ -483,7 +520,9 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### POST `/api/v1/groups/:id/invitations`
 
-邀请好友入群。**Body** `{ "userIds": ["uuid"] }`
+群主/管理员邀请好友入群：直接写入群成员并同步 OpenIM（不走待接受邀请）。已在群中或非好友会被跳过。
+
+**Body** `{ "userIds": ["uuid"] }`
 
 ### POST `/api/v1/group-invitations/:token/accept`
 
@@ -548,11 +587,23 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 **Body** `{ "nickname": "群内昵称" }`
 
-### POST `/api/v1/groups/:id/reports`
+### PUT `/api/v1/groups/:id/remark`
+
+设置当前用户对该群的备注，最多 64 个字。**Body** `{ "remark": "项目群" }`；传空字符串清除。群详情响应通过 `remark` 返回。
+
+### PUT `/api/v1/groups/:id/members/:userId/remark`
+
+设置当前用户对指定群成员的备注，最多 64 个字。**Body** `{ "remark": "产品负责人" }`；传空字符串清除。群成员列表通过 `memberRemark` 返回。
+
+### POST `/api/v1/groups/reports`
 
 举报当前群聊，仅群成员可提交；同一用户对同一群的待处理举报幂等。
 
-**Body** `{ "reason": "spam|fraud|pornography|violence|harassment|other", "description": "补充说明" }`
+图片先通过 `POST /api/v1/files/uploads`（`purpose=image`）上传，并调用 `POST /api/v1/files/uploads/complete` 完成上传。举报最多关联 9 张当前用户的已完成图片，每张不超过 10 MiB。
+
+**Body** `{ "groupId": "100001", "reason": "spam|fraud|pornography|violence|harassment|other", "description": "补充说明", "imageFileIds": ["图片文件 UUID"] }`
+
+响应的 `imagePaths` 仅包含可直接点击打开的 MinIO HTTP(S) URL，不返回 objectKey 等内部字符串。
 
 ### POST `/api/v1/groups/:id/leave`
 
@@ -566,11 +617,58 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ---
 
+## 用户举报（需 JWT）
+
+### GET `/api/v1/report-reasons?targetType=user&language=zh`
+
+返回当前启用的用户举报原因，按 `sortOrder` 排序。当前后端只接受 `targetType=user`，`language` 默认 `zh`。
+
+**Response**
+```json
+[
+  {
+    "id": "uuid",
+    "targetType": "user",
+    "reason": "垃圾广告",
+    "language": "zh",
+    "sortOrder": 10
+  }
+]
+```
+
+### POST `/api/v1/reports`
+
+提交用户举报。证据文件必须由当前用户上传且状态为 `ready`，最多 9 个；补充说明最多 1000 个字符。同一用户对同一目标已有 `pending`、`processing` 或 `reopened` 工单时，接口幂等返回原工单。
+
+**Body**
+```json
+{
+  "targetType": "user",
+  "targetId": "被举报用户UUID",
+  "reasonId": "举报原因UUID",
+  "description": "补充说明",
+  "evidenceFileIds": ["已完成上传的文件UUID"]
+}
+```
+
+**Response**
+```json
+{
+  "id": "举报工单UUID",
+  "status": "pending",
+  "createdAt": "2026-08-14T12:00:00Z"
+}
+```
+
+该接口写入管理后台共用的 `report_reasons`、`reports`、`report_files`，不写入也不修改原有 `group_reports`。
+
+---
+
 ## 文件上传（需 JWT）
 
 ### POST `/api/v1/files/uploads`
 
-创建上传任务，获取预签名 PUT 地址。
+创建上传任务，获取预签名 multipart POST 表单。H5 和 App 都使用 `formUrl` + `formData` 上传，文件字段名为 `file`；`uploadUrl` 仅为兼容字段，值与 `formUrl` 相同。
 
 **Body**
 ```json
@@ -586,32 +684,36 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ```json
 {
   "file": { "id": "uuid", "status": "pending" },
-  "uploadUrl": "https://...",
+  "uploadUrl": "https://...预签名 POST 表单地址...",
+  "formUrl": "https://www.ke58.com/minio/im-uploads",
+  "formData": {
+    "key": "uploads/.../uuid.jpg",
+    "policy": "...",
+    "x-amz-algorithm": "AWS4-HMAC-SHA256"
+  },
   "headers": {},
   "expiresIn": 900
 }
 ```
 
-客户端 PUT 二进制到 `uploadUrl` 后，调用完成接口。
+### POST `/api/v1/files/uploads/complete`
 
-### POST `/api/v1/files/uploads/:fileId/complete`
-
-确认上传完成。
+确认上传完成，`fileId` 放在 JSON 请求体中。
 
 **Body**
 ```json
-{ "etag": "optional" }
+{ "fileId": "uuid", "etag": "optional" }
 ```
 
 **Response**：`FileInfo`（含 `url`、`status` 等）。
 
-### GET `/api/v1/files/:fileId`
+### GET `/api/v1/files?fileId=uuid`
 
 查询文件信息。
 
 ### POST `/api/v1/files/presign`（旧版 / 兼容）
 
-获取 MinIO 预签名上传 URL（MinIO 未配置时返回 dev 占位 URL）。
+获取 MinIO 预签名 multipart POST 表单（MinIO 未配置时返回 dev 占位 URL）。
 
 **Body**
 ```json
@@ -622,6 +724,8 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 ```json
 {
   "uploadUrl": "https://...",
+  "formUrl": "https://...",
+  "formData": { "key": "users/{uid}/{uuid}.jpg", "policy": "..." },
   "fileUrl": "https://...",
   "objectKey": "users/{uid}/{uuid}.jpg",
   "expiresIn": 900
@@ -661,7 +765,88 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/im/groups/:businessGroupId`
 
-把纯数字业务群号解析为内部 UUID，再解析为稳定的 OpenIM groupID，并校验群状态、成员资格、单人禁言及全员禁言。
+把纯数字业务群号、内部 UUID 或 OpenIM 群 ID 解析为稳定的 OpenIM groupID，响应里的 `businessGroupId` 始终是纯数字群号。校验群状态、成员资格、单人禁言及全员禁言。若 OpenIM 尚无该群（历史数据未同步），会按业务库补创建并把当前用户邀请进群后再返回；全量成员对账仍由 Outbox 负责。
+
+### GET `/api/v1/im/conversations/:peerType/:peerId`
+
+获取单个会话的当前设置（OpenIM 全量对象）。
+
+- `peerType`：`c2c`（单聊）或 `group`（群聊）
+- `peerId`：业务好友 ID 或业务群 ID（**无需传 OpenIM conversationId**，后端用 `ResolvePeer`/`ResolveGroup` 解析并拼 `si_`/`sg_` 会话 ID，且带好友/群关系校验）
+
+**Response `data`**：见下方 PATCH 返回结构。
+
+### PATCH `/api/v1/im/conversations/:peerType/:peerId`
+
+部分更新会话设置，请求体为下列字段的任意子集（只传要改的）。后端先 GET 全量再叠加回写，避免清零其它设置。
+
+- `peerType` / `peerId`：含义同上
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `recvMsgOpt` | int | 0 正常 / 1 免打扰 / 2 仅在线接收 |
+| `isPinned` | bool | 置顶聊天 |
+| `isPrivateChat` | bool | 阅后即焚开关 |
+| `burnDuration` | int | 阅后即焚时长（秒） |
+| `isMsgDestruct` | bool | 消息定时销毁开关 |
+| `msgDestructTime` | int | 消息定时销毁时长（秒） |
+| `groupAtType` | int | 群 @ 强提醒档位 |
+| `ex` | string | 会话扩展（建议存备注名） |
+| `draftText` | string | 会话草稿 |
+
+**Body 示例**
+```json
+{ "recvMsgOpt": 1, "isPinned": true, "ex": "老王" }
+```
+
+**Response `data`**：回写后该会话的最新全量设置。至少传一个字段，否则 400；`peerType` 非法 400；与好友/群不可聊天 403；会话不存在（仅 GET）404。
+
+### POST `/api/v1/im/conversations/:peerType/:peerId/read`
+
+标记会话已读，清空未读数。`peerType` / `peerId` 含义同上。
+
+**Response `data`**：`{ "ok": true }`
+
+### PUT `/api/v1/im/me/global-msg-recv-opt`
+
+设置当前用户级全局免打扰（对所有会话生效）。
+
+**Body**
+```json
+{ "recvMsgOpt": 1 }
+```
+
+**Response `data`**：`{ "recvMsgOpt": 1 }`
+
+### POST `/api/v1/im/me/push-token`
+
+注册/更新当前用户的设备推送凭证（App 后台/离线时的「来消息提示」）。按 `platform + deviceToken` 去重 upsert，存于 Redis，不过期。
+
+**Body**
+```json
+{ "platform": "ios", "channel": "apns", "deviceToken": "a1b2c3d4e5f6...", "enabled": true }
+```
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `platform` | string | 是 | ios / android / web / harmony |
+| `channel` | string | 否 | apns / fcm / jpush / harmony（web 可空） |
+| `deviceToken` | string | 是 | 设备推送令牌 |
+| `enabled` | bool | 否 | 是否接收推送，缺省 true |
+
+**Response `data`**：`{ "ok": true }`（Redis 不可用时 503）
+
+### DELETE `/api/v1/im/me/push-token`
+
+注销当前用户某个设备的推送凭证（退出登录/关闭推送时调用）。
+
+**Body**
+```json
+{ "deviceToken": "a1b2c3d4e5f6..." }
+```
+
+**Response `data`**：`{ "ok": true }`
+
+> 消息推送管线：OpenIM 在消息落库后回调 `AfterMessage` Webhook，后端记录审计并构造 `PushMessage` 调用 `PushService.Dispatch`。当前为 `LoggingPushService` 日志桩（仅打印意图），后续替换为接入 APNs/FCM/个推 的实现。未读总数建议前端直接调 OpenIM SDK `getTotalUnreadMsgCount` 获取，无需后端中转。
 
 ## OpenIM 内部接口
 
@@ -695,28 +880,64 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ## 消息转发（Phase 5）
 
-这是旧 PostgreSQL 消息链路能力，仅 `LEGACY_CHAT_ENABLED=true` 时注册；OpenIM 模式默认返回 404。普通用户消息转发应由 OpenIM SDK 完成。
+万人转发采用“PostgreSQL 任务状态 + 事务 Outbox + Kafka 异步队列 + OpenIM 发消息”的链路，接口始终注册，不依赖 `LEGACY_CHAT_ENABLED`。转发目标总人数不设业务上限；worker 从 Kafka 逐批消费并逐个发送，不会在一个 HTTP 请求内同步发完。客户端聊天「转发给」走本接口：创建草稿、按全部好友/标签生成或分批写入目标后提交，发送由 worker 异步完成。离线推送不在本阶段范围内。
+
+接口约定：GET 使用 query 参数；新建的 POST 写接口全部使用静态路径和 JSON body，不把 `taskId` 拼入路径。`GET /api/v1/forward-tasks/:id` 只保留给旧客户端兼容，新客户端使用 `/forward-task-progress?taskId=...`。
 
 ### POST `/api/v1/forward-tasks`
 
-创建异步转发任务（最多 9999 个目标会话）。
+创建异步转发草稿任务。`targetUserIds` 可以一次传入全部目标，服务端内部按每批 1000 条写 PostgreSQL；也可以先创建空任务，再通过 add/generate 逐批补充。
 
 **Body**
 ```json
-{ "sourceMessageId": "uuid", "targetConvIds": ["uuid1", "uuid2"] }
+{
+  "sourceConversationId": "si_xxx_xxx",
+  "sourceClientMsgId": "OpenIM-clientMsgID",
+  "sourceServerMsgId": "OpenIM-serverMsgID",
+  "sourceSnapshot": {
+    "contentType": 101,
+    "content": {"content": "需要转发的文本"}
+  },
+  "selector": {"mode": "all_friends"},
+  "idempotencyKey": "forward-request-uuid",
+  "targetUserIds": ["业务用户UUID-1", "业务用户UUID-2"]
+}
 ```
 
-### GET `/api/v1/forward-tasks/:id`
+`sourceClientMsgId` 与兼容字段 `sourceMessageId` 至少传一个；`sourceSnapshot.contentType` 只能是 1～999，禁止借转发接口伪造 OpenIM 通知/控制消息。
 
-查询转发任务进度。
+### 目标管理
+
+| 方法与路径 | 参数 | 说明 |
+|---|---|---|
+| `GET /api/v1/forward-task-targets?taskId=...&status=...&cursor=...&limit=50` | query | 游标分页查询目标明细 |
+| `POST /api/v1/forward-task-targets/add` | `{taskId,targetUserIds}` | 向草稿任务添加目标，单次最多 1000 个 |
+| `POST /api/v1/forward-task-targets/generate` | `{taskId,selector}` | 按全部好友、标签或关键字生成目标 |
+| `POST /api/v1/forward-task-targets/remove` | `{taskId,targetUserIds}` | 从草稿任务移除目标，单次最多 1000 个 |
+| `POST /api/v1/forward-task-targets/clear` | `{taskId}` | 清空草稿任务目标 |
+
+`selector.mode` 可选 `all_friends`、`tags`、`search`；`tags` 需传 `tagIds`，`search` 可传 `keyword`。1000 是单次数据库写入/重试请求的技术批次，不是一个转发任务的总人数限制。
+
+### 任务控制与进度
+
+| 方法与路径 | 参数 | 说明 |
+|---|---|---|
+| `GET /api/v1/forward-tasks?status=...&cursor=...&limit=20` | query | 查询当前用户的任务列表 |
+| `GET /api/v1/forward-task-progress?taskId=...` | query | 查询任务汇总进度 |
+| `GET /api/v1/forward-tasks/:id` | path | 旧客户端兼容查询，已废弃 |
+| `POST /api/v1/forward-tasks/submit` | `{taskId}` | 提交任务并写 Kafka Outbox |
+| `POST /api/v1/forward-tasks/cancel` | `{taskId,reason}` | 取消任务 |
+| `POST /api/v1/forward-tasks/retry` | `{taskId,onlyFailed,targetUserIds}` | 重试失败或指定目标，指定目标单次最多 1000 个 |
+| `POST /api/v1/forward-tasks/pause` | `{taskId}` | 暂停任务 |
+| `POST /api/v1/forward-tasks/resume` | `{taskId}` | 恢复任务并重新派发 Kafka 事件 |
+
+提交、恢复或重试时 Kafka 未配置返回 503。任务状态包括 `draft`、`expanding`、`pending`、`processing`、`completed`、`partially_completed`、`failed`、`paused`、`cancelled`；进度响应包含目标总数及成功、失败、跳过、取消、等待中、处理中等计数。
 
 ---
 
 ## 收藏
 
-收藏消息快照（文字 / 表情 / 图片 / 视频 / 文件 / 语音）。创建时按业务库 `messages` 校验消息存在且当前用户是会话成员；同一用户对同一消息幂等。
-
-> 说明：当前实现依赖 PostgreSQL `messages` 表。OpenIM 主路径下的消息尚未落该表时，创建可能返回「消息不存在」；列表 / 删除不受影响。
+收藏消息快照（文字 / 表情 / 图片 / 视频 / 文件 / 语音）。OpenIM 主路径下由客户端提交快照，服务端不再查业务库 `messages`。同一用户对同一 `messageId` 幂等。
 
 ### POST `/api/v1/favorites`
 
@@ -724,7 +945,13 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 **Body**
 ```json
-{ "messageId": "uuid" }
+{
+  "messageId": "OpenIM clientMsgID",
+  "type": "text",
+  "content": "消息内容或文件地址/JSON",
+  "senderId": "发送者业务或 OpenIM ID",
+  "conversationId": "OpenIM conversationID"
+}
 ```
 
 **Response**
@@ -740,9 +967,16 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 }
 ```
 
-### GET `/api/v1/favorites?type=image&page=1&limit=20`
+### POST `/api/v1/favorites/list`
 
-收藏列表。`type` 可选：`text` | `emoji` | `image` | `video` | `file` | `voice`；不传则全部。`page` 默认 1，`limit` 默认 20（最大 100）。
+收藏列表使用 JSON body，不使用 query 参数。
+
+**Body**
+```json
+{ "page": 1, "size": 20, "type": 0 }
+```
+
+`type`：`0` 全部、`1` 文字、`2` 图片/视频、`3` 文件、`4` 语音；`size` 默认 20，最大 100。
 
 **Response**：收藏对象数组（字段同创建响应）。
 

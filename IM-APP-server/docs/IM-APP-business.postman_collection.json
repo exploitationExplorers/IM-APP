@@ -13,7 +13,10 @@
     { "key": "conversationId", "value": "", "type": "string" },
     { "key": "tagId", "value": "", "type": "string" },
     { "key": "fileId", "value": "", "type": "string" },
-    { "key": "friendRequestId", "value": "", "type": "string" }
+    { "key": "friendRequestId", "value": "", "type": "string" },
+    { "key": "memberUserId", "value": "", "type": "string" },
+    { "key": "clientMsgId", "value": "", "type": "string" },
+    { "key": "messageSeq", "value": "1", "type": "string" }
   ],
   "auth": {
     "type": "bearer",
@@ -247,6 +250,20 @@
           "response": []
         },
         {
+          "name": "从群成员资料发送好友申请",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"toUserId\": \"{{memberUserId}}\",\n  \"message\": \"你好，我是群成员\"\n}"
+            },
+            "url": "{{baseUrl}}/group-friend-requests",
+            "description": "服务端强制校验双方均为有效群成员以及 allowMemberAddFriend=true，客户端不能伪造来源绕过。"
+          },
+          "response": []
+        },
+        {
           "name": "同意好友申请",
           "request": {
             "method": "POST",
@@ -426,8 +443,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/groups/{{groupId}}",
-            "description": "需为群成员。"
+            "url": "{{baseUrl}}/groups/detail?groupId={{groupId}}",
+            "description": "需为群成员。进入群聊时调用；返回 canChat、denyReason、isMuted、mutedUntil，前端无需等到发送失败才展示禁言状态。"
           },
           "response": []
         },
@@ -436,21 +453,49 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/groups/{{groupId}}/members",
-            "description": "群成员列表。"
+            "url": "{{baseUrl}}/group-members?groupId={{groupId}}",
+            "description": "群成员列表，包含 isMuted 与 mutedUntil。"
+          },
+          "response": []
+        },
+        {
+          "name": "禁言群成员",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"memberUserId\": \"{{memberUserId}}\",\n  \"mutedSeconds\": 3600\n}"
+            },
+            "url": "{{baseUrl}}/group-members/mute",
+            "description": "群主/管理员按角色权限禁言指定成员，最长 30 天。"
+          },
+          "response": []
+        },
+        {
+          "name": "解除群成员禁言",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"memberUserId\": \"{{memberUserId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/group-members/unmute",
+            "description": "权限同禁言接口；重复解除按幂等成功处理。"
           },
           "response": []
         },
         {
           "name": "修改群设置",
           "request": {
-            "method": "PUT",
+            "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"announcement\": \"公告\",\n  \"allowMemberAddFriend\": false,\n  \"joinMode\": \"open\",\n  \"allMuted\": false\n}"
+              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"announcement\": \"公告\",\n  \"allowMemberAddFriend\": false,\n  \"joinMode\": \"open\",\n  \"allMuted\": false\n}"
             },
-            "url": "{{baseUrl}}/groups/{{groupId}}/settings",
+            "url": "{{baseUrl}}/groups/settings/update",
             "description": "群主/管理员。allowMemberAddFriend=false 时禁止从该群加好友。"
           },
           "response": []
@@ -478,6 +523,25 @@
       ]
     },
     {
+      "name": "OpenIM 消息管理",
+      "item": [
+        {
+          "name": "撤回私聊或群聊消息",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"peerType\": \"group\",\n  \"peerId\": \"{{groupId}}\",\n  \"clientMsgId\": \"{{clientMsgId}}\",\n  \"seq\": {{messageSeq}},\n  \"reason\": \"违规消息\"\n}"
+            },
+            "url": "{{baseUrl}}/im/messages/recall",
+            "description": "私聊和群成员只能在撤回时间窗内撤回自己的消息；群管理员可撤回普通成员消息，群主可撤回普通成员或管理员消息。管理员撤回他人消息时 reason 必填。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "文件",
       "item": [
         {
@@ -490,7 +554,7 @@
               "raw": "{\n  \"purpose\": \"avatar\",\n  \"fileName\": \"avatar.jpg\",\n  \"contentType\": \"image/jpeg\",\n  \"size\": 102400\n}"
             },
             "url": "{{baseUrl}}/files/uploads",
-            "description": "返回 uploadUrl，客户端 PUT 二进制后再调 complete。"
+            "description": "返回 formUrl/formData，客户端使用 multipart/form-data POST 文件（字段名 file）后再调 complete。uploadUrl 与 formUrl 值相同。"
           },
           "response": []
         },
@@ -501,9 +565,9 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"etag\": \"\"\n}"
+              "raw": "{\n  \"fileId\": \"{{fileId}}\",\n  \"etag\": \"\"\n}"
             },
-            "url": "{{baseUrl}}/files/uploads/{{fileId}}/complete",
+            "url": "{{baseUrl}}/files/uploads/complete",
             "description": "确认上传完成，返回 FileInfo（含 url）。"
           },
           "response": []
@@ -513,7 +577,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/files/{{fileId}}",
+            "url": "{{baseUrl}}/files?fileId={{fileId}}",
             "description": "查询文件信息。"
           },
           "response": []

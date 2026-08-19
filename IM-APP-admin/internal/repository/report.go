@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"im-app-admin/internal/models"
@@ -59,6 +61,15 @@ func (r *DataRepo) ListReports(ctx context.Context, status, targetType, keyword 
 		out = append(out, rp)
 	}
 	return out, total, nil
+}
+
+// CountResolvedReports 统计某对象被结案（成立）的举报数（举报联动用）
+func (r *DataRepo) CountResolvedReports(ctx context.Context, targetType, targetID string) (int64, error) {
+	var n int64
+	err := r.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM reports
+		WHERE target_type=$1 AND target_id=$2 AND status='resolved'`, targetType, targetID).Scan(&n)
+	return n, err
 }
 
 func (r *DataRepo) GetReport(ctx context.Context, reportID string) (*models.ReportDetail, error) {
@@ -140,7 +151,7 @@ func (r *DataRepo) CreateReport(ctx context.Context, reporterID, targetType, tar
 	return id, err
 }
 
-// transitionReport 乐观锁状态迁移（版本号防重复结案，清单 05.4）
+// transitionReport 状态机校验 + 乐观锁（version CAS）状态迁移（清单 05.4）
 func (r *DataRepo) transitionReport(ctx context.Context, reportID, action, toStatus, detail, operatorID string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -152,10 +163,18 @@ func (r *DataRepo) transitionReport(ctx context.Context, reportID, action, toSta
 	if err := tx.QueryRow(ctx, `SELECT status, version FROM reports WHERE id=$1::uuid FOR UPDATE`, reportID).Scan(&before, &version); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE reports SET status=$2, version=version+1, updated_at=NOW() WHERE id=$1::uuid`,
-		reportID, toStatus); err != nil {
+	// 状态机校验：禁止非法流转（终态不可再处理）
+	if !validReportTransition(before, toStatus) {
+		return fmt.Errorf("举报状态 %s 不能流转到 %s", before, toStatus)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE reports SET status=$2, version=version+1, updated_at=NOW()
+		WHERE id=$1::uuid AND version=$3`, reportID, toStatus, version)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("举报状态已变更，请刷新后重试")
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO report_actions(report_id, admin_id, action, before_status, after_status, detail)
@@ -164,6 +183,20 @@ func (r *DataRepo) transitionReport(ctx context.Context, reportID, action, toSta
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// validReportTransition 举报状态机合法流转：
+// pending/reopened → processing（start）；pending/processing/reopened → resolved|rejected；rejected → reopened
+func validReportTransition(before, to string) bool {
+	switch to {
+	case "processing":
+		return before == "pending" || before == "reopened"
+	case "resolved", "rejected":
+		return before == "pending" || before == "processing" || before == "reopened"
+	case "reopened":
+		return before == "rejected"
+	}
+	return false
 }
 
 func (r *DataRepo) AssignReport(ctx context.Context, reportID, assigneeID, operatorID, reason string) error {
@@ -205,14 +238,26 @@ func (r *DataRepo) ResolveReport(ctx context.Context, reportID string, conclusio
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `
-		UPDATE reports SET status='resolved', conclusion=$2, action_taken=$3, resolved_by=$4::uuid, updated_at=NOW()
-		WHERE id=$1::uuid`, reportID, conclusion, actionTaken, operatorID); err != nil {
+	var before string
+	var version int
+	if err := tx.QueryRow(ctx, `SELECT status, version FROM reports WHERE id=$1::uuid FOR UPDATE`, reportID).Scan(&before, &version); err != nil {
 		return err
+	}
+	if !validReportTransition(before, "resolved") {
+		return fmt.Errorf("举报状态 %s 不能结案", before)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE reports SET status='resolved', conclusion=$2, action_taken=$3, resolved_by=$4::uuid, version=version+1, updated_at=NOW()
+		WHERE id=$1::uuid AND version=$5`, reportID, conclusion, actionTaken, operatorID, version)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("举报状态已变更，请刷新后重试")
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO report_actions(report_id, admin_id, action, before_status, after_status, detail)
-		VALUES($1::uuid,$2::uuid,'resolve','', 'resolved', $3)`, reportID, operatorID, reason); err != nil {
+		VALUES($1::uuid,$2::uuid,'resolve',$3, 'resolved', $4)`, reportID, operatorID, before, reason); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

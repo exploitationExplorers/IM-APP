@@ -1,0 +1,91 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {
+  collapseRepeatedGroupNameNotices,
+  imNotificationEventKey,
+} from '../src/utils/im-notification.ts'
+
+function message(id: string, systemEventKey?: string) {
+  return {
+    id,
+    conversationId: 'sg_group-1',
+    senderId: 'imAdmin',
+    type: systemEventKey ? 'system' : 'text',
+    content: systemEventKey ? '管理员 修改了群名称' : 'hello',
+    createdAt: '2026-08-16T00:00:00.000Z',
+    systemEventKey,
+  } as const
+}
+
+test('群改名通知签名区分目标名称', () => {
+  const base = {
+    contentType: 1520,
+    groupID: 'group-1',
+    sendID: 'imAdmin',
+  }
+  const first = imNotificationEventKey({
+    ...base,
+    content: JSON.stringify({
+      opUser: { userID: 'imAdmin' },
+      group: { groupID: 'group-1', groupName: '研发群' },
+    }),
+  } as never)
+  const second = imNotificationEventKey({
+    ...base,
+    content: JSON.stringify({
+      opUser: { userID: 'imAdmin' },
+      group: { groupID: 'group-1', groupName: '产品群' },
+    }),
+  } as never)
+
+  assert.notEqual(first, second)
+})
+
+test('只折叠连续且语义相同的群改名通知', () => {
+  const repeated = 'group-name:group-1:imAdmin:研发群'
+  const renamedAgain = 'group-name:group-1:imAdmin:产品群'
+  const result = collapseRepeatedGroupNameNotices([
+    message('1', repeated),
+    message('2', repeated),
+    message('3', repeated),
+    message('4'),
+    message('5', repeated),
+    message('6', renamedAgain),
+  ])
+
+  assert.deepEqual(result.map((item) => item.id), ['1', '4', '5', '6'])
+})
+
+test('禁言/全员禁言通知生成 group-mute 事件 key', () => {
+  const base = { groupID: 'group-1', sendID: 'imAdmin', clientMsgID: 'msg-1' }
+  // 1512 成员禁言 / 1514 全员禁言
+  assert.equal(
+    imNotificationEventKey({ ...base, contentType: 1512 } as never),
+    'group-mute:group-1:msg-1',
+  )
+  assert.equal(
+    imNotificationEventKey({ ...base, contentType: 1514 } as never),
+    'group-mute:group-1:msg-1',
+  )
+  // 1513 解除成员禁言 / 1515 取消全员禁言
+  assert.equal(
+    imNotificationEventKey({ ...base, contentType: 1513 } as never),
+    'group-mute:group-1:msg-1',
+  )
+  assert.equal(
+    imNotificationEventKey({ ...base, contentType: 1515 } as never),
+    'group-mute:group-1:msg-1',
+  )
+})
+
+test('普通聊天消息没有事件 key', () => {
+  assert.equal(
+    imNotificationEventKey({
+      contentType: 101,
+      groupID: 'group-1',
+      clientMsgID: 'msg-2',
+    } as never),
+    '',
+  )
+})

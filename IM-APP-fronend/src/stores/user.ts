@@ -19,7 +19,12 @@ import {
 } from '@/utils/request'
 import { initOpenIM, logoutOpenIM } from '@/utils/openim'
 import { applyLoginPhone, clearLoginPhone, saveLoginPhone } from '@/utils/login-phone'
+import { syncPushRegistration, unregisterPushRegistration } from '@/utils/push-register'
 import { useChatStore } from '@/stores/chat'
+import { useChatSettingsStore } from '@/stores/chatSettings'
+import { useContactStore } from '@/stores/contact'
+import { useGroupStore } from '@/stores/group'
+import { useMassSendStore } from '@/stores/massSend'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(getToken())
@@ -37,6 +42,10 @@ export const useUserStore = defineStore('user', () => {
     setRefreshToken(res.refreshToken)
     // IM 登录失败不应挡住业务登录，进聊天页时还会再试一次
     startIMSession()
+    const settings = useChatSettingsStore()
+    if (settings.notificationPermissionAsked && settings.message) {
+      void syncPushRegistration()
+    }
   }
 
   async function loginPassword(phone: string, password: string, countryCode?: string) {
@@ -77,6 +86,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function logout() {
+    await unregisterPushRegistration().catch(() => undefined)
     try {
       if (refreshToken.value) {
         await logoutCurrentDevice()
@@ -90,6 +100,9 @@ export const useUserStore = defineStore('user', () => {
     clearLoginPhone()
     clearToken()
     useChatStore().reset()
+    useContactStore().reset()
+    useGroupStore().reset()
+    useMassSendStore().resetAll()
     await logoutOpenIM().catch(() => undefined)
     uni.reLaunch({ url: '/pages/auth/sign-in' })
   }
@@ -97,7 +110,7 @@ export const useUserStore = defineStore('user', () => {
   /** 登录 SDK 后立刻挂上收消息监听，不能等到用户点开会话列表才订阅 */
   function startIMSession() {
     initOpenIM()
-      .then(() => useChatStore().subscribeRealtime())
+      .then(() => useChatStore().loadConversations())
       .catch(() => undefined)
   }
 
@@ -113,6 +126,10 @@ export const useUserStore = defineStore('user', () => {
     if (token.value) {
       startIMSession()
       loadProfile().catch(() => undefined)
+      const settings = useChatSettingsStore()
+      if (settings.notificationPermissionAsked && settings.message) {
+        void syncPushRegistration()
+      }
     }
   }
 

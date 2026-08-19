@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IM-APP-server 后端架构全景 · 代码解读</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "dark",
+      securityLevel: "loose",
+      fontFamily: "IBM Plex Sans, sans-serif",
+      themeVariables: {
+        darkMode: true,
+        background: "#0c1220",
+        primaryColor: "#16324a",
+        primaryTextColor: "#e8eef8",
+        primaryBorderColor: "#2ee9d0",
+        secondaryColor: "#1c2540",
+        tertiaryColor: "#121a2c",
+        lineColor: "#7dd3c7",
+        textColor: "#e8eef8",
+        nodeTextColor: "#e8eef8",
+        mainBkg: "#16324a",
+        nodeBorder: "#2ee9d0",
+        clusterBkg: "#10182a",
+        clusterBorder: "#2a3b5c",
+        titleColor: "#2ee9d0",
+        actorBkg: "#16324a",
+        actorBorder: "#8b7cff",
+        actorTextColor: "#e8eef8",
+        signalColor: "#7dd3c7",
+        signalTextColor: "#cfe8e4",
+        noteBkgColor: "#1a2740",
+        noteTextColor: "#e8eef8",
+        activationBkgColor: "#23405c",
+        sequenceNumberColor: "#0c1220"
+      }
+    });
+  </script>
+  <style>
+    :root {
+      --bg: #070b14;
+      --panel: rgba(16, 24, 42, 0.78);
+      --panel-solid: #10182a;
+      --line: #243352;
+      --text: #e8eef8;
+      --muted: #8ea0bc;
+      --cyan: #2ee9d0;
+      --violet: #8b7cff;
+      --amber: #ffc857;
+      --rose: #ff6b8a;
+      --ok: #3dd68c;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--text);
+      font: 15px/1.65 "IBM Plex Sans", system-ui, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(46, 233, 208, 0.12), transparent 50%),
+        radial-gradient(900px 500px at 110% 0%, rgba(139, 124, 255, 0.14), transparent 45%),
+        var(--bg);
+    }
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .app { display: grid; grid-template-columns: 272px 1fr; min-height: 100vh; }
+    nav.side {
+      position: sticky; top: 0; height: 100vh; overflow: auto;
+      padding: 22px 16px 40px;
+      border-right: 1px solid var(--line);
+      background: rgba(8, 12, 22, 0.92);
+      backdrop-filter: blur(16px);
+    }
+    .brand { display: flex; gap: 12px; align-items: center; margin-bottom: 22px; padding: 4px 6px; }
+    .logo {
+      width: 40px; height: 40px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--cyan), var(--violet));
+      display: grid; place-items: center; font-weight: 700; color: #071018;
+    }
+    .brand h1 { margin: 0; font-size: 15px; letter-spacing: 0.02em; }
+    .brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+    .nav a {
+      display: block; color: var(--muted); padding: 8px 10px; border-radius: 8px;
+      font-size: 13px; text-decoration: none;
+    }
+    .nav a:hover, .nav a.active { background: rgba(46, 233, 208, 0.08); color: var(--text); }
+    .nav .sec { margin: 16px 10px 6px; font-size: 11px; letter-spacing: 0.14em; color: #5f7394; text-transform: uppercase; }
+    main { padding: 28px 36px 80px; max-width: 1280px; }
+    .hero {
+      border: 1px solid var(--line); border-radius: 24px; padding: 32px;
+      background: linear-gradient(180deg, rgba(46, 233, 208, 0.08), transparent 40%), var(--panel);
+      box-shadow: var(--shadow); margin-bottom: 28px;
+    }
+    .hero h2 { margin: 0 0 8px; font-size: 32px; letter-spacing: -0.03em; }
+    .hero .lead { color: var(--muted); max-width: 820px; font-size: 16px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .chip {
+      font-size: 12px; padding: 5px 10px; border-radius: 999px;
+      border: 1px solid var(--line); color: #c9d7ea; background: rgba(255,255,255,0.03);
+    }
+    .chip.ok { border-color: rgba(61, 214, 140, 0.4); color: var(--ok); }
+    .chip.warn { border-color: rgba(255, 200, 87, 0.4); color: var(--amber); }
+    section.block { margin: 48px 0 16px; }
+    section.block > h2 {
+      font-size: 24px; margin: 0 0 8px; letter-spacing: -0.02em;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .num {
+      width: 28px; height: 28px; border-radius: 8px; font-size: 13px;
+      display: grid; place-items: center; background: rgba(46,233,208,0.15); color: var(--cyan);
+    }
+    .sub { color: var(--muted); margin: 0 0 18px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .card {
+      border: 1px solid var(--line); border-radius: 16px; padding: 18px;
+      background: var(--panel); backdrop-filter: blur(10px);
+    }
+    .card h3 { margin: 0 0 8px; font-size: 15px; }
+    .card p, .card li { color: #c5d2e6; font-size: 13.5px; }
+    .card code { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--cyan); }
+    .diagram {
+      border: 1px solid var(--line); border-radius: 18px; padding: 18px 12px;
+      background: #0c1220; overflow-x: auto; margin: 16px 0 20px;
+    }
+    .arch {
+      display: grid; grid-template-columns: 1.1fr 0.4fr 1.6fr 0.4fr 1.4fr;
+      gap: 8px; align-items: stretch; min-width: 980px;
+    }
+    .col { display: flex; flex-direction: column; gap: 10px; }
+    .node {
+      border-radius: 14px; padding: 12px 14px; border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), transparent);
+    }
+    .node strong { display: block; font-size: 13px; }
+    .node span { color: var(--muted); font-size: 12px; }
+    .node.client { border-color: #3d6bff; }
+    .node.go { border-color: var(--cyan); box-shadow: inset 0 0 0 1px rgba(46,233,208,0.12); }
+    .node.openim { border-color: var(--violet); }
+    .node.store { border-color: #4d6a8f; }
+    .arrow {
+      display: grid; place-items: center; color: var(--cyan); font-size: 11px;
+      letter-spacing: 0.04em; text-align: center;
+    }
+    .pipe {
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      padding: 14px; border-radius: 14px; border: 1px dashed #2d4468;
+      background: rgba(12, 18, 32, 0.6); margin: 12px 0 18px;
+    }
+    .step {
+      background: #162238; border: 1px solid #2c456c; color: #d7e6f7;
+      padding: 7px 10px; border-radius: 10px; font-size: 12px; font-family: "IBM Plex Mono", monospace;
+    }
+    .step b { color: var(--cyan); font-weight: 500; }
+    .chev { color: #4d6a8f; }
+    pre.code {
+      margin: 0; padding: 14px 16px; overflow-x: auto;
+      background: #0a101c; border-radius: 12px; border: 1px solid #1d2c46;
+      font: 12.5px/1.55 "IBM Plex Mono", monospace; color: #d5e4f5;
+    }
+    .kw { color: #8b7cff; } .fn { color: var(--cyan); } .str { color: #ffc857; }
+    .cmt { color: #6b7c96; } .type { color: #7ec8ff; }
+    table.api {
+      width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0 16px;
+    }
+    table.api th, table.api td {
+      text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top;
+    }
+    table.api th { color: #9bb0cc; font-weight: 600; font-size: 12px; }
+    .tag {
+      display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 999px;
+      background: rgba(139,124,255,0.16); color: #c9c0ff; margin-right: 4px;
+    }
+    .tag.pub { background: rgba(46,233,208,0.14); color: var(--cyan); }
+    .tag.int { background: rgba(255,107,138,0.16); color: var(--rose); }
+    .callout {
+      border-left: 3px solid var(--cyan); padding: 10px 14px; margin: 12px 0;
+      background: rgba(46,233,208,0.06); border-radius: 0 12px 12px 0; color: #cfe8e4;
+    }
+    .warn {
+      border-left-color: var(--amber); background: rgba(255,200,87,0.07); color: #f3e3bc;
+    }
+    details { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 10px 0; background: rgba(16,24,42,0.5); }
+    details summary { cursor: pointer; color: #d7e4f5; font-weight: 600; }
+    footer { color: var(--muted); font-size: 12px; margin-top: 48px; }
+    @media (max-width: 1080px) {
+      .app { grid-template-columns: 1fr; }
+      nav.side { position: relative; height: auto; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <nav class="side">
+      <div class="brand">
+        <div class="logo">IM</div>
+        <div>
+          <h1>IM-APP-server</h1>
+          <p>Go + Gin 业务后端全景</p>
+        </div>
+      </div>
+      <div class="nav">
+        <div class="sec">总览</div>
+        <a href="#overview">系统全景</a>
+        <a href="#layers">分层与启动</a>
+        <a href="#pipeline">每次接口调用</a>
+        <div class="sec">业务流</div>
+        <a href="#auth">注册 / 登录</a>
+        <a href="#friend">加好友 / 拉黑</a>
+        <a href="#group">建群 / 加群</a>
+        <a href="#file">文件上传</a>
+        <a href="#forward">万人转发</a>
+        <div class="sec">OpenIM</div>
+        <a href="#openim">双通道职责</a>
+        <a href="#token">Token 与 SDK 登录</a>
+        <a href="#msg">发消息与 Webhook</a>
+        <a href="#outbox">Outbox 同步</a>
+        <div class="sec">并发</div>
+        <a href="#concurrency">怎么扛高并发</a>
+        <a href="#limits">现状与瓶颈</a>
+      </div>
+    </nav>
+
+    <main>
+      <header class="hero">
+        <h2>业务后端不是聊天引擎</h2>
+        <p class="lead">
+          <code>IM-APP-server</code> 管账号、关系、权限、文件元数据和 OpenIM 桥接。
+          真正的消息收发、历史、会话、已读、离线走 OpenIM WebSocket + MongoDB。
+          Go 进程里同时跑 HTTP API、IM 同步 Worker、Kafka Outbox 发布器和万人转发 Worker。
+        </p>
+        <div class="chips">
+          <span class="chip ok">Go 1.25 + Gin 1.10</span>
+          <span class="chip ok">PostgreSQL / pgx 连接池</span>
+          <span class="chip ok">Redis 限流 + Token 缓存</span>
+          <span class="chip ok">MinIO 预签名直传</span>
+          <span class="chip ok">OpenIM REST 桥 + Webhook</span>
+          <span class="chip ok">Kafka 异步转发</span>
+          <span class="chip warn">推送仍是日志桩</span>
+          <span class="chip warn">旧 /ws 默认关闭</span>
+        </div>
+      </header>
+
+      <section class="block" id="overview">
+        <h2><span class="num">01</span>系统全景</h2>
+        <p class="sub">客户端同时连两套后端：业务 REST（JWT）负责关系；OpenIM WS 负责消息。两边用同一套「去连字符 UUID」作为用户/群 ID 对齐。</p>
+        <div class="diagram">
+          <div class="arch">
+            <div class="col">
+              <div class="node client"><strong>uni-app 客户端</strong><span>Vue 3 · Pinia · OpenIM SDK</span></div>
+              <div class="node client"><strong>REST /api/v1</strong><span>Authorization: Bearer JWT</span></div>
+              <div class="node client"><strong>OpenIM WebSocket</strong><span>wsAddr + OpenIM token</span></div>
+            </div>
+            <div class="arrow">JWT<br/>REST →<br/><br/>WS →</div>
+            <div class="col">
+              <div class="node go"><strong>Go 业务服务</strong><span>cmd/server/main.go</span></div>
+              <div class="node go"><strong>Handler → Service → Repo</strong><span>权限只在 service 判定</span></div>
+              <div class="node go"><strong>后台协程</strong><span>IMSyncWorker · ForwardOutboxPublisher · ForwardWorker</span></div>
+            </div>
+            <div class="arrow">SQL<br/>缓存<br/>对象<br/>管理 REST</div>
+            <div class="col">
+              <div class="node store"><strong>PostgreSQL</strong><span>账号 / 好友 / 群元数据 / Outbox / 转发任务</span></div>
+              <div class="node store"><strong>Redis</strong><span>验证码限流 · OpenIM Token 缓存 · 推送凭证</span></div>
+              <div class="node store"><strong>MinIO</strong><span>头像/图片直传，Go 不转发字节流</span></div>
+              <div class="node openim"><strong>OpenIM 集群</strong><span>API :10002 · WS :10001 · MongoDB 消息 · Kafka/Etcd</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="grid-3">
+          <div class="card">
+            <h3>Go 管什么</h3>
+            <p>多国手机号注册、JWT、资料、公开 ID、二维码、好友申请、拉黑、群设置、禁加好友、文件元数据、OpenIM Token、对象解析、Outbox 同步、发送前权限 Webhook、万人转发任务。</p>
+          </div>
+          <div class="card">
+            <h3>OpenIM 管什么</h3>
+            <p>单聊/群聊消息、历史、会话列表、已读、离线补偿、在线状态、@ 提醒。消息正文不进 PostgreSQL，Go 也不直连 OpenIM 的 MongoDB。</p>
+          </div>
+          <div class="card">
+            <h3>明确不做</h3>
+            <p>转账钱包、红包、朋友圈、音视频通话、PC/H5 正式版。旧 Go <code>/ws</code> 与 PostgreSQL 消息 REST 仅 <code>LEGACY_CHAT_ENABLED=true</code> 才注册。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="block" id="layers">
+        <h2><span class="num">02</span>分层、装配与进程生命周期</h2>
+        <p class="sub">唯一 wiring 点是 <code>cmd/server/main.go</code>。基础设施缺失时走 stub，不 panic；OpenIM / Kafka 未配则对应 Worker 不启动。</p>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TB
+  subgraph boot [启动序列]
+    ENV[config.Load 读环境变量] --> PG[db.Connect pgxpool MaxConns=25]
+    PG --> MIG[RunMigrationsDir 按文件名排序]
+    MIG --> SCHEMA[RequireColumns 防旧库跑新二进制]
+    SCHEMA --> INFRA[Redis / MinIO / OpenIM Client / Kafka]
+    INFRA --> DI[手工注入 Repo → Service → Handler]
+    DI --> ROUTES[注册路由 + CORS + Recovery]
+    ROUTES --> WORKERS[go IMSyncWorker / OutboxPublisher / ForwardWorker]
+    WORKERS --> HTTP[ListenAndServe]
+    HTTP --> SIG[SIGINT/SIGTERM]
+    SIG --> STOP[stopWorker + Shutdown 5s]
+  end
+          </pre>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>分层硬约束</h3>
+            <p><code>handler</code> 只绑定入参、调 service、把 sentinel error 映射成中文 HTTP。<code>service</code> 不碰 <code>*gin.Context</code>。<code>repository</code> 只写 SQL，不做权限语义。跨层不得跳级。</p>
+            <pre class="code"><span class="cmt">// cmd/server/main.go 装配示例</span>
+userRepo := &amp;repository.UserRepo{DB: pool}
+userSvc  := &amp;service.UserService{Users: userRepo, ...}
+userH    := &amp;handler.UserHandler{Svc: userSvc}</pre>
+          </div>
+          <div class="card">
+            <h3>统一响应</h3>
+            <p>一律 <code>{code, message, data}</code>。<code>code</code> 只有 0/1，语义由 HTTP 状态码承担。禁止 handler 裸 <code>c.JSON</code>（Webhook 是例外：OpenIM 要求它自己的 envelope）。</p>
+            <pre class="code"><span class="kw">func</span> <span class="fn">OK</span>(c *gin.Context, data <span class="kw">interface</span>{}) {
+  c.JSON(200, Body{Code: 0, Message: <span class="str">"ok"</span>, Data: data})
+}</pre>
+          </div>
+        </div>
+        <div class="callout">
+          身份映射：业务用户 UUID <code>a1b2-...-c9</code> → OpenIM userID 去掉连字符 <code>a1b2...c9</code>。反向也必须能还原成合法 UUID，否则 Webhook 直接拒绝——防止非本 App 账号混入。
+        </div>
+      </section>
+
+      <section class="block" id="pipeline">
+        <h2><span class="num">03</span>每一次接口调用走什么</h2>
+        <p class="sub">公开接口和鉴权接口共用同一条中间件链；差别只在有没有 JWT，以及业务 service 里查什么。</p>
+        <div class="pipe">
+          <span class="step"><b>1</b> CORS</span><span class="chev">→</span>
+          <span class="step"><b>2</b> Logger / Recovery</span><span class="chev">→</span>
+          <span class="step"><b>3</b> 路由匹配 /api/v1</span><span class="chev">→</span>
+          <span class="step"><b>4</b> AuthRequired?</span><span class="chev">→</span>
+          <span class="step"><b>5</b> Handler 绑定 JSON</span><span class="chev">→</span>
+          <span class="step"><b>6</b> Service 权限判定</span><span class="chev">→</span>
+          <span class="step"><b>7</b> Repo SQL / 事务</span><span class="chev">→</span>
+          <span class="step"><b>8</b> 可选：写 im_sync_outbox</span><span class="chev">→</span>
+          <span class="step"><b>9</b> response.OK / Fail</span>
+        </div>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as uni-app
+  participant G as Gin
+  participant A as AuthRequired
+  participant H as Handler
+  participant S as Service
+  participant R as PostgreSQL
+  participant O as im_sync_outbox
+  C->>G: HTTP + Origin
+  G->>G: CORS 白名单 / OPTIONS 204
+  alt 需登录
+    C->>A: Authorization Bearer JWT
+    A-->>H: c.Set(userId) 或 401
+  else 公开接口
+    G->>H: 无 JWT
+  end
+  H->>H: ShouldBindJSON / 校验长度枚举
+  H->>S: ctx, userId, DTO
+  S->>R: 查询关系 / 写事务
+  opt 用户/好友/群变更
+    S->>O: 同一事务 INSERT outbox
+  end
+  S-->>H: 数据或 sentinel error
+  H-->>C: {code, message, data}
+          </pre>
+        </div>
+        <h3>路由分组（main.go）</h3>
+        <table class="api">
+          <thead><tr><th>前缀</th><th>鉴权</th><th>谁调用</th><th>做什么</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET /health</code></td><td>无，IP 每分钟 20 次</td><td>探活 / 前端轮询</td><td>只回 <code>{"status":"ok"}</code></td></tr>
+            <tr><td><code>/api/v1/auth/*</code> <code>/public/countries</code></td><td class="tag pub">公开</td><td>客户端</td><td>国家列表、发短信、注册登录、刷新令牌</td></tr>
+            <tr><td><code>/api/v1/*</code> 其余</td><td><span class="tag">JWT</span></td><td>客户端</td><td>资料、好友、群、文件、IM 桥、转发、收藏</td></tr>
+            <tr><td><code>/internal/openim/webhooks/:secret/*</code></td><td><span class="tag int">路径密钥 + CIDR</span></td><td>OpenIM 服务器</td><td>发送前放行/拒绝，发送后审计+推送</td></tr>
+            <tr><td><code>/internal/im/*</code></td><td><span class="tag int">X-Internal-API-Key</span></td><td>运维 / 内部</td><td>系统消息、健康、对账、死信重放</td></tr>
+          </tbody>
+        </table>
+        <details>
+          <summary>JWT 怎么取当前用户（禁止从 Body 读 userId）</summary>
+          <pre class="code"><span class="kw">func</span> <span class="fn">AuthRequired</span>(secret <span class="type">string</span>) gin.HandlerFunc {
+  <span class="kw">return func</span>(c *gin.Context) {
+    raw := strings.TrimPrefix(c.GetHeader(<span class="str">"Authorization"</span>), <span class="str">"Bearer "</span>)
+    claims, err := ParseToken(secret, raw) <span class="cmt">// HS256, uid in claims</span>
+    <span class="kw">if</span> err != <span class="kw">nil</span> { response.Unauthorized(c, <span class="str">"登录已过期"</span>); c.Abort(); <span class="kw">return</span> }
+    c.Set(ContextUserID, claims.UserID)
+    c.Next()
+  }
+}</pre>
+          <p>Access Token TTL = 2 小时；Refresh Token 随机 32 字节，哈希入库，30 天。刷新时旧 refresh 立即失效。</p>
+        </details>
+        <details>
+          <summary>按业务域看「每次调用」落在哪些文件</summary>
+          <table class="api">
+            <thead><tr><th>域</th><th>Handler</th><th>Service</th><th>Repository / 外部</th></tr></thead>
+            <tbody>
+              <tr><td>认证</td><td><code>handler/auth.go</code></td><td>handler 内直接 SQL（历史遗留）</td><td>users / sms_codes / auth_sessions · Redis 限流 · 阿里云短信</td></tr>
+              <tr><td>用户资料</td><td><code>handler/user.go</code></td><td><code>UserService</code></td><td>UserRepo · FileRepo · PrivacyRepo</td></tr>
+              <tr><td>好友</td><td><code>handler/user.go</code> ContactHandler</td><td><code>ContactService</code></td><td>ContactRepo · 事务写 friendships + outbox</td></tr>
+              <tr><td>群</td><td><code>handler/group.go</code></td><td><code>GroupService</code></td><td>GroupRepo · 事务写 groups + outbox</td></tr>
+              <tr><td>文件</td><td><code>handler/file.go</code></td><td>Handler 直调 MinIO + FileRepo</td><td>MinIO 预签名 · files 表</td></tr>
+              <tr><td>OpenIM 桥</td><td><code>handler/im.go</code></td><td><code>IMService</code></td><td>im.Client REST · Redis Token 缓存 · IMAccessRepo</td></tr>
+              <tr><td>Webhook</td><td><code>handler/openim_webhook.go</code></td><td>无 service 层</td><td>IMAccessRepo 权限 SQL · 审计表 · PushService</td></tr>
+              <tr><td>转发</td><td><code>handler/forward.go</code></td><td><code>ForwardService</code> + Worker</td><td>forward_* 表 · Kafka · OpenIM SendForwardMessage</td></tr>
+            </tbody>
+          </table>
+        </details>
+      </section>
+
+      <section class="block" id="auth">
+        <h2><span class="num">04</span>注册 / 登录调用链</h2>
+        <p class="sub">账号唯一键是 <code>countryCode + 本地号</code>，入库标准化为 E.164。接口返回只有脱敏号 <code>phoneMasked</code>，不能按手机号搜索。</p>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant App as 客户端
+  participant API as POST /auth/register
+  participant Redis as Redis 限流
+  participant PG as PostgreSQL
+  participant SMS as 短信网关
+  participant W as IMSyncWorker
+  participant OIM as OpenIM /user/user_register
+
+  App->>API: POST /auth/sms/send {countryCode, phone, scene}
+  API->>Redis: 1分钟1条 / IP小时5条 / 号码日10条
+  API->>PG: INSERT sms_codes (hash, 10分钟过期)
+  API->>SMS: 真发或 [sms-dev] 日志
+  API-->>App: retryAfterSec + 开发态 devCode
+
+  App->>API: POST /auth/register {code, password?}
+  API->>PG: 校验验证码 attempts≤5 后 consumed_at
+  API->>PG: 事务 INSERT users + Enqueue user.registered
+  API->>PG: EnsureQRCode / Ensure privacy
+  API->>PG: INSERT auth_sessions + 签发 JWT
+  API-->>App: accessToken + refreshToken + 脱敏资料
+
+  Note over W,OIM: HTTP 已返回，同步异步进行
+  W->>PG: FOR UPDATE SKIP LOCKED 领取 outbox
+  W->>OIM: EnsureUser = account_check → user_register
+  W->>PG: MarkCompleted
+          </pre>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>代码要点</h3>
+            <ul>
+              <li>验证码存 SHA-256，明文只在开发环境回传 <code>devCode</code>。</li>
+              <li>密码 bcrypt；不传密码则 <code>hasPassword=false</code>，只能验证码登录。</li>
+              <li>注册与 OpenIM 注册解耦：先落 PG，再 outbox。OpenIM 挂了也不阻断注册。</li>
+              <li>登录同样走 <code>respondAuth</code>：access 2h + refresh 30d。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>相关接口</h3>
+            <p>
+              <code>GET /public/countries</code><br/>
+              <code>POST /auth/sms/send</code><br/>
+              <code>POST /auth/register</code> · <code>/auth/login</code> · <code>/auth/login/sms</code><br/>
+              <code>POST /auth/token/refresh</code> · <code>/auth/logout</code> · <code>/auth/logout-all</code><br/>
+              <code>POST /auth/password/reset</code>
+            </p>
+          </div>
+        </div>
+        <div class="callout warn">
+          <code>public_id</code> 用 <code>COUNT(*)+10000</code> 生成，高并发同时注册可能撞号。生产若要扛注册洪峰，应改成序列或随机公开 ID。
+        </div>
+      </section>
+
+      <section class="block" id="friend">
+        <h2><span class="num">05</span>加好友：入口可以很多，权限必须在服务端</h2>
+        <p class="sub">公开 ID、个人二维码不受群开关影响。只有 <code>source=group</code> 才校验「群内禁止互加好友」。前端藏按钮不算实现。</p>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TD
+  A[POST /friend-requests] --> B{自己?}
+  B -->|是| X1[400 不能加自己]
+  B -->|否| C{对方存在?}
+  C -->|否| X2[404]
+  C -->|是| D{对方拉黑了我?}
+  D -->|是| X3[403]
+  D -->|否| E{已经是好友?}
+  E -->|是| X4[冲突]
+  E -->|否| F{source == group?}
+  F -->|是| G[双方都在该群 AND allow_member_add_friend]
+  G -->|否| X5[403 群内禁止加好友]
+  G -->|是| H{对方 requireFriendApproval?}
+  F -->|否 公开ID/二维码| H
+  H -->|否| I[事务: 双向 friendships + outbox friend.accepted]
+  H -->|是| J[INSERT friend_requests pending]
+  I --> K[IMSyncWorker ImportFriends]
+  J --> L[对方 POST .../accept 后再写好友 + outbox]
+          </pre>
+        </div>
+        <pre class="code"><span class="cmt">// ContactService.SendFriendRequest —— 群开关只约束来自该群的申请</span>
+<span class="kw">if</span> source == <span class="str">"group"</span> &amp;&amp; sourceGroupID != <span class="str">""</span> {
+  allowed, err := s.Contacts.IsGroupAddFriendAllowed(ctx, uid, toUserID, internalID)
+  <span class="kw">if</span> err != <span class="kw">nil</span> || !allowed { <span class="kw">return</span> empty, ErrForbidden }
+}
+<span class="cmt">// SQL: 两人必须都是该群成员，再读 groups.allow_member_add_friend</span></pre>
+        <p>同意/删除/拉黑都会在同一事务写 <code>im_sync_outbox</code>，Worker 再调 OpenIM <code>import_friend</code> / <code>delete_friend</code> / <code>add_black</code>。聊天权限最终以 PostgreSQL 为准：Webhook 发送前会再查一遍好友与双向拉黑。</p>
+      </section>
+
+      <section class="block" id="group">
+        <h2><span class="num">06</span>建群 / 加群</h2>
+        <p class="sub">对外群号是纯数字（如 100001），库内仍是 UUID。OpenIM groupID 同样是去连字符的内部 UUID。</p>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant App as 客户端
+  participant H as GroupHandler
+  participant S as GroupService
+  participant PG as PostgreSQL 事务
+  participant W as IMSyncWorker
+  participant OIM as OpenIM
+
+  App->>H: POST /groups {name, memberIds}
+  H->>S: 去重、校验 UUID、人数≥3
+  S->>PG: INSERT groups + members(owner/members)
+  PG->>PG: Enqueue group.created
+  PG-->>App: 数字群号 + conversationId 占位
+  W->>OIM: EnsureGroup create_group
+  W->>OIM: 邀请成员 / 设管理员
+  Note over OIM: 创建成功后可发欢迎系统消息
+          </pre>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>入群三条路径</h3>
+            <ul>
+              <li><code>POST /groups/:id/join</code>：公开群直接进；审核群 409，必须走申请。</li>
+              <li><code>POST /groups/:id/invitations</code>：群主/管理员邀请好友，直接写入成员并同步 OpenIM。</li>
+              <li>二维码：resolve 只读 → join 按 <code>joinMode</code> 决定 enter / joined / pending_approval。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>权限全在服务端</h3>
+            <ul>
+              <li>改设置、禁言、踢人、解散：先查成员角色再执行。</li>
+              <li>普通成员不能退成「群主退群」；解散只群主，状态变为 dismissed，所有接口不可见。</li>
+              <li>全员禁言后普通成员发消息会被 Webhook BeforeGroup 拒绝。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="block" id="file">
+        <h2><span class="num">07</span>文件：Go 只签发，不扛流量</h2>
+        <p class="sub">这是高并发的关键分流：业务进程不转发文件字节。客户端拿预签名直接 PUT/POST 到 MinIO。</p>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant App as 客户端
+  participant API as Go FileHandler
+  participant PG as files 表
+  participant M as MinIO
+  App->>API: POST /files/uploads {purpose, fileName, contentType, size}
+  API->>M: PresignPut + PresignPost 15分钟
+  API->>PG: INSERT status=pending
+  API-->>App: fileId + uploadUrl / formUrl+formData
+  App->>M: PUT 或 uni.uploadFile（不经 Go）
+  App->>API: POST /files/uploads/complete {fileId}
+  API->>PG: MarkReady 仅本人 pending→ready
+  App->>API: PATCH /me {avatarFileId} 或发图片消息带 URL
+          </pre>
+        </div>
+      </section>
+
+      <section class="block" id="forward">
+        <h2><span class="num">08</span>万人转发：HTTP 绝不循环发送</h2>
+        <p class="sub">需求：单次至少 10000 好友、接收人互不可见、每人一份、重复提交不重复发。实现是「草稿任务 + PG Outbox + Kafka + Worker 限速」。</p>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart LR
+  subgraph http [请求线程立刻返回]
+    C[POST /forward-tasks 建草稿] --> A[add / generate 每批最多 1000]
+    A --> S[POST /forward-tasks/submit]
+    S --> OB[(forward_kafka_outbox)]
+  end
+  subgraph async [进程内后台]
+    P[ForwardOutboxPublisher 2s 轮询] --> K[(Kafka Hash 按 taskId)]
+    K --> W[ForwardWorker FetchMessage]
+    W --> CL[ClaimTaskTargets SKIP LOCKED]
+    CL --> POOL[Concurrency 默认 4]
+    POOL --> QPS[Ticker 默认 20 QPS]
+    QPS --> SEND[OpenIM SendForwardMessage]
+    SEND --> ST[成功 / 跳过 / 重试 / 失败]
+    ST -->|还有 pending| K
+  end
+          </pre>
+        </div>
+        <div class="grid-3">
+          <div class="card">
+            <h3>幂等</h3>
+            <p>客户端带 <code>idempotencyKey</code>。同一键若任务已离开 draft，直接返回原任务。发送用 <code>sha256(taskId+targetUserId)</code> 当 OpenIM <code>clientMsgID</code>，崩溃重试也不会给同一人再插一条。</p>
+          </div>
+          <div class="card">
+            <h3>过滤</h3>
+            <p><code>TargetEligible</code> 发送前再查：非好友、拉黑、封禁、已删除一律 skip。每个有效接收人只投一次。</p>
+          </div>
+          <div class="card">
+            <h3>Kafka 语义</h3>
+            <p>Writer <code>RequireAll</code> 同步 ack；Reader 显式提交。先发 continue 事件再 commit，崩溃最多重复处理，靠锁和确定性 msgID 去重。毒消息解码失败直接提交，避免卡死分区。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="block" id="openim">
+        <h2><span class="num">09</span>OpenIM：两条完全不同的通道</h2>
+        <p class="sub">容易混淆的点：客户端聊天不走 Go WebSocket。Go 只在管理面用 REST，在控制面收 Webhook。</p>
+        <div class="grid-2">
+          <div class="card">
+            <h3>通道 A · 客户端 ↔ OpenIM</h3>
+            <p>登录后 <code>POST /im/token</code> 拿到 <code>token / apiAddr / wsAddr</code>，SDK 直连 OpenIM。发消息、拉历史、会话、已读、撤回全部走这条。Go <strong>不代理</strong> WS。</p>
+          </div>
+          <div class="card">
+            <h3>通道 B · Go ↔ OpenIM 管理 API</h3>
+            <p><code>internal/im/client.go</code> 用 admin token 调 <code>/user/*</code> <code>/friend/*</code> <code>/group/*</code> <code>/msg/*</code>。HTTP 超时 10s，响应上限 2MB。OpenIM 可能 HTTP 200 但 <code>errCode≠0</code>，必须看业务码。</p>
+          </div>
+        </div>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TB
+  subgraph client [手机]
+    SDK[OpenIM SDK]
+    REST[业务 REST JWT]
+  end
+  subgraph go [IM-APP-server]
+    IMH[IMHandler Token/Peer/Group]
+    CL[im.Client]
+    WH[Webhook Before/After]
+    SYNC[IMSyncWorker]
+  end
+  subgraph oim [OpenIM]
+    API[openim-api :10002]
+    MSG[msg-gateway :10001]
+    MONGO[(MongoDB 消息)]
+    CB[Callback 模块]
+  end
+  REST --> IMH --> CL --> API
+  SDK --> MSG
+  SDK --> API
+  MSG --> MONGO
+  MSG --> CB --> WH
+  SYNC --> CL
+          </pre>
+        </div>
+        <table class="api">
+          <thead><tr><th>Go 调用的 OpenIM 路径</th><th>时机</th></tr></thead>
+          <tbody>
+            <tr><td><code>/auth/get_admin_token</code></td><td>管理调用前，内存缓存，过期前 5 分钟刷新；401 则清空重拿</td></tr>
+            <tr><td><code>/user/account_check</code> + <code>/user/user_register</code> + <code>/user/update_user_info_ex</code></td><td>EnsureUser：注册、改资料、发 Token 前补齐</td></tr>
+            <tr><td><code>/auth/get_user_token</code></td><td>给客户端 SDK 登录</td></tr>
+            <tr><td><code>/friend/import_friend</code> <code>delete_friend</code> <code>add_black</code> <code>remove_black</code></td><td>好友/拉黑 outbox</td></tr>
+            <tr><td><code>/group/create_group</code> <code>invite_user_to_group</code> <code>kick_group</code> <code>set_group_info_ex</code> …</td><td>群生命周期 outbox</td></tr>
+            <tr><td><code>/msg/send_msg</code> 等</td><td>系统通知、万人转发、欢迎语</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="block" id="token">
+        <h2><span class="num">10</span>客户端进聊天室：Token 签发</h2>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant App as App
+  participant H as POST /im/token
+  participant S as IMService
+  participant Redis as Redis / 进程缓存
+  participant OIM as OpenIM
+  App->>H: {platformId} 默认 Web=5
+  H->>S: 当前 JWT 用户
+  S->>S: 用户必须 active
+  S->>Redis: 按 user+platform+部署指纹 读缓存
+  alt 命中且未到 refreshAhead 5min
+    Redis-->>App: 同一 token（避免二次签发作废旧票）
+  else 未命中
+    S->>S: 同 key 互斥锁，不同用户可并行
+    S->>OIM: EnsureUser
+    S->>OIM: get_user_token
+    S->>Redis: 写入，调用方断开也继续写
+    S-->>App: token + apiAddr + wsAddr
+  end
+  App->>OIM: SDK login(wsAddr, token)
+          </pre>
+        </div>
+        <div class="callout">
+          OpenIM 每调一次 <code>get_user_token</code> 可能作废旧 token。所以并发重复请求必须共享缓存，并用 per-key lock，而不是全局一把大锁。缓存 key 含 API URL / Secret / AdminUser 的哈希，换环境不会复用旧票。
+        </div>
+        <p>进会话前还会调：</p>
+        <ul>
+          <li><code>GET /im/peers/:businessUserId</code> → SQL 校验好友/拉黑，返回 OpenIM userID + <code>canChat</code></li>
+          <li><code>GET /im/groups/:businessGroupId</code> → 成员、禁言、全员禁言；若 OpenIM 还没有这个群，当场补创建并拉当前用户进群</li>
+        </ul>
+      </section>
+
+      <section class="block" id="msg">
+        <h2><span class="num">11</span>发一条消息的完整路径</h2>
+        <p class="sub">这是最高频路径。Go 不在热路径上存正文，只做「发前闸门」和「发后审计」。</p>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as 发送方 SDK
+  participant G as OpenIM msg-gateway
+  participant WH as Go Webhook
+  participant PG as PostgreSQL
+  participant B as 接收方 SDK
+  participant P as PushService 日志桩
+
+  A->>G: WS 发送（文本/图/语音…）
+  G->>WH: BeforeSendSingle 或 BeforeSendGroup
+  Note over WH: 路径密钥 constant-time 比较 + CIDR 白名单
+  WH->>PG: ResolvePeer / ResolveGroup
+  alt 非好友 / 拉黑 / 未入群 / 禁言 / 全员禁言
+    WH-->>G: nextCode=1 拒绝
+    G-->>A: 发送失败
+  else 管理员账号系统消息
+    WH-->>G: 直接放行
+  else 允许
+    WH-->>G: actionCode=0
+    G->>G: 写入 MongoDB 并推在线接收方
+    G-->>B: 实时消息
+    G->>WH: AfterSend* / BeforeAfterMsg
+    WH->>PG: im_message_audit 幂等插入
+    WH-->>G: 200 立刻返回
+    WH->>P: go dispatchPush（群会拉成员列表）
+  end
+          </pre>
+        </div>
+        <pre class="code"><span class="cmt">// BeforeSingle：把 OpenIM ID 还原成业务 UUID，再查 canChat</span>
+peer, err := h.Access.ResolvePeer(ctx, senderID, receiverID)
+<span class="kw">if</span> err != <span class="kw">nil</span> || !peer.CanChat {
+  c.JSON(200, denyWebhook(reason)) <span class="cmt">// HTTP 仍 200，靠 nextCode 拦截</span>
+  <span class="kw">return</span>
+}</pre>
+        <div class="grid-2">
+          <div class="card">
+            <h3>单聊拒绝原因</h3>
+            <p><code>self</code> / <code>sender_inactive</code> / <code>account_inactive</code> / <code>blocked</code>（双向） / <code>not_friend</code>。非好友即使 SDK 能发出去，服务端也会拦。</p>
+          </div>
+          <div class="card">
+            <h3>群聊拒绝原因</h3>
+            <p><code>group_inactive</code> / <code>member_muted</code> / <code>group_muted</code>（全员禁言时 owner/admin 仍可发）。非成员 JOIN 不到行，直接 not found。</p>
+          </div>
+        </div>
+        <div class="callout warn">
+          Webhook 密钥配了但 <code>OPENIM_WEBHOOK_ALLOW_CIDRS</code> 为空时，<code>authorized</code> 恒为 false，回调全部 404——等于闸门失效。启动时会打 WARN。
+        </div>
+      </section>
+
+      <section class="block" id="outbox">
+        <h2><span class="num">12</span>Outbox：业务写成功 ≠ OpenIM 已同步</h2>
+        <p class="sub">所有用户/关系/群变更与 OpenIM 的一致性，靠同一事务写入 <code>im_sync_outbox</code>，再由 Worker 对账。这是抗抖、可水平扩展的核心。</p>
+        <div class="diagram">
+          <pre class="mermaid">
+stateDiagram-v2
+  [*] --> pending: 业务事务提交
+  pending --> processing: ClaimBatch SKIP LOCKED
+  processing --> completed: EnsureUser/ImportFriends/EnsureGroup 成功
+  processing --> retry: 失败 + 指数退避
+  retry --> processing: next_attempt_at 到期
+  processing --> dead: attempt ≥ 10
+  dead --> processing: POST /internal/im/outbox/:id/replay
+  processing --> processing: locked_at 超过 5 分钟视为租约过期再抢
+          </pre>
+        </div>
+        <table class="api">
+          <thead><tr><th>event_type</th><th>Worker 动作</th></tr></thead>
+          <tbody>
+            <tr><td><code>user.registered</code> / <code>user.profile_updated</code></td><td>EnsureUser（检查 → 注册或更新昵称头像）</td></tr>
+            <tr><td><code>friend.accepted</code> / <code>friend.deleted</code></td><td>对照 PG 当前关系，Import 或双向 Delete</td></tr>
+            <tr><td><code>block.added</code> / <code>block.removed</code></td><td>AddBlack / RemoveBlack</td></tr>
+            <tr><td><code>group.created/updated/member.*/mute/dismissed</code></td><td>建群、补成员、改角色禁言、解散</td></tr>
+          </tbody>
+        </table>
+        <p>运维接口：<code>POST /internal/im/reconcile</code> 把当前全量用户好友群重新入队；<code>GET /internal/im/health</code> 看 API、admin token、outbox 堆积。</p>
+      </section>
+
+      <section class="block" id="concurrency">
+        <h2><span class="num">13</span>怎么扛高并发 —— 现有设计</h2>
+        <p class="sub">策略可以概括成一句话：<strong>热路径不进 Go，冷路径异步化，写路径事务+租约，读路径分页+缓存。</strong></p>
+
+        <h3>1. 把最重的流量从 Go 上拿掉</h3>
+        <div class="grid-3">
+          <div class="card">
+            <h3>消息不经业务 API</h3>
+            <p>聊天是 OpenIM 长连接。万人同时说话时，压力在 msg-gateway / Mongo / Kafka，而不是 Gin。Go 只在每条消息上吃一次轻量 Webhook SQL。</p>
+          </div>
+          <div class="card">
+            <h3>文件不经业务 API</h3>
+            <p>预签名直传 MinIO。头像、聊天图片的带宽与磁盘 I/O 不经过 Go 进程。</p>
+          </div>
+          <div class="card">
+            <h3>万人转发不经请求线程</h3>
+            <p>Submit 只写 outbox 立刻返回。发送在 Worker 里按 QPS/并发限速，避免把 OpenIM 打穿。</p>
+          </div>
+        </div>
+
+        <h3>2. 数据库侧</h3>
+        <ul>
+          <li>pgx 连接池 <code>MaxConns=25</code>，避免把 PostgreSQL 连接打满。</li>
+          <li>列表接口强制 cursor + LIMIT（通讯录默认 50、最大 100）。</li>
+          <li>多表写入必须事务；Outbox 与业务数据同事务，不会出现「好友已加但永远不同步」。</li>
+          <li><code>FOR UPDATE SKIP LOCKED</code>：多实例 Worker 抢任务不会撞车，这是水平扩展转发/同步的基础。</li>
+          <li>审计表 <code>ON CONFLICT DO NOTHING</code>，Webhook 重放不会堆重复行。</li>
+        </ul>
+
+        <h3>3. 缓存与锁</h3>
+        <ul>
+          <li>OpenIM 用户 Token：Redis + 进程内 map 双层；Redis 故障降级到本地缓存，接口不 5xx。</li>
+          <li>Admin Token 进程内缓存，避免每次管理调用都打 <code>get_admin_token</code>。</li>
+          <li>Token 按 user+platform 细粒度锁，不同用户并发签发互不影响。</li>
+          <li>短信三维 Redis 限流；<code>/health</code> IP 限流。Redis 挂了限流放行，保证可用性优先。</li>
+        </ul>
+
+        <h3>4. 异步与背压</h3>
+        <ul>
+          <li>IMSyncWorker：2s poll，每批 20，最多 10 次，失败指数退避，死后进 dead letter。</li>
+          <li>ForwardWorker：默认 batch 50、concurrency 4、QPS 20（可环境变量调，concurrency 上限 256）。</li>
+          <li>Kafka Hash(taskId)：同一任务有序进同一分区，避免多消费者把同一任务打乱。</li>
+          <li>Webhook After 推送用 <code>go dispatchPush</code>，5s 超时，失败不影响 OpenIM 落库。</li>
+          <li>Webhook body 限制 64KB；OpenIM 响应限制 2MB，防止大包拖死进程。</li>
+        </ul>
+
+        <h3>5. 进程与部署层</h3>
+        <ul>
+          <li>Gin 每个请求一个 goroutine，适合大量短 REST。</li>
+          <li><code>ReadHeaderTimeout=10s</code> 防慢速攻击；优雅退出 5s。</li>
+          <li>OpenIM compose：healthcheck + restart unless-stopped；etcd/kafka/mongo 挂卷，避免重启丢服务发现。</li>
+          <li>基础设施可降级：没 Redis/MinIO/Kafka/OpenIM 时 HTTP 仍能起（对应能力 503 或 stub）。</li>
+        </ul>
+
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TB
+  subgraph hot [热路径 应能水平扩]
+    WS[OpenIM WS 发消息] --> WH[Go Webhook: 一次权限 SQL]
+    WS --> MG[(MongoDB)]
+    FILE[客户端 PUT MinIO] --> S3[(对象存储)]
+  end
+  subgraph warm [温路径 REST]
+    REST[Gin API] --> POOL[pgx pool]
+    REST --> RC[Redis Token/限流]
+  end
+  subgraph cold [冷路径 异步]
+    OB[im_sync_outbox] --> W1[多实例 SKIP LOCKED]
+    FT[forward_tasks] --> K[Kafka] --> W2[限 QPS Worker]
+  end
+          </pre>
+        </div>
+      </section>
+
+      <section class="block" id="limits">
+        <h2><span class="num">14</span>现状：能抗什么，还不能抗什么</h2>
+        <p class="sub">文档必须诚实。下面这些是读代码后的结论，不是「理论上以后可以」。</p>
+        <div class="grid-2">
+          <div class="card">
+            <h3>已经具备的承载力</h3>
+            <ul>
+              <li>消息扇出：交给 OpenIM，Go 不是瓶颈点。</li>
+              <li>1 万+ 转发：异步 + 限速 + 幂等，HTTP 不会被同步发送拖死。</li>
+              <li>关系同步：Outbox 可多实例，失败可重放。</li>
+              <li>登录进聊天：Token 缓存避免 OpenIM 被重复签发打崩。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>上生产前的真实瓶颈</h3>
+            <ul>
+              <li><code>MaxConns=25</code> 对多副本 Gin 可能偏小或偏大，需要按实例数重算，目前写死。</li>
+              <li>Worker 与 API 同进程；流量高峰时同步任务会抢 CPU/连接。生产应拆独立 worker 部署。</li>
+              <li>compose 里 etcd/kafka 单节点，不是 HA。</li>
+              <li>绝大多数 REST <strong>没有</strong> 限流，只有 health 和短信。</li>
+              <li>离线推送仍是 <code>LoggingPushService</code>，群消息 After 回调还会同步拉全量成员。</li>
+              <li>注册 <code>COUNT(*)</code> 生成 publicId，并发注册不安全。</li>
+              <li>AuthHandler 未走分层，直接持有 <code>*pgxpool.Pool</code>。</li>
+              <li>没有熔断/舱壁：OpenIM 超时会拖住 Token、建群补齐、Webhook 里 ListGroupMember。</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout">
+          若目标是「十万在线、每秒数千条消息」：扩 OpenIM msg-gateway / Mongo / Kafka 分区；Go 只保证 Webhook SQL 走索引、多副本 + 连接池、把 Worker 拆出去。不要试图让 Gin 再实现一套消息系统。
+        </div>
+      </section>
+
+      <section class="block">
+        <h2><span class="num">15</span>一张图记住职责边界</h2>
+        <table class="api">
+          <thead><tr><th>动作</th><th>客户端先调谁</th><th>权威数据在哪</th><th>失败怎么恢复</th></tr></thead>
+          <tbody>
+            <tr><td>注册登录</td><td>Go REST</td><td>PostgreSQL users / sessions</td><td>outbox 补 OpenIM 用户</td></tr>
+            <tr><td>改头像昵称</td><td>Go REST + MinIO</td><td>PG users + files</td><td>outbox UpdateUser</td></tr>
+            <tr><td>加好友 / 拉黑</td><td>Go REST</td><td>PG friendships / blocks</td><td>outbox + Webhook 再校验</td></tr>
+            <tr><td>建群 / 群设置</td><td>Go REST</td><td>PG groups</td><td>outbox EnsureGroup</td></tr>
+            <tr><td>发消息 / 历史 / 已读 / 撤回</td><td>OpenIM SDK</td><td>OpenIM MongoDB</td><td>SDK 同步；Go 只审计</td></tr>
+            <tr><td>会话置顶免打扰</td><td>Go REST 转 OpenIM</td><td>OpenIM 会话对象</td><td>Go 先 GET 再 PATCH 防清零</td></tr>
+            <tr><td>万人转发</td><td>Go REST 建任务</td><td>PG 任务行 + OpenIM 消息</td><td>Kafka continue + 确定性 clientMsgID</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <footer>
+        依据仓库当前代码生成：<code>cmd/server/main.go</code>、<code>internal/im/client.go</code>、<code>internal/service/im.go</code>、<code>internal/service/im_sync.go</code>、<code>internal/service/forward.go</code>、<code>internal/handler/openim_webhook.go</code>、<code>docs/architecture.md</code>、<code>docs/api-contract.md</code>。
+        打开方式：用浏览器直接打开本文件。
+      </footer>
+    </main>
+  </div>
+  <script>
+    const links = document.querySelectorAll(".nav a");
+    const secs = [...links].map(a => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+    const io = new IntersectionObserver((entries) => {
+      const vis = entries.filter(e => e.isIntersecting).sort((a,b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (!vis) return;
+      links.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + vis.target.id));
+    }, { rootMargin: "-20% 0px -70% 0px", threshold: [0, 0.2, 0.6] });
+    secs.forEach(s => io.observe(s));
+  </script>
+</body>
+</html>

@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ConversationItem from '@/components/ConversationItem.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
+import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
 import { useChatStore } from '@/stores/chat'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { usePullRefresh } from '@/composables/usePullRefresh'
 import { useTabBar } from '@/composables/useTabBar'
 import type { Conversation } from '@/types'
+import { getStatusBarHeight } from '@/utils/status-bar'
+import { openQrScanner } from '@/utils/qrcode'
 
 useAuthGuard()
 useTabBar()
 
+const statusBarHeight = getStatusBarHeight()
 const chatStore = useChatStore()
 const keyword = ref('')
 const showAddMenu = ref(false)
@@ -30,12 +34,20 @@ const filtered = computed(() => {
   return list.filter((c) => c.title.includes(k) || c.lastMessage.includes(k))
 })
 
-// 会话变化平时由 SDK 事件推送，每次进入页面再兜底拉一次
-onShow(() => {
-  chatStore.loadConversations().catch((e: Error) => {
-    uni.showToast({ title: e?.message || '会话加载失败', icon: 'none' })
-  })
-})
+async function reloadConversations() {
+  try {
+    await chatStore.loadConversations()
+  } catch (e) {
+    const message = (e as Error)?.message || '会话加载失败'
+    if (message.includes('自定义调试基座')) {
+      uni.showModal({ title: '无法连接聊天', content: message, showCancel: false })
+      return
+    }
+    uni.showToast({ title: message, icon: 'none' })
+  }
+}
+
+const { refreshing, onRefresherRefresh } = usePullRefresh(reloadConversations)
 
 function openConversation(item: Conversation) {
   showAddMenu.value = false
@@ -55,6 +67,11 @@ function go(url: string) {
   uni.navigateTo({ url })
 }
 
+function goScan() {
+  showAddMenu.value = false
+  openQrScanner()
+}
+
 function setFilter(key: 'all' | 'unread') {
   filterKey.value = key
   showFilter.value = false
@@ -68,7 +85,7 @@ function closeMenus() {
 
 <template>
   <view class="page" @click="closeMenus">
-    <view class="header">
+    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
       <text class="title">聊天</text>
       <view class="add-wrap" @click.stop="onAdd">
         <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
@@ -77,7 +94,7 @@ function closeMenus() {
             <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
             <text>添加朋友</text>
           </view>
-          <view class="popup-item" @click="go('/pages/contacts/scan')">
+          <view class="popup-item" @click="goScan">
             <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
             <text>添加群聊</text>
           </view>
@@ -110,7 +127,14 @@ function closeMenus() {
       </view>
     </view>
 
-    <scroll-view scroll-y class="list">
+    <scroll-view
+      scroll-y
+      class="list"
+      refresher-enabled
+      refresher-default-style="black"
+      :refresher-triggered="refreshing"
+      @refresherrefresh="onRefresherRefresh"
+    >
       <ConversationItem
         v-for="item in filtered"
         :key="item.id"
@@ -121,12 +145,16 @@ function closeMenus() {
     </scroll-view>
 
     <ImTabBar current="chat" />
+    <ImNotificationPermissionDialog />
   </view>
 </template>
 
 <style scoped lang="scss">
 .page {
-  min-height: 100vh;
+  /* iOS Safari：只有 min-height 时，flex 子项 height:0 会塌成 0，会话列表整页空白 */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -231,7 +259,11 @@ function closeMenus() {
 
 .list {
   flex: 1;
-  height: 0;
+  min-height: 0;
+  /* #ifdef H5 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* #endif */
 }
 
 .empty {

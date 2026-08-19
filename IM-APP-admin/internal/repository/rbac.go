@@ -2,12 +2,16 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"im-app-admin/internal/models"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrRoleInUse 角色仍被管理员引用，不允许删除
+var ErrRoleInUse = errors.New("角色已被管理员使用，不能删除")
 
 // RBACRepo 管理员账号/角色/权限（表：admin_users/admin_roles/admin_permissions/...）
 type RBACRepo struct{ DB *pgxpool.Pool }
@@ -254,12 +258,27 @@ func (r *RBACRepo) setRolePermsTx(ctx context.Context, tx pgx.Tx, roleID string,
 }
 
 func (r *RBACRepo) DeleteRole(ctx context.Context, id string) (int64, error) {
+	// 被管理员引用时拒绝删除，避免 ON DELETE CASCADE 静默清空引用方权限
+	var refs int64
+	if err := r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM admin_user_roles WHERE role_id=$1::uuid`, id).Scan(&refs); err != nil {
+		return 0, err
+	}
+	if refs > 0 {
+		return 0, ErrRoleInUse
+	}
 	// 返回受影响行数，判断角色是否不存在
 	tag, err := r.DB.Exec(ctx, `DELETE FROM admin_roles WHERE id=$1::uuid AND code<>'super_admin'`, id)
 	if err != nil {
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// RoleCodeByID 查询角色 code（用于 super_admin 角色分配校验）
+func (r *RBACRepo) RoleCodeByID(ctx context.Context, roleID string) (string, error) {
+	var code string
+	err := r.DB.QueryRow(ctx, `SELECT code FROM admin_roles WHERE id=$1::uuid`, roleID).Scan(&code)
+	return code, err
 }
 
 func (r *RBACRepo) GetRolePermissions(ctx context.Context, roleID string) ([]string, error) {
@@ -308,7 +327,7 @@ func (r *RBACRepo) IsSuperAdmin(ctx context.Context, adminID string) (bool, erro
 	err := r.DB.QueryRow(ctx, `
 		SELECT 1 FROM admin_user_roles ur
 		JOIN admin_roles ro ON ro.id = ur.role_id
-		WHERE ur.admin_id=$1::uuid AND ro.code='super_admin'`, adminID).Scan(&one)
+		WHERE ur.admin_id=$1::uuid AND ro.code='super_admin' AND ro.status='active'`, adminID).Scan(&one)
 	if err == pgx.ErrNoRows {
 		return false, nil
 	}
@@ -324,6 +343,7 @@ func (r *RBACRepo) HasPermission(ctx context.Context, adminID, permission string
 	err := r.DB.QueryRow(ctx, `
 		SELECT 1 FROM admin_role_permissions rp
 		JOIN admin_user_roles ur ON ur.role_id = rp.role_id
+		JOIN admin_roles ro ON ro.id = ur.role_id AND ro.status='active'
 		JOIN admin_permissions p ON p.id = rp.permission_id
 		WHERE ur.admin_id=$1::uuid AND p.code=$2`, adminID, permission).Scan(&one)
 	if err == pgx.ErrNoRows {

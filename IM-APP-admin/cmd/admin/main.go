@@ -23,8 +23,11 @@ import (
 
 func main() {
 	cfg := config.Load()
-	if cfg.AdminJWTSecret == "im-admin-dev-secret-change-me" {
-		log.Println("WARN: ADMIN_JWT_SECRET 使用默认开发密钥，生产环境必须设置独立密钥")
+	if cfg.WeakJWTSecret() {
+		if mode := os.Getenv("GIN_MODE"); mode == "release" || mode == "test" {
+			log.Fatalf("config: ADMIN_JWT_SECRET 过弱（长度<32 或为已知默认值），生产环境拒绝启动，请设置强随机密钥")
+		}
+		log.Println("WARN: ADMIN_JWT_SECRET 使用弱/默认密钥，仅限开发环境，生产必须设置独立强密钥")
 	}
 
 	pool, err := db.Connect(cfg.DatabaseURL)
@@ -67,17 +70,25 @@ func main() {
 		MFATTL:     5 * time.Minute,
 	}
 	rbacSvc := &service.RBACService{Rbac: rbacRepo, Auth: authRepo, Audit: auditRepo}
-	dataSvc := &service.DataService{Repo: &repository.DataRepo{DB: pool}}
-	opsSvc := &service.OpsService{Repo: &repository.OpsRepo{DB: pool}}
+	dataSvc := &service.DataService{
+		Repo:              &repository.DataRepo{DB: pool},
+		ServerBaseURL:     cfg.ServerBaseURL,
+		ServerInternalKey: cfg.ServerInternalKey,
+	}
+	opsSvc := &service.OpsService{
+		Repo:              &repository.OpsRepo{DB: pool},
+		ServerBaseURL:     cfg.ServerBaseURL,
+		ServerInternalKey: cfg.ServerInternalKey,
+	}
 
 	authH := &handler.AuthHandler{
 		Svc:     authSvc,
 		Limiter: middleware.NewLoginLimiter(cfg.LoginFailThreshold, cfg.LoginLockMinutes),
 	}
 	rbacH := &handler.RBACHandler{Svc: rbacSvc}
-	dataH := &handler.DataHandler{Data: dataSvc}
+	dataH := &handler.DataHandler{Data: dataSvc, Perms: rbacRepo}
 	opsH := &handler.OpsHandler{Svc: opsSvc}
-	metaH := &handler.MetaHandler{Version: "1.0.0", Commit: "dev", BuildTime: time.Now().UTC().Format(time.RFC3339)}
+	metaH := &handler.MetaHandler{Version: "1.0.0", Commit: "dev", BuildTime: time.Now().UTC().Format(time.RFC3339), Svc: opsSvc}
 
 	r := server.BuildRouter(server.Deps{
 		Cfg:       cfg,
@@ -94,6 +105,9 @@ func main() {
 		Addr:              cfg.HTTPAddr,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {

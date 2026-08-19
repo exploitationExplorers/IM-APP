@@ -30,12 +30,17 @@ type Config struct {
 	MaxBodyBytes    int64
 	TrustedProxies  []string
 	RequestIDHeader string
+
+	// 与 server 服务的内部调用（方案 A：写操作走 server 执行业务 + OpenIM 同步）
+	ServerBaseURL     string // server 地址，如 http://127.0.0.1:8080
+	ServerInternalKey string // 与 server 的 IM_INTERNAL_API_KEY 一致
 }
 
 func Load() Config {
 	return Config{
 		HTTPAddr:           getenv("HTTP_ADDR", ":8081"),
-		DatabaseURL:        getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
+		// 默认值不携带口令，避免弱默认口令被复用；生产必须显式配置 DATABASE_URL
+		DatabaseURL:        getenv("DATABASE_URL", "postgres://im@127.0.0.1:5433/im_app?sslmode=disable"),
 		AdminJWTSecret:     adminJWTSecret(),
 		JWTIssuer:          "im-admin",
 		JWTAudience:        "im-admin-web",
@@ -49,6 +54,8 @@ func Load() Config {
 		MaxBodyBytes:       1 << 20, // 1MB
 		TrustedProxies:     splitCSV(getenv("ADMIN_TRUSTED_PROXIES", "")),
 		RequestIDHeader:    "X-Request-Id",
+		ServerBaseURL:      getenv("SERVER_BASE_URL", ""),
+		ServerInternalKey:  getenv("SERVER_INTERNAL_KEY", ""),
 	}
 }
 
@@ -101,6 +108,19 @@ func adminJWTSecret() string {
 		return v
 	}
 	return "im-admin-dev-secret-change-me"
+}
+
+// WeakJWTSecret 报告 JWT 密钥是否过弱（长度 <32 字节，或命中已知默认值）。
+// 生产环境应拒绝使用弱密钥，否则攻击者可伪造任意管理员 token。
+func (c Config) WeakJWTSecret() bool {
+	if len(c.AdminJWTSecret) < 32 {
+		return true
+	}
+	switch c.AdminJWTSecret {
+	case "im-admin-dev-secret-change-me", "im-local-dev-secret-change-me":
+		return true
+	}
+	return false
 }
 
 func getenv(key, fallback string) string {

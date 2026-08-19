@@ -19,6 +19,22 @@ export interface Contact {
   commonGroups?: GroupPreview[]
 }
 
+export interface ContactPage {
+  items: Contact[]
+  nextCursor?: string
+  hasMore: boolean
+  total: number
+}
+
+export type ContactListSort = 'recent' | 'name'
+
+export interface ContactListQuery {
+  keyword?: string
+  sort?: ContactListSort
+  cursor?: string
+  limit?: number
+}
+
 export interface GroupPreview {
   id: string
   name: string
@@ -48,4 +64,11 @@ export interface SendFriendResult {
   ok: boolean
   id?: string
   status: 'pending' | 'accepted'
+}
+
+/** POST /group-friend-requests 的返回（从群成员资料发起好友申请） */
+export interface GroupFriendRequestResult {
+  ok: boolean
+  requestId: string
+  status: string
 }

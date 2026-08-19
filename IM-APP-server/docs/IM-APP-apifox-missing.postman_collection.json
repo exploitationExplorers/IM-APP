@@ -291,7 +291,7 @@
               "raw": "{\n  \"filename\": \"photo.jpg\",\n  \"contentType\": \"image/jpeg\"\n}"
             },
             "url": "{{baseUrl}}/files/presign",
-            "description": "需 JWT。兼容旧版预签名上传。新链路请用 POST /files/uploads → PUT → POST /files/uploads/:fileId/complete。\nMinIO 未配置时返回 dev 占位 URL。\n响应 data：{ uploadUrl, fileUrl, objectKey, expiresIn }"
+            "description": "需 JWT。兼容旧版预签名上传。新链路请用 POST /files/uploads → multipart POST data.formUrl → POST /files/uploads/complete。\nMinIO 未配置时返回 dev 占位 URL。\n响应 data：{ uploadUrl, formUrl, formData, fileUrl, objectKey, expiresIn }"
           },
           "response": []
         }

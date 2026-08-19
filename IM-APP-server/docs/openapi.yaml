@@ -1,12 +1,14 @@
 openapi: 3.0.3
 info:
-  title: IM-APP OpenIM 对接增量接口
-  version: 1.0.0
+  title: IM-APP 后端增量接口
+  version: 1.3.0
   description: |
-    仅包含本次 OpenIM 对接开发中新增或实际优化过的 Go 后端接口。
+    包含 OpenIM 对接、会话设置、万人转发、收藏、国家区号、群备注、用户举报中新增或实际优化过的 Go 后端接口。
     不包含未改动的普通登录、短信、用户查询、文件上传和旧 Go 对话接口。
 
-    PostgreSQL 保存业务身份、好友、群组、同步任务和审计元数据；
+
+    PostgreSQL 保存业务身份、好友、群组、转发任务状态、Kafka Outbox、同步任务和审计元数据；
+    Kafka 承担万人转发的异步派发和消费，转发总人数不设业务上限；
     OpenIM + MongoDB 负责消息、会话、历史记录和 WebSocket。
 servers:
   - url: http://127.0.0.1:8080
@@ -20,6 +22,16 @@ tags:
     description: 好友、黑名单关系及 OpenIM 同步
   - name: Group Sync
     description: 群资料、成员、权限及 OpenIM 同步
+  - name: Reports
+    description: 用户举报原因和举报工单
+  - name: Forward
+    description: Kafka 异步万人转发任务及目标管理
+  - name: Favorites
+    description: OpenIM 消息快照收藏
+  - name: Public Config
+    description: 登录前可读取的公共配置
+  - name: Health
+    description: 服务存活检查
   - name: OpenIM Client
     description: 客户端连接 OpenIM 所需接口
   - name: OpenIM Internal
@@ -34,6 +46,7 @@ paths:
       summary: 注册业务用户并创建 OpenIM 同步任务
       description: 原注册接口已优化，前端不需要额外调用同步接口。
       operationId: registerAndSyncOpenIM
+      security: []
       x-change-type: optimized
       requestBody:
         required: true
@@ -119,6 +132,31 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
 
+  /api/v1/group-friend-requests:
+    post:
+      tags: [Contact Sync, Group Sync]
+      summary: 从群成员资料发起好友申请
+      description: |
+        仅用于“从某个群的成员列表或成员资料页加好友”。
+        服务端校验群处于 active 状态、双方均为有效群成员且 allowMemberAddFriend=true。
+        关闭群内加好友仅限制该群来源；用户仍可通过公开 ID 或个人二维码按正常规则加好友。
+      operationId: createGroupSourceFriendRequest
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateGroupFriendRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/GroupFriendRequestResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
   /api/v1/groups:
     get:
       tags: [Group Sync]
@@ -163,19 +201,40 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
 
-  /api/v1/groups/{id}/members:
+  /api/v1/groups/detail:
     get:
       tags: [Group Sync]
-      summary: 查询有效群成员
+      summary: 查询群详情及当前用户实时发言权限
+      description: |
+        前端每次进入群聊时调用，包括从已有 OpenIM 会话进入的场景。
+        canChat=false 时应立即禁用消息输入区，并根据 denyReason 展示单人禁言或全员禁言提示；无需等待发送消息失败。
+      operationId: getActiveGroupDetailWithChatPermission
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupIdQuery'
+      responses:
+        '200': {$ref: '#/components/responses/GroupResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/group-members:
+    get:
+      tags: [Group Sync]
+      summary: 查询有效群成员及禁言状态
       operationId: listActiveGroupMembers
       x-change-type: optimized
       security: [{bearerAuth: []}]
       parameters:
-        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/GroupIdQuery'
       responses:
         '200': {$ref: '#/components/responses/GroupMembersResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
 
   /api/v1/groups/{id}/join:
@@ -241,15 +300,16 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '404': {$ref: '#/components/responses/NotFound'}
 
-  /api/v1/groups/{id}/settings:
-    put:
+  /api/v1/groups/settings/update:
+    post:
       tags: [Group Sync]
       summary: 更新群设置并同步 OpenIM
+      description: |
+        请求体除 groupId 外至少传入一个要更新的字段。
+        allowMemberAddFriend=false 时只禁止从该群成员资料发起的新好友申请，不删除已有好友关系。
       operationId: updateGroupSettingsAndSyncOpenIM
       x-change-type: optimized
       security: [{bearerAuth: []}]
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
       requestBody:
         required: true
         content:
@@ -260,6 +320,7 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
 
   /api/v1/groups/{id}/me/nickname:
@@ -281,15 +342,54 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '403': {$ref: '#/components/responses/Forbidden'}
 
-  /api/v1/groups/{id}/reports:
+  /api/v1/groups/{id}/remark:
+    put:
+      tags: [Group Sync]
+      summary: 修改当前用户对群聊的备注
+      operationId: updateMyGroupRemark
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateRemarkRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/GroupResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/groups/{id}/members/{userId}/remark:
+    put:
+      tags: [Group Sync]
+      summary: 修改当前用户对指定群成员的备注
+      operationId: updateMyGroupMemberRemark
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MemberUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateRemarkRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/groups/reports:
     post:
       tags: [Group Sync]
       summary: 举报群聊
       operationId: reportGroup
       x-change-type: new
       security: [{bearerAuth: []}]
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
       requestBody:
         required: true
         content:
@@ -337,47 +437,50 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalError'}
 
-  /api/v1/groups/{id}/members/{userId}/mute:
-    put:
+  /api/v1/group-members/mute:
+    post:
       tags: [Group Sync]
-      summary: 设置或解除群成员禁言
-      operationId: updateGroupMemberMute
+      summary: 禁言指定群成员
+      description: |
+        群主或管理员可禁言普通成员；群主还可禁言管理员。
+        不允许操作自己、群主，也不允许管理员操作其他管理员。
+        成功后事务内更新 PostgreSQL 并写入 OpenIM 同步 Outbox。
+      operationId: muteGroupMember
       x-change-type: new
       security: [{bearerAuth: []}]
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
-        - $ref: '#/components/parameters/MemberUserId'
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/UpdateGroupMemberMuteRequest'}
+            schema: {$ref: '#/components/schemas/MuteGroupMemberRequest'}
       responses:
-        '200': {$ref: '#/components/responses/OKResponse'}
+        '200': {$ref: '#/components/responses/GroupMemberMuteResponse'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
 
-  /api/v1/groups/{id}/mute:
-    put:
+  /api/v1/group-members/unmute:
+    post:
       tags: [Group Sync]
-      summary: 开启或关闭全员禁言
-      operationId: updateGroupMute
+      summary: 解除指定群成员禁言
+      description: |
+        权限规则与禁言接口一致。目标成员已经未被禁言时按幂等成功处理，不重复产生 OpenIM 通知。
+      operationId: unmuteGroupMember
       x-change-type: new
       security: [{bearerAuth: []}]
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/UpdateGroupMuteRequest'}
+            schema: {$ref: '#/components/schemas/UnmuteGroupMemberRequest'}
       responses:
-        '200': {$ref: '#/components/responses/OKResponse'}
+        '200': {$ref: '#/components/responses/GroupMemberMuteResponse'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
 
   /api/v1/groups/{id}/dismiss:
@@ -394,6 +497,113 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/report-reasons:
+    get:
+      tags: [Reports]
+      summary: 查询启用的用户举报原因
+      operationId: listUserReportReasons
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: targetType
+          in: query
+          required: true
+          schema: {type: string, enum: [user]}
+        - name: language
+          in: query
+          schema: {type: string, maxLength: 8, default: zh}
+      responses:
+        '200': {$ref: '#/components/responses/ReportReasonsResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/reports:
+    post:
+      tags: [Reports]
+      summary: 提交用户举报
+      operationId: createUserReport
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateUserReportRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/UserReportResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/files/presign:
+    post:
+      tags: [Files]
+      summary: 获取文件预签名 POST 上传表单
+      description: 返回 formUrl/formData；客户端将表单字段和名为 file 的文件使用 multipart/form-data POST 到 formUrl。
+      operationId: presignFileUpload
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PresignFileRequest'}
+      responses:
+        '200': {description: 预签名 multipart POST 表单, content: {application/json: {schema: {$ref: '#/components/schemas/PresignFileUploadEnvelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /api/v1/files/uploads:
+    post:
+      tags: [Files]
+      summary: 创建文件上传任务
+      description: 返回 file、formUrl 和 formData；客户端必须使用 multipart/form-data POST 直传 MinIO，文件字段名为 file。uploadUrl 仅为兼容字段，值与 formUrl 相同。
+      operationId: createFileUpload
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateFileUploadRequest'}
+      responses:
+        '200': {description: 上传任务和预签名 POST 表单, content: {application/json: {schema: {$ref: '#/components/schemas/CreateFileUploadEnvelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /api/v1/files/uploads/complete:
+    post:
+      tags: [Files]
+      summary: 确认文件上传完成
+      operationId: completeFileUpload
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CompleteFileUploadRequest'}
+      responses:
+        '200': {description: 已就绪文件信息, content: {application/json: {schema: {$ref: '#/components/schemas/FileObjectEnvelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /api/v1/files:
+    get:
+      tags: [Files]
+      summary: 查询当前用户上传的文件
+      operationId: getFile
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: fileId
+          in: query
+          required: true
+          schema: {$ref: '#/components/schemas/UUID'}
+      responses:
+        '200': {description: 文件信息, content: {application/json: {schema: {$ref: '#/components/schemas/FileObjectEnvelope'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
 
   /api/v1/im/token:
     post:
@@ -419,6 +629,43 @@ paths:
         '502': {$ref: '#/components/responses/BadGateway'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
 
+  /api/v1/im/messages/recall:
+    post:
+      tags: [OpenIM Client]
+      summary: 统一撤回私聊或群聊的单条消息
+      description: |
+        “一键撤回”在本接口中指对选中的一条消息执行一次撤回，不包含批量、全群历史或按成员撤回。
+
+        服务端根据 peerType + peerId 解析 OpenIM conversationID，并用 seq + clientMsgId 校验目标消息；
+        客户端不得直接传 conversationID，也不能指定撤回操作人。
+
+        权限规则：
+        - 私聊只允许发送者在服务端配置的撤回时间窗内撤回自己的消息。
+        - 群成员只能在撤回时间窗内撤回自己的消息。
+        - 群管理员可撤回普通成员消息；群主可撤回普通成员或管理员消息。
+        - 已解散群、系统通知消息或已撤回消息不重复执行；已撤回时幂等返回 200。
+
+        后端调用 OpenIM `/msg/revoke_msg`，并将会话、序号、原发送者、操作人、角色、原因和时间写入幂等撤回审计。
+        本接口依赖 OpenIM 发送后 Webhook 已正常写入 `im_message_audit`；缺少审计记录时返回 404，避免仅凭客户端参数越权撤回。
+      operationId: recallOpenIMMessage
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecallMessageRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/MessageRecallResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
   /api/v1/im/peers/{businessUserId}:
     get:
       tags: [OpenIM Client]
@@ -434,6 +681,140 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
 
+  /api/v1/im/conversations/{peerType}/{peerId}:
+    get:
+      tags: [OpenIM Client]
+      summary: 读取单聊或群聊的 OpenIM 全量会话设置
+      operationId: getOpenIMConversationSettings
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/PeerType'
+        - $ref: '#/components/parameters/PeerId'
+      responses:
+        '200': {$ref: '#/components/responses/ConversationSettingsResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+    patch:
+      tags: [OpenIM Client]
+      summary: 部分更新单聊或群聊的 OpenIM 会话设置
+      description: 未传字段保持原值；请求体至少包含一个字段。
+      operationId: updateOpenIMConversationSettings
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/PeerType'
+        - $ref: '#/components/parameters/PeerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateConversationSettingsRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/ConversationSettingsResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /api/v1/im/conversations/{peerType}/{peerId}/read:
+    post:
+      tags: [OpenIM Client]
+      summary: 标记单聊或群聊会话已读
+      operationId: markOpenIMConversationRead
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/PeerType'
+        - $ref: '#/components/parameters/PeerId'
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /api/v1/im/conversation-messages/clear:
+    post:
+      tags: [OpenIM Client]
+      summary: 清除当前用户的单聊或群聊历史消息
+      description: 仅清除当前用户在该会话中的服务端漫游历史，并同步其其他设备；不影响私聊对方或其他群成员。该操作不可恢复。
+      operationId: clearOpenIMConversationMessages
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ClearConversationMessagesRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /api/v1/im/me/global-msg-recv-opt:
+    put:
+      tags: [OpenIM Client]
+      summary: 设置当前用户的全局消息接收选项
+      operationId: setOpenIMGlobalMsgRecvOpt
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GlobalMsgRecvOptRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/GlobalMsgRecvOptResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /api/v1/im/me/push-token:
+    post:
+      tags: [OpenIM Client]
+      summary: 注册或更新设备推送凭证
+      description: 当前只保存推送凭证；离线推送供应商尚未对接。
+      operationId: registerOpenIMPushToken
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegisterPushTokenRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+    delete:
+      tags: [OpenIM Client]
+      summary: 注销设备推送凭证
+      operationId: unregisterOpenIMPushToken
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UnregisterPushTokenRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
   /api/v1/im/groups/{businessGroupId}:
     get:
       tags: [OpenIM Client]
@@ -448,6 +829,368 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/im/groups/by-im/{imGroupId}:
+    get:
+      tags: [OpenIM Client]
+      summary: 使用 OpenIM 群 ID 反查业务群资料
+      operationId: resolveBusinessGroupByOpenIMId
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: imGroupId
+          in: path
+          required: true
+          schema: {type: string, minLength: 1}
+      responses:
+        '200': {$ref: '#/components/responses/OpenIMGroupResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /health:
+    get:
+      tags: [Health]
+      summary: 服务存活检查
+      description: 无需登录；按来源 IP 每分钟最多请求 20 次。
+      operationId: getHealth
+      security: []
+      x-change-type: optimized
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HealthResult'}
+        '429':
+          description: 请求过于频繁
+
+  /api/v1/public/countries:
+    get:
+      tags: [Public Config]
+      summary: 查询已启用的国家和国际电话区号
+      description: 登录、注册前即可调用。
+      operationId: listEnabledCountries
+      security: []
+      x-change-type: new
+      responses:
+        '200': {$ref: '#/components/responses/CountriesResponse'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/v1/favorites:
+    post:
+      tags: [Favorites]
+      summary: 收藏一条 OpenIM 消息快照
+      operationId: createFavorite
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateFavoriteRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/FavoriteResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/favorites/list:
+    post:
+      tags: [Favorites]
+      summary: 分页查询收藏列表
+      description: 非 GET 接口统一使用 JSON body，不接受 query 参数。
+      operationId: listFavorites
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ListFavoritesRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/FavoritesResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /api/v1/favorites/{favoriteId}:
+    delete:
+      tags: [Favorites]
+      summary: 删除当前用户的一条收藏
+      operationId: deleteFavorite
+      x-change-type: existing
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: favoriteId
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/UUID'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/forward-tasks:
+    post:
+      tags: [Forward]
+      summary: 创建异步万人转发草稿任务
+      description: |
+        转发总人数不设业务上限。创建接口可直接传入全部 targetUserIds，服务端会按 1000 条一批持久化；
+        也可通过 add 或 generate 继续分批写入。任务状态保存在 PostgreSQL，提交后由 Kafka 异步派发。
+      operationId: createForwardTask
+      x-change-type: optimized
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateForwardTaskRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/ForwardTaskResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    get:
+      tags: [Forward]
+      summary: 分页查询当前用户的转发任务
+      operationId: listForwardTasks
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/ForwardTaskStatusQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+        - $ref: '#/components/parameters/TaskLimitQuery'
+      responses:
+        '200': {$ref: '#/components/responses/ForwardTaskPageResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /api/v1/forward-tasks/{id}:
+    get:
+      deprecated: true
+      tags: [Forward]
+      summary: 查询转发任务进度（旧兼容路径）
+      description: 新客户端改用 GET /api/v1/forward-task-progress?taskId=...。
+      operationId: getForwardTaskLegacy
+      x-change-type: existing
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/UUID'}
+      responses:
+        '200': {$ref: '#/components/responses/ForwardTaskResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/forward-task-progress:
+    get:
+      tags: [Forward]
+      summary: 使用 query 参数查询转发任务进度
+      operationId: getForwardTaskProgress
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/ForwardTaskIdQuery'
+      responses:
+        '200': {$ref: '#/components/responses/ForwardTaskResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/forward-task-targets:
+    get:
+      tags: [Forward]
+      summary: 分页查询转发任务目标明细
+      operationId: listForwardTaskTargets
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/ForwardTaskIdQuery'
+        - $ref: '#/components/parameters/ForwardTargetStatusQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+        - $ref: '#/components/parameters/TargetLimitQuery'
+      responses:
+        '200': {$ref: '#/components/responses/ForwardTargetPageResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/forward-task-targets/add:
+    post:
+      tags: [Forward]
+      summary: 向草稿任务分批添加目标用户
+      operationId: addForwardTaskTargets
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForwardTargetsRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AffectedCountResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /api/v1/forward-task-targets/generate:
+    post:
+      tags: [Forward]
+      summary: 按好友范围生成任务目标
+      operationId: generateForwardTaskTargets
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GenerateForwardTargetsRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AffectedCountResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /api/v1/forward-task-targets/remove:
+    post:
+      tags: [Forward]
+      summary: 从草稿任务分批移除目标用户
+      operationId: removeForwardTaskTargets
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForwardTargetsRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AffectedCountResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /api/v1/forward-task-targets/clear:
+    post:
+      tags: [Forward]
+      summary: 清空草稿任务的全部目标
+      operationId: clearForwardTaskTargets
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForwardTaskActionRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AffectedCountResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /api/v1/forward-tasks/submit:
+    post:
+      tags: [Forward]
+      summary: 提交转发任务并写入 Kafka Outbox
+      operationId: submitForwardTask
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForwardTaskActionRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /api/v1/forward-tasks/cancel:
+    post:
+      tags: [Forward]
+      summary: 取消转发任务
+      operationId: cancelForwardTask
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CancelForwardTaskRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /api/v1/forward-tasks/retry:
+    post:
+      tags: [Forward]
+      summary: 重试失败目标或指定目标
+      operationId: retryForwardTask
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RetryForwardTaskRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/AffectedCountResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /api/v1/forward-tasks/pause:
+    post:
+      tags: [Forward]
+      summary: 暂停转发任务
+      operationId: pauseForwardTask
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForwardTaskActionRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /api/v1/forward-tasks/resume:
+    post:
+      tags: [Forward]
+      summary: 恢复转发任务并重新派发 Kafka 事件
+      operationId: resumeForwardTask
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForwardTaskActionRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/OKResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
 
   /internal/im/messages:
     post:
@@ -542,6 +1285,7 @@ paths:
       tags: [OpenIM Webhook]
       summary: OpenIM 单聊发送前权限检查
       operationId: beforeSendSingleMessage
+      security: []
       x-change-type: new
       parameters:
         - $ref: '#/components/parameters/WebhookSecret'
@@ -560,6 +1304,7 @@ paths:
       tags: [OpenIM Webhook]
       summary: OpenIM 群聊发送前权限和禁言检查
       operationId: beforeSendGroupMessage
+      security: []
       x-change-type: new
       parameters:
         - $ref: '#/components/parameters/WebhookSecret'
@@ -578,6 +1323,7 @@ paths:
       tags: [OpenIM Webhook]
       summary: OpenIM 单聊发送后审计回调
       operationId: afterSendSingleMessage
+      security: []
       x-change-type: new
       parameters:
         - $ref: '#/components/parameters/WebhookSecret'
@@ -597,6 +1343,7 @@ paths:
       tags: [OpenIM Webhook]
       summary: OpenIM 群聊发送后审计回调
       operationId: afterSendGroupMessage
+      security: []
       x-change-type: new
       parameters:
         - $ref: '#/components/parameters/WebhookSecret'
@@ -616,6 +1363,7 @@ paths:
       tags: [OpenIM Webhook]
       summary: OpenIM 撤回前后审计回调
       operationId: afterRevokeMessage
+      security: []
       x-change-type: new
       parameters:
         - $ref: '#/components/parameters/WebhookSecret'
@@ -668,6 +1416,12 @@ components:
       required: true
       description: 业务群 ID（十进制数字字符串）。
       schema: {type: string, pattern: '^[0-9]+$', example: '100001'}
+    GroupIdQuery:
+      name: groupId
+      in: query
+      required: true
+      description: 业务群 ID（十进制数字字符串）。
+      schema: {type: string, pattern: '^[0-9]+$', example: '100001'}
     BusinessUserId:
       name: businessUserId
       in: path
@@ -680,6 +1434,49 @@ components:
       required: true
       description: 业务群 ID（十进制数字字符串），服务端会转换为 OpenIM 群 ID。
       schema: {type: string, pattern: '^[0-9]+$', example: '100001'}
+    PeerType:
+      name: peerType
+      in: path
+      required: true
+      description: 会话目标类型；c2c=单聊，group=群聊。
+      schema: {type: string, enum: [c2c, group]}
+    PeerId:
+      name: peerId
+      in: path
+      required: true
+      description: 单聊时为业务好友 UUID，群聊时为业务群 ID；无需传 OpenIM conversationID。
+      schema: {type: string, minLength: 1}
+    ForwardTaskIdQuery:
+      name: taskId
+      in: query
+      required: true
+      description: 转发任务 UUID。
+      schema: {$ref: '#/components/schemas/UUID'}
+    ForwardTaskStatusQuery:
+      name: status
+      in: query
+      description: 按任务状态筛选；不传时查询全部状态。
+      schema: {$ref: '#/components/schemas/ForwardTaskStatus'}
+    ForwardTargetStatusQuery:
+      name: status
+      in: query
+      description: 按目标处理状态筛选；不传时查询全部状态。
+      schema: {$ref: '#/components/schemas/ForwardTargetStatus'}
+    CursorQuery:
+      name: cursor
+      in: query
+      description: 上一页返回的 nextCursor；首页不传。
+      schema: {type: string}
+    TaskLimitQuery:
+      name: limit
+      in: query
+      description: 每页任务数，默认 20。
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    TargetLimitQuery:
+      name: limit
+      in: query
+      description: 每页目标数，默认 50。
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
     WebhookSecret:
       name: secret
       in: path
@@ -718,6 +1515,16 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/GroupMembersEnvelope'}
+    GroupMemberMuteResponse:
+      description: 群成员最新禁言状态
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GroupMemberMuteEnvelope'}
+    GroupFriendRequestResponse:
+      description: 群来源好友申请结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GroupFriendRequestEnvelope'}
     GroupQRCodeResponse:
       description: 群二维码信息
       content:
@@ -738,16 +1545,36 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/GroupReportEnvelope'}
+    ReportReasonsResponse:
+      description: 用户举报原因列表
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ReportReasonsEnvelope'}
+    UserReportResponse:
+      description: 用户举报提交结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/UserReportEnvelope'}
     OpenIMTokenResponse:
       description: OpenIM 登录信息
       content:
         application/json:
           schema: {$ref: '#/components/schemas/OpenIMTokenEnvelope'}
+    MessageRecallResponse:
+      description: 消息撤回结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/MessageRecallEnvelope'}
     OpenIMPeerResponse:
       description: 单聊目标与权限
       content:
         application/json:
           schema: {$ref: '#/components/schemas/OpenIMPeerEnvelope'}
+    ConversationSettingsResponse:
+      description: OpenIM 单聊设置
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ConversationSettingsEnvelope'}
     OpenIMGroupResponse:
       description: 群聊目标与权限
       content:
@@ -778,6 +1605,46 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/ReplayEnvelope'}
+    GlobalMsgRecvOptResponse:
+      description: 全局消息接收选项
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/GlobalMsgRecvOptEnvelope'}
+    CountriesResponse:
+      description: 启用的国家和国际区号列表
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CountriesEnvelope'}
+    FavoriteResponse:
+      description: 收藏记录
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/FavoriteEnvelope'}
+    FavoritesResponse:
+      description: 收藏记录列表
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/FavoritesEnvelope'}
+    ForwardTaskResponse:
+      description: 转发任务及实时汇总进度
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ForwardTaskEnvelope'}
+    ForwardTaskPageResponse:
+      description: 转发任务游标分页结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ForwardTaskPageEnvelope'}
+    ForwardTargetPageResponse:
+      description: 转发目标游标分页结果
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ForwardTargetPageEnvelope'}
+    AffectedCountResponse:
+      description: 受影响目标数量
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AffectedCountEnvelope'}
     WebhookResponse:
       description: OpenIM 回调响应
       content:
@@ -831,7 +1698,7 @@ components:
       properties:
         code: {type: integer, description: 错误业务码，当前失败响应通常为 1。, example: 1}
         message: {type: string, description: 可直接用于排查问题的中文错误提示。, example: 参数错误}
-        data: {nullable: true, description: 失败时固定为空。}
+        data: {type: object, nullable: true, description: 失败时固定为空。}
 
     InternalAuthError:
       type: object
@@ -855,11 +1722,11 @@ components:
 
     RegisterRequest:
       type: object
-      required: [phone, password, code]
+      required: [phone, code]
       properties:
         phone: {type: string, description: 注册手机号，不含国家/地区区号。, example: '13800138000'}
         countryCode: {type: string, description: 国际电话区号；不传时服务端默认使用 +86。, example: '+86'}
-        password: {type: string, format: password, minLength: 6, description: 登录密码，至少 6 位；传输时为明文但必须使用 HTTPS。}
+        password: {type: string, format: password, minLength: 6, description: 可选登录密码；不传或传空字符串时只支持验证码登录，之后可在安全设置中设置密码。必须使用 HTTPS 传输。}
         code: {type: string, description: 注册场景的短信验证码。, example: '123456'}
         deviceId: {type: string, description: 客户端设备唯一标识，用于记录并管理刷新令牌会话；建议稳定传入。}
 
@@ -872,7 +1739,7 @@ components:
 
     MeProfile:
       type: object
-      required: [id, publicId, nickname, avatar, bio, status, createdAt]
+      required: [id, publicId, nickname, avatar, bio, status, createdAt, hasPassword]
       properties:
         id: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 当前业务用户 ID。}
         phoneMasked: {type: string, description: 脱敏后的手机号，例如 138****8000。, example: '138****8000'}
@@ -883,6 +1750,7 @@ components:
         bio: {type: string, description: 个人简介，未设置时为空字符串。}
         status: {type: string, description: 账号状态，例如 active 表示正常。, example: active}
         createdAt: {type: string, format: date-time, description: 用户注册时间（RFC 3339）。}
+        hasPassword: {type: boolean, description: 当前账号是否已设置登录密码。}
 
     AuthResult:
       type: object
@@ -950,8 +1818,13 @@ components:
         allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。}
         myRole: {type: string, enum: [owner, admin, member], description: 当前登录用户在群内的角色；owner=群主，admin=管理员，member=普通成员。}
         myNickname: {type: string, description: 当前登录用户的群昵称，未设置时为空字符串。}
+        remark: {type: string, description: 当前用户为该群设置的备注，未设置时省略。}
         joinMode: {type: string, enum: [open, approval], description: 入群方式；open=可直接加入，approval=需要管理员审核。}
         allMuted: {type: boolean, description: 是否开启全员禁言。}
+        canChat: {type: boolean, description: 当前登录用户此刻是否可发送群消息；群详情接口中始终返回。}
+        denyReason: {type: string, enum: [member_muted, group_muted], description: canChat=false 的稳定原因码；member_muted=当前用户被单独禁言，group_muted=普通成员受到全员禁言限制。}
+        isMuted: {type: boolean, description: 当前登录用户是否正处于单人禁言；与全员禁言状态分开。}
+        mutedUntil: {type: string, format: date-time, nullable: true, description: 当前用户单人禁言截止时间；未被单独禁言时不返回。}
         permissions:
           type: object
           description: 当前登录用户在本群可执行的操作权限。
@@ -975,7 +1848,7 @@ components:
 
     GroupMember:
       type: object
-      required: [id, nickname, groupNickname, displayName, avatar, role]
+      required: [id, nickname, groupNickname, displayName, avatar, role, isMuted, mutedUntil]
       properties:
         id: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 群成员的业务用户 ID。}
         nickname: {type: string, description: 用户的全局昵称。}
@@ -983,6 +1856,9 @@ components:
         displayName: {type: string, description: 前端应优先展示的名称，通常为群昵称，否则为全局昵称。}
         avatar: {type: string, description: 用户头像访问地址。}
         role: {type: string, enum: [owner, admin, member], description: 群角色；owner=群主，admin=管理员，member=普通成员。}
+        memberRemark: {type: string, description: 当前用户为该成员设置的备注，未设置时省略。}
+        isMuted: {type: boolean, description: 该成员当前是否处于单人禁言中；不包含群全员禁言状态。}
+        mutedUntil: {type: string, format: date-time, nullable: true, description: 单人禁言截止时间（RFC 3339）；未禁言时为 null。}
 
     GroupMembersEnvelope:
       allOf:
@@ -996,7 +1872,11 @@ components:
 
     UpdateGroupSettingsRequest:
       type: object
+      required: [groupId]
+      minProperties: 2
+      additionalProperties: false
       properties:
+        groupId: {type: string, pattern: '^[0-9]+$', description: 待更新的业务群 ID。, example: '100001'}
         name: {type: string, minLength: 1, maxLength: 100, description: 新群名称；不传表示不修改。}
         avatarFileId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 已上传且可用的新群头像文件 ID；不传表示不修改。}
         announcement: {type: string, maxLength: 2000, description: 新群公告；传空字符串表示清空。}
@@ -1024,15 +1904,29 @@ components:
       properties:
         nickname: {type: string, maxLength: 32, description: 当前用户在本群的新昵称；传空字符串可清除群昵称。}
 
+    UpdateRemarkRequest:
+      type: object
+      required: [remark]
+      properties:
+        remark: {type: string, maxLength: 64, description: 新备注；传空字符串表示清除。}
+
     CreateGroupReportRequest:
       type: object
-      required: [reason]
+      required: [groupId, reason]
+      additionalProperties: false
       properties:
+        groupId: {type: string, pattern: '^[0-9]+$', description: 被举报群聊的业务群 ID。, example: '100001'}
         reason:
           type: string
           enum: [spam, fraud, pornography, violence, harassment, other]
           description: 举报原因；spam=垃圾广告，fraud=诈骗，pornography=色情，violence=暴力，harassment=骚扰，other=其他。
         description: {type: string, maxLength: 1000, description: 举报补充说明，最多 1000 个字符。}
+        imageFileIds:
+          type: array
+          maxItems: 9
+          uniqueItems: true
+          description: 通过文件上传接口上传并完成的图片文件 ID；仅接受当前用户 purpose=image、image/*、不超过 10 MiB 的图片。
+          items: {$ref: '#/components/schemas/UUID'}
 
     UpdateGroupMemberRoleRequest:
       type: object
@@ -1040,22 +1934,98 @@ components:
       properties:
         role: {type: string, enum: [admin, member], description: 目标角色；admin=设为管理员，member=取消管理员并设为普通成员。}
 
-    UpdateGroupMemberMuteRequest:
+    MuteGroupMemberRequest:
       type: object
-      required: [mutedSeconds]
+      required: [groupId, memberUserId, mutedSeconds]
+      additionalProperties: false
       properties:
+        groupId: {type: string, pattern: '^[0-9]+$', description: 目标业务群 ID。, example: '100001'}
+        memberUserId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 待禁言群成员的业务用户 ID。}
         mutedSeconds:
           type: integer
           format: int64
-          minimum: 0
+          minimum: 1
           maximum: 2592000
-          description: 禁言时长（秒）；0 表示解除禁言，最大 2592000 秒（30 天）。
+          description: 禁言时长（秒），范围 1～2592000（最大 30 天）；解除禁言必须使用 unmute 接口。
 
-    UpdateGroupMuteRequest:
+    UnmuteGroupMemberRequest:
       type: object
-      required: [muted]
+      required: [groupId, memberUserId]
+      additionalProperties: false
       properties:
-        muted: {type: boolean, description: true 开启全员禁言，false 关闭全员禁言。}
+        groupId: {type: string, pattern: '^[0-9]+$', description: 目标业务群 ID。, example: '100001'}
+        memberUserId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 待解除禁言群成员的业务用户 ID。}
+
+    GroupMemberMuteResult:
+      type: object
+      required: [groupId, memberUserId, isMuted, mutedUntil, changedAt]
+      properties:
+        groupId: {type: string, pattern: '^[0-9]+$', description: 业务群 ID。, example: '100001'}
+        memberUserId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 目标群成员的业务用户 ID。}
+        isMuted: {type: boolean, description: 操作后该成员是否处于单人禁言中。}
+        mutedUntil: {type: string, format: date-time, nullable: true, description: 操作后的禁言截止时间；解除禁言后为 null。}
+        changedAt: {type: string, format: date-time, description: 服务端确认该状态的时间。}
+
+    GroupMemberMuteEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/GroupMemberMuteResult'}
+
+    CreateGroupFriendRequest:
+      type: object
+      required: [groupId, toUserId]
+      additionalProperties: false
+      properties:
+        groupId: {type: string, pattern: '^[0-9]+$', description: 好友申请的来源业务群 ID。, example: '100001'}
+        toUserId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 待添加群成员的业务用户 ID。}
+        message: {type: string, maxLength: 500, description: 好友申请验证信息；对方无需验证时仍作为申请记录保留。}
+
+    GroupFriendRequestResult:
+      type: object
+      required: [ok, requestId, status]
+      properties:
+        ok: {type: boolean, example: true}
+        requestId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 好友申请记录 ID。}
+        status: {type: string, enum: [pending, accepted], description: pending=等待对方同意，accepted=对方关闭好友验证并已直接成为好友。}
+
+    GroupFriendRequestEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/GroupFriendRequestResult'}
+
+    RecallMessageRequest:
+      type: object
+      required: [peerType, peerId, clientMsgId, seq]
+      additionalProperties: false
+      properties:
+        peerType: {type: string, enum: [c2c, group], description: c2c=私聊，group=群聊。}
+        peerId: {type: string, minLength: 1, description: 私聊时为对端业务用户 UUID，群聊时为数字形式的业务群 ID。}
+        clientMsgId: {type: string, minLength: 1, maxLength: 128, description: OpenIM clientMsgID，必须与 seq 指向同一条消息。}
+        seq: {type: integer, format: int64, minimum: 1, description: 消息在 OpenIM 会话中的序号。}
+        reason: {type: string, maxLength: 500, description: 撤回原因；群主或管理员撤回他人消息时必填，撤回自己消息时可省略。}
+
+    MessageRecallResult:
+      type: object
+      required: [peerType, peerId, clientMsgId, seq, status, alreadyRecalled, recalledAt]
+      properties:
+        peerType: {type: string, enum: [c2c, group], description: 已撤回消息的会话类型。}
+        peerId: {type: string, description: 请求使用的业务好友 ID 或群 ID。}
+        clientMsgId: {type: string, description: 已撤回的 OpenIM clientMsgID。}
+        seq: {type: integer, format: int64, description: 已撤回消息的 OpenIM 序号。}
+        status: {type: string, enum: [recalled], description: 撤回最终状态。}
+        alreadyRecalled: {type: boolean, description: true 表示该消息在本次请求前已撤回，本次为幂等命中。}
+        recalledAt: {type: string, format: date-time, description: 首次成功撤回的服务端时间。}
+
+    MessageRecallEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/MessageRecallResult'}
 
     GroupQRCodeResult:
       type: object
@@ -1106,10 +2076,14 @@ components:
 
     GroupReportResult:
       type: object
-      required: [id, status, createdAt]
+      required: [id, status, imagePaths, createdAt]
       properties:
         id: {type: string, format: uuid, description: 群举报记录 ID。}
         status: {type: string, description: 举报处理状态，新提交的举报通常为 pending。, example: pending}
+        imagePaths:
+          type: array
+          description: 举报图片的公开可访问 URL；数组元素可直接点击打开，不返回 objectKey 等内部字符串。
+          items: {type: string, format: uri, example: 'https://minio.example.com/im-uploads/uploads/user-id/image-id.jpg'}
         createdAt: {type: string, format: date-time, description: 举报提交时间（RFC 3339）。}
 
     GroupReportEnvelope:
@@ -1118,6 +2092,507 @@ components:
         - type: object
           properties:
             data: {allOf: [{$ref: '#/components/schemas/GroupReportResult'}], description: 新建的群举报记录。}
+
+    ReportReason:
+      type: object
+      required: [id, targetType, reason, language, sortOrder]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        targetType: {type: string, enum: [user]}
+        reason: {type: string, maxLength: 128, example: 垃圾广告}
+        language: {type: string, maxLength: 8, example: zh}
+        sortOrder: {type: integer, example: 10}
+
+    ReportReasonsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/ReportReason'}
+
+    CreateUserReportRequest:
+      type: object
+      required: [targetType, targetId, reasonId]
+      properties:
+        targetType: {type: string, enum: [user]}
+        targetId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 被举报用户的业务 UUID。}
+        reasonId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 启用中的用户举报原因 UUID。}
+        description: {type: string, maxLength: 1000}
+        evidenceFileIds:
+          type: array
+          maxItems: 9
+          items: {$ref: '#/components/schemas/UUID'}
+
+    UserReportResult:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        status: {type: string, enum: [pending, processing, reopened]}
+        createdAt: {type: string, format: date-time}
+
+    UserReportEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/UserReportResult'}
+
+    ConversationSettings:
+      type: object
+      required: [conversationID, conversationType, ownerUserID, recvMsgOpt, unreadCount, groupAtType, isPinned, isPrivateChat, isNotInGroup, burnDuration, hasReadSeq, msgDestructTime, isMsgDestruct]
+      properties:
+        conversationID: {type: string, description: OpenIM 会话 ID，单聊以 si_ 开头，群聊以 sg_ 开头。}
+        conversationType: {type: integer, description: OpenIM 会话类型。}
+        ownerUserID: {type: string, description: 当前用户的 OpenIM userID。}
+        userID: {type: string, description: 单聊对方的 OpenIM userID；群聊时为空。}
+        groupID: {type: string, description: 群聊的 OpenIM groupID；单聊时为空。}
+        showName: {type: string}
+        faceURL: {type: string}
+        recvMsgOpt: {type: integer, enum: [0, 1, 2], description: 0=正常，1=免打扰，2=仅在线接收。}
+        unreadCount: {type: integer, minimum: 0}
+        groupAtType: {type: integer, description: 群 @ 强提醒档位。}
+        isPinned: {type: boolean, description: 是否置顶。}
+        isPrivateChat: {type: boolean, description: 是否启用阅后即焚。}
+        isNotInGroup: {type: boolean}
+        burnDuration: {type: integer, format: int64, minimum: 0, description: 阅后即焚时长，单位秒。}
+        hasReadSeq: {type: integer, format: int64}
+        msgDestructTime: {type: integer, format: int64, minimum: 0, description: 消息定时销毁时长，单位秒。}
+        isMsgDestruct: {type: boolean, description: 是否开启消息定时销毁。}
+        ex: {type: string, description: 会话扩展字段，可用于备注。}
+        draftText: {type: string, description: 会话草稿。}
+        attachedInfo: {type: string}
+
+    UpdateConversationSettingsRequest:
+      type: object
+      minProperties: 1
+      properties:
+        recvMsgOpt: {type: integer, enum: [0, 1, 2]}
+        isPinned: {type: boolean}
+        isPrivateChat: {type: boolean}
+        burnDuration: {type: integer, format: int64, minimum: 0}
+        isMsgDestruct: {type: boolean}
+        msgDestructTime: {type: integer, format: int64, minimum: 0}
+        groupAtType: {type: integer}
+        ex: {type: string}
+        draftText: {type: string}
+
+    ClearConversationMessagesRequest:
+      type: object
+      required: [peerType, peerId]
+      additionalProperties: false
+      properties:
+        peerType: {type: string, enum: [c2c, group], description: c2c=私聊，group=群聊。}
+        peerId: {type: string, minLength: 1, description: 私聊传对方业务用户 UUID，群聊传业务群 ID。}
+
+    PresignFileRequest:
+      type: object
+      required: [filename]
+      additionalProperties: false
+      properties:
+        filename: {type: string, minLength: 1}
+        contentType: {type: string, default: application/octet-stream}
+
+    CreateFileUploadRequest:
+      type: object
+      required: [purpose, fileName, contentType, size]
+      additionalProperties: false
+      properties:
+        purpose: {type: string, enum: [avatar, image, voice, file, sticker]}
+        fileName: {type: string, minLength: 1}
+        contentType: {type: string, minLength: 1}
+        size: {type: integer, format: int64, minimum: 0}
+        sha256: {type: string}
+
+    CompleteFileUploadRequest:
+      type: object
+      required: [fileId]
+      additionalProperties: false
+      properties:
+        fileId: {$ref: '#/components/schemas/UUID'}
+        etag: {type: string}
+
+    FileObject:
+      type: object
+      required: [id, purpose, fileName, contentType, size, url, status]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        purpose: {type: string, enum: [avatar, image, voice, file, sticker]}
+        fileName: {type: string}
+        contentType: {type: string}
+        size: {type: integer, format: int64, minimum: 0}
+        url: {type: string}
+        thumbnailUrl: {type: string}
+        durationMs: {type: integer, format: int64, minimum: 0}
+        status: {type: string, enum: [pending, ready, rejected]}
+
+    PresignFileUploadResult:
+      type: object
+      required: [uploadUrl, formUrl, formData, fileUrl, objectKey, expiresIn]
+      properties:
+        uploadUrl: {type: string, format: uri, description: 兼容字段，值与 formUrl 相同，必须使用 POST。}
+        formUrl: {type: string, format: uri, description: 预签名 multipart POST 目标地址。}
+        formData:
+          type: object
+          description: 直传时必须原样携带的 MinIO 签名表单字段。
+          additionalProperties: {type: string}
+        fileUrl: {type: string, format: uri}
+        objectKey: {type: string}
+        expiresIn: {type: integer, minimum: 1, example: 900}
+
+    CreateFileUploadResult:
+      type: object
+      required: [file, uploadUrl, formUrl, formData, expiresIn]
+      properties:
+        file: {$ref: '#/components/schemas/FileObject'}
+        uploadUrl: {type: string, format: uri, description: 兼容字段，值与 formUrl 相同，必须使用 POST。}
+        formUrl: {type: string, format: uri, description: 预签名 multipart POST 目标地址。}
+        formData:
+          type: object
+          description: 直传时必须原样携带的 MinIO 签名表单字段；文件字段名固定为 file。
+          additionalProperties: {type: string}
+        expiresIn: {type: integer, minimum: 1, example: 900}
+
+    PresignFileUploadEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/PresignFileUploadResult'}
+
+    CreateFileUploadEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/CreateFileUploadResult'}
+
+    FileObjectEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/FileObject'}
+
+    ConversationSettingsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/ConversationSettings'}
+
+    GlobalMsgRecvOptRequest:
+      type: object
+      required: [recvMsgOpt]
+      properties:
+        recvMsgOpt: {type: integer, enum: [0, 1, 2], description: 0=正常，1=免打扰，2=仅在线接收。}
+
+    GlobalMsgRecvOptResult:
+      type: object
+      required: [recvMsgOpt]
+      properties:
+        recvMsgOpt: {type: integer, enum: [0, 1, 2]}
+
+    GlobalMsgRecvOptEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/GlobalMsgRecvOptResult'}
+
+    RegisterPushTokenRequest:
+      type: object
+      required: [platform, deviceToken]
+      properties:
+        platform: {type: string, enum: [ios, android, web, harmony]}
+        channel: {type: string, description: 推送通道，例如 apns、fcm、jpush、harmony；web 可留空。}
+        deviceToken: {type: string, minLength: 1}
+        enabled: {type: boolean, default: true}
+
+    UnregisterPushTokenRequest:
+      type: object
+      required: [deviceToken]
+      properties:
+        deviceToken: {type: string, minLength: 1}
+
+    HealthResult:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [ok]}
+
+    CountryItem:
+      type: object
+      required: [code, dialCode, cnName, enName, enabled]
+      properties:
+        code: {type: string, description: ISO 国家或地区代码。, example: CN}
+        dialCode: {type: string, description: 国际电话区号。, example: '+86'}
+        cnName: {type: string, example: 中国}
+        enName: {type: string, example: China}
+        enabled: {type: boolean}
+
+    CountriesEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/CountryItem'}
+
+    CreateFavoriteRequest:
+      type: object
+      required: [messageId]
+      properties:
+        messageId: {type: string, minLength: 1, description: OpenIM clientMsgID。}
+        type: {type: string, enum: [text, emoji, image, video, file, voice]}
+        content: {type: string, description: 冻结后的消息内容、URL 或 JSON 字符串。}
+        senderId: {type: string, description: 发送者业务 ID 或 OpenIM userID。}
+        conversationId: {type: string, description: OpenIM conversationID。}
+
+    ListFavoritesRequest:
+      type: object
+      properties:
+        page: {type: integer, minimum: 1, default: 1}
+        size: {type: integer, minimum: 1, maximum: 100, default: 20}
+        type:
+          type: integer
+          minimum: 0
+          maximum: 4
+          default: 0
+          description: 0=全部，1=文字，2=图片/视频，3=文件，4=语音。
+
+    Favorite:
+      type: object
+      required: [id, messageId, type, content, senderId, conversationId, createdAt]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        messageId: {type: string}
+        type: {type: string, enum: [text, emoji, image, video, file, voice]}
+        content: {type: string}
+        senderId: {type: string}
+        conversationId: {type: string}
+        createdAt: {type: string, format: date-time}
+
+    FavoriteEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/Favorite'}
+
+    FavoritesEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/Favorite'}
+
+    ForwardTaskStatus:
+      type: string
+      enum: [draft, expanding, pending, processing, completed, partially_completed, failed, paused, cancelled]
+
+    ForwardTargetStatus:
+      type: string
+      enum: [pending, processing, retrying, success, failed, skipped, cancelled]
+
+    ForwardSelector:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [all_friends, tags, search]
+          description: all_friends=全部好友，tags=按标签，search=按关键字。
+        tagIds:
+          type: array
+          uniqueItems: true
+          description: mode=tags 时必填。
+          items: {$ref: '#/components/schemas/UUID'}
+        keyword: {type: string, description: mode=search 时使用的关键字。}
+
+    ForwardMessageSnapshot:
+      type: object
+      required: [contentType, content]
+      properties:
+        contentType:
+          type: integer
+          minimum: 1
+          maximum: 999
+          description: OpenIM 消息内容类型；禁止转发 1000 及以上的通知/控制消息。
+        content:
+          description: 符合 OpenIM send_msg 的非 null JSON 消息内容，任务创建后冻结。
+          oneOf:
+            - {type: object, additionalProperties: true}
+            - {type: array, items: {}}
+            - {type: string}
+            - {type: number}
+            - {type: boolean}
+
+    CreateForwardTaskRequest:
+      type: object
+      required: [sourceSnapshot]
+      properties:
+        sourceMessageId: {type: string, description: 旧调用兼容字段；与 sourceClientMsgId 至少传一个。}
+        sourceConversationId: {type: string, description: 来源 OpenIM conversationID。}
+        sourceClientMsgId: {type: string, description: 来源 OpenIM clientMsgID；与 sourceMessageId 至少传一个。}
+        sourceServerMsgId: {type: string, description: 来源 OpenIM serverMsgID。}
+        sourceSnapshot: {$ref: '#/components/schemas/ForwardMessageSnapshot'}
+        selector: {$ref: '#/components/schemas/ForwardSelector'}
+        idempotencyKey: {type: string, maxLength: 128, description: 可选幂等键；省略时由服务端生成 UUID。}
+        targetUserIds:
+          type: array
+          uniqueItems: true
+          description: 目标业务用户 UUID；任务总人数不设业务上限，服务端会按 1000 条一批持久化。
+          items: {$ref: '#/components/schemas/UUID'}
+
+    ForwardTargetsRequest:
+      type: object
+      required: [taskId, targetUserIds]
+      properties:
+        taskId: {$ref: '#/components/schemas/UUID'}
+        targetUserIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          description: 单次写库技术批次最多 1000 个，不是任务总人数限制。
+          items: {$ref: '#/components/schemas/UUID'}
+
+    GenerateForwardTargetsRequest:
+      type: object
+      required: [taskId, selector]
+      properties:
+        taskId: {$ref: '#/components/schemas/UUID'}
+        selector: {$ref: '#/components/schemas/ForwardSelector'}
+
+    ForwardTaskActionRequest:
+      type: object
+      required: [taskId]
+      properties:
+        taskId: {$ref: '#/components/schemas/UUID'}
+
+    CancelForwardTaskRequest:
+      allOf:
+        - $ref: '#/components/schemas/ForwardTaskActionRequest'
+        - type: object
+          properties:
+            reason: {type: string, description: 取消原因。}
+
+    RetryForwardTaskRequest:
+      allOf:
+        - $ref: '#/components/schemas/ForwardTaskActionRequest'
+        - type: object
+          properties:
+            onlyFailed: {type: boolean, default: false, description: 是否只重试失败目标。}
+            targetUserIds:
+              type: array
+              maxItems: 1000
+              uniqueItems: true
+              description: 指定本次重试目标；单次最多 1000 个。省略时由 onlyFailed 决定范围。
+              items: {$ref: '#/components/schemas/UUID'}
+
+    ForwardTask:
+      type: object
+      required: [id, sourceConversationId, sourceClientMsgId, sourceSnapshot, selector, idempotencyKey, status, targetCount, doneCount, successCount, failedCount, skippedCount, cancelledCount, pendingCount, processingCount, createdAt, updatedAt]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        sourceConversationId: {type: string}
+        sourceClientMsgId: {type: string}
+        sourceServerMsgId: {type: string}
+        sourceMessageId: {type: string}
+        sourceSnapshot: {$ref: '#/components/schemas/ForwardMessageSnapshot'}
+        selector: {$ref: '#/components/schemas/ForwardSelector'}
+        idempotencyKey: {type: string}
+        status: {$ref: '#/components/schemas/ForwardTaskStatus'}
+        targetCount: {type: integer, format: int64, minimum: 0}
+        doneCount: {type: integer, format: int64, minimum: 0}
+        successCount: {type: integer, format: int64, minimum: 0}
+        failedCount: {type: integer, format: int64, minimum: 0}
+        skippedCount: {type: integer, format: int64, minimum: 0}
+        cancelledCount: {type: integer, format: int64, minimum: 0}
+        pendingCount: {type: integer, format: int64, minimum: 0}
+        processingCount: {type: integer, format: int64, minimum: 0}
+        startedAt: {type: string, format: date-time}
+        finishedAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
+    ForwardTarget:
+      type: object
+      required: [id, taskId, targetUserId, status, attempts, nextRetryAt, createdAt, updatedAt]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        taskId: {$ref: '#/components/schemas/UUID'}
+        targetUserId: {$ref: '#/components/schemas/UUID'}
+        status: {$ref: '#/components/schemas/ForwardTargetStatus'}
+        attempts: {type: integer, minimum: 0}
+        conversationId: {type: string}
+        sentClientMsgId: {type: string}
+        sentServerMsgId: {type: string}
+        failureCode: {type: string}
+        failureMessage: {type: string}
+        nextRetryAt: {type: string, format: date-time}
+        finishedAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
+    ForwardTaskPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ForwardTask'}
+        nextCursor: {type: string}
+        hasMore: {type: boolean}
+
+    ForwardTargetPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ForwardTarget'}
+        nextCursor: {type: string}
+        hasMore: {type: boolean}
+
+    AffectedCountResult:
+      type: object
+      required: [affectedCount]
+      properties:
+        affectedCount: {type: integer, format: int64, minimum: 0}
+
+    ForwardTaskEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/ForwardTask'}
+
+    ForwardTaskPageEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/ForwardTaskPage'}
+
+    ForwardTargetPageEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/ForwardTargetPage'}
+
+    AffectedCountEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/AffectedCountResult'}
 
     OpenIMTokenRequest:
       type: object

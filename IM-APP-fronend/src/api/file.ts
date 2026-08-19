@@ -15,21 +15,24 @@ export async function createUploadTask(input: CreateUploadInput): Promise<Upload
   })
 }
 
+/** 完成上传：后端为 POST /files/uploads/complete，fileId 放 body */
 export async function completeUpload(
   fileId: string,
   input: CompleteUploadInput = {},
 ): Promise<FileObject> {
   return request<FileObject>({
-    url: `/files/uploads/${fileId}/complete`,
+    url: '/files/uploads/complete',
     method: 'POST',
-    data: input,
+    data: { fileId, ...input },
   })
 }
 
+/** 查询已完成文件：后端为 GET /files?fileId= */
 export async function getFileInfo(fileId: string): Promise<FileObject> {
   return request<FileObject>({
-    url: `/files/${fileId}`,
+    url: '/files',
     method: 'GET',
+    data: { fileId },
   })
 }
 

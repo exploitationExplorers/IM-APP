@@ -34,10 +34,11 @@ const (
 )
 
 type AuthHandler struct {
-	DB    *pgxpool.Pool
-	Cfg   config.Config
-	Redis *infra.Redis
-	SMS   service.SMSGateway
+	DB           *pgxpool.Pool
+	Cfg          config.Config
+	Redis        *infra.Redis
+	SMS          service.SMSGateway
+	Restrictions *repository.RestrictionRepo
 }
 
 // ---- 短信验证码 ----
@@ -213,6 +214,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		response.Fail(c, http.StatusUnauthorized, "账号或密码错误")
 		return
 	}
+	// 账号状态与登录限制检查（方案 A：server 强制；admin 封禁/限制后立即生效）
+	status, loginBanned, _, rerr := h.Restrictions.UserRestrictions(c.Request.Context(), user.ID)
+	if rerr == nil {
+		if status == "banned" {
+			response.Fail(c, http.StatusUnauthorized, "账号已被封禁")
+			return
+		}
+		if loginBanned {
+			response.Fail(c, http.StatusUnauthorized, "账号已限制登录")
+			return
+		}
+	}
 	h.respondAuth(c, user, req.DeviceID)
 }
 
@@ -237,6 +250,18 @@ func (h *AuthHandler) LoginSMS(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, http.StatusNotFound, "该手机号未注册，请先注册")
 		return
+	}
+	// 账号状态与登录限制检查（方案 A：server 强制）
+	status, loginBanned, _, rerr := h.Restrictions.UserRestrictions(ctx, user.ID)
+	if rerr == nil {
+		if status == "banned" {
+			response.Fail(c, http.StatusUnauthorized, "账号已被封禁")
+			return
+		}
+		if loginBanned {
+			response.Fail(c, http.StatusUnauthorized, "账号已限制登录")
+			return
+		}
 	}
 	h.respondAuth(c, user, req.DeviceID)
 }
@@ -385,14 +410,26 @@ func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID str
 		response.Fail(c, http.StatusInternalServerError, "签发令牌失败")
 		return
 	}
-	if _, err := h.DB.Exec(c.Request.Context(), `
-		INSERT INTO auth_sessions(user_id, device_id, refresh_token_hash, ip, user_agent, expires_at)
-		VALUES($1,$2,$3,$4,$5,$6)`,
-		user.ID, deviceID, hashHex(refresh), c.ClientIP(), c.Request.UserAgent(), time.Now().Add(refreshTokenTTL),
-	); err != nil {
-		log.Printf("create auth session failed: %v", err)
-		response.Fail(c, http.StatusInternalServerError, "签发令牌失败")
-		return
+	// 浏览器/App 的 User-Agent 可能超长，截断到 255 避免写库失败（varchar(256)）
+	userAgent := c.Request.UserAgent()
+	if len(userAgent) > 255 {
+		userAgent = userAgent[:255]
+	}
+	// 写会话：偶发瞬时连接错误时重试一次，避免登录失败
+	insertSession := func() error {
+		_, err := h.DB.Exec(c.Request.Context(), `
+			INSERT INTO auth_sessions(user_id, device_id, refresh_token_hash, ip, user_agent, expires_at)
+			VALUES($1,$2,$3,$4,$5,$6)`,
+			user.ID, deviceID, hashHex(refresh), c.ClientIP(), userAgent, time.Now().Add(refreshTokenTTL),
+		)
+		return err
+	}
+	if err := insertSession(); err != nil {
+		if err2 := insertSession(); err2 != nil {
+			log.Printf("create auth session failed: %v (retry: %v)", err, err2)
+			response.Fail(c, http.StatusInternalServerError, "签发令牌失败")
+			return
+		}
 	}
 	response.OK(c, models.AuthResult{
 		TokenPair: models.TokenPair{

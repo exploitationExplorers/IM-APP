@@ -4,6 +4,7 @@ import { useUserStore } from '@/stores/user'
 import { sendSmsCode } from '@/api/auth'
 import { APP_CONFIG } from '@/config'
 import ImCountryPicker from '@/components/ImCountryPicker.vue'
+import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
 import { findCountryByDialCode, validatePhone } from '@/constants/countries'
 
 const userStore = useUserStore()
@@ -167,6 +168,7 @@ function goForgot() {
         <text class="auth-register-link" @click="goRegister">立即注册</text>
       </view>
     </view>
+    <ImNotificationPermissionDialog />
   </view>
 </template>
 

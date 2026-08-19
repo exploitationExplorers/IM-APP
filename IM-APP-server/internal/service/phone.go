@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// 手机号 E.164 归一化
-// countryCode: 国家区号，如 "+86" / "86" / "0086"
+// NormalizeE164 手机号 E.164 归一化（宽松校验，测试阶段）
+// countryCode: 国家区号，如 "+86" / "86"
 // national:    本地号码，如 "13800138000"
 // 返回标准 E.164，如 "+8613800138000"
 func NormalizeE164(countryCode, national string) (string, error) {

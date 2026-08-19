@@ -15,9 +15,12 @@ import {
   updateSensitiveWordStatus,
   getSmsProvidersHealth,
 } from "@/api/modules/admin";
+import { useRoute } from "vue-router";
 import type { Moderation, SensitiveWords, Sms } from "@/api/interface";
 
-const activeTab = shallowRef("region");
+const route = useRoute();
+const initialTab = typeof route.meta.defaultTab === "string" ? route.meta.defaultTab : "region";
+const activeTab = shallowRef(initialTab);
 
 /* ============================================================
  *  Tab 1: 国家/地区启停
@@ -61,13 +64,55 @@ const smsRecordPage = shallowRef(1);
 const smsRecordSize = shallowRef(10);
 
 const smsRecords = shallowRef<SmsRecord[]>([
-  { id: 1, phone: "138****1234", content: "您的验证码为 385921，请在5分钟内使用。", type: "验证码", sendTime: "2026-08-12 09:15" },
-  { id: 2, phone: "159****5678", content: "您的账户已成功激活，欢迎使用。", type: "通知", sendTime: "2026-08-12 09:30" },
-  { id: 3, phone: "186****9012", content: "限时优惠！全场商品8折起，点击查看详情。", type: "营销", sendTime: "2026-08-12 10:00" },
-  { id: 4, phone: "133****3456", content: "您的验证码为 724018，请在5分钟内使用。", type: "验证码", sendTime: "2026-08-11 14:20" },
-  { id: 5, phone: "150****7890", content: "系统升级通知：8月15日凌晨2点进行维护。", type: "通知", sendTime: "2026-08-11 16:45" },
-  { id: 6, phone: "176****2345", content: "您的验证码为 519374，请在5分钟内使用。", type: "验证码", sendTime: "2026-08-11 18:00" },
-  { id: 7, phone: "188****6789", content: "新功能上线！快来体验群组管理功能。", type: "营销", sendTime: "2026-08-10 10:30" },
+  {
+    id: 1,
+    phone: "138****1234",
+    content: "您的验证码为 385921，请在5分钟内使用。",
+    type: "验证码",
+    sendTime: "2026-08-12 09:15",
+  },
+  {
+    id: 2,
+    phone: "159****5678",
+    content: "您的账户已成功激活，欢迎使用。",
+    type: "通知",
+    sendTime: "2026-08-12 09:30",
+  },
+  {
+    id: 3,
+    phone: "186****9012",
+    content: "限时优惠！全场商品8折起，点击查看详情。",
+    type: "营销",
+    sendTime: "2026-08-12 10:00",
+  },
+  {
+    id: 4,
+    phone: "133****3456",
+    content: "您的验证码为 724018，请在5分钟内使用。",
+    type: "验证码",
+    sendTime: "2026-08-11 14:20",
+  },
+  {
+    id: 5,
+    phone: "150****7890",
+    content: "系统升级通知：8月15日凌晨2点进行维护。",
+    type: "通知",
+    sendTime: "2026-08-11 16:45",
+  },
+  {
+    id: 6,
+    phone: "176****2345",
+    content: "您的验证码为 519374，请在5分钟内使用。",
+    type: "验证码",
+    sendTime: "2026-08-11 18:00",
+  },
+  {
+    id: 7,
+    phone: "188****6789",
+    content: "新功能上线！快来体验群组管理功能。",
+    type: "营销",
+    sendTime: "2026-08-10 10:30",
+  },
 ]);
 
 const filteredSmsRecords = computed(() => {
@@ -102,20 +147,69 @@ interface SmsResult {
   sendTime: string;
 }
 
-const smsResultFilters = reactive({ keyword: "", status: "" as "" | "success" | "failed" | "pending" });
+const smsResultFilters = reactive({
+  keyword: "",
+  status: "" as "" | "success" | "failed" | "pending",
+});
 const smsResultPage = shallowRef(1);
 const smsResultSize = shallowRef(10);
 
 const smsResults = shallowRef<SmsResult[]>([
-  { id: 1, phone: "138****1234", content: "验证码 385921", status: "success", errorCode: "", sendTime: "2026-08-12 09:15" },
-  { id: 2, phone: "159****5678", content: "账户激活通知", status: "success", errorCode: "", sendTime: "2026-08-12 09:30" },
-  { id: 3, phone: "186****9012", content: "营销短信", status: "failed", errorCode: "ERR_QUOTA", sendTime: "2026-08-12 10:00" },
-  { id: 4, phone: "133****3456", content: "验证码 724018", status: "success", errorCode: "", sendTime: "2026-08-11 14:20" },
-  { id: 5, phone: "150****7890", content: "系统升级通知", status: "pending", errorCode: "", sendTime: "2026-08-11 16:45" },
-  { id: 6, phone: "176****2345", content: "验证码 519374", status: "failed", errorCode: "ERR_INVALID", sendTime: "2026-08-11 18:00" },
+  {
+    id: 1,
+    phone: "138****1234",
+    content: "验证码 385921",
+    status: "success",
+    errorCode: "",
+    sendTime: "2026-08-12 09:15",
+  },
+  {
+    id: 2,
+    phone: "159****5678",
+    content: "账户激活通知",
+    status: "success",
+    errorCode: "",
+    sendTime: "2026-08-12 09:30",
+  },
+  {
+    id: 3,
+    phone: "186****9012",
+    content: "营销短信",
+    status: "failed",
+    errorCode: "ERR_QUOTA",
+    sendTime: "2026-08-12 10:00",
+  },
+  {
+    id: 4,
+    phone: "133****3456",
+    content: "验证码 724018",
+    status: "success",
+    errorCode: "",
+    sendTime: "2026-08-11 14:20",
+  },
+  {
+    id: 5,
+    phone: "150****7890",
+    content: "系统升级通知",
+    status: "pending",
+    errorCode: "",
+    sendTime: "2026-08-11 16:45",
+  },
+  {
+    id: 6,
+    phone: "176****2345",
+    content: "验证码 519374",
+    status: "failed",
+    errorCode: "ERR_INVALID",
+    sendTime: "2026-08-11 18:00",
+  },
 ]);
 
-const SMS_RESULT_MAP: Record<string, string> = { success: "发送成功", failed: "发送失败", pending: "待发送" };
+const SMS_RESULT_MAP: Record<string, string> = {
+  success: "发送成功",
+  failed: "发送失败",
+  pending: "待发送",
+};
 
 function smsResultTagType(status: string) {
   const map: Record<string, string> = { success: "success", failed: "danger", pending: "warning" };
@@ -174,11 +268,51 @@ interface AppVersion {
 }
 
 const appVersions = shallowRef<AppVersion[]>([
-  { id: 1, version: "2.5.0", platform: "Android", description: "新增群组管理功能，优化消息推送性能", forceUpdate: false, status: "published", createdAt: "2026-08-10" },
-  { id: 2, version: "2.5.0", platform: "iOS", description: "新增群组管理功能，优化消息推送性能", forceUpdate: false, status: "published", createdAt: "2026-08-10" },
-  { id: 3, version: "2.4.1", platform: "Android", description: "修复登录闪退问题", forceUpdate: true, status: "published", createdAt: "2026-07-20" },
-  { id: 4, version: "2.4.1", platform: "iOS", description: "修复登录闪退问题", forceUpdate: true, status: "published", createdAt: "2026-07-20" },
-  { id: 5, version: "2.6.0", platform: "Android", description: "新增转发群发功能，敏感词过滤", forceUpdate: false, status: "draft", createdAt: "2026-08-12" },
+  {
+    id: 1,
+    version: "2.5.0",
+    platform: "Android",
+    description: "新增群组管理功能，优化消息推送性能",
+    forceUpdate: false,
+    status: "published",
+    createdAt: "2026-08-10",
+  },
+  {
+    id: 2,
+    version: "2.5.0",
+    platform: "iOS",
+    description: "新增群组管理功能，优化消息推送性能",
+    forceUpdate: false,
+    status: "published",
+    createdAt: "2026-08-10",
+  },
+  {
+    id: 3,
+    version: "2.4.1",
+    platform: "Android",
+    description: "修复登录闪退问题",
+    forceUpdate: true,
+    status: "published",
+    createdAt: "2026-07-20",
+  },
+  {
+    id: 4,
+    version: "2.4.1",
+    platform: "iOS",
+    description: "修复登录闪退问题",
+    forceUpdate: true,
+    status: "published",
+    createdAt: "2026-07-20",
+  },
+  {
+    id: 5,
+    version: "2.6.0",
+    platform: "Android",
+    description: "新增转发群发功能，敏感词过滤",
+    forceUpdate: false,
+    status: "draft",
+    createdAt: "2026-08-12",
+  },
 ]);
 
 const APP_STATUS_MAP: Record<string, string> = { published: "已发布", draft: "草稿" };
@@ -456,7 +590,10 @@ function formatHitDisposition(disposition: string): string {
 
 function formatHitTime(value: string): string {
   if (!value) return "-";
-  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+  return value
+    .replace("T", " ")
+    .replace(/\.\d+/, "")
+    .replace(/\+08:00$/, "");
 }
 
 async function loadModerationHits(): Promise<void> {
@@ -777,7 +914,10 @@ interface ErrorLog {
   createdAt: string;
 }
 
-const errorLogFilters = reactive({ keyword: "", level: "" as "" | "error" | "warning" | "critical" });
+const errorLogFilters = reactive({
+  keyword: "",
+  level: "" as "" | "error" | "warning" | "critical",
+});
 const errorLogPage = shallowRef(1);
 const errorLogSize = shallowRef(10);
 const errorDetailVisible = shallowRef(false);
@@ -789,7 +929,8 @@ const errorLogs = shallowRef<ErrorLog[]>([
     level: "error",
     module: "MessageService",
     message: "消息推送超时",
-    stack: "TimeoutError: Push notification timed out after 30000ms\n  at MessageService.push (message.ts:142)\n  at async NotificationHandler.send (notification.ts:58)",
+    stack:
+      "TimeoutError: Push notification timed out after 30000ms\n  at MessageService.push (message.ts:142)\n  at async NotificationHandler.send (notification.ts:58)",
     createdAt: "2026-08-12 08:30",
   },
   {
@@ -797,7 +938,8 @@ const errorLogs = shallowRef<ErrorLog[]>([
     level: "critical",
     module: "DatabaseService",
     message: "数据库连接池耗尽",
-    stack: "PoolExhaustedError: All connections in use (max: 100)\n  at DatabaseService.getConnection (db.ts:89)\n  at QueryRunner.execute (query.ts:34)",
+    stack:
+      "PoolExhaustedError: All connections in use (max: 100)\n  at DatabaseService.getConnection (db.ts:89)\n  at QueryRunner.execute (query.ts:34)",
     createdAt: "2026-08-12 07:15",
   },
   {
@@ -805,7 +947,8 @@ const errorLogs = shallowRef<ErrorLog[]>([
     level: "warning",
     module: "FileService",
     message: "文件上传大小超出建议值",
-    stack: "Warning: File size 48MB exceeds recommended limit of 20MB\n  at FileService.validate (file.ts:67)",
+    stack:
+      "Warning: File size 48MB exceeds recommended limit of 20MB\n  at FileService.validate (file.ts:67)",
     createdAt: "2026-08-11 22:10",
   },
   {
@@ -813,7 +956,8 @@ const errorLogs = shallowRef<ErrorLog[]>([
     level: "error",
     module: "AuthService",
     message: "Token 刷新失败",
-    stack: "AuthError: Refresh token expired\n  at AuthService.refreshToken (auth.ts:201)\n  at TokenMiddleware.handle (middleware.ts:45)",
+    stack:
+      "AuthError: Refresh token expired\n  at AuthService.refreshToken (auth.ts:201)\n  at TokenMiddleware.handle (middleware.ts:45)",
     createdAt: "2026-08-11 19:45",
   },
   {
@@ -821,12 +965,17 @@ const errorLogs = shallowRef<ErrorLog[]>([
     level: "critical",
     module: "SmsService",
     message: "短信网关连接失败",
-    stack: "GatewayError: Connection refused by SMS gateway\n  at SmsService.connect (sms.ts:78)\n  at SmsQueue.process (queue.ts:112)",
+    stack:
+      "GatewayError: Connection refused by SMS gateway\n  at SmsService.connect (sms.ts:78)\n  at SmsQueue.process (queue.ts:112)",
     createdAt: "2026-08-11 15:30",
   },
 ]);
 
-const ERROR_LEVEL_MAP: Record<string, string> = { error: "错误", warning: "警告", critical: "严重" };
+const ERROR_LEVEL_MAP: Record<string, string> = {
+  error: "错误",
+  warning: "警告",
+  critical: "严重",
+};
 
 function errorLevelTagType(level: string) {
   const map: Record<string, string> = { error: "danger", warning: "warning", critical: "danger" };
@@ -836,7 +985,8 @@ function errorLevelTagType(level: string) {
 const filteredErrorLogs = computed(() => {
   const kw = errorLogFilters.keyword.trim().toLowerCase();
   return errorLogs.value.filter((log) => {
-    const matchKw = !kw || log.module.toLowerCase().includes(kw) || log.message.toLowerCase().includes(kw);
+    const matchKw =
+      !kw || log.module.toLowerCase().includes(kw) || log.message.toLowerCase().includes(kw);
     const matchLevel = !errorLogFilters.level || log.level === errorLogFilters.level;
     return matchKw && matchLevel;
   });
@@ -871,7 +1021,7 @@ function openErrorDetail(log: ErrorLog): void {
             <el-table-column label="状态" min-width="100">
               <template #default="{ row }">
                 <el-tag :type="row.enabled ? 'success' : 'info'" effect="light">
-                  {{ row.enabled ? '已启用' : '已停用' }}
+                  {{ row.enabled ? "已启用" : "已停用" }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -915,7 +1065,9 @@ function openErrorDetail(log: ErrorLog): void {
                   </el-form-item>
                 </div>
                 <div class="search-operation">
-                  <el-button type="primary" :icon="Search" @click="smsRecordPage = 1">搜索</el-button>
+                  <el-button type="primary" :icon="Search" @click="smsRecordPage = 1"
+                    >搜索</el-button
+                  >
                   <el-button :icon="RefreshLeft" @click="resetSmsRecordFilters">重置</el-button>
                 </div>
               </div>
@@ -924,7 +1076,12 @@ function openErrorDetail(log: ErrorLog): void {
 
           <el-table :data="pageSmsRecords" style="width: 100%">
             <el-table-column prop="phone" label="手机号" min-width="130" />
-            <el-table-column prop="content" label="短信内容" min-width="280" show-overflow-tooltip />
+            <el-table-column
+              prop="content"
+              label="短信内容"
+              min-width="280"
+              show-overflow-tooltip
+            />
             <el-table-column label="类型" min-width="90">
               <template #default="{ row }">
                 <el-tag effect="plain" round>{{ row.type }}</el-tag>
@@ -971,7 +1128,9 @@ function openErrorDetail(log: ErrorLog): void {
                   </el-form-item>
                 </div>
                 <div class="search-operation">
-                  <el-button type="primary" :icon="Search" @click="smsResultPage = 1">搜索</el-button>
+                  <el-button type="primary" :icon="Search" @click="smsResultPage = 1"
+                    >搜索</el-button
+                  >
                   <el-button :icon="RefreshLeft" @click="resetSmsResultFilters">重置</el-button>
                 </div>
               </div>
@@ -980,7 +1139,12 @@ function openErrorDetail(log: ErrorLog): void {
 
           <el-table :data="pageSmsResults" style="width: 100%">
             <el-table-column prop="phone" label="手机号" min-width="130" />
-            <el-table-column prop="content" label="短信内容" min-width="200" show-overflow-tooltip />
+            <el-table-column
+              prop="content"
+              label="短信内容"
+              min-width="200"
+              show-overflow-tooltip
+            />
             <el-table-column label="发送状态" min-width="110">
               <template #default="{ row }">
                 <el-tag :type="smsResultTagType(row.status)" effect="light">
@@ -1012,12 +1176,20 @@ function openErrorDetail(log: ErrorLog): void {
         <el-tab-pane label="短信供应商健康" name="smsProviderHealth">
           <div class="tab-search">
             <div class="search-operation">
-              <el-button :icon="RefreshLeft" :loading="smsProviderHealthLoading" @click="loadSmsProvidersHealth">
+              <el-button
+                :icon="RefreshLeft"
+                :loading="smsProviderHealthLoading"
+                @click="loadSmsProvidersHealth"
+              >
                 刷新
               </el-button>
             </div>
           </div>
-          <el-table v-loading="smsProviderHealthLoading" :data="smsProviderHealthItems" style="width: 100%">
+          <el-table
+            v-loading="smsProviderHealthLoading"
+            :data="smsProviderHealthItems"
+            style="width: 100%"
+          >
             <el-table-column label="供应商" min-width="180">
               <template #default="{ row }">{{ row.provider || "-" }}</template>
             </el-table-column>
@@ -1050,11 +1222,16 @@ function openErrorDetail(log: ErrorLog): void {
                 <el-tag effect="plain" round>{{ row.platform }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="description" label="更新说明" min-width="280" show-overflow-tooltip />
+            <el-table-column
+              prop="description"
+              label="更新说明"
+              min-width="280"
+              show-overflow-tooltip
+            />
             <el-table-column label="强制更新" min-width="90" align="center">
               <template #default="{ row }">
                 <el-tag :type="row.forceUpdate ? 'danger' : 'success'" effect="light" round>
-                  {{ row.forceUpdate ? '是' : '否' }}
+                  {{ row.forceUpdate ? "是" : "否" }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -1087,7 +1264,9 @@ function openErrorDetail(log: ErrorLog): void {
             <div class="agreement-block">
               <div class="agreement-header">
                 <h4>用户协议</h4>
-                <el-button type="primary" size="small" :icon="Edit" @click="saveAgreement">保存</el-button>
+                <el-button type="primary" size="small" :icon="Edit" @click="saveAgreement"
+                  >保存</el-button
+                >
               </div>
               <el-input
                 v-model="agreementContent"
@@ -1100,7 +1279,9 @@ function openErrorDetail(log: ErrorLog): void {
             <div class="agreement-block">
               <div class="agreement-header">
                 <h4>隐私政策</h4>
-                <el-button type="primary" size="small" :icon="Edit" @click="savePrivacy">保存</el-button>
+                <el-button type="primary" size="small" :icon="Edit" @click="savePrivacy"
+                  >保存</el-button
+                >
               </div>
               <el-input
                 v-model="privacyContent"
@@ -1130,9 +1311,15 @@ function openErrorDetail(log: ErrorLog): void {
                   </el-form-item>
                 </div>
                 <div class="search-operation">
-                  <el-button type="primary" :icon="Search" @click="searchSensitiveWords">搜索</el-button>
+                  <el-button type="primary" :icon="Search" @click="searchSensitiveWords"
+                    >搜索</el-button
+                  >
                   <el-button :icon="RefreshLeft" @click="resetSensitiveWordFilters">重置</el-button>
-                  <el-button :icon="RefreshLeft" :loading="sensitiveWordLoading" @click="loadSensitiveWords">
+                  <el-button
+                    :icon="RefreshLeft"
+                    :loading="sensitiveWordLoading"
+                    @click="loadSensitiveWords"
+                  >
                     刷新
                   </el-button>
                 </div>
@@ -1154,7 +1341,12 @@ function openErrorDetail(log: ErrorLog): void {
               <el-option label="广告" value="广告" />
               <el-option label="其他" value="其他" />
             </el-select>
-            <el-button type="primary" :icon="Plus" :loading="createWordSubmitting" @click="submitCreateSensitiveWord">
+            <el-button
+              type="primary"
+              :icon="Plus"
+              :loading="createWordSubmitting"
+              @click="submitCreateSensitiveWord"
+            >
               添加
             </el-button>
             <el-button @click="openImportWordDialog">批量导入</el-button>
@@ -1184,7 +1376,9 @@ function openErrorDetail(log: ErrorLog): void {
             </el-table-column>
             <el-table-column label="操作" width="100" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" :icon="Edit" @click="openEditWordDialog(row)">修改</el-button>
+                <el-button link type="primary" :icon="Edit" @click="openEditWordDialog(row)"
+                  >修改</el-button
+                >
               </template>
             </el-table-column>
           </el-table>
@@ -1205,7 +1399,12 @@ function openErrorDetail(log: ErrorLog): void {
           <div class="tab-search">
             <div class="search-grid">
               <div class="search-operation">
-                <el-button type="primary" :icon="RefreshLeft" :loading="hitLoading" @click="loadModerationHits">
+                <el-button
+                  type="primary"
+                  :icon="RefreshLeft"
+                  :loading="hitLoading"
+                  @click="loadModerationHits"
+                >
                   刷新
                 </el-button>
               </div>
@@ -1222,7 +1421,12 @@ function openErrorDetail(log: ErrorLog): void {
             <el-table-column label="字段" min-width="100">
               <template #default="{ row }">{{ formatHitField(row.field) }}</template>
             </el-table-column>
-            <el-table-column prop="content" label="原文内容" min-width="220" show-overflow-tooltip />
+            <el-table-column
+              prop="content"
+              label="原文内容"
+              min-width="220"
+              show-overflow-tooltip
+            />
             <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
             <el-table-column label="处理结果" min-width="110">
               <template #default="{ row }">
@@ -1269,7 +1473,11 @@ function openErrorDetail(log: ErrorLog): void {
                 <div class="search-operation">
                   <el-button type="primary" :icon="Search" @click="searchProfiles">搜索</el-button>
                   <el-button :icon="RefreshLeft" @click="resetProfileFilters">重置</el-button>
-                  <el-button :icon="RefreshLeft" :loading="profileLoading" @click="loadModerationProfiles">
+                  <el-button
+                    :icon="RefreshLeft"
+                    :loading="profileLoading"
+                    @click="loadModerationProfiles"
+                  >
                     刷新
                   </el-button>
                 </div>
@@ -1370,7 +1578,9 @@ function openErrorDetail(log: ErrorLog): void {
                   </el-form-item>
                 </div>
                 <div class="search-operation">
-                  <el-button type="primary" :icon="Search" @click="errorLogPage = 1">搜索</el-button>
+                  <el-button type="primary" :icon="Search" @click="errorLogPage = 1"
+                    >搜索</el-button
+                  >
                   <el-button :icon="RefreshLeft" @click="resetErrorLogFilters">重置</el-button>
                 </div>
               </div>
@@ -1386,11 +1596,18 @@ function openErrorDetail(log: ErrorLog): void {
               </template>
             </el-table-column>
             <el-table-column prop="module" label="模块" min-width="140" />
-            <el-table-column prop="message" label="错误信息" min-width="220" show-overflow-tooltip />
+            <el-table-column
+              prop="message"
+              label="错误信息"
+              min-width="220"
+              show-overflow-tooltip
+            />
             <el-table-column prop="createdAt" label="发生时间" min-width="160" />
             <el-table-column label="操作" width="100" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" :icon="View" @click="openErrorDetail(row)">详情</el-button>
+                <el-button link type="primary" :icon="View" @click="openErrorDetail(row)"
+                  >详情</el-button
+                >
               </template>
             </el-table-column>
           </el-table>
@@ -1447,7 +1664,11 @@ function openErrorDetail(log: ErrorLog): void {
       </el-form>
       <template #footer>
         <el-button @click="closeImportWordDialog">取消</el-button>
-        <el-button type="primary" :loading="importWordSubmitting" @click="submitImportSensitiveWords">
+        <el-button
+          type="primary"
+          :loading="importWordSubmitting"
+          @click="submitImportSensitiveWords"
+        >
           确认导入
         </el-button>
       </template>
@@ -1521,7 +1742,9 @@ function openErrorDetail(log: ErrorLog): void {
       </el-form>
       <template #footer>
         <el-button @click="closeRejectDialog">取消</el-button>
-        <el-button type="danger" :loading="rejectSubmitting" @click="submitRejectProfile">确认驳回</el-button>
+        <el-button type="danger" :loading="rejectSubmitting" @click="submitRejectProfile"
+          >确认驳回</el-button
+        >
       </template>
     </el-dialog>
 
@@ -1555,7 +1778,9 @@ function openErrorDetail(log: ErrorLog): void {
       </el-form>
       <template #footer>
         <el-button @click="closeApproveDialog">取消</el-button>
-        <el-button type="success" :loading="approveSubmitting" @click="submitApproveProfile">确认同意</el-button>
+        <el-button type="success" :loading="approveSubmitting" @click="submitApproveProfile"
+          >确认同意</el-button
+        >
       </template>
     </el-dialog>
 
@@ -1589,7 +1814,9 @@ function openErrorDetail(log: ErrorLog): void {
       </el-form>
       <template #footer>
         <el-button @click="closeRestoreDialog">取消</el-button>
-        <el-button type="primary" :loading="restoreSubmitting" @click="submitRestoreProfile">确认恢复</el-button>
+        <el-button type="primary" :loading="restoreSubmitting" @click="submitRestoreProfile"
+          >确认恢复</el-button
+        >
       </template>
     </el-dialog>
 
@@ -1603,8 +1830,12 @@ function openErrorDetail(log: ErrorLog): void {
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="模块">{{ selectedErrorLog.module }}</el-descriptions-item>
-          <el-descriptions-item label="错误信息" :span="2">{{ selectedErrorLog.message }}</el-descriptions-item>
-          <el-descriptions-item label="发生时间" :span="2">{{ selectedErrorLog.createdAt }}</el-descriptions-item>
+          <el-descriptions-item label="错误信息" :span="2">{{
+            selectedErrorLog.message
+          }}</el-descriptions-item>
+          <el-descriptions-item label="发生时间" :span="2">{{
+            selectedErrorLog.createdAt
+          }}</el-descriptions-item>
         </el-descriptions>
         <el-divider content-position="left">堆栈信息</el-divider>
         <pre class="stack-trace">{{ selectedErrorLog.stack }}</pre>

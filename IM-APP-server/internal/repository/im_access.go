@@ -15,6 +15,8 @@ var (
 	ErrIMTargetNotFound   = errors.New("IM target not found")
 	ErrIMAccessDenied     = errors.New("IM access denied")
 	ErrIMIdempotencyReuse = errors.New("IM idempotency key was reused for another request")
+	ErrIMMessageNotFound  = errors.New("IM message audit not found")
+	ErrIMRecallInProgress = errors.New("IM message recall is in progress")
 )
 
 type IMAccessRepo struct {
@@ -102,6 +104,121 @@ func (r *IMAccessRepo) RecordMessageAudit(ctx context.Context, command, serverMs
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (callback_command, conversation_id, server_msg_id, client_msg_id, seq) DO NOTHING`,
 		command, serverMsgID, clientMsgID, conversationID, senderID, receiverID, groupID, contentType, seq, sendTime)
+	return err
+}
+
+// FindAuditByClientMsgID 按 client_msg_id 反查消息审计（用于撤回定位 OpenIM 消息的 conversation_id + seq）
+func (r *IMAccessRepo) FindAuditByClientMsgID(ctx context.Context, clientMsgID string) (conversationID string, seq int64, found bool, err error) {
+	err = r.DB.QueryRow(ctx, `
+		SELECT conversation_id, seq FROM im_message_audit
+		WHERE client_msg_id=$1 ORDER BY id DESC LIMIT 1`, clientMsgID).Scan(&conversationID, &seq)
+	if err == pgx.ErrNoRows {
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, false, err
+	}
+	return conversationID, seq, true, nil
+}
+
+func (r *IMAccessRepo) FindMessageAudit(ctx context.Context, conversationID, clientMsgID string) (models.IMAuditedMessage, error) {
+	var message models.IMAuditedMessage
+	// 注意：OpenIM 3.8 的 afterSend 回调不携带 seq（审计表 seq 恒为 0），
+	// 因此这里按 conversation_id + client_msg_id 匹配，clientMsgID 全局唯一足以定位消息。
+	err := r.DB.QueryRow(ctx, `
+		SELECT client_msg_id, conversation_id, sender_im_id, content_type, seq, send_time
+		FROM im_message_audit
+		WHERE conversation_id=$1 AND client_msg_id=$2
+		  AND sender_im_id<>'' AND send_time>0
+		ORDER BY created_at DESC
+		LIMIT 1`, conversationID, clientMsgID).Scan(
+		&message.ClientMsgID, &message.ConversationID, &message.SenderIMID,
+		&message.ContentType, &message.Seq, &message.SendTime)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return message, ErrIMMessageNotFound
+	}
+	return message, err
+}
+
+type IMMessageRecallReservation struct {
+	ID           int64
+	Status       string
+	RecalledAt   *time.Time
+	ShouldRecall bool
+}
+
+func (r *IMAccessRepo) ReserveMessageRecall(
+	ctx context.Context,
+	conversationID string,
+	seq int64,
+	clientMsgID, peerType, peerID, senderIMID, operatorID, operatorIMID, operatorRole, reason string,
+) (IMMessageRecallReservation, error) {
+	var result IMMessageRecallReservation
+	err := r.DB.QueryRow(ctx, `
+		INSERT INTO im_message_recalls(
+			conversation_id, seq, client_msg_id, peer_type, peer_business_id,
+			sender_im_id, operator_user_id, operator_im_id, operator_role, reason, status)
+		VALUES($1,$2,$3,$4,$5,$6,$7::uuid,$8,$9,$10,'pending')
+		ON CONFLICT (conversation_id, seq) DO NOTHING
+		RETURNING id, status, recalled_at`,
+		conversationID, seq, clientMsgID, peerType, peerID, senderIMID,
+		operatorID, operatorIMID, operatorRole, reason).Scan(&result.ID, &result.Status, &result.RecalledAt)
+	if err == nil {
+		result.ShouldRecall = true
+		return result, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return result, err
+	}
+
+	err = r.DB.QueryRow(ctx, `
+		SELECT id, status, recalled_at
+		FROM im_message_recalls
+		WHERE conversation_id=$1 AND seq=$2`, conversationID, seq,
+	).Scan(&result.ID, &result.Status, &result.RecalledAt)
+	if err != nil {
+		return result, err
+	}
+	if result.Status == "recalled" {
+		return result, nil
+	}
+
+	tag, err := r.DB.Exec(ctx, `
+		UPDATE im_message_recalls
+		SET client_msg_id=$3, peer_type=$4, peer_business_id=$5,
+			sender_im_id=$6, operator_user_id=$7::uuid, operator_im_id=$8,
+			operator_role=$9, reason=$10, status='pending', last_error='', updated_at=NOW()
+		WHERE conversation_id=$1 AND seq=$2
+		  AND (status='failed' OR (status='pending' AND updated_at < NOW() - INTERVAL '1 minute'))`,
+		conversationID, seq, clientMsgID, peerType, peerID, senderIMID,
+		operatorID, operatorIMID, operatorRole, reason)
+	if err != nil {
+		return result, err
+	}
+	if tag.RowsAffected() == 0 {
+		return result, ErrIMRecallInProgress
+	}
+	result.Status = "pending"
+	result.ShouldRecall = true
+	return result, nil
+}
+
+func (r *IMAccessRepo) CompleteMessageRecall(ctx context.Context, id int64) (time.Time, error) {
+	var recalledAt time.Time
+	err := r.DB.QueryRow(ctx, `
+		UPDATE im_message_recalls
+		SET status='recalled', recalled_at=COALESCE(recalled_at, NOW()),
+			last_error='', updated_at=NOW()
+		WHERE id=$1
+		RETURNING recalled_at`, id).Scan(&recalledAt)
+	return recalledAt, err
+}
+
+func (r *IMAccessRepo) FailMessageRecall(ctx context.Context, id int64, message string) error {
+	_, err := r.DB.Exec(ctx, `
+		UPDATE im_message_recalls
+		SET status='failed', last_error=$2, updated_at=NOW()
+		WHERE id=$1 AND status='pending'`, id, message)
 	return err
 }
 

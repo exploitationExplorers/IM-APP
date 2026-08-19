@@ -6,6 +6,7 @@ import { useAuthGuard } from '@/composables/useAuthGuard'
 import { consumeSecuritySaveSuccess } from '@/utils/profile-feedback'
 import { stashOldPassword, userHasPassword } from '@/utils/password-state'
 import { verifyPassword } from '@/api/user'
+import ImNavBar from '@/components/ImNavBar.vue'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
 
 useAuthGuard()
@@ -72,12 +73,7 @@ async function onNext() {
 
 <template>
   <view v-if="!checking" class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">安全</text>
-    </view>
+    <ImNavBar title="安全" @back="goBack" />
 
     <view class="body">
       <view class="phone-block">
@@ -132,38 +128,6 @@ async function onNext() {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  gap: 32rpx;
-  height: 96rpx;
-  padding: env(safe-area-inset-top) 40rpx 0;
-  box-sizing: content-box;
-  flex-shrink: 0;
-}
-
-.nav-back {
-  width: 48rpx;
-  height: 48rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.nav-back-icon {
-  width: 40rpx;
-  height: 40rpx;
-}
-
-.nav-title {
-  flex: 1;
-  font-size: 48rpx;
-  font-weight: 700;
-  line-height: 64rpx;
-  color: #212121;
 }
 
 .body {

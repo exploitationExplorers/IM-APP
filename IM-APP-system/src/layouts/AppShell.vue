@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef } from "vue";
 import { useRoute } from "vue-router";
-import { getAdminMeta } from "@/api/modules/admin";
+import { getAdminHealth, getAdminMeta } from "@/api/modules/admin";
 import type { Auth } from "@/api/interface";
 import SystemHeader from "./components/SystemHeader.vue";
 import SystemTabs from "./components/SystemTabs.vue";
 
 const route = useRoute();
 const isCollapse = shallowRef(false);
-const activeMenu = computed(() => route.path);
+const activeMenu = computed(() => {
+  const menu = route.meta.activeMenu;
+  if (typeof menu === "string" && menu.trim()) return menu;
+  return route.path;
+});
 const meta = shallowRef<Auth.ResMeta | null>(null);
+const health = shallowRef<Auth.ResHealth | null>(null);
 
 const metaSummary = computed(() => {
   const data = meta.value;
@@ -42,12 +47,9 @@ function toggleCollapse(): void {
 }
 
 onMounted(async () => {
-  try {
-    const res = await getAdminMeta();
-    meta.value = res.data ?? null;
-  } catch {
-    meta.value = null;
-  }
+  const [metaRes, healthRes] = await Promise.allSettled([getAdminMeta(), getAdminHealth()]);
+  meta.value = metaRes.status === "fulfilled" ? (metaRes.value.data ?? null) : null;
+  health.value = healthRes.status === "fulfilled" ? (healthRes.value.data ?? null) : null;
 });
 </script>
 
@@ -62,12 +64,20 @@ onMounted(async () => {
               :default-active="activeMenu"
               :collapse="isCollapse"
               :collapse-transition="false"
-              :default-openeds="['/system', '/forward-group-send', '/sms-operation-config']"
+              :default-openeds="[
+                '/system',
+                '/forward-group-send',
+                '/sms-operation-config',
+                '/country-sms',
+                '/runtime-observe',
+                '/app-config',
+                '/audit-log',
+              ]"
               router
             >
               <el-menu-item index="/home">
                 <el-icon><House /></el-icon>
-                <template #title>首页</template>
+                <template #title>工作台</template>
               </el-menu-item>
               <el-menu-item index="/app/users">
                 <el-icon><UserFilled /></el-icon>
@@ -79,7 +89,15 @@ onMounted(async () => {
               </el-menu-item>
               <el-menu-item index="/app/reports">
                 <el-icon><Warning /></el-icon>
-                <template #title>举报管理</template>
+                <template #title>举报处置</template>
+              </el-menu-item>
+              <el-menu-item index="/sensitive-words">
+                <el-icon><Filter /></el-icon>
+                <template #title>敏感词审核</template>
+              </el-menu-item>
+              <el-menu-item index="/auth-mine">
+                <el-icon><User /></el-icon>
+                <template #title>认证与我的</template>
               </el-menu-item>
               <el-sub-menu index="/forward-group-send">
                 <template #title>
@@ -89,6 +107,32 @@ onMounted(async () => {
                 <el-menu-item index="/forward-group-send">
                   <el-icon><List /></el-icon>
                   <template #title>任务列表</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-menu-item index="/forward-risk">
+                <el-icon><Warning /></el-icon>
+                <template #title>转发风控</template>
+              </el-menu-item>
+              <el-sub-menu index="/app-config">
+                <template #title>
+                  <el-icon><Iphone /></el-icon>
+                  <span>APP配置</span>
+                </template>
+                <el-menu-item index="/app-config/app-versions">
+                  <el-icon><Document /></el-icon>
+                  <template #title>APP 版本</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/legal-documents">
+                  <el-icon><Tickets /></el-icon>
+                  <template #title>协议文档</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/report-reasons">
+                  <el-icon><Warning /></el-icon>
+                  <template #title>举报原因</template>
+                </el-menu-item>
+                <el-menu-item index="/app-config/system-limits">
+                  <el-icon><Setting /></el-icon>
+                  <template #title>系统限制</template>
                 </el-menu-item>
               </el-sub-menu>
               <el-sub-menu index="/sms-operation-config">
@@ -101,6 +145,48 @@ onMounted(async () => {
                   <template #title>配置管理</template>
                 </el-menu-item>
               </el-sub-menu>
+              <el-sub-menu index="/country-sms">
+                <template #title>
+                  <el-icon><Message /></el-icon>
+                  <span>国家短信</span>
+                </template>
+                <el-menu-item index="/country-sms/countries">
+                  <el-icon><Location /></el-icon>
+                  <template #title>国家/地区</template>
+                </el-menu-item>
+                <el-menu-item index="/country-sms/sms-logs">
+                  <el-icon><Document /></el-icon>
+                  <template #title>短信发送日志</template>
+                </el-menu-item>
+                <el-menu-item index="/country-sms/sms-statistics">
+                  <el-icon><TrendCharts /></el-icon>
+                  <template #title>送达统计</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="/runtime-observe">
+                <template #title>
+                  <el-icon><Monitor /></el-icon>
+                  <span>运行观测</span>
+                </template>
+                <el-menu-item index="/runtime-observe/exports">
+                  <el-icon><Document /></el-icon>
+                  <template #title>导出任务</template>
+                </el-menu-item>
+                <el-menu-item index="/runtime-observe/errors">
+                  <el-icon><Warning /></el-icon>
+                  <template #title>运行错误</template>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="/other">
+                <template #title>
+                  <el-icon><MoreFilled /></el-icon>
+                  <span>其他</span>
+                </template>
+                <el-menu-item index="/other/features">
+                  <el-icon><SwitchButton /></el-icon>
+                  <template #title>功能开关</template>
+                </el-menu-item>
+              </el-sub-menu>
               <el-sub-menu index="/system">
                 <template #title>
                   <el-icon><Setting /></el-icon>
@@ -108,7 +194,7 @@ onMounted(async () => {
                 </template>
                 <el-menu-item index="/system/users">
                   <el-icon><User /></el-icon>
-                  <template #title>平台用户管理</template>
+                  <template #title>管理员</template>
                 </el-menu-item>
                 <el-menu-item index="/system/roles">
                   <el-icon><Lock /></el-icon>
@@ -153,6 +239,10 @@ onMounted(async () => {
                 <button class="meta-summary" type="button">{{ metaSummary }}</button>
               </template>
               <div class="meta-panel">
+                <div class="meta-row">
+                  <span>服务状态</span>
+                  <strong>{{ health?.status || "-" }}</strong>
+                </div>
                 <div class="meta-row">
                   <span>版本</span>
                   <strong>{{ meta?.version || "-" }}</strong>

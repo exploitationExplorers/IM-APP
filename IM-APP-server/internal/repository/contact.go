@@ -14,29 +14,65 @@ type ContactRepo struct {
 	DB *pgxpool.Pool
 }
 
-func (r *ContactRepo) ListContacts(ctx context.Context, uid string) ([]models.Contact, error) {
-	rows, err := r.DB.Query(ctx, `
-		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, COALESCE(f.remark,'')
+const contactListWhere = `
 		FROM friendships f
 		JOIN users u ON u.id = f.friend_id
-		WHERE f.user_id=$1
+		WHERE f.user_id=$1::uuid
 		AND NOT EXISTS (
-			SELECT 1 FROM user_blocks b WHERE b.user_id=$1 AND b.blocked_id=f.friend_id
+			SELECT 1 FROM user_blocks b WHERE b.user_id=$1::uuid AND b.blocked_id=f.friend_id
 		)
-		ORDER BY f.created_at DESC`, uid)
+		AND ($2='' OR u.nickname ILIKE '%'||$2||'%' ESCAPE '\'
+		     OR COALESCE(f.remark,'') ILIKE '%'||$2||'%' ESCAPE '\'
+		     OR COALESCE(u.public_id,'') ILIKE '%'||$2||'%' ESCAPE '\')`
+
+func (r *ContactRepo) ListContacts(ctx context.Context, uid, keyword, sort, cursor string, limit int) (models.ContactPage, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	page := models.ContactPage{Items: make([]models.Contact, 0)}
+	if err := r.DB.QueryRow(ctx, `SELECT COUNT(*)`+contactListWhere, uid, keyword).Scan(&page.Total); err != nil {
+		return page, err
+	}
+
+	order := `ORDER BY f.created_at DESC, f.friend_id DESC`
+	cursorSQL := `AND (NULLIF($3,'') IS NULL OR (f.created_at, f.friend_id) < (
+			SELECT f2.created_at, f2.friend_id FROM friendships f2
+			WHERE f2.user_id=$1::uuid AND f2.friend_id=NULLIF($3,'')::uuid))`
+	if sort == "name" {
+		order = `ORDER BY LOWER(COALESCE(NULLIF(TRIM(f.remark),''), u.nickname)) ASC, f.friend_id ASC`
+		cursorSQL = `AND (NULLIF($3,'') IS NULL OR (
+			LOWER(COALESCE(NULLIF(TRIM(f.remark),''), u.nickname)), f.friend_id) > (
+				SELECT LOWER(COALESCE(NULLIF(TRIM(f2.remark),''), u2.nickname)), f2.friend_id
+				FROM friendships f2 JOIN users u2 ON u2.id=f2.friend_id
+				WHERE f2.user_id=$1::uuid AND f2.friend_id=NULLIF($3,'')::uuid)))`
+	}
+
+	rows, err := r.DB.Query(ctx, `
+		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, COALESCE(f.remark,'')
+		`+contactListWhere+cursorSQL+`
+		`+order+` LIMIT $4`, uid, keyword, cursor, limit+1)
 	if err != nil {
-		return nil, err
+		return page, err
 	}
 	defer rows.Close()
-	list := make([]models.Contact, 0)
+	items := make([]models.Contact, 0, limit+1)
 	for rows.Next() {
 		var item models.Contact
 		if err := rows.Scan(&item.ID, &item.PublicID, &item.Nickname, &item.Avatar, &item.Remark); err != nil {
-			return nil, err
+			return page, err
 		}
-		list = append(list, item)
+		items = append(items, item)
 	}
-	return list, nil
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	page.Items = items
+	if len(items) > limit {
+		page.HasMore = true
+		page.Items = items[:limit]
+		page.NextCursor = page.Items[len(page.Items)-1].ID
+	}
+	return page, nil
 }
 
 func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]models.GroupPreview, error) {
@@ -176,7 +212,9 @@ func (r *ContactRepo) IsGroupAddFriendAllowed(ctx context.Context, uid, toUserID
 		FROM groups g
 		JOIN group_members gm1 ON gm1.group_id=g.id AND gm1.user_id=$1
 		JOIN group_members gm2 ON gm2.group_id=g.id AND gm2.user_id=$2
-		WHERE g.id=$3::uuid`, uid, toUserID, groupID).Scan(&allow)
+		JOIN users u1 ON u1.id=gm1.user_id AND COALESCE(u1.status,'active')='active'
+		JOIN users u2 ON u2.id=gm2.user_id AND COALESCE(u2.status,'active')='active'
+		WHERE g.id=$3::uuid AND COALESCE(g.status,'active')='active'`, uid, toUserID, groupID).Scan(&allow)
 	if err != nil {
 		return false, err
 	}

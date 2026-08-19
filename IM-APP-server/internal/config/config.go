@@ -18,7 +18,9 @@ type Config struct {
 	LegacyChatEnabled bool
 	SeedDemo          bool
 	Kafka             KafkaConfig
+	Forward           ForwardConfig
 	SMS               SMSConfig
+	CORSAllowOrigins  []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
 }
 
 type MinIOConfig struct {
@@ -27,23 +29,35 @@ type MinIOConfig struct {
 	SecretKey  string
 	Bucket     string
 	UseSSL     bool
-	PublicURL  string // 对外可访问的 MinIO 地址（如 http://8.210.72.157:9000），空则用内部 Endpoint
+	PublicURL  string // 对外可访问的 MinIO 地址（如 https://www.ke58.com/minio），空则用内部 Endpoint
 	PublicRead bool   // true 时启动自动把桶设为公开读（外网可直接访问文件 URL）
 }
 
 type OpenIMConfig struct {
-	APIURL            string
-	PublicAPIURL      string
-	PublicWSURL       string
-	Secret            string
-	AdminUser         string
-	WebhookSecret     string
-	WebhookAllowCIDRs []string
+	APIURL              string
+	PublicAPIURL        string
+	PublicWSURL         string
+	Secret              string
+	AdminUser           string
+	WebhookSecret       string
+	WebhookAllowCIDRs   []string
+	RecallWindowSeconds int
 }
 
 type KafkaConfig struct {
 	Brokers string
 	Topic   string
+	GroupID string
+}
+
+type ForwardConfig struct {
+	WorkerEnabled bool
+	BatchSize     int
+	MaxAttempts   int
+	Concurrency   int
+	QPS           int
+	PollSeconds   int
+	LockSeconds   int
 }
 
 // SMSConfig 阿里云短信服务（Dysmsapi SendSms）
@@ -65,7 +79,7 @@ func Load() Config {
 		IMInternalAPIKey:  getenv("IM_INTERNAL_API_KEY", ""),
 		LegacyChatEnabled: getenvBool("LEGACY_CHAT_ENABLED", false),
 		SeedDemo:          getenvBool("SEED_DEMO", false),
-		DevSMSCode:        getenv("DEV_SMS_CODE", "123456"),
+		DevSMSCode:        getenv("DEV_SMS_CODE", ""),
 		RedisURL:          getenv("REDIS_URL", ""),
 		MinIO: MinIOConfig{
 			Endpoint:   getenv("MINIO_ENDPOINT", ""),
@@ -77,17 +91,28 @@ func Load() Config {
 			PublicRead: getenv("MINIO_PUBLIC_READ", "false") == "true",
 		},
 		OpenIM: OpenIMConfig{
-			APIURL:            getenv("OPENIM_API_URL", ""),
-			PublicAPIURL:      getenv("OPENIM_PUBLIC_API_URL", ""),
-			PublicWSURL:       getenv("OPENIM_PUBLIC_WS_URL", ""),
-			Secret:            getenv("OPENIM_SECRET", ""),
-			AdminUser:         getenv("OPENIM_ADMIN_USER", "imAdmin"),
-			WebhookSecret:     getenv("OPENIM_WEBHOOK_SECRET", ""),
-			WebhookAllowCIDRs: splitCSV(getenv("OPENIM_WEBHOOK_ALLOW_CIDRS", "")),
+			APIURL:              getenv("OPENIM_API_URL", ""),
+			PublicAPIURL:        getenv("OPENIM_PUBLIC_API_URL", ""),
+			PublicWSURL:         getenv("OPENIM_PUBLIC_WS_URL", ""),
+			Secret:              getenv("OPENIM_SECRET", ""),
+			AdminUser:           getenv("OPENIM_ADMIN_USER", "imAdmin"),
+			WebhookSecret:       getenv("OPENIM_WEBHOOK_SECRET", ""),
+			WebhookAllowCIDRs:   splitCSV(getenv("OPENIM_WEBHOOK_ALLOW_CIDRS", "")),
+			RecallWindowSeconds: GetenvInt("OPENIM_RECALL_WINDOW_SECONDS", 120),
 		},
 		Kafka: KafkaConfig{
 			Brokers: getenv("KAFKA_BROKERS", ""),
 			Topic:   getenv("KAFKA_FORWARD_TOPIC", "im-forward-tasks"),
+			GroupID: getenv("KAFKA_FORWARD_GROUP_ID", "im-forward-workers"),
+		},
+		Forward: ForwardConfig{
+			WorkerEnabled: getenvBool("FORWARD_WORKER_ENABLED", true),
+			BatchSize:     GetenvInt("FORWARD_BATCH_SIZE", 50),
+			MaxAttempts:   GetenvInt("FORWARD_MAX_ATTEMPTS", 8),
+			Concurrency:   GetenvInt("FORWARD_CONCURRENCY", 4),
+			QPS:           GetenvInt("FORWARD_QPS", 20),
+			PollSeconds:   GetenvInt("FORWARD_POLL_SECONDS", 2),
+			LockSeconds:   GetenvInt("FORWARD_LOCK_SECONDS", 300),
 		},
 		SMS: SMSConfig{
 			AccessKeyID:     getenv("ALIYUN_ACCESS_KEY_ID", ""),
@@ -96,6 +121,7 @@ func Load() Config {
 			TemplateCode:    getenv("SMS_TEMPLATE_CODE", ""),
 			RegionID:        getenv("SMS_REGION_ID", "cn-hangzhou"),
 		},
+		CORSAllowOrigins: splitCSV(getenv("CORS_ALLOW_ORIGINS", "")),
 	}
 }
 

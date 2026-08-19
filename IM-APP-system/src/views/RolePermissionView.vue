@@ -1,184 +1,43 @@
 <script setup lang="ts">
-import { computed, reactive, shallowRef } from "vue";
+import { computed, onMounted, reactive, shallowRef } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { CirclePlus, Delete, Search } from "@element-plus/icons-vue";
+import {
+  createRole,
+  deleteRole,
+  listPermissions,
+  listRoles,
+  updateRole,
+  type Rbac,
+} from "../api/modules/rbac";
 
-interface RolePermission {
+interface PermissionGroup {
   label: string;
-  permissions: string[];
-}
-
-interface SystemRole {
-  id: number;
-  name: string;
-  code: string;
-  description: string;
-  userCount: number;
-  status: "active" | "disabled";
-  createdAt: string;
-  permissions: string[];
+  permissions: Rbac.Permission[];
 }
 
 interface RoleDraft {
   name: string;
   code: string;
   description: string;
-  status: "active" | "disabled";
+  status: Rbac.Status;
   permissions: string[];
 }
 
 interface RoleFilters {
   keyword: string;
-  status: "all" | "active" | "disabled";
+  status: "all" | Rbac.Status;
 }
-
-const allPermissions: RolePermission[] = [
-  { label: "用户管理", permissions: ["查看用户", "新增用户", "编辑用户", "删除用户", "导出用户"] },
-  { label: "角色管理", permissions: ["查看角色", "新增角色", "编辑角色", "删除角色", "分配权限"] },
-  { label: "操作日志", permissions: ["查看日志", "导出日志"] },
-  { label: "系统设置", permissions: ["查看设置", "修改设置"] },
-];
-
-const allPermissionValues = allPermissions.flatMap((g) => g.permissions);
 
 const filters = reactive<RoleFilters>({ keyword: "", status: "all" });
 const currentPage = shallowRef(1);
 const pageSize = shallowRef(10);
+const loading = shallowRef(false);
 const drawerVisible = shallowRef(false);
-const selectedRole = shallowRef<SystemRole | null>(null);
-
-const roles = shallowRef<SystemRole[]>([
-  {
-    id: 1,
-    name: "超级管理员",
-    code: "super_admin",
-    description: "拥有系统全部权限，不可删除",
-    userCount: 1,
-    status: "active",
-    createdAt: "2026-03-08",
-    permissions: [...allPermissionValues],
-  },
-  {
-    id: 2,
-    name: "运营管理员",
-    code: "ops_admin",
-    description: "负责日常运营管理，可管理用户和查看日志",
-    userCount: 2,
-    status: "active",
-    createdAt: "2026-03-13",
-    permissions: ["查看用户", "新增用户", "编辑用户", "查看日志", "导出日志"],
-  },
-  {
-    id: 3,
-    name: "普通成员",
-    code: "member",
-    description: "仅可查看用户列表",
-    userCount: 2,
-    status: "active",
-    createdAt: "2026-04-02",
-    permissions: ["查看用户"],
-  },
-  {
-    id: 4,
-    name: "审计员",
-    code: "auditor",
-    description: "只读权限，可查看所有数据和日志",
-    userCount: 0,
-    status: "disabled",
-    createdAt: "2026-05-15",
-    permissions: ["查看用户", "查看角色", "查看日志", "查看设置"],
-  },
-]);
-
-const filteredRoles = computed(() => {
-  const keyword = filters.keyword.trim().toLowerCase();
-  return roles.value.filter((role) => {
-    const matchesKeyword =
-      !keyword ||
-      [role.name, role.code, role.description].some((value) => value.toLowerCase().includes(keyword));
-    const matchesStatus = filters.status === "all" || role.status === filters.status;
-    return matchesKeyword && matchesStatus;
-  });
-});
-
-const pageRoles = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  return filteredRoles.value.slice(start, start + pageSize.value);
-});
-
-function queryRoles(): void {
-  currentPage.value = 1;
-}
-
-function resetFilters(): void {
-  filters.keyword = "";
-  filters.status = "all";
-  currentPage.value = 1;
-}
-
-function openCreateDrawer(): void {
-  selectedRole.value = null;
-  drawerVisible.value = true;
-}
-
-function openEditDrawer(role: SystemRole): void {
-  selectedRole.value = role;
-  drawerVisible.value = true;
-}
-
-function saveRole(draft: RoleDraft): void {
-  if (selectedRole.value) {
-    roles.value = roles.value.map((role) =>
-      role.id === selectedRole.value?.id ? { ...role, ...draft } : role,
-    );
-    ElMessage.success("角色更新成功");
-    return;
-  }
-  const newRole: SystemRole = {
-    id: Math.max(...roles.value.map((r) => r.id), 0) + 1,
-    ...draft,
-    userCount: 0,
-    createdAt: new Date().toISOString().slice(0, 10),
-  };
-  roles.value = [newRole, ...roles.value];
-  ElMessage.success("角色创建成功");
-}
-
-async function deleteRole(role: SystemRole): Promise<void> {
-  if (role.code === "super_admin") {
-    ElMessage.warning("超级管理员角色不可删除");
-    return;
-  }
-  try {
-    await ElMessageBox.confirm(`确认删除角色「${role.name}」？删除后不可恢复。`, "删除角色", {
-      type: "warning",
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-    });
-    roles.value = roles.value.filter((r) => r.id !== role.id);
-    ElMessage.success("角色删除成功");
-  } catch {
-    // dismissed
-  }
-}
-
-async function toggleStatus(role: SystemRole): Promise<void> {
-  const nextStatus = role.status === "active" ? "disabled" : "active";
-  const action = nextStatus === "active" ? "启用" : "停用";
-  try {
-    await ElMessageBox.confirm(`确认${action}角色「${role.name}」？`, `${action}角色`, {
-      type: "warning",
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-    });
-    roles.value = roles.value.map((r) =>
-      r.id === role.id ? { ...r, status: nextStatus } : r,
-    );
-    ElMessage.success(`角色${action}成功`);
-  } catch {
-    // dismissed
-  }
-}
+const saving = shallowRef(false);
+const selectedRole = shallowRef<Rbac.Role | null>(null);
+const roles = shallowRef<Rbac.Role[]>([]);
+const permissionCatalog = shallowRef<Rbac.Permission[]>([]);
 
 const drawerDraft = reactive<RoleDraft>({
   name: "",
@@ -190,14 +49,92 @@ const drawerDraft = reactive<RoleDraft>({
 
 const drawerTitle = computed(() => (selectedRole.value ? "编辑角色" : "新增角色"));
 
-function openDrawer(): void {
+const permissionGroups = computed<PermissionGroup[]>(() => {
+  const map = new Map<string, Rbac.Permission[]>();
+  for (const item of permissionCatalog.value) {
+    const label = item.module?.trim() || "其它";
+    const list = map.get(label) ?? [];
+    list.push(item);
+    map.set(label, list);
+  }
+  return [...map.entries()].map(([label, permissions]) => ({ label, permissions }));
+});
+
+const filteredRoles = computed(() => {
+  const keyword = filters.keyword.trim().toLowerCase();
+  return roles.value.filter((role) => {
+    const matchesKeyword =
+      !keyword ||
+      [role.name, role.code, role.description ?? ""].some((value) =>
+        value.toLowerCase().includes(keyword),
+      );
+    const matchesStatus = filters.status === "all" || role.status === filters.status;
+    return matchesKeyword && matchesStatus;
+  });
+});
+
+const pageRoles = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return filteredRoles.value.slice(start, start + pageSize.value);
+});
+
+function formatTime(value?: string): string {
+  if (!value) return "-";
+  return value
+    .replace("T", " ")
+    .replace(/\.\d+/, "")
+    .replace(/\+08:00$/, "");
+}
+
+function queryRoles(): void {
+  currentPage.value = 1;
+}
+
+function resetFilters(): void {
+  filters.keyword = "";
+  filters.status = "all";
+  currentPage.value = 1;
+}
+
+async function loadPermissions(): Promise<void> {
+  try {
+    const res = await listPermissions();
+    permissionCatalog.value = res.data ?? [];
+  } catch {
+    permissionCatalog.value = [];
+  }
+}
+
+async function loadRoles(): Promise<void> {
+  loading.value = true;
+  try {
+    const res = await listRoles();
+    roles.value = res.data ?? [];
+  } catch {
+    roles.value = [];
+  } finally {
+    loading.value = false;
+  }
+}
+
+function openCreateDrawer(): void {
+  selectedRole.value = null;
+  drawerVisible.value = true;
+}
+
+function openEditDrawer(role: Rbac.Role): void {
+  selectedRole.value = role;
+  drawerVisible.value = true;
+}
+
+function handleDrawerOpen(): void {
   if (selectedRole.value) {
     Object.assign(drawerDraft, {
       name: selectedRole.value.name,
       code: selectedRole.value.code,
-      description: selectedRole.value.description,
-      status: selectedRole.value.status,
-      permissions: [...selectedRole.value.permissions],
+      description: selectedRole.value.description ?? "",
+      status: selectedRole.value.status === "disabled" ? "disabled" : "active",
+      permissions: [...(selectedRole.value.permissions ?? [])],
     });
   } else {
     Object.assign(drawerDraft, {
@@ -210,33 +147,113 @@ function openDrawer(): void {
   }
 }
 
-function handleDrawerOpen(): void {
-  openDrawer();
-}
+async function handleSave(): Promise<void> {
+  const name = drawerDraft.name.trim();
+  const code = drawerDraft.code.trim();
+  if (!name) {
+    ElMessage.warning("请输入角色名称");
+    return;
+  }
+  if (!selectedRole.value && !code) {
+    ElMessage.warning("请输入角色编码");
+    return;
+  }
 
-function handleSave(): void {
-  saveRole({ ...drawerDraft });
-  drawerVisible.value = false;
-}
-
-function handleCheckAll(checked: boolean, group: RolePermission): void {
-  if (checked) {
-    const set = new Set(drawerDraft.permissions);
-    group.permissions.forEach((p) => set.add(p));
-    drawerDraft.permissions = [...set];
-  } else {
-    drawerDraft.permissions = drawerDraft.permissions.filter((p) => !group.permissions.includes(p));
+  saving.value = true;
+  try {
+    if (selectedRole.value) {
+      await updateRole(selectedRole.value.id, {
+        name,
+        description: drawerDraft.description.trim() || undefined,
+        permissions: drawerDraft.permissions,
+        status: drawerDraft.status,
+      });
+      ElMessage.success("角色更新成功");
+    } else {
+      await createRole({
+        code,
+        name,
+        description: drawerDraft.description.trim() || undefined,
+        permissions: drawerDraft.permissions,
+      });
+      ElMessage.success("角色创建成功");
+    }
+    drawerVisible.value = false;
+    await loadRoles();
+  } catch {
+    // 拦截器已提示
+  } finally {
+    saving.value = false;
   }
 }
 
-function isGroupAllChecked(group: RolePermission): boolean {
-  return group.permissions.every((p) => drawerDraft.permissions.includes(p));
+async function removeRole(role: Rbac.Role): Promise<void> {
+  if (role.code === "super_admin") {
+    ElMessage.warning("超级管理员角色不可删除");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(`确认删除角色「${role.name}」？删除后不可恢复。`, "删除角色", {
+      type: "warning",
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+    });
+    await deleteRole(role.id);
+    ElMessage.success("角色删除成功");
+    await loadRoles();
+  } catch {
+    // 取消或失败
+  }
 }
 
-function isGroupIndeterminate(group: RolePermission): boolean {
-  const checked = group.permissions.filter((p) => drawerDraft.permissions.includes(p));
+async function toggleStatus(role: Rbac.Role): Promise<void> {
+  if (role.code === "super_admin") {
+    ElMessage.warning("超级管理员角色状态不可修改");
+    return;
+  }
+  const nextStatus: Rbac.Status = role.status === "active" ? "disabled" : "active";
+  const action = nextStatus === "active" ? "启用" : "停用";
+  try {
+    await ElMessageBox.confirm(`确认${action}角色「${role.name}」？`, `${action}角色`, {
+      type: "warning",
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+    });
+    await updateRole(role.id, { status: nextStatus });
+    ElMessage.success(`角色${action}成功`);
+    await loadRoles();
+  } catch {
+    // 取消或失败
+  }
+}
+
+function handleCheckAll(checked: boolean | string | number, group: PermissionGroup): void {
+  const codes = group.permissions.map((p) => p.code);
+  if (checked) {
+    const set = new Set(drawerDraft.permissions);
+    codes.forEach((code) => set.add(code));
+    drawerDraft.permissions = [...set];
+  } else {
+    drawerDraft.permissions = drawerDraft.permissions.filter((code) => !codes.includes(code));
+  }
+}
+
+function isGroupAllChecked(group: PermissionGroup): boolean {
+  return (
+    group.permissions.length > 0 &&
+    group.permissions.every((p) => drawerDraft.permissions.includes(p.code))
+  );
+}
+
+function isGroupIndeterminate(group: PermissionGroup): boolean {
+  const checked = group.permissions.filter((p) => drawerDraft.permissions.includes(p.code));
   return checked.length > 0 && checked.length < group.permissions.length;
 }
+
+onMounted(() => {
+  void loadPermissions();
+  void loadRoles();
+});
 </script>
 
 <template>
@@ -280,18 +297,25 @@ function isGroupIndeterminate(group: RolePermission): boolean {
         </div>
       </div>
 
-      <el-table :data="pageRoles" style="width: 100%">
+      <el-table v-loading="loading" :data="pageRoles" style="width: 100%">
         <el-table-column prop="name" label="角色名称" min-width="140">
           <template #default="{ row }">
             <div class="role-name-cell">
               <strong>{{ row.name }}</strong>
-              <el-tag v-if="row.code === 'super_admin'" type="warning" size="small" effect="plain">内置</el-tag>
+              <el-tag
+                v-if="row.code === 'super_admin'"
+                type="warning"
+                size="small"
+                effect="plain"
+              >
+                内置
+              </el-tag>
             </div>
           </template>
         </el-table-column>
         <el-table-column prop="code" label="角色编码" min-width="140" />
         <el-table-column prop="description" label="描述" min-width="240" show-overflow-tooltip />
-        <el-table-column prop="userCount" label="用户数" min-width="90" align="center" />
+        <el-table-column prop="userCount" label="管理员数" min-width="100" align="center" />
         <el-table-column label="状态" min-width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'success' : 'danger'" effect="light">
@@ -299,13 +323,18 @@ function isGroupIndeterminate(group: RolePermission): boolean {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" min-width="130" />
+        <el-table-column label="创建时间" min-width="170">
+          <template #default="{ row }">
+            {{ formatTime(row.createdAt) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEditDrawer(row)">编辑</el-button>
             <el-button
               link
               :type="row.status === 'active' ? 'danger' : 'success'"
+              :disabled="row.code === 'super_admin'"
               @click="toggleStatus(row)"
             >
               {{ row.status === "active" ? "停用" : "启用" }}
@@ -314,7 +343,7 @@ function isGroupIndeterminate(group: RolePermission): boolean {
               link
               type="danger"
               :disabled="row.code === 'super_admin'"
-              @click="deleteRole(row)"
+              @click="removeRole(row)"
             >
               删除
             </el-button>
@@ -345,7 +374,11 @@ function isGroupIndeterminate(group: RolePermission): boolean {
           <el-input v-model="drawerDraft.name" placeholder="请输入角色名称" />
         </el-form-item>
         <el-form-item label="角色编码">
-          <el-input v-model="drawerDraft.code" placeholder="请输入角色编码" />
+          <el-input
+            v-model="drawerDraft.code"
+            placeholder="如 operator"
+            :disabled="!!selectedRole"
+          />
         </el-form-item>
         <el-form-item label="描述">
           <el-input
@@ -356,35 +389,44 @@ function isGroupIndeterminate(group: RolePermission): boolean {
           />
         </el-form-item>
         <el-form-item label="状态">
-          <el-radio-group v-model="drawerDraft.status">
+          <el-radio-group v-model="drawerDraft.status" :disabled="selectedRole?.code === 'super_admin'">
             <el-radio value="active">启用</el-radio>
             <el-radio value="disabled">停用</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="权限分配">
-          <div class="permission-groups">
-            <div v-for="group in allPermissions" :key="group.label" class="permission-group">
+          <div v-if="permissionGroups.length" class="permission-groups">
+            <div
+              v-for="group in permissionGroups"
+              :key="group.label"
+              class="permission-group"
+            >
               <div class="permission-group-header">
                 <el-checkbox
                   :model-value="isGroupAllChecked(group)"
                   :indeterminate="isGroupIndeterminate(group)"
-                  @change="(val: boolean) => handleCheckAll(val, group)"
+                  @change="(val: boolean | string | number) => handleCheckAll(val, group)"
                 >
                   {{ group.label }}
                 </el-checkbox>
               </div>
               <el-checkbox-group v-model="drawerDraft.permissions" class="permission-items">
-                <el-checkbox v-for="perm in group.permissions" :key="perm" :value="perm">
-                  {{ perm }}
+                <el-checkbox
+                  v-for="perm in group.permissions"
+                  :key="perm.code"
+                  :value="perm.code"
+                >
+                  {{ perm.name || perm.code }}
                 </el-checkbox>
               </el-checkbox-group>
             </div>
           </div>
+          <el-empty v-else description="暂无权限字典" :image-size="64" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="drawerVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSave">确定</el-button>
+        <el-button type="primary" :loading="saving" @click="handleSave">确定</el-button>
       </template>
     </el-drawer>
   </div>

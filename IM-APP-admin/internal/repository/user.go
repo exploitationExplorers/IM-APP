@@ -17,7 +17,7 @@ type DataRepo struct{ DB *pgxpool.Pool }
 // ===== 用户管理（清单 03） =====
 
 const userSelect = `
-	SELECT u.id::text, COALESCE(u.public_id,''), u.phone_e164, u.country_code, u.nickname, u.avatar,
+	SELECT u.id::text, COALESCE(u.public_id,''), COALESCE(u.phone_e164,''), u.country_code, u.nickname, u.avatar,
 	       COALESCE(u.status,'active'), u.created_at,
 	       (SELECT COUNT(*) FROM friendships f WHERE f.user_id=u.id),
 	       (SELECT COUNT(*) FROM group_members gm WHERE gm.user_id=u.id),
@@ -37,9 +37,35 @@ func scanUser(row pgx.Row) (models.AppUser, error) {
 	return u, nil
 }
 
-// ListUsers 用户列表（关键字 + 状态筛选）
+// ListUsers 用户列表（关键字 + 状态筛选；手机号走独立 SearchByPhone 权限）
 func (r *DataRepo) ListUsers(ctx context.Context, keyword, status string, limit, offset int) ([]models.AppUser, int64, error) {
 	where, args := userWhere(keyword, status)
+	var total int64
+	if err := r.DB.QueryRow(ctx, "SELECT COUNT(*) FROM users u WHERE 1=1"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	qargs := append(append([]any{}, args...), limit, offset)
+	rows, err := r.DB.Query(ctx, userSelect+" WHERE 1=1"+where+
+		" ORDER BY u.created_at DESC LIMIT $"+itoa(len(qargs)-1)+" OFFSET $"+itoa(len(qargs)), qargs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]models.AppUser, 0)
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, u)
+	}
+	return out, total, nil
+}
+
+// SearchByPhone 按手机号查询用户（需 users.phone.search 权限，保护隐私）
+func (r *DataRepo) SearchByPhone(ctx context.Context, phone string, limit, offset int) ([]models.AppUser, int64, error) {
+	args := []any{"%" + phone + "%"}
+	where := " AND u.phone_e164 ILIKE $1"
 	var total int64
 	if err := r.DB.QueryRow(ctx, "SELECT COUNT(*) FROM users u WHERE 1=1"+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
@@ -69,7 +95,6 @@ func userWhere(keyword, status string) (string, []any) {
 		args = append(args, "%"+keyword+"%")
 		w += " AND (u.nickname ILIKE $" + itoa(len(args)) +
 			" OR u.public_id ILIKE $" + itoa(len(args)) +
-			" OR u.phone_e164 ILIKE $" + itoa(len(args)) +
 			" OR u.id::text=$" + itoa(len(args)) + ")"
 	}
 	if status != "" {
@@ -175,6 +200,18 @@ func (r *DataRepo) UpdateUserStatus(ctx context.Context, userID, status, reason,
 // RevokeUserSessions 强制用户全部设备下线（清单 03）
 func (r *DataRepo) RevokeUserSessions(ctx context.Context, userID string) error {
 	_, err := r.DB.Exec(ctx, `UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=$1::uuid AND revoked_at IS NULL`, userID)
+	return err
+}
+
+// LogUserStatusChange 记录用户状态变更审计（状态变更已由 server 内部接口执行；本方法只写 user_status_logs）
+func (r *DataRepo) LogUserStatusChange(ctx context.Context, userID, toStatus, reason, operatorID string) error {
+	var oldStatus string
+	if err := r.DB.QueryRow(ctx, `SELECT COALESCE(status,'active') FROM users WHERE id=$1::uuid`, userID).Scan(&oldStatus); err != nil {
+		return err
+	}
+	_, err := r.DB.Exec(ctx, `
+		INSERT INTO user_status_logs(user_id, from_status, to_status, reason, operator_id)
+		VALUES($1::uuid,$2,$3,$4,$5::uuid)`, userID, oldStatus, toStatus, reason, operatorID)
 	return err
 }
 

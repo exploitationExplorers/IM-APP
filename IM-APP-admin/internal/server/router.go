@@ -45,21 +45,25 @@ func BuildRouter(d Deps) *gin.Engine {
 	{
 		// 模块 00：健康与元信息
 		v1.GET("/health", d.MetaH.Health)
-		v1.GET("/meta", middleware.RequirePermission(rbacRepo, "admin.login"), d.MetaH.Meta)
+		v1.GET("/meta", middleware.AuthRequired(cfg.AdminJWTSecret, cfg.JWTIssuer, cfg.JWTAudience), middleware.RequirePermission(rbacRepo, "admin.login"), d.MetaH.Meta)
 
-		// 模块 01：登录 / MFA 挑战（公共）
+		// 模块 01：登录 / MFA 挑战 / 令牌刷新（公共）
+		// refresh 只依赖 refresh token 本身，放在鉴权组外，access token 过期后仍可续期
 		v1.POST("/auth/login", d.AuthH.Login)
 		v1.POST("/auth/mfa/verify", d.AuthH.MFAVerify)
+		v1.POST("/auth/token/refresh", d.AuthH.Refresh)
 
 		// 已登录区：认证 + 审计
 		auth := v1.Group("")
 		auth.Use(middleware.AuthRequired(cfg.AdminJWTSecret, cfg.JWTIssuer, cfg.JWTAudience))
 		auth.Use(middleware.Audit(auditRepo))
 		{
-			auth.POST("/auth/token/refresh", d.AuthH.Refresh)
 			auth.POST("/auth/logout", d.AuthH.Logout)
 			auth.POST("/auth/logout-all", d.AuthH.LogoutAll)
 			auth.GET("/me", d.AuthH.Me)
+			// 功能开关（MFA / 举报等）
+			auth.GET("/features", middleware.RequirePermission(rbacRepo, "system-limits.read"), d.MetaH.GetFeatures)
+			auth.PUT("/features", middleware.RequirePermission(rbacRepo, "system-limits.write"), d.MetaH.SetFeatures)
 			auth.PUT("/me/password", d.AuthH.ChangePassword)
 			auth.GET("/me/mfa", d.AuthH.MFAStatus)
 			auth.POST("/me/mfa/setup", d.AuthH.MFASetup)
@@ -98,6 +102,9 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.PUT("/users/:id/message-restriction", middleware.RequirePermission(rbacRepo, "users.restrict.message"), d.DataH.SetMessageRestriction)
 			auth.PUT("/users/:id/ban", middleware.RequirePermission(rbacRepo, "users.ban"), d.DataH.BanUser)
 			auth.POST("/users/:id/sessions/revoke", middleware.RequirePermission(rbacRepo, "users.sessions.revoke"), d.DataH.RevokeSessions)
+			auth.POST("/users/:id/reset-profile", middleware.RequirePermission(rbacRepo, "users.reset.profile"), d.DataH.ResetUserProfile)
+			auth.POST("/users/:id/cancel", middleware.RequirePermission(rbacRepo, "users.cancel"), d.DataH.CancelUser)
+			auth.GET("/users/phone-search", middleware.RequirePermission(rbacRepo, "users.phone.search"), d.DataH.SearchUserByPhone)
 
 			// 模块 04：群组管理
 			auth.GET("/groups", middleware.RequirePermission(rbacRepo, "groups.read"), d.DataH.ListGroups)
@@ -108,6 +115,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.PUT("/groups/:id/member-add-friend", middleware.RequirePermission(rbacRepo, "groups.settings"), d.DataH.SetGroupAddFriend)
 			auth.POST("/groups/:id/dissolve", middleware.RequirePermission(rbacRepo, "groups.dissolve"), d.DataH.DissolveGroup)
 			auth.GET("/groups/:id/recall-logs", middleware.RequirePermission(rbacRepo, "messages.audit.read"), d.DataH.ListGroupRecallLogs)
+			auth.GET("/groups/:id/status-logs", middleware.RequirePermission(rbacRepo, "groups.read"), d.DataH.ListGroupStatusLogs)
 			auth.POST("/groups/:id/messages/:messageId/recall", middleware.RequirePermission(rbacRepo, "messages.recall.admin"), d.DataH.RecallMessage)
 
 			// 模块 05：举报与内容处置
@@ -166,6 +174,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.PUT("/sensitive-words/:id/status", middleware.RequirePermission(rbacRepo, "moderation.words.write"), d.OpsH.SetSensitiveWordStatus)
 			auth.GET("/moderation/hits", middleware.RequirePermission(rbacRepo, "moderation.hits.read"), d.OpsH.ListModerationHits)
 			auth.GET("/moderation/profiles", middleware.RequirePermission(rbacRepo, "moderation.profiles.read"), d.OpsH.ListProfileModerations)
+			auth.POST("/moderation/profiles/:userId/approve", middleware.RequirePermission(rbacRepo, "moderation.profiles.handle"), d.OpsH.ApproveProfile)
 			auth.POST("/moderation/profiles/:userId/reject", middleware.RequirePermission(rbacRepo, "moderation.profiles.handle"), d.OpsH.RejectProfile)
 			auth.POST("/moderation/profiles/:userId/restore", middleware.RequirePermission(rbacRepo, "moderation.profiles.handle"), d.OpsH.RestoreProfile)
 

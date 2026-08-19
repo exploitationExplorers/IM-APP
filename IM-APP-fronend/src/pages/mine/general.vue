@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { clearAppCache } from '@/utils/app-cache'
 import { reselectLine } from '@/utils/reselect-line'
@@ -89,13 +90,7 @@ async function confirmReselectLine() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">通用</text>
-      <view class="nav-spacer" />
-    </view>
+    <ImNavBar title="通用" @back="goBack" />
 
     <view class="cell" @click="onLanguage">
       <text class="label">切换语言</text>
@@ -168,44 +163,6 @@ $muted: #636e86;
   min-height: 100vh;
   background: #fff;
   box-sizing: border-box;
-}
-
-.nav {
-  position: relative;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  height: calc(88rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 24rpx 0;
-  box-sizing: border-box;
-  background: #fff;
-}
-
-.nav-back {
-  width: 88rpx;
-  height: 88rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.nav-back-icon {
-  width: 40rpx;
-  height: 40rpx;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 34rpx;
-  font-weight: 700;
-  color: $text;
-}
-
-.nav-spacer {
-  width: 88rpx;
-  height: 88rpx;
-  flex-shrink: 0;
 }
 
 .cell {

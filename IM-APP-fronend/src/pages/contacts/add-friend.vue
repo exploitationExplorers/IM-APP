@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useContactStore } from '@/stores/contact'
 import { searchUserByPublicId } from '@/api/user'
+import { openQrScanner } from '@/utils/qrcode'
 import type { UserInfo } from '@/types'
 
 const contactStore = useContactStore()
@@ -37,7 +38,7 @@ function goBack() {
 }
 
 function goScan() {
-  uni.navigateTo({ url: '/pages/contacts/scan' })
+  openQrScanner()
 }
 
 function viewProfile() {

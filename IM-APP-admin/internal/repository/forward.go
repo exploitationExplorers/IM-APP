@@ -17,17 +17,21 @@ type OpsRepo struct{ DB *pgxpool.Pool }
 // ===== 转发/群发与风控（清单 06） =====
 
 const forwardSelect = `
-	SELECT ft.id::text, ft.user_id::text, ft.status, ft.target_count, ft.created_at, ft.updated_at,
-	       GREATEST(ft.done_count, COALESCE((SELECT COUNT(*) FROM forward_task_targets t WHERE t.task_id=ft.id AND t.status='success'),0)),
-	       (SELECT COUNT(*) FROM forward_task_targets t WHERE t.task_id=ft.id AND t.status='failed'),
-	       (SELECT COUNT(*) FROM forward_task_targets t WHERE t.task_id=ft.id AND t.status='skipped')
+	SELECT ft.id::text, ft.user_id::text, ft.status, ft.target_count, ft.created_at,
+	       COALESCE(ft.finished_at, ft.updated_at),
+	       ft.success_count, ft.failed_count, ft.skipped_count,
+	       (ft.idempotency_key <> '' AND EXISTS (
+	           SELECT 1 FROM forward_tasks f2
+	           WHERE f2.idempotency_key = ft.idempotency_key
+	             AND f2.id <> ft.id AND f2.created_at <= ft.created_at
+	       )) AS is_duplicate
 	FROM forward_tasks ft`
 
 func scanForwardTask(row pgx.Row) (models.ForwardTask, error) {
 	var t models.ForwardTask
 	var finishedAt time.Time
 	err := row.Scan(&t.ID, &t.UserID, &t.Status, &t.TargetCount, &t.CreatedAt, &finishedAt,
-		&t.SuccessCount, &t.FailedCount, &t.SkippedCount)
+		&t.SuccessCount, &t.FailedCount, &t.SkippedCount, &t.IsDuplicate)
 	if !finishedAt.IsZero() {
 		t.FinishedAt = &finishedAt
 	}
@@ -131,10 +135,14 @@ func (r *OpsRepo) CancelForwardTask(ctx context.Context, taskID, operatorID, rea
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE forward_tasks SET status='cancelled', updated_at=NOW()
-		WHERE id=$1::uuid AND status IN ('pending','processing')`, taskID); err != nil {
+		WHERE id=$1::uuid AND status IN ('pending','processing')`, taskID)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return tx.Commit(ctx) // 终态任务无需取消，也不写取消审计
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE forward_task_targets SET status='cancelled', finished_at=NOW()
@@ -155,11 +163,23 @@ func (r *OpsRepo) RetryFailedTargets(ctx context.Context, taskID, operatorID str
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
+	// 终态任务（cancelled/success）不可重试，先校验任务状态
+	var taskStatus string
+	if err := tx.QueryRow(ctx, `SELECT status FROM forward_tasks WHERE id=$1::uuid`, taskID).Scan(&taskStatus); err != nil {
+		return 0, err
+	}
+	if taskStatus != "pending" && taskStatus != "processing" && taskStatus != "failed" {
+		return 0, tx.Commit(ctx) // 终态任务不重试
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE forward_task_targets SET status='pending', fail_code='', finished_at=NULL
 		WHERE task_id=$1::uuid AND status='failed' AND attempts < 3`, taskID)
 	if err != nil {
 		return 0, err
+	}
+	if tag.RowsAffected() == 0 {
+		// 无 failed 目标可重试：不改任务状态、不写审计
+		return 0, tx.Commit(ctx)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE forward_tasks SET status='processing', updated_at=NOW() WHERE id=$1::uuid`, taskID); err != nil {

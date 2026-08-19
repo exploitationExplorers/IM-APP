@@ -57,7 +57,7 @@ func (h *DataHandler) SetGroupMuteAll(c *gin.Context) {
 		return
 	}
 	if err := h.Data.SetGroupMuteAll(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -71,7 +71,7 @@ func (h *DataHandler) SetGroupAddFriend(c *gin.Context) {
 		return
 	}
 	if err := h.Data.SetGroupAddFriend(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -85,7 +85,7 @@ func (h *DataHandler) DissolveGroup(c *gin.Context) {
 		return
 	}
 	if err := h.Data.DissolveGroup(c.Request.Context(), c.Param("id"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)
@@ -102,6 +102,16 @@ func (h *DataHandler) ListGroupRecallLogs(c *gin.Context) {
 	response.OKPage(c, list, total, page, size)
 }
 
+func (h *DataHandler) ListGroupStatusLogs(c *gin.Context) {
+	page, size := pageParams(c)
+	list, total, err := h.Data.ListGroupStatusLogs(c.Request.Context(), c.Param("id"), page, size)
+	if err != nil {
+		response.FailErr(c, 500, "查询失败", err)
+		return
+	}
+	response.OKPage(c, list, total, page, size)
+}
+
 func (h *DataHandler) RecallMessage(c *gin.Context) {
 	var req models.AdminRecallRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
@@ -109,7 +119,7 @@ func (h *DataHandler) RecallMessage(c *gin.Context) {
 		return
 	}
 	if err := h.Data.RecallMessage(c.Request.Context(), c.Param("id"), c.Param("messageId"), req, middleware.AdminID(c)); err != nil {
-		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
+		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}
 	c.Set("auditReason", req.Reason)

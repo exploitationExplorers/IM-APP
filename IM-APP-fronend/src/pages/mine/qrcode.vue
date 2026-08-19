@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { fetchQrcode } from '@/api/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
-import { buildQrcodeDataUrl } from '@/utils/qrcode'
+import { buildQrcodeDataUrl, openQrScanner } from '@/utils/qrcode'
 import { buildQrcodeCardDataUrl, saveBase64ImageToAlbum } from '@/utils/qrcode-card'
 import type { UserQrcodeResult } from '@/types'
 
@@ -42,7 +43,7 @@ function goBack() {
 }
 
 function goScan() {
-  uni.navigateTo({ url: '/pages/contacts/scan' })
+  openQrScanner()
 }
 
 async function onShare() {
@@ -104,20 +105,16 @@ async function onSave() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">二维码</text>
-      <view class="nav-actions">
+    <ImNavBar title="二维码" @back="goBack">
+      <template #right>
         <view class="nav-action" @click="goScan">
           <image class="nav-action-icon" src="/static/icons/icon-scan.svg" mode="aspectFit" />
         </view>
         <view class="nav-action" @click="onShare">
           <image class="nav-action-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
         </view>
-      </view>
-    </view>
+      </template>
+    </ImNavBar>
 
     <view class="card">
       <view class="user-row">
@@ -168,52 +165,9 @@ async function onSave() {
   flex-direction: column;
 }
 
-.nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: calc(88rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 24rpx 0;
-  background: #fff;
-  border-bottom: 1rpx solid #e1e3ea;
-  box-sizing: border-box;
-}
-
-.nav-back {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.nav-back-icon {
-  width: 40rpx;
-  height: 40rpx;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 34rpx;
-  font-weight: 600;
-  color: #212121;
-}
-
-.nav-actions {
-  width: 144rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8rpx;
-}
-
 .nav-action {
-  width: 72rpx;
-  height: 72rpx;
+  width: 64rpx;
+  height: 64rpx;
   display: flex;
   align-items: center;
   justify-content: center;

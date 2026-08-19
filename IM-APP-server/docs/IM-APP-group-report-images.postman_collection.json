@@ -1,0 +1,62 @@
+{
+  "info": {
+    "name": "IM-APP 群举报图片",
+    "description": "先创建并完成 MinIO 图片上传，再提交群举报。举报响应 imagePaths 仅包含可直接打开的 URL。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "token", "value": "" },
+    { "key": "groupId", "value": "100001" },
+    { "key": "imageFileId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. 创建举报图片上传任务",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"purpose\": \"image\",\n  \"fileName\": \"report.jpg\",\n  \"contentType\": \"image/jpeg\",\n  \"size\": 1024\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/files/uploads",
+        "description": "成功后将 data.formData 和名为 file 的图片使用 multipart/form-data POST 到 data.formUrl，并把 data.file.id 保存到 imageFileId。"
+      }
+    },
+    {
+      "name": "2. 确认举报图片上传完成",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fileId\": \"{{imageFileId}}\"\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/files/uploads/complete"
+      }
+    },
+    {
+      "name": "3. 举报群聊并关联图片",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"reason\": \"spam\",\n  \"description\": \"补充说明\",\n  \"imageFileIds\": [\"{{imageFileId}}\"]\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/groups/reports",
+        "description": "响应 data.imagePaths 是可直接点击打开的 MinIO URL 数组。"
+      }
+    }
+  ]
+}
