@@ -343,6 +343,21 @@ export namespace Groups {
     allowMemberAddFriend?: boolean;
     announcement?: string;
     joinMode?: string;
+    dissolvedAt?: string;
+    dissolveReason?: string;
+    dissolvedByAdminId?: string;
+  }
+
+  export interface GroupStatusLogItem {
+    id: number;
+    groupId: string;
+    fromStatus: string;
+    toStatus: string;
+    reason: string;
+    operatorId?: string;
+    operatorName: string;
+    operatorType: string;
+    createdAt: string;
   }
 
   export interface ReqDissolveGroup {
