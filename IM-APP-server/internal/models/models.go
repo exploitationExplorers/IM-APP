@@ -85,6 +85,15 @@ type GroupPreview struct {
 	Avatar         string `json:"avatar"`
 	Role           string `json:"role,omitempty"`
 	ConversationID string `json:"conversationId,omitempty"`
+	Status         string `json:"status,omitempty"`
+}
+
+// DissolvedGroupInfo 已解散群的轻量资料（通讯录详情页只读展示用）
+type DissolvedGroupInfo struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Avatar string `json:"avatar"`
+	Status string `json:"status"`
 }
 
 type FriendRequest struct {
