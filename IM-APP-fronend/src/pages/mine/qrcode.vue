@@ -4,7 +4,7 @@ import { onShow } from '@dcloudio/uni-app'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { fetchQrcode } from '@/api/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
-import { buildQrcodeDataUrl } from '@/utils/qrcode'
+import { buildQrcodeDataUrl, openQrScanner } from '@/utils/qrcode'
 import { buildQrcodeCardDataUrl, saveBase64ImageToAlbum } from '@/utils/qrcode-card'
 import type { UserQrcodeResult } from '@/types'
 
@@ -43,7 +43,7 @@ function goBack() {
 }
 
 function goScan() {
-  uni.navigateTo({ url: '/pages/contacts/scan' })
+  openQrScanner()
 }
 
 async function onShare() {

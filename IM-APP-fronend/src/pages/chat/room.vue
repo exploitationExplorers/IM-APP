@@ -12,15 +12,19 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useForwardStore } from '@/stores/forward'
-import { businessUserIdFromIM, chooseLocalFile, ensureIMLogin, imUserId } from '@/utils/openim'
+import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { resolveIMGroupByIM } from '@/api/im'
 import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation } from '@/types'
-import { collapseRepeatedGroupNameNotices } from '@/utils/im-notification'
+import { collapseRepeatedGroupNameNotices, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
+import {
+  isAnnouncementDismissed,
+  rememberDismissedAnnouncement,
+} from '@/utils/group-announcement'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -41,6 +45,8 @@ const myRole = ref<'owner' | 'admin' | 'member'>('member')
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
 const convRef = ref<Conversation | null>(null)
 const memberRemarkMap = ref<Record<string, string>>({})
+/** 群主展示名，系统通知里的 imAdmin 用这个替换 */
+const groupOwnerName = ref('')
 /** 群成员业务头像（业务用户 ID 索引），IM 快照头像为空或损坏时兜底用 */
 const memberAvatarMap = ref<Record<string, string>>({})
 /** 群禁言状态（群详情接口）：本人被禁言 / 全员禁言时禁用输入区 */
@@ -49,6 +55,13 @@ const denyReason = ref('')
 const myMutedUntil = ref<string | null>(null)
 /** 群成员角色 / 禁言元信息（业务用户 ID 索引），供长按菜单做权限与禁言项判断 */
 const memberMetaMap = ref<Record<string, MemberMeta>>({})
+/** 当前群公告正文，房间顶栏横幅用 */
+const announcementText = ref('')
+/**
+ * `uni.setStorageSync` 不是响应式数据源。
+ * 当用户点「不再提示」后，需要显式触发一次 computed 重算，保证横幅立刻收起。
+ */
+const announcementDismissEpoch = ref(0)
 let muteExpireTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const scrollInto = ref('')
@@ -90,7 +103,10 @@ watch(
       .map((m) => m.systemEventKey)
       .filter(
         (key): key is string =>
-          !!key && (key.startsWith('group-member:') || key.startsWith('group-mute:')),
+          !!key &&
+          (key.startsWith('group-member:') ||
+            key.startsWith('group-mute:') ||
+            key.startsWith('group-announce:')),
       )
       .join('|'),
   (keys, prev) => {
@@ -142,6 +158,21 @@ function nicknameOf(message: ChatMessage): string {
   return contact?.remark?.trim() || contact?.nickname || ''
 }
 
+function systemTextOf(message: ChatMessage): string {
+  return replaceOpenIMAdminLabel(message.content, groupOwnerName.value)
+}
+
+function refreshPrivateTitle() {
+  if (chatType.value !== 'private' || !businessId.value) return
+  const contact = contactStore.contacts.find((c) => c.id === businessId.value)
+  const remark = contact?.remark?.trim()
+  if (remark) {
+    title.value = remark
+    return
+  }
+  if (contact?.nickname) title.value = contact.nickname
+}
+
 const enterToSend = computed(() => settingsStore.enterToSend)
 const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 const hasInput = computed(() => input.value.trim().length > 0)
@@ -149,22 +180,20 @@ const hasInput = computed(() => input.value.trim().length > 0)
 /** 被禁言（单人 / 全员）时隐藏输入区，换成居中提示条 */
 const composerBlocked = computed(() => chatType.value === 'group' && !canChat.value)
 
-const blockTip = computed(() => {
-  if (denyReason.value === 'group_muted') return '群主已开启全员禁言'
-  if (denyReason.value === 'member_muted') {
-    const until = formatMuteUntil(myMutedUntil.value)
-    return until ? `你已被禁言，至 ${until} 解禁` : '你已被禁言'
-  }
-  return '当前群暂无法发言'
+const showAnnouncementBanner = computed(() => {
+  if (chatType.value !== 'group') return false
+  // 依赖这个 epoch：否则存储变化后 computed 不会自动重算
+  void announcementDismissEpoch.value
+  const text = announcementText.value.trim()
+  if (!text) return false
+  return !isAnnouncementDismissed(imUserId.value || myId.value, conversationId.value, text)
 })
 
-function formatMuteUntil(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
+const blockTip = computed(() => {
+  if (denyReason.value === 'group_muted') return '群主已开启全员禁言'
+  if (denyReason.value === 'member_muted') return '您已经被禁言'
+  return '当前群暂无法发言'
+})
 
 watch(composerBlocked, (blocked) => {
   if (!blocked) return
@@ -173,6 +202,25 @@ watch(composerBlocked, (blocked) => {
   if (recording.value) stopVoiceRecord()
   voiceMode.value = false
 })
+
+/** 禁言条右侧「检查禁言状态」：重新拉群详情，已解禁则输入区自动恢复，未解禁提示剩余时间 */
+const checkingMute = ref(false)
+async function checkMuteStatus() {
+  if (checkingMute.value) return
+  checkingMute.value = true
+  try {
+    const ok = await refreshGroupMeta()
+    if (!ok) {
+      uni.showToast({ title: '检查失败，请稍后重试', icon: 'none' })
+    } else if (composerBlocked.value) {
+      uni.showToast({ title: blockTip.value, icon: 'none' })
+    } else {
+      uni.showToast({ title: '禁言已解除，可以正常发言', icon: 'none' })
+    }
+  } finally {
+    checkingMute.value = false
+  }
+}
 
 const actions = useChatMessageActions({
   conversationId,
@@ -193,6 +241,7 @@ const actions = useChatMessageActions({
 
 onShow(() => {
   if (chatType.value === 'group') void refreshGroupMeta()
+  if (chatType.value === 'private') refreshPrivateTitle()
   if (!forwardStore.consumeSucceeded()) return
   actions.cancelSelect()
   successVisible.value = true
@@ -377,19 +426,20 @@ async function resolveBusinessTarget(): Promise<string> {
   return ''
 }
 
-/** 进群 / 退群 / 踢人 / 禁言后标题旁人数与禁言状态要跟着变，不能只在首次进入时拉一次 */
-async function refreshGroupMeta() {
-  if (chatType.value !== 'group') return
+/** 进群 / 退群 / 踢人 / 禁言后标题旁人数与禁言状态要跟着变，不能只在首次进入时拉一次。返回群详情是否拉取成功（「检查禁言状态」用它区分失败） */
+async function refreshGroupMeta(): Promise<boolean> {
+  if (chatType.value !== 'group') return false
   let gid = businessId.value
   if (!gid) {
     try {
       gid = await resolveBusinessTarget()
     } catch {
-      return
+      return false
     }
   }
-  if (!gid) return
+  if (!gid) return false
   businessId.value = gid
+  let detailApplied = false
   try {
     const [ms, detail] = await Promise.all([
       fetchGroupMembers(gid),
@@ -409,20 +459,49 @@ async function refreshGroupMeta() {
     memberAvatarMap.value = avatarMap
     memberMetaMap.value = metaMap
     memberCount.value = ms.length
+    const owner = ms.find((m) => m.role === 'owner')
+    groupOwnerName.value =
+      owner?.memberRemark?.trim() ||
+      owner?.displayName?.trim() ||
+      owner?.groupNickname?.trim() ||
+      owner?.nickname?.trim() ||
+      ''
     const me = userStore.profile?.id
     const self = me ? ms.find((m) => m.id === me) : undefined
     if (self) myRole.value = self.role
-    if (detail) applyGroupChatPermission(detail)
+    if (detail) {
+      applyGroupChatPermission(detail, self)
+      announcementText.value = (detail.announcement || '').trim()
+      detailApplied = true
+    }
   } catch {
     // 人数刷新失败时保留当前值
   }
+  return detailApplied
 }
 
-/** 群详情的发言权限 → 输入区禁用状态 */
-function applyGroupChatPermission(detail: { canChat?: boolean; denyReason?: string; mutedUntil?: string | null }) {
+/**
+ * 群详情的发言权限 → 输入区禁用状态。
+ * detail 实际返回 canChat/isMuted/allMuted，不下发 denyReason/mutedUntil：
+ * 禁言原因本地推导（服务端若下发 denyReason 则优先）；截止时间从成员列表里自己的 mutedUntil 兜底。
+ */
+function applyGroupChatPermission(
+  detail: { canChat?: boolean; denyReason?: string; isMuted?: boolean; allMuted?: boolean; mutedUntil?: string | null },
+  self?: { isMuted?: boolean; mutedUntil?: string | null },
+) {
   canChat.value = detail.canChat !== false
-  denyReason.value = detail.denyReason || ''
-  myMutedUntil.value = detail.mutedUntil || null
+  myMutedUntil.value = detail.mutedUntil || self?.mutedUntil || null
+  if (canChat.value) {
+    denyReason.value = ''
+  } else if (detail.denyReason) {
+    denyReason.value = detail.denyReason
+  } else if (detail.isMuted || self?.isMuted) {
+    denyReason.value = 'member_muted'
+  } else if (detail.allMuted) {
+    denyReason.value = 'group_muted'
+  } else {
+    denyReason.value = 'unknown'
+  }
   scheduleMuteExpiry()
 }
 
@@ -496,6 +575,22 @@ async function openProfileById(userId: string) {
     ? `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}`
     : `/pages/contacts/user-profile?id=${encodeURIComponent(userId)}${groupParam}`
   uni.navigateTo({ url: path })
+}
+
+function openAnnouncement() {
+  if (!businessId.value) return
+  uni.navigateTo({
+    url: `/pages/group/announcement?id=${encodeURIComponent(businessId.value)}`,
+  })
+}
+
+async function dismissAnnouncementBanner() {
+  const text = announcementText.value.trim()
+  if (text) {
+    rememberDismissedAnnouncement(imUserId.value || myId.value, conversationId.value, text)
+  }
+  announcementDismissEpoch.value += 1
+  await chatStore.dismissGroupAnnouncement(conversationId.value)
 }
 
 async function onAvatarClick(message: ChatMessage) {
@@ -748,18 +843,30 @@ function onPlus() {
   }
 }
 
+/** 相册 / 文件一次最多可选数量 */
+const MAX_PICK_COUNT = 9
+
+/** 相册多选：一次最多 9 张，逐张发送保持顺序，单张失败不中断并汇总提示 */
 function pickImage() {
   uni.chooseImage({
-    count: 1,
+    count: MAX_PICK_COUNT,
     sourceType: ['album'],
     success: async (res) => {
       showPlusPanel.value = false
-      try {
-        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
-        await nextTick()
-        scrollToBottom()
-      } catch (e) {
-        uni.showToast({ title: (e as Error).message, icon: 'none' })
+      // 各端选择器一般已按 count 限制，这里再截一次兜底
+      const paths = (res.tempFilePaths || []).slice(0, MAX_PICK_COUNT)
+      let failed = 0
+      for (const path of paths) {
+        try {
+          await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
+          await nextTick()
+          scrollToBottom()
+        } catch {
+          failed++
+        }
+      }
+      if (failed) {
+        uni.showToast({ title: `${failed} 张图片发送失败`, icon: 'none' })
       }
     },
   })
@@ -791,14 +898,24 @@ function pickCard() {
   })
 }
 
-/** 选本地文件发送 */
+/** 选本地文件发送：一次最多 9 个（app 端原生选择器仅支持单选），逐个发送保持顺序，单个失败不中断并汇总提示 */
 async function pickFile() {
   showPlusPanel.value = false
   try {
-    const file = await chooseLocalFile()
-    await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
-    await nextTick()
-    scrollToBottom()
+    const files = await chooseLocalFiles(MAX_PICK_COUNT)
+    let failed = 0
+    for (const file of files) {
+      try {
+        await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
+        await nextTick()
+        scrollToBottom()
+      } catch {
+        failed++
+      }
+    }
+    if (failed) {
+      uni.showToast({ title: `${failed} 个文件发送失败`, icon: 'none' })
+    }
   } catch (e) {
     const msg = (e as Error).message
     if (msg && !msg.includes('未选择')) {
@@ -822,9 +939,15 @@ function pickFavorite() {
       <view class="back-btn" @click="goBack">‹</view>
       <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text>
       <view class="header-title" @click="goToProfile">
-        <text>{{ title }}</text>
+        <text class="header-title-text">{{ title }}</text>
       </view>
       <view class="header-icon" @click="goToProfile">⋯</view>
+    </view>
+
+    <view v-if="showAnnouncementBanner" class="announce-bar">
+      <image class="announce-icon" src="/static/icons/icon-megaphone.svg" mode="aspectFit" />
+      <text class="announce-text" @click="openAnnouncement">{{ announcementText }}</text>
+      <text class="announce-dismiss" @click.stop="dismissAnnouncementBanner">不再提示</text>
     </view>
 
     <!-- 不开 scroll-with-animation：uni 的滚动动画是 transform 假动画 + 过渡结束才提交 scrollTop，
@@ -847,7 +970,7 @@ function pickFavorite() {
           <text v-if="actions.selectedIds.value.has(m.id)">✓</text>
         </view>
         <view v-if="m.type === 'system'" class="sys-tip">
-          <text class="sys-tip-text">{{ m.content }}</text>
+          <text class="sys-tip-text">{{ systemTextOf(m) }}</text>
         </view>
         <ChatBubble
           v-else
@@ -883,7 +1006,12 @@ function pickFavorite() {
         :text="actions.quote.value.content"
         @close="actions.clearQuote"
       />
-      <view v-if="composerBlocked" class="composer-blocked">🔇 {{ blockTip }}</view>
+      <view v-if="composerBlocked" class="composer-blocked">
+        <text class="composer-blocked-tip">🔇 {{ blockTip }}</text>
+        <view class="mute-check-btn" :class="{ checking: checkingMute }" @click="checkMuteStatus">
+          {{ checkingMute ? '检查中…' : '检查禁言状态' }}
+        </view>
+      </view>
 
       <template v-else>
       <view v-if="voiceMode" class="voice-bar">
@@ -982,7 +1110,8 @@ function pickFavorite() {
 
 <style scoped lang="scss">
 .room {
-  height: 100%;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: #f5f5f5;
@@ -1023,13 +1152,19 @@ function pickFavorite() {
 .header-title {
   flex: 1;
   min-width: 0;
-  text-align: left;
+  overflow: hidden;
+}
+
+.header-title-text {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  lines: 1;
   font-size: 38rpx;
   font-weight: 700;
   color: #111;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .header-icon {
@@ -1041,6 +1176,39 @@ function pickFavorite() {
   font-size: 42rpx;
   color: #444;
   flex-shrink: 0;
+}
+
+.announce-bar {
+  display: flex;
+  align-items: center;
+  height: 72rpx;
+  padding: 0 24rpx;
+  background: #ffffff;
+  border-bottom: 1rpx solid #ececec;
+  flex-shrink: 0;
+}
+
+.announce-icon {
+  width: 36rpx;
+  height: 36rpx;
+  flex-shrink: 0;
+}
+
+.announce-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0 16rpx;
+  font-size: 26rpx;
+  color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.announce-dismiss {
+  flex-shrink: 0;
+  font-size: 26rpx;
+  color: #0a2fc2;
 }
 
 .msg-list {
@@ -1120,14 +1288,39 @@ function pickFavorite() {
   gap: 12rpx;
 }
 
-/** 被禁言 / 全员禁言时替代输入区的居中提示条 */
+/** 被禁言 / 全员禁言时替代输入区：左侧禁言提示，右侧检查禁言状态按钮 */
 .composer-blocked {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   height: 96rpx;
+  padding: 0 32rpx;
+}
+
+.composer-blocked-tip {
+  flex: 1;
   color: #999;
   font-size: 26rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mute-check-btn {
+  flex-shrink: 0;
+  margin-left: 24rpx;
+  height: 56rpx;
+  padding: 0 24rpx;
+  display: flex;
+  align-items: center;
+  border-radius: 28rpx;
+  border: 1rpx solid #0a2fc2;
+  color: #0a2fc2;
+  font-size: 24rpx;
+}
+
+.mute-check-btn.checking {
+  opacity: 0.5;
 }
 
 .tool {
@@ -1298,12 +1491,5 @@ function pickFavorite() {
 .plus-icon-img {
   width: 56rpx;
   height: 56rpx;
-}
-</style>
-
-<style lang="scss">
-page {
-  height: 100%;
-  overflow: hidden;
 }
 </style>

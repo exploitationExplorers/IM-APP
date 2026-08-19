@@ -1,5 +1,10 @@
+<script lang="ts">
+/** 模块级单例：同一时刻只允许一条语音在播，切到别的气泡先停掉前一条 */
+let activeVoiceStopper: (() => void) | null = null
+</script>
+
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage } from '@/types'
 import { formatClock, splitTextWithLinks } from '@/utils/format'
@@ -125,27 +130,145 @@ function copyFileUrl() {
 
 const timeText = computed(() => formatClock(props.message.createdAt))
 
+/** 时长格式对齐设计稿：12'' / 1'12''（微信式） */
 function formatVoiceDuration(seconds: number) {
   const total = Math.max(0, Math.ceil(seconds))
-  const min = String(Math.floor(total / 60)).padStart(2, '0')
-  const sec = String(total % 60).padStart(2, '0')
-  return `${min}:${sec}`
+  if (total < 60) return `${total}''`
+  return `${Math.floor(total / 60)}'${String(total % 60).padStart(2, '0')}''`
 }
 
+/** 静态波形柱高：按消息 id 稳定取一组，同一条消息不随渲染跳动；中段（最高峰附近）多排 5 根高柱 */
+const WAVE_PATTERNS = [
+  [12, 24, 32, 20, 14, 28, 34, 34, 33, 32, 31, 30, 22, 16, 26, 18, 12],
+  [20, 14, 28, 34, 33, 32, 31, 30, 29, 18, 12, 26, 30, 16, 22, 28, 14],
+  [14, 22, 16, 30, 32, 33, 32, 31, 30, 29, 26, 12, 20, 32, 24, 14, 18],
+]
+
+const waveBars = computed(() => {
+  const id = props.message.id || ''
+  let sum = 0
+  for (let i = 0; i < id.length; i++) sum += id.charCodeAt(i)
+  return WAVE_PATTERNS[sum % WAVE_PATTERNS.length]
+})
+
+/** 气泡宽度随时长伸缩：260rpx 起步（12 根柱的最小排布），每秒 +6rpx，封顶 440rpx */
+const voiceBubbleStyle = computed(() => {
+  const seconds = Math.max(1, Math.ceil(voiceMeta.value?.duration || 1))
+  const width = Math.min(260 + seconds * 6, 440)
+  return { width: `${width}rpx` }
+})
+
+const playing = ref(false)
+/** 已播放进度：波柱按比例分成已播（高亮）/未播两段颜色 */
+const playedBars = ref(0)
+let stopVoiceFn: (() => void) | null = null
+/** 进度轮询兜底：个别平台 onTimeUpdate 不回调，保证进度一定推进 */
+let progressTimer: ReturnType<typeof setInterval> | null = null
+
+function clearProgressTimer() {
+  if (progressTimer) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+}
+
+/** 进度换算：total 非法（NaN/Infinity/0）时退回消息自带时长，避免永远算出 0 */
+function syncPlayedProgress(current: number, totalRaw: number) {
+  const fallback = voiceMeta.value?.duration || 0
+  const total = Number.isFinite(totalRaw) && totalRaw > 0 ? totalRaw : fallback
+  if (!total) return
+  const ratio = Math.min(1, Math.max(0, current / total))
+  playedBars.value = Math.round(ratio * waveBars.value.length)
+}
+
+function stopVoice() {
+  stopVoiceFn?.()
+  stopVoiceFn = null
+  playing.value = false
+  playedBars.value = 0
+  clearProgressTimer()
+}
+
+/**
+ * 点按播放：再点一次停止；切到别的语音气泡时前一条自动停。
+ * 播放中波形柱变蓝并跳动，结束/出错自动复原。
+ */
 function playVoice() {
   const src = toPlayableMediaUrl(voiceMeta.value?.path || '')
   if (!src) return
-  const inner = (uni as { createInnerAudioContext?: () => { src: string; play: () => void } }).createInnerAudioContext?.()
+  if (playing.value) {
+    stopVoice()
+    return
+  }
+  activeVoiceStopper?.()
+  const inner = (
+    uni as unknown as {
+      createInnerAudioContext?: () => {
+        src: string
+        currentTime: number
+        duration: number
+        play: () => void
+        stop: () => void
+        destroy: () => void
+        onEnded: (cb: () => void) => void
+        onError: (cb: () => void) => void
+        onStop: (cb: () => void) => void
+        onTimeUpdate: (cb: () => void) => void
+      }
+    }
+  ).createInnerAudioContext?.()
   if (inner) {
     inner.src = src
+    const reset = () => {
+      playing.value = false
+      playedBars.value = 0
+      clearProgressTimer()
+    }
+    inner.onEnded(reset)
+    inner.onError(reset)
+    inner.onStop(reset)
+    // 注意：onTimeUpdate 回调在部分平台不带事件参数，必须读实例的 currentTime/duration
+    inner.onTimeUpdate(() => syncPlayedProgress(inner.currentTime, inner.duration))
     inner.play()
+    playing.value = true
+    progressTimer = setInterval(() => {
+      if (!playing.value) return
+      syncPlayedProgress(inner.currentTime, inner.duration)
+    }, 300)
+    stopVoiceFn = () => {
+      try {
+        inner.stop()
+        inner.destroy()
+      } catch {
+        /* 已释放 */
+      }
+    }
+    activeVoiceStopper = stopVoice
     return
   }
   if (typeof Audio !== 'undefined') {
     const audio = new Audio(src)
-    audio.play().catch(() => undefined)
+    playing.value = true
+    audio.addEventListener('ended', () => {
+      playing.value = false
+      playedBars.value = 0
+    })
+    audio.addEventListener('timeupdate', () => syncPlayedProgress(audio.currentTime, audio.duration))
+    audio.play().catch(() => {
+      playing.value = false
+    })
+    stopVoiceFn = () => {
+      audio.pause()
+      audio.currentTime = 0
+    }
+    activeVoiceStopper = stopVoice
   }
 }
+
+onUnmounted(() => {
+  if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
+  stopVoice()
+})
 
 /** 归一化媒体地址：网络/blob 路径原样返回，App 本地临时路径转 file:// 绝对路径（语音播放与图片预览共用） */
 function toPlayableMediaUrl(path: string): string {
@@ -199,15 +322,22 @@ function openLink(url: string) {
       <view
         v-else-if="message.type === 'voice'"
         class="bubble voice-bubble"
-        :class="mine ? 'bubble-mine voice-mine' : 'bubble-other voice-other'"
+        :class="[mine ? 'bubble-mine voice-mine' : 'bubble-other voice-other', { playing: playing }]"
+        :style="voiceBubbleStyle"
         @click="playVoice"
         @longpress="onLongPress"
         @contextmenu.prevent="onContextMenu"
       >
         <view class="voice-inner">
-          <view class="voice-play">▶</view>
+          <view class="voice-play-icon"></view>
           <view class="voice-wave">
-            <text>▁▂▃▄▅▆▇</text>
+            <view
+              v-for="(h, i) in waveBars"
+              :key="i"
+              class="voice-bar"
+              :class="{ played: i < playedBars }"
+              :style="{ height: `${h}rpx` }"
+            ></view>
           </view>
           <text class="voice-duration">{{ formatVoiceDuration(voiceMeta?.duration || 0) }}</text>
         </view>
@@ -344,36 +474,80 @@ function openLink(url: string) {
 
 .voice-bubble {
   min-width: 260rpx;
-  padding: 12rpx 18rpx;
+  max-width: 440rpx;
+  box-sizing: border-box;
+  padding: 18rpx 24rpx;
 }
 
 .voice-inner {
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  gap: 16rpx;
 }
 
-.voice-play {
-  font-size: 24rpx;
-  font-weight: bold;
-  line-height: 1;
+/** 最前面的播放三角：CSS 画的 ▶，默认黑色与波形一致，播放态换暂停图标；margin 让图标和波形隔开 */
+.voice-play-icon {
+  flex-shrink: 0;
+  margin-right: 16rpx;
+  width: 0;
+  height: 0;
+  border-top: 10rpx solid transparent;
+  border-bottom: 10rpx solid transparent;
+  border-left: 16rpx solid #000;
 }
 
+/** 播放中：播放三角换成暂停图标（两根竖条） */
+.voice-bubble.playing .voice-play-icon {
+  width: 16rpx;
+  height: 20rpx;
+  border: none;
+  position: relative;
+}
+
+.voice-bubble.playing .voice-play-icon::before,
+.voice-bubble.playing .voice-play-icon::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 4rpx;
+  height: 20rpx;
+  border-radius: 2rpx;
+  background: #000;
+}
+
+.voice-bubble.playing .voice-play-icon::before {
+  left: 0;
+}
+
+.voice-bubble.playing .voice-play-icon::after {
+  right: 0;
+}
+
+/** 波形紧凑排列在图标右侧，剩余空白留给时长一侧 */
 .voice-wave {
   flex: 1;
-  min-width: 110rpx;
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 20rpx;
-  letter-spacing: 2rpx;
-  opacity: 0.9;
+  gap: 6rpx;
+}
+
+.voice-bar {
+  width: 2rpx;
+  border-radius: 1rpx;
+  background: #8a93a1;
+  transition: background-color 0.2s ease;
+}
+
+/** 播放进度双色：未播灰色，已播过的柱子变黑（两侧统一配色） */
+.voice-bar.played {
+  background: #000;
 }
 
 .voice-duration {
-  font-size: 22rpx;
-  min-width: 70rpx;
-  text-align: right;
+  flex-shrink: 0;
+  font-size: 24rpx;
+  line-height: 1;
+  color: #000;
 }
 
 .file-bubble {
@@ -476,13 +650,11 @@ function openLink(url: string) {
 }
 
 .voice-other {
-  background: #d9edf9;
-  color: #1f2d3d;
+  background: #fff;
 }
 
 .voice-mine {
   background: #bfe3ff;
-  color: #1f2d3d;
 }
 
 .link {

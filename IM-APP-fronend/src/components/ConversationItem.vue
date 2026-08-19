@@ -40,7 +40,7 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
       <view class="bottom">
         <view class="preview">
           <image v-if="isMuted" class="mute-icon" src="/static/icons/icon-bell-slash.svg" mode="aspectFit" />
-          <text v-if="item.highlightTag" class="tag">{{ item.highlightTag }}</text>
+          <text v-for="tag in item.highlightTags" :key="tag" class="tag">{{ tag }}</text>
           <text class="msg">{{ item.lastMessage }}</text>
         </view>
         <view v-if="item.unreadCount > 0" class="badge">
@@ -133,15 +133,15 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
 .preview {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .tag {
   color: #e54d42;
   font-size: 26rpx;
-  margin-right: 6rpx;
+  flex-shrink: 0;
 }
 
 .mute-icon {
@@ -154,6 +154,10 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
 .msg {
   color: #999;
   font-size: 26rpx;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .badge {

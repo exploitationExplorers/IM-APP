@@ -54,10 +54,24 @@ function parseDetail(item: MessageItem): NoticeDetail {
   }
 }
 
+function isOpenIMAdmin(user?: NoticeUser): boolean {
+  const id = user?.userID?.trim() || ''
+  const nickname = user?.nickname?.trim() || ''
+  return id === 'imAdmin' || nickname === 'imAdmin'
+}
+
 function nameOf(user?: NoticeUser, fallback = ''): string {
+  if (isOpenIMAdmin(user)) return fallback || '群主'
   const nickname = user?.nickname?.trim()
   if (nickname) return nickname
   return fallback
+}
+
+/** OpenIM 管理账号会出现在系统通知里，展示时换成群主昵称。 */
+export function replaceOpenIMAdminLabel(text: string, ownerName = '群主'): string {
+  if (!text.includes('imAdmin')) return text
+  const alias = ownerName.trim() || '群主'
+  return text.replace(/imAdmin/g, alias)
 }
 
 function namesOf(list?: NoticeUser[]): string {
@@ -76,6 +90,9 @@ export function imNotificationEventKey(item: MessageItem): string {
   if (isGroupMuteNotice(item.contentType)) {
     return `group-mute:${item.groupID || ''}:${item.clientMsgID}`
   }
+  if (isGroupAnnouncementNotice(item.contentType)) {
+    return `group-announce:${item.groupID || ''}`
+  }
   if (item.contentType !== GroupNotice.NameSet) return ''
   const detail = parseDetail(item)
   const groupID = detail.group?.groupID || item.groupID || ''
@@ -91,6 +108,10 @@ export function isGroupMembershipNotice(contentType: number): boolean {
     contentType === GroupNotice.MemberInvited ||
     contentType === GroupNotice.MemberEnter
   )
+}
+
+export function isGroupAnnouncementNotice(contentType: number): boolean {
+  return contentType === GroupNotice.Announcement
 }
 
 /** 禁言/解禁通知（单成员或全员）：房间页据此即时刷新成员禁言状态与输入区 */

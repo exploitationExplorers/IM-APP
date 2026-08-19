@@ -71,3 +71,16 @@ type RecallLog struct {
 	Reason       string    `json:"reason"`
 	CreatedAt    time.Time `json:"createdAt"`
 }
+
+// GroupStatusLog 群状态变更记录（group_status_logs）
+type GroupStatusLog struct {
+	ID           int64     `json:"id"`
+	GroupID      string    `json:"groupId"`
+	FromStatus   string    `json:"fromStatus"`
+	ToStatus     string    `json:"toStatus"`
+	Reason       string    `json:"reason"`
+	OperatorID   string    `json:"operatorId,omitempty"`
+	OperatorName string    `json:"operatorName"`
+	OperatorType string    `json:"operatorType"` // admin=管理员 / user=群主/用户（users/admin_users 双 JOIN 推导）
+	CreatedAt    time.Time `json:"createdAt"`
+}

@@ -102,6 +102,16 @@ func (h *DataHandler) ListGroupRecallLogs(c *gin.Context) {
 	response.OKPage(c, list, total, page, size)
 }
 
+func (h *DataHandler) ListGroupStatusLogs(c *gin.Context) {
+	page, size := pageParams(c)
+	list, total, err := h.Data.ListGroupStatusLogs(c.Request.Context(), c.Param("id"), page, size)
+	if err != nil {
+		response.FailErr(c, 500, "查询失败", err)
+		return
+	}
+	response.OKPage(c, list, total, page, size)
+}
+
 func (h *DataHandler) RecallMessage(c *gin.Context) {
 	var req models.AdminRecallRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {

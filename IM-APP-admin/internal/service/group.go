@@ -41,14 +41,23 @@ func (s *DataService) SetGroupAddFriend(ctx context.Context, id string, req mode
 	})
 }
 
-// DissolveGroup 解散群：方案 A —— 调 server 内部接口解散（含 OpenIM 同步），成功后本地写群状态审计
+// DissolveGroup 解散群：方案 A —— 动作前快照群状态，再调 server 内部接口解散（含 OpenIM 同步），成功后本地写群状态审计
 func (s *DataService) DissolveGroup(ctx context.Context, id string, req models.DissolveRequest, operatorID string) error {
+	from, err := s.Repo.GetGroupStatus(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := s.callServerGroupAction(ctx, "dismiss", id, map[string]any{
 		"adminId": operatorID, "reason": req.Reason,
 	}); err != nil {
 		return err
 	}
-	return s.Repo.LogGroupDissolve(ctx, id, req.Reason, operatorID)
+	return s.Repo.LogGroupDissolve(ctx, id, from, req.Reason, operatorID)
+}
+
+// ListGroupStatusLogs 群状态变更记录（分页）
+func (s *DataService) ListGroupStatusLogs(ctx context.Context, id string, page, size int) ([]models.GroupStatusLog, int64, error) {
+	return s.Repo.ListGroupStatusLogs(ctx, id, size, (page-1)*size)
 }
 
 // callServerGroupAction 调 server /internal/admin 接口执行群管理操作（由 server 改库 + 同步 OpenIM）
