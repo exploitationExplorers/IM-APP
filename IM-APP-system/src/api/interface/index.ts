@@ -76,6 +76,25 @@ export namespace Auth {
     refreshToken?: string;
     token?: string;
   }
+
+  export interface ResHealth {
+    status?: string;
+  }
+
+  export interface ResMeta {
+    version?: string;
+    commit?: string;
+    buildTime?: string;
+    features?: Record<string, unknown>;
+  }
+}
+
+export namespace Sms {
+  export interface ProviderHealthItem {
+    provider?: string;
+    healthy?: boolean;
+    latencyMs?: number;
+  }
 }
 
 export namespace Me {
@@ -115,6 +134,43 @@ export namespace Sms {
     provider?: string;
     healthy?: boolean;
     latencyMs?: number;
+  }
+}
+
+export namespace SensitiveWords {
+  export interface ReqListParams {
+    page?: number;
+    size?: number;
+    keyword?: string;
+  }
+
+  export interface WordItem {
+    id: string;
+    word: string;
+    category: string;
+    status: string;
+    createdAt: string;
+  }
+
+  export interface ReqCreateWord {
+    word: string;
+    category?: string;
+  }
+
+  export interface ReqImportWords {
+    words: string[];
+    reason: string;
+    category?: string;
+  }
+
+  export interface ReqUpdateWord {
+    word?: string;
+    category?: string;
+    status?: string;
+  }
+
+  export interface ReqUpdateWordStatus {
+    status: string;
   }
 }
 

@@ -15,9 +15,12 @@ import {
   updateSensitiveWordStatus,
   getSmsProvidersHealth,
 } from "@/api/modules/admin";
+import { useRoute } from "vue-router";
 import type { Moderation, SensitiveWords, Sms } from "@/api/interface";
 
-const activeTab = shallowRef("region");
+const route = useRoute();
+const initialTab = typeof route.meta.defaultTab === "string" ? route.meta.defaultTab : "region";
+const activeTab = shallowRef(initialTab);
 
 /* ============================================================
  *  Tab 1: 国家/地区启停

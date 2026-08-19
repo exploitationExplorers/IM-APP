@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, shallowRef } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowRight } from "@element-plus/icons-vue";
 import { useRoute, useRouter } from "vue-router";
 import logo from "../../assets/images/logo.svg";
+import { getAdminHealth } from "@/api/modules/admin";
 import { logoutApi } from "@/api/modules/auth";
 import { useAuthStore } from "../../stores/auth";
 
@@ -13,6 +14,23 @@ const emit = defineEmits<{ toggle: [] }>();
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+
+type HealthState = "checking" | "ok" | "error";
+
+const healthState = shallowRef<HealthState>("checking");
+const healthStatus = shallowRef("");
+
+const healthLabel = computed(() => {
+  if (healthState.value === "checking") return "检查中";
+  if (healthState.value === "ok") return "服务正常";
+  return "服务异常";
+});
+
+const healthTagType = computed(() => {
+  if (healthState.value === "ok") return "success";
+  if (healthState.value === "error") return "danger";
+  return "info";
+});
 
 const breadcrumbItems = computed(() => {
   const currentTitle = String(route.meta.title ?? "首页");
@@ -25,6 +43,24 @@ const breadcrumbItems = computed(() => {
   }
   return items;
 });
+
+async function checkHealth(showToast = false): Promise<void> {
+  healthState.value = "checking";
+  try {
+    const res = await getAdminHealth();
+    const status = String(res.data?.status || "").trim().toLowerCase();
+    healthStatus.value = status || "ok";
+    healthState.value = status === "" || status === "ok" ? "ok" : "error";
+    if (showToast) {
+      ElMessage.success(
+        healthState.value === "ok" ? "服务存活检查通过" : `服务状态：${healthStatus.value}`,
+      );
+    }
+  } catch {
+    healthStatus.value = "";
+    healthState.value = "error";
+  }
+}
 
 function navigateBreadcrumb(path: string): void {
   if (path !== route.path) void router.push(path);
@@ -64,6 +100,10 @@ async function handleLogout(): Promise<void> {
     // Dismissing the confirmation leaves the current session unchanged.
   }
 }
+
+onMounted(() => {
+  void checkHealth(false);
+});
 </script>
 
 <template>
@@ -106,6 +146,13 @@ async function handleLogout(): Promise<void> {
 
     <div class="tool-bar-ri">
       <div class="header-icon">
+        <el-tooltip content="点击重新检查服务存活" placement="bottom">
+          <button class="health-chip" type="button" @click="checkHealth(true)">
+            <el-tag :type="healthTagType" effect="plain" round size="small">
+              {{ healthLabel }}
+            </el-tag>
+          </button>
+        </el-tooltip>
         <el-tooltip content="消息" placement="bottom">
           <el-button class="header-action" text aria-label="查看消息" @click="showNotice">
             <el-icon><Bell /></el-icon>
@@ -238,7 +285,16 @@ async function handleLogout(): Promise<void> {
 }
 
 .header-icon {
-  gap: 21px;
+  gap: 16px;
+}
+
+.health-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
 }
 
 .username {

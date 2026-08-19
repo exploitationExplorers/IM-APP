@@ -30,7 +30,12 @@ const routes: RouteRecordRaw[] = [
       {
         path: "app/reports",
         component: () => import("./views/ReportManagementView.vue"),
-        meta: { title: "举报管理" },
+        meta: { title: "举报处置" },
+      },
+      {
+        path: "sensitive-words",
+        component: () => import("./views/smsOperationConfig/SmsOperationConfigView.vue"),
+        meta: { title: "敏感词审核", defaultTab: "sensitiveWord" },
       },
       {
         path: "system/users",
