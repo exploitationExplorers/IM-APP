@@ -14,6 +14,7 @@ const statusLabels: Record<string, string> = {
   muted: "全员禁言",
   banned: "封禁",
   dissolved: "已解散",
+  dismissed: "已解散",
 };
 
 const statusTagTypes: Record<string, "info" | "warning" | "success" | "danger" | "primary"> = {
@@ -21,6 +22,7 @@ const statusTagTypes: Record<string, "info" | "warning" | "success" | "danger" |
   muted: "warning",
   banned: "danger",
   dissolved: "info",
+  dismissed: "info",
 };
 
 const joinModeLabels: Record<string, string> = {
