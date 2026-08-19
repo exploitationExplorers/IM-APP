@@ -370,7 +370,7 @@ async function submitRecallMessage(): Promise<void> {
     ?.validate()
     .then(() => true)
     .catch(() => false);
-  if (!ok || recallSubmitting.value || !selectedGroup.value) return;
+  if (!ok || recallSubmitting.value || !selectedGroup.value || isDissolved(selectedGroup.value.status)) return;
 
   const messageId = recallForm.messageId.trim();
   const reason = recallForm.reason.trim();
@@ -750,6 +750,7 @@ onMounted(() => {
               :model="recallForm"
               :rules="recallRules"
               label-width="90px"
+              :disabled="isDissolved(selectedGroup.status)"
               @submit.prevent="submitRecallMessage"
             >
               <el-form-item label="消息ID" prop="messageId">
