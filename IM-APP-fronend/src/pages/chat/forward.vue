@@ -8,8 +8,10 @@ import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
 import { useForwardStore } from '@/stores/forward'
 import type { ContactTagItem, FriendForwardPlan } from '@/types'
+import { MAX_FORWARD_MESSAGES } from '@/constants/forward'
 import { snapshotFromMessage } from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
+import { isIOSApp } from '@/utils/platform'
 import { businessUserIdFromIM } from '@/utils/openim'
 
 useAuthGuard()
@@ -47,6 +49,15 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined
 onLoad(async () => {
   if (!forwardStore.messageIds.length) {
     uni.showToast({ title: '没有可转发的消息', icon: 'none' })
+    safeBack('/pages/chat/index')
+    return
+  }
+  // 页面层兜底：入口已限制 iOS 转发 99 条，这里拦住绕过入口直接写入 store 的路径
+  if (isIOSApp() && forwardStore.messageIds.length > MAX_FORWARD_MESSAGES) {
+    uni.showToast({
+      title: `一次最多转发 ${MAX_FORWARD_MESSAGES} 条消息`,
+      icon: 'none',
+    })
     safeBack('/pages/chat/index')
     return
   }
