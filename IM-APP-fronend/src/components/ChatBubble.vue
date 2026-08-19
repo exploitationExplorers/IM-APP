@@ -17,6 +17,8 @@ const props = defineProps<{
   nickname?: string
   /** 本会话全部图片消息的地址：预览时可左右滑动切换，缺省只预览本条 */
   previewUrls?: string[]
+  /** 私聊已读回执：'read' 已读 / 'unread' 未读；群聊与发送中/失败不传 */
+  readState?: 'read' | 'unread'
 }>()
 
 /** 头像加载失败（死链/空对象）时切换到业务侧兜底头像，避免一直显示灰色占位 */
@@ -390,7 +392,14 @@ function openLink(url: string) {
           @click="p.type === 'link' ? openLink(p.value) : undefined"
         >{{ p.value }}</text>
       </view>
-      <text class="time">{{ timeText }}</text>
+      <view class="meta-row">
+        <!-- 私聊已读标识（微信式钩）：未读单钩 / 已读双钩，放在时间前面 -->
+        <view v-if="readState" class="read-flag" :class="{ read: readState === 'read' }">
+          <view class="tick first"></view>
+          <view v-if="readState === 'read'" class="tick second"></view>
+        </view>
+        <text class="time">{{ timeText }}</text>
+      </view>
     </view>
     <image v-if="mine" class="avatar" :src="avatarSrc" mode="aspectFill" @error="onAvatarError" />
   </view>
@@ -696,9 +705,53 @@ function openLink(url: string) {
   white-space: nowrap;
 }
 
-.time {
+/** 气泡下方的元信息行：已读钩 + 时间（自己一侧右对齐） */
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
   margin-top: 8rpx;
+}
+
+/** 未读单钩浅灰；已读双钩略深一档，与微信观感一致 */
+.read-flag {
+  position: relative;
+  width: 24rpx;
+  height: 14rpx;
+  flex-shrink: 0;
+  color: #b3bac6;
+}
+
+.read-flag.read {
+  color: #7f8896;
+}
+
+/** CSS 画的钩形（border-left + border-bottom 旋转 -45°），顶点朝下、底边贴容器底部 */
+.tick {
+  position: absolute;
+  bottom: 1rpx;
+  border-left: 3rpx solid currentColor;
+  border-bottom: 3rpx solid currentColor;
+  box-sizing: border-box;
+  transform: rotate(-45deg);
+}
+
+.tick.first {
+  left: 0;
+  width: 15rpx;
+  height: 8rpx;
+}
+
+/** 双钩的第二钩：起点落在第一钩的臂上，两钩交叉连贯（微信式 ✓✓） */
+.tick.second {
+  left: 8rpx;
+  width: 12rpx;
+  height: 7rpx;
+}
+
+.time {
   font-size: 22rpx;
+  line-height: 1;
   color: #bbb;
 }
 </style>
