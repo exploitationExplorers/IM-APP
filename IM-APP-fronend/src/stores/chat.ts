@@ -389,7 +389,10 @@ export const useChatStore = defineStore('chat', () => {
     const target = isGroup
       ? await resolveIMGroup(params.businessId)
       : await resolveIMPeer(params.businessId)
-    if (!target.canChat) throw new Error(target.denyReason || '当前无法发起会话')
+    // 群聊禁言（单人/全员）不阻断进入：能进群看历史，只是输入区禁用（房间页按 denyReason 处理）；
+    // 私聊的拉黑/非好友/对方注销等 denyReason 仍需阻断。
+    const muteOnly = isGroup && (target.denyReason === 'group_muted' || target.denyReason === 'member_muted')
+    if (!target.canChat && !muteOnly) throw new Error(target.denyReason || '当前无法发起会话')
 
     const sourceId = isGroup
       ? (target as { imGroupId: string }).imGroupId

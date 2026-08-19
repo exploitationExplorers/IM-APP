@@ -129,7 +129,10 @@ func main() {
 		}
 	}
 	countryH := &handler.CountryHandler{Repo: countryRepo}
-	authH := &handler.AuthHandler{DB: pool, Cfg: cfg, Redis: redisClient, SMS: smsGateway}
+	authH := &handler.AuthHandler{
+		DB: pool, Cfg: cfg, Redis: redisClient, SMS: smsGateway,
+		Restrictions: &repository.RestrictionRepo{DB: pool},
+	}
 	userH := &handler.UserHandler{Svc: userSvc}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
