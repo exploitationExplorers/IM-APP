@@ -19,7 +19,7 @@ import {
   X,
 } from "@lucide/vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api";
 import { rememberActiveConnectionOrigin } from "../active-connection-origin";
 import {
@@ -30,19 +30,19 @@ import {
   type DesktopLogStreamEvent,
 } from "../desktop";
 import {
-  countLogLines,
-  filterLogOutput,
+  filterLogLineArray,
   MAX_LOG_CONTEXT_LINES,
   MAX_LOG_DISPLAY_LINES,
   normalizeLogInteger,
-  tailLogLines,
+  tailLogLineArray,
 } from "../log-filter";
-import { renderHighlightedLogHtml } from "../log-highlighting";
 import { shouldHandleLogPauseShortcut, shouldHandleLogReconnectShortcut } from "../log-shortcut";
 import { ServiceSocket } from "../service-socket";
 import DesktopExecutionNotice from "./DesktopExecutionNotice.vue";
+import LogVirtualViewport from "./LogVirtualViewport.vue";
 import TipIcon from "./TipIcon.vue";
 import WorkbenchConnectionActions from "./WorkbenchConnectionActions.vue";
+import { DOCKER_LOG_REF_PREFIX, validateConfiguredLogPath } from "../../shared/environment-log";
 
 interface EnvironmentLog {
   id: string;
@@ -87,7 +87,10 @@ interface LogStream {
 type ViewerStatus = "idle" | "connecting" | "streaming" | "stopped" | "error";
 
 interface LogViewerState {
-  output: string;
+  // lines 用 markRaw 保存，避免上万行进入深响应式代理；变更靠 linesVersion 驱动。
+  lines: string[];
+  linesVersion: number;
+  pendingFragment: string;
   status: ViewerStatus;
   message: string;
   streamId: string;
@@ -122,9 +125,11 @@ const autoScroll = ref(true);
 const highlightImportant = ref(true);
 const catalogWidth = ref(220);
 const panelElement = ref<HTMLElement | null>(null);
-const outputElement = ref<HTMLElement | null>(null);
+const logViewportRef = ref<InstanceType<typeof LogVirtualViewport> | null>(null);
 const viewers = reactive<Record<string, LogViewerState>>({});
 const sockets = new Map<string, ServiceSocket>();
+const appendBuffers = new Map<string, { stderr: boolean; chunks: string[] }>();
+let appendFlushHandle = 0;
 const DEFAULT_LOG_LINE_LIMIT = 200;
 const filterContextModeOptions: Array<{ value: FilterContextMode; label: string }> = [
   { value: "before", label: tr("上文") },
@@ -143,7 +148,9 @@ const form = reactive({ name: "", sshConnectionId: "", filePaths: [""] as string
 const selectedLog = computed(() => logs.value.find((item) => item.id === selectedLogId.value) ?? null);
 const totalFileCount = computed(() => logs.value.reduce((total, log) => total + log.filePaths.length, 0));
 const emptyViewer: LogViewerState = {
-  output: "",
+  lines: markRaw<string[]>([]),
+  linesVersion: 0,
+  pendingFragment: "",
   status: "idle",
   message: tr("选择日志配置并双击开始查看"),
   streamId: "",
@@ -156,9 +163,42 @@ const emptyViewer: LogViewerState = {
 };
 const selectedViewer = computed(() => viewers[selectedLogId.value] ?? emptyViewer);
 const panelStyle = computed(() => ({ "--log-catalog-width": `${catalogWidth.value}px` }));
-const output = computed(() => selectedViewer.value.output);
-const viewerStatus = computed(() => selectedViewer.value.status);
-const viewerMessage = computed(() => selectedViewer.value.message);
+const normalizedFilterKeyword = computed(() => filterKeyword.value.trim());
+const filterBeforeLines = computed(() => (filterContextMode.value === "after" ? 0 : filterContextLines.value));
+const filterAfterLines = computed(() => (filterContextMode.value === "before" ? 0 : filterContextLines.value));
+// lines 可能复用同一个数组引用，所以结果里带上 version 标记内容是否变化，供视口判断是否重绘。
+const filteredLog = computed(() => {
+  const viewer = selectedViewer.value;
+  const limited = tailLogLineArray(viewer.lines, viewer.lineLimit);
+  const result = filterLogLineArray(limited, {
+    keyword: normalizedFilterKeyword.value,
+    caseSensitive: filterCaseSensitive.value,
+    before: filterBeforeLines.value,
+    after: filterAfterLines.value,
+  });
+  const version = [
+    viewer.linesVersion,
+    viewer.lineLimit,
+    normalizedFilterKeyword.value,
+    filterCaseSensitive.value ? 1 : 0,
+    filterBeforeLines.value,
+    filterAfterLines.value,
+    result.lines.length,
+  ].join("|");
+  return { ...result, version };
+});
+const rawLineCount = computed(() => {
+  const viewer = selectedViewer.value;
+  void viewer.linesVersion;
+  return viewer.lines.length;
+});
+const displayLines = computed(() => filteredLog.value.lines);
+const displayVersion = computed(() => filteredLog.value.version);
+const logFilterActions = computed(() => [
+  { key: "download", label: tr("下载日志"), icon: Download, disabled: !filteredLog.value.lines.length },
+]);
+const lineCount = computed(() => filteredLog.value.lines.length);
+const outputEmptyMessage = computed(() => rawLineCount.value && normalizedFilterKeyword.value ? tr("没有匹配关键字的日志") : viewerMessage.value);
 const lineLimit = computed({
   get: () => selectedViewer.value.lineLimit,
   set: (value: number) => {
@@ -189,30 +229,9 @@ const filterContextLines = computed({
     if (selectedLogId.value) ensureViewer(selectedLogId.value).filterContextLines = value;
   },
 });
-const rawLineCount = computed(() => countLogLines(output.value));
-const limitedOutput = computed(() => tailLogLines(output.value, lineLimit.value));
-const normalizedFilterKeyword = computed(() => filterKeyword.value.trim());
-const filterBeforeLines = computed(() => (filterContextMode.value === "after" ? 0 : filterContextLines.value));
-const filterAfterLines = computed(() => (filterContextMode.value === "before" ? 0 : filterContextLines.value));
-const filteredLog = computed(() => filterLogOutput(limitedOutput.value, {
-  keyword: normalizedFilterKeyword.value,
-  caseSensitive: filterCaseSensitive.value,
-  before: filterBeforeLines.value,
-  after: filterAfterLines.value,
-}));
-const displayOutput = computed(() => filteredLog.value.output);
-const logFilterActions = computed(() => [
-  { key: "download", label: tr("下载日志"), icon: Download, disabled: !displayOutput.value },
-]);
-const lineCount = computed(() => countLogLines(displayOutput.value));
-const highlightedOutput = computed(() => (highlightImportant.value || normalizedFilterKeyword.value) && displayOutput.value
-  ? renderHighlightedLogHtml(displayOutput.value, {
-    semantic: highlightImportant.value,
-    keyword: normalizedFilterKeyword.value,
-    keywordCaseSensitive: filterCaseSensitive.value,
-  })
-  : "");
-const outputEmptyMessage = computed(() => output.value && normalizedFilterKeyword.value ? tr("没有匹配关键字的日志") : viewerMessage.value);
+const viewerStatus = computed(() => selectedViewer.value.status);
+const viewerMessage = computed(() => selectedViewer.value.message);
+const hasBufferedOutput = computed(() => rawLineCount.value > 0 || Boolean(selectedViewer.value.pendingFragment));
 const statusLabel = computed(() => ({
   idle: tr("未连接"),
   connecting: tr("连接中"),
@@ -229,7 +248,9 @@ watch(() => [props.focusLogId, props.focusRequest] as const, ([logId]) => {
 
 function createViewerState(): LogViewerState {
   return {
-    output: "",
+    lines: markRaw<string[]>([]),
+    linesVersion: 0,
+    pendingFragment: "",
     status: "idle",
     message: tr("双击配置开始查看"),
     streamId: "",
@@ -240,6 +261,12 @@ function createViewerState(): LogViewerState {
     filterContextLines: 0,
     requestVersion: 0,
   };
+}
+
+function resetViewerOutput(viewer: LogViewerState) {
+  viewer.lines = markRaw<string[]>([]);
+  viewer.linesVersion += 1;
+  viewer.pendingFragment = "";
 }
 
 function ensureViewer(logId: string): LogViewerState {
@@ -280,7 +307,6 @@ async function loadData() {
 
 async function selectLog(id: string) {
   selectedLogId.value = id;
-  if (autoScroll.value) await scrollToBottom();
 }
 
 function openCreate() {
@@ -332,7 +358,13 @@ async function saveLog() {
   if (!form.sshConnectionId) return ElMessage.warning(tr("请选择 SSH 连接"));
   const filePaths = form.filePaths.map((filePath) => filePath.trim()).filter(Boolean);
   if (!filePaths.length) return ElMessage.warning(tr("请至少输入一个日志文件路径"));
-  if (filePaths.some((filePath) => !filePath.startsWith("/"))) return ElMessage.warning(tr("请输入以 / 开头的绝对路径"));
+  for (const filePath of filePaths) {
+    try {
+      validateConfiguredLogPath(filePath);
+    } catch (error) {
+      return ElMessage.warning(error instanceof Error ? error.message : tr("日志文件路径无效"));
+    }
+  }
   if (new Set(filePaths).size !== filePaths.length) return ElMessage.warning(tr("日志文件路径不能重复"));
   saving.value = true;
   try {
@@ -350,9 +382,9 @@ async function saveLog() {
     if (editing) {
       if (logStreamActive(editingLogId.value)) await stopStream(editingLogId.value);
       const viewer = ensureViewer(editingLogId.value);
-      viewer.output = "";
       viewer.status = "idle";
       viewer.message = tr("配置已更新，双击重新查看");
+      resetViewerOutput(viewer);
     }
     await loadData();
   } catch (error) {
@@ -389,12 +421,41 @@ function handleLogFilterAction(action: string) {
   if (action === "download") void downloadCurrentLog();
 }
 
-function appendOutput(logId: string, data: string, stderr = false) {
+function queueAppendOutput(logId: string, data: string, stderr = false) {
+  const entry = appendBuffers.get(logId) ?? { stderr: false, chunks: [] };
+  entry.chunks.push(data);
+  if (stderr) entry.stderr = true;
+  appendBuffers.set(logId, entry);
+  if (!appendFlushHandle) {
+    appendFlushHandle = window.requestAnimationFrame(flushAppendOutputs);
+  }
+}
+
+function flushAppendOutputs() {
+  appendFlushHandle = 0;
+  for (const [logId, entry] of appendBuffers) {
+    flushAppendOutput(logId, entry.chunks.join(""), entry.stderr);
+  }
+  appendBuffers.clear();
+}
+
+function flushAppendOutput(logId: string, data: string, stderr: boolean) {
+  if (!data) return;
   const viewer = ensureViewer(logId);
-  const next = `${viewer.output}${stderr ? "[tail] " : ""}${data}`;
-  const lines = next.split("\n");
-  viewer.output = lines.length > MAX_LOG_DISPLAY_LINES ? lines.slice(lines.length - MAX_LOG_DISPLAY_LINES).join("\n") : next;
-  if (selectedLogId.value === logId && autoScroll.value) void scrollToBottom();
+  const chunk = `${stderr ? "[tail] " : ""}${data}`;
+  let text = viewer.pendingFragment + chunk;
+  const parts = text.split("\n");
+  viewer.pendingFragment = parts.pop() ?? "";
+  if (!parts.length) return;
+  for (const part of parts) viewer.lines.push(part);
+  if (viewer.lines.length > MAX_LOG_DISPLAY_LINES) {
+    viewer.lines.splice(0, viewer.lines.length - MAX_LOG_DISPLAY_LINES);
+  }
+  viewer.linesVersion += 1;
+}
+
+function appendOutput(logId: string, data: string, stderr = false) {
+  queueAppendOutput(logId, data, stderr);
 }
 
 function downloadFilename(): string {
@@ -405,18 +466,14 @@ function downloadFilename(): string {
 }
 
 async function downloadCurrentLog() {
-  if (!displayOutput.value) return ElMessage.warning(normalizedFilterKeyword.value ? tr("没有可下载的匹配日志") : tr("没有可下载的日志内容"));
+  if (!displayLines.value.length) return ElMessage.warning(normalizedFilterKeyword.value ? tr("没有可下载的匹配日志") : tr("没有可下载的日志内容"));
+  const payload = displayLines.value.join("\n");
   try {
-    const saved = await saveTextFile(downloadFilename(), displayOutput.value.endsWith("\n") ? displayOutput.value : `${displayOutput.value}\n`);
+    const saved = await saveTextFile(downloadFilename(), payload.endsWith("\n") ? payload : `${payload}\n`);
     if (saved) ElMessage.success(tr("日志已保存"));
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : tr("下载日志失败"));
   }
-}
-
-async function scrollToBottom() {
-  await nextTick();
-  if (outputElement.value) outputElement.value.scrollTop = outputElement.value.scrollHeight;
 }
 
 function connectWebSocket(logId: string, ticket: string) {
@@ -491,7 +548,7 @@ async function startStream(logId = selectedLogId.value) {
   if (viewer.streamId || sockets.has(logId)) await stopStream(logId);
   normalizeLineLimit(logId);
   const requestVersion = ++viewer.requestVersion;
-  viewer.output = "";
+  resetViewerOutput(viewer);
   viewer.status = "connecting";
   viewer.message = tr("正在连接 SSH 并读取最近 {0} 行", [viewer.lineLimit]);
   try {
@@ -595,7 +652,9 @@ function handleLogShortcut(event: KeyboardEvent) {
 }
 
 function clearOutput(logId = selectedLogId.value) {
-  if (logId) ensureViewer(logId).output = "";
+  if (!logId) return;
+  const viewer = ensureViewer(logId);
+  resetViewerOutput(viewer);
 }
 
 function setCatalogWidth(value: number) {
@@ -662,6 +721,8 @@ watch(() => props.environmentId, async () => {
 onBeforeUnmount(() => {
   finishCatalogResize();
   document.removeEventListener("keydown", handleLogShortcut);
+  if (appendFlushHandle) window.cancelAnimationFrame(appendFlushHandle);
+  appendBuffers.clear();
   for (const viewer of Object.values(viewers)) viewer.requestVersion += 1;
   stopDesktopLogEvents?.();
   stopDesktopLogEvents = null;
@@ -709,7 +770,7 @@ onBeforeUnmount(() => {
       <div v-else class="log-catalog__empty">
         <FileText :size="24" />
         <strong>{{ $t('还没有日志配置') }}</strong>
-        <p v-if="sshConnections.length">{{ $t('选择当前环境的 SSH 连接，再填写远程日志文件路径。') }}</p>
+        <p v-if="sshConnections.length">{{ $t('选择当前环境的 SSH 连接，再填写远程日志文件路径或 Docker 容器引用。') }}</p>
         <p v-else>{{ $t('当前环境还没有可用的 SSH 连接，请先在连接资源池中完成分配。') }}</p>
         <el-button v-if="sshConnections.length" type="primary" @click="openCreate"><Plus :size="15" />{{ $t('新增日志') }}</el-button>
       </div>
@@ -757,7 +818,7 @@ onBeforeUnmount(() => {
             <button type="button" :disabled="!selectedLog || lineLimit >= 5000" :aria-label="$t('增加日志行数上限')" @click="adjustLineLimit(100)"><Plus :size="14" /></button>
           </div>
         </div>
-        <button class="log-filter-action" type="button" :disabled="!output" :title="$t('清空当前屏幕')" @click="clearOutput()"><Eraser :size="15" />{{ $t('清屏') }}</button>
+        <button class="log-filter-action" type="button" :disabled="!hasBufferedOutput" :title="$t('清空当前屏幕')" @click="clearOutput()"><Eraser :size="15" />{{ $t('清屏') }}</button>
         <el-dropdown class="log-filter-menu-target" trigger="click" placement="bottom-end" popper-class="workbench-connection-menu-popper" @command="handleLogFilterAction">
           <button class="log-filter-more" type="button" :aria-label="$t('打开日志更多操作')" :title="$t('更多日志操作')"><Ellipsis :size="17" /></button>
           <template #dropdown><WorkbenchConnectionActions :actions="logFilterActions" /></template>
@@ -765,8 +826,17 @@ onBeforeUnmount(() => {
         <span v-if="filteredLog.filtered" class="log-filter-summary">{{ filteredLog.matchLineCount }} {{ $t('个匹配 ·') }} {{ filteredLog.includedLineCount }} {{ $t('行上下文') }}</span>
       </section>
 
-      <div ref="outputElement" class="log-output" role="log" :aria-label="$t('实时日志输出')">
-        <pre v-if="displayOutput"><code v-if="highlightImportant || normalizedFilterKeyword" class="is-highlighted" v-html="highlightedOutput"></code><code v-else>{{ displayOutput }}</code></pre>
+      <div class="log-output" role="log" :aria-label="$t('实时日志输出')">
+        <LogVirtualViewport
+          v-if="lineCount"
+          ref="logViewportRef"
+          :lines="displayLines"
+          :version="displayVersion"
+          :highlight="highlightImportant"
+          :keyword="normalizedFilterKeyword"
+          :keyword-case-sensitive="filterCaseSensitive"
+          :auto-scroll="autoScroll"
+        />
         <div v-else class="log-output__empty" :class="{ 'is-error': viewerStatus === 'error' }">
           <FileText :size="28" />
           <strong>{{ outputEmptyMessage }}</strong>
@@ -786,11 +856,11 @@ onBeforeUnmount(() => {
           </el-select>
         </el-form-item>
         <el-form-item required>
-          <template #label><span class="form-label-with-tip">{{ $t('日志文件路径') }}<TipIcon :content="$t('每个配置可填写 1–10 个远程绝对文件路径，不支持通配符或目录。')" placement="right" /></span></template>
+          <template #label><span class="form-label-with-tip">{{ $t('日志文件路径') }}<TipIcon :content="$t('支持绝对路径，或使用 docker://容器名 自动跟踪 Docker 容器日志（容器重建后无需改路径）。')" placement="right" /></span></template>
           <div class="log-path-fields">
             <div v-for="(_filePath, index) in form.filePaths" :key="index" class="log-path-field">
               <span>{{ index + 1 }}</span>
-              <el-input v-model="form.filePaths[index]" class="log-path-input" placeholder="/var/log/my-app/application.log" maxlength="1024" />
+              <el-input v-model="form.filePaths[index]" class="log-path-input" :placeholder="`${DOCKER_LOG_REF_PREFIX}im-app-api`" maxlength="1024" />
               <button type="button" :aria-label="$t('移除第 {0} 个文件路径', [index + 1])" :title="$t('移除路径')" @click="removeFilePath(index)"><X :size="15" /></button>
             </div>
             <button v-if="form.filePaths.length < 10" class="log-add-path" type="button" @click="addFilePath"><Plus :size="14" />{{ $t('添加文件路径') }}</button>
@@ -913,11 +983,7 @@ onBeforeUnmount(() => {
 :global(.log-context-mode-popper .el-select-dropdown__item) { height: 34px; border-radius: 6px; color: #d1d4db; font-size: 13px; font-weight: 700; }
 :global(.log-context-mode-popper .el-select-dropdown__item.hover), :global(.log-context-mode-popper .el-select-dropdown__item:hover) { background: #262930; }
 :global(.log-context-mode-popper .el-select-dropdown__item.is-selected) { background: #2c2936; color: #a891ff; }
-.log-output { min-width: 0; min-height: 0; overflow: auto; }
-.log-output pre { min-width: 100%; width: max-content; margin: 0; padding: 18px 20px 32px; box-sizing: border-box; color: #c6d7d3; font-family: var(--font-console); font-size: var(--font-console-size); line-height: 1.65; tab-size: 4; }
-.log-output code { font-family: inherit; }
-.log-output code.is-highlighted { min-width: 100%; display: block; }
-.log-output :deep(.log-line) { min-width: 100%; margin: 0 -8px; padding: 0 8px; display: block; box-sizing: border-box; box-shadow: inset 2px 0 transparent; white-space: pre; }
+.log-output { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .log-output :deep(.log-line--critical) { background: rgba(163, 85, 224, .105); box-shadow: inset 2px 0 #b36df0; color: #eadcf6; }
 .log-output :deep(.log-line--error) { background: rgba(222, 83, 73, .09); box-shadow: inset 2px 0 #e56d63; color: #efd8d5; }
 .log-output :deep(.log-line--warning) { background: rgba(206, 153, 52, .07); box-shadow: inset 2px 0 #d1a64e; color: #e7dfcc; }
