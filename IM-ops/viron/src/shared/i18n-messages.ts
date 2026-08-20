@@ -3877,6 +3877,8 @@ const generatedEnMessages: Record<string, string> = {
   "HTTP Tunnel 事务已经开始": "HTTP Tunnel transaction has started",
   "H5 预览": "H5 preview",
   "H5 预览页面": "H5 preview page",
+  "后台管理预览": "Admin preview",
+  "后台管理预览页面": "Admin preview page",
   "{0} 预览框": "{0} preview frame",
   "预览设备": "Preview device",
   "日志文件路径无效": "Invalid log file path",
