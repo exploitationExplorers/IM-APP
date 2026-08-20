@@ -388,6 +388,49 @@ func (r *ContactRepo) IsBlocked(ctx context.Context, uid, otherID string) (bool,
 	return exists, err
 }
 
+// ListBlockedUsers 当前用户拉黑的所有人，按拉黑时间倒序。
+// keyword 为空时不附加搜索条件；limit<=0 或 >100 默认 100。
+func (r *ContactRepo) ListBlockedUsers(ctx context.Context, uid, keyword string, limit int) ([]models.BlockedUser, int64, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var total int64
+	if err := r.DB.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM user_blocks b
+		JOIN users u ON u.id = b.blocked_id
+		WHERE b.user_id = $1::uuid
+		  AND ($2 = '' OR u.nickname ILIKE '%' || $2 || '%')`,
+		uid, keyword).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := r.DB.Query(ctx, `
+		SELECT b.blocked_id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, b.created_at
+		FROM user_blocks b
+		JOIN users u ON u.id = b.blocked_id
+		WHERE b.user_id = $1::uuid
+		  AND ($2 = '' OR u.nickname ILIKE '%' || $2 || '%')
+		ORDER BY b.created_at DESC
+		LIMIT $3`,
+		uid, keyword, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.BlockedUser, 0)
+	for rows.Next() {
+		var u models.BlockedUser
+		if err := rows.Scan(&u.ID, &u.PublicID, &u.Nickname, &u.Avatar, &u.BlockedAt); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 func (r *ContactRepo) HasPendingRequest(ctx context.Context, uid, otherID string) (bool, error) {
 	var exists bool
 	err := r.DB.QueryRow(ctx, `
