@@ -156,7 +156,7 @@ function onBlock() {
   if (!contact.value) return
   uni.showModal({
     title: '加入黑名单',
-    content: '拉黑后将删除好友关系，对方无法再向你发起会话。',
+    content: '拉黑后对方将无法再向你发送消息，解除后可恢复。',
     confirmText: '拉黑',
     confirmColor: THEME.danger,
     success: async (res) => {

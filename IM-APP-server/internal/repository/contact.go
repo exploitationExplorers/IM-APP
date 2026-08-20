@@ -18,9 +18,6 @@ const contactListWhere = `
 		FROM friendships f
 		JOIN users u ON u.id = f.friend_id
 		WHERE f.user_id=$1::uuid
-		AND NOT EXISTS (
-			SELECT 1 FROM user_blocks b WHERE b.user_id=$1::uuid AND b.blocked_id=f.friend_id
-		)
 		AND ($2='' OR u.nickname ILIKE '%'||$2||'%' ESCAPE '\'
 		     OR COALESCE(f.remark,'') ILIKE '%'||$2||'%' ESCAPE '\'
 		     OR COALESCE(u.public_id,'') ILIKE '%'||$2||'%' ESCAPE '\')`
@@ -338,19 +335,11 @@ func (r *ContactRepo) BlockUser(ctx context.Context, uid, blockedID string) erro
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, _ = tx.Exec(ctx, `
-		DELETE FROM friendships
-		WHERE (user_id=$1 AND friend_id=$2) OR (user_id=$2 AND friend_id=$1)`,
-		uid, blockedID)
+	// 拉黑仅屏蔽消息往来，不删除好友关系；解除黑名单后关系保持原样。
 	_, err = tx.Exec(ctx, `
 		INSERT INTO user_blocks(user_id, blocked_id) VALUES($1,$2)
 		ON CONFLICT DO NOTHING`, uid, blockedID)
 	if err != nil {
-		return err
-	}
-	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendDeleted, uid, map[string]string{
-		"friendUserId": blockedID,
-	}); err != nil {
 		return err
 	}
 	if err := EnqueueIMSyncTx(ctx, tx, IMEventBlockAdded, uid, map[string]string{
