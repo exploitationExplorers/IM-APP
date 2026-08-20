@@ -420,6 +420,20 @@ export async function logoutOpenIM(): Promise<void> {
   } finally {
     resetLoginCache()
   }
+  // App 原生 SDK Logout 不会清本地数据库：会话/消息数据持久化在 SQLite，
+  // 下一个账号登录后 GetConversationList 会读到上一个账号的残留会话。
+  // 这里通过 unInitSDK 销毁 SDK 实例并清空本地数据库，确保下次 initOpenIM 是干净的。
+  // H5 平台 SDK 库为 in-memory，无需销毁。
+  if (isAppPlatform) {
+    try {
+      await imCall(IMMethods.UnInitSDK)
+    } catch {
+      /* App 已退出登录，destroy 失败不阻塞 */
+    }
+    // unInitSDK 会清掉原生层的 connectionWatchers 订阅；
+    // 重置闭锁，让下次 initOpenIM 重新挂连接事件监听。
+    connectionWatchersReady = false
+  }
 }
 
 /** 手动重连：重新取 token 再登录，用于「重新选线」 */
