@@ -55,6 +55,7 @@ type Contact struct {
 	Nickname     string           `json:"nickname"`
 	Avatar       string           `json:"avatar"`
 	Remark       string           `json:"remark"`
+	IsBlocked    bool             `json:"isBlocked"`
 	Tags         []ContactTagItem `json:"tags,omitempty"`
 	CommonGroups []GroupPreview   `json:"commonGroups"`
 }

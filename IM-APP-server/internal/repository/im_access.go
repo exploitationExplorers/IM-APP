@@ -33,8 +33,7 @@ func (r *IMAccessRepo) ResolvePeer(ctx context.Context, requesterID, targetID st
 			EXISTS(SELECT 1 FROM friendships f WHERE f.user_id=$1::uuid AND f.friend_id=target.id),
 			EXISTS(
 				SELECT 1 FROM user_blocks b
-				WHERE (b.user_id=$1::uuid AND b.blocked_id=target.id)
-				   OR (b.user_id=target.id AND b.blocked_id=$1::uuid)
+				WHERE b.user_id=target.id AND b.blocked_id=$1::uuid
 			)
 		FROM users target
 		JOIN users requester ON requester.id=$1::uuid
