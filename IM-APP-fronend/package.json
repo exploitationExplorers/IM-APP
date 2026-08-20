@@ -55,6 +55,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-5020320260806002",
     "@dcloudio/uni-mp-xhs": "3.0.0-5020320260806002",
     "@dcloudio/uni-quickapp-webview": "3.0.0-5020320260806002",
+    "@dcloudio/uni-ui": "^1.5.12",
     "@openim/client-sdk": "^3.8.3-hotfix.0",
     "@openim/protocol": "^0.0.8",
     "base64-arraybuffer": "^1.0.2",

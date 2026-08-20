@@ -56,6 +56,7 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
   display: flex;
   padding: 24rpx 40rpx;
   background: #fff;
+  border-bottom: 1rpx solid #f0f1f4;
 }
 
 .avatar-wrap {
@@ -98,8 +99,6 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
 .body {
   flex: 1;
   min-width: 0;
-  border-bottom: 1rpx solid #f0f1f4;
-  padding-bottom: 24rpx;
 }
 
 .top,
