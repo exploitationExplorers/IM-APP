@@ -7,6 +7,7 @@ import {
   type SecurityPasswordDraft,
   type SecurityPasswordMode,
 } from '@/utils/security-password-draft'
+import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
 
@@ -64,13 +65,7 @@ function onSubmit() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">{{ navTitle }}</text>
-      <view class="nav-spacer" />
-    </view>
+    <ImNavBar :title="navTitle" @back="goBack" />
 
     <view class="body">
       <view class="input-box">
@@ -130,45 +125,6 @@ $btn-disabled-bg: #c5cddc;
   min-height: 100vh;
   background: #fff;
   box-sizing: border-box;
-}
-
-.nav {
-  position: relative;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  height: calc(88rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 24rpx 0;
-  box-sizing: border-box;
-  background: #fff;
-}
-
-.nav-back {
-  width: 88rpx;
-  height: 88rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.nav-back-icon {
-  width: 40rpx;
-  height: 40rpx;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 34rpx;
-  font-weight: 700;
-  color: $text;
-  line-height: 48rpx;
-}
-
-.nav-spacer {
-  width: 72rpx;
-  height: 72rpx;
-  flex-shrink: 0;
 }
 
 .body {

@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useContactStore } from '@/stores/contact'
 import { searchUserByPublicId } from '@/api/user'
 import { openQrScanner } from '@/utils/qrcode'
+import ImNavBar from '@/components/ImNavBar.vue'
 import type { UserInfo } from '@/types'
 
 const contactStore = useContactStore()
@@ -65,15 +66,13 @@ async function onSendRequest() {
 
 <template>
   <view class="page">
-    <view class="navbar">
-      <view class="nav-btn" @click="goBack">
-        <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">添加朋友</text>
-      <view class="nav-btn" @click="goScan">
-        <image class="nav-icon" src="/static/icons/icon-scan.svg" mode="aspectFit" />
-      </view>
-    </view>
+    <ImNavBar title="添加朋友" @back="goBack">
+      <template #right>
+        <view class="nav-btn" @click="goScan">
+          <image class="nav-icon" src="/static/icons/icon-scan.svg" mode="aspectFit" />
+        </view>
+      </template>
+    </ImNavBar>
 
     <view class="search-wrap">
       <view class="search-box">
@@ -127,15 +126,6 @@ async function onSendRequest() {
   box-sizing: border-box;
 }
 
-.navbar {
-  display: flex;
-  align-items: center;
-  height: 96rpx;
-  padding: 0 40rpx;
-  gap: 16rpx;
-  background: #fff;
-}
-
 .nav-btn {
   width: 72rpx;
   height: 72rpx;
@@ -148,15 +138,6 @@ async function onSendRequest() {
 .nav-icon {
   width: 48rpx;
   height: 48rpx;
-}
-
-.nav-title {
-  flex: 1;
-  font-size: 48rpx;
-  font-weight: 700;
-  color: #212121;
-  line-height: 64rpx;
-  text-align: left;
 }
 
 .search-wrap {

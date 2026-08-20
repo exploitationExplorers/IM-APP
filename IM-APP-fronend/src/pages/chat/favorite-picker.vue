@@ -7,12 +7,12 @@ import {
   FavoriteListType,
   type FavoriteItem,
 } from '@/api/favorites'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { imUserId } from '@/utils/openim'
 import { formatFavoriteDay } from '@/utils/format'
-import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
 
@@ -23,7 +23,6 @@ useAuthGuard()
 const chatStore = useChatStore()
 const userStore = useUserStore()
 
-const statusBarHeight = getStatusBarHeight()
 const PAGE_SIZE = 20
 /** 当前可直发的收藏类型：文字/表情发文本，图片按 URL 直发 */
 const SENDABLE_TYPES = new Set(['text', 'emoji', 'image'])
@@ -218,13 +217,13 @@ function goBack() {
 
 <template>
   <view class="page">
-    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
-      <view class="back-btn" @click="goBack">‹</view>
-      <text class="title">我的收藏</text>
-      <view class="header-btn" :class="{ on: managing }" @click="toggleManage">
-        <image class="header-icon" src="/static/icon-favorite.png" mode="aspectFit" />
-      </view>
-    </view>
+    <ImNavBar title="我的收藏" @back="goBack">
+      <template #right>
+        <view class="header-btn" :class="{ on: managing }" @click="toggleManage">
+          <image class="header-icon" src="/static/icon-favorite.png" mode="aspectFit" />
+        </view>
+      </template>
+    </ImNavBar>
 
     <view class="search-bar">
       <view class="lens"></view>
@@ -305,35 +304,6 @@ function goBack() {
   background: #fff;
   display: flex;
   flex-direction: column;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 96rpx;
-  padding-left: 24rpx;
-  padding-right: 24rpx;
-  box-sizing: content-box;
-  background: #fff;
-}
-
-.back-btn {
-  font-size: 56rpx;
-  color: #333;
-  width: 88rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #333;
 }
 
 .header-btn {

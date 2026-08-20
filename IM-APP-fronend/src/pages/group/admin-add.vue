@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { fetchGroupMembers } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
 import type { GroupMember } from '@/types'
@@ -71,11 +72,7 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">新增群组管理员</text>
-      <view class="nav-space" />
-    </view>
+    <ImNavBar title="新增群组管理员" @back="goBack" />
 
     <view class="search-wrap">
       <view class="search-box">
@@ -114,32 +111,6 @@ async function onSubmit() {
   background: #fff;
   display: flex;
   flex-direction: column;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  height: 96rpx;
-  padding: 0 26rpx;
-}
-
-.nav-back,
-.nav-space {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #1f1f1f;
 }
 
 .search-wrap {

@@ -222,11 +222,14 @@ function closeMenus() {
   box-sizing: border-box;
 }
 
+/* 与 contacts/mine 的 tab 大标题行统一：固定 96rpx 行高 + 垂直居中 */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16rpx 40rpx 8rpx;
+  height: 96rpx;
+  padding: 0 40rpx;
+  box-sizing: border-box;
 }
 
 .title {
