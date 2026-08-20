@@ -23,6 +23,30 @@ export async function createForwardTask(input: CreateForwardTaskInput): Promise<
   })
 }
 
+export interface CreateForwardBatchInput {
+  messages: Array<{
+    sourceConversationId: string
+    sourceClientMsgId: string
+    sourceServerMsgId?: string
+    sourceSnapshot: CreateForwardTaskInput['sourceSnapshot']
+  }>
+  targetUserIds?: string[]
+  targetGroupIds?: string[]
+  selector?: ForwardSelector
+  excludeUserIds?: string[]
+  idempotencyKey: string
+}
+
+export interface ForwardBatchAccepted {
+  batchId: string
+  taskIds: string[]
+  status: 'queued'
+}
+
+export async function createForwardBatch(input: CreateForwardBatchInput): Promise<ForwardBatchAccepted> {
+  return request<ForwardBatchAccepted>({ url: '/forward-batches', method: 'POST', data: input })
+}
+
 export async function fetchForwardTasks(params?: {
   status?: string
   cursor?: string

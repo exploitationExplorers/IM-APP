@@ -1,0 +1,36 @@
+{
+  "info": {
+    "name": "IM-APP Reliable Forwarding",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "HTTP 200 means the batch is persisted and queued. Forwarding has no daily, hourly, or per-batch business limit."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "accessToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Queue reliable forward batch",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/forward-batches",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"idempotencyKey\": \"{{$guid}}\",\n  \"messages\": [{\n    \"sourceConversationId\": \"si_example\",\n    \"sourceClientMsgId\": \"source-message-1\",\n    \"sourceSnapshot\": {\"contentType\": 101, \"content\": {\"content\": \"hello\"}}\n  }],\n  \"targetUserIds\": [],\n  \"targetGroupIds\": []\n}"
+        }
+      }
+    },
+    {
+      "name": "Query task progress",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+        "url": "{{baseUrl}}/forward-task-progress?taskId={{taskId}}"
+      }
+    }
+  ]
+}

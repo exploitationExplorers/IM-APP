@@ -797,22 +797,75 @@
         },
         "type": "object"
       },
+      "ForwardQueueMetrics": {
+        "properties": {
+          "oldestPendingSeconds": {
+            "description": "最老等待秒数",
+            "type": "integer"
+          },
+          "permanentFailed": {
+            "description": "永久失败数",
+            "type": "integer"
+          },
+          "processing": {
+            "description": "处理中数量",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "排队数",
+            "type": "integer"
+          },
+          "retrying": {
+            "description": "重试数",
+            "type": "integer"
+          },
+          "sendRatePerSecond": {
+            "description": "最近一分钟平均发送速率",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
       "ForwardSettings": {
         "properties": {
-          "defaultDailyLimit": {
-            "description": "默认每日上限",
+          "claimBatchSize": {
+            "description": "领取批次",
             "type": "integer"
           },
-          "defaultHourlyLimit": {
-            "description": "默认每小时上限",
+          "globalQps": {
+            "description": "全局 QPS",
             "type": "integer"
           },
-          "defaultSingleTargets": {
-            "description": "默认单次目标数",
+          "perUserConcurrency": {
+            "description": "单用户并发",
             "type": "integer"
           },
-          "maxSingleTargets": {
-            "description": "单次目标数上限",
+          "processingLockSeconds": {
+            "description": "处理锁秒数",
+            "type": "integer"
+          },
+          "queueAlertDepth": {
+            "description": "积压告警阈值",
+            "type": "integer"
+          },
+          "queuePaused": {
+            "description": "是否暂停消费",
+            "type": "boolean"
+          },
+          "retentionDays": {
+            "description": "保留天数",
+            "type": "integer"
+          },
+          "retryBaseSeconds": {
+            "description": "初始重试秒数",
+            "type": "integer"
+          },
+          "retryMaxSeconds": {
+            "description": "最大重试秒数",
+            "type": "integer"
+          },
+          "workerConcurrency": {
+            "description": "Worker 并发",
             "type": "integer"
           }
         },
@@ -842,6 +895,10 @@
           },
           "nickname": {
             "description": "昵称",
+            "type": "string"
+          },
+          "peerType": {
+            "description": "c2c|group",
             "type": "string"
           },
           "status": {
@@ -941,6 +998,10 @@
           "dailyLimit": {
             "description": "每日上限",
             "type": "integer"
+          },
+          "effective": {
+            "description": "固定 false；历史配置不参与投递拦截",
+            "type": "boolean"
           },
           "enabled": {
             "description": "是否启用",
@@ -4059,7 +4120,7 @@
     },
     "/api/admin/v1/forward-limits/users/{userId}": {
       "get": {
-        "description": "查看用户转发限额。接口路径：/api/admin/v1/forward-limits/users/:userId",
+        "description": "查看历史用户转发限额审计（不参与发送拦截）。接口路径：/api/admin/v1/forward-limits/users/:userId",
         "operationId": "GET_api_admin_v1_forward-limits_users_{userId}",
         "parameters": [
           {
@@ -4117,13 +4178,13 @@
             "description": "服务异常"
           }
         },
-        "summary": "查看用户转发限额",
+        "summary": "查看历史用户转发限额审计（不参与发送拦截）",
         "tags": [
           "用户管理"
         ]
       },
       "put": {
-        "description": "修改用户转发限额（需审计）。接口路径：/api/admin/v1/forward-limits/users/:userId",
+        "description": "写入历史用户转发限额审计（不参与发送拦截）。接口路径：/api/admin/v1/forward-limits/users/:userId",
         "operationId": "PUT_api_admin_v1_forward-limits_users_{userId}",
         "parameters": [
           {
@@ -4142,15 +4203,15 @@
               "schema": {
                 "properties": {
                   "dailyLimit": {
-                    "description": "每日上限",
+                    "description": "历史每日值，不参与拦截",
                     "type": "integer"
                   },
                   "enabled": {
-                    "description": "是否启用限制",
+                    "description": "历史开关，不参与拦截",
                     "type": "boolean"
                   },
                   "hourlyLimit": {
-                    "description": "每小时上限",
+                    "description": "历史每小时值，不参与拦截",
                     "type": "integer"
                   },
                   "reason": {
@@ -4158,7 +4219,7 @@
                     "type": "string"
                   },
                   "singleTargets": {
-                    "description": "单次目标上限",
+                    "description": "历史单次值，不参与拦截",
                     "type": "integer"
                   }
                 },
@@ -4224,15 +4285,70 @@
             "description": "服务异常"
           }
         },
-        "summary": "修改用户转发限额（需审计）",
+        "summary": "写入历史用户转发限额审计（不参与发送拦截）",
         "tags": [
           "用户管理"
         ]
       }
     },
+    "/api/admin/v1/forward-queue-metrics": {
+      "get": {
+        "description": "获取可靠队列指标。接口路径：/api/admin/v1/forward-queue-metrics",
+        "operationId": "GET_api_admin_v1_forward-queue-metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ForwardQueueMetrics"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "获取可靠队列指标",
+        "tags": [
+          "转发风控"
+        ]
+      }
+    },
     "/api/admin/v1/forward-settings": {
       "get": {
-        "description": "获取全局转发规则。接口路径：/api/admin/v1/forward-settings",
+        "description": "获取转发调度与可靠性配置（不限总量）。接口路径：/api/admin/v1/forward-settings",
         "operationId": "GET_api_admin_v1_forward-settings",
         "responses": {
           "200": {
@@ -4279,13 +4395,13 @@
             "description": "服务异常"
           }
         },
-        "summary": "获取全局转发规则",
+        "summary": "获取转发调度与可靠性配置（不限总量）",
         "tags": [
           "转发风控"
         ]
       },
       "put": {
-        "description": "修改全局转发规则。接口路径：/api/admin/v1/forward-settings",
+        "description": "修改转发调度与可靠性配置（只影响速度）。接口路径：/api/admin/v1/forward-settings",
         "operationId": "PUT_api_admin_v1_forward-settings",
         "requestBody": {
           "content": {
@@ -4298,20 +4414,44 @@
                   },
                   "settings": {
                     "properties": {
-                      "defaultDailyLimit": {
-                        "description": "默认每日上限",
+                      "claimBatchSize": {
+                        "description": "单次领取数量",
                         "type": "integer"
                       },
-                      "defaultHourlyLimit": {
-                        "description": "默认每小时上限",
+                      "globalQps": {
+                        "description": "全局每秒发送速度",
                         "type": "integer"
                       },
-                      "defaultSingleTargets": {
-                        "description": "默认单次目标数",
+                      "perUserConcurrency": {
+                        "description": "单用户并发",
                         "type": "integer"
                       },
-                      "maxSingleTargets": {
-                        "description": "单次目标数上限",
+                      "processingLockSeconds": {
+                        "description": "处理锁超时",
+                        "type": "integer"
+                      },
+                      "queueAlertDepth": {
+                        "description": "积压告警阈值",
+                        "type": "integer"
+                      },
+                      "queuePaused": {
+                        "description": "暂停消费但继续受理",
+                        "type": "boolean"
+                      },
+                      "retentionDays": {
+                        "description": "明细保留天数",
+                        "type": "integer"
+                      },
+                      "retryBaseSeconds": {
+                        "description": "初始重试间隔",
+                        "type": "integer"
+                      },
+                      "retryMaxSeconds": {
+                        "description": "最大重试间隔",
+                        "type": "integer"
+                      },
+                      "workerConcurrency": {
+                        "description": "Worker 并发",
                         "type": "integer"
                       }
                     },
@@ -4381,7 +4521,7 @@
             "description": "服务异常"
           }
         },
-        "summary": "修改全局转发规则",
+        "summary": "修改转发调度与可靠性配置（只影响速度）",
         "tags": [
           "转发风控"
         ]
@@ -5836,6 +5976,79 @@
           }
         },
         "summary": "群被举报记录",
+        "tags": [
+          "群组管理"
+        ]
+      }
+    },
+    "/api/admin/v1/groups/{id}/status-logs": {
+      "get": {
+        "operationId": "GET_api_admin_v1_groups_{id}_status-logs",
+        "parameters": [
+          {
+            "description": "资源 ID（UUID）",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "0=成功",
+                      "type": "integer"
+                    },
+                    "data": {
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "requestId"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "/api/admin/v1/groups/:id/status-logs",
         "tags": [
           "群组管理"
         ]

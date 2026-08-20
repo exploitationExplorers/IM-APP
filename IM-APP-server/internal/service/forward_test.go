@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"im-app-server/internal/models"
 )
@@ -21,6 +24,24 @@ func TestValidateForwardSnapshot(t *testing.T) {
 		if err := validateForwardSnapshot(snapshot); err == nil {
 			t.Fatalf("invalid snapshot accepted: %#v", snapshot)
 		}
+	}
+}
+
+func TestTemporaryForwardErrorsRetryForever(t *testing.T) {
+	if !temporaryForwardError(context.DeadlineExceeded) {
+		t.Fatal("deadline exceeded must be retried")
+	}
+	if !temporaryForwardError(errors.New("network unavailable")) {
+		t.Fatal("unknown infrastructure errors must be retried conservatively")
+	}
+}
+
+func TestForwardRetryDelayIsCappedButNeverStops(t *testing.T) {
+	if got := forwardRetryDelay(1, 2*time.Second, 5*time.Minute); got != 2*time.Second {
+		t.Fatalf("first retry delay = %s", got)
+	}
+	if got := forwardRetryDelay(1000, 2*time.Second, 5*time.Minute); got != 5*time.Minute {
+		t.Fatalf("retry delay cap = %s", got)
 	}
 }
 

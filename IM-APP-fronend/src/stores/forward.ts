@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
   addForwardTaskTargets,
+  createForwardBatch,
   createForwardTask,
   fetchForwardTaskProgress,
   forwardTargetWriteBatch,
@@ -53,14 +54,40 @@ export const useForwardStore = defineStore('forward', () => {
     if (!sources.length) throw new Error('没有可转发的消息')
     const batchKey = createIdempotencyKey()
     const taskIds: string[] = []
+    lastTaskIds.value = []
     for (let i = 0; i < sources.length; i += 1) {
       const task = await createAndFillTask(sources[i], plan, `${batchKey}-${i}`)
       if (task.targetCount <= 0) throw new Error('没有可转发的好友')
       await submitForwardTask(task.id)
       taskIds.push(task.id)
+      // 每受理一条立即保存，后续提交失败时仍能准确恢复已入队部分。
+      lastTaskIds.value = [...taskIds]
     }
-    lastTaskIds.value = taskIds
     return taskIds
+  }
+
+  async function submitBatch(sources: ForwardSourcePayload[], plan: FriendForwardPlan | null, targetGroupIds: string[]) {
+    if (!sources.length) throw new Error('没有可转发的消息')
+    const targetUserIds = plan?.kind === 'ids' ? uniqueIds(plan.userIds)
+      : plan?.kind === 'generate' ? uniqueIds(plan.extraUserIds) : []
+    const selector = plan?.kind === 'all_friends' ? { mode: 'all_friends' as const }
+      : plan?.kind === 'generate' ? plan.selector : undefined
+    const excludeUserIds = plan?.kind === 'all_friends' ? uniqueIds(plan.excludeUserIds) : []
+    const result = await createForwardBatch({
+      messages: sources.map((source) => ({
+        sourceConversationId: source.sourceConversationId,
+        sourceClientMsgId: source.sourceClientMsgId,
+        sourceServerMsgId: source.sourceServerMsgId,
+        sourceSnapshot: source.snapshot,
+      })),
+      targetUserIds,
+      targetGroupIds: uniqueIds(targetGroupIds),
+      selector,
+      excludeUserIds,
+      idempotencyKey: createIdempotencyKey(),
+    })
+    lastTaskIds.value = [...result.taskIds]
+    return result
   }
 
   return {
@@ -72,6 +99,7 @@ export const useForwardStore = defineStore('forward', () => {
     consumeSucceeded,
     clear,
     submitFriendPlan,
+    submitBatch,
   }
 })
 
