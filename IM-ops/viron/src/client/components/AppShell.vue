@@ -17,6 +17,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  Smartphone,
   TerminalSquare,
   UserRound,
   Users,
@@ -60,6 +61,7 @@ const menuItems = [
   { key: "ssh", label: tr("SSH 工作台"), icon: TerminalSquare, routeName: "ssh", routeNames: ["ssh"], planned: false },
   { key: "database", label: tr("数据库工作台"), icon: Database, routeName: "database", routeNames: ["database"], planned: false },
   { key: "redis", label: tr("Redis 工作台"), icon: MemoryStick, routeName: "redis", routeNames: ["redis"], planned: false },
+  { key: "h5-preview", label: tr("H5 预览"), icon: Smartphone, routeName: "h5-preview", routeNames: ["h5-preview"], planned: false },
   { key: "knowledge", label: tr("知识库"), icon: BookOpen, routeName: "knowledge", routeNames: ["knowledge"], planned: false },
   { key: "audit", label: tr("操作审计"), icon: ClipboardList, routeName: "audit", routeNames: ["audit"], planned: false },
   { key: "organization", label: tr("组织与用户"), icon: Users, routeName: "organization", routeNames: ["organization"], planned: false },
@@ -67,7 +69,7 @@ const menuItems = [
 
 const activeRouteName = computed(() => String(route.name ?? ""));
 const activeEnvironmentId = computed(() => route.name === "environment" ? String(route.params.id ?? "") : null);
-const isWorkbenchPage = computed(() => ["environment", "knowledge", "ssh", "database", "redis"].includes(activeRouteName.value));
+const isWorkbenchPage = computed(() => ["environment", "knowledge", "ssh", "database", "redis", "h5-preview"].includes(activeRouteName.value));
 const currentWorkspaceCommand = computed(() => session.workspace ? `${session.workspace.type}:${session.workspace.id}` : "");
 const personalWorkspace = computed(() => session.workspaces.find((workspace) => workspace.type === "personal"));
 const organizationWorkspaces = computed(() => session.workspaces.filter((workspace) => workspace.type === "organization"));
