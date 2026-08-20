@@ -23,6 +23,7 @@ const STATUS_LABEL_MAP: Record<TaskStatus, string> = {
   pending: "待处理",
   processing: "处理中",
   success: "已完成",
+  completed: "已完成",
   failed: "失败",
   cancelled: "已终止",
 };
@@ -159,24 +160,21 @@ function pickStatusTagType(status: TaskStatus): "success" | "danger" | "warning"
     pending: "warning",
     processing: "primary",
     success: "success",
+    completed: "success",
     failed: "danger",
     cancelled: "info",
   };
   return map[status] ?? "info";
 }
 
+function formatTime(value?: string | null): string {
+  if (!value) return "—";
+  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+}
+
 function formatTaskStatus(status: unknown): string {
   const key = status as TaskStatus;
   return (STATUS_LABEL_MAP[key] ?? String(status ?? "")) || "—";
-}
-
-function pickRiskTagType(riskLevel: string): "success" | "danger" | "warning" | "primary" | "info" {
-  const v = String(riskLevel ?? "").toLowerCase();
-  if (!v) return "info";
-  if (v.includes("high") || v.includes("danger") || v.includes("严重") || v === "3") return "danger";
-  if (v.includes("mid") || v.includes("medium") || v.includes("warn") || v.includes("中") || v === "2") return "warning";
-  if (v.includes("low") || v.includes("safe") || v.includes("低") || v === "1") return "success";
-  return "info";
 }
 
 function resetFilters(): void {
@@ -248,7 +246,7 @@ async function fetchFailures(): Promise<void> {
   failuresLoading.value = true;
   try {
     const res = await getAdminForwardTaskFailuresApi(id);
-    failures.value = res.data ?? [];
+    failures.value = Array.isArray(res.data) ? res.data : [];
   } catch {
     failures.value = [];
   } finally {
@@ -394,7 +392,7 @@ watch(activeDetailTab, () => {
               <el-select v-model="filters.status" clearable placeholder="任务状态" @change="applyFilters">
                 <el-option label="待处理" value="pending" />
                 <el-option label="处理中" value="processing" />
-                <el-option label="已完成" value="success" />
+                <el-option label="已完成" value="completed" />
                 <el-option label="失败" value="failed" />
                 <el-option label="已终止" value="cancelled" />
               </el-select>
@@ -420,21 +418,17 @@ watch(activeDetailTab, () => {
             <span class="mono-text">{{ row.userId }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="contentSummary" label="内容摘要" min-width="220" show-overflow-tooltip />
-        <el-table-column label="内容类型" min-width="120">
-          <template #default="{ row }">
-            <el-tag effect="plain" round>{{ row.contentType || "—" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="风险等级" min-width="120">
-          <template #default="{ row }">
-            <el-tag :type="pickRiskTagType(row.riskLevel)" effect="light">{{ row.riskLevel || "—" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" min-width="120">
+        <el-table-column label="状态" min-width="110">
           <template #default="{ row }">
             <el-tag :type="pickStatusTagType(row.status as TaskStatus)" effect="light">
               {{ formatTaskStatus(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="是否重复" min-width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.isDuplicate ? 'warning' : 'info'" size="small" effect="plain">
+              {{ row.isDuplicate ? "是" : "否" }}
             </el-tag>
           </template>
         </el-table-column>
@@ -449,8 +443,12 @@ watch(activeDetailTab, () => {
             <span class="count-skip">{{ row.skippedCount ?? 0 }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" min-width="180" />
-        <el-table-column prop="finishedAt" label="完成时间" min-width="180" />
+        <el-table-column label="创建时间" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="完成时间" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.finishedAt) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="View" @click="openDetail(row)">详情</el-button>
@@ -515,24 +513,22 @@ watch(activeDetailTab, () => {
                 <el-descriptions-item label="用户ID">
                   <span class="mono-text">{{ selectedTask.userId }}</span>
                 </el-descriptions-item>
-                <el-descriptions-item label="内容类型">{{ selectedTask.contentType || "—" }}</el-descriptions-item>
-                <el-descriptions-item label="风险等级">
-                  <el-tag :type="pickRiskTagType(selectedTask.riskLevel)" effect="light">
-                    {{ selectedTask.riskLevel || "—" }}
-                  </el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="状态" :span="2">
+                <el-descriptions-item label="状态">
                   <el-tag :type="pickStatusTagType(selectedTask.status)" effect="light">
                     {{ formatTaskStatus(selectedTask.status) }}
                   </el-tag>
                 </el-descriptions-item>
-                <el-descriptions-item label="内容摘要" :span="2">{{ selectedTask.contentSummary || "—" }}</el-descriptions-item>
+                <el-descriptions-item label="是否重复">
+                  <el-tag :type="selectedTask.isDuplicate ? 'warning' : 'info'" size="small" effect="plain">
+                    {{ selectedTask.isDuplicate ? "是" : "否" }}
+                  </el-tag>
+                </el-descriptions-item>
                 <el-descriptions-item label="目标数">{{ selectedTask.targetCount ?? 0 }}</el-descriptions-item>
                 <el-descriptions-item label="成功数">{{ selectedTask.successCount ?? 0 }}</el-descriptions-item>
                 <el-descriptions-item label="失败数">{{ selectedTask.failedCount ?? 0 }}</el-descriptions-item>
                 <el-descriptions-item label="跳过数">{{ selectedTask.skippedCount ?? 0 }}</el-descriptions-item>
-                <el-descriptions-item label="创建时间" :span="2">{{ selectedTask.createdAt || "—" }}</el-descriptions-item>
-                <el-descriptions-item label="完成时间" :span="2">{{ selectedTask.finishedAt || "—" }}</el-descriptions-item>
+                <el-descriptions-item label="创建时间" :span="2">{{ formatTime(selectedTask.createdAt) }}</el-descriptions-item>
+                <el-descriptions-item label="完成时间" :span="2">{{ formatTime(selectedTask.finishedAt) }}</el-descriptions-item>
               </el-descriptions>
             </el-tab-pane>
             <el-tab-pane label="目标明细" name="targets">
@@ -553,9 +549,9 @@ watch(activeDetailTab, () => {
                 </el-table-column>
                 <el-table-column prop="userId" label="用户ID" min-width="220" show-overflow-tooltip />
                 <el-table-column prop="nickname" label="昵称" min-width="120" show-overflow-tooltip />
-                <el-table-column label="状态" min-width="120">
+                <el-table-column label="状态" min-width="110">
                   <template #default="{ row }">
-                    <el-tag effect="light">
+                    <el-tag :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : 'info'" effect="light">
                       {{
                         row.status === "pending"
                           ? "待发送"
@@ -572,12 +568,12 @@ watch(activeDetailTab, () => {
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="attempts" label="重试次数" width="100" align="center" />
-                <el-table-column label="失败码" min-width="120" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.failCode || "—" }}</template>
+                <el-table-column label="尝试次数" width="100" align="center">
+                  <template #default="{ row }">{{ row.attempts ?? 0 }}</template>
                 </el-table-column>
-                <el-table-column prop="finishedAt" label="完成时间" min-width="170" />
-                <el-table-column prop="messageId" label="消息ID" min-width="220" show-overflow-tooltip />
+                <el-table-column label="完成时间" min-width="180">
+                  <template #default="{ row }">{{ formatTime(row.finishedAt) }}</template>
+                </el-table-column>
               </el-table>
               <div class="table-footer">
                 <el-pagination

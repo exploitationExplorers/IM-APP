@@ -2,7 +2,7 @@ import http from "@/api";
 import type { AdminPage } from "@/api/interface";
 
 export namespace AdminForwardRisk {
-  export type ForwardTaskStatus = "pending" | "processing" | "success" | "failed" | "cancelled";
+  export type ForwardTaskStatus = "pending" | "processing" | "success" | "completed" | "failed" | "cancelled";
   export type ForwardTargetStatus = "pending" | "success" | "failed" | "skipped" | "cancelled";
 
   export interface ForwardSettings {
@@ -21,16 +21,17 @@ export namespace AdminForwardRisk {
   export interface ForwardTask {
     id: string;
     userId: string;
-    contentSummary: string;
-    contentType: string;
-    createdAt: string;
-    finishedAt?: string | null;
+    status: ForwardTaskStatus;
     targetCount: number;
     successCount: number;
     failedCount: number;
     skippedCount: number;
-    riskLevel: string;
-    status: ForwardTaskStatus;
+    createdAt: string;
+    finishedAt?: string | null;
+    isDuplicate?: boolean;
+    contentSummary?: string;
+    contentType?: string;
+    riskLevel?: string;
   }
 
   export interface ReqForwardTaskTargetsParams {
@@ -42,12 +43,12 @@ export namespace AdminForwardRisk {
   export interface ForwardTarget {
     id: string;
     userId: string;
-    nickname: string;
-    messageId: string;
+    nickname?: string;
     status: ForwardTargetStatus;
-    attempts: number;
+    attempts?: number;
     failCode?: string | null;
     finishedAt?: string | null;
+    messageId?: string;
   }
 
   export interface ForwardTaskFailureStat {
@@ -107,5 +108,5 @@ export const getAdminForwardSettingsApi = () => {
 };
 
 export const putAdminForwardSettingsApi = (body: AdminForwardRisk.ReqUpdateForwardSettingsBody) => {
-  return http.put<null>(FORWARD_SETTINGS_BASE, body, { loading: false });
+  return http.put<{ ok?: boolean }>(FORWARD_SETTINGS_BASE, body, { loading: false });
 };

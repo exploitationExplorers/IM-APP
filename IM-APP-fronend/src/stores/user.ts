@@ -35,7 +35,13 @@ export const useUserStore = defineStore('user', () => {
 
   const isLoggedIn = computed(() => !!token.value)
 
-  function afterLogin(res: AuthResult, phone: string, countryCode?: string) {
+  async function afterLogin(res: AuthResult, phone: string, countryCode?: string) {
+    useChatStore().reset()
+    useContactStore().reset()
+    useGroupStore().reset()
+    useMassSendStore().resetAll()
+    await logoutOpenIM().catch(() => undefined)
+
     saveLoginPhone(countryCode || '+86', phone)
     token.value = res.accessToken
     refreshToken.value = res.refreshToken
@@ -60,12 +66,12 @@ export const useUserStore = defineStore('user', () => {
 
   async function loginPassword(phone: string, password: string, countryCode?: string) {
     const res = await loginByPassword(phone, password, countryCode)
-    afterLogin(res, phone, countryCode)
+    await afterLogin(res, phone, countryCode)
   }
 
   async function loginSms(phone: string, code: string, countryCode?: string) {
     const res = await loginBySms(phone, code, countryCode)
-    afterLogin(res, phone, countryCode)
+    await afterLogin(res, phone, countryCode)
   }
 
   async function register(
@@ -75,7 +81,7 @@ export const useUserStore = defineStore('user', () => {
     countryCode?: string,
   ) {
     const res = await registerBySms(phone, code, password, countryCode)
-    afterLogin(res, phone, countryCode)
+    await afterLogin(res, phone, countryCode)
   }
 
   async function loadProfile() {

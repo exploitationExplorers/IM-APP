@@ -63,7 +63,7 @@ onMounted(async () => {
               :collapse-transition="false"
               :default-openeds="[
                 '/system',
-                '/forward-group-send',
+                '/forward-risk',
                 '/sms-operation-config',
                 '/country-sms',
                 '/runtime-observe',
@@ -96,20 +96,16 @@ onMounted(async () => {
                 <el-icon><User /></el-icon>
                 <template #title>认证与我的</template>
               </el-menu-item>
-              <el-sub-menu index="/forward-group-send">
+              <el-sub-menu index="/forward-risk">
                 <template #title>
                   <el-icon><Promotion /></el-icon>
                   <span>转发和群发管理</span>
                 </template>
-                <el-menu-item index="/forward-group-send">
-                  <el-icon><List /></el-icon>
-                  <template #title>任务列表</template>
+                <el-menu-item index="/forward-risk">
+                  <el-icon><Warning /></el-icon>
+                  <template #title>转发风控</template>
                 </el-menu-item>
               </el-sub-menu>
-              <el-menu-item index="/forward-risk">
-                <el-icon><Warning /></el-icon>
-                <template #title>转发风控</template>
-              </el-menu-item>
               <el-sub-menu index="/app-config">
                 <template #title>
                   <el-icon><Iphone /></el-icon>

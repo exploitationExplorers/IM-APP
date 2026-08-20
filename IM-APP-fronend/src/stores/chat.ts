@@ -37,6 +37,8 @@ import {
   resetConversationGroupAtType,
   seqOf,
   setConversationPin,
+  invalidateIMLoginCache,
+  waitForSync,
 } from '@/utils/openim'
 import { isIMNotification, isGroupAnnouncementNotice, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { playMessageSound, vibrateShort } from '@/utils/notify'
@@ -348,7 +350,20 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await ensureIMLogin()
       subscribeRealtime()
-      const list = await getConversationList()
+      let list
+      try {
+        list = await getConversationList()
+      } catch (e) {
+        const msg = (e as Error)?.message || ''
+        if (msg.includes('10004') || msg.includes('10005')) {
+          invalidateIMLoginCache()
+          await ensureIMLogin()
+          await waitForSync(5000)
+          list = await getConversationList()
+        } else {
+          throw e
+        }
+      }
       console.log('[chat] getConversationList count:', list.length)
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       conversations.value = sortConversations(

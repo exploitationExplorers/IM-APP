@@ -7,10 +7,10 @@
   },
   "pages": [
     {
-      "path": "pages/dev/swipe-test",
+      "path": "pages/chat/index",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "Swipe Demo"
+        "navigationBarTitleText": "聊天"
       }
     },
     {
@@ -58,13 +58,6 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "通讯录"
-      }
-    },
-    {
-      "path": "pages/chat/index",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "聊天"
       }
     },
     {
