@@ -5,6 +5,7 @@ import { MessageType } from 'openim-uniapp-polyfill'
 import type { MessageItem } from 'openim-uniapp-polyfill'
 import { collectHistoryMessages, resolveGroupConversationID } from '@/utils/openim'
 import { formatFavoriteDay, formatClock } from '@/utils/format'
+import ImNavBar from '@/components/ImNavBar.vue'
 
 const groupId = ref('')
 const keyword = ref('')
@@ -66,11 +67,7 @@ function openRoom() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">搜索聊天记录</text>
-      <view class="nav-space" />
-    </view>
+    <ImNavBar title="搜索聊天记录" @back="goBack" />
 
     <view class="search-wrap">
       <view class="search-box">
@@ -103,31 +100,6 @@ function openRoom() {
 .page {
   min-height: 100vh;
   background: #fff;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  height: 96rpx;
-  padding: 0 26rpx;
-}
-
-.nav-back,
-.nav-space {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 36rpx;
-  font-weight: 700;
 }
 
 .search-wrap {

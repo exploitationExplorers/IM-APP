@@ -12,6 +12,7 @@ import type { ContactTagItem, FriendForwardPlan } from '@/types'
 import { snapshotFromMessage } from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
 import { businessUserIdFromIM } from '@/utils/openim'
+import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
 
@@ -359,11 +360,11 @@ function goBack() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="back" @click="goBack">‹</view>
-      <text class="title">转发给</text>
-      <view class="send" :class="{ disabled: selectedCount === 0 || sending }" @click="onSend">传送</view>
-    </view>
+    <ImNavBar title="转发给" @back="goBack">
+      <template #right>
+        <view class="send" :class="{ disabled: selectedCount === 0 || sending }" @click="onSend">传送</view>
+      </template>
+    </ImNavBar>
 
     <view class="search">
       <input v-model="keyword" class="search-input" placeholder="搜索" placeholder-style="color:#B0B0B0" />
@@ -406,27 +407,6 @@ function goBack() {
   display: flex;
   flex-direction: column;
   background: #fff;
-}
-
-.nav {
-  height: 96rpx;
-  padding: 0 24rpx;
-  display: flex;
-  align-items: center;
-}
-
-.back {
-  width: 72rpx;
-  font-size: 52rpx;
-  color: #111;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #111;
 }
 
 .send {

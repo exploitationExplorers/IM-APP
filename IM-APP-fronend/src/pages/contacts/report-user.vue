@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { createUserReport, fetchReportReasons, type ReportReason } from '@/api/report'
 import { safeBack } from '@/utils/nav'
+import ImNavBar from '@/components/ImNavBar.vue'
 
 const userId = ref('')
 const reasons = ref<ReportReason[]>([])
@@ -44,11 +45,7 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="back" @click="goBack">‹</view>
-      <text class="title">检举</text>
-      <view class="space" />
-    </view>
+    <ImNavBar title="检举" @back="goBack" />
 
     <view class="card">
       <view
@@ -79,28 +76,6 @@ async function onSubmit() {
 .page {
   min-height: 100vh;
   background: #f5f5f5;
-}
-
-.nav {
-  height: 96rpx;
-  padding: 0 26rpx;
-  background: #fff;
-  display: flex;
-  align-items: center;
-}
-
-.back,
-.space {
-  width: 52rpx;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
 }
 
 .card {

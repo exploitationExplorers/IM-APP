@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useGroupStore } from '@/stores/group'
 import type { GroupMember } from '@/types'
 
@@ -64,11 +65,11 @@ async function onTapMember(member: GroupMember) {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">群组管理员</text>
-      <text class="nav-action" :class="{ hidden: !isOwner }" @click="goAdd">新增</text>
-    </view>
+    <ImNavBar title="群组管理员" @back="goBack">
+      <template #right>
+        <text class="nav-action" :class="{ hidden: !isOwner }" @click="goAdd">新增</text>
+      </template>
+    </ImNavBar>
 
     <view class="list">
       <view
@@ -95,33 +96,6 @@ async function onTapMember(member: GroupMember) {
 .page {
   min-height: 100vh;
   background: #fff;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  height: 96rpx;
-  padding: 0 26rpx;
-  background: #fff;
-  border-bottom: 1rpx solid #f0f0f0;
-}
-
-.nav-back {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #1f1f1f;
 }
 
 .nav-action {

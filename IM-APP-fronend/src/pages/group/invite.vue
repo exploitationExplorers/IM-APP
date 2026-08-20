@@ -7,6 +7,7 @@ import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useContactStore } from '@/stores/contact'
 import { useGroupStore } from '@/stores/group'
 import { APP_CONFIG } from '@/config'
+import ImNavBar from '@/components/ImNavBar.vue'
 import type { Contact, ContactListSort } from '@/types'
 
 useAuthGuard()
@@ -161,15 +162,13 @@ async function onConfirm() {
 
 <template>
   <view class="page" @click="showSort = false">
-    <view class="navbar">
-      <view class="nav-btn" @click="goBack">
-        <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">选择联络人</text>
-      <view class="confirm-btn" :class="{ enabled: canConfirm }" @click="onConfirm">
-        {{ canConfirm ? `确认(${selectedCount})` : '确认' }}
-      </view>
-    </view>
+    <ImNavBar title="选择联络人" @back="goBack">
+      <template #right>
+        <view class="confirm-btn" :class="{ enabled: canConfirm }" @click="onConfirm">
+          {{ canConfirm ? `确认(${selectedCount})` : '确认' }}
+        </view>
+      </template>
+    </ImNavBar>
 
     <view v-if="selectedCount > 0" class="chips">
       <view
@@ -246,37 +245,6 @@ async function onConfirm() {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-.navbar {
-  display: flex;
-  align-items: center;
-  height: 96rpx;
-  padding: 0 40rpx;
-  gap: 24rpx;
-  background: #fff;
-}
-
-.nav-btn {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.nav-icon {
-  width: 48rpx;
-  height: 48rpx;
-}
-
-.nav-title {
-  flex: 1;
-  font-size: 48rpx;
-  font-weight: 700;
-  color: #212121;
-  line-height: 64rpx;
 }
 
 .confirm-btn {

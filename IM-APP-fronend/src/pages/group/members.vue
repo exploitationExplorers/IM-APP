@@ -9,16 +9,15 @@ import {
   unmuteGroupMember,
 } from '@/api/group'
 import AppSearchBar from '@/components/AppSearchBar.vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { APP_CONFIG } from '@/config'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { MUTE_OPTIONS } from '@/constants/mute'
 import { useUserStore } from '@/stores/user'
 import type { GroupInfo, GroupMember, GroupMemberMuteResult } from '@/types'
-import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
 
-const statusBarHeight = getStatusBarHeight()
 const userStore = useUserStore()
 const groupId = ref('')
 const keyword = ref('')
@@ -172,11 +171,11 @@ async function onRemove(member: GroupMember) {
 
 <template>
   <view class="page">
-    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
-      <view class="back-btn" @click="goBack">‹</view>
-      <text class="title">群聊成员</text>
-      <text class="action" :class="{ hidden: !canManage }" @click="goInvite">新增</text>
-    </view>
+    <ImNavBar title="群聊成员" @back="goBack">
+      <template #right>
+        <text class="action" :class="{ hidden: !canManage }" @click="goInvite">新增</text>
+      </template>
+    </ImNavBar>
 
     <AppSearchBar v-model="keyword" placeholder="搜索" />
 
@@ -228,37 +227,7 @@ async function onRemove(member: GroupMember) {
   flex-direction: column;
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 96rpx;
-  padding: 0 40rpx;
-  box-sizing: content-box;
-  background: #fff;
-}
-
-.back-btn {
-  font-size: 56rpx;
-  color: #212121;
-  width: 88rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #212121;
-}
-
 .action {
-  width: 88rpx;
-  text-align: right;
   font-size: 30rpx;
   color: #212121;
 }

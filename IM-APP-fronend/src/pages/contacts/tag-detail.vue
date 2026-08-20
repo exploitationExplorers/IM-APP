@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import {
   deleteContactTag,
   fetchTagMembers,
@@ -174,22 +175,17 @@ function onRemove(c: Contact) {
 
 <template>
   <view class="page" @click="closeMore">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <view class="nav-title">
-        <text class="nav-name">{{ tagName }}</text>
-        <text class="nav-count">({{ members.length }})</text>
-      </view>
-      <view class="nav-more" @click.stop="onMore">
-        <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
-        <view v-if="showMore" class="more-menu" @click.stop>
-          <view class="more-item" @click="openRename">变更名称</view>
-          <view class="more-item danger" @click="onDeleteTag">删除标签</view>
+    <ImNavBar :title="`${tagName} (${members.length})`" @back="goBack">
+      <template #right>
+        <view class="nav-more" @click.stop="onMore">
+          <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
+          <view v-if="showMore" class="more-menu" @click.stop>
+            <view class="more-item" @click="openRename">变更名称</view>
+            <view class="more-item danger" @click="onDeleteTag">删除标签</view>
+          </view>
         </view>
-      </view>
-    </view>
+      </template>
+    </ImNavBar>
 
     <AppSearchBar v-model="keyword" placeholder="搜索" />
 
@@ -249,17 +245,6 @@ function onRemove(c: Contact) {
   box-sizing: border-box;
 }
 
-.nav {
-  display: flex;
-  align-items: center;
-  height: calc(96rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 16rpx 0 32rpx;
-  background: #ffffff;
-  box-sizing: border-box;
-  gap: 16rpx;
-}
-
-.nav-back,
 .nav-more {
   width: 72rpx;
   height: 72rpx;
@@ -270,37 +255,10 @@ function onRemove(c: Contact) {
   position: relative;
 }
 
-.nav-icon {
-  width: 48rpx;
-  height: 48rpx;
-}
-
 .nav-more-icon {
   width: 36rpx;
   height: 36rpx;
   transform: rotate(90deg);
-}
-
-.nav-title {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.nav-name,
-.nav-count {
-  font-size: 48rpx;
-  font-weight: 700;
-  line-height: 64rpx;
-  color: #212121;
-}
-
-.nav-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 70%;
 }
 
 .more-menu {

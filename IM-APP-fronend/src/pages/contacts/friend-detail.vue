@@ -11,6 +11,7 @@ import {
 import { useContactStore } from '@/stores/contact'
 import { useChatStore } from '@/stores/chat'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import ImNavBar from '@/components/ImNavBar.vue'
 import ImSwitch from '@/components/ImSwitch.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { setConversationPin, setConversationRecvOpt } from '@/utils/openim'
@@ -213,25 +214,23 @@ function onDelete() {
       <view class="hero-img" />
     </view>
 
-    <view class="nav">
-      <view class="nav-btn" @click="goBack">
-        <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">好友详情</text>
-      <view class="nav-btn" @click.stop="onMore">
-        <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
-        <view v-if="showMore" class="more-menu">
-          <view class="more-item" @click.stop="onBlock">
-            <image class="more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
-            <text>{{ contact?.isBlocked ? '移出黑名单' : '加入黑名单' }}</text>
-          </view>
-          <view class="more-item danger" @click.stop="onDelete">
-            <image class="more-icon" src="/static/icons/icon-profile-remove.svg" mode="aspectFit" />
-            <text>删除联络人</text>
+    <ImNavBar title="好友详情" @back="goBack">
+      <template #right>
+        <view class="nav-btn" @click.stop="onMore">
+          <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
+          <view v-if="showMore" class="more-menu">
+            <view class="more-item" @click.stop="onBlock">
+              <image class="more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
+              <text>{{ contact?.isBlocked ? '移出黑名单' : '加入黑名单' }}</text>
+            </view>
+            <view class="more-item danger" @click.stop="onDelete">
+              <image class="more-icon" src="/static/icons/icon-profile-remove.svg" mode="aspectFit" />
+              <text>删除联络人</text>
+            </view>
           </view>
         </view>
-      </view>
-    </view>
+      </template>
+    </ImNavBar>
 
     <view v-if="contact" class="body">
       <view class="sheet">
@@ -358,18 +357,6 @@ function onDelete() {
   opacity: 0.95;
 }
 
-.nav {
-  position: relative;
-  z-index: 20;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  height: calc(96rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 32rpx 0;
-  background: transparent;
-  box-sizing: border-box;
-}
-
 .nav-btn {
   width: 72rpx;
   height: 72rpx;
@@ -380,24 +367,10 @@ function onDelete() {
   flex-shrink: 0;
 }
 
-.nav-icon {
-  width: 40rpx;
-  height: 40rpx;
-}
-
 .nav-more-icon {
   width: 36rpx;
   height: 36rpx;
   transform: rotate(90deg);
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 48rpx;
-  font-weight: 700;
-  line-height: 64rpx;
-  color: #212121;
 }
 
 .more-menu {
