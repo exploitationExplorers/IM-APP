@@ -34,6 +34,7 @@ export const router = createRouter({
     { path: "/sftp", redirect: (to) => ({ name: "ssh", query: { ...to.query, mode: "sftp" } }) },
     { path: "/database", name: "database", component: () => import("./views/DatabaseWorkbenchView.vue") },
     { path: "/redis", name: "redis", component: () => import("./views/RedisWorkbenchView.vue") },
+    { path: "/h5-preview", name: "h5-preview", component: () => import("./views/H5PreviewView.vue") },
     { path: "/active-connections", name: "active-connections", component: () => import("./views/ActiveConnectionsView.vue") },
     { path: "/audit", name: "audit", component: () => import("./views/AuditView.vue") },
     { path: "/downloads", name: "client-downloads", component: () => import("./views/ClientDownloadsView.vue"), meta: { webOnly: true } },
