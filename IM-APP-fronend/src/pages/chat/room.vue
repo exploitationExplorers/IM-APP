@@ -264,24 +264,52 @@ onUnload(() => {
     clearTimeout(muteExpireTimer)
     muteExpireTimer = null
   }
+  if (dissolveExitTimer) {
+    clearTimeout(dissolveExitTimer)
+    dissolveExitTimer = null
+  }
   chatStore.setOnIncomingForDissolve(null)
 })
 
 /**
- * 用户在房间时收到群解散通知时，自动 toast + 返回上一页。
+ * 群已解散的统一出口：提示「该群已解散」并回到聊天列表。
+ * 聊天列表是 tabBar 页，App/H5 都必须用 switchTab（navigateBack 只能回到来源页，
+ * 从通讯录/扫码等入口进房间时会回到错误页面）。dissolveExited 防止多触发源重复弹提示。
+ * 触发源：
+ * 1. 进入房间时群已解散（onLoad 预检，群详情 404）
+ * 2. 在房间时实时收到解散通知（chatStore.setOnIncomingForDissolve 回调）
+ * 3. App 切后台期间群被解散，回前台 onShow 重拉群详情发现（watch groupDissolved）
+ * 4. 拉历史兜底 OpenIM errCode=10006
+ */
+let dissolveExited = false
+let dissolveExitTimer: ReturnType<typeof setTimeout> | null = null
+function exitDissolvedRoom() {
+  if (dissolveExited) return
+  dissolveExited = true
+  uni.showToast({ title: '该群已解散', icon: 'none', duration: 2000 })
+  // 稍等 toast 渲染再切页；App 端 toast 为原生层，切页后仍可见
+  dissolveExitTimer = setTimeout(() => {
+    dissolveExitTimer = null
+    uni.switchTab({ url: '/pages/chat/index' })
+  }, 400)
+}
+
+/**
+ * 用户在房间时收到群解散通知时，自动提示并返回聊天列表。
  * 通过 chatStore.setOnIncomingForDissolve 注册回调，避开 messagesMap 的 reactive watch。
  */
-let dissolvedInRoom = false
 function handleIncomingForDissolve(message: { conversationId?: string; notificationKind?: string }) {
-  if (dissolvedInRoom) return
   if (chatType.value !== 'group') return
   if (message.conversationId !== conversationId.value) return
   if (message.notificationKind !== 'dissolved') return
-  dissolvedInRoom = true
-  uni.showToast({ title: '群已解散', icon: 'none', duration: 2000 })
-  setTimeout(() => uni.navigateBack(), 0)
+  exitDissolvedRoom()
 }
 chatStore.setOnIncomingForDissolve(handleIncomingForDissolve)
+
+/** onShow 重拉群详情发现已解散（如 App 后台期间群被解散）时，同样提示并退出 */
+watch(groupDissolved, (dissolved) => {
+  if (dissolved) exitDissolvedRoom()
+})
 
 onLoad(async (query) => {
   title.value = decodeURIComponent(String(query?.title || '聊天'))
@@ -318,13 +346,12 @@ onLoad(async (query) => {
       }
     }
 
-    // 群聊先查群详情：群已解散时弹 toast 后直接返回上一页，不再调 OpenIM 拉历史
+    // 群聊先查群详情：群已解散时提示并回聊天列表，不再调 OpenIM 拉历史
     // （避免触发 getAdvancedHistoryMessageList errCode=10006）
     if (chatType.value === 'group' && businessId.value) {
       await refreshGroupMeta()
       if (groupDissolved.value) {
-        uni.showToast({ title: '群已解散', icon: 'none', duration: 2000 })
-        setTimeout(() => uni.navigateBack(), 0)
+        exitDissolvedRoom()
         return
       }
     }
@@ -332,10 +359,9 @@ onLoad(async (query) => {
     await Promise.all([
       chatStore.loadMessages(conv.id).catch((e: any) => {
         // 兜底：预检测失败时 OpenIM SDK 直接抛 getAdvancedHistoryMessageList errCode=10006，
-        // 同样弹 toast 后返回上一页
+        // 同样提示并回聊天列表
         if (chatType.value === 'group' && e?.message?.includes('10006')) {
-          uni.showToast({ title: '群已解散', icon: 'none', duration: 2000 })
-          setTimeout(() => uni.navigateBack(), 0)
+          exitDissolvedRoom()
           return
         }
         throw e
