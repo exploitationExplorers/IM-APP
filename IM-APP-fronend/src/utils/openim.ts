@@ -14,6 +14,7 @@ import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
+import { getToken } from '@/utils/request'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
 import { formatIMNotification, imNotificationEventKey, notificationKindOf } from '@/utils/im-notification'
 import { highlightTagsOf } from '@/utils/group-announcement'
@@ -78,6 +79,7 @@ let tokenExpireAt = 0
 let loginPromise: Promise<string> | null = null
 /** 退出登录时递增，作废进行中的 IM 登录，避免旧账号登录完成后把会话写回来 */
 let loginEpoch = 0
+let boundAccessToken = ''
 
 /**
  * SDK 是否已真正连上 OpenIM 服务端。
@@ -95,11 +97,32 @@ function resetLoginCache() {
   imUserId.value = ''
   tokenExpireAt = 0
   connected = false
+  boundAccessToken = ''
+}
+
+export function invalidateIMLoginCache() {
+  resetLoginCache()
 }
 
 function invalidatePendingLogin() {
   loginEpoch += 1
   resetLoginCache()
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
 }
 
 async function forceSdkLogout(): Promise<void> {
@@ -260,6 +283,7 @@ function rememberLogin(imToken: IMTokenResult): string {
   imUserId.value = imToken.userId
   tokenExpireAt = Date.now() + Math.max(0, imToken.expireSec - 300) * 1000
   connected = true // 登录 + 同步已成功，视为已连上服务端
+  boundAccessToken = getToken()
   return imUserId.value
 }
 
@@ -296,12 +320,22 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
   try {
     await imCall(IMMethods.Login, payload)
   } catch (e) {
-    if (!isLoginRepeat(e)) throw e
-    const loggedUserId = await getSdkLoginUserId()
-    if (loggedUserId !== imToken.userId) {
-      await imCall(IMMethods.Logout).catch(() => undefined)
-      synced = waitForSync()
-      await imCall(IMMethods.Login, payload)
+    if (!isLoginRepeat(e)) {
+      const msg = (e as Error)?.message || ''
+      if (msg.includes('10005') || msg.includes('10004')) {
+        await new Promise((r) => setTimeout(r, 400))
+        synced = waitForSync()
+        await imCall(IMMethods.Login, payload)
+      } else {
+        throw e
+      }
+    } else {
+      const loggedUserId = await getSdkLoginUserId()
+      if (loggedUserId !== imToken.userId) {
+        await imCall(IMMethods.Logout).catch(() => undefined)
+        synced = waitForSync()
+        await imCall(IMMethods.Login, payload)
+      }
     }
   }
   await synced
@@ -346,10 +380,23 @@ async function doLogin(): Promise<string> {
 /** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
 export async function ensureIMLogin(): Promise<string> {
   if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
-  // 三者同时满足才直接复用缓存：本地有用户、token 未过期、且 SDK 当前已连上。
-  // 只信前两个会在服务端掉线后误以为仍登录，从而拿到 errCode=10004。
-  if (imUserId.value && Date.now() < tokenExpireAt && connected) {
-    return imUserId.value
+  const businessToken = getToken()
+  if (
+    imUserId.value &&
+    Date.now() < tokenExpireAt &&
+    connected &&
+    businessToken &&
+    businessToken === boundAccessToken
+  ) {
+    const logged = await getSdkLoginUserId()
+    if (!logged || logged === imUserId.value) {
+      return imUserId.value
+    }
+    resetLoginCache()
+  } else if (imUserId.value || connected || boundAccessToken) {
+    invalidatePendingLogin()
+    await forceSdkLogout().catch(() => undefined)
+    resetLoginCache()
   }
   const epoch = loginEpoch
   if (!loginPromise) {
@@ -412,28 +459,16 @@ export async function initOpenIM(): Promise<void> {
 }
 
 export async function logoutOpenIM(): Promise<void> {
+  const hadIMSession = !!(imUserId.value || connected)
   invalidatePendingLogin()
-  try {
-    await forceSdkLogout()
-  } catch {
-    // 本地必须清掉，避免下一个账号读到上一个号的会话库
-  } finally {
-    resetLoginCache()
-  }
-  // App 原生 SDK Logout 不会清本地数据库：会话/消息数据持久化在 SQLite，
-  // 下一个账号登录后 GetConversationList 会读到上一个账号的残留会话。
-  // 这里通过 unInitSDK 销毁 SDK 实例并清空本地数据库，确保下次 initOpenIM 是干净的。
-  // H5 平台 SDK 库为 in-memory，无需销毁。
-  if (isAppPlatform) {
+  if (hadIMSession) {
     try {
-      await imCall(IMMethods.UnInitSDK)
+      await withTimeout(forceSdkLogout(), 1500)
     } catch {
-      /* App 已退出登录，destroy 失败不阻塞 */
+      // 本地必须清掉，避免下一个账号读到上一个号的会话库
     }
-    // unInitSDK 会清掉原生层的 connectionWatchers 订阅；
-    // 重置闭锁，让下次 initOpenIM 重新挂连接事件监听。
-    connectionWatchersReady = false
   }
+  resetLoginCache()
 }
 
 /** 手动重连：重新取 token 再登录，用于「重新选线」 */

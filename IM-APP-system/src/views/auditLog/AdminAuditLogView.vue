@@ -160,12 +160,12 @@ onMounted(() => {
         <el-table-column label="操作人" min-width="145">
           <template #default="{ row }">{{ row.adminName || "未知管理员" }}</template>
         </el-table-column>
-        <el-table-column prop="action" label="操作类型" min-width="170">
+        <el-table-column prop="action" label="操作类型" min-width="280" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag effect="plain">{{ row.action || "-" }}</el-tag>
+            <span class="action-text">{{ row.action || "-" }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作目标" min-width="170">
+        <el-table-column label="操作目标" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">{{ formatTarget(row) }}</template>
         </el-table-column>
         <el-table-column prop="reason" label="操作原因" min-width="180" show-overflow-tooltip>
@@ -324,6 +324,19 @@ onMounted(() => {
   align-items: center;
   justify-content: flex-end;
   min-height: 64px;
+}
+
+.action-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--el-color-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .detail-value {
