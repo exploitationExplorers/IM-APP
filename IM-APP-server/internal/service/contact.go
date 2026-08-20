@@ -165,6 +165,15 @@ func (s *ContactService) UnblockContact(ctx context.Context, uid, contactID stri
 	return s.Contacts.UnblockUser(ctx, uid, contactID)
 }
 
+// ListBlockedContacts 返回当前用户的黑名单列表
+func (s *ContactService) ListBlockedContacts(ctx context.Context, uid, keyword string, limit int) (models.BlockedListResponse, error) {
+	items, total, err := s.Contacts.ListBlockedUsers(ctx, uid, keyword, limit)
+	if err != nil {
+		return models.BlockedListResponse{}, err
+	}
+	return models.BlockedListResponse{Items: items, Total: total}, nil
+}
+
 func (s *ContactService) GetConversationID(ctx context.Context, uid, contactID string) (string, error) {
 	ok, _ := s.Contacts.IsFriend(ctx, uid, contactID)
 	if !ok {
