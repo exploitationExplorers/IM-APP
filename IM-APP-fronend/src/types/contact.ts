@@ -13,6 +13,8 @@ export interface Contact {
   nickname: string
   avatar: string
   remark?: string
+  /** 我是否已拉黑该好友 */
+  isBlocked?: boolean
   /** @deprecated 列表侧旧字段；详情用 tags */
   tagNames?: string[]
   tags?: ContactTagItem[]

@@ -1369,7 +1369,7 @@ function toISOTime(timestamp: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// 会话级设置（置顶 / 免打扰）：直接走 OpenIM SDK，随账号云同步，多端一致。
+// 会话级设置（置顶 / 免打扰 / 隐藏）：直接走 OpenIM SDK，随账号云同步，多端一致。
 // 注意：这些不经由业务后端 REST 接口，避免与 OpenIM 服务端的会话状态冲突。
 // ---------------------------------------------------------------------------
 
@@ -1388,6 +1388,23 @@ export async function setConversationPin(conversationID: string, isPinned: boole
  */
 export async function setConversationRecvOpt(conversationID: string, opt: number): Promise<void> {
   await imCall('setConversation' as IMMethods, { conversationID, recvMsgOpt: opt })
+}
+
+/**
+ * 隐藏指定会话（仅本地层面）。
+ * - 群聊/私聊未解散时，对方发消息会重新插入列表（OpenIM OnNewConversation / OnConversationChanged 事件触发）。
+ * - 不影响服务端消息记录。
+ * - 对应 OpenIM SDK 的 hideConversation 接口。
+ * - H5 平台 client-sdk 不支持 hideConversation，调用会抛 undefined.apply 错误，本地已过滤等于成功。
+ */
+export async function hideConversation(conversationID: string): Promise<void> {
+  try {
+    await imCall(IMMethods.HideConversation, conversationID)
+  } catch (e) {
+    // H5 SDK 不支持 hideConversation；本地 hideConversationLocal 已经在调用前把会话从列表中移除，
+    // 因此本次操作在 UI 上已生效。吞掉底层错误即可。
+    console.warn('[openim] hideConversation 调用失败（H5 SDK 可能不支持该接口）', e)
+  }
 }
 
 function conversationEx(item: ConversationItem): string {

@@ -6,6 +6,7 @@ import {
   blockContact,
   deleteContact,
   fetchContact,
+  unblockContact,
 } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
 import { useChatStore } from '@/stores/chat'
@@ -154,18 +155,27 @@ function closeMore() {
 function onBlock() {
   closeMore()
   if (!contact.value) return
+  const blocked = !!contact.value.isBlocked
   uni.showModal({
-    title: '加入黑名单',
-    content: '拉黑后将删除好友关系，对方无法再向你发起会话。',
-    confirmText: '拉黑',
+    title: blocked ? '移出黑名单' : '加入黑名单',
+    content: blocked
+      ? '解除后对方可正常向你发送消息。'
+      : '拉黑后对方将无法再向你发送消息，解除后可恢复。',
+    confirmText: blocked ? '解除' : '拉黑',
     confirmColor: THEME.danger,
     success: async (res) => {
       if (!res.confirm || !contact.value) return
       try {
-        await blockContact(contact.value.id)
+        if (blocked) {
+          await unblockContact(contact.value.id)
+          contact.value.isBlocked = false
+          uni.showToast({ title: '已解除', icon: 'success' })
+        } else {
+          await blockContact(contact.value.id)
+          contact.value.isBlocked = true
+          uni.showToast({ title: '已拉黑', icon: 'success' })
+        }
         await contactStore.loadDirectory()
-        uni.showToast({ title: '已拉黑', icon: 'success' })
-        setTimeout(() => uni.navigateBack(), 400)
       } catch (e) {
         uni.showToast({ title: (e as Error).message, icon: 'none' })
       }
@@ -213,7 +223,7 @@ function onDelete() {
         <view v-if="showMore" class="more-menu">
           <view class="more-item" @click.stop="onBlock">
             <image class="more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
-            <text>加入黑名单</text>
+            <text>{{ contact?.isBlocked ? '移出黑名单' : '加入黑名单' }}</text>
           </view>
           <view class="more-item danger" @click.stop="onDelete">
             <image class="more-icon" src="/static/icons/icon-profile-remove.svg" mode="aspectFit" />
@@ -234,6 +244,9 @@ function onDelete() {
             />
             <view class="profile-meta">
               <text class="name">{{ nickname }}</text>
+              <view v-if="contact.isBlocked" class="blocked-tag">
+                <text>已拉黑</text>
+              </view>
             </view>
           </view>
 
@@ -481,6 +494,21 @@ function onDelete() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.blocked-tag {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  margin-top: 8rpx;
+  padding: 4rpx 16rpx;
+  border-radius: 8rpx;
+  background: #ffe5e5;
+}
+
+.blocked-tag text {
+  font-size: 22rpx;
+  color: #e54d42;
 }
 
 /* 参考站 my-1 mx-5 border #e1e3ea，仅资料区下方一条 */

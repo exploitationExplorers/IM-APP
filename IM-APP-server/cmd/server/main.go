@@ -254,6 +254,7 @@ func main() {
 			auth.GET("/contacts/:id", contactH.GetContact)
 			auth.PATCH("/contacts/:id", contactH.UpdateContact)
 			auth.DELETE("/contacts/:id", contactH.DeleteContact)
+			auth.GET("/contacts/blocked", contactH.ListBlockedContacts)
 			auth.POST("/contacts/:id/block", contactH.BlockContact)
 			auth.DELETE("/contacts/:id/block", contactH.UnblockContact)
 

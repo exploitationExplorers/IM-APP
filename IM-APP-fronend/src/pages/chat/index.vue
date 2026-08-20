@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import AppSearchBar from '@/components/AppSearchBar.vue'
-import ConversationItem from '@/components/ConversationItem.vue'
+import ImSwipeActionItem from '@/components/ImSwipeActionItem.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
 import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
 import { useChatStore } from '@/stores/chat'
@@ -23,6 +23,46 @@ const showFilter = ref(false)
 const filterKey = ref<'all' | 'unread'>('all')
 
 const filterLabel = computed(() => (filterKey.value === 'unread' ? '未读' : '全部'))
+
+// 当前左滑展开的会话 id（同一时间只允许一个 row 展开）
+const activeSwipeId = ref<string | null>(null)
+
+// uni-swipe-action-item 通过 change 事件回报展开/收起状态，同步到 activeSwipeId
+function onSwipeChange(item: Conversation, open: string) {
+  activeSwipeId.value = open === 'right' ? item.id : null
+}
+
+// 点击「置顶」按钮
+async function onTogglePin(item: Conversation) {
+  activeSwipeId.value = null
+  try {
+    await chatStore.togglePin(item.id)
+  } catch (e) {
+    uni.showToast({
+      title: (e as Error)?.message || '置顶失败',
+      icon: 'none',
+    })
+  }
+}
+
+// 点击「移除」按钮
+async function onHideConversation(item: Conversation) {
+  activeSwipeId.value = null
+  try {
+    await chatStore.hideConversationLocal(item.id)
+  } catch (e) {
+    uni.showToast({
+      title: (e as Error)?.message || '移除失败',
+      icon: 'none',
+    })
+  }
+}
+
+// 点击 row 内容区 → 打开会话
+function onSwipeItemClick(item: Conversation) {
+  activeSwipeId.value = null
+  openConversation(item)
+}
 
 const filtered = computed(() => {
   let list = chatStore.conversations
@@ -80,6 +120,7 @@ function setFilter(key: 'all' | 'unread') {
 function closeMenus() {
   showAddMenu.value = false
   showFilter.value = false
+  activeSwipeId.value = null
 }
 </script>
 
@@ -135,12 +176,31 @@ function closeMenus() {
       :refresher-triggered="refreshing"
       @refresherrefresh="onRefresherRefresh"
     >
-      <ConversationItem
-        v-for="item in filtered"
-        :key="item.id"
-        :item="item"
-        @click="openConversation"
-      />
+      <uni-swipe-action>
+        <ImSwipeActionItem
+          v-for="item in filtered"
+          :key="item.id"
+          :item="item"
+          :show="activeSwipeId === item.id ? 'right' : 'none'"
+          @item-click="onSwipeItemClick"
+          @change="(open) => onSwipeChange(item, open)"
+        >
+          <template #right>
+            <view class="swipe-actions">
+              <view
+                class="swipe-btn swipe-btn-pin"
+                :class="{ active: item.pinned }"
+                @click.stop="onTogglePin(item)"
+              >
+                <text>{{ item.pinned ? '取消置顶' : '置顶' }}</text>
+              </view>
+              <view class="swipe-btn swipe-btn-remove" @click.stop="onHideConversation(item)">
+                <text>移除</text>
+              </view>
+            </view>
+          </template>
+        </ImSwipeActionItem>
+      </uni-swipe-action>
       <view v-if="!filtered.length" class="empty">无聊天消息</view>
     </scroll-view>
 
@@ -271,5 +331,32 @@ function closeMenus() {
   color: #212121;
   padding: 80rpx 40rpx;
   font-size: 32rpx;
+}
+
+.swipe-actions {
+  display: flex;
+  flex-direction: row;
+}
+
+.swipe-btn {
+  width: 140rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28rpx;
+  color: #212121;
+}
+
+.swipe-btn-pin {
+  background: #f0f1f4;
+}
+
+.swipe-btn-remove {
+  background: #ffe5e5;
+  color: #e54d42;
+}
+
+.swipe-btn.active {
+  background: #e7e8ec;
 }
 </style>
