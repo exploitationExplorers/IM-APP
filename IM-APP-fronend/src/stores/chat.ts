@@ -94,9 +94,12 @@ export const useChatStore = defineStore('chat', () => {
    * H5 平台 SDK 不支持 hideConversation，已隐藏会话在 loadConversations 重新拉时
    * 仍会回来；用本地持久化维护隐藏列表，刷新/重连后仍生效。
    * 收到新消息时（OnNewConversation / OnConversationChanged）用户仍会看到该会话重新出现。
+   * App 原生平台 hideConversation 由 SDK 真正通知服务端，无需本地兜底。
    */
   const HIDDEN_KEY = 'chat:hidden-conversations'
+  const isH5Platform = uni.getSystemInfoSync().uniPlatform === 'h5'
   function readHiddenIds(): Set<string> {
+    if (!isH5Platform) return new Set()
     try {
       const raw = uni.getStorageSync(HIDDEN_KEY)
       if (Array.isArray(raw)) return new Set(raw as string[])
@@ -106,6 +109,7 @@ export const useChatStore = defineStore('chat', () => {
     return new Set()
   }
   function writeHiddenIds(ids: Set<string>) {
+    if (!isH5Platform) return
     try {
       uni.setStorageSync(HIDDEN_KEY, Array.from(ids))
     } catch {
