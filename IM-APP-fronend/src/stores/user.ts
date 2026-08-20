@@ -14,6 +14,8 @@ import {
   clearToken,
   getRefreshToken,
   getToken,
+  persistRefreshTokenAsync,
+  persistTokenAsync,
   setRefreshToken,
   setToken,
 } from '@/utils/request'
@@ -40,6 +42,14 @@ export const useUserStore = defineStore('user', () => {
     profile.value = applyLoginPhone(res.user)
     setToken(res.accessToken)
     setRefreshToken(res.refreshToken)
+    // App 端强杀进程可能丢失未落盘的 storage：异步落盘 + 回读校验。
+    // 这里不能 await，否则会阻塞跳转；但 fire-and-forget 已能保证 App 启动后 token 已在 storage。
+    void persistTokenAsync(res.accessToken).then(() => {
+      if (getToken() !== res.accessToken) setToken(res.accessToken)
+    })
+    void persistRefreshTokenAsync(res.refreshToken).then(() => {
+      if (getRefreshToken() !== res.refreshToken) setRefreshToken(res.refreshToken)
+    })
     // IM 登录失败不应挡住业务登录，进聊天页时还会再试一次
     startIMSession()
     const settings = useChatSettingsStore()
@@ -83,6 +93,13 @@ export const useUserStore = defineStore('user', () => {
     refreshToken.value = res.refreshToken
     setToken(res.accessToken)
     setRefreshToken(res.refreshToken)
+    // 异步落盘 + 回读校验，避免 App 杀进程后 token 丢失
+    void persistTokenAsync(res.accessToken).then(() => {
+      if (getToken() !== res.accessToken) setToken(res.accessToken)
+    })
+    void persistRefreshTokenAsync(res.refreshToken).then(() => {
+      if (getRefreshToken() !== res.refreshToken) setRefreshToken(res.refreshToken)
+    })
   }
 
   async function logout() {
@@ -122,6 +139,14 @@ export const useUserStore = defineStore('user', () => {
       clearLoginPhone()
       clearToken()
       return
+    }
+    // App 端 uni.getStorageSync 在 onLaunch 第一次读可能返回空（runtime 初始化竞态），
+    // 二次读 storage 兜底，确保 storage 真有 token 时不漏掉。
+    if (!token.value) {
+      const stored = getToken()
+      if (stored) token.value = stored
+      const storedRefresh = getRefreshToken()
+      if (storedRefresh) refreshToken.value = storedRefresh
     }
     if (token.value) {
       startIMSession()
