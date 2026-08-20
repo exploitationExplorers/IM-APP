@@ -448,8 +448,21 @@ function onConfirmSend() {
   onSend()
 }
 
+/** 重发：先二次确认，再按原类型重新发送 */
+function onRetry(m: ChatMessage) {
+  uni.showModal({
+    title: '重新发送',
+    content: '是否重新发送这条消息？',
+    confirmText: '重发',
+    confirmColor: '#e54d42',
+    success: (res) => {
+      if (res.confirm) doRetry(m)
+    },
+  })
+}
+
 /** 重发失败的文本/图片/语音/文件消息：按原类型重新发送，成功后移除旧的失败气泡 */
-async function onRetry(m: ChatMessage) {
+async function doRetry(m: ChatMessage) {
   if (!conversationId.value) return
   const senderId = imUserId.value || myId.value
   try {
