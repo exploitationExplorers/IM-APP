@@ -60,6 +60,15 @@ interface RevokedNotice {
   seq?: number
 }
 
+/**
+ * OnRecvC2CReadReceipt 事件载荷：对方读了「我发的」私聊消息。
+ * 回执不带 conversationID，按 clientMsgID（全局唯一）反查已加载会话。
+ */
+interface C2CReadReceipt {
+  userID?: string
+  msgIDList?: string[]
+}
+
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
   const messagesMap = ref<Record<string, ChatMessage[]>>({})
@@ -240,6 +249,35 @@ export const useChatStore = defineStore('chat', () => {
     return ''
   }
 
+  /** SDK 有时推单条，有时推数组；解析失败时不能让监听器抛错 */
+  function ingestReadReceipts(raw: C2CReadReceipt | C2CReadReceipt[] | null) {
+    const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+    const ids = new Set<string>()
+    list.forEach((r) => {
+      ;(r?.msgIDList || []).forEach((id) => {
+        if (id) ids.add(id)
+      })
+    })
+    if (!ids.size) return
+    markLoadedMessagesRead(ids)
+  }
+
+  /**
+   * 把已读回执落到已加载的消息上，房间内实时把「未读」翻成「已读」。
+   * clientMsgID 全局唯一，直接扫所有已加载会话按 ID 命中；未加载的消息无需处理，
+   * 下次拉历史时 SDK 本地库的 isRead 会带出已读状态。
+   */
+  function markLoadedMessagesRead(ids: Set<string>) {
+    const next: Record<string, ChatMessage[]> = {}
+    let changed = false
+    for (const [conversationId, list] of Object.entries(messagesMap.value)) {
+      if (!list.some((m) => ids.has(m.id) && !m.hasRead)) continue
+      next[conversationId] = list.map((m) => (ids.has(m.id) ? { ...m, hasRead: true } : m))
+      changed = true
+    }
+    if (changed) messagesMap.value = { ...messagesMap.value, ...next }
+  }
+
   function subscribeRealtime() {
     unsubscribeRealtime()
     unsubscribers = [
@@ -260,6 +298,8 @@ export const useChatStore = defineStore('chat', () => {
           dropRevokedMessage(conversationId, info.clientMsgID, tip)
         },
       ),
+      // 私聊已读回执：对方进入会话标记已读后，把自己发过的消息翻成已读
+      onIMEvent<C2CReadReceipt[]>(IMEvents.OnRecvC2CReadReceipt, ingestReadReceipts),
       onUserStatusChanged((state) => {
         console.log('[online] 状态变更事件:', state)
         onlineStatus.value[state.userID] = state.status
@@ -389,7 +429,10 @@ export const useChatStore = defineStore('chat', () => {
     const target = isGroup
       ? await resolveIMGroup(params.businessId)
       : await resolveIMPeer(params.businessId)
-    if (!target.canChat) throw new Error(target.denyReason || '当前无法发起会话')
+    // 群聊禁言（单人/全员）不阻断进入：能进群看历史，只是输入区禁用（房间页按 denyReason 处理）；
+    // 私聊的拉黑/非好友/对方注销等 denyReason 仍需阻断。
+    const muteOnly = isGroup && (target.denyReason === 'group_muted' || target.denyReason === 'member_muted')
+    if (!target.canChat && !muteOnly) throw new Error(target.denyReason || '当前无法发起会话')
 
     const sourceId = isGroup
       ? (target as { imGroupId: string }).imGroupId
@@ -442,9 +485,14 @@ export const useChatStore = defineStore('chat', () => {
       await markAsRead(conversationId)
       return
     }
+    // 已读回执先于历史快照落在本地的（H5 缓存偶发滞后），不要回退成未读
+    const readIds = new Set(existing.filter((m) => m.hasRead).map((m) => m.id))
+    const withRead = readIds.size
+      ? mapped.map((m) => (m.hasRead || !readIds.has(m.id) ? m : { ...m, hasRead: true }))
+      : mapped
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: mergeLocalPending(mapped, existing),
+      [conversationId]: mergeLocalPending(withRead, existing),
     }
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
     await markAsRead(conversationId)

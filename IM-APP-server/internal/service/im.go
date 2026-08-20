@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,10 @@ var (
 	ErrIMRecallConflict       = errors.New("message recall is in progress")
 	ErrIMMessageNotFound      = errors.New("message not found")
 	ErrIMRecallUpstream       = errors.New("OpenIM message recall failed")
+	// ErrIMInvalidReadStatusRequest 表示已读状态查询参数不合法。
+	ErrIMInvalidReadStatusRequest = errors.New("invalid message read status request")
+	// ErrIMNotGroupMember 表示调用者不是该群成员，无权查询已读状态。
+	ErrIMNotGroupMember = errors.New("caller is not a group member")
 )
 
 type IMToken struct {
@@ -52,6 +57,15 @@ type IMToken struct {
 const (
 	imTokenCachePrefix  = "openim:user-token:v1:"
 	imTokenRefreshAhead = 5 * time.Minute
+
+	// 群聊已读状态缓存（复用 TokenCache 的 CacheGet/CacheSet）。
+	// 成员游标单调递增、结果 TTL 极短，缓存安全。
+	imReadCursorCachePrefix = "im:read:cursor:v1:"
+	imReadResultCachePrefix = "im:read:status:v1:"
+	imReadCursorCacheTTL    = 3 * time.Second
+	imReadResultCacheTTL    = 8 * time.Second
+	// imReadFetchConcurrency 并发拉取成员已读游标的上限。
+	imReadFetchConcurrency = 10
 )
 
 // IMTokenCache is intentionally small so the IM service can use Redis without
@@ -845,4 +859,170 @@ func (s *IMService) ensureOpenIMGroup(ctx context.Context, requesterID, internal
 		return err
 	}
 	return nil
+}
+
+// MessageReadQuery 一条待查已读状态的消息（发送者自己发送的群消息）。
+type MessageReadQuery struct {
+	ClientMsgID string `json:"clientMsgId"`
+	Seq         int64  `json:"seq"`     // OpenIM 会话内消息序号，单调递增
+	SendTime    int64  `json:"sendTime"` // 毫秒时间戳
+}
+
+// MessageReadResult 一条消息的已读聚合结果。计数均不含发送者本人。
+type MessageReadResult struct {
+	TotalCount    int      `json:"totalCount"`    // 应读人数（不含发送者；晚于消息入群的成员不计）
+	HasReadCount  int      `json:"hasReadCount"`  // 已读人数
+	UnreadCount   int      `json:"unreadCount"`   // 未读人数
+	ReadMemberIDs []string `json:"readMemberIds"` // 已读成员的 OpenIM userID（前端还原业务 UUID）
+}
+
+// MessageReadStatus 计算某群会话里若干消息各自被哪些成员已读。
+//
+// conversationID 形如 "sg_<imGroupId>"；messages 来自发送者自己发送的消息。
+// 判定规则：成员.hasReadSeq >= 消息.seq 即视为已读（详见《群聊消息已读-后端改造清单》§6）。
+func (s *IMService) MessageReadStatus(ctx context.Context, callerUserID, conversationID string, messages []MessageReadQuery) (map[string]MessageReadResult, error) {
+	if s.Client == nil || !s.Client.Available() {
+		return nil, ErrIMUnavailable
+	}
+	if len(messages) == 0 || len(messages) > 50 {
+		return nil, ErrIMInvalidReadStatusRequest
+	}
+	imGroupID, ok := strings.CutPrefix(conversationID, "sg_")
+	if !ok || imGroupID == "" {
+		return nil, ErrIMInvalidReadStatusRequest
+	}
+	if _, err := im.BusinessIDFromUserID(imGroupID); err != nil {
+		return nil, ErrIMInvalidReadStatusRequest
+	}
+	callerIMID, err := im.UserIDFromBusinessID(callerUserID)
+	if err != nil {
+		return nil, ErrIMInvalidReadStatusRequest
+	}
+	for _, m := range messages {
+		if m.ClientMsgID == "" || m.Seq <= 0 || m.SendTime <= 0 {
+			return nil, ErrIMInvalidReadStatusRequest
+		}
+	}
+
+	results := make(map[string]MessageReadResult, len(messages))
+	// 1) 命中整条结果缓存的直接返回，未命中才进入后续计算。
+	pending := make([]MessageReadQuery, 0, len(messages))
+	for _, m := range messages {
+		key := imReadResultCachePrefix + conversationID + ":" + strconv.FormatInt(m.Seq, 10)
+		if s.TokenCache != nil && s.TokenCache.Available() {
+			if payload, found, err := s.TokenCache.CacheGet(ctx, key); err == nil && found {
+				var r MessageReadResult
+				if json.Unmarshal([]byte(payload), &r) == nil {
+					results[m.ClientMsgID] = r
+					continue
+				}
+			}
+		}
+		pending = append(pending, m)
+	}
+	if len(pending) == 0 {
+		return results, nil
+	}
+
+	// 2) 拉一次全量成员，校验调用者是成员；成员池 = 除调用者外的当前成员。
+	members, err := s.Client.ListGroupMembers(ctx, imGroupID)
+	if err != nil {
+		return nil, err
+	}
+	isMember := false
+	memberPool := make(map[string]int64, len(members)) // OpenIM userID → joinTime
+	for _, m := range members {
+		if m.UserID == callerIMID {
+			isMember = true
+			continue
+		}
+		memberPool[m.UserID] = m.JoinTime
+	}
+	if !isMember {
+		return nil, ErrIMNotGroupMember
+	}
+
+	// 3) 并发取每个成员的已读游标（失败重试 1 次后跳过，视为未读）。
+	readSeq := s.memberReadSeqs(ctx, conversationID, memberPool)
+
+	// 4) 逐条消息计算，并写入结果缓存。
+	for _, m := range pending {
+		total, hasRead := 0, 0
+		readIDs := make([]string, 0)
+		for memberID, joinTime := range memberPool {
+			if joinTime > m.SendTime {
+				continue // 晚于消息发送才入群，不计入应读
+			}
+			total++
+			if readSeq[memberID] >= m.Seq {
+				hasRead++
+				readIDs = append(readIDs, memberID)
+			}
+		}
+		r := MessageReadResult{
+			TotalCount:    total,
+			HasReadCount:  hasRead,
+			UnreadCount:   total - hasRead,
+			ReadMemberIDs: readIDs,
+		}
+		results[m.ClientMsgID] = r
+		if s.TokenCache != nil && s.TokenCache.Available() {
+			key := imReadResultCachePrefix + conversationID + ":" + strconv.FormatInt(m.Seq, 10)
+			if payload, err := json.Marshal(r); err == nil {
+				_ = s.TokenCache.CacheSet(ctx, key, string(payload), imReadResultCacheTTL)
+			}
+		}
+	}
+	return results, nil
+}
+
+// memberReadSeqs 并发获取每个成员在指定会话上的已读游标。
+// 结果 key 为成员 OpenIM userID；获取失败（重试后仍失败）的成员不写入结果，调用方按未读处理。
+func (s *IMService) memberReadSeqs(ctx context.Context, conversationID string, memberPool map[string]int64) map[string]int64 {
+	readSeq := make(map[string]int64, len(memberPool))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, imReadFetchConcurrency)
+	for memberID := range memberPool {
+		wg.Add(1)
+		go func(memberID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			seq := int64(0)
+			cacheKey := imReadCursorCachePrefix + conversationID + ":" + memberID
+			cached := false
+			if s.TokenCache != nil && s.TokenCache.Available() {
+				if payload, found, err := s.TokenCache.CacheGet(ctx, cacheKey); err == nil && found {
+					if json.Unmarshal([]byte(payload), &seq) == nil {
+						cached = true
+					}
+				}
+			}
+			if !cached {
+				var err error
+				for attempt := 0; attempt < 2; attempt++ {
+					seq, err = s.Client.GetConversationHasReadSeq(ctx, memberID, conversationID)
+					if err == nil {
+						break
+					}
+				}
+				if err != nil {
+					log.Printf("read-status: fetch hasReadSeq for %s in %s failed: %v", memberID, conversationID, err)
+					return // 不写入结果，调用方按 0 处理
+				}
+				if s.TokenCache != nil && s.TokenCache.Available() {
+					if payload, err := json.Marshal(seq); err == nil {
+						_ = s.TokenCache.CacheSet(ctx, cacheKey, string(payload), imReadCursorCacheTTL)
+					}
+				}
+			}
+			mu.Lock()
+			readSeq[memberID] = seq
+			mu.Unlock()
+		}(memberID)
+	}
+	wg.Wait()
+	return readSeq
 }

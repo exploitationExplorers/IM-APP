@@ -4,9 +4,11 @@ import type { MessageMenuItem } from '@/components/ImMessageActionMenu.vue'
 import { createFavorite } from '@/api/favorites'
 import { muteGroupMember, removeGroupMember, unmuteGroupMember } from '@/api/group'
 import { MUTE_OPTIONS } from '@/constants/mute'
+import { MAX_FORWARD_MESSAGES } from '@/constants/forward'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
 import { rememberConversationTitle } from '@/utils/favoriteMeta'
+import { isIOSApp } from '@/utils/platform'
 import { businessUserIdFromIM } from '@/utils/openim'
 
 /** 群成员的发言管控元信息（房间页从群成员接口构建，业务用户 ID 索引） */
@@ -133,8 +135,16 @@ export function useChatMessageActions(opts: {
   function toggleSelect(message: ChatMessage) {
     if (!selecting.value) return
     const next = new Set(selectedIds.value)
-    if (next.has(message.id)) next.delete(message.id)
-    else next.add(message.id)
+    if (next.has(message.id)) {
+      next.delete(message.id)
+    } else {
+      // iOS 一次最多转发 99 条：转发模式选满即止；多选模式不限制（批量删除不受影响）
+      if (selectMode.value === 'forward' && isIOSApp() && next.size >= MAX_FORWARD_MESSAGES) {
+        uni.showToast({ title: `一次最多转发 ${MAX_FORWARD_MESSAGES} 条消息`, icon: 'none' })
+        return
+      }
+      next.add(message.id)
+    }
     selectedIds.value = next
   }
 
@@ -150,6 +160,14 @@ export function useChatMessageActions(opts: {
 
   function goForward(messages: ChatMessage[]) {
     if (!messages.length) return
+    // 入口兜底：多选模式勾选不设限，点「转发」时统一校验（iOS 99 条，安卓不限）
+    if (isIOSApp() && messages.length > MAX_FORWARD_MESSAGES) {
+      uni.showToast({
+        title: `一次最多转发 ${MAX_FORWARD_MESSAGES} 条消息，请取消部分消息`,
+        icon: 'none',
+      })
+      return
+    }
     forwardStore.start(
       opts.conversationId.value,
       messages.map((m) => m.id),

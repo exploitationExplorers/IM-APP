@@ -145,6 +145,16 @@ export const getGroupDetail = (id: string) => {
   return http.get<Groups.GroupDetail>(`${GROUPS_BASE}/${encodeURIComponent(id)}`);
 };
 
+export const getGroupStatusLogs = (
+  id: string,
+  params: { page?: number; size?: number } = {},
+) => {
+  return http.get<AdminPage<Groups.GroupStatusLogItem>>(
+    `${GROUPS_BASE}/${encodeURIComponent(id)}/status-logs`,
+    params,
+  );
+};
+
 export const dissolveGroup = (id: string, body: Groups.ReqDissolveGroup) => {
   return http.post<Groups.ActionResult>(`${GROUPS_BASE}/${encodeURIComponent(id)}/dissolve`, body);
 };

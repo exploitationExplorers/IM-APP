@@ -39,8 +39,19 @@ func (r *DataRepo) ListGroups(ctx context.Context, keyword, status string, limit
 		where += " AND (g.name ILIKE $" + itoa(len(args)) + " OR g.id::text=$" + itoa(len(args)) + ")"
 	}
 	if status != "" && status != "all" {
-		args = append(args, status)
-		where += " AND g.status=$" + itoa(len(args))
+		// 前端用归一化业务状态（normal/muted/banned/dissolved），需映射到数据库实际查询条件：
+		// groups.status 只存 active/dismissed；全员禁言由 all_muted 字段表示，不在 status 中。
+		switch status {
+		case "normal":
+			where += " AND g.status='active'"
+		case "dissolved":
+			where += " AND g.status='dismissed'"
+		case "muted":
+			where += " AND COALESCE(g.all_muted,false)=true"
+		default:
+			args = append(args, status)
+			where += " AND g.status=$" + itoa(len(args))
+		}
 	}
 	var total int64
 	if err := r.DB.QueryRow(ctx, "SELECT COUNT(*) FROM groups g WHERE 1=1"+where, args...).Scan(&total); err != nil {

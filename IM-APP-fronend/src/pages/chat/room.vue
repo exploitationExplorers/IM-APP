@@ -160,6 +160,16 @@ function nicknameOf(message: ChatMessage): string {
   return contact?.remark?.trim() || contact?.nickname || ''
 }
 
+/**
+ * 私聊已读回执展示条件：仅私聊 + 自己发的 + 已成功发出的消息。
+ * 发送中 / 失败的消息没有已读语义；群聊 OpenIM 单聊回执能力不覆盖，不展示。
+ */
+function readStateOf(message: ChatMessage): 'read' | 'unread' | undefined {
+  if (chatType.value !== 'private' || !isMine(message)) return undefined
+  if (message.status !== 'sent') return undefined
+  return message.hasRead ? 'read' : 'unread'
+}
+
 function systemTextOf(message: ChatMessage): string {
   return replaceOpenIMAdminLabel(message.content, groupOwnerName.value)
 }
@@ -1031,6 +1041,7 @@ function pickFavorite() {
           :fallback-avatar="fallbackAvatarOf(m)"
           :nickname="nicknameOf(m)"
           :preview-urls="imagePreviewUrls"
+          :read-state="readStateOf(m)"
           @avatar-click="onAvatarClick(m)"
           @card-view="onViewCard"
           @longpress="actions.openMenu(m)"

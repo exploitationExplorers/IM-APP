@@ -1038,6 +1038,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     systemEventKey: imNotificationEventKey(item) || undefined,
     notificationKind: notificationKind || undefined,
     quote: quotePreviewOf(item),
+    hasRead: messageIsRead(item),
     status:
       item.status === MessageStatus.Failed
         ? 'failed'
@@ -1045,6 +1046,12 @@ export function toChatMessage(item: MessageItem): ChatMessage {
           ? 'sending'
           : 'sent',
   }
+}
+
+/** 单聊已读标记：App 原生桥可能把布尔编成字符串，统一容错 */
+function messageIsRead(item: MessageItem): boolean {
+  const raw = (item as { isRead?: unknown }).isRead
+  return raw === true || raw === 'true'
 }
 
 function toAppMessageType(contentType: number): AppMessageType {

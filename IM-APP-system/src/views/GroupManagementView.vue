@@ -2,7 +2,7 @@
 import { onMounted, reactive, shallowRef, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { Delete, RefreshLeft, Search } from "@element-plus/icons-vue";
-import { getGroups, getGroupDetail, dissolveGroup as dissolveGroupApi, muteGroupAll, getGroupRecallLogs, getGroupReports } from "@/api/modules/admin";
+import { getGroups, getGroupDetail, dissolveGroup as dissolveGroupApi, muteGroupAll, getGroupRecallLogs, getGroupReports, getGroupStatusLogs } from "@/api/modules/admin";
 import { getGroupMembersApi, postGroupRecallMessageApi, putGroupMemberAddFriendApi } from "@/api/modules/adminGroups";
 import type { AdminGroups } from "@/api/modules/adminGroups";
 import type { Groups, Reports } from "@/api/interface";
@@ -14,6 +14,7 @@ const statusLabels: Record<string, string> = {
   muted: "全员禁言",
   banned: "封禁",
   dissolved: "已解散",
+  dismissed: "已解散",
 };
 
 const statusTagTypes: Record<string, "info" | "warning" | "success" | "danger" | "primary"> = {
@@ -21,6 +22,7 @@ const statusTagTypes: Record<string, "info" | "warning" | "success" | "danger" |
   muted: "warning",
   banned: "danger",
   dissolved: "info",
+  dismissed: "info",
 };
 
 const joinModeLabels: Record<string, string> = {
@@ -74,6 +76,12 @@ const groupReportsTotal = shallowRef(0);
 const groupMembers = shallowRef<AdminGroups.GroupMember[]>([]);
 const membersLoading = shallowRef(false);
 
+const statusLogs = shallowRef<Groups.GroupStatusLogItem[]>([]);
+const statusLogsLoading = shallowRef(false);
+const statusLogsPage = shallowRef(1);
+const statusLogsSize = shallowRef(10);
+const statusLogsTotal = shallowRef(0);
+
 const recallFormRef = shallowRef<FormInstance>();
 const recallSubmitting = shallowRef(false);
 const recallForm = reactive({
@@ -98,6 +106,7 @@ const operatorTypeLabels: Record<string, string> = {
   admin: "管理员",
   member: "成员",
   system: "系统",
+  user: "用户/群主",
 };
 
 const reportStatusLabels: Record<string, string> = {
@@ -133,6 +142,11 @@ function formatStatus(status?: string): string {
   return statusLabels[status] ?? status;
 }
 
+/** 群是否已解散：前端筛选用 dissolved，后端 normalize 保留 server 原始值 dismissed，两值都算已解散 */
+function isDissolved(status?: string): boolean {
+  return status === "dissolved" || status === "dismissed";
+}
+
 function formatJoinMode(mode?: string): string {
   if (!mode) return "-";
   return joinModeLabels[mode] ?? mode;
@@ -156,6 +170,12 @@ function formatActionTaken(action?: string): string {
 function formatTime(value?: string): string {
   if (!value) return "-";
   return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+}
+
+function formatStatusChange(from?: string, to?: string): string {
+  const f = from ? (statusLabels[from] ?? from) : "—";
+  const t = to ? (statusLabels[to] ?? to) : "—";
+  return `${f} → ${t}`;
 }
 
 function avatarText(row: Pick<Groups.GroupItem, "name">): string {
@@ -216,6 +236,23 @@ async function loadRecallLogs(groupId: string): Promise<void> {
   }
 }
 
+async function loadStatusLogs(groupId: string): Promise<void> {
+  statusLogsLoading.value = true;
+  try {
+    const res = await getGroupStatusLogs(groupId, {
+      page: statusLogsPage.value,
+      size: statusLogsSize.value,
+    });
+    statusLogs.value = res.data?.items ?? [];
+    statusLogsTotal.value = res.data?.total ?? 0;
+  } catch {
+    statusLogs.value = [];
+    statusLogsTotal.value = 0;
+  } finally {
+    statusLogsLoading.value = false;
+  }
+}
+
 async function loadGroupReports(groupId: string): Promise<void> {
   groupReportsLoading.value = true;
   try {
@@ -262,6 +299,9 @@ async function openGroupDetail(group: Groups.GroupItem): Promise<void> {
   groupReportsTotal.value = 0;
   groupReportsPage.value = 1;
   groupMembers.value = [];
+  statusLogs.value = [];
+  statusLogsTotal.value = 0;
+  statusLogsPage.value = 1;
   resetRecallForm();
   detailLoading.value = true;
   try {
@@ -270,6 +310,7 @@ async function openGroupDetail(group: Groups.GroupItem): Promise<void> {
       loadRecallLogs(group.id),
       loadGroupReports(group.id),
       loadGroupMembers(group.id),
+      loadStatusLogs(group.id),
     ]);
     selectedGroup.value = detailRes.data ?? null;
   } catch {
@@ -289,13 +330,16 @@ function closeGroupDetail(): void {
   groupReportsTotal.value = 0;
   groupReportsPage.value = 1;
   groupMembers.value = [];
+  statusLogs.value = [];
+  statusLogsTotal.value = 0;
+  statusLogsPage.value = 1;
   resetRecallForm();
   closeDissolveDialog();
   closeMuteDialog();
 }
 
 async function toggleMemberAddFriend(group: Groups.GroupDetail, next?: boolean): Promise<void> {
-  if (group.status === "dissolved") return;
+  if (isDissolved(group.status)) return;
   const enabled = typeof next === "boolean" ? next : !group.allowMemberAddFriend;
   const action = enabled ? "允许群内互加好友" : "禁止群内互加好友";
   try {
@@ -326,7 +370,7 @@ async function submitRecallMessage(): Promise<void> {
     ?.validate()
     .then(() => true)
     .catch(() => false);
-  if (!ok || recallSubmitting.value || !selectedGroup.value) return;
+  if (!ok || recallSubmitting.value || !selectedGroup.value || isDissolved(selectedGroup.value.status)) return;
 
   const messageId = recallForm.messageId.trim();
   const reason = recallForm.reason.trim();
@@ -353,7 +397,7 @@ async function submitRecallMessage(): Promise<void> {
 }
 
 function openMuteDialog(group: Groups.GroupItem | Groups.GroupDetail): void {
-  if (group.status === "dissolved" || group.status === "banned") return;
+  if (isDissolved(group.status) || group.status === "banned") return;
   muteTarget.value = group;
   muteNext.value = !group.allMuted;
   muteForm.reason = "";
@@ -413,7 +457,7 @@ function createIdempotencyKey(): string {
 }
 
 function openDissolveDialog(group: Groups.GroupItem | Groups.GroupDetail): void {
-  if (group.status === "dissolved") return;
+  if (isDissolved(group.status)) return;
   dissolveTarget.value = group;
   dissolveForm.reason = "";
   dissolveForm.ticketNo = "";
@@ -476,6 +520,11 @@ watch([recallPage, recallSize], () => {
 watch([groupReportsPage, groupReportsSize], () => {
   if (!detailVisible.value || !selectedGroup.value?.id) return;
   void loadGroupReports(selectedGroup.value.id);
+});
+
+watch([statusLogsPage, statusLogsSize], () => {
+  if (!detailVisible.value || !selectedGroup.value?.id) return;
+  void loadStatusLogs(selectedGroup.value.id);
 });
 
 onMounted(() => {
@@ -567,7 +616,7 @@ onMounted(() => {
               <el-button
                 link
                 :type="row.allMuted ? 'success' : 'warning'"
-                :disabled="row.status === 'dissolved' || row.status === 'banned'"
+                :disabled="isDissolved(row.status) || row.status === 'banned'"
                 @click="openMuteDialog(row)"
               >
                 {{ row.allMuted ? "解除禁言" : "全员禁言" }}
@@ -575,7 +624,7 @@ onMounted(() => {
               <el-button
                 link
                 type="danger"
-                :disabled="row.status === 'dissolved'"
+                :disabled="isDissolved(row.status)"
                 @click="openDissolveDialog(row)"
               >
                 解散
@@ -635,6 +684,12 @@ onMounted(() => {
             <el-descriptions-item label="创建时间" :span="2">
               {{ formatTime(selectedGroup.createdAt) }}
             </el-descriptions-item>
+            <el-descriptions-item v-if="isDissolved(selectedGroup.status)" label="解散时间" :span="2">
+              {{ formatTime(selectedGroup.dissolvedAt) }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="isDissolved(selectedGroup.status)" label="解散原因" :span="2">
+              {{ selectedGroup.dissolveReason || "-" }}
+            </el-descriptions-item>
             <el-descriptions-item label="群公告" :span="2">
               {{ selectedGroup.announcement || "未设置" }}
             </el-descriptions-item>
@@ -646,7 +701,7 @@ onMounted(() => {
               <span>全员禁言</span>
               <el-switch
                 :model-value="!!selectedGroup.allMuted"
-                :disabled="selectedGroup.status === 'dissolved' || selectedGroup.status === 'banned'"
+                :disabled="isDissolved(selectedGroup.status) || selectedGroup.status === 'banned'"
                 @change="() => openMuteDialog(selectedGroup!)"
               />
             </div>
@@ -654,12 +709,12 @@ onMounted(() => {
               <span>允许群内互加好友</span>
               <el-switch
                 :model-value="!!selectedGroup.allowMemberAddFriend"
-                :disabled="selectedGroup.status === 'dissolved'"
+                :disabled="isDissolved(selectedGroup.status)"
                 @change="(val: boolean) => toggleMemberAddFriend(selectedGroup!, val)"
               />
             </div>
             <el-button
-              v-if="selectedGroup.status !== 'dissolved'"
+              v-if="!isDissolved(selectedGroup.status)"
               type="danger"
               plain
               class="dissolve-btn"
@@ -695,6 +750,7 @@ onMounted(() => {
               :model="recallForm"
               :rules="recallRules"
               label-width="90px"
+              :disabled="isDissolved(selectedGroup.status)"
               @submit.prevent="submitRecallMessage"
             >
               <el-form-item label="消息ID" prop="messageId">
@@ -806,6 +862,49 @@ onMounted(() => {
               </div>
             </template>
             <el-empty v-else description="暂无举报记录" :image-size="60" />
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section-header">
+              <h4>群状态变更记录</h4>
+              <el-tag v-if="statusLogsTotal > 0" type="info" size="small">{{ statusLogsTotal }} 条</el-tag>
+            </div>
+            <template v-if="statusLogs.length || statusLogsLoading">
+              <el-table
+                v-loading="statusLogsLoading"
+                :data="statusLogs"
+                size="small"
+                style="width: 100%"
+              >
+                <el-table-column label="变更" min-width="110">
+                  <template #default="{ row }">{{ formatStatusChange(row.fromStatus, row.toStatus) }}</template>
+                </el-table-column>
+                <el-table-column label="操作人" min-width="100" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.operatorName || "-" }}</template>
+                </el-table-column>
+                <el-table-column label="操作方" min-width="90">
+                  <template #default="{ row }">{{ formatOperatorType(row.operatorType) }}</template>
+                </el-table-column>
+                <el-table-column label="原因" min-width="140" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.reason || "-" }}</template>
+                </el-table-column>
+                <el-table-column label="时间" min-width="160">
+                  <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+                </el-table-column>
+              </el-table>
+              <div v-if="statusLogsTotal > 0" class="recall-footer">
+                <el-pagination
+                  background
+                  small
+                  v-model:current-page="statusLogsPage"
+                  v-model:page-size="statusLogsSize"
+                  :page-sizes="[10, 20, 50]"
+                  layout="total, sizes, prev, pager, next"
+                  :total="statusLogsTotal"
+                />
+              </div>
+            </template>
+            <el-empty v-else description="暂无状态变更记录" :image-size="60" />
           </div>
         </template>
         <el-empty v-else-if="!detailLoading" description="暂无详情" :image-size="64" />

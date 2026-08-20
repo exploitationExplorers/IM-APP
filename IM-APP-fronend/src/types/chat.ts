@@ -35,6 +35,12 @@ export interface ChatMessage {
   notificationKind?: 'dissolved' | 'group-muted' | 'group-cancel-muted' | string
   /** 引用回复时展示的原消息摘要 */
   quote?: MessageQuote
+  /**
+   * 私聊已读回执：对方是否已读「我发的」这条消息。
+   * 来自 OpenIM MessageItem.isRead，实时更新靠 OnRecvC2CReadReceipt 事件翻转；
+   * 群聊与对方发来的消息不展示该状态。
+   */
+  hasRead?: boolean
   /** 本地发送中状态 */
   status?: 'sending' | 'sent' | 'failed'
 }
