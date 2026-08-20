@@ -420,6 +420,20 @@ export async function logoutOpenIM(): Promise<void> {
   } finally {
     resetLoginCache()
   }
+  // App 原生 SDK Logout 不会清本地数据库：会话/消息数据持久化在 SQLite，
+  // 下一个账号登录后 GetConversationList 会读到上一个账号的残留会话。
+  // 这里通过 unInitSDK 销毁 SDK 实例并清空本地数据库，确保下次 initOpenIM 是干净的。
+  // H5 平台 SDK 库为 in-memory，无需销毁。
+  if (isAppPlatform) {
+    try {
+      await imCall(IMMethods.UnInitSDK)
+    } catch {
+      /* App 已退出登录，destroy 失败不阻塞 */
+    }
+    // unInitSDK 会清掉原生层的 connectionWatchers 订阅；
+    // 重置闭锁，让下次 initOpenIM 重新挂连接事件监听。
+    connectionWatchersReady = false
+  }
 }
 
 /** 手动重连：重新取 token 再登录，用于「重新选线」 */
@@ -1369,7 +1383,7 @@ function toISOTime(timestamp: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// 会话级设置（置顶 / 免打扰）：直接走 OpenIM SDK，随账号云同步，多端一致。
+// 会话级设置（置顶 / 免打扰 / 隐藏）：直接走 OpenIM SDK，随账号云同步，多端一致。
 // 注意：这些不经由业务后端 REST 接口，避免与 OpenIM 服务端的会话状态冲突。
 // ---------------------------------------------------------------------------
 
@@ -1388,6 +1402,23 @@ export async function setConversationPin(conversationID: string, isPinned: boole
  */
 export async function setConversationRecvOpt(conversationID: string, opt: number): Promise<void> {
   await imCall('setConversation' as IMMethods, { conversationID, recvMsgOpt: opt })
+}
+
+/**
+ * 隐藏指定会话（仅本地层面）。
+ * - 群聊/私聊未解散时，对方发消息会重新插入列表（OpenIM OnNewConversation / OnConversationChanged 事件触发）。
+ * - 不影响服务端消息记录。
+ * - 对应 OpenIM SDK 的 hideConversation 接口。
+ * - H5 平台 client-sdk 不支持 hideConversation，调用会抛 undefined.apply 错误，本地已过滤等于成功。
+ */
+export async function hideConversation(conversationID: string): Promise<void> {
+  try {
+    await imCall(IMMethods.HideConversation, conversationID)
+  } catch (e) {
+    // H5 SDK 不支持 hideConversation；本地 hideConversationLocal 已经在调用前把会话从列表中移除，
+    // 因此本次操作在 UI 上已生效。吞掉底层错误即可。
+    console.warn('[openim] hideConversation 调用失败（H5 SDK 可能不支持该接口）', e)
+  }
 }
 
 function conversationEx(item: ConversationItem): string {

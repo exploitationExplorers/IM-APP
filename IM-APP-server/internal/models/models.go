@@ -55,6 +55,7 @@ type Contact struct {
 	Nickname     string           `json:"nickname"`
 	Avatar       string           `json:"avatar"`
 	Remark       string           `json:"remark"`
+	IsBlocked    bool             `json:"isBlocked"`
 	Tags         []ContactTagItem `json:"tags,omitempty"`
 	CommonGroups []GroupPreview   `json:"commonGroups"`
 }
@@ -127,4 +128,19 @@ type GroupFriendRequestResult struct {
 	OK        bool   `json:"ok"`
 	RequestID string `json:"requestId"`
 	Status    string `json:"status"`
+}
+
+// BlockedUser 黑名单成员简表（区别于 Contact：不含好友/标签/共同群信息）
+type BlockedUser struct {
+	ID        string    `json:"id"`
+	PublicID  string    `json:"publicId,omitempty"`
+	Nickname  string    `json:"nickname"`
+	Avatar    string    `json:"avatar"`
+	BlockedAt time.Time `json:"blockedAt"`
+}
+
+// BlockedListResponse 黑名单列表响应
+type BlockedListResponse struct {
+	Items []BlockedUser `json:"items"`
+	Total int64         `json:"total"`
 }

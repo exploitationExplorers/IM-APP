@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"im-app-server/internal/middleware"
 	"im-app-server/internal/models"
@@ -298,6 +299,23 @@ func (h *ContactHandler) DeleteContact(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
+}
+
+func (h *ContactHandler) ListBlockedContacts(c *gin.Context) {
+	uid := middleware.UserID(c)
+	keyword := c.Query("keyword")
+	limit := 100
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
+	}
+	resp, err := h.Svc.ListBlockedContacts(c.Request.Context(), uid, keyword, limit)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	response.OK(c, resp)
 }
 
 func (h *ContactHandler) BlockContact(c *gin.Context) {

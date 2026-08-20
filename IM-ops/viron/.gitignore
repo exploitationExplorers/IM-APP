@@ -29,3 +29,8 @@ AGENTS.override.md
 skills/
 .hallmark/
 .impeccable/
+
+# 本地学习笔记，不入库
+log-viewport-optimization-learn.html
+log-viewport-cases-playground.html
+log-viewport-from-zero.html

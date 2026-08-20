@@ -18,9 +18,6 @@ const contactListWhere = `
 		FROM friendships f
 		JOIN users u ON u.id = f.friend_id
 		WHERE f.user_id=$1::uuid
-		AND NOT EXISTS (
-			SELECT 1 FROM user_blocks b WHERE b.user_id=$1::uuid AND b.blocked_id=f.friend_id
-		)
 		AND ($2='' OR u.nickname ILIKE '%'||$2||'%' ESCAPE '\'
 		     OR COALESCE(f.remark,'') ILIKE '%'||$2||'%' ESCAPE '\'
 		     OR COALESCE(u.public_id,'') ILIKE '%'||$2||'%' ESCAPE '\')`
@@ -237,11 +234,12 @@ func (r *ContactRepo) UpdateContactRemark(ctx context.Context, uid, friendID, re
 func (r *ContactRepo) GetContact(ctx context.Context, uid, friendID string) (models.Contact, error) {
 	var item models.Contact
 	err := r.DB.QueryRow(ctx, `
-		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, COALESCE(f.remark,'')
+		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, COALESCE(f.remark,''),
+			EXISTS(SELECT 1 FROM user_blocks b WHERE b.user_id=$1::uuid AND b.blocked_id=f.friend_id)
 		FROM friendships f
 		JOIN users u ON u.id = f.friend_id
 		WHERE f.user_id=$1 AND f.friend_id=$2`, uid, friendID,
-	).Scan(&item.ID, &item.PublicID, &item.Nickname, &item.Avatar, &item.Remark)
+	).Scan(&item.ID, &item.PublicID, &item.Nickname, &item.Avatar, &item.Remark, &item.IsBlocked)
 	return item, err
 }
 
@@ -338,19 +336,11 @@ func (r *ContactRepo) BlockUser(ctx context.Context, uid, blockedID string) erro
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, _ = tx.Exec(ctx, `
-		DELETE FROM friendships
-		WHERE (user_id=$1 AND friend_id=$2) OR (user_id=$2 AND friend_id=$1)`,
-		uid, blockedID)
+	// 拉黑仅屏蔽消息往来，不删除好友关系；解除黑名单后关系保持原样。
 	_, err = tx.Exec(ctx, `
 		INSERT INTO user_blocks(user_id, blocked_id) VALUES($1,$2)
 		ON CONFLICT DO NOTHING`, uid, blockedID)
 	if err != nil {
-		return err
-	}
-	if err := EnqueueIMSyncTx(ctx, tx, IMEventFriendDeleted, uid, map[string]string{
-		"friendUserId": blockedID,
-	}); err != nil {
 		return err
 	}
 	if err := EnqueueIMSyncTx(ctx, tx, IMEventBlockAdded, uid, map[string]string{
@@ -386,6 +376,49 @@ func (r *ContactRepo) IsBlocked(ctx context.Context, uid, otherID string) (bool,
 		SELECT EXISTS(SELECT 1 FROM user_blocks WHERE user_id=$1 AND blocked_id=$2)`,
 		uid, otherID).Scan(&exists)
 	return exists, err
+}
+
+// ListBlockedUsers 当前用户拉黑的所有人，按拉黑时间倒序。
+// keyword 为空时不附加搜索条件；limit<=0 或 >100 默认 100。
+func (r *ContactRepo) ListBlockedUsers(ctx context.Context, uid, keyword string, limit int) ([]models.BlockedUser, int64, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var total int64
+	if err := r.DB.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM user_blocks b
+		JOIN users u ON u.id = b.blocked_id
+		WHERE b.user_id = $1::uuid
+		  AND ($2 = '' OR u.nickname ILIKE '%' || $2 || '%')`,
+		uid, keyword).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := r.DB.Query(ctx, `
+		SELECT b.blocked_id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, b.created_at
+		FROM user_blocks b
+		JOIN users u ON u.id = b.blocked_id
+		WHERE b.user_id = $1::uuid
+		  AND ($2 = '' OR u.nickname ILIKE '%' || $2 || '%')
+		ORDER BY b.created_at DESC
+		LIMIT $3`,
+		uid, keyword, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.BlockedUser, 0)
+	for rows.Next() {
+		var u models.BlockedUser
+		if err := rows.Scan(&u.ID, &u.PublicID, &u.Nickname, &u.Avatar, &u.BlockedAt); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 func (r *ContactRepo) HasPendingRequest(ctx context.Context, uid, otherID string) (bool, error) {

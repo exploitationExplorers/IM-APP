@@ -43,6 +43,7 @@ const emit = defineEmits<{
   avatarClick: []
   longpress: []
   cardView: [card: CardPayload]
+  retry: [message: ChatMessage]
 }>()
 
 function onAvatarClick() {
@@ -71,6 +72,11 @@ function onViewCard() {
 
 function onLongPress() {
   emit('longpress')
+}
+
+/** 发送失败：点击感叹号触发重发 */
+function onRetry() {
+  emit('retry', props.message)
 }
 
 /**
@@ -318,7 +324,12 @@ function openLink(url: string) {
     />
     <view class="content-wrap">
       <text v-if="showNickname" class="nickname">{{ nickname }}</text>
-      <view v-if="message.type === 'image'" class="bubble image-bubble" @click="previewImage" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
+      <view class="bubble-line">
+        <!-- 发送失败：红色感叹号显示在气泡前面，点击重发 -->
+        <view v-if="mine && message.status === 'failed'" class="retry-flag" @click.stop="onRetry">
+          <text class="retry-icon">!</text>
+        </view>
+        <view v-if="message.type === 'image'" class="bubble image-bubble" @click="previewImage" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
         <image class="msg-image" :src="message.content" mode="widthFix" />
       </view>
       <view
@@ -392,6 +403,7 @@ function openLink(url: string) {
           @click="p.type === 'link' ? openLink(p.value) : undefined"
         >{{ p.value }}</text>
       </view>
+      </view>
       <view class="meta-row">
         <!-- 私聊已读标识（微信式钩）：未读单钩 / 已读双钩，放在时间前面 -->
         <view v-if="readState" class="read-flag" :class="{ read: readState === 'read' }">
@@ -446,6 +458,13 @@ function openLink(url: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/** 气泡行：感叹号（失败）在气泡前面，与气泡水平居中排列 */
+.bubble-line {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
 }
 
 .bubble {
@@ -747,6 +766,25 @@ function openLink(url: string) {
   left: 8rpx;
   width: 12rpx;
   height: 7rpx;
+}
+
+/** 发送失败感叹号：红色圆形 + 白感叹号，点击重发 */
+.retry-flag {
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 50%;
+  background: #e54d42;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.retry-icon {
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .time {

@@ -38,6 +38,15 @@ export function classifyLogSeverity(line: string): LogSeverity {
   return EXCEPTION_PATTERN.test(line) ? "error" : "unknown";
 }
 
+export function isLogStackContinuation(line: string): boolean {
+  return STACK_CONTINUATION_PATTERN.test(line);
+}
+
+// 行内容与行等级互不依赖，拆开后等级可以按行缓存，续行继承只在渲染时叠加。
+export function renderLogLineInnerHtml(line: string, options: LogHighlightOptions = {}): string {
+  return renderLineContent(line, options);
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -100,7 +109,31 @@ function statusClass(value: string): string {
   return "";
 }
 
-function renderLine(line: string, severity: LogSeverity, options: LogHighlightOptions): string {
+export interface LogLinePresentation {
+  severity: LogSeverity;
+  innerHtml: string;
+}
+
+export function renderLogLinePresentation(line: string, options: LogHighlightOptions = {}, previousSeverity: LogSeverity = "unknown"): LogLinePresentation {
+  let severity = options.semantic === false ? "unknown" : classifyLogSeverity(line);
+  if (severity === "unknown" && STACK_CONTINUATION_PATTERN.test(line) && (previousSeverity === "critical" || previousSeverity === "error")) {
+    severity = previousSeverity;
+  }
+  return { severity, innerHtml: renderLineContent(line, options) };
+}
+
+export function renderHighlightedLogHtml(output: string, options: LogHighlightOptions = {}): string {
+  let previousSeverity: LogSeverity = "unknown";
+  const semantic = options.semantic !== false;
+  return output.split(/\r?\n/).map((line) => {
+    const presentation = renderLogLinePresentation(line, options, previousSeverity);
+    if (semantic && presentation.severity !== "unknown" && line.trim()) previousSeverity = presentation.severity;
+    else if (line.trim() && !STACK_CONTINUATION_PATTERN.test(line)) previousSeverity = "unknown";
+    return `<span class="log-line log-line--${presentation.severity}">${presentation.innerHtml || "&#8203;"}</span>`;
+  }).join("");
+}
+
+function renderLineContent(line: string, options: LogHighlightOptions): string {
   const matches = collectMatches(line, options);
   let cursor = 0;
   let content = "";
@@ -113,19 +146,5 @@ function renderLine(line: string, severity: LogSeverity, options: LogHighlightOp
     cursor = match.end;
   }
   content += escapeHtml(line.slice(cursor));
-  return `<span class="log-line log-line--${severity}">${content || "&#8203;"}</span>`;
-}
-
-export function renderHighlightedLogHtml(output: string, options: LogHighlightOptions = {}): string {
-  let previousSeverity: LogSeverity = "unknown";
-  const semantic = options.semantic !== false;
-  return output.split(/\r?\n/).map((line) => {
-    let severity = semantic ? classifyLogSeverity(line) : "unknown";
-    if (severity === "unknown" && STACK_CONTINUATION_PATTERN.test(line) && (previousSeverity === "critical" || previousSeverity === "error")) {
-      severity = previousSeverity;
-    }
-    if (severity !== "unknown" && line.trim()) previousSeverity = severity;
-    else if (line.trim() && !STACK_CONTINUATION_PATTERN.test(line)) previousSeverity = "unknown";
-    return renderLine(line, severity, options);
-  }).join("");
+  return content || "&#8203;";
 }

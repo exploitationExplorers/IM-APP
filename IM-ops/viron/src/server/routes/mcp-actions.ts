@@ -4,7 +4,8 @@ import { canAccessConnection, canAccessEnvironmentLog, canAccessWebCredential } 
 import { writeAudit } from "../audit.js";
 import { listMcpBusinessOperations, MCP_BUSINESS_OPERATION_MODES } from "../../shared/mcp-business-operations.js";
 import { VIRON_MCP_TOOL_NAMES } from "../../shared/mcp-tools.js";
-import { parseStoredLogFilePaths, buildSshLogSnapshotCommand } from "../../shared/environment-log.js";
+import { parseStoredLogFilePaths } from "../../shared/environment-log.js";
+import { prepareLogSnapshotCommand } from "../../shared/log-path-resolver.js";
 import { executionScope } from "../execution-scope.js";
 import { executeSshCommand, executeSshCommandOnConnection, type SshCommandResult } from "../ssh/command.js";
 import { connectSsh } from "../ssh/connector.js";
@@ -198,7 +199,12 @@ export async function registerMcpActionRoutes(app: FastifyInstance): Promise<voi
     if (!log) return reply.code(404).send({ error: "LOG_NOT_FOUND", message: "日志配置不存在" });
     const filePaths = parseStoredLogFilePaths(log.file_paths_json, log.file_path);
     try {
-      const result = await executeSshCommand(app, log.ssh_connection_id, buildSshLogSnapshotCommand(filePaths, body.initialLines), {
+      const snapshotCommand = await prepareLogSnapshotCommand(
+        (command) => executeSshCommand(app, log.ssh_connection_id, command, { timeoutMs: 30_000, maxBytes: body.maxBytes }),
+        filePaths,
+        body.initialLines,
+      );
+      const result = await executeSshCommand(app, log.ssh_connection_id, snapshotCommand, {
         timeoutMs: 30_000,
         maxBytes: body.maxBytes,
       });

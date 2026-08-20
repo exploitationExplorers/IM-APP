@@ -3,7 +3,6 @@ import type { FastifyInstance } from "fastify";
 import type { ClientChannel } from "ssh2";
 import type { WebSocket } from "ws";
 import {
-  buildSshLogTailCommand,
   MAX_ENVIRONMENT_LOG_FILES,
   MAX_ENVIRONMENT_LOG_LINES,
   MIN_ENVIRONMENT_LOG_LINES,
@@ -11,6 +10,8 @@ import {
   quotePosixShellArg,
 } from "../../shared/environment-log.js";
 import { connectSsh, type ConnectedSsh } from "./connector.js";
+import { executeSshCommandOnConnection } from "./command.js";
+import { prepareLogFollowCommand } from "../../shared/log-path-resolver.js";
 import { normalizeSshLoginScript } from "./options.js";
 import type { AuthenticatedUser } from "../access-control.js";
 
@@ -64,7 +65,7 @@ const TICKET_TTL_MS = 30_000;
 const MAX_PLATFORM_STREAMS = 10;
 const MAX_OWNER_STREAMS = 3;
 
-export { buildSshLogTailCommand, quotePosixShellArg };
+export { quotePosixShellArg };
 
 function sshErrorMessage(error: unknown): string {
   const value = error instanceof Error ? error.message : String(error);
@@ -129,7 +130,11 @@ export class SshLogStreamManager {
     let connected: ConnectedSsh | undefined;
     try {
       connected = await connectSsh(this.app, log.sshConnectionId);
-      const tailCommand = buildSshLogTailCommand(log.filePaths, initialLines);
+      const tailCommand = await prepareLogFollowCommand(
+        (command) => executeSshCommandOnConnection(connected!, command, { timeoutMs: 15_000, maxBytes: 4096 }),
+        log.filePaths,
+        initialLines,
+      );
       const loginScript = connected.connection.options.loginScript ?? "";
       const useLoginScript = connected.connection.options.loginScriptEnabled === true && Boolean(loginScript.trim());
       const channel = await new Promise<ClientChannel>((resolve, reject) => {

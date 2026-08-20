@@ -2,7 +2,7 @@ import { translate as tr } from "./i18n.js";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ClientChannel } from "ssh2";
-import { buildSshLogSnapshotCommand, buildSshLogTailCommand } from "../shared/environment-log.js";
+import { prepareLogFollowCommand, prepareLogSnapshotCommand } from "../shared/log-path-resolver.js";
 import type { DesktopSshCredential } from "./device-identity.js";
 import {
   connectDesktopSshConnection,
@@ -77,7 +77,11 @@ export class DesktopLogRuntime {
     const loaded = await connectDesktopSshConnection(definition.sshConnectionId, await this.currentContext(), this.loadCredential);
     const connected = loaded.connected;
     try {
-      const command = buildSshLogTailCommand(definition.filePaths, definition.initialLines);
+      const command = await prepareLogFollowCommand(
+        (shellCommand) => executeDesktopSshCommandOnConnection(connected, shellCommand, { timeoutMs: 15_000, maxBytes: 4096 }),
+        definition.filePaths,
+        definition.initialLines,
+      );
       const loginScript = connected.connection.options.loginScript ?? "";
       const useLoginScript = connected.connection.options.loginScriptEnabled === true && Boolean(loginScript.trim());
       const channel = await new Promise<ClientChannel>((resolve, reject) => {
@@ -151,9 +155,14 @@ export class DesktopLogRuntime {
   }> {
     const loaded = await connectDesktopSshConnection(definition.sshConnectionId, await this.currentContext(), this.loadCredential);
     try {
+      const snapshotCommand = await prepareLogSnapshotCommand(
+        (shellCommand) => executeDesktopSshCommandOnConnection(loaded.connected, shellCommand, { timeoutMs: 30_000, maxBytes }),
+        definition.filePaths,
+        definition.initialLines,
+      );
       const result = await executeDesktopSshCommandOnConnection(
         loaded.connected,
-        buildSshLogSnapshotCommand(definition.filePaths, definition.initialLines),
+        snapshotCommand,
         { timeoutMs: 30_000, maxBytes },
       );
       return { logId: definition.logId, name: definition.logName, filePaths: [...definition.filePaths], ...result };

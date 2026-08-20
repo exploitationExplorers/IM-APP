@@ -22,6 +22,11 @@ const isOnline = computed(
     !!props.item.peerUserId &&
     chatStore.isPeerOnline(props.item.peerUserId),
 )
+/** 会话本地最后一条消息是否发送失败：是则列表预览显示感叹号 */
+const lastFailed = computed(() => {
+  const list = chatStore.messagesMap[props.item.id] || []
+  return list[list.length - 1]?.status === 'failed'
+})
 console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.item.peerUserId, 'isOnline=', isOnline.value)
 </script>
 
@@ -39,6 +44,7 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
       </view>
       <view class="bottom">
         <view class="preview">
+          <view v-if="lastFailed" class="failed-mark">!</view>
           <image v-if="isMuted" class="mute-icon" src="/static/icons/icon-bell-slash.svg" mode="aspectFit" />
           <text v-for="tag in item.highlightTags" :key="tag" class="tag">{{ tag }}</text>
           <text class="msg">{{ item.lastMessage }}</text>
@@ -56,6 +62,7 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
   display: flex;
   padding: 24rpx 40rpx;
   background: #fff;
+  border-bottom: 1rpx solid #f0f1f4;
 }
 
 .avatar-wrap {
@@ -98,8 +105,6 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
 .body {
   flex: 1;
   min-width: 0;
-  border-bottom: 1rpx solid #f0f1f4;
-  padding-bottom: 24rpx;
 }
 
 .top,
@@ -147,6 +152,22 @@ console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.
 .mute-icon {
   width: 24rpx;
   height: 24rpx;
+  margin-right: 6rpx;
+  flex-shrink: 0;
+}
+
+/** 会话列表发送失败标识：红色小感叹号 */
+.failed-mark {
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 50%;
+  background: #e54d42;
+  color: #fff;
+  font-size: 20rpx;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-right: 6rpx;
   flex-shrink: 0;
 }

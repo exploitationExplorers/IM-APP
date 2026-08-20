@@ -115,6 +115,22 @@ export async function unblockContact(contactId: string) {
   })
 }
 
+export interface BlockedUser {
+  id: string
+  publicId?: string
+  nickname: string
+  avatar: string
+  blockedAt: string
+}
+
+export async function fetchBlacklist(params?: { keyword?: string; limit?: number }) {
+  return request<{ items: BlockedUser[]; total: number }>({
+    url: '/contacts/blocked',
+    method: 'GET',
+    data: params,
+  })
+}
+
 export async function fetchContactTags(): Promise<ContactTagItem[]> {
   return request<ContactTagItem[]>({ url: '/contact-tags', method: 'GET' })
 }

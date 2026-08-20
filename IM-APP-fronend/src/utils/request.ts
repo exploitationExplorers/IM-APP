@@ -13,12 +13,40 @@ export function setToken(token: string) {
   uni.setStorageSync(TOKEN_KEY, token)
 }
 
+/**
+ * App 端 setStorageSync 写完不一定立刻落盘，被强杀进程会导致 token 丢失。
+ * 这里 异步落盘 + 主动回读校验，避免杀进程后 window bootstrap 拿到空 token。
+ */
+export async function persistTokenAsync(token: string): Promise<void> {
+  uni.setStorageSync(TOKEN_KEY, token)
+  // App 端：uni.setStorage 是异步 IO，立即 await 让数据真正落盘
+  if (typeof uni.setStorage === 'function') {
+    await new Promise<void>((resolve) => {
+      uni.setStorage({ key: TOKEN_KEY, data: token, success: () => resolve(), fail: () => resolve() })
+    })
+  }
+}
+
 export function getRefreshToken(): string {
   return uni.getStorageSync(REFRESH_TOKEN_KEY) || ''
 }
 
 export function setRefreshToken(token: string) {
   uni.setStorageSync(REFRESH_TOKEN_KEY, token)
+}
+
+export async function persistRefreshTokenAsync(token: string): Promise<void> {
+  uni.setStorageSync(REFRESH_TOKEN_KEY, token)
+  if (typeof uni.setStorage === 'function') {
+    await new Promise<void>((resolve) => {
+      uni.setStorage({
+        key: REFRESH_TOKEN_KEY,
+        data: token,
+        success: () => resolve(),
+        fail: () => resolve(),
+      })
+    })
+  }
 }
 
 export function clearToken() {
@@ -96,6 +124,13 @@ async function refreshAccessToken(): Promise<string> {
         if (statusCode >= 200 && statusCode < 300 && body?.code === 0 && body.data?.accessToken) {
           setToken(body.data.accessToken)
           setRefreshToken(body.data.refreshToken)
+          // 异步落盘 + 回读校验，确保 App 强杀进程后 token 仍在 storage
+          void persistTokenAsync(body.data.accessToken).then(() => {
+            if (getToken() !== body.data.accessToken) setToken(body.data.accessToken)
+          })
+          void persistRefreshTokenAsync(body.data.refreshToken).then(() => {
+            if (getRefreshToken() !== body.data.refreshToken) setRefreshToken(body.data.refreshToken)
+          })
           return body.data.accessToken
         }
         throw new Error(body?.message || `刷新登录失败(${statusCode})`)

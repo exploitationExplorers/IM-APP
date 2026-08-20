@@ -437,13 +437,65 @@ async function onSend() {
     await nextTick()
     scrollToBottom()
   } catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' })
+    // 发送失败（如被对方拉黑、网络异常）：消息气泡已由 store 标为 failed（红色感叹号），
+    // 用户点感叹号可重发，这里不弹 toast 打扰，避免出现 blocked 等原始错误提示。
+    console.warn('[room] 发送失败', (e as Error)?.message)
   }
 }
 
 function onConfirmSend() {
   if (!enterToSend.value) return
   onSend()
+}
+
+/** 重发：先二次确认，再按原类型重新发送 */
+function onRetry(m: ChatMessage) {
+  uni.showModal({
+    title: '重新发送',
+    content: '是否重新发送这条消息？',
+    confirmText: '重发',
+    confirmColor: '#e54d42',
+    success: (res) => {
+      if (res.confirm) doRetry(m)
+    },
+  })
+}
+
+/** 重发失败的文本/图片/语音/文件消息：按原类型重新发送，成功后移除旧的失败气泡 */
+async function doRetry(m: ChatMessage) {
+  if (!conversationId.value) return
+  const senderId = imUserId.value || myId.value
+  try {
+    if (m.type === 'text') {
+      await chatStore.sendText(conversationId.value, m.content, senderId)
+    } else if (m.type === 'image') {
+      if (/^(https?|blob|file):/.test(m.content)) {
+        await chatStore.sendImageUrl(conversationId.value, m.content, senderId)
+      } else {
+        await chatStore.sendImage(conversationId.value, m.content, senderId)
+      }
+    } else if (m.type === 'voice') {
+      let path = ''
+      let duration = 0
+      try {
+        const meta = JSON.parse(m.content) as { path?: string; duration?: number }
+        path = meta.path || ''
+        duration = Number(meta.duration || 0)
+      } catch {
+        path = m.content
+      }
+      if (path) await chatStore.sendVoice(conversationId.value, path, duration, senderId)
+    } else if (m.type === 'file') {
+      const name = m.content.split(/[\\/]/).filter(Boolean).pop() || '文件'
+      await chatStore.sendFile(conversationId.value, m.content, name, senderId)
+    }
+    // 重发成功：移除旧的失败气泡，避免同一条消息出现两次
+    await chatStore.removeLocal(conversationId.value, m.id).catch(() => undefined)
+    await nextTick()
+    scrollToBottom()
+  } catch (e) {
+    console.warn('[room] 重发失败', (e as Error)?.message)
+  }
 }
 
 function goBack() {
@@ -1045,6 +1097,7 @@ function pickFavorite() {
           @avatar-click="onAvatarClick(m)"
           @card-view="onViewCard"
           @longpress="actions.openMenu(m)"
+          @retry="onRetry(m)"
         />
       </view>
       <!-- 底部锚点：scroll-into-view 只保证元素「顶部」进入视口，最后一条比视口高时会露出上半截；

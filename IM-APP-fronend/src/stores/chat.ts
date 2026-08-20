@@ -11,6 +11,7 @@ import {
   getHistoryMessages,
   getOneConversation,
   clearConversationMessages,
+  hideConversation,
   markConversationRead,
   onIMEvent,
   onUserStatusChanged,
@@ -35,6 +36,7 @@ import {
   resolveMessageSeq,
   resetConversationGroupAtType,
   seqOf,
+  setConversationPin,
 } from '@/utils/openim'
 import { isIMNotification, isGroupAnnouncementNotice, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { playMessageSound, vibrateShort } from '@/utils/notify'
@@ -87,6 +89,34 @@ export const useChatStore = defineStore('chat', () => {
    * 时自动 toast + 返回。挂在 store 外避免大 messagesMap 的 reactive watch 触发循环。
    */
   let onIncomingForDissolve: ((m: ChatMessage) => void) | null = null
+
+  /**
+   * H5 平台 SDK 不支持 hideConversation，已隐藏会话在 loadConversations 重新拉时
+   * 仍会回来；用本地持久化维护隐藏列表，刷新/重连后仍生效。
+   * 收到新消息时（OnNewConversation / OnConversationChanged）用户仍会看到该会话重新出现。
+   * App 原生平台 hideConversation 由 SDK 真正通知服务端，无需本地兜底。
+   */
+  const HIDDEN_KEY = 'chat:hidden-conversations'
+  const isH5Platform = uni.getSystemInfoSync().uniPlatform === 'h5'
+  function readHiddenIds(): Set<string> {
+    if (!isH5Platform) return new Set()
+    try {
+      const raw = uni.getStorageSync(HIDDEN_KEY)
+      if (Array.isArray(raw)) return new Set(raw as string[])
+    } catch {
+      /* 忽略 */
+    }
+    return new Set()
+  }
+  function writeHiddenIds(ids: Set<string>) {
+    if (!isH5Platform) return
+    try {
+      uni.setStorageSync(HIDDEN_KEY, Array.from(ids))
+    } catch {
+      /* 忽略 */
+    }
+  }
+  const hiddenIds = readHiddenIds()
 
   const totalUnread = computed(() =>
     conversations.value.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
@@ -322,11 +352,16 @@ export const useChatStore = defineStore('chat', () => {
       console.log('[chat] getConversationList count:', list.length)
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       conversations.value = sortConversations(
-        list.map((item) => {
-          const mapped = decorateConversation(toConversation(item))
-          const prev = prevById.get(mapped.id)
-          return prev ? keepNewerPreview(prev, mapped) : mapped
-        }),
+        list
+          .filter((item) => {
+            const id = (item as { conversationID?: string }).conversationID || ''
+            return !hiddenIds.has(id)
+          })
+          .map((item) => {
+            const mapped = decorateConversation(toConversation(item))
+            const prev = prevById.get(mapped.id)
+            return prev ? keepNewerPreview(prev, mapped) : mapped
+          }),
       )
       console.log('[chat] conversations mapped, will refresh online status')
       refreshOnlineStatus().catch((e) => console.warn('[chat] 刷新在线状态失败', e))
@@ -430,9 +465,11 @@ export const useChatStore = defineStore('chat', () => {
       ? await resolveIMGroup(params.businessId)
       : await resolveIMPeer(params.businessId)
     // 群聊禁言（单人/全员）不阻断进入：能进群看历史，只是输入区禁用（房间页按 denyReason 处理）；
-    // 私聊的拉黑/非好友/对方注销等 denyReason 仍需阻断。
+    // 私聊被对方拉黑也不阻断进入：能进聊天看历史，发送消息时 OpenIM BeforeSingle 会拦截并标失败感叹号；
+    // 其余 denyReason（非好友/对方注销等）仍需阻断。
     const muteOnly = isGroup && (target.denyReason === 'group_muted' || target.denyReason === 'member_muted')
-    if (!target.canChat && !muteOnly) throw new Error(target.denyReason || '当前无法发起会话')
+    const blockedByPeer = target.denyReason === 'blocked'
+    if (!target.canChat && !muteOnly && !blockedByPeer) throw new Error(target.denyReason || '当前无法发起会话')
 
     const sourceId = isGroup
       ? (target as { imGroupId: string }).imGroupId
@@ -563,6 +600,46 @@ export const useChatStore = defineStore('chat', () => {
     patchConversation(conversationId, { lastMessage: '', lastMessageAt: '' })
   }
 
+  /**
+   * 切换会话置顶状态。OpenIM 云同步，多端一致。
+   * 乐观更新：先 patchConversation 翻转 pinned 字段，失败时回滚。
+   */
+  async function togglePin(conversationId: string) {
+    const conv = conversations.value.find((c) => c.id === conversationId)
+    if (!conv) return
+    const next = !conv.pinned
+    // 乐观更新：先翻本地值，失败再回滚
+    patchConversation(conversationId, { pinned: next })
+    try {
+      await setConversationPin(conversationId, next)
+    } catch (e) {
+      patchConversation(conversationId, { pinned: !next })
+      throw new Error((e as Error)?.message || '置顶失败')
+    }
+  }
+
+  /**
+   * 从聊天列表移除（本地隐藏）。SDK 不会再推送该会话，
+   * 直到有新消息触发 OnNewConversation / OnConversationChanged。
+   * 失败回滚：重新拉回会话（conversationOf 内部会通过 upsertConversations 重新插入 + 排序）。
+   * H5 平台 SDK 不支持 hideConversation，用本地持久化列表（hiddenIds）保证
+   * 刷新/重连后仍生效；收到新消息时再出现。
+   */
+  async function hideConversationLocal(conversationId: string) {
+    conversations.value = conversations.value.filter((c) => c.id !== conversationId)
+    hiddenIds.add(conversationId)
+    writeHiddenIds(hiddenIds)
+    try {
+      await hideConversation(conversationId)
+    } catch (e) {
+      await conversationOf(conversationId).catch((err) => {
+        console.warn('[chat] 移除失败后会话回滚重拉失败', conversationId, err)
+        return null
+      })
+      throw new Error((e as Error)?.message || '移除失败')
+    }
+  }
+
   /** 局部更新本地会话（如置顶、会话级免打扰），命中才重排，保证 UI 即时反映 */
   function patchConversation(conversationId: string, patch: Partial<Conversation>) {
     const idx = conversations.value.findIndex((c) => c.id === conversationId)
@@ -570,6 +647,25 @@ export const useChatStore = defineStore('chat', () => {
     const copy = [...conversations.value]
     copy[idx] = { ...copy[idx], ...patch }
     conversations.value = sortConversations(copy)
+  }
+
+  /**
+   * 让一个被隐藏的会话重新出现在列表顶部。
+   * - 自己给已隐藏会话主动发消息时触发；
+   * - 从 hiddenIds 移除 + 从 SDK 重新拉取会话信息（conversationOf 内部走 upsertConversations 插入列表）。
+   * - 失败回滚：hiddenIds 重新加入。
+   */
+  async function reappearConversation(conversationId: string) {
+    if (!hiddenIds.has(conversationId)) return
+    hiddenIds.delete(conversationId)
+    writeHiddenIds(hiddenIds)
+    try {
+      await conversationOf(conversationId)
+    } catch (e) {
+      hiddenIds.add(conversationId)
+      writeHiddenIds(hiddenIds)
+      throw e
+    }
   }
 
   /** 「不再提示」：清掉会话列表 [有新公告]；若当前不是 @ 强提醒，再清 OpenIM groupAtType */
@@ -599,6 +695,8 @@ export const useChatStore = defineStore('chat', () => {
       rememberRaw(sent)
       const mapped = toChatMessage(sent)
       replaceMessage(conversationId, placeholder.id, mapped)
+      // 自己给已隐藏的会话主动发消息时，让该会话重新出现在列表顶部
+      await reappearConversation(conversationId)
       patchConversation(conversationId, {
         lastMessage: previewOf(mapped),
         lastMessageAt: mapped.createdAt,
@@ -881,6 +979,9 @@ export const useChatStore = defineStore('chat', () => {
     subscribeRealtime,
     unsubscribeRealtime,
     patchConversation,
+    togglePin,
+    hideConversationLocal,
+    reappearConversation,
     applyContactRemarks,
     dismissGroupAnnouncement,
     clearHistory,

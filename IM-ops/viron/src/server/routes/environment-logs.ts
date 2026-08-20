@@ -11,6 +11,7 @@ import {
   MAX_ENVIRONMENT_LOG_LINES,
   MIN_ENVIRONMENT_LOG_LINES,
   parseStoredLogFilePaths,
+  validateConfiguredLogPath,
 } from "../environment-log-files.js";
 import { parseBody } from "../validation.js";
 import { executionScope } from "../execution-scope.js";
@@ -21,8 +22,17 @@ const filePathSchema = z.string()
   .trim()
   .min(1, "请输入日志文件路径")
   .max(1024, "日志文件路径不能超过 1024 个字符")
-  .refine((value) => value.startsWith("/"), "请输入绝对路径")
-  .refine((value) => !/[\0\r\n]/.test(value), "日志文件路径不能包含换行或空字符");
+  .refine((value) => !/[\0\r\n]/.test(value), "日志文件路径不能包含换行或空字符")
+  .superRefine((value, context) => {
+    try {
+      validateConfiguredLogPath(value);
+    } catch (error) {
+      context.addIssue({
+        code: "custom",
+        message: error instanceof Error ? error.message : "日志文件路径无效",
+      });
+    }
+  });
 
 export const environmentLogSchema = z.object({
   sshConnectionId: z.string().uuid(),
