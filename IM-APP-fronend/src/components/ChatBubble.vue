@@ -43,6 +43,7 @@ const emit = defineEmits<{
   avatarClick: []
   longpress: []
   cardView: [card: CardPayload]
+  retry: [message: ChatMessage]
 }>()
 
 function onAvatarClick() {
@@ -71,6 +72,11 @@ function onViewCard() {
 
 function onLongPress() {
   emit('longpress')
+}
+
+/** 发送失败：点击感叹号触发重发 */
+function onRetry() {
+  emit('retry', props.message)
 }
 
 /**
@@ -397,6 +403,10 @@ function openLink(url: string) {
         <view v-if="readState" class="read-flag" :class="{ read: readState === 'read' }">
           <view class="tick first"></view>
           <view v-if="readState === 'read'" class="tick second"></view>
+        </view>
+        <!-- 发送失败：红色感叹号，点击重发 -->
+        <view v-if="mine && message.status === 'failed'" class="retry-flag" @click.stop="onRetry">
+          <text class="retry-icon">!</text>
         </view>
         <text class="time">{{ timeText }}</text>
       </view>
@@ -747,6 +757,25 @@ function openLink(url: string) {
   left: 8rpx;
   width: 12rpx;
   height: 7rpx;
+}
+
+/** 发送失败感叹号：红色圆形 + 白感叹号，点击重发 */
+.retry-flag {
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 50%;
+  background: #e54d42;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.retry-icon {
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .time {
