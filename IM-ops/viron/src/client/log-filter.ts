@@ -36,6 +36,73 @@ export function tailLogLines(output: string, maxLines: number): string {
   return lines.length > limit ? lines.slice(lines.length - limit).join("\n") : output;
 }
 
+export interface LogFilterLineResult {
+  lines: readonly string[];
+  totalLineCount: number;
+  matchLineCount: number;
+  includedLineCount: number;
+  filtered: boolean;
+  hasGaps: boolean;
+}
+
+// 未超限、未过滤时直接透传原数组，避免每帧对上万行做一次拷贝。
+export function tailLogLineArray(lines: readonly string[], maxLines: number): readonly string[] {
+  const limit = normalizeLogInteger(maxLines, MIN_LOG_DISPLAY_LINES, MAX_LOG_DISPLAY_LINES, DEFAULT_LOG_DISPLAY_LINES);
+  return lines.length > limit ? lines.slice(lines.length - limit) : lines;
+}
+
+export function filterLogLineArray(lines: readonly string[], options: LogFilterOptions): LogFilterLineResult {
+  const totalLineCount = lines.length;
+  const keyword = options.keyword.trim();
+  if (!keyword) {
+    return {
+      lines,
+      totalLineCount,
+      matchLineCount: 0,
+      includedLineCount: totalLineCount,
+      filtered: false,
+      hasGaps: false,
+    };
+  }
+
+  const before = normalizeLogInteger(options.before, MIN_LOG_CONTEXT_LINES, MAX_LOG_CONTEXT_LINES, 0);
+  const after = normalizeLogInteger(options.after, MIN_LOG_CONTEXT_LINES, MAX_LOG_CONTEXT_LINES, 0);
+  const needle = options.caseSensitive ? keyword : keyword.toLowerCase();
+  const included = new Set<number>();
+  let matchLineCount = 0;
+
+  lines.forEach((line, index) => {
+    const haystack = options.caseSensitive ? line : line.toLowerCase();
+    if (!haystack.includes(needle)) return;
+    matchLineCount += 1;
+    for (let current = Math.max(0, index - before); current <= Math.min(lines.length - 1, index + after); current += 1) {
+      included.add(current);
+    }
+  });
+
+  const selected = [...included].sort((left, right) => left - right);
+  const rendered: string[] = [];
+  let previous = -1;
+  let hasGaps = false;
+  for (const index of selected) {
+    if (previous >= 0 && index > previous + 1) {
+      rendered.push("--");
+      hasGaps = true;
+    }
+    rendered.push(lines[index]!);
+    previous = index;
+  }
+
+  return {
+    lines: rendered,
+    totalLineCount,
+    matchLineCount,
+    includedLineCount: selected.length,
+    filtered: true,
+    hasGaps,
+  };
+}
+
 export function filterLogOutput(output: string, options: LogFilterOptions): LogFilterResult {
   const lines = output ? output.split("\n") : [];
   const totalLineCount = lines.length;
