@@ -437,7 +437,9 @@ async function onSend() {
     await nextTick()
     scrollToBottom()
   } catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' })
+    // 发送失败（如被对方拉黑、网络异常）：消息气泡已由 store 标为 failed（红色感叹号），
+    // 用户点感叹号可重发，这里不弹 toast 打扰，避免出现 blocked 等原始错误提示。
+    console.warn('[room] 发送失败', (e as Error)?.message)
   }
 }
 
