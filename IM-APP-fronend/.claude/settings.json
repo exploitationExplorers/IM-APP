@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"/c/Program Files/Docker/Docker/Docker Desktop.exe\" 2>/dev/null && echo FOUND || echo NOT_FOUND)",
+      "Read(//c/Program Files/Docker/Docker/**)",
+      "Bash(cmd //c start \"\" \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\")",
+      "Bash(curl -s -m 10 -D - -o /dev/null -H \"Origin: http://localhost:5173\" \"https://www.ke58.com/api/v1/auth/captcha?scene=login\")",
+      "Bash(curl -s -m 10 -X POST -D - -H \"Content-Type: application/json\" -H \"Origin: http://localhost:5173\" -d '{\"phone\":\"13800000000\",\"countryCode\":\"+86\"}' \"https://www.ke58.com/api/v1/auth/sms/send\")",
+      "Bash(curl -s -m 10 -w \"\\\\n--- status: %{http_code} ---\\\\n\" -X POST -H \"Content-Type: application/json\" -d '{\"phone\":\"13800000000\",\"countryCode\":\"+86\"}' \"http://localhost:5173/api/v1/auth/sms/send\")"
+    ]
+  }
+}

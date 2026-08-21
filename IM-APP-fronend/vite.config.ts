@@ -18,7 +18,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:18080',
+        // 本地后端（docker compose 的 api 服务，127.0.0.1:8080）没起时，
+        // 直接代理线上，前端开发不依赖本地后端。代理是 Node 服务端转发，不受浏览器 CORS 限制。
+        target: 'https://www.ke58.com',
         changeOrigin: true,
       },
     },
