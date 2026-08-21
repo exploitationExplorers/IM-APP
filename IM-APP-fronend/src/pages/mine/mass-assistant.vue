@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useMassSendStore } from '@/stores/massSend'
 
-const statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20
 const massStore = useMassSendStore()
 
 const list = computed(() => massStore.history)
@@ -117,20 +117,11 @@ function renderTargets(r: (typeof list.value)[number]) {
 
 <template>
   <view class="page">
-    <view class="nav-bar-wrap">
-      <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
-      <view class="nav-bar">
-        <view class="nav-left">
-          <text class="back-icon" @click="goBack">‹</text>
-        </view>
-        <view class="nav-center">
-          <text class="title">群发助手</text>
-        </view>
-        <view class="nav-right" @click="toggleEdit">
-          <text class="edit-text">{{ editing ? '取消' : '编辑' }}</text>
-        </view>
-      </view>
-    </view>
+    <ImNavBar title="群发助手" @back="goBack">
+      <template #right>
+        <text class="edit-text" @click="toggleEdit">{{ editing ? '取消' : '编辑' }}</text>
+      </template>
+    </ImNavBar>
 
     <view v-if="isEmpty" class="empty">
       <text class="empty-text">暂无资料</text>
@@ -179,48 +170,6 @@ function renderTargets(r: (typeof list.value)[number]) {
   background: #ffffff;
   display: flex;
   flex-direction: column;
-}
-
-.nav-bar-wrap {
-  background: #ffffff;
-}
-
-.nav-bar {
-  height: 96rpx;
-  display: flex;
-  align-items: center;
-  padding: 0 24rpx;
-  box-sizing: border-box;
-}
-
-.nav-left,
-.nav-right {
-  width: 160rpx;
-  display: flex;
-  align-items: center;
-}
-
-.nav-right {
-  justify-content: flex-end;
-}
-
-.nav-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
-.back-icon {
-  font-size: 52rpx;
-  color: #111;
-  line-height: 1;
-  padding: 8rpx 12rpx;
-}
-
-.title {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #111;
 }
 
 .edit-text {

@@ -139,6 +139,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.GET("/forward-limits/users/:userId", middleware.RequirePermission(rbacRepo, "forward.limits.read"), d.OpsH.GetForwardUserLimit)
 			auth.PUT("/forward-limits/users/:userId", middleware.RequirePermission(rbacRepo, "forward.limits.write"), d.OpsH.SetForwardUserLimit)
 			auth.GET("/forward-settings", middleware.RequirePermission(rbacRepo, "forward.settings.read"), d.OpsH.GetForwardSettings)
+			auth.GET("/forward-queue-metrics", middleware.RequirePermission(rbacRepo, "forward.read"), d.OpsH.GetForwardQueueMetrics)
 			auth.PUT("/forward-settings", middleware.RequirePermission(rbacRepo, "forward.settings.write"), d.OpsH.SetForwardSettings)
 
 			// 模块 07：国家与短信运营

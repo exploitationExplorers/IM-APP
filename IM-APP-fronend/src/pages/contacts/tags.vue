@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import {
   createContactTag,
   deleteContactTag,
@@ -182,13 +183,11 @@ async function onDelete() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">通讯录标签</text>
-      <text class="nav-action" @click="toggleEdit">{{ editing ? '取消' : '编辑' }}</text>
-    </view>
+    <ImNavBar title="通讯录标签" @back="goBack">
+      <template #right>
+        <text class="nav-action" @click="toggleEdit">{{ editing ? '取消' : '编辑' }}</text>
+      </template>
+    </ImNavBar>
 
     <AppSearchBar v-model="keyword" placeholder="搜索" />
 
@@ -254,38 +253,6 @@ async function onDelete() {
   flex-direction: column;
   padding-bottom: calc(128rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  height: calc(96rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 32rpx 0 32rpx;
-  background: #ffffff;
-  box-sizing: border-box;
-  gap: 16rpx;
-}
-
-.nav-back {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.nav-icon {
-  width: 48rpx;
-  height: 48rpx;
-}
-
-.nav-title {
-  flex: 1;
-  font-size: 48rpx;
-  font-weight: 700;
-  line-height: 64rpx;
-  color: #212121;
 }
 
 .nav-action {

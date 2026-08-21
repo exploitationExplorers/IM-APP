@@ -13,6 +13,10 @@ import (
 // callServerInternal 调 server /internal/* 内部接口（方案 A：写操作由 server 执行业务 + OpenIM 同步）
 // 返回响应体（调用方按需解析），非 2xx 返回错误
 func callServerInternal(ctx context.Context, baseURL, key, path string, payload map[string]any) ([]byte, error) {
+	return callServerInternalMethod(ctx, http.MethodPost, baseURL, key, path, payload)
+}
+
+func callServerInternalMethod(ctx context.Context, method, baseURL, key, path string, payload map[string]any) ([]byte, error) {
 	if baseURL == "" {
 		return nil, errors.New("未配置 server 内部接口地址")
 	}
@@ -20,7 +24,11 @@ func callServerInternal(ctx context.Context, baseURL, key, path string, payload 
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(body))
+	var reader io.Reader
+	if method != http.MethodGet {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, reader)
 	if err != nil {
 		return nil, err
 	}

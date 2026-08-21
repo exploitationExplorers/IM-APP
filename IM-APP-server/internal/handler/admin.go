@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"im-app-server/internal/im"
+	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
 	"im-app-server/internal/response"
 	"im-app-server/internal/service"
@@ -23,6 +24,44 @@ type AdminGroupHandler struct {
 // AdminForwardHandler 管理端转发任务操作（由管理后台经 /internal/admin 内部密钥调用）
 type AdminForwardHandler struct {
 	Forward *service.ForwardService
+}
+
+func (h *AdminForwardHandler) GetForwardSettings(c *gin.Context) {
+	settings, err := h.Forward.Repo.GetDeliverySettings(c.Request.Context())
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "读取转发调度配置失败")
+		return
+	}
+	response.OK(c, settings)
+}
+
+func (h *AdminForwardHandler) GetForwardQueueMetrics(c *gin.Context) {
+	metrics, err := h.Forward.Repo.GetQueueMetrics(c.Request.Context())
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "读取转发队列指标失败")
+		return
+	}
+	response.OK(c, metrics)
+}
+
+func (h *AdminForwardHandler) UpdateForwardSettings(c *gin.Context) {
+	var req struct {
+		models.ForwardDeliverySettings
+		AdminID string `json:"adminId"`
+		Reason  string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" ||
+		req.GlobalQPS <= 0 || req.WorkerConcurrency <= 0 || req.ClaimBatchSize <= 0 ||
+		req.PerUserConcurrency <= 0 || req.RetryBaseSeconds <= 0 || req.RetryMaxSeconds < req.RetryBaseSeconds ||
+		req.ProcessingLockSeconds <= 0 || req.RetentionDays <= 0 || req.QueueAlertDepth <= 0 {
+		response.Fail(c, http.StatusBadRequest, "调度参数或 reason 无效")
+		return
+	}
+	if err := h.Forward.Repo.UpdateDeliverySettings(c.Request.Context(), req.ForwardDeliverySettings, req.AdminID, req.Reason); err != nil {
+		response.Fail(c, http.StatusInternalServerError, "保存转发调度配置失败")
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
 }
 
 // AdminUserHandler 管理端用户限制操作（由管理后台经 /internal/admin 内部密钥调用）

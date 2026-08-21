@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { sendSmsCode } from '@/api/auth'
 import { APP_CONFIG } from '@/config'
@@ -8,6 +9,12 @@ import ImNotificationPermissionDialog from '@/components/ImNotificationPermissio
 import { findCountryByDialCode, validatePhone } from '@/constants/countries'
 
 const userStore = useUserStore()
+
+onShow(() => {
+  if (userStore.isLoggedIn) {
+    uni.switchTab({ url: '/pages/chat/index' })
+  }
+})
 const mode = ref<'password' | 'sms'>('password')
 const countryCode = ref(APP_CONFIG.defaultCountryCode)
 const phone = ref('')

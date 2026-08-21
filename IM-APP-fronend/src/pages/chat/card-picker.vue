@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { APP_CONFIG } from '@/config'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useChatStore } from '@/stores/chat'
@@ -9,7 +10,6 @@ import { useContactStore } from '@/stores/contact'
 import { useUserStore } from '@/stores/user'
 import type { Contact } from '@/types'
 import { imUserId } from '@/utils/openim'
-import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
 
@@ -17,8 +17,6 @@ useAuthGuard()
 const chatStore = useChatStore()
 const contactStore = useContactStore()
 const userStore = useUserStore()
-
-const statusBarHeight = getStatusBarHeight()
 const conversationId = ref('')
 const conversationTitle = ref('')
 const keyword = ref('')
@@ -80,11 +78,7 @@ function goBack() {
 
 <template>
   <view class="page">
-    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
-      <view class="back-btn" @click="goBack">‹</view>
-      <text class="title">选择好友</text>
-      <view class="header-pad"></view>
-    </view>
+    <ImNavBar title="选择好友" @back="goBack" />
 
     <view v-if="conversationTitle" class="target-bar">
       <text class="target-text">发送给：{{ conversationTitle }}</text>
@@ -121,38 +115,6 @@ function goBack() {
   background: #fff;
   display: flex;
   flex-direction: column;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 96rpx;
-  padding: 0 32rpx;
-  box-sizing: content-box;
-  background: #fff;
-}
-
-.back-btn {
-  font-size: 56rpx;
-  color: #212121;
-  width: 88rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #212121;
-}
-
-.header-pad {
-  width: 88rpx;
 }
 
 .target-bar {

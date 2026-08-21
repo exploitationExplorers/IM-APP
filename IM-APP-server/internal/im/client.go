@@ -650,6 +650,27 @@ func (c *Client) SendForwardMessage(
 	return result, err
 }
 
+func (c *Client) SendForwardGroupMessage(ctx context.Context, senderID, groupID, clientMsgID string,
+	contentType int, content json.RawMessage) (SendMessageResult, error) {
+	if senderID == "" || groupID == "" || clientMsgID == "" || contentType <= 0 || !json.Valid(content) {
+		return SendMessageResult{}, errors.New("invalid forward group message")
+	}
+	var decoded any
+	if err := json.Unmarshal(content, &decoded); err != nil || decoded == nil {
+		return SendMessageResult{}, errors.New("invalid forward message content")
+	}
+	var result SendMessageResult
+	err := c.postWithAdmin(ctx, "/msg/send_msg", map[string]any{
+		"sendID": senderID, "groupID": groupID, "clientMsgID": clientMsgID,
+		"content": decoded, "contentType": contentType, "sessionType": 3,
+		"isOnlineOnly": false, "notOfflinePush": true,
+	}, &result)
+	if result.ClientMsgID == "" {
+		result.ClientMsgID = clientMsgID
+	}
+	return result, err
+}
+
 // GetConversations 拉取指定会话的当前设置（全量对象）。
 // v3.8.3 使用 ownerUserID；同时携带 opUserID/userID 兼容旧部署。
 func (c *Client) GetConversations(ctx context.Context, opUserID string, conversationIDs []string) ([]ConversationSettings, error) {

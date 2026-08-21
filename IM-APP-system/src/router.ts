@@ -54,13 +54,12 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: "forward-group-send",
-        component: () => import("./views/forwardGroupSend/ForwardGroupSendView.vue"),
-        meta: { title: "转发和群发管理" },
+        redirect: "/forward-risk",
       },
       {
         path: "forward-risk",
         component: () => import("./views/forwardRisk/ForwardRiskView.vue"),
-        meta: { title: "转发风控" },
+        meta: { title: "转发风控", activeMenu: "/forward-risk" },
       },
       {
         path: "app-config/app-versions",

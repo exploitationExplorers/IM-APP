@@ -212,6 +212,36 @@ func TestSendForwardMessageDisablesOfflinePush(t *testing.T) {
 	}
 }
 
+func TestSendForwardGroupMessageUsesGroupSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/msg/send_msg":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["sendID"] != "sender" || body["groupID"] != "group" || body["recvID"] != nil ||
+				body["sessionType"] != float64(3) || body["notOfflinePush"] != true {
+				t.Fatalf("unexpected request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"serverMsgID":"server-1"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin"}, server.Client())
+	result, err := client.SendForwardGroupMessage(context.Background(), "sender", "group", "fwd-group", 101,
+		json.RawMessage(`{"content":"hello"}`))
+	if err != nil {
+		t.Fatalf("SendForwardGroupMessage() error = %v", err)
+	}
+	if result.ServerMsgID != "server-1" || result.ClientMsgID != "fwd-group" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
 func TestConversationSettingsUseV383API(t *testing.T) {
 	var getCalls, setCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -67,6 +67,7 @@ type ForwardTarget struct {
 	ID              string     `json:"id"`
 	TaskID          string     `json:"taskId"`
 	TargetUserID    string     `json:"targetUserId"`
+	PeerType        string     `json:"peerType"`
 	Status          string     `json:"status"`
 	Attempts        int        `json:"attempts"`
 	ConversationID  string     `json:"conversationId,omitempty"`
@@ -91,4 +92,28 @@ type ForwardTaskPage struct {
 	Items      []ForwardTask `json:"items"`
 	NextCursor string        `json:"nextCursor,omitempty"`
 	HasMore    bool          `json:"hasMore"`
+}
+
+type ForwardDeliverySettings struct {
+	GlobalQPS             int       `json:"globalQps"`
+	WorkerConcurrency     int       `json:"workerConcurrency"`
+	ClaimBatchSize        int       `json:"claimBatchSize"`
+	PerUserConcurrency    int       `json:"perUserConcurrency"`
+	RetryBaseSeconds      int       `json:"retryBaseSeconds"`
+	RetryMaxSeconds       int       `json:"retryMaxSeconds"`
+	ProcessingLockSeconds int       `json:"processingLockSeconds"`
+	QueuePaused           bool      `json:"queuePaused"`
+	RetentionDays         int       `json:"retentionDays"`
+	QueueAlertDepth       int64     `json:"queueAlertDepth"`
+	Version               int64     `json:"version"`
+	UpdatedAt             time.Time `json:"updatedAt"`
+}
+
+type ForwardQueueMetrics struct {
+	Queued               int64   `json:"queued"`
+	Retrying             int64   `json:"retrying"`
+	Processing           int64   `json:"processing"`
+	PermanentFailed      int64   `json:"permanentFailed"`
+	OldestPendingSeconds int64   `json:"oldestPendingSeconds"`
+	SendRatePerSecond    float64 `json:"sendRatePerSecond"`
 }

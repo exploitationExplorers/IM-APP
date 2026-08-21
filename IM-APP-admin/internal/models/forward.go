@@ -23,6 +23,7 @@ type ForwardTask struct {
 type ForwardTarget struct {
 	ID         string     `json:"id"`
 	UserID     string     `json:"userId"`
+	PeerType   string     `json:"peerType"`
 	Nickname   string     `json:"nickname,omitempty"`
 	Status     string     `json:"status"`
 	Attempts   int        `json:"attempts"`
@@ -37,13 +38,31 @@ type ForwardUserLimit struct {
 	HourlyLimit   int    `json:"hourlyLimit"`
 	SingleTargets int    `json:"singleTargets"`
 	Enabled       bool   `json:"enabled"`
+	Effective     bool   `json:"effective"` // 固定为 false；仅保留历史查询与审计兼容
 }
 
 type ForwardSettings struct {
-	DefaultDailyLimit    int `json:"defaultDailyLimit"`
-	DefaultHourlyLimit   int `json:"defaultHourlyLimit"`
-	DefaultSingleTargets int `json:"defaultSingleTargets"`
-	MaxSingleTargets     int `json:"maxSingleTargets"`
+	GlobalQPS             int       `json:"globalQps"`
+	WorkerConcurrency     int       `json:"workerConcurrency"`
+	ClaimBatchSize        int       `json:"claimBatchSize"`
+	PerUserConcurrency    int       `json:"perUserConcurrency"`
+	RetryBaseSeconds      int       `json:"retryBaseSeconds"`
+	RetryMaxSeconds       int       `json:"retryMaxSeconds"`
+	ProcessingLockSeconds int       `json:"processingLockSeconds"`
+	QueuePaused           bool      `json:"queuePaused"`
+	RetentionDays         int       `json:"retentionDays"`
+	QueueAlertDepth       int64     `json:"queueAlertDepth"`
+	Version               int64     `json:"version,omitempty"`
+	UpdatedAt             time.Time `json:"updatedAt,omitempty"`
+}
+
+type ForwardQueueMetrics struct {
+	Queued               int64   `json:"queued"`
+	Retrying             int64   `json:"retrying"`
+	Processing           int64   `json:"processing"`
+	PermanentFailed      int64   `json:"permanentFailed"`
+	OldestPendingSeconds int64   `json:"oldestPendingSeconds"`
+	SendRatePerSecond    float64 `json:"sendRatePerSecond"`
 }
 
 type ForwardLimitRequest struct {

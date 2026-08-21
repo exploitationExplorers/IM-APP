@@ -2,9 +2,9 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import ImMessageComposer, { type ComposerContent } from '@/components/ImMessageComposer.vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useMassSendStore } from '@/stores/massSend'
 
-const statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20
 const massStore = useMassSendStore()
 const sending = ref(false)
 
@@ -67,18 +67,7 @@ defineExpose({
 
 <template>
   <view class="page">
-    <view class="nav-bar-wrap">
-      <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
-      <view class="nav-bar">
-        <view class="nav-left">
-          <text class="back-icon" @click="goBack">‹</text>
-        </view>
-        <view class="nav-center">
-          <text class="title">群发</text>
-        </view>
-        <view class="nav-right"></view>
-      </view>
-    </view>
+    <ImNavBar title="群发" @back="goBack" />
 
     <view class="targets" @click="goEditTargets">
       <text class="targets-tip">你将发送消息给</text>
@@ -100,44 +89,6 @@ defineExpose({
   background: #ffffff;
   display: flex;
   flex-direction: column;
-}
-
-.nav-bar-wrap {
-  background: #ffffff;
-}
-
-.nav-bar {
-  height: 96rpx;
-  display: flex;
-  align-items: center;
-  padding: 0 24rpx;
-  box-sizing: border-box;
-}
-
-.nav-left,
-.nav-right {
-  width: 160rpx;
-  display: flex;
-  align-items: center;
-}
-
-.nav-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
-.back-icon {
-  font-size: 52rpx;
-  color: #111;
-  line-height: 1;
-  padding: 8rpx 12rpx;
-}
-
-.title {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #111;
 }
 
 .targets {

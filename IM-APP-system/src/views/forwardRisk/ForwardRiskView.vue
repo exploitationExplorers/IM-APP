@@ -2,6 +2,8 @@
 import { computed, onMounted, reactive, shallowRef, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { CircleClose, RefreshLeft, RefreshRight, Search, View } from "@element-plus/icons-vue";
+import ForwardDeliverySettingsCard from "./ForwardDeliverySettingsCard.vue";
+import ForwardQueueOverview from "./ForwardQueueOverview.vue";
 
 import {
   AdminForwardRisk,
@@ -9,6 +11,7 @@ import {
   getAdminForwardTaskFailuresApi,
   getAdminForwardTaskTargetsApi,
   getAdminForwardSettingsApi,
+  getAdminForwardQueueMetricsApi,
   getAdminForwardTasksApi,
   postAdminCancelForwardTaskApi,
   postAdminRetryFailedForwardTargetsApi,
@@ -22,7 +25,13 @@ type ForwardSettings = AdminForwardRisk.ForwardSettings;
 const STATUS_LABEL_MAP: Record<TaskStatus, string> = {
   pending: "待处理",
   processing: "处理中",
+  draft: "草稿",
+  expanding: "展开目标中",
+  retrying: "重试中",
+  partially_completed: "部分完成",
+  paused: "已暂停",
   success: "已完成",
+  completed: "已完成",
   failed: "失败",
   cancelled: "已终止",
 };
@@ -55,46 +64,41 @@ const failures = shallowRef<AdminForwardRisk.ForwardTaskFailureStat[]>([]);
 
 const settingsLoading = shallowRef(false);
 const settingsSaving = shallowRef(false);
-const forwardSettings = reactive<ForwardSettings>({
-  defaultDailyLimit: 0,
-  defaultHourlyLimit: 0,
-  defaultSingleTargets: 0,
-  maxSingleTargets: 0,
+const forwardSettings = shallowRef<ForwardSettings>({
+  globalQps: 20, workerConcurrency: 4, claimBatchSize: 50, perUserConcurrency: 2,
+  retryBaseSeconds: 2, retryMaxSeconds: 300, processingLockSeconds: 300,
+  queuePaused: false, retentionDays: 30, queueAlertDepth: 100000,
 });
 const forwardSettingsInitial = shallowRef<ForwardSettings | null>(null);
+const queueMetrics = shallowRef<AdminForwardRisk.ForwardQueueMetrics | null>(null);
+const queueMetricsLoading = shallowRef(false);
+
+async function fetchQueueMetrics(): Promise<void> {
+  queueMetricsLoading.value = true;
+  try { queueMetrics.value = (await getAdminForwardQueueMetricsApi()).data ?? null; }
+  finally { queueMetricsLoading.value = false; }
+}
 
 const forwardSettingsChanged = computed(() => {
   if (!forwardSettingsInitial.value) return false;
-  return (
-    forwardSettings.defaultDailyLimit !== forwardSettingsInitial.value.defaultDailyLimit ||
-    forwardSettings.defaultHourlyLimit !== forwardSettingsInitial.value.defaultHourlyLimit ||
-    forwardSettings.defaultSingleTargets !== forwardSettingsInitial.value.defaultSingleTargets ||
-    forwardSettings.maxSingleTargets !== forwardSettingsInitial.value.maxSingleTargets
-  );
+  return JSON.stringify(forwardSettings.value) !== JSON.stringify(forwardSettingsInitial.value);
 });
 
 function snapshotForwardSettings(): ForwardSettings {
   return {
-    defaultDailyLimit: Number(forwardSettings.defaultDailyLimit ?? 0),
-    defaultHourlyLimit: Number(forwardSettings.defaultHourlyLimit ?? 0),
-    defaultSingleTargets: Number(forwardSettings.defaultSingleTargets ?? 0),
-    maxSingleTargets: Number(forwardSettings.maxSingleTargets ?? 0),
+    ...forwardSettings.value,
   };
 }
 
 function applyForwardSettings(value: ForwardSettings): void {
-  forwardSettings.defaultDailyLimit = Number(value.defaultDailyLimit ?? 0);
-  forwardSettings.defaultHourlyLimit = Number(value.defaultHourlyLimit ?? 0);
-  forwardSettings.defaultSingleTargets = Number(value.defaultSingleTargets ?? 0);
-  forwardSettings.maxSingleTargets = Number(value.maxSingleTargets ?? 0);
+  forwardSettings.value = { ...value };
 }
 
 function validateForwardSettings(): string | null {
-  if (forwardSettings.defaultDailyLimit < 0) return "默认每日上限不能小于 0";
-  if (forwardSettings.defaultHourlyLimit < 0) return "默认每小时上限不能小于 0";
-  if (forwardSettings.defaultSingleTargets < 0) return "默认单次目标数不能小于 0";
-  if (forwardSettings.maxSingleTargets < 0) return "单次目标数上限不能小于 0";
-  if (forwardSettings.defaultSingleTargets > forwardSettings.maxSingleTargets) return "默认单次目标数不能大于单次目标数上限";
+  const s = forwardSettings.value;
+  if ([s.globalQps, s.workerConcurrency, s.claimBatchSize, s.perUserConcurrency, s.retryBaseSeconds,
+    s.retryMaxSeconds, s.processingLockSeconds, s.retentionDays, s.queueAlertDepth].some((value) => value < 1)) return "调度参数必须大于 0";
+  if (s.retryMaxSeconds < s.retryBaseSeconds) return "最大重试间隔不能小于初始重试间隔";
   return null;
 }
 
@@ -128,7 +132,7 @@ async function saveForwardSettings(): Promise<void> {
   }
   if (!forwardSettingsInitial.value || !forwardSettingsChanged.value) return;
 
-  const reason = await promptReason("修改全局转发规则");
+  const reason = await promptReason("修改转发调度与可靠性配置");
   if (!reason) return;
 
   settingsSaving.value = true;
@@ -158,25 +162,27 @@ function pickStatusTagType(status: TaskStatus): "success" | "danger" | "warning"
   const map: Record<TaskStatus, "success" | "danger" | "warning" | "primary" | "info"> = {
     pending: "warning",
     processing: "primary",
+    draft: "info",
+    expanding: "primary",
+    retrying: "warning",
+    partially_completed: "warning",
+    paused: "info",
     success: "success",
+    completed: "success",
     failed: "danger",
     cancelled: "info",
   };
   return map[status] ?? "info";
 }
 
+function formatTime(value?: string | null): string {
+  if (!value) return "—";
+  return value.replace("T", " ").replace(/\.\d+/, "").replace(/\+08:00$/, "");
+}
+
 function formatTaskStatus(status: unknown): string {
   const key = status as TaskStatus;
   return (STATUS_LABEL_MAP[key] ?? String(status ?? "")) || "—";
-}
-
-function pickRiskTagType(riskLevel: string): "success" | "danger" | "warning" | "primary" | "info" {
-  const v = String(riskLevel ?? "").toLowerCase();
-  if (!v) return "info";
-  if (v.includes("high") || v.includes("danger") || v.includes("严重") || v === "3") return "danger";
-  if (v.includes("mid") || v.includes("medium") || v.includes("warn") || v.includes("中") || v === "2") return "warning";
-  if (v.includes("low") || v.includes("safe") || v.includes("低") || v === "1") return "success";
-  return "info";
 }
 
 function resetFilters(): void {
@@ -248,7 +254,7 @@ async function fetchFailures(): Promise<void> {
   failuresLoading.value = true;
   try {
     const res = await getAdminForwardTaskFailuresApi(id);
-    failures.value = res.data ?? [];
+    failures.value = Array.isArray(res.data) ? res.data : [];
   } catch {
     failures.value = [];
   } finally {
@@ -321,6 +327,7 @@ async function retryFailedTargets(task: AdminForwardRisk.ForwardTask): Promise<v
 
 onMounted(() => {
   fetchForwardSettings();
+  fetchQueueMetrics();
   fetchTasks();
 });
 
@@ -356,35 +363,9 @@ watch(activeDetailTab, () => {
 
 <template>
   <div class="table-box">
-    <section class="card settings-card" v-loading="settingsLoading">
-      <div class="settings-header">
-        <div class="settings-title">全局转发规则</div>
-        <div class="settings-ops">
-          <el-button :disabled="settingsSaving" @click="fetchForwardSettings">刷新</el-button>
-          <el-button :disabled="!forwardSettingsChanged || settingsSaving" @click="resetForwardSettings">还原</el-button>
-          <el-button type="primary" :loading="settingsSaving" :disabled="!forwardSettingsChanged" @click="saveForwardSettings">
-            保存
-          </el-button>
-        </div>
-      </div>
-
-      <el-form :model="forwardSettings" label-width="140px">
-        <div class="settings-grid">
-          <el-form-item label="默认每日上限">
-            <el-input-number v-model="forwardSettings.defaultDailyLimit" :min="0" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="默认每小时上限">
-            <el-input-number v-model="forwardSettings.defaultHourlyLimit" :min="0" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="默认单次目标数">
-            <el-input-number v-model="forwardSettings.defaultSingleTargets" :min="0" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="单次目标数上限">
-            <el-input-number v-model="forwardSettings.maxSingleTargets" :min="0" controls-position="right" />
-          </el-form-item>
-        </div>
-      </el-form>
-    </section>
+    <ForwardQueueOverview :metrics="queueMetrics" :loading="queueMetricsLoading" @refresh="fetchQueueMetrics" />
+    <ForwardDeliverySettingsCard v-model="forwardSettings" :loading="settingsLoading" :saving="settingsSaving"
+      :changed="forwardSettingsChanged" @refresh="fetchForwardSettings" @reset="resetForwardSettings" @save="saveForwardSettings" />
 
     <section class="card table-search">
       <el-form :model="filters" @submit.prevent="applyFilters">
@@ -394,7 +375,7 @@ watch(activeDetailTab, () => {
               <el-select v-model="filters.status" clearable placeholder="任务状态" @change="applyFilters">
                 <el-option label="待处理" value="pending" />
                 <el-option label="处理中" value="processing" />
-                <el-option label="已完成" value="success" />
+                <el-option label="已完成" value="completed" />
                 <el-option label="失败" value="failed" />
                 <el-option label="已终止" value="cancelled" />
               </el-select>
@@ -420,21 +401,17 @@ watch(activeDetailTab, () => {
             <span class="mono-text">{{ row.userId }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="contentSummary" label="内容摘要" min-width="220" show-overflow-tooltip />
-        <el-table-column label="内容类型" min-width="120">
-          <template #default="{ row }">
-            <el-tag effect="plain" round>{{ row.contentType || "—" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="风险等级" min-width="120">
-          <template #default="{ row }">
-            <el-tag :type="pickRiskTagType(row.riskLevel)" effect="light">{{ row.riskLevel || "—" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" min-width="120">
+        <el-table-column label="状态" min-width="110">
           <template #default="{ row }">
             <el-tag :type="pickStatusTagType(row.status as TaskStatus)" effect="light">
               {{ formatTaskStatus(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="是否重复" min-width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.isDuplicate ? 'warning' : 'info'" size="small" effect="plain">
+              {{ row.isDuplicate ? "是" : "否" }}
             </el-tag>
           </template>
         </el-table-column>
@@ -449,8 +426,12 @@ watch(activeDetailTab, () => {
             <span class="count-skip">{{ row.skippedCount ?? 0 }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" min-width="180" />
-        <el-table-column prop="finishedAt" label="完成时间" min-width="180" />
+        <el-table-column label="创建时间" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="完成时间" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.finishedAt) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="View" @click="openDetail(row)">详情</el-button>
@@ -515,24 +496,22 @@ watch(activeDetailTab, () => {
                 <el-descriptions-item label="用户ID">
                   <span class="mono-text">{{ selectedTask.userId }}</span>
                 </el-descriptions-item>
-                <el-descriptions-item label="内容类型">{{ selectedTask.contentType || "—" }}</el-descriptions-item>
-                <el-descriptions-item label="风险等级">
-                  <el-tag :type="pickRiskTagType(selectedTask.riskLevel)" effect="light">
-                    {{ selectedTask.riskLevel || "—" }}
-                  </el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="状态" :span="2">
+                <el-descriptions-item label="状态">
                   <el-tag :type="pickStatusTagType(selectedTask.status)" effect="light">
                     {{ formatTaskStatus(selectedTask.status) }}
                   </el-tag>
                 </el-descriptions-item>
-                <el-descriptions-item label="内容摘要" :span="2">{{ selectedTask.contentSummary || "—" }}</el-descriptions-item>
+                <el-descriptions-item label="是否重复">
+                  <el-tag :type="selectedTask.isDuplicate ? 'warning' : 'info'" size="small" effect="plain">
+                    {{ selectedTask.isDuplicate ? "是" : "否" }}
+                  </el-tag>
+                </el-descriptions-item>
                 <el-descriptions-item label="目标数">{{ selectedTask.targetCount ?? 0 }}</el-descriptions-item>
                 <el-descriptions-item label="成功数">{{ selectedTask.successCount ?? 0 }}</el-descriptions-item>
                 <el-descriptions-item label="失败数">{{ selectedTask.failedCount ?? 0 }}</el-descriptions-item>
                 <el-descriptions-item label="跳过数">{{ selectedTask.skippedCount ?? 0 }}</el-descriptions-item>
-                <el-descriptions-item label="创建时间" :span="2">{{ selectedTask.createdAt || "—" }}</el-descriptions-item>
-                <el-descriptions-item label="完成时间" :span="2">{{ selectedTask.finishedAt || "—" }}</el-descriptions-item>
+                <el-descriptions-item label="创建时间" :span="2">{{ formatTime(selectedTask.createdAt) }}</el-descriptions-item>
+                <el-descriptions-item label="完成时间" :span="2">{{ formatTime(selectedTask.finishedAt) }}</el-descriptions-item>
               </el-descriptions>
             </el-tab-pane>
             <el-tab-pane label="目标明细" name="targets">
@@ -551,11 +530,13 @@ watch(activeDetailTab, () => {
                     <span class="mono-text">{{ row.id }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="userId" label="用户ID" min-width="220" show-overflow-tooltip />
+                <el-table-column label="目标" min-width="220" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.peerType === "group" ? "群 " : "用户 " }}{{ row.userId }}</template>
+                </el-table-column>
                 <el-table-column prop="nickname" label="昵称" min-width="120" show-overflow-tooltip />
-                <el-table-column label="状态" min-width="120">
+                <el-table-column label="状态" min-width="110">
                   <template #default="{ row }">
-                    <el-tag effect="light">
+                    <el-tag :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : 'info'" effect="light">
                       {{
                         row.status === "pending"
                           ? "待发送"
@@ -572,12 +553,12 @@ watch(activeDetailTab, () => {
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="attempts" label="重试次数" width="100" align="center" />
-                <el-table-column label="失败码" min-width="120" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.failCode || "—" }}</template>
+                <el-table-column label="尝试次数" width="100" align="center">
+                  <template #default="{ row }">{{ row.attempts ?? 0 }}</template>
                 </el-table-column>
-                <el-table-column prop="finishedAt" label="完成时间" min-width="170" />
-                <el-table-column prop="messageId" label="消息ID" min-width="220" show-overflow-tooltip />
+                <el-table-column label="完成时间" min-width="180">
+                  <template #default="{ row }">{{ formatTime(row.finishedAt) }}</template>
+                </el-table-column>
               </el-table>
               <div class="table-footer">
                 <el-pagination

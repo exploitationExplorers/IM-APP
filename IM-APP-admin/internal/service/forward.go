@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 
 	"im-app-admin/internal/models"
 	"im-app-admin/internal/repository"
@@ -67,9 +68,42 @@ func (s *OpsService) SetForwardUserLimit(ctx context.Context, userID string, req
 }
 
 func (s *OpsService) GetForwardSettings(ctx context.Context) (*models.ForwardSettings, error) {
-	return s.Repo.GetForwardSettings(ctx)
+	body, err := callServerInternalMethod(ctx, http.MethodGet, s.ServerBaseURL, s.ServerInternalKey,
+		"/internal/admin/forward-settings", nil)
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Data models.ForwardSettings `json:"data"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	return &envelope.Data, nil
 }
 
-func (s *OpsService) SetForwardSettings(ctx context.Context, settings *models.ForwardSettings, operatorID string) error {
-	return s.Repo.SetForwardSettings(ctx, settings, operatorID)
+func (s *OpsService) GetForwardQueueMetrics(ctx context.Context) (*models.ForwardQueueMetrics, error) {
+	body, err := callServerInternalMethod(ctx, http.MethodGet, s.ServerBaseURL, s.ServerInternalKey,
+		"/internal/admin/forward-queue-metrics", nil)
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Data models.ForwardQueueMetrics `json:"data"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	return &envelope.Data, nil
+}
+
+func (s *OpsService) SetForwardSettings(ctx context.Context, settings *models.ForwardSettings, operatorID, reason string) error {
+	payloadBytes, _ := json.Marshal(settings)
+	var payload map[string]any
+	_ = json.Unmarshal(payloadBytes, &payload)
+	payload["adminId"] = operatorID
+	payload["reason"] = reason
+	_, err := callServerInternal(ctx, s.ServerBaseURL, s.ServerInternalKey,
+		"/internal/admin/forward-settings/update", payload)
+	return err
 }

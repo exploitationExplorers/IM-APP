@@ -24,8 +24,7 @@ import (
 var (
 	ErrForwardInvalidRequest = errors.New("invalid forward request")
 	ErrForwardUnavailable    = errors.New("forward service unavailable")
-	ErrForwardLimit          = errors.New("forward limit exceeded")
-	ErrForwardDisabled       = errors.New("forward disabled by admin")
+	ErrForwardQueuePaused    = errors.New("forward queue paused")
 )
 
 // 单次 HTTP 请求只控制写库批次大小，不限制一个任务最终可以包含多少目标。
@@ -46,6 +45,80 @@ type CreateForwardInput struct {
 	Selector             models.ForwardSelector
 	IdempotencyKey       string
 	TargetUserIDs        []string
+}
+
+type CreateForwardBatchInput struct {
+	Messages       []CreateForwardInput
+	TargetUserIDs  []string
+	TargetGroupIDs []string
+	Selector       models.ForwardSelector
+	ExcludeUserIDs []string
+	IdempotencyKey string
+}
+
+type CreateForwardBatchResult struct {
+	BatchID string   `json:"batchId"`
+	TaskIDs []string `json:"taskIds"`
+	Status  string   `json:"status"`
+}
+
+func (s *ForwardService) CreateBatch(ctx context.Context, userID string, in CreateForwardBatchInput) (CreateForwardBatchResult, error) {
+	if len(in.Messages) == 0 || strings.TrimSpace(in.IdempotencyKey) == "" {
+		return CreateForwardBatchResult{}, fmt.Errorf("%w: messages and idempotencyKey are required", ErrForwardInvalidRequest)
+	}
+	if len(in.Messages) > 1000 {
+		return CreateForwardBatchResult{}, fmt.Errorf("%w: too many messages", ErrForwardInvalidRequest)
+	}
+	for _, groupID := range in.TargetGroupIDs {
+		if strings.TrimSpace(groupID) == "" || len(groupID) > 64 {
+			return CreateForwardBatchResult{}, fmt.Errorf("%w: targetGroupIds contains invalid group ID", ErrForwardInvalidRequest)
+		}
+	}
+	result := CreateForwardBatchResult{BatchID: deterministicForwardBatchID(userID, in.IdempotencyKey), Status: "queued"}
+	for i, message := range in.Messages {
+		message.IdempotencyKey = fmt.Sprintf("%s-%d", in.IdempotencyKey, i)
+		message.TargetUserIDs = in.TargetUserIDs
+		task, err := s.Create(ctx, userID, message)
+		if err != nil {
+			return result, err
+		}
+		if task.Status == models.ForwardTaskDraft {
+			if in.Selector.Mode != "" {
+				if _, err = s.GenerateTargets(ctx, userID, task.ID, in.Selector); err != nil {
+					return result, err
+				}
+			}
+			for start := 0; start < len(in.ExcludeUserIDs); start += maxForwardTargetWriteBatch {
+				end := min(start+maxForwardTargetWriteBatch, len(in.ExcludeUserIDs))
+				if _, err = s.RemoveTargets(ctx, userID, task.ID, in.ExcludeUserIDs[start:end]); err != nil {
+					return result, err
+				}
+			}
+			groups := uniqueStrings(in.TargetGroupIDs)
+			for start := 0; start < len(groups); start += maxForwardTargetWriteBatch {
+				end := min(start+maxForwardTargetWriteBatch, len(groups))
+				if _, err = s.Repo.AddGroupTargets(ctx, userID, task.ID, groups[start:end]); err != nil {
+					return result, err
+				}
+			}
+			task, err = s.Repo.GetTask(ctx, userID, task.ID)
+			if err != nil {
+				return result, err
+			}
+			if task.TargetCount <= 0 {
+				return result, fmt.Errorf("%w: no eligible targets", ErrForwardInvalidRequest)
+			}
+			if err = s.Submit(ctx, userID, task.ID); err != nil {
+				return result, err
+			}
+		}
+		result.TaskIDs = append(result.TaskIDs, task.ID)
+	}
+	return result, nil
+}
+
+func deterministicForwardBatchID(userID, key string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(userID+":"+key)).String()
 }
 
 func (s *ForwardService) Create(ctx context.Context, userID string, in CreateForwardInput) (models.ForwardTask, error) {
@@ -202,49 +275,7 @@ func (s *ForwardService) Submit(ctx context.Context, userID, taskID string) erro
 	if err := validateForwardTaskID(taskID); err != nil {
 		return err
 	}
-	if s.Kafka == nil || !s.Kafka.Available() {
-		return fmt.Errorf("%w: kafka is not configured", ErrForwardUnavailable)
-	}
-	if err := s.enforceLimit(ctx, userID, taskID); err != nil {
-		return err
-	}
 	return s.Repo.SubmitTask(ctx, userID, taskID)
-}
-
-// enforceLimit 提交前强制检查用户转发限额（enabled / 单次 / 每日 / 每小时）
-func (s *ForwardService) enforceLimit(ctx context.Context, userID, taskID string) error {
-	daily, hourly, single, enabled, err := s.Repo.GetForwardLimit(ctx, userID)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		return ErrForwardDisabled
-	}
-	task, err := s.Repo.GetTask(ctx, userID, taskID)
-	if err != nil {
-		return err
-	}
-	if task.TargetCount > int64(single) {
-		return fmt.Errorf("%w: 单次目标数 %d 超过上限 %d", ErrForwardLimit, task.TargetCount, single)
-	}
-	now := time.Now()
-	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	dailyUsed, err := s.Repo.CountForwardTargetsSince(ctx, userID, dayStart)
-	if err != nil {
-		return err
-	}
-	if dailyUsed+task.TargetCount > int64(daily) {
-		return fmt.Errorf("%w: 今日转发量 %d 已超上限 %d", ErrForwardLimit, dailyUsed, daily)
-	}
-	hourStart := now.Truncate(time.Hour)
-	hourlyUsed, err := s.Repo.CountForwardTargetsSince(ctx, userID, hourStart)
-	if err != nil {
-		return err
-	}
-	if hourlyUsed+task.TargetCount > int64(hourly) {
-		return fmt.Errorf("%w: 本小时转发量 %d 已超上限 %d", ErrForwardLimit, hourlyUsed, hourly)
-	}
-	return nil
 }
 
 func (s *ForwardService) Cancel(ctx context.Context, userID, taskID, reason string) error {
@@ -265,18 +296,12 @@ func (s *ForwardService) Resume(ctx context.Context, userID, taskID string) erro
 	if err := validateForwardTaskID(taskID); err != nil {
 		return err
 	}
-	if s.Kafka == nil || !s.Kafka.Available() {
-		return fmt.Errorf("%w: kafka is not configured", ErrForwardUnavailable)
-	}
 	return s.Repo.ResumeTask(ctx, userID, taskID)
 }
 
 func (s *ForwardService) Retry(ctx context.Context, userID, taskID string, onlyFailed bool, userIDs []string) (int64, error) {
 	if err := validateForwardTaskID(taskID); err != nil {
 		return 0, err
-	}
-	if s.Kafka == nil || !s.Kafka.Available() {
-		return 0, fmt.Errorf("%w: kafka is not configured", ErrForwardUnavailable)
 	}
 	if len(userIDs) > maxForwardTargetWriteBatch {
 		return 0, fmt.Errorf("%w: invalid taskId or too many targetUserIds", ErrForwardInvalidRequest)
@@ -346,16 +371,20 @@ func validForwardTargetStatus(status string) bool {
 }
 
 type ForwardWorker struct {
-	Repo         *repository.ForwardRepo
-	Client       *im.Client
-	Kafka        *infra.KafkaProducer
-	WorkerID     string
-	BatchSize    int
-	MaxAttempts  int
-	Concurrency  int
-	QPS          int
-	PollInterval time.Duration
-	LockTTL      time.Duration
+	Repo      *repository.ForwardRepo
+	Client    *im.Client
+	Kafka     *infra.KafkaProducer
+	WorkerID  string
+	BatchSize int
+	// MaxAttempts 仅保留用于兼容旧配置和观测；临时错误不会因为达到该值而放弃。
+	MaxAttempts        int
+	Concurrency        int
+	QPS                int
+	PollInterval       time.Duration
+	LockTTL            time.Duration
+	RetryBase          time.Duration
+	RetryMax           time.Duration
+	PerUserConcurrency int
 }
 
 func (w *ForwardWorker) normalize() {
@@ -388,6 +417,45 @@ func (w *ForwardWorker) normalize() {
 	}
 	if w.LockTTL <= 0 {
 		w.LockTTL = 5 * time.Minute
+	}
+	if w.RetryBase <= 0 {
+		w.RetryBase = 2 * time.Second
+	}
+	if w.RetryMax <= 0 {
+		w.RetryMax = 5 * time.Minute
+	}
+	if w.PerUserConcurrency <= 0 {
+		w.PerUserConcurrency = 2
+	}
+}
+
+// RunPolling 以 PostgreSQL 为事实来源持续领取任务。Kafka 只负责加速唤醒，不能成为可靠投递前置条件。
+func (w *ForwardWorker) RunPolling(ctx context.Context) {
+	w.normalize()
+	for {
+		settings, err := w.Repo.GetDeliverySettings(ctx)
+		if err != nil {
+			log.Printf("forward settings refresh failed: %v", err)
+		} else if !settings.QueuePaused {
+			w.BatchSize = settings.ClaimBatchSize
+			w.Concurrency = settings.WorkerConcurrency
+			w.PerUserConcurrency = settings.PerUserConcurrency
+			w.QPS = settings.GlobalQPS
+			w.LockTTL = time.Duration(settings.ProcessingLockSeconds) * time.Second
+			w.RetryBase = time.Duration(settings.RetryBaseSeconds) * time.Second
+			w.RetryMax = time.Duration(settings.RetryMaxSeconds) * time.Second
+			var targets []models.ForwardTarget
+			targets, err = w.Repo.ClaimRunnableTargets(ctx, w.WorkerID, w.BatchSize, w.PerUserConcurrency, w.LockTTL)
+			if err == nil && len(targets) > 0 {
+				_, err = w.processBatch(ctx, targets)
+			}
+		}
+		if err != nil {
+			log.Printf("forward database worker failed: %v", err)
+		}
+		if !waitContext(ctx, w.PollInterval) {
+			return
+		}
 	}
 }
 
@@ -465,6 +533,19 @@ func (w *ForwardWorker) RunTaskOnce(ctx context.Context, taskID string) (int, er
 	if err := validateForwardTaskID(taskID); err != nil {
 		return 0, err
 	}
+	settings, err := w.Repo.GetDeliverySettings(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if settings.QueuePaused {
+		return 0, ErrForwardQueuePaused
+	}
+	w.BatchSize = settings.ClaimBatchSize
+	w.Concurrency = settings.WorkerConcurrency
+	w.QPS = settings.GlobalQPS
+	w.LockTTL = time.Duration(settings.ProcessingLockSeconds) * time.Second
+	w.RetryBase = time.Duration(settings.RetryBaseSeconds) * time.Second
+	w.RetryMax = time.Duration(settings.RetryMaxSeconds) * time.Second
 	targets, err := w.Repo.ClaimTaskTargets(ctx, taskID, w.WorkerID, w.BatchSize, w.LockTTL)
 	if err != nil || len(targets) == 0 {
 		return len(targets), err
@@ -594,12 +675,18 @@ func (w *ForwardWorker) processTarget(ctx context.Context, target models.Forward
 		return w.Repo.MarkTargetSkipped(ctx, target, "task_not_runnable", "task is not runnable")
 	}
 
-	eligible, reason, err := w.Repo.TargetEligible(ctx, task.UserID, target.TargetUserID)
+	var eligible bool
+	var reason string
+	if target.PeerType == "group" {
+		eligible, reason, err = w.Repo.GroupTargetEligible(ctx, task.UserID, target.TargetUserID)
+	} else {
+		eligible, reason, err = w.Repo.TargetEligible(ctx, task.UserID, target.TargetUserID)
+	}
 	if err != nil {
 		return w.retryOrFail(ctx, target, "eligibility_check_failed", err)
 	}
 	if !eligible {
-		return w.Repo.MarkTargetSkipped(ctx, target, reason, reason)
+		return w.Repo.MarkTargetFailed(ctx, target, reason, reason)
 	}
 
 	senderIMID, err := im.UserIDFromBusinessID(task.UserID)
@@ -608,25 +695,48 @@ func (w *ForwardWorker) processTarget(ctx context.Context, target models.Forward
 	}
 	targetIMID, err := im.UserIDFromBusinessID(target.TargetUserID)
 	if err != nil {
-		return w.Repo.MarkTargetSkipped(ctx, target, "invalid_target_id", err.Error())
+		return w.Repo.MarkTargetFailed(ctx, target, "invalid_target_id", err.Error())
 	}
-	clientMsgID := deterministicForwardClientMsgID(task.ID, target.TargetUserID)
-	result, err := w.Client.SendForwardMessage(ctx, senderIMID, targetIMID, clientMsgID,
-		task.SourceSnapshot.ContentType, task.SourceSnapshot.Content)
+	clientMsgID := deterministicForwardClientMsgID(task.ID, target.PeerType+":"+target.TargetUserID)
+	var result im.SendMessageResult
+	if target.PeerType == "group" {
+		result, err = w.Client.SendForwardGroupMessage(ctx, senderIMID, targetIMID, clientMsgID, task.SourceSnapshot.ContentType, task.SourceSnapshot.Content)
+	} else {
+		result, err = w.Client.SendForwardMessage(ctx, senderIMID, targetIMID, clientMsgID, task.SourceSnapshot.ContentType, task.SourceSnapshot.Content)
+	}
 	if err != nil {
 		return w.retryOrFail(ctx, target, "openim_send_failed", err)
 	}
 	conversationID := singleConversationID(senderIMID, targetIMID)
+	if target.PeerType == "group" {
+		conversationID = "sg_" + targetIMID
+	}
 	return w.Repo.MarkTargetSuccess(ctx, target, conversationID, result.ClientMsgID, result.ServerMsgID)
 }
 
 func (w *ForwardWorker) retryOrFail(ctx context.Context, target models.ForwardTarget, code string, cause error) error {
 	message := cause.Error()
-	if target.Attempts >= w.MaxAttempts || !temporaryForwardError(cause) {
+	if !temporaryForwardError(cause) {
 		return w.Repo.MarkTargetFailed(ctx, target, code, message)
 	}
-	delay := time.Duration(1<<min(target.Attempts, 8)) * time.Second
+	delay := forwardRetryDelay(target.Attempts, w.RetryBase, w.RetryMax)
 	return w.Repo.MarkTargetRetry(ctx, target, code, message, time.Now().Add(delay))
+}
+
+func forwardRetryDelay(attempt int, base, maximum time.Duration) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if base <= 0 {
+		base = 2 * time.Second
+	}
+	if maximum < base {
+		maximum = 5 * time.Minute
+	}
+	if attempt >= 31 {
+		return maximum
+	}
+	return min(base*time.Duration(1<<(attempt-1)), maximum)
 }
 
 func temporaryForwardError(err error) bool {

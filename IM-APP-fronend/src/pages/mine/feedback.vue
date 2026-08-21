@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
 
@@ -64,12 +65,7 @@ function onSubmit() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <text class="nav-back-chevron">‹</text>
-      </view>
-      <text class="nav-title">意见反馈</text>
-    </view>
+    <ImNavBar title="意见反馈" @back="goBack" />
 
     <view class="body">
       <view class="field">
@@ -142,43 +138,6 @@ $btn-disabled: #c5cddc;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-.nav {
-  position: relative;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  height: calc(88rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 32rpx 0;
-  box-sizing: border-box;
-  background: #fff;
-}
-
-.nav-back {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 12rpx;
-  background: #eef0f4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.nav-back-chevron {
-  font-size: 44rpx;
-  color: #606266;
-  line-height: 1;
-  margin-top: -4rpx;
-}
-
-.nav-title {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: $text;
-  line-height: 48rpx;
 }
 
 .body {

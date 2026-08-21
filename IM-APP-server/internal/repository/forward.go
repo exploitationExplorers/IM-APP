@@ -129,27 +129,6 @@ func (r *ForwardRepo) GetTaskForWorker(ctx context.Context, taskID string) (mode
 	return task, err
 }
 
-// GetForwardLimit 查用户转发限额（无记录返回默认值：日 100 / 时 20 / 单次 10000 / 启用）
-func (r *ForwardRepo) GetForwardLimit(ctx context.Context, userID string) (daily, hourly, single int, enabled bool, err error) {
-	daily, hourly, single, enabled = 100, 20, 10000, true
-	err = r.DB.QueryRow(ctx, `
-		SELECT daily_limit, hourly_limit, single_targets, enabled
-		FROM forward_user_limits WHERE user_id=$1::uuid`, userID).Scan(&daily, &hourly, &single, &enabled)
-	if err == pgx.ErrNoRows {
-		return daily, hourly, single, enabled, nil
-	}
-	return daily, hourly, single, enabled, err
-}
-
-// CountForwardTargetsSince 统计用户某时间点后创建的转发任务目标总数（不含已取消）
-func (r *ForwardRepo) CountForwardTargetsSince(ctx context.Context, userID string, since time.Time) (int64, error) {
-	var n int64
-	err := r.DB.QueryRow(ctx, `
-		SELECT COALESCE(SUM(target_count),0) FROM forward_tasks
-		WHERE user_id=$1::uuid AND created_at >= $2 AND status <> 'cancelled'`, userID, since).Scan(&n)
-	return n, err
-}
-
 func (r *ForwardRepo) ListTasks(ctx context.Context, userID, status, cursor string, limit int) (models.ForwardTaskPage, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -218,6 +197,39 @@ func (r *ForwardRepo) AddTargets(ctx context.Context, userID, taskID string, use
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+func (r *ForwardRepo) AddGroupTargets(ctx context.Context, userID, taskID string, groupIDs []string) (int64, error) {
+	if len(groupIDs) == 0 {
+		return 0, nil
+	}
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM forward_tasks WHERE id=$2::uuid AND user_id=$1::uuid FOR UPDATE`, userID, taskID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrForwardTaskNotFound
+		}
+		return 0, err
+	}
+	if status != models.ForwardTaskDraft {
+		return 0, ErrForwardTaskState
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO forward_task_targets(task_id,user_id,group_id,peer_type)
+		SELECT $2::uuid,NULL,g.id,'group' FROM groups g
+		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$1::uuid AND COALESCE(gm.status,'active')='active'
+		WHERE (g.public_id=ANY($3::text[]) OR g.id::text=ANY($3::text[])) AND COALESCE(g.status,'active')='active'
+		ON CONFLICT DO NOTHING`, userID, taskID, groupIDs)
+	if err != nil {
+		return 0, err
+	}
+	if err := refreshTargetCountTx(ctx, tx, taskID); err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), tx.Commit(ctx)
 }
 
 func (r *ForwardRepo) GenerateTargets(ctx context.Context, userID, taskID string, selector models.ForwardSelector) (int64, error) {
@@ -501,7 +513,7 @@ func (r *ForwardRepo) ListTargets(ctx context.Context, userID, taskID, status, c
 		limit = 50
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT t.id::text,t.task_id::text,t.user_id::text,t.status,t.attempts,
+		SELECT t.id::text,t.task_id::text,COALESCE(t.user_id,t.group_id)::text,t.peer_type,t.status,t.attempts,
 			t.conversation_id,t.sent_client_msg_id,t.sent_server_msg_id,
 			t.fail_code,t.failure_message,t.next_retry_at,t.finished_at,t.created_at,t.updated_at
 		FROM forward_task_targets t JOIN forward_tasks ft ON ft.id=t.task_id
@@ -515,7 +527,7 @@ func (r *ForwardRepo) ListTargets(ctx context.Context, userID, taskID, status, c
 	items := make([]models.ForwardTarget, 0, limit+1)
 	for rows.Next() {
 		var item models.ForwardTarget
-		if err := rows.Scan(&item.ID, &item.TaskID, &item.TargetUserID, &item.Status, &item.Attempts,
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.TargetUserID, &item.PeerType, &item.Status, &item.Attempts,
 			&item.ConversationID, &item.SentClientMsgID, &item.SentServerMsgID,
 			&item.FailureCode, &item.FailureMessage, &item.NextRetryAt, &item.FinishedAt,
 			&item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -552,7 +564,7 @@ func (r *ForwardRepo) ClaimTaskTargets(ctx context.Context, taskID, workerID str
 			locked_by=$2,locked_until=NOW()+($3 * INTERVAL '1 second'),
 			started_at=COALESCE(started_at,NOW()),updated_at=NOW()
 		FROM picked WHERE t.id=picked.id
-		RETURNING t.id::text,t.task_id::text,t.user_id::text,t.status,t.attempts,
+		RETURNING t.id::text,t.task_id::text,COALESCE(t.user_id,t.group_id)::text,t.peer_type,t.status,t.attempts,
 			t.conversation_id,t.sent_client_msg_id,t.sent_server_msg_id,
 			t.fail_code,t.failure_message,t.next_retry_at,t.finished_at,t.created_at,t.updated_at`,
 		limit, workerID, int(lockTTL.Seconds()), taskID)
@@ -563,7 +575,64 @@ func (r *ForwardRepo) ClaimTaskTargets(ctx context.Context, taskID, workerID str
 	items := make([]models.ForwardTarget, 0, limit)
 	for rows.Next() {
 		var item models.ForwardTarget
-		if err := rows.Scan(&item.ID, &item.TaskID, &item.TargetUserID, &item.Status, &item.Attempts,
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.TargetUserID, &item.PeerType, &item.Status, &item.Attempts,
+			&item.ConversationID, &item.SentClientMsgID, &item.SentServerMsgID,
+			&item.FailureCode, &item.FailureMessage, &item.NextRetryAt, &item.FinishedAt,
+			&item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.LockedBy = workerID
+		items = append(items, item)
+	}
+	if len(items) > 0 {
+		_, _ = r.DB.Exec(ctx, `UPDATE forward_tasks SET status='processing',started_at=COALESCE(started_at,NOW()),updated_at=NOW()
+			WHERE id=ANY($1::uuid[]) AND status='pending'`, uniqueTaskIDs(items))
+	}
+	return items, rows.Err()
+}
+
+// ClaimRunnableTargets 跨任务公平领取投递。每个用户每轮最多领取 perUser 条，避免大任务独占 Worker。
+func (r *ForwardRepo) ClaimRunnableTargets(ctx context.Context, workerID string, limit, perUser int, lockTTL time.Duration) ([]models.ForwardTarget, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if perUser <= 0 {
+		perUser = 2
+	}
+	if lockTTL <= 0 {
+		lockTTL = time.Minute
+	}
+	rows, err := r.DB.Query(ctx, `
+		WITH active_users AS (
+			SELECT DISTINCT ft.user_id FROM forward_task_targets t JOIN forward_tasks ft ON ft.id=t.task_id
+			WHERE ft.status IN ('pending','processing') AND (
+				(t.status IN ('pending','retrying') AND t.next_retry_at<=NOW()) OR
+				(t.status='processing' AND t.locked_until<NOW()))
+		), picked AS (
+			SELECT candidate.id FROM active_users u CROSS JOIN LATERAL (
+				SELECT t.id FROM forward_task_targets t JOIN forward_tasks ft ON ft.id=t.task_id
+				WHERE ft.user_id=u.user_id AND ft.status IN ('pending','processing') AND (
+					(t.status IN ('pending','retrying') AND t.next_retry_at<=NOW()) OR
+					(t.status='processing' AND t.locked_until<NOW()))
+				ORDER BY t.priority DESC,t.next_retry_at,t.created_at,t.id FOR UPDATE OF t SKIP LOCKED LIMIT $4
+			) candidate ORDER BY candidate.id LIMIT $1
+		)
+		UPDATE forward_task_targets t SET status='processing',attempts=attempts+1,
+			locked_by=$2,locked_until=NOW()+($3 * INTERVAL '1 second'),
+			started_at=COALESCE(started_at,NOW()),updated_at=NOW()
+		FROM picked WHERE t.id=picked.id
+		RETURNING t.id::text,t.task_id::text,COALESCE(t.user_id,t.group_id)::text,t.peer_type,t.status,t.attempts,
+			t.conversation_id,t.sent_client_msg_id,t.sent_server_msg_id,
+			t.fail_code,t.failure_message,t.next_retry_at,t.finished_at,t.created_at,t.updated_at`,
+		limit, workerID, int(lockTTL.Seconds()), perUser)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]models.ForwardTarget, 0, limit)
+	for rows.Next() {
+		var item models.ForwardTarget
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.TargetUserID, &item.PeerType, &item.Status, &item.Attempts,
 			&item.ConversationID, &item.SentClientMsgID, &item.SentServerMsgID,
 			&item.FailureCode, &item.FailureMessage, &item.NextRetryAt, &item.FinishedAt,
 			&item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -686,6 +755,26 @@ func (r *ForwardRepo) TargetEligible(ctx context.Context, senderID, targetID str
 	return true, "", nil
 }
 
+func (r *ForwardRepo) GroupTargetEligible(ctx context.Context, senderID, groupID string) (bool, string, error) {
+	var groupStatus, memberStatus string
+	err := r.DB.QueryRow(ctx, `SELECT COALESCE(g.status,'active'),COALESCE(gm.status,'active')
+		FROM groups g JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$1::uuid WHERE g.id=$2::uuid`, senderID, groupID).
+		Scan(&groupStatus, &memberStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, "not_group_member", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	if groupStatus != "active" {
+		return false, "group_dissolved", nil
+	}
+	if memberStatus != "active" {
+		return false, "not_group_member", nil
+	}
+	return true, "", nil
+}
+
 func (r *ForwardRepo) MarkTargetSuccess(ctx context.Context, target models.ForwardTarget, conversationID, clientMsgID, serverMsgID string) error {
 	return r.finishTarget(ctx, target, models.ForwardTargetSuccess, "", "", conversationID, clientMsgID, serverMsgID)
 }
@@ -760,4 +849,56 @@ func recordActionTx(ctx context.Context, tx pgx.Tx, taskID, operatorID, action s
 	_, err := tx.Exec(ctx, `INSERT INTO forward_task_actions(task_id,admin_id,action,detail)
 		VALUES($1::uuid,NULLIF($2,'')::uuid,$3,$4)`, taskID, operatorID, action, string(raw))
 	return err
+}
+
+func (r *ForwardRepo) GetDeliverySettings(ctx context.Context) (models.ForwardDeliverySettings, error) {
+	var s models.ForwardDeliverySettings
+	err := r.DB.QueryRow(ctx, `SELECT global_qps,worker_concurrency,claim_batch_size,
+		per_user_concurrency,retry_base_seconds,retry_max_seconds,processing_lock_seconds,
+		queue_paused,retention_days,queue_alert_depth,version,updated_at
+		FROM forward_delivery_settings WHERE singleton=TRUE`).Scan(
+		&s.GlobalQPS, &s.WorkerConcurrency, &s.ClaimBatchSize, &s.PerUserConcurrency,
+		&s.RetryBaseSeconds, &s.RetryMaxSeconds, &s.ProcessingLockSeconds,
+		&s.QueuePaused, &s.RetentionDays, &s.QueueAlertDepth, &s.Version, &s.UpdatedAt)
+	return s, err
+}
+
+func (r *ForwardRepo) GetQueueMetrics(ctx context.Context) (models.ForwardQueueMetrics, error) {
+	var m models.ForwardQueueMetrics
+	err := r.DB.QueryRow(ctx, `SELECT
+		COUNT(*) FILTER (WHERE status='pending'),COUNT(*) FILTER (WHERE status='retrying'),
+		COUNT(*) FILTER (WHERE status='processing'),COUNT(*) FILTER (WHERE status='failed'),
+		COALESCE(EXTRACT(EPOCH FROM (NOW()-(MIN(created_at) FILTER (WHERE status IN ('pending','retrying')))))::BIGINT,0),
+		(COUNT(*) FILTER (WHERE status='success' AND finished_at>=NOW()-INTERVAL '1 minute'))::float8/60.0
+		FROM forward_task_targets`).Scan(&m.Queued, &m.Retrying, &m.Processing, &m.PermanentFailed,
+		&m.OldestPendingSeconds, &m.SendRatePerSecond)
+	return m, err
+}
+
+func (r *ForwardRepo) UpdateDeliverySettings(ctx context.Context, s models.ForwardDeliverySettings, adminID, reason string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var before []byte
+	if err := tx.QueryRow(ctx, `SELECT to_jsonb(x) FROM forward_delivery_settings x WHERE singleton=TRUE FOR UPDATE`).Scan(&before); err != nil {
+		return err
+	}
+	var after []byte
+	err = tx.QueryRow(ctx, `UPDATE forward_delivery_settings SET global_qps=$1,worker_concurrency=$2,
+		claim_batch_size=$3,per_user_concurrency=$4,retry_base_seconds=$5,retry_max_seconds=$6,
+		processing_lock_seconds=$7,queue_paused=$8,retention_days=$9,queue_alert_depth=$10,
+		version=version+1,updated_by=NULLIF($11,'')::uuid,update_reason=$12,updated_at=NOW()
+		WHERE singleton=TRUE RETURNING to_jsonb(forward_delivery_settings)`, s.GlobalQPS, s.WorkerConcurrency,
+		s.ClaimBatchSize, s.PerUserConcurrency, s.RetryBaseSeconds, s.RetryMaxSeconds,
+		s.ProcessingLockSeconds, s.QueuePaused, s.RetentionDays, s.QueueAlertDepth, adminID, reason).Scan(&after)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO forward_delivery_settings_audit(admin_id,reason,before_value,after_value)
+		VALUES(NULLIF($1,'')::uuid,$2,$3::jsonb,$4::jsonb)`, adminID, reason, before, after); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

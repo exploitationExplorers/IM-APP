@@ -2,17 +2,17 @@
 import { computed, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { fetchContactTags } from '@/api/contact'
+import { resolveIMGroupByIM } from '@/api/im'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG } from '@/config'
 import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
 import { useForwardStore } from '@/stores/forward'
 import type { ContactTagItem, FriendForwardPlan } from '@/types'
-import { MAX_FORWARD_MESSAGES } from '@/constants/forward'
 import { snapshotFromMessage } from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
-import { isIOSApp } from '@/utils/platform'
 import { businessUserIdFromIM } from '@/utils/openim'
+import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
 
@@ -49,15 +49,6 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined
 onLoad(async () => {
   if (!forwardStore.messageIds.length) {
     uni.showToast({ title: '没有可转发的消息', icon: 'none' })
-    safeBack('/pages/chat/index')
-    return
-  }
-  // 页面层兜底：入口已限制 iOS 转发 99 条，这里拦住绕过入口直接写入 store 的路径
-  if (isIOSApp() && forwardStore.messageIds.length > MAX_FORWARD_MESSAGES) {
-    uni.showToast({
-      title: `一次最多转发 ${MAX_FORWARD_MESSAGES} 条消息`,
-      icon: 'none',
-    })
     safeBack('/pages/chat/index')
     return
   }
@@ -274,20 +265,6 @@ function collectPlan(): { friendPlan: FriendForwardPlan | null; groupTargets: Fo
   return { friendPlan: null, groupTargets }
 }
 
-async function resolveConversation(target: ForwardTarget) {
-  if (target.conversationId) {
-    const cached = chatStore.conversations.find((c) => c.id === target.conversationId)
-    if (cached) return cached
-  }
-  if (target.kind === 'contact' && target.businessUserId) {
-    return chatStore.enterConversation({ type: 'private', businessId: target.businessUserId })
-  }
-  if (target.kind === 'group' && target.businessGroupId) {
-    return chatStore.enterConversation({ type: 'group', businessId: target.businessGroupId })
-  }
-  throw new Error(`无法转发到${target.name}`)
-}
-
 function selectedPreviewNames() {
   const names: string[] = []
   const pushName = (name: string) => {
@@ -341,15 +318,15 @@ function buildSources() {
   })
 }
 
-async function sendToGroups(groupTargets: ForwardTarget[], messageIds: string[]) {
+async function resolveGroupTargetIds(groupTargets: ForwardTarget[]) {
+  const ids: string[] = []
   for (const target of groupTargets) {
-    try {
-      const conv = await resolveConversation(target)
-      await chatStore.forwardToConversation(conv.id, messageIds)
-    } catch {
-      /* 群转发走原生 SDK，失败不挡住好友队列 */
-    }
+    if (target.businessGroupId) { ids.push(target.businessGroupId); continue }
+    const conversation = chatStore.conversations.find((item) => item.id === target.conversationId)
+    if (!conversation?.groupId) throw new Error(`无法识别群聊「${target.name}」`)
+    ids.push((await resolveIMGroupByIM(conversation.groupId)).businessGroupId)
   }
+  return [...new Set(ids)]
 }
 
 async function onSend() {
@@ -362,17 +339,12 @@ async function onSend() {
     // App 原生弹窗关闭前立刻请求，容易把后续调用卡住；H5 没有这个问题。
     await afterNativeModal()
     const sources = buildSources()
-    const messageIds = [...forwardStore.messageIds]
-    if (friendPlan) {
-      await forwardStore.submitFriendPlan(sources, friendPlan)
-    }
-    const groups = [...groupTargets]
+    const targetGroupIds = await resolveGroupTargetIds(groupTargets)
+    await forwardStore.submitBatch(sources, friendPlan, targetGroupIds)
     forwardStore.markSucceeded()
     forwardStore.clear()
+    uni.showToast({ title: '已加入队列', icon: 'success' })
     safeBack('/pages/chat/index')
-    if (groups.length) {
-      void sendToGroups(groups, messageIds)
-    }
   } catch (e) {
     uni.showToast({ title: e instanceof Error ? e.message : '提交失败', icon: 'none' })
   } finally {
@@ -388,11 +360,11 @@ function goBack() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="back" @click="goBack">‹</view>
-      <text class="title">转发给</text>
-      <view class="send" :class="{ disabled: selectedCount === 0 || sending }" @click="onSend">传送</view>
-    </view>
+    <ImNavBar title="转发给" @back="goBack">
+      <template #right>
+        <view class="send" :class="{ disabled: selectedCount === 0 || sending }" @click="onSend">传送</view>
+      </template>
+    </ImNavBar>
 
     <view class="search">
       <input v-model="keyword" class="search-input" placeholder="搜索" placeholder-style="color:#B0B0B0" />
@@ -435,27 +407,6 @@ function goBack() {
   display: flex;
   flex-direction: column;
   background: #fff;
-}
-
-.nav {
-  height: 96rpx;
-  padding: 0 24rpx;
-  display: flex;
-  align-items: center;
-}
-
-.back {
-  width: 72rpx;
-  font-size: 52rpx;
-  color: #111;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #111;
 }
 
 .send {
