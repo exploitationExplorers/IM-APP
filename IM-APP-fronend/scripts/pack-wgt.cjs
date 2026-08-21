@@ -98,11 +98,43 @@ function zipDir(srcDir, destFile) {
   const zipFile = destFile.replace(/\.wgt$/i, '.zip')
   if (fs.existsSync(zipFile)) fs.unlinkSync(zipFile)
   if (fs.existsSync(destFile)) fs.unlinkSync(destFile)
-  const tar = spawnSync('tar', ['-a', '-c', '-f', zipFile, '-C', srcDir, '.'], { stdio: 'inherit' })
-  if (tar.status !== 0) {
-    throw new Error('打包 wgt 失败：本机需要 tar（Windows 10+ 自带）')
+  const script =
+    'import os, sys, zipfile\nsrc, dst = sys.argv[1], sys.argv[2]\nwith zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:\n    for root, _, files in os.walk(src):\n        for name in files:\n            full = os.path.join(root, name)\n            rel = os.path.relpath(full, src).replace(os.sep, "/")\n            z.write(full, rel)\n'
+  const pyCmds = process.platform === 'win32' ? [['py', '-3'], ['python'], ['python3']] : [['python3'], ['python']]
+  let packed = false
+  for (const [cmd, ...prefix] of pyCmds) {
+    const result = spawnSync(cmd, [...prefix, '-c', script, srcDir, zipFile], { stdio: 'inherit' })
+    if (result.status === 0 && fs.existsSync(zipFile)) {
+      packed = true
+      break
+    }
+  }
+  if (!packed) {
+    throw new Error('打包 wgt 失败：需要 Python 把资源打成根目录含 manifest.json 的 zip')
   }
   fs.renameSync(zipFile, destFile)
+}
+
+function syncDistWidgetVersion(versionName, versionCode) {
+  const distManifestPath = path.join(distDir, 'manifest.json')
+  const json = JSON.parse(fs.readFileSync(distManifestPath, 'utf8'))
+  json.version = { ...(json.version || {}), name: versionName, code: String(versionCode) }
+  fs.writeFileSync(distManifestPath, `${JSON.stringify(json, null, 2)}\n`)
+}
+
+function readPackedWidgetVersion(wgtPath) {
+  for (const entry of ['manifest.json', './manifest.json']) {
+    const extracted = spawnSync('tar', ['-xOf', wgtPath, entry], { encoding: 'utf8' })
+    if (extracted.status !== 0 || !extracted.stdout) continue
+    const json = JSON.parse(extracted.stdout)
+    const versionCode = Number.parseInt(String(json.version?.code || ''), 10)
+    const versionName = String(json.version?.name || '')
+    if (!versionName || !Number.isFinite(versionCode) || versionCode <= 0) {
+      throw new Error(`wgt 内 manifest.json 版本无效: ${entry}`)
+    }
+    return { versionName, versionCode, appid: String(json.id || '') }
+  }
+  throw new Error('wgt 根目录没有 manifest.json，热更新会安装成功但不会生效')
 }
 
 function resolveApiBase(raw) {
@@ -230,6 +262,15 @@ async function publishRelease(args, filePath, versionName, versionCode) {
   const key = args.key || process.env.IM_INTERNAL_API_KEY || serverEnv.IM_INTERNAL_API_KEY
   if (!origin) throw new Error('发布需要 --api=https://你的域名 或配置 VITE_API_BASE_URL')
   if (!key) throw new Error('发布需要 --key 或 IM-APP-server/.env 中的 IM_INTERNAL_API_KEY')
+  if (args.packageType === 'wgt') {
+    const packed = readPackedWidgetVersion(filePath)
+    if (packed.versionCode !== versionCode || packed.versionName !== versionName) {
+      throw new Error(
+        `wgt 内是 ${packed.versionName} (${packed.versionCode})，不能按 ${versionName} (${versionCode}) 发布`,
+      )
+    }
+    console.log(`wgt 校验通过: ${packed.appid} ${packed.versionName} (${packed.versionCode})`)
+  }
   console.log(`正在发布到 ${origin}`)
 
   const fileName = path.basename(filePath)
@@ -310,12 +351,16 @@ async function main() {
     }
     const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
     execFileSync(npmCmd, ['run', 'build:app'], { cwd: root, stdio: 'inherit', shell: true })
+    syncDistWidgetVersion(versionName, versionCode)
   }
 
   let filePath = args.file ? path.resolve(root, args.file) : ''
   if (args.packageType === 'wgt' && !filePath) {
     if (!fs.existsSync(path.join(distDir, 'manifest.json'))) {
       throw new Error(`未找到 ${distDir}，请先加 --build 或使用 HBuilderX 打自定义基座资源`)
+    }
+    if (!args.build) {
+      syncDistWidgetVersion(versionName, versionCode)
     }
     filePath = path.join(releaseDir, `im-${versionCode}.wgt`)
     zipDir(distDir, filePath)

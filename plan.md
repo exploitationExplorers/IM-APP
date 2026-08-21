@@ -139,7 +139,8 @@ npm run pack:wgt -- --build --publish --min-native=100
 2. 把 `dist/build/app-plus` 打成 zip，扩展名改为 `.wgt`，输出到 `unpackage/release/`
 3. `--publish` 时读 `IM_INTERNAL_API_KEY` 和 API 根地址，上传并创建发布记录
 
-日常：改完前端 → `npm run pack:wgt -- --build --publish --min-native=100`。  
+日常：改完前端 → 先合进要发布的分支 → `npm run pack:wgt -- --build --publish --min-native=100 --changelog=客户可见说明`。  
+操作步骤、验收和踩坑见 [IM-APP-fronend/docs/wgt热更新发布.md](IM-APP-fronend/docs/wgt热更新发布.md)。  
 `min-native` 必须等于客户手里那只 APK 的 `versionCode`。换原生插件、权限、运行时后先打新 APK 发给客户，再把后续 wgt 的 `--min-native` 改成新壳版本。
 
 ## 任务拆分
