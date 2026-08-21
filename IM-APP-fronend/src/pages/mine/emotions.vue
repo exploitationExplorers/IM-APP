@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-
-// 状态栏高度适配
-const statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20
+import ImNavBar from '@/components/ImNavBar.vue'
 
 // 状态
 const isEditMode = ref(false)
@@ -136,20 +134,13 @@ function onDelete() {
 <template>
   <view class="page">
     <!-- 自定义导航栏 -->
-    <view class="nav-bar-wrap">
-      <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
-      <view class="nav-bar">
-        <view class="nav-left" >
-          <text class="back-icon" @click="goBack">‹</text>
-          <text class="title">我的表情</text>
+    <ImNavBar title="我的表情" @back="goBack">
+      <template #right>
+        <view class="edit-btn" :class="{ 'cancel-btn': isEditMode }" @click="toggleEdit">
+          {{ isEditMode ? '取消' : '编辑' }}
         </view>
-        <view class="nav-right" @click="toggleEdit">
-          <view class="edit-btn" :class="{ 'cancel-btn': isEditMode }">
-            {{ isEditMode ? '取消' : '编辑' }}
-          </view>
-        </view>
-      </view>
-    </view>
+      </template>
+    </ImNavBar>
 
     <!-- 主体内容 -->
     <scroll-view scroll-y class="content" :class="{ 'has-bottom-bar': isEditMode }">
@@ -201,42 +192,7 @@ function onDelete() {
   flex-direction: column;
 }
 
-/* 导航栏样式 */
-.nav-bar-wrap {
-  background: #ffffff;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-.nav-bar {
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 32rpx;
-}
-.nav-left {
-  display: flex;
-  align-items: center;
-  height: 100%;
-}
-.back-icon {
-  font-size: 56rpx;
-  color: #333;
-  margin-right: 8rpx;
-  font-weight: 300;
-  margin-top: -4rpx;
-}
-.title {
-  font-size: 34rpx;
-  font-weight: 600;
-  color: #000;
-}
-.nav-right {
-  height: 100%;
-  display: flex;
-  align-items: center;
-}
+/* 导航栏右侧编辑按钮 */
 .edit-btn {
   font-size: 28rpx;
   color: #333;

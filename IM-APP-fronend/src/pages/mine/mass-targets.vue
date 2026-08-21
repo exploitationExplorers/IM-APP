@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useMassSendStore } from '@/stores/massSend'
 
-const statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20
 const massStore = useMassSendStore()
 
 const targets = computed(() => massStore.selectedTargets)
@@ -27,20 +27,7 @@ function goEdit() {
 
 <template>
   <view class="page">
-    <view class="nav-bar-wrap">
-      <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
-      <view class="nav-bar">
-        <view class="nav-left">
-          <text class="back-icon" @click="goBack">‹</text>
-        </view>
-        <view class="nav-center">
-          <text class="title">群发对象</text>
-        </view>
-        <!-- <view class="nav-right">
-          <view class="edit-btn" @click="goEdit">编辑</view>
-        </view> -->
-      </view>
-    </view>
+    <ImNavBar title="群发对象" @back="goBack" />
 
     <view class="summary">
       <text class="summary-title">你将发送消息给</text>
@@ -66,60 +53,6 @@ function goEdit() {
   background: #ffffff;
   display: flex;
   flex-direction: column;
-}
-
-.nav-bar-wrap {
-  background: #ffffff;
-}
-
-.nav-bar {
-  height: 96rpx;
-  display: flex;
-  align-items: center;
-  padding: 0 24rpx;
-  box-sizing: border-box;
-}
-
-.nav-left,
-.nav-right {
-  width: 160rpx;
-  display: flex;
-  align-items: center;
-}
-
-.nav-right {
-  justify-content: flex-end;
-}
-
-.nav-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
-.back-icon {
-  font-size: 52rpx;
-  color: #111;
-  line-height: 1;
-  padding: 8rpx 12rpx;
-}
-
-.title {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #111;
-}
-
-.edit-btn {
-  height: 56rpx;
-  padding: 0 18rpx;
-  border-radius: 999rpx;
-  background: #f0f1f4;
-  color: #111;
-  font-size: 26rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .summary {

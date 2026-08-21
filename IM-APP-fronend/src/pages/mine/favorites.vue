@@ -9,6 +9,7 @@ import {
 import type { FavoriteItem } from '@/api/favorites'
 import EmptyState from '@/components/EmptyState.vue'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
 import { conversationTitleOf } from '@/utils/favoriteMeta'
@@ -258,11 +259,7 @@ function displayText(item: FavoriteItem) {
 
 <template>
   <view class="page">
-    <view class="navbar">
-      <view class="back" @click="goBack">‹</view>
-      <text class="title">我的收藏</text>
-      <view class="space" />
-    </view>
+    <ImNavBar title="我的收藏" @back="goBack" />
 
     <view class="tabs">
       <view
@@ -348,29 +345,6 @@ function displayText(item: FavoriteItem) {
   display: flex;
   flex-direction: column;
   background: #ffffff;
-}
-
-.navbar {
-  height: 96rpx;
-  padding: 0 24rpx;
-  display: flex;
-  align-items: center;
-}
-
-.back,
-.space {
-  width: 72rpx;
-  font-size: 52rpx;
-  color: #111;
-  line-height: 1;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #111;
 }
 
 .tabs {

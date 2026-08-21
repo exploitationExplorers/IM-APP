@@ -2,14 +2,31 @@ import http from "@/api";
 import type { AdminPage } from "@/api/interface";
 
 export namespace AdminForwardRisk {
-  export type ForwardTaskStatus = "pending" | "processing" | "success" | "completed" | "failed" | "cancelled";
-  export type ForwardTargetStatus = "pending" | "success" | "failed" | "skipped" | "cancelled";
+  export type ForwardTaskStatus = "draft" | "expanding" | "pending" | "processing" | "retrying" | "partially_completed" | "paused" | "success" | "completed" | "failed" | "cancelled";
+  export type ForwardTargetStatus = "pending" | "processing" | "retrying" | "success" | "failed" | "skipped" | "cancelled";
 
   export interface ForwardSettings {
-    defaultDailyLimit: number;
-    defaultHourlyLimit: number;
-    defaultSingleTargets: number;
-    maxSingleTargets: number;
+    globalQps: number;
+    workerConcurrency: number;
+    claimBatchSize: number;
+    perUserConcurrency: number;
+    retryBaseSeconds: number;
+    retryMaxSeconds: number;
+    processingLockSeconds: number;
+    queuePaused: boolean;
+    retentionDays: number;
+    queueAlertDepth: number;
+    version?: number;
+    updatedAt?: string;
+  }
+
+  export interface ForwardQueueMetrics {
+    queued: number;
+    retrying: number;
+    processing: number;
+    permanentFailed: number;
+    oldestPendingSeconds: number;
+    sendRatePerSecond: number;
   }
 
   export interface ReqForwardTasksParams {
@@ -43,6 +60,7 @@ export namespace AdminForwardRisk {
   export interface ForwardTarget {
     id: string;
     userId: string;
+    peerType?: "c2c" | "group";
     nickname?: string;
     status: ForwardTargetStatus;
     attempts?: number;
@@ -78,6 +96,7 @@ export namespace AdminForwardRisk {
 
 const FORWARD_TASKS_BASE = "/admin/v1/forward-tasks";
 const FORWARD_SETTINGS_BASE = "/admin/v1/forward-settings";
+const FORWARD_QUEUE_METRICS = "/admin/v1/forward-queue-metrics";
 
 export const getAdminForwardTasksApi = (params?: AdminForwardRisk.ReqForwardTasksParams) => {
   return http.get<AdminPage<AdminForwardRisk.ForwardTask>>(FORWARD_TASKS_BASE, params, { loading: false });
@@ -105,6 +124,10 @@ export const postAdminRetryFailedForwardTargetsApi = (id: string, params: AdminF
 
 export const getAdminForwardSettingsApi = () => {
   return http.get<AdminForwardRisk.ForwardSettings>(FORWARD_SETTINGS_BASE, undefined, { loading: false });
+};
+
+export const getAdminForwardQueueMetricsApi = () => {
+  return http.get<AdminForwardRisk.ForwardQueueMetrics>(FORWARD_QUEUE_METRICS, undefined, { loading: false });
 };
 
 export const putAdminForwardSettingsApi = (body: AdminForwardRisk.ReqUpdateForwardSettingsBody) => {

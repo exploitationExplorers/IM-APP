@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"im-app-admin/internal/models"
@@ -88,9 +87,9 @@ func (r *OpsRepo) ListForwardTargets(ctx context.Context, taskID, status string,
 	}
 	qargs := append(append([]any{}, args...), limit, offset)
 	rows, err := r.DB.Query(ctx, `
-		SELECT t.id::text, t.user_id::text, COALESCE(u.nickname,''), t.status, t.attempts,
-		       COALESCE(t.message_id::text,''), COALESCE(t.fail_code,''), t.finished_at
-		FROM forward_task_targets t LEFT JOIN users u ON u.id=t.user_id`+where+
+		SELECT t.id::text, COALESCE(t.user_id,t.group_id)::text, t.peer_type, COALESCE(u.nickname,g.name,''), t.status, t.attempts,
+		       COALESCE(t.sent_server_msg_id,''), COALESCE(t.fail_code,''), t.finished_at
+		FROM forward_task_targets t LEFT JOIN users u ON u.id=t.user_id LEFT JOIN groups g ON g.id=t.group_id`+where+
 		" ORDER BY t.created_at LIMIT $"+itoa(len(qargs)-1)+" OFFSET $"+itoa(len(qargs)), qargs...)
 	if err != nil {
 		return nil, 0, err
@@ -99,7 +98,7 @@ func (r *OpsRepo) ListForwardTargets(ctx context.Context, taskID, status string,
 	out := make([]models.ForwardTarget, 0)
 	for rows.Next() {
 		var t models.ForwardTarget
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Nickname, &t.Status, &t.Attempts,
+		if err := rows.Scan(&t.ID, &t.UserID, &t.PeerType, &t.Nickname, &t.Status, &t.Attempts,
 			&t.MessageID, &t.FailCode, &t.FinishedAt); err != nil {
 			return nil, 0, err
 		}
@@ -199,18 +198,18 @@ func (r *OpsRepo) GetForwardUserLimit(ctx context.Context, userID string) (*mode
 		SELECT user_id::text, daily_limit, hourly_limit, single_targets, enabled
 		FROM forward_user_limits WHERE user_id=$1::uuid`, userID).Scan(&l.UserID, &l.DailyLimit, &l.HourlyLimit, &l.SingleTargets, &l.Enabled)
 	if err == pgx.ErrNoRows {
-		def, _ := r.GetForwardSettings(ctx)
 		return &models.ForwardUserLimit{
 			UserID:        userID,
-			DailyLimit:    def.DefaultDailyLimit,
-			HourlyLimit:   def.DefaultHourlyLimit,
-			SingleTargets: def.DefaultSingleTargets,
+			DailyLimit:    100,
+			HourlyLimit:   20,
+			SingleTargets: 10000,
 			Enabled:       true,
 		}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	l.Effective = false
 	return &l, nil
 }
 
@@ -236,28 +235,5 @@ func (r *OpsRepo) SetForwardUserLimit(ctx context.Context, userID string, req mo
 		INSERT INTO forward_task_actions(task_id, admin_id, action, detail)
 		VALUES('00000000-0000-0000-0000-000000000000', $1::uuid, 'limit_change', $2)`,
 		operatorID, "user="+userID)
-	return err
-}
-
-// ===== 全局转发规则（存 app_configs） =====
-
-const cfgKeyForwardSettings = "forward.settings"
-
-func (r *OpsRepo) GetForwardSettings(ctx context.Context) (*models.ForwardSettings, error) {
-	s := &models.ForwardSettings{DefaultDailyLimit: 100, DefaultHourlyLimit: 20, DefaultSingleTargets: 10000, MaxSingleTargets: 100000}
-	var raw string
-	if err := r.DB.QueryRow(ctx, `SELECT value FROM app_configs WHERE key=$1`, cfgKeyForwardSettings).Scan(&raw); err == nil && raw != "" {
-		_ = json.Unmarshal([]byte(raw), s)
-	}
-	return s, nil
-}
-
-func (r *OpsRepo) SetForwardSettings(ctx context.Context, s *models.ForwardSettings, operatorID string) error {
-	b, _ := json.Marshal(s)
-	_, err := r.DB.Exec(ctx, `
-		INSERT INTO app_configs(key, value, description, updated_by, updated_at)
-		VALUES($1,$2,'全局转发规则',$3::uuid,NOW())
-		ON CONFLICT (key) DO UPDATE SET value=$2, updated_by=$3::uuid, updated_at=NOW()`,
-		cfgKeyForwardSettings, string(b), operatorID)
 	return err
 }

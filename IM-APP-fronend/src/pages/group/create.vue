@@ -8,6 +8,7 @@ import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { resolveIMGroup } from '@/api/im'
 import { APP_CONFIG } from '@/config'
+import ImNavBar from '@/components/ImNavBar.vue'
 import type { Contact, ContactListSort } from '@/types'
 
 const contactStore = useContactStore()
@@ -181,19 +182,17 @@ async function onCreate() {
   <view class="page" @click="showSort = false">
     <!-- Step 1: 选择联络人 -->
     <template v-if="step === 'select'">
-      <view class="navbar">
-        <view class="nav-btn" @click="goBack">
-          <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-        </view>
-        <text class="nav-title">选择联络人</text>
-        <view
-          class="confirm-btn"
-          :class="{ enabled: canConfirm }"
-          @click="onConfirmSelect"
-        >
-          {{ canConfirm ? `确认(${selectedCount})` : '确认' }}
-        </view>
-      </view>
+      <ImNavBar title="选择联络人" @back="goBack">
+        <template #right>
+          <view
+            class="confirm-btn"
+            :class="{ enabled: canConfirm }"
+            @click="onConfirmSelect"
+          >
+            {{ canConfirm ? `确认(${selectedCount})` : '确认' }}
+          </view>
+        </template>
+      </ImNavBar>
 
       <view v-if="selectedCount > 0" class="chips">
         <view
@@ -260,13 +259,7 @@ async function onCreate() {
 
     <!-- Step 2: 创建群聊 -->
     <template v-else>
-      <view class="navbar">
-        <view class="nav-btn" @click="goBack">
-          <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-        </view>
-        <text class="nav-title">创建群聊</text>
-        <view class="nav-placeholder" />
-      </view>
+      <ImNavBar title="创建群聊" @back="goBack" />
 
       <scroll-view scroll-y class="create-body">
         <view class="avatar-picker">
@@ -318,41 +311,6 @@ async function onCreate() {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-.navbar {
-  display: flex;
-  align-items: center;
-  height: 96rpx;
-  padding: 0 40rpx;
-  gap: 24rpx;
-  background: #fff;
-}
-
-.nav-btn {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.nav-icon {
-  width: 48rpx;
-  height: 48rpx;
-}
-
-.nav-title {
-  flex: 1;
-  font-size: 48rpx;
-  font-weight: 700;
-  color: #212121;
-  line-height: 64rpx;
-}
-
-.nav-placeholder {
-  width: 104rpx;
 }
 
 .confirm-btn {

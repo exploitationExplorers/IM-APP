@@ -117,6 +117,15 @@ func (h *OpsHandler) GetForwardSettings(c *gin.Context) {
 	response.OK(c, s)
 }
 
+func (h *OpsHandler) GetForwardQueueMetrics(c *gin.Context) {
+	metrics, err := h.Svc.GetForwardQueueMetrics(c.Request.Context())
+	if err != nil {
+		response.FailErr(c, 500, "查询队列指标失败", err)
+		return
+	}
+	response.OK(c, metrics)
+}
+
 func (h *OpsHandler) SetForwardSettings(c *gin.Context) {
 	var req struct {
 		Settings *models.ForwardSettings `json:"settings" binding:"required"`
@@ -126,7 +135,7 @@ func (h *OpsHandler) SetForwardSettings(c *gin.Context) {
 		response.BadRequest(c, "必须填写规则和原因")
 		return
 	}
-	if err := h.Svc.SetForwardSettings(c.Request.Context(), req.Settings, middleware.AdminID(c)); err != nil {
+	if err := h.Svc.SetForwardSettings(c.Request.Context(), req.Settings, middleware.AdminID(c), req.Reason); err != nil {
 		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
 		return
 	}

@@ -3,9 +3,9 @@ import { computed, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useMassSendStore, type MassTarget } from '@/stores/massSend'
 
-const statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20
 const chatStore = useChatStore()
 const contactStore = useContactStore()
 const massStore = useMassSendStore()
@@ -160,22 +160,13 @@ function onConfirm() {
 
 <template>
   <view class="page">
-    <view class="nav-bar-wrap">
-      <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
-      <view class="nav-bar">
-        <view class="nav-left">
-          <text class="back-icon" @click="goBack">‹</text>
+    <ImNavBar title="选择联系人" @back="goBack">
+      <template #right>
+        <view class="confirm-btn" :class="{ disabled: selectedCount === 0 }" @click="onConfirm">
+          {{ confirmLabel }}
         </view>
-        <view class="nav-center">
-          <text class="title">选择联系人</text>
-        </view>
-        <view class="nav-right">
-          <view class="confirm-btn" :class="{ disabled: selectedCount === 0 }" @click="onConfirm">
-            {{ confirmLabel }}
-          </view>
-        </view>
-      </view>
-    </view>
+      </template>
+    </ImNavBar>
 
     <view class="selected-bar">
       <text class="selected-label">{{ selectedLabel }}</text>
@@ -238,48 +229,6 @@ function onConfirm() {
   background: #ffffff;
   display: flex;
   flex-direction: column;
-}
-
-.nav-bar-wrap {
-  background: #ffffff;
-}
-
-.nav-bar {
-  height: 96rpx;
-  display: flex;
-  align-items: center;
-  padding: 0 24rpx;
-  box-sizing: border-box;
-}
-
-.nav-left,
-.nav-right {
-  width: 200rpx;
-  display: flex;
-  align-items: center;
-}
-
-.nav-right {
-  justify-content: flex-end;
-}
-
-.nav-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
-.back-icon {
-  font-size: 52rpx;
-  color: #111;
-  line-height: 1;
-  padding: 8rpx 12rpx;
-}
-
-.title {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #111;
 }
 
 .confirm-btn {

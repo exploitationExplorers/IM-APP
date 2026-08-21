@@ -4,6 +4,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { markProfileSaveSuccess } from '@/utils/profile-feedback'
+import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
 const userStore = useUserStore()
@@ -72,13 +73,7 @@ async function onConfirm() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">修改昵称</text>
-      <view class="nav-spacer" />
-    </view>
+    <ImNavBar title="修改昵称" @back="goBack" />
 
     <view class="form">
       <view class="input-row">
@@ -122,46 +117,6 @@ async function onConfirm() {
   background: #f3f4f7;
   display: flex;
   flex-direction: column;
-}
-
-.nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  height: calc(88rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 24rpx 0;
-  background: #fff;
-  border-bottom: 1rpx solid #e1e3ea;
-  box-sizing: border-box;
-}
-
-.nav-back {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.nav-back-icon {
-  width: 40rpx;
-  height: 40rpx;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 34rpx;
-  font-weight: 700;
-  color: #212121;
-}
-
-.nav-spacer {
-  width: 72rpx;
-  height: 72rpx;
-  flex-shrink: 0;
 }
 
 .form {

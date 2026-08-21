@@ -5,6 +5,7 @@ import { fetchGroupDetail, updateGroupRemark } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
 import { resolveGroupConversationID, setConversationGroupRemark } from '@/utils/openim'
+import ImNavBar from '@/components/ImNavBar.vue'
 
 const REMARK_MAX = 64
 const groupId = ref('')
@@ -65,13 +66,7 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">
-        <image class="nav-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
-      </view>
-      <text class="nav-title">群备注</text>
-      <view class="nav-spacer" />
-    </view>
+    <ImNavBar title="群备注" @back="goBack" />
 
     <view class="form">
       <textarea
@@ -99,34 +94,6 @@ async function onSubmit() {
   background: #f3f4f7;
   display: flex;
   flex-direction: column;
-}
-.nav {
-  display: flex;
-  align-items: center;
-  height: calc(88rpx + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 24rpx 0;
-  background: #fff;
-  border-bottom: 1rpx solid #e1e3ea;
-  box-sizing: border-box;
-}
-.nav-back,
-.nav-spacer {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.nav-icon {
-  width: 40rpx;
-  height: 40rpx;
-}
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 34rpx;
-  font-weight: 700;
-  color: #212121;
 }
 .form {
   margin-top: 24rpx;

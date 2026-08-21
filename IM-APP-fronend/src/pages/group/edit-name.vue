@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { fetchGroupDetail } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
 
@@ -50,11 +51,7 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">修改群组名称</text>
-      <view class="nav-space" />
-    </view>
+    <ImNavBar title="修改群组名称" @back="goBack" />
 
     <view class="form">
       <input class="input" v-model="name" :maxlength="NAME_MAX" placeholder="请输入群组名称" />
@@ -76,32 +73,6 @@ async function onSubmit() {
   background: #f3f4f7;
   display: flex;
   flex-direction: column;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  height: 96rpx;
-  padding: 0 26rpx;
-  background: #fff;
-}
-
-.nav-back,
-.nav-space {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 36rpx;
-  font-weight: 700;
 }
 
 .form {

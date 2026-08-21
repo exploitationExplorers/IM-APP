@@ -1,6 +1,6 @@
 -- ============================================================
 -- 026 用户转发限额表（server 侧建表；与 admin 006 同结构，幂等）
--- admin 管理限额，server 在提交转发任务时强制检查
+-- 历史审计数据：数量字段不再参与 server 提交拦截。
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS forward_user_limits (
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS forward_user_limits (
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-COMMENT ON TABLE forward_user_limits IS '用户转发限额（admin 管理，server 提交时强制检查）';
+COMMENT ON TABLE forward_user_limits IS '历史用户转发限额审计（不参与发送拦截）';
 COMMENT ON COLUMN forward_user_limits.user_id IS '用户ID';
 COMMENT ON COLUMN forward_user_limits.daily_limit IS '每日转发上限（默认 100）';
 COMMENT ON COLUMN forward_user_limits.hourly_limit IS '每小时上限（默认 20）';

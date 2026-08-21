@@ -54,6 +54,39 @@ func (h *ForwardHandler) Create(c *gin.Context) {
 	response.OK(c, task)
 }
 
+type createForwardBatchReq struct {
+	Messages []struct {
+		SourceConversationID string                        `json:"sourceConversationId"`
+		SourceClientMsgID    string                        `json:"sourceClientMsgId"`
+		SourceServerMsgID    string                        `json:"sourceServerMsgId"`
+		SourceSnapshot       models.ForwardMessageSnapshot `json:"sourceSnapshot"`
+	} `json:"messages"`
+	TargetUserIDs  []string               `json:"targetUserIds"`
+	TargetGroupIDs []string               `json:"targetGroupIds"`
+	Selector       models.ForwardSelector `json:"selector"`
+	ExcludeUserIDs []string               `json:"excludeUserIds"`
+	IdempotencyKey string                 `json:"idempotencyKey"`
+}
+
+func (h *ForwardHandler) CreateBatch(c *gin.Context) {
+	var req createForwardBatchReq
+	if !bindForwardJSON(c, &req) {
+		return
+	}
+	in := service.CreateForwardBatchInput{TargetUserIDs: req.TargetUserIDs, TargetGroupIDs: req.TargetGroupIDs,
+		Selector: req.Selector, ExcludeUserIDs: req.ExcludeUserIDs, IdempotencyKey: req.IdempotencyKey}
+	for _, message := range req.Messages {
+		in.Messages = append(in.Messages, service.CreateForwardInput{SourceConversationID: message.SourceConversationID,
+			SourceClientMsgID: message.SourceClientMsgID, SourceServerMsgID: message.SourceServerMsgID, SourceSnapshot: message.SourceSnapshot})
+	}
+	result, err := h.Svc.CreateBatch(c.Request.Context(), middleware.UserID(c), in)
+	if err != nil {
+		forwardError(c, err)
+		return
+	}
+	response.OK(c, result)
+}
+
 // GetLegacy 仅兼容旧 GET /forward-tasks/:id；新接口使用 query 参数。
 func (h *ForwardHandler) GetLegacy(c *gin.Context) {
 	h.get(c, c.Param("id"))

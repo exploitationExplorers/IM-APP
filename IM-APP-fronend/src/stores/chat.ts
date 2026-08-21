@@ -933,11 +933,18 @@ export const useChatStore = defineStore('chat', () => {
 
   async function forwardToConversation(targetConversationId: string, messageIds: string[]) {
     const target = targetOf(requireConversation(targetConversationId))
+    const failedMessageIds: string[] = []
     for (const id of messageIds) {
-      const raw = rawMessages.value[id]
-      if (!raw) throw new Error('原消息不存在')
-      await sendForwardMessage(target, raw)
+      try {
+        const raw = rawMessages.value[id]
+        if (!raw) throw new Error('原消息不存在')
+        await sendForwardMessage(target, raw)
+      } catch {
+        // 单条失败不能阻断同批次后续消息；调用方统一展示汇总结果。
+        failedMessageIds.push(id)
+      }
     }
+    return { total: messageIds.length, failedMessageIds }
   }
 
   function getRawMessage(messageId: string): MessageItem | undefined {

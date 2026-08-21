@@ -10,11 +10,9 @@ import {
   getAdminUserGroupsApi,
   getAdminUserReportsApi,
   getAdminUsersApi,
-  getAdminUserForwardLimitApi,
   postAdminUserPhoneRevealApi,
   postAdminUserRevokeSessionsApi,
   putAdminUserBanApi,
-  putAdminUserForwardLimitApi,
   putAdminUserLoginRestrictionApi,
   putAdminUserMessageRestrictionApi,
 } from "@/api/modules/adminUsers";
@@ -91,16 +89,12 @@ const groupPageSize = shallowRef(20);
 
 const users = shallowRef<AppUser[]>([]);
 
-type ActionMode = "loginRestriction" | "banUser" | "revokeSessions" | "forwardLimit" | "phoneReveal";
+type ActionMode = "loginRestriction" | "banUser" | "revokeSessions" | "phoneReveal";
 
 interface ActionFormModel {
   reason: string;
   ticketNo: string;
   until: Date | null;
-  enabled: boolean;
-  dailyLimit: number;
-  hourlyLimit: number;
-  singleTargets: number;
 }
 
 const actionVisible = shallowRef(false);
@@ -113,14 +107,7 @@ const actionForm = reactive<ActionFormModel>({
   reason: "",
   ticketNo: "",
   until: null,
-  enabled: false,
-  dailyLimit: 0,
-  hourlyLimit: 0,
-  singleTargets: 0,
 });
-
-const forwardLimitLoading = shallowRef(false);
-const forwardLimit = shallowRef<AdminUsers.ForwardLimitConfig | null>(null);
 const revealedPhones = reactive<Record<string, string>>({});
 
 function normalizeStatus(value?: string): AppUserStatus {
@@ -146,31 +133,6 @@ function pickField(row: Record<string, any>, keys: string[]): string {
     if (value) return String(value);
   }
   return "—";
-}
-
-function pickNumberField(row: Record<string, any> | null | undefined, keys: string[], fallback = 0): number {
-  if (!row) return fallback;
-  for (const key of keys) {
-    const value = (row as any)[key];
-    if (typeof value === "number") return value;
-    if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value);
-  }
-  return fallback;
-}
-
-function pickBoolField(row: Record<string, any> | null | undefined, keys: string[], fallback = false): boolean {
-  if (!row) return fallback;
-  for (const key of keys) {
-    const value = (row as any)[key];
-    if (typeof value === "boolean") return value;
-    if (typeof value === "number") return value !== 0;
-    if (typeof value === "string") {
-      const lowered = value.toLowerCase();
-      if (lowered === "true") return true;
-      if (lowered === "false") return false;
-    }
-  }
-  return fallback;
 }
 
 function pickStringField(row: any, keys: string[]): string {
@@ -208,7 +170,6 @@ function getActionTitle(): string {
   if (actionMode.value === "loginRestriction") return `${actionNext.value ? "禁止登录" : "恢复登录"}${userName}`;
   if (actionMode.value === "banUser") return `${actionNext.value ? "禁止发送消息" : "恢复发送消息"}${userName}`;
   if (actionMode.value === "revokeSessions") return `强制下线${userName}`;
-  if (actionMode.value === "forwardLimit") return `转发权限设置${userName}`;
   if (actionMode.value === "phoneReveal") return `查看完整手机号${userName}`;
   return "操作";
 }
@@ -217,32 +178,6 @@ function resetActionForm(): void {
   actionForm.reason = "";
   actionForm.ticketNo = "";
   actionForm.until = null;
-  actionForm.enabled = false;
-  actionForm.dailyLimit = 0;
-  actionForm.hourlyLimit = 0;
-  actionForm.singleTargets = 0;
-}
-
-async function fetchForwardLimit(userId: string): Promise<AdminUsers.ForwardLimitConfig> {
-  forwardLimitLoading.value = true;
-  try {
-    const res = await getAdminUserForwardLimitApi(userId);
-    const raw = res.data as any;
-    const parsed: AdminUsers.ForwardLimitConfig = {
-      enabled: pickBoolField(raw, ["enabled", "isEnabled"], false),
-      dailyLimit: pickNumberField(raw, ["dailyLimit", "dayLimit", "daily"], 0),
-      hourlyLimit: pickNumberField(raw, ["hourlyLimit", "hourLimit", "hourly"], 0),
-      singleTargets: pickNumberField(raw, ["singleTargets", "singleTarget", "singleTargetLimit"], 0),
-    };
-    forwardLimit.value = parsed;
-    return parsed;
-  } catch {
-    const fallback = { enabled: false, dailyLimit: 0, hourlyLimit: 0, singleTargets: 0 };
-    forwardLimit.value = fallback;
-    return fallback;
-  } finally {
-    forwardLimitLoading.value = false;
-  }
 }
 
 async function openAction(mode: ActionMode, user: AppUser, next?: boolean): Promise<void> {
@@ -250,14 +185,6 @@ async function openAction(mode: ActionMode, user: AppUser, next?: boolean): Prom
   actionUser.value = user;
   actionNext.value = Boolean(next);
   resetActionForm();
-
-  if (mode === "forwardLimit") {
-    const config = await fetchForwardLimit(user.id);
-    actionForm.enabled = config.enabled;
-    actionForm.dailyLimit = config.dailyLimit;
-    actionForm.hourlyLimit = config.hourlyLimit;
-    actionForm.singleTargets = config.singleTargets;
-  }
 
   actionVisible.value = true;
 }
@@ -324,18 +251,6 @@ async function submitAction(): Promise<void> {
     if (actionMode.value === "revokeSessions") {
       await postAdminUserRevokeSessionsApi(userId, { reason });
       ElMessage.success("已强制下线");
-    }
-
-    if (actionMode.value === "forwardLimit") {
-      await putAdminUserForwardLimitApi(userId, {
-        enabled: actionForm.enabled,
-        dailyLimit: actionForm.dailyLimit,
-        hourlyLimit: actionForm.hourlyLimit,
-        singleTargets: actionForm.singleTargets,
-        reason,
-      });
-      ElMessage.success("转发权限已更新");
-      await fetchForwardLimit(userId);
     }
 
     if (actionMode.value === "phoneReveal") {
@@ -522,8 +437,6 @@ function openUserDetail(user: AppUser): void {
   forwardTasks.value = [];
   groups.value = [];
   fetchUserDetail(user.id);
-  forwardLimit.value = null;
-  fetchForwardLimit(user.id);
 }
 
 async function toggleBanLogin(user: AppUser): Promise<void> {
@@ -561,7 +474,6 @@ watch(activeDetailTab, (tab) => {
   if (!detailVisible.value || !selectedUser.value) return;
   if (tab === "base") {
     fetchUserDetail(selectedUser.value.id);
-    fetchForwardLimit(selectedUser.value.id);
   }
   if (tab === "reports") fetchReports(selectedUser.value.id);
   if (tab === "forward") fetchForwardTasks(selectedUser.value.id);
@@ -578,7 +490,6 @@ watch(detailVisible, (visible) => {
   reports.value = [];
   forwardTasks.value = [];
   groups.value = [];
-  forwardLimit.value = null;
   reportTotal.value = 0;
   forwardTotal.value = 0;
   groupTotal.value = 0;
@@ -841,32 +752,6 @@ watch(detailVisible, (visible) => {
               </div>
             </div>
 
-            <div class="detail-section">
-              <div class="detail-section-header">
-                <h4>转发权限限制</h4>
-                <el-button link type="primary" @click="openAction('forwardLimit', selectedUser!)">设置</el-button>
-              </div>
-              <div class="forward-limit-card" v-loading="forwardLimitLoading">
-                <div class="forward-limit-item">
-                  <span class="forward-limit-label">是否启用</span>
-                  <el-tag :type="(forwardLimit?.enabled ?? false) ? 'warning' : 'info'" size="small" effect="light">
-                    {{ (forwardLimit?.enabled ?? false) ? "启用" : "未启用" }}
-                  </el-tag>
-                </div>
-                <div class="forward-limit-item">
-                  <span class="forward-limit-label">每小时上限</span>
-                  <span class="forward-limit-value">{{ forwardLimit?.hourlyLimit ?? 0 }}</span>
-                </div>
-                <div class="forward-limit-item">
-                  <span class="forward-limit-label">每日上限</span>
-                  <span class="forward-limit-value">{{ forwardLimit?.dailyLimit ?? 0 }}</span>
-                </div>
-                <div class="forward-limit-item">
-                  <span class="forward-limit-label">单次目标上限</span>
-                  <span class="forward-limit-value">{{ forwardLimit?.singleTargets ?? 0 }}</span>
-                </div>
-              </div>
-            </div>
           </el-tab-pane>
 
           <el-tab-pane label="举报记录" name="reports">
@@ -998,21 +883,6 @@ watch(detailVisible, (visible) => {
 
     <el-dialog v-model="actionVisible" :title="getActionTitle()" width="520px" destroy-on-close>
       <el-form :model="actionForm" label-width="90px" class="action-form">
-        <template v-if="actionMode === 'forwardLimit'">
-          <el-form-item label="启用限制">
-            <el-switch v-model="actionForm.enabled" />
-          </el-form-item>
-          <el-form-item label="每小时上限">
-            <el-input-number v-model="actionForm.hourlyLimit" :min="0" :max="999999" />
-          </el-form-item>
-          <el-form-item label="每日上限">
-            <el-input-number v-model="actionForm.dailyLimit" :min="0" :max="999999" />
-          </el-form-item>
-          <el-form-item label="单次目标">
-            <el-input-number v-model="actionForm.singleTargets" :min="0" :max="999999" />
-          </el-form-item>
-        </template>
-
         <template v-if="actionMode === 'loginRestriction' || actionMode === 'banUser'">
           <el-form-item label="截止时间">
             <el-date-picker

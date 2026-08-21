@@ -2,6 +2,8 @@
 import { computed, onMounted, reactive, shallowRef, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { CircleClose, RefreshLeft, RefreshRight, Search, View } from "@element-plus/icons-vue";
+import ForwardDeliverySettingsCard from "./ForwardDeliverySettingsCard.vue";
+import ForwardQueueOverview from "./ForwardQueueOverview.vue";
 
 import {
   AdminForwardRisk,
@@ -9,6 +11,7 @@ import {
   getAdminForwardTaskFailuresApi,
   getAdminForwardTaskTargetsApi,
   getAdminForwardSettingsApi,
+  getAdminForwardQueueMetricsApi,
   getAdminForwardTasksApi,
   postAdminCancelForwardTaskApi,
   postAdminRetryFailedForwardTargetsApi,
@@ -22,6 +25,11 @@ type ForwardSettings = AdminForwardRisk.ForwardSettings;
 const STATUS_LABEL_MAP: Record<TaskStatus, string> = {
   pending: "待处理",
   processing: "处理中",
+  draft: "草稿",
+  expanding: "展开目标中",
+  retrying: "重试中",
+  partially_completed: "部分完成",
+  paused: "已暂停",
   success: "已完成",
   completed: "已完成",
   failed: "失败",
@@ -56,46 +64,41 @@ const failures = shallowRef<AdminForwardRisk.ForwardTaskFailureStat[]>([]);
 
 const settingsLoading = shallowRef(false);
 const settingsSaving = shallowRef(false);
-const forwardSettings = reactive<ForwardSettings>({
-  defaultDailyLimit: 0,
-  defaultHourlyLimit: 0,
-  defaultSingleTargets: 0,
-  maxSingleTargets: 0,
+const forwardSettings = shallowRef<ForwardSettings>({
+  globalQps: 20, workerConcurrency: 4, claimBatchSize: 50, perUserConcurrency: 2,
+  retryBaseSeconds: 2, retryMaxSeconds: 300, processingLockSeconds: 300,
+  queuePaused: false, retentionDays: 30, queueAlertDepth: 100000,
 });
 const forwardSettingsInitial = shallowRef<ForwardSettings | null>(null);
+const queueMetrics = shallowRef<AdminForwardRisk.ForwardQueueMetrics | null>(null);
+const queueMetricsLoading = shallowRef(false);
+
+async function fetchQueueMetrics(): Promise<void> {
+  queueMetricsLoading.value = true;
+  try { queueMetrics.value = (await getAdminForwardQueueMetricsApi()).data ?? null; }
+  finally { queueMetricsLoading.value = false; }
+}
 
 const forwardSettingsChanged = computed(() => {
   if (!forwardSettingsInitial.value) return false;
-  return (
-    forwardSettings.defaultDailyLimit !== forwardSettingsInitial.value.defaultDailyLimit ||
-    forwardSettings.defaultHourlyLimit !== forwardSettingsInitial.value.defaultHourlyLimit ||
-    forwardSettings.defaultSingleTargets !== forwardSettingsInitial.value.defaultSingleTargets ||
-    forwardSettings.maxSingleTargets !== forwardSettingsInitial.value.maxSingleTargets
-  );
+  return JSON.stringify(forwardSettings.value) !== JSON.stringify(forwardSettingsInitial.value);
 });
 
 function snapshotForwardSettings(): ForwardSettings {
   return {
-    defaultDailyLimit: Number(forwardSettings.defaultDailyLimit ?? 0),
-    defaultHourlyLimit: Number(forwardSettings.defaultHourlyLimit ?? 0),
-    defaultSingleTargets: Number(forwardSettings.defaultSingleTargets ?? 0),
-    maxSingleTargets: Number(forwardSettings.maxSingleTargets ?? 0),
+    ...forwardSettings.value,
   };
 }
 
 function applyForwardSettings(value: ForwardSettings): void {
-  forwardSettings.defaultDailyLimit = Number(value.defaultDailyLimit ?? 0);
-  forwardSettings.defaultHourlyLimit = Number(value.defaultHourlyLimit ?? 0);
-  forwardSettings.defaultSingleTargets = Number(value.defaultSingleTargets ?? 0);
-  forwardSettings.maxSingleTargets = Number(value.maxSingleTargets ?? 0);
+  forwardSettings.value = { ...value };
 }
 
 function validateForwardSettings(): string | null {
-  if (forwardSettings.defaultDailyLimit < 0) return "默认每日上限不能小于 0";
-  if (forwardSettings.defaultHourlyLimit < 0) return "默认每小时上限不能小于 0";
-  if (forwardSettings.defaultSingleTargets < 0) return "默认单次目标数不能小于 0";
-  if (forwardSettings.maxSingleTargets < 0) return "单次目标数上限不能小于 0";
-  if (forwardSettings.defaultSingleTargets > forwardSettings.maxSingleTargets) return "默认单次目标数不能大于单次目标数上限";
+  const s = forwardSettings.value;
+  if ([s.globalQps, s.workerConcurrency, s.claimBatchSize, s.perUserConcurrency, s.retryBaseSeconds,
+    s.retryMaxSeconds, s.processingLockSeconds, s.retentionDays, s.queueAlertDepth].some((value) => value < 1)) return "调度参数必须大于 0";
+  if (s.retryMaxSeconds < s.retryBaseSeconds) return "最大重试间隔不能小于初始重试间隔";
   return null;
 }
 
@@ -129,7 +132,7 @@ async function saveForwardSettings(): Promise<void> {
   }
   if (!forwardSettingsInitial.value || !forwardSettingsChanged.value) return;
 
-  const reason = await promptReason("修改全局转发规则");
+  const reason = await promptReason("修改转发调度与可靠性配置");
   if (!reason) return;
 
   settingsSaving.value = true;
@@ -159,6 +162,11 @@ function pickStatusTagType(status: TaskStatus): "success" | "danger" | "warning"
   const map: Record<TaskStatus, "success" | "danger" | "warning" | "primary" | "info"> = {
     pending: "warning",
     processing: "primary",
+    draft: "info",
+    expanding: "primary",
+    retrying: "warning",
+    partially_completed: "warning",
+    paused: "info",
     success: "success",
     completed: "success",
     failed: "danger",
@@ -319,6 +327,7 @@ async function retryFailedTargets(task: AdminForwardRisk.ForwardTask): Promise<v
 
 onMounted(() => {
   fetchForwardSettings();
+  fetchQueueMetrics();
   fetchTasks();
 });
 
@@ -354,35 +363,9 @@ watch(activeDetailTab, () => {
 
 <template>
   <div class="table-box">
-    <section class="card settings-card" v-loading="settingsLoading">
-      <div class="settings-header">
-        <div class="settings-title">全局转发规则</div>
-        <div class="settings-ops">
-          <el-button :disabled="settingsSaving" @click="fetchForwardSettings">刷新</el-button>
-          <el-button :disabled="!forwardSettingsChanged || settingsSaving" @click="resetForwardSettings">还原</el-button>
-          <el-button type="primary" :loading="settingsSaving" :disabled="!forwardSettingsChanged" @click="saveForwardSettings">
-            保存
-          </el-button>
-        </div>
-      </div>
-
-      <el-form :model="forwardSettings" label-width="140px">
-        <div class="settings-grid">
-          <el-form-item label="默认每日上限">
-            <el-input-number v-model="forwardSettings.defaultDailyLimit" :min="0" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="默认每小时上限">
-            <el-input-number v-model="forwardSettings.defaultHourlyLimit" :min="0" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="默认单次目标数">
-            <el-input-number v-model="forwardSettings.defaultSingleTargets" :min="0" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="单次目标数上限">
-            <el-input-number v-model="forwardSettings.maxSingleTargets" :min="0" controls-position="right" />
-          </el-form-item>
-        </div>
-      </el-form>
-    </section>
+    <ForwardQueueOverview :metrics="queueMetrics" :loading="queueMetricsLoading" @refresh="fetchQueueMetrics" />
+    <ForwardDeliverySettingsCard v-model="forwardSettings" :loading="settingsLoading" :saving="settingsSaving"
+      :changed="forwardSettingsChanged" @refresh="fetchForwardSettings" @reset="resetForwardSettings" @save="saveForwardSettings" />
 
     <section class="card table-search">
       <el-form :model="filters" @submit.prevent="applyFilters">
@@ -547,7 +530,9 @@ watch(activeDetailTab, () => {
                     <span class="mono-text">{{ row.id }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="userId" label="用户ID" min-width="220" show-overflow-tooltip />
+                <el-table-column label="目标" min-width="220" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.peerType === "group" ? "群 " : "用户 " }}{{ row.userId }}</template>
+                </el-table-column>
                 <el-table-column prop="nickname" label="昵称" min-width="120" show-overflow-tooltip />
                 <el-table-column label="状态" min-width="110">
                   <template #default="{ row }">

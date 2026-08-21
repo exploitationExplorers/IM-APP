@@ -58,10 +58,11 @@ async function submitProfile() {
   }
   loading.value = true
   try {
-    const avatarFileId = await uploadAvatarForProfile(
-      avatarPath.value || undefined,
-      avatarPath.value ? undefined : APP_CONFIG.defaultAvatarUrl,
-    )
+    // 未选头像时不上传默认图：avatarFileId 传空串即保持原头像，
+    // 也避免 App 端走依赖浏览器 fetch 的默认图上传链路（真机无 fetch）。
+    const avatarFileId = avatarPath.value
+      ? await uploadAvatarForProfile(avatarPath.value)
+      : ''
 
     await userStore.saveProfile({
       nickname: name,

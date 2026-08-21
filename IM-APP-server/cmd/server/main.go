@@ -207,6 +207,9 @@ func main() {
 		internalAdmin.POST("/groups/:id/add-friend", adminGroupH.SetAddFriend)
 		internalAdmin.POST("/forward-tasks/:id/cancel", adminForwardH.CancelForwardTask)
 		internalAdmin.POST("/forward-tasks/:id/retry", adminForwardH.RetryForwardTask)
+		internalAdmin.GET("/forward-settings", adminForwardH.GetForwardSettings)
+		internalAdmin.GET("/forward-queue-metrics", adminForwardH.GetForwardQueueMetrics)
+		internalAdmin.POST("/forward-settings/update", adminForwardH.UpdateForwardSettings)
 		internalAdmin.POST("/users/:id/restriction", adminUserH.SetRestriction)
 		internalAdmin.POST("/users/:id/status", adminUserH.SetUserStatus)
 		internalAdmin.POST("/users/:id/sessions/revoke", adminUserH.RevokeSessions)
@@ -329,6 +332,7 @@ func main() {
 
 			// 新增写接口全部使用静态路径 + JSON body；旧 GET 动态路径仅保留兼容。
 			auth.POST("/forward-tasks", forwardH.Create)
+			auth.POST("/forward-batches", forwardH.CreateBatch)
 			auth.GET("/forward-tasks", forwardH.List)
 			auth.GET("/forward-tasks/:id", forwardH.GetLegacy)
 			auth.GET("/forward-task-progress", forwardH.Progress)
@@ -367,7 +371,7 @@ func main() {
 		log.Printf("forward Kafka enabled: brokers=%s topic=%s group=%s",
 			cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.GroupID)
 	} else {
-		log.Println("forward Kafka disabled: KAFKA_BROKERS is missing; submit/resume/retry will return 503")
+		log.Println("forward Kafka disabled: tasks remain persisted in the outbox until Kafka is configured")
 	}
 	if imClient.Available() {
 		imWorker := &service.IMSyncWorker{
@@ -375,7 +379,7 @@ func main() {
 			BatchSize: 20, MaxAttempts: 10, PollInterval: 2 * time.Second,
 		}
 		go imWorker.Run(workerCtx)
-		if cfg.Forward.WorkerEnabled && kafkaQueue.Available() {
+		if cfg.Forward.WorkerEnabled {
 			forwardWorker := &service.ForwardWorker{
 				Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue,
 				BatchSize: cfg.Forward.BatchSize, MaxAttempts: cfg.Forward.MaxAttempts,
@@ -383,7 +387,7 @@ func main() {
 				PollInterval: time.Duration(cfg.Forward.PollSeconds) * time.Second,
 				LockTTL:      time.Duration(cfg.Forward.LockSeconds) * time.Second,
 			}
-			go forwardWorker.Run(workerCtx)
+			go forwardWorker.RunPolling(workerCtx)
 			log.Printf("forward worker enabled: batch=%d concurrency=%d qps=%d",
 				cfg.Forward.BatchSize, cfg.Forward.Concurrency, cfg.Forward.QPS)
 		}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import ImNavBar from '@/components/ImNavBar.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { approveJoinRequest, fetchJoinRequests, rejectJoinRequest } from '@/api/group'
 import type { GroupJoinRequestItem } from '@/types'
@@ -62,11 +63,7 @@ async function onReject(item: GroupJoinRequestItem) {
 
 <template>
   <view class="page">
-    <view class="nav">
-      <view class="nav-back" @click="goBack">‹</view>
-      <text class="nav-title">入群申请</text>
-      <view class="nav-space" />
-    </view>
+    <ImNavBar title="入群申请" @back="goBack" />
 
     <view class="search-wrap">
       <view class="search-box">
@@ -95,32 +92,6 @@ async function onReject(item: GroupJoinRequestItem) {
 .page {
   min-height: 100vh;
   background: #fff;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  height: 96rpx;
-  padding: 0 26rpx;
-}
-
-.nav-back,
-.nav-space {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 54rpx;
-  color: #1b1b1b;
-}
-
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #1f1f1f;
 }
 
 .search-wrap {
