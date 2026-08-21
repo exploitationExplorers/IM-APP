@@ -111,18 +111,24 @@ func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction str
 		query = `
 			SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
 				fr.message, fr.status, fr.created_at
-			FROM friend_requests fr
+			FROM (
+				SELECT DISTINCT ON (to_user) * FROM friend_requests
+				WHERE from_user=$1 AND status='pending'
+				ORDER BY to_user, created_at DESC, id DESC
+			) fr
 			JOIN users u ON u.id = fr.to_user
-			WHERE fr.from_user=$1 AND fr.status='pending'
 			ORDER BY fr.created_at DESC
 			LIMIT $2`
 	} else {
 		query = `
 			SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
 				fr.message, fr.status, fr.created_at
-			FROM friend_requests fr
+			FROM (
+				SELECT DISTINCT ON (from_user) * FROM friend_requests
+				WHERE to_user=$1 AND status='pending'
+				ORDER BY from_user, created_at DESC, id DESC
+			) fr
 			JOIN users u ON u.id = fr.from_user
-			WHERE fr.to_user=$1 AND fr.status='pending'
 			ORDER BY fr.created_at DESC
 			LIMIT $2`
 	}
@@ -160,6 +166,9 @@ func (r *ContactRepo) CreateFriendRequest(ctx context.Context, fromID, toID, mes
 	err := r.DB.QueryRow(ctx, `
 		INSERT INTO friend_requests(from_user, to_user, message, status, source, source_group_id)
 		VALUES($1,$2,$3,'pending',$4,$5)
+		ON CONFLICT (from_user, to_user) WHERE status='pending'
+		DO UPDATE SET message=EXCLUDED.message, source=EXCLUDED.source,
+			source_group_id=EXCLUDED.source_group_id, created_at=NOW()
 		RETURNING id::text`, fromID, toID, message, source, groupID).Scan(&id)
 	return id, err
 }
@@ -280,6 +289,12 @@ func (r *ContactRepo) AcceptFriendRequest(ctx context.Context, requestID, uid st
 		WHERE id=$1 AND to_user=$2 AND status='pending'
 		RETURNING from_user::text, to_user::text`, requestID, uid).Scan(&fromID, &toID)
 	if err != nil {
+		return err
+	}
+	// 兼容唯一索引上线前产生的重复申请：接受任意一条后，同一方向全部结束。
+	if _, err = tx.Exec(ctx, `
+		UPDATE friend_requests SET status='accepted'
+		WHERE from_user=$1::uuid AND to_user=$2::uuid AND status='pending'`, fromID, toID); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `

@@ -9,6 +9,7 @@ import {
   rejectFriendRequest,
   sendFriendRequest,
 } from '@/api/contact'
+import { mergeReceivedFriendRequests } from '@/utils/friend-request'
 
 const PAGE_SIZE = 50
 
@@ -72,7 +73,7 @@ export const useContactStore = defineStore('contact', () => {
   }
 
   async function loadFriendRequests() {
-    friendRequests.value = await fetchFriendRequests()
+    friendRequests.value = mergeReceivedFriendRequests(await fetchFriendRequests())
   }
 
   async function loadAll() {
