@@ -2,13 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { fetchContactTags } from '@/api/contact'
-import { resolveIMGroupByIM } from '@/api/im'
+import { resolveIMGroup, resolveIMGroupByIM } from '@/api/im'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG } from '@/config'
 import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
 import { useForwardStore } from '@/stores/forward'
-import type { ContactTagItem, FriendForwardPlan } from '@/types'
+import type { ContactTagItem, Conversation, FriendForwardPlan } from '@/types'
 import { snapshotFromMessage } from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
 import { businessUserIdFromIM } from '@/utils/openim'
@@ -44,7 +44,51 @@ const excludedFriendIds = ref<Set<string>>(new Set())
 const tags = ref<ContactTagItem[]>([])
 const sending = ref(false)
 const visibleLimit = ref(PAGE_SIZE)
+const dismissedGroupIds = ref<Set<string>>(new Set())
+const dismissedConversationKeys = ref<Set<string>>(new Set())
 let searchTimer: ReturnType<typeof setTimeout> | undefined
+
+async function refreshDismissedForwardBlocklist() {
+  await contactStore.loadGroups().catch(() => undefined)
+  const dissolved = contactStore.groups.filter((g) => g.status === 'dismissed')
+  const groupIds = new Set<string>()
+  const convKeys = new Set<string>()
+  await Promise.all(
+    dissolved.map(async (g) => {
+      groupIds.add(g.id)
+      if (g.conversationId) convKeys.add(g.conversationId)
+      try {
+        const target = await resolveIMGroup(g.id)
+        if (target.businessGroupId) groupIds.add(target.businessGroupId)
+        if (target.imGroupId) {
+          convKeys.add(target.imGroupId)
+          convKeys.add(`sg_${target.imGroupId}`)
+        }
+      } catch {
+        /* 解析失败时仍靠 status / 群名兜底 */
+      }
+    }),
+  )
+  dismissedGroupIds.value = groupIds
+  dismissedConversationKeys.value = convKeys
+}
+
+function isDissolvedGroupConversation(c: Conversation): boolean {
+  if (c.type !== 'group') return false
+  if (dismissedConversationKeys.value.has(c.id)) return true
+  if (c.groupId) {
+    if (dismissedConversationKeys.value.has(c.groupId)) return true
+    if (dismissedConversationKeys.value.has(`sg_${c.groupId}`)) return true
+  }
+  return contactStore.groups.some((g) => g.status === 'dismissed' && g.name === c.title)
+}
+
+function isDissolvedGroupTarget(item: ForwardTarget): boolean {
+  if (item.kind !== 'group' && item.conversationType !== 'group') return false
+  if (item.businessGroupId && dismissedGroupIds.value.has(item.businessGroupId)) return true
+  if (item.conversationId && dismissedConversationKeys.value.has(item.conversationId)) return true
+  return contactStore.groups.some((g) => g.status === 'dismissed' && g.name === item.name)
+}
 
 onLoad(async () => {
   if (!forwardStore.messageIds.length) {
@@ -57,7 +101,7 @@ onLoad(async () => {
   }
   await Promise.all([
     contactStore.reloadContacts({ keyword: '', sort: 'recent' }).catch(() => undefined),
-    contactStore.groups.length ? Promise.resolve() : contactStore.loadGroups().catch(() => undefined),
+    refreshDismissedForwardBlocklist(),
   ])
   tags.value = await fetchContactTags().catch(() => [])
 })
@@ -90,15 +134,17 @@ const selectedCount = computed(() => {
 })
 
 const listRecent = computed<ForwardTarget[]>(() =>
-  chatStore.conversations.map((c) => ({
-    id: `r_${c.id}`,
-    kind: c.type === 'group' ? 'group' : 'conversation',
-    name: c.title,
-    avatar: c.avatar || APP_CONFIG.defaultAvatarUrl,
-    conversationId: c.id,
-    conversationType: c.type,
-    businessUserId: c.type === 'private' ? businessUserIdFromIM(c.peerUserId || '') || undefined : undefined,
-  })),
+  chatStore.conversations
+    .filter((c) => !isDissolvedGroupConversation(c))
+    .map((c) => ({
+      id: `r_${c.id}`,
+      kind: c.type === 'group' ? 'group' : 'conversation',
+      name: c.title,
+      avatar: c.avatar || APP_CONFIG.defaultAvatarUrl,
+      conversationId: c.id,
+      conversationType: c.type,
+      businessUserId: c.type === 'private' ? businessUserIdFromIM(c.peerUserId || '') || undefined : undefined,
+    })),
 )
 
 const listContacts = computed<ForwardTarget[]>(() =>
@@ -112,15 +158,17 @@ const listContacts = computed<ForwardTarget[]>(() =>
 )
 
 const listGroups = computed<ForwardTarget[]>(() =>
-  contactStore.groups.map((g) => ({
-    id: `g_${g.id}`,
-    kind: 'group',
-    name: g.name,
-    avatar: g.avatar || APP_CONFIG.defaultGroupAvatarUrl,
-    businessGroupId: g.id,
-    conversationId: g.conversationId,
-    conversationType: 'group',
-  })),
+  contactStore.groups
+    .filter((g) => g.status !== 'dismissed')
+    .map((g) => ({
+      id: `g_${g.id}`,
+      kind: 'group',
+      name: g.name,
+      avatar: g.avatar || APP_CONFIG.defaultGroupAvatarUrl,
+      businessGroupId: g.id,
+      conversationId: g.conversationId,
+      conversationType: 'group',
+    })),
 )
 
 const listTags = computed<ForwardTarget[]>(() =>
@@ -331,15 +379,24 @@ async function resolveGroupTargetIds(groupTargets: ForwardTarget[]) {
 
 async function onSend() {
   const { friendPlan, groupTargets } = collectPlan()
-  if ((!friendPlan && !groupTargets.length) || sending.value) return
+  const aliveGroupTargets = groupTargets.filter((item) => !isDissolvedGroupTarget(item))
+  if (sending.value) return
+  if (!friendPlan && !aliveGroupTargets.length) {
+    if (groupTargets.length) {
+      uni.showToast({ title: '所选群聊已解散', icon: 'none' })
+    }
+    return
+  }
+  if (aliveGroupTargets.length < groupTargets.length) {
+    uni.showToast({ title: '已忽略已解散的群聊', icon: 'none' })
+  }
   const ok = await confirmSend(confirmHint())
   if (!ok) return
   sending.value = true
   try {
-    // App 原生弹窗关闭前立刻请求，容易把后续调用卡住；H5 没有这个问题。
     await afterNativeModal()
     const sources = buildSources()
-    const targetGroupIds = await resolveGroupTargetIds(groupTargets)
+    const targetGroupIds = await resolveGroupTargetIds(aliveGroupTargets)
     await forwardStore.submitBatch(sources, friendPlan, targetGroupIds)
     forwardStore.markSucceeded()
     forwardStore.clear()
