@@ -18,7 +18,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'https://www.ke58.com',
+        target: 'http://127.0.0.1:18080',
         changeOrigin: true,
       },
     },

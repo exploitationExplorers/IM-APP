@@ -41,12 +41,13 @@ func main() {
 		"report_reasons":       {"id", "target_type", "reason", "language", "sort_order", "status"},
 		"reports":              {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
 		"report_files":         {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
+		"feedbacks":            {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
 		"forward_tasks":        {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
 		"forward_task_targets": {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
 		"forward_kafka_outbox": {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
 		"im_message_recalls":   {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql, 024_im_message_recalls.sql", err)
+		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql, 024_im_message_recalls.sql, 029_feedbacks.sql", err)
 	}
 	log.Println("migrations applied")
 
@@ -94,6 +95,7 @@ func main() {
 	imOutboxRepo := &repository.IMSyncOutboxRepo{DB: pool}
 	imAccessRepo := &repository.IMAccessRepo{DB: pool}
 	reportRepo := &repository.ReportRepo{DB: pool}
+	feedbackRepo := &repository.FeedbackRepo{DB: pool}
 	forwardRepo := &repository.ForwardRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
@@ -116,6 +118,7 @@ func main() {
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue}
 	reportSvc := &service.ReportService{Reports: reportRepo}
+	feedbackSvc := &service.FeedbackService{Feedbacks: feedbackRepo}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
 	var smsGateway service.SMSGateway = service.DevSMSGateway{}
@@ -141,6 +144,7 @@ func main() {
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
 	imH := &handler.IMHandler{Service: imSvc}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
+	feedbackH := &handler.FeedbackHandler{Svc: feedbackSvc}
 	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
 	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
 	pushSvc := service.NewLoggingPushService()
@@ -244,6 +248,7 @@ func main() {
 			auth.GET("/users/:id", userH.GetUser)
 			auth.GET("/report-reasons", reportH.ListReasons)
 			auth.POST("/reports", reportH.Create)
+			auth.POST("/feedbacks", feedbackH.Create)
 
 			if cfg.LegacyChatEnabled {
 				auth.GET("/conversations", chatH.ListConversations)
