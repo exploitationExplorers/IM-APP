@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { createFeedback } from '@/api/feedback'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import ImNavBar from '@/components/ImNavBar.vue'
+import { uploadReportImage } from '@/utils/file-upload'
 
 useAuthGuard()
 
@@ -47,7 +49,7 @@ function removeImage() {
   imagePath.value = ''
 }
 
-function onSubmit() {
+async function onSubmit() {
   if (!canSubmit.value) return
   const text = content.value.trim()
   if (!text) {
@@ -55,11 +57,25 @@ function onSubmit() {
     return
   }
   submitting.value = true
-  uni.showToast({ title: '已送出', icon: 'success' })
-  setTimeout(() => {
+  try {
+    const imageFileIds: string[] = []
+    if (imagePath.value) {
+      const fileId = await uploadReportImage(imagePath.value)
+      if (fileId) imageFileIds.push(fileId)
+    }
+    await createFeedback({
+      contact: contact.value.trim(),
+      content: text,
+      imageFileIds,
+    })
+    uni.showToast({ title: '已送出', icon: 'success' })
+    setTimeout(() => goBack(), 500)
+  } catch (e) {
+    const msg = e instanceof Error && e.message ? e.message : '提交失败'
+    uni.showToast({ title: msg, icon: 'none' })
+  } finally {
     submitting.value = false
-    goBack()
-  }, 500)
+  }
 }
 </script>
 
