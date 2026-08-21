@@ -26,6 +26,14 @@ const GroupNotice = {
   NameSet: 1520,
 } as const
 
+/** 好友关系通知；OpenIM 导入好友时通常下发 1204，SDK 接受申请时可能下发 1201。 */
+const FriendNotice = {
+  ApplicationApproved: 1201,
+  Added: 1204,
+} as const
+
+export const FRIEND_CONNECTED_TEXT = '你们已成为好友，现在可以开始聊天了'
+
 interface NoticeUser {
   userID?: string
   nickname?: string
@@ -84,6 +92,10 @@ function namesOf(list?: NoticeUser[]): string {
  * 群改名通知。签名包含群、操作者和目标群名，因此真正改成不同名称时不会误合并。
  */
 export function imNotificationEventKey(item: MessageItem): string {
+  if (isFriendConnectedNotice(item.contentType)) {
+    const users = [item.sendID || '', item.recvID || ''].filter(Boolean).sort()
+    return `friend-connected:${users.join(':')}`
+  }
   if (isGroupMembershipNotice(item.contentType)) {
     return `group-member:${item.groupID || ''}:${item.clientMsgID}`
   }
@@ -99,6 +111,13 @@ export function imNotificationEventKey(item: MessageItem): string {
   const operatorID = detail.opUser?.userID || item.sendID || ''
   const groupName = detail.group?.groupName?.trim() || ''
   return `group-name:${groupID}:${operatorID}:${groupName}`
+}
+
+export function isFriendConnectedNotice(contentType: number): boolean {
+  return (
+    contentType === FriendNotice.ApplicationApproved ||
+    contentType === FriendNotice.Added
+  )
 }
 
 export function isGroupMembershipNotice(contentType: number): boolean {
@@ -148,7 +167,9 @@ export function isGroupMuteNotice(contentType: number): boolean {
 export function collapseRepeatedGroupNameNotices(messages: ChatMessage[]): ChatMessage[] {
   let previousKey = ''
   return messages.filter((message) => {
-    const key = message.systemEventKey?.startsWith('group-name:')
+    const key =
+      message.systemEventKey?.startsWith('group-name:') ||
+      message.systemEventKey?.startsWith('friend-connected:')
       ? message.systemEventKey
       : ''
     if (!key) {
@@ -168,6 +189,7 @@ export function collapseRepeatedGroupNameNotices(messages: ChatMessage[]): ChatM
  */
 export function formatIMNotification(item: MessageItem): string {
   if (!isIMNotification(item.contentType)) return ''
+  if (isFriendConnectedNotice(item.contentType)) return FRIEND_CONNECTED_TEXT
   const detail = parseDetail(item)
   const op = nameOf(detail.opUser, item.senderNickname || '')
   switch (item.contentType as number) {
