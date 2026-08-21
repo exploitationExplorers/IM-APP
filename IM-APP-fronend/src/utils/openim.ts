@@ -653,6 +653,8 @@ export async function sendAtTextMessage(
 interface SendCreatedMessageOptions {
   /** 媒体文件已经上传并写入消息 URL，此时不能再让 SDK 查找本地文件并重复上传 */
   alreadyUploaded?: boolean
+  /** 原生发送等待成功回调的超时（毫秒）。大文件（视频）走 OSS 上传时需比默认更久 */
+  timeoutMs?: number
 }
 
 interface NativeSendResult {
@@ -726,7 +728,7 @@ async function sendCreatedMessage(
     },
   }
   if (isAppPlatform) {
-    return sendOnAppNative(method, params, message.clientMsgID)
+    return sendOnAppNative(method, params, message.clientMsgID, options.timeoutMs)
   }
   const sent = await imCall<unknown>(method, params)
   if (!isMessageItem(sent)) throw new Error('发送失败')
@@ -742,6 +744,7 @@ function sendOnAppNative(
   method: IMMethods,
   params: unknown,
   clientMsgID: string,
+  timeoutMs?: number,
 ): Promise<MessageItem> {
   const sdk = nativeOpenIM()
   if (!sdk) throw new Error(APP_NATIVE_PLUGIN_MISSING)
@@ -749,6 +752,11 @@ function sendOnAppNative(
   if (useNotOss ? typeof sdk.sendMessageNotOss !== 'function' : typeof sdk.sendMessage !== 'function') {
     throw new Error(APP_NATIVE_PLUGIN_MISSING)
   }
+  const waitMs = timeoutMs ?? (useNotOss ? 15000 : 60000)
+  const isVideo =
+    !!params &&
+    typeof params === 'object' &&
+    (params as { message?: { contentType?: number } }).message?.contentType === MessageType.VideoMessage
   return new Promise((resolve, reject) => {
     let settled = false
     const finish = (ok: boolean, payload?: unknown, err?: Error) => {
@@ -767,8 +775,9 @@ function sendOnAppNative(
       reject(err || new Error('发送失败'))
     }
     const timer = setTimeout(() => {
+      if (isVideo) console.warn('[video][send] TIMEOUT 未收到成功/失败回调', { clientMsgID, waitMs })
       finish(false, undefined, new Error('发送超时'))
-    }, useNotOss ? 15000 : 60000)
+    }, waitMs)
     const offOk = onIMEvent<MessageItem>(IMEvents.SendMessageSuccess, (msg) => {
       const parsed = coerceMessage(msg)
       if (parsed?.clientMsgID === clientMsgID && isCompleteSentMessage(parsed)) finish(true, parsed)
@@ -786,6 +795,16 @@ function sendOnAppNative(
         } catch {
           /* 保持原字符串 */
         }
+      }
+      if (isVideo) {
+        const m = coerceMessage(data)
+        console.log('[video][send] native cb', {
+          errCode: res?.errCode,
+          dataType: typeof res?.data,
+          isProgress: isSendProgressData(data),
+          status: m?.status,
+          contentType: m?.contentType,
+        })
       }
       if (isSendProgressData(data)) return
       if (res?.errCode !== 0) {
@@ -886,10 +905,19 @@ export async function sendVideoMessage(
   if (isAppPlatform) {
     const videoPath = toNativeFullPath(filePath)
     const snap = await snapshotOfVideo(videoPath, snapshotPath)
+    console.log('[video][send] app 路径', {
+      filePath,
+      videoPath,
+      pathConverted: videoPath !== filePath,
+      stillUri: /^(content|file):\/\//.test(videoPath),
+      snap,
+      seconds,
+    })
     let message: MessageItem
     try {
       message = await imCall<MessageItem>(IMMethods.CreateVideoMessageFromFullPath, videoPath)
-    } catch {
+    } catch (e1) {
+      console.warn('[video][send] FromFullPath(字符串) 失败，降级传对象', (e1 as Error)?.message)
       try {
         message = await imCall<MessageItem>(IMMethods.CreateVideoMessageFromFullPath, {
           videoFullPath: videoPath,
@@ -897,7 +925,8 @@ export async function sendVideoMessage(
           duration: seconds,
           snapshotPath: snap,
         })
-      } catch {
+      } catch (e2) {
+        console.warn('[video][send] FromFullPath(对象) 失败，改为上传后按 URL 发', (e2 as Error)?.message)
         const uploaded = await uploadFileFromPath(videoPath, `video_${Date.now()}.mp4`, 'video/mp4')
         let snapshotUrl = ''
         if (snap) {
@@ -925,7 +954,12 @@ export async function sendVideoMessage(
         return sendCreatedMessage(target, message, { alreadyUploaded: true })
       }
     }
-    return sendCreatedMessage(target, message)
+    console.log('[video][send] 创建完成，交原生上传+发送', {
+      clientMsgID: message?.clientMsgID,
+      contentType: message?.contentType,
+      hasVideoElem: !!(message as { videoElem?: unknown })?.videoElem,
+    })
+    return sendCreatedMessage(target, message, { timeoutMs: 180000 })
   }
   const file = await pathToFile(filePath)
   const url = await uploadFile(file)
