@@ -88,7 +88,7 @@ func (r *OpsRepo) ListForwardTargets(ctx context.Context, taskID, status string,
 	qargs := append(append([]any{}, args...), limit, offset)
 	rows, err := r.DB.Query(ctx, `
 		SELECT t.id::text, COALESCE(t.user_id,t.group_id)::text, t.peer_type, COALESCE(u.nickname,g.name,''), t.status, t.attempts,
-		       COALESCE(t.sent_server_msg_id,''), COALESCE(t.fail_code,''), t.finished_at
+		       COALESCE(t.sent_server_msg_id,''), COALESCE(t.fail_code,''), COALESCE(t.failure_message,''), t.finished_at
 		FROM forward_task_targets t LEFT JOIN users u ON u.id=t.user_id LEFT JOIN groups g ON g.id=t.group_id`+where+
 		" ORDER BY t.created_at LIMIT $"+itoa(len(qargs)-1)+" OFFSET $"+itoa(len(qargs)), qargs...)
 	if err != nil {
@@ -99,7 +99,7 @@ func (r *OpsRepo) ListForwardTargets(ctx context.Context, taskID, status string,
 	for rows.Next() {
 		var t models.ForwardTarget
 		if err := rows.Scan(&t.ID, &t.UserID, &t.PeerType, &t.Nickname, &t.Status, &t.Attempts,
-			&t.MessageID, &t.FailCode, &t.FinishedAt); err != nil {
+			&t.MessageID, &t.FailCode, &t.FailureMessage, &t.FinishedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, t)
@@ -110,7 +110,9 @@ func (r *OpsRepo) ListForwardTargets(ctx context.Context, taskID, status string,
 // ForwardFailures 失败原因统计
 func (r *OpsRepo) ForwardFailures(ctx context.Context, taskID string) ([]map[string]any, error) {
 	rows, err := r.DB.Query(ctx, `
-		SELECT fail_code, COUNT(*) AS cnt FROM forward_task_targets
+		SELECT fail_code, COUNT(*) AS cnt,
+		       COALESCE((array_agg(failure_message) FILTER (WHERE failure_message <> ''))[1], '') AS sample_message
+		FROM forward_task_targets
 		WHERE task_id=$1::uuid AND status='failed' GROUP BY fail_code ORDER BY cnt DESC`, taskID)
 	if err != nil {
 		return nil, err
@@ -118,12 +120,12 @@ func (r *OpsRepo) ForwardFailures(ctx context.Context, taskID string) ([]map[str
 	defer rows.Close()
 	out := make([]map[string]any, 0)
 	for rows.Next() {
-		var code string
+		var code, sample string
 		var cnt int64
-		if err := rows.Scan(&code, &cnt); err != nil {
+		if err := rows.Scan(&code, &cnt, &sample); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{"failCode": code, "count": cnt})
+		out = append(out, map[string]any{"failCode": code, "count": cnt, "message": sample})
 	}
 	return out, nil
 }

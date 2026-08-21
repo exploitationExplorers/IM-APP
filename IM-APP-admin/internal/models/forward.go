@@ -21,15 +21,16 @@ type ForwardTask struct {
 }
 
 type ForwardTarget struct {
-	ID         string     `json:"id"`
-	UserID     string     `json:"userId"`
-	PeerType   string     `json:"peerType"`
-	Nickname   string     `json:"nickname,omitempty"`
-	Status     string     `json:"status"`
-	Attempts   int        `json:"attempts"`
-	MessageID  string     `json:"messageId,omitempty"`
-	FailCode   string     `json:"failCode,omitempty"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	ID             string     `json:"id"`
+	UserID         string     `json:"userId"`
+	PeerType       string     `json:"peerType"`
+	Nickname       string     `json:"nickname,omitempty"`
+	Status         string     `json:"status"`
+	Attempts       int        `json:"attempts"`
+	MessageID      string     `json:"messageId,omitempty"`
+	FailCode       string     `json:"failCode,omitempty"`
+	FailureMessage string     `json:"failureMessage,omitempty"`
+	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
 }
 
 type ForwardUserLimit struct {

@@ -65,6 +65,7 @@ export namespace AdminForwardRisk {
     status: ForwardTargetStatus;
     attempts?: number;
     failCode?: string | null;
+    failureMessage?: string | null;
     finishedAt?: string | null;
     messageId?: string;
   }
