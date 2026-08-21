@@ -92,11 +92,11 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`、`wgtVer
 
 Header：`X-Internal-API-Key`
 
-1. `POST /internal/admin/app-releases/uploads`  
+1. `POST /api/v1/admin/app-releases/uploads`  
    Body：`platform`、`packageType`（`wgt|apk|ipa`）、`fileName`  
-   返回 MinIO 预签名 PUT：`uploadUrl`、`objectKey`、`fileUrl`。对象键固定 `app-releases/{platform}/{uuid}.{ext}`。单文件上限 200MB。
+   返回 MinIO 预签名 PUT：`uploadUrl`、`objectKey`、`fileUrl`。对象键固定 `app-releases/{platform}/{uuid}.{ext}`。单文件上限 200MB。内网仍可用 `/internal/admin/app-releases/uploads`。
 
-2. `POST /internal/admin/app-releases`  
+2. `POST /api/v1/admin/app-releases`  
    Body：`platform`、`channel`、`versionName`、`versionCode`、`packageType`、`objectKey`、`changelog`、`forceUpdate`、可选 `minNativeVersion`  
    校验对象存在、`versionCode` 大于当前最大版本，写入 `app_releases`。
 

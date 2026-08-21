@@ -463,21 +463,64 @@ func (c *Client) UpdateGroup(ctx context.Context, groupID string, update GroupUp
 }
 
 func (c *Client) InviteGroupMember(ctx context.Context, groupID string, userIDs []string) error {
+	return c.InviteGroupMemberAs(ctx, "", groupID, userIDs)
+}
+
+func (c *Client) InviteGroupMemberAs(ctx context.Context, operatorUserID, groupID string, userIDs []string) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
-	err := c.postWithAdmin(ctx, "/group/invite_user_to_group", map[string]any{
+	err := c.postAsUser(ctx, operatorUserID, "/group/invite_user_to_group", map[string]any{
 		"groupID": groupID, "invitedUserIDs": userIDs, "reason": "business group sync",
 	}, nil)
 	return ignoreAlreadyDesired(err)
 }
 
 func (c *Client) KickGroupMember(ctx context.Context, groupID string, userIDs []string) error {
+	return c.KickGroupMemberAs(ctx, "", groupID, userIDs)
+}
+
+func (c *Client) KickGroupMemberAs(ctx context.Context, operatorUserID, groupID string, userIDs []string) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
-	err := c.postWithAdmin(ctx, "/group/kick_group", map[string]any{
+	err := c.postAsUser(ctx, operatorUserID, "/group/kick_group", map[string]any{
 		"groupID": groupID, "kickedUserIDs": userIDs, "reason": "business group sync",
+	}, nil)
+	return ignoreNotFound(err)
+}
+
+func (c *Client) JoinGroup(ctx context.Context, userID, groupID string) error {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(groupID) == "" {
+		return errors.New("invalid join group request")
+	}
+	token, err := c.mustUserToken(ctx, userID)
+	if err != nil {
+		return err
+	}
+	err = c.post(ctx, "/group/join_group", token, map[string]any{
+		"groupID": groupID, "reqMessage": "", "joinSource": 4,
+	}, nil)
+	if err = ignoreAlreadyDesired(err); err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "verif") || strings.Contains(message, "apply") || strings.Contains(message, "审核") {
+		return c.InviteGroupMember(ctx, groupID, []string{userID})
+	}
+	return err
+}
+
+func (c *Client) QuitGroup(ctx context.Context, userID, groupID string) error {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(groupID) == "" {
+		return errors.New("invalid quit group request")
+	}
+	token, err := c.mustUserToken(ctx, userID)
+	if err != nil {
+		return err
+	}
+	err = c.post(ctx, "/group/quit_group", token, map[string]any{
+		"groupID": groupID, "userID": userID,
 	}, nil)
 	return ignoreNotFound(err)
 }
@@ -800,7 +843,6 @@ func (c *Client) postWithAdmin(ctx context.Context, path string, request, respon
 	if err == nil || !isAuthError(err) {
 		return err
 	}
-
 	c.adminMu.Lock()
 	c.adminToken = ""
 	c.adminExpiresAt = time.Time{}
@@ -808,6 +850,34 @@ func (c *Client) postWithAdmin(ctx context.Context, path string, request, respon
 	token, err = c.GetAdminToken(ctx)
 	if err != nil {
 		return err
+	}
+	return c.post(ctx, path, token, request, response)
+}
+
+func (c *Client) mustUserToken(ctx context.Context, userID string) (string, error) {
+	userToken, err := c.GetUserToken(ctx, userID, 3)
+	if err != nil {
+		return "", fmt.Errorf("openim user token for %s: %w", userID, err)
+	}
+	if userToken.Token == "" {
+		return "", fmt.Errorf("openim user token for %s is empty", userID)
+	}
+	return userToken.Token, nil
+}
+
+func (c *Client) postAsUser(ctx context.Context, userID, path string, request, response any) error {
+	token := ""
+	if strings.TrimSpace(userID) != "" {
+		if userToken, err := c.GetUserToken(ctx, userID, 3); err == nil {
+			token = userToken.Token
+		}
+	}
+	if token == "" {
+		var err error
+		token, err = c.GetAdminToken(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	return c.post(ctx, path, token, request, response)
 }

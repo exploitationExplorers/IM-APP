@@ -8,7 +8,7 @@ import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { clearConversationHistory } from '@/api/im'
-import { fetchDissolvedGroup, removeDissolvedGroup } from '@/api/group'
+import { fetchDissolvedGroup, fetchJoinRequests, removeDissolvedGroup } from '@/api/group'
 import {
   setConversationPin,
   setConversationRecvOpt,
@@ -28,6 +28,7 @@ const groupId = ref('')
 const showJoinMode = ref(false)
 const leaving = ref(false)
 const dissolved = ref(false)
+const pendingJoinCount = ref(0)
 const dissolvedInfo = ref<{ id: string; name: string; avatar: string; status: string } | null>(null)
 
 const groupDetail = computed(() => groupStore.currentGroup)
@@ -110,10 +111,24 @@ onShow(async () => {
     if (!userStore.profile) await userStore.loadProfile()
     await groupStore.loadDetail(groupId.value)
     await initConversationSettings()
+    await loadPendingJoinCount()
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载群聊详情失败', icon: 'none' })
   }
 })
+
+async function loadPendingJoinCount() {
+  if (!canManage.value) {
+    pendingJoinCount.value = 0
+    return
+  }
+  try {
+    const list = await fetchJoinRequests(groupId.value)
+    pendingJoinCount.value = list.length
+  } catch {
+    pendingJoinCount.value = 0
+  }
+}
 
 async function initConversationSettings() {
   try {
@@ -405,7 +420,10 @@ async function onRemoveDissolved() {
       </view>
       <view class="info-row nav-row" @click="goToJoinRequests">
         <text class="label">入群申请</text>
-        <text class="arrow">›</text>
+        <view class="row-right">
+          <text v-if="pendingJoinCount" class="muted">{{ pendingJoinCount }}</text>
+          <text class="arrow">›</text>
+        </view>
       </view>
       <view class="info-row nav-row" @click="showJoinMode = true">
         <text class="label">入群方式</text>

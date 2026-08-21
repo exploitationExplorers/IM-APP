@@ -22,6 +22,7 @@ const (
 	IMEventGroupUpdated       = "group.updated"
 	IMEventGroupMemberJoined  = "group.member.joined"
 	IMEventGroupMemberLeft    = "group.member.left"
+	// reason：join=本人入群 / invite=邀请入群 / quit=本人退群 / kick=被移出
 	IMEventGroupMemberRole    = "group.member.role_changed"
 	IMEventGroupMemberMute    = "group.member.mute_changed"
 	IMEventGroupMemberProfile = "group.member.profile_changed"

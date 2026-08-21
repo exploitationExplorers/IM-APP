@@ -46,7 +46,7 @@
 - 文件上传预签名（MinIO）
 - OpenIM Token 签发、对象解析、用户/关系/群 Outbox 同步
 - OpenIM 发送前权限 Webhook、发送后元数据审计和内部系统消息
-- 客户端 wgt 热更新 / 整包发布检查（公开接口）与内部发布
+- 客户端 wgt 热更新 / 整包发布检查（公开接口 `/api/v1/public/app-release`）与带内部密钥的发布（`/api/v1/admin/app-releases`，内网另有 `/internal/admin/app-releases`）
 
 ### OpenIM
 

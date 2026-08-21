@@ -128,7 +128,7 @@ func (m *MinIO) PresignGet(ctx context.Context, objectKey string, expiry time.Du
 	if err != nil {
 		return "", err
 	}
-	return u.String(), nil
+	return m.rewritePublicPath(u.String()), nil
 }
 func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, expiry time.Duration) (string, error) {
 	if !m.Available() {
@@ -143,7 +143,20 @@ func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, e
 		return "", err
 	}
 	_ = contentType
-	return u.String(), nil
+	return m.rewritePublicPath(u.String()), nil
+}
+
+func (m *MinIO) rewritePublicPath(raw string) string {
+	prefix := strings.TrimSuffix(m.publicPathPrefix, "/")
+	if prefix == "" {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Path == "" || strings.HasPrefix(u.Path, prefix+"/") {
+		return raw
+	}
+	u.Path = prefix + u.Path
+	return u.String()
 }
 
 func (m *MinIO) signClientForPublic() (*minio.Client, string, error) {

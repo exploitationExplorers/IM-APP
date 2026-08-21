@@ -297,6 +297,8 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		UserID       string `json:"userId"`
 		Role         string `json:"role"`
 		MutedSeconds int64  `json:"mutedSeconds"`
+		Reason       string `json:"reason"`
+		OperatorID   string `json:"operatorId"`
 	}
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("decode %s payload: %w", event.EventType, err)
@@ -304,6 +306,13 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 	memberID, err := im.UserIDFromBusinessID(payload.UserID)
 	if err != nil {
 		return err
+	}
+	operatorID := ""
+	if payload.OperatorID != "" {
+		operatorID, err = im.UserIDFromBusinessID(payload.OperatorID)
+		if err != nil {
+			return err
+		}
 	}
 	if event.EventType == repository.IMEventGroupMemberRole {
 		member, exists := memberByID[memberID]
@@ -330,10 +339,25 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		}
 		return w.Client.SetGroupMemberNickname(ctx, groupID, memberID, member.GroupNickname)
 	}
-	if _, exists := memberByID[memberID]; exists {
-		return w.Client.InviteGroupMember(ctx, groupID, []string{memberID})
+	if event.EventType == repository.IMEventGroupMemberJoined {
+		if _, exists := memberByID[memberID]; !exists {
+			return nil
+		}
+		if payload.Reason == "invite" {
+			return w.Client.InviteGroupMemberAs(ctx, operatorID, groupID, []string{memberID})
+		}
+		return w.Client.JoinGroup(ctx, memberID, groupID)
 	}
-	return w.Client.KickGroupMember(ctx, groupID, []string{memberID})
+	if event.EventType == repository.IMEventGroupMemberLeft {
+		if _, exists := memberByID[memberID]; exists {
+			return nil
+		}
+		if payload.Reason == "kick" {
+			return w.Client.KickGroupMemberAs(ctx, operatorID, groupID, []string{memberID})
+		}
+		return w.Client.QuitGroup(ctx, memberID, groupID)
+	}
+	return fmt.Errorf("unsupported OpenIM group event type %q", event.EventType)
 }
 
 func (w *IMSyncWorker) sendGroupCreatedWelcome(ctx context.Context, businessGroupID, imGroupID string) error {

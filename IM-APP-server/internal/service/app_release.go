@@ -210,7 +210,9 @@ func (s *AppReleaseService) List(ctx context.Context, platform, channel string, 
 func (s *AppReleaseService) toCheckResult(ctx context.Context, item models.AppRelease, updateType models.AppUpdateType) models.AppReleaseCheckResult {
 	downloadURL := item.DownloadURL
 	if s.MinIO != nil && s.MinIO.Available() && item.ObjectKey != "" {
-		if signed, err := s.MinIO.PresignGet(ctx, item.ObjectKey, time.Hour); err == nil && signed != "" {
+		if u := s.MinIO.FileURL(item.ObjectKey); u != "" {
+			downloadURL = u
+		} else if signed, err := s.MinIO.PresignGet(ctx, item.ObjectKey, time.Hour); err == nil && signed != "" {
 			downloadURL = signed
 		}
 	}

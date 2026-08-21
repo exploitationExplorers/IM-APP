@@ -46,13 +46,13 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 `updateType`：`none` | `wgt` | `native`。无发布记录或已是最新时 `hasUpdate=false` 且 `updateType=none`。`downloadUrl` 为限时预签名地址。
 
-发布接口走内部密钥，不面向 App：
+发布接口走内部密钥，不面向 App。线上 Nginx 只反代 `/api/`，因此本机 `pack:wgt --publish` 使用下面这组：
 
-- `POST /internal/admin/app-releases/uploads` Body：`{ "platform", "packageType", "fileName" }`，返回 `uploadUrl`（PUT）、`objectKey`、`fileUrl`
-- `POST /internal/admin/app-releases` Body：`{ "platform", "channel", "versionName", "versionCode", "packageType", "objectKey", "changelog", "forceUpdate", "minNativeVersion?" }`
-- `GET /internal/admin/app-releases?platform=&channel=&limit=`
+- `POST /api/v1/admin/app-releases/uploads` Body：`{ "platform", "packageType", "fileName" }`，返回 `uploadUrl`（PUT）、`objectKey`、`fileUrl`
+- `POST /api/v1/admin/app-releases` Body：`{ "platform", "channel", "versionName", "versionCode", "packageType", "objectKey", "changelog", "forceUpdate", "minNativeVersion?" }`
+- `GET /api/v1/admin/app-releases?platform=&channel=&limit=`
 
-Header 均需 `X-Internal-API-Key`。日常用前端 `npm run pack:wgt -- --build --publish --min-native=100` 发布。详见仓库根目录 [plan.md](../../plan.md)。
+内网仍保留 `POST/GET /internal/admin/app-releases*`。Header 均需 `X-Internal-API-Key`。日常用前端 `npm run pack:wgt -- --build --publish --min-native=100` 发布。详见仓库根目录 [plan.md](../../plan.md)。
 
 ### POST `/api/v1/auth/sms/send`
 

@@ -9,9 +9,18 @@
  *
  * --min-native 必须等于客户当前安装的 APK versionCode。
  */
+const crypto = require('crypto')
+const dns = require('dns')
 const fs = require('fs')
+const http = require('http')
+const https = require('https')
 const path = require('path')
 const { execFileSync, spawnSync } = require('child_process')
+const { URL } = require('url')
+
+/** 本机 DNS 常把 www.ke58.com 指到 CDN（证书不匹配）；发布必须打源站。可用 IM_APP_ORIGIN_IP 覆盖。 */
+const ORIGIN_PIN_IP = process.env.IM_APP_ORIGIN_IP || '8.210.72.157'
+const ORIGIN_PIN_HOSTS = new Set(['www.ke58.com', 'ke58.com'])
 
 const root = path.resolve(__dirname, '..')
 const manifestPath = path.join(root, 'src', 'manifest.json')
@@ -96,20 +105,107 @@ function zipDir(srcDir, destFile) {
   fs.renameSync(zipFile, destFile)
 }
 
-function originFromApiBase(apiBaseUrl) {
-  return String(apiBaseUrl || '').replace(/\/api\/v1\/?$/, '').replace(/\/$/, '')
+function resolveApiBase(raw) {
+  const value = String(raw || '').trim().replace(/\/$/, '')
+  if (!value) return ''
+  if (/\/api\/v1$/i.test(value)) return value
+  return `${value}/api/v1`
+}
+
+function pinnedLookup(hostname, options, callback) {
+  if (ORIGIN_PIN_HOSTS.has(hostname)) {
+    const record = { address: ORIGIN_PIN_IP, family: 4 }
+    if (options && options.all) callback(null, [record])
+    else callback(null, ORIGIN_PIN_IP, 4)
+    return
+  }
+  dns.lookup(hostname, options, callback)
+}
+
+function requestBuffer(url, { method = 'GET', headers = {}, body } = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url)
+    const lib = target.protocol === 'https:' ? https : http
+    const req = lib.request(
+      {
+        method,
+        hostname: target.hostname,
+        port: target.port || (target.protocol === 'https:' ? 443 : 80),
+        path: `${target.pathname}${target.search}`,
+        headers,
+        lookup: pinnedLookup,
+      },
+      (res) => {
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => {
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            body: Buffer.concat(chunks),
+          })
+        })
+      },
+    )
+    req.on('error', reject)
+    if (body) req.write(body)
+    req.end()
+  })
+}
+
+function sha256Hex(buf) {
+  return crypto.createHash('sha256').update(buf).digest('hex')
+}
+
+function hmac(key, data) {
+  return crypto.createHmac('sha256', key).update(data).digest()
+}
+
+async function putObjectMinio({ endpoint, accessKey, secretKey, bucket, objectKey, body, region = 'us-east-1' }) {
+  const target = new URL(endpoint)
+  const host = target.host
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '')
+  const dateStamp = amzDate.slice(0, 8)
+  const payloadHash = sha256Hex(body)
+  const canonicalUri = `/${bucket}/${objectKey.split('/').map(encodeURIComponent).join('/')}`
+  const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`
+  const signedHeaders = 'host;x-amz-content-sha256;x-amz-date'
+  const canonicalRequest = ['PUT', canonicalUri, '', canonicalHeaders, signedHeaders, payloadHash].join('\n')
+  const credentialScope = `${dateStamp}/${region}/s3/aws4_request`
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256Hex(canonicalRequest)].join('\n')
+  const kSigning = hmac(hmac(hmac(hmac(`AWS4${secretKey}`, dateStamp), region), 's3'), 'aws4_request')
+  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex')
+  return requestBuffer(`${target.origin}${canonicalUri}`, {
+    method: 'PUT',
+    headers: {
+      Host: host,
+      'Content-Length': String(body.length),
+      'x-amz-content-sha256': payloadHash,
+      'x-amz-date': amzDate,
+      Authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+    },
+    body,
+  })
 }
 
 async function apiJson(origin, key, method, pathname, body) {
-  const res = await fetch(`${origin}${pathname}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Internal-API-Key': key,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  const text = await res.text()
+  const url = `${origin}${pathname}`
+  let res
+  try {
+    const payload = body ? Buffer.from(JSON.stringify(body)) : undefined
+    res = await requestBuffer(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-API-Key': key,
+        ...(payload ? { 'Content-Length': String(payload.length) } : {}),
+      },
+      body: payload,
+    })
+  } catch (err) {
+    throw new Error(`请求 ${url} 失败: ${err instanceof Error ? err.message : err}`)
+  }
+  const text = res.body.toString('utf8')
   let parsed
   try {
     parsed = JSON.parse(text)
@@ -125,23 +221,53 @@ async function apiJson(origin, key, method, pathname, body) {
 async function publishRelease(args, filePath, versionName, versionCode) {
   const frontendEnv = loadDotEnv(path.join(root, '.env'))
   const serverEnv = loadDotEnv(path.join(root, '..', 'IM-APP-server', '.env'))
-  const origin =
+  const origin = resolveApiBase(
     args.api ||
-    process.env.IM_APP_API_ORIGIN ||
-    originFromApiBase(frontendEnv.VITE_API_BASE_URL) ||
-    originFromApiBase(serverEnv.PUBLIC_API_BASE_URL)
+      process.env.IM_APP_API_ORIGIN ||
+      frontendEnv.VITE_API_BASE_URL ||
+      serverEnv.PUBLIC_API_BASE_URL,
+  )
   const key = args.key || process.env.IM_INTERNAL_API_KEY || serverEnv.IM_INTERNAL_API_KEY
   if (!origin) throw new Error('发布需要 --api=https://你的域名 或配置 VITE_API_BASE_URL')
   if (!key) throw new Error('发布需要 --key 或 IM-APP-server/.env 中的 IM_INTERNAL_API_KEY')
+  console.log(`正在发布到 ${origin}`)
 
   const fileName = path.basename(filePath)
-  const upload = await apiJson(origin, key, 'POST', '/internal/admin/app-releases/uploads', {
+  const upload = await apiJson(origin, key, 'POST', '/admin/app-releases/uploads', {
     platform: args.platform,
     packageType: args.packageType,
     fileName,
   })
   const buf = fs.readFileSync(filePath)
-  const putRes = await fetch(upload.uploadUrl, { method: 'PUT', body: buf })
+  let putRes
+  try {
+    putRes = await requestBuffer(upload.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Length': String(buf.length) },
+      body: buf,
+    })
+  } catch (err) {
+    putRes = { ok: false, status: 0, error: err }
+  }
+  if (!putRes.ok) {
+    const minioEndpoint =
+      process.env.IM_APP_MINIO_ENDPOINT || `http://${ORIGIN_PIN_IP}:9000`
+    const accessKey = serverEnv.MINIO_ACCESS_KEY
+    const secretKey = serverEnv.MINIO_SECRET_KEY
+    const bucket = serverEnv.MINIO_BUCKET || 'im-uploads'
+    if (!accessKey || !secretKey) {
+      throw new Error(`上传 MinIO 失败 (${putRes.status})，且未配置 MINIO_ACCESS_KEY`)
+    }
+    console.log(`预签名 PUT 不可用 (${putRes.status})，改走源站 MinIO ${minioEndpoint}`)
+    putRes = await putObjectMinio({
+      endpoint: minioEndpoint,
+      accessKey,
+      secretKey,
+      bucket,
+      objectKey: upload.objectKey,
+      body: buf,
+    })
+  }
   if (!putRes.ok) {
     throw new Error(`上传 MinIO 失败 (${putRes.status})`)
   }
@@ -162,7 +288,7 @@ async function publishRelease(args, filePath, versionName, versionCode) {
       throw new Error('--min-native 必须是 >= 0 的整数')
     }
   }
-  const published = await apiJson(origin, key, 'POST', '/internal/admin/app-releases', payload)
+  const published = await apiJson(origin, key, 'POST', '/admin/app-releases', payload)
   console.log(`已发布 ${published.packageType} ${published.versionName} (${published.versionCode})`)
   console.log(published.downloadUrl)
 }

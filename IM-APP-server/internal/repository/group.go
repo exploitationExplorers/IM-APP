@@ -241,10 +241,10 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]mod
 }
 
 func (r *GroupRepo) Join(ctx context.Context, groupID, uid string) (models.GroupInfo, error) {
-	return r.addMember(ctx, groupID, uid, true)
+	return r.addMember(ctx, groupID, uid, true, "join")
 }
 
-func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJoinMode bool) (models.GroupInfo, error) {
+func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJoinMode bool, reason string) (models.GroupInfo, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return models.GroupInfo{}, err
@@ -267,7 +267,7 @@ func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJ
 		}
 		return r.GetByID(ctx, groupID, uid)
 	}
-	if enforceJoinMode && joinMode != "open" {
+	if enforceJoinMode && joinMode == "approval" {
 		return models.GroupInfo{}, ErrApprovalRequired
 	}
 	// 校验群成员上限（024 扩展列 groups.max_members）
@@ -295,8 +295,12 @@ func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJ
 			return models.GroupInfo{}, err
 		}
 	}
+	if reason == "" {
+		reason = "join"
+	}
 	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, map[string]string{
 		"userId": uid,
+		"reason": reason,
 	}); err != nil {
 		return models.GroupInfo{}, err
 	}
@@ -391,6 +395,10 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 }
 
 func (r *GroupRepo) Leave(ctx context.Context, groupID, uid string) error {
+	return r.removeMembership(ctx, groupID, uid, "quit", uid)
+}
+
+func (r *GroupRepo) removeMembership(ctx context.Context, groupID, memberID, reason, operatorID string) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -401,25 +409,30 @@ func (r *GroupRepo) Leave(ctx context.Context, groupID, uid string) error {
 	err = tx.QueryRow(ctx, `
 		SELECT COALESCE(g.conversation_id::text,''), gm.role
 		FROM groups g JOIN group_members gm ON gm.group_id=g.id
-		WHERE g.id=$1 AND gm.user_id=$2`, groupID, uid).Scan(&convID, &role)
+		WHERE g.id=$1 AND gm.user_id=$2`, groupID, memberID).Scan(&convID, &role)
 	if err != nil {
 		return err
 	}
 	if role == "owner" {
 		return ErrForbidden
 	}
-	_, err = tx.Exec(ctx, `DELETE FROM group_members WHERE group_id=$1 AND user_id=$2`, groupID, uid)
+	_, err = tx.Exec(ctx, `DELETE FROM group_members WHERE group_id=$1 AND user_id=$2`, groupID, memberID)
 	if err != nil {
 		return err
 	}
 	if r.LegacyChatEnabled && convID != "" {
-		if _, err := tx.Exec(ctx, `DELETE FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`, convID, uid); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`, convID, memberID); err != nil {
 			return err
 		}
 	}
-	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberLeft, map[string]string{
-		"userId": uid,
-	}); err != nil {
+	if reason == "" {
+		reason = "quit"
+	}
+	payload := map[string]string{"userId": memberID, "reason": reason}
+	if operatorID != "" {
+		payload["operatorId"] = operatorID
+	}
+	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberLeft, payload); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -728,6 +741,10 @@ var ErrInvalidGroupOperation = errors.New("invalid group operation")
 
 var ErrApprovalRequired = errors.New("group approval required")
 
+var ErrAlreadyGroupMember = errors.New("already a group member")
+
+var ErrJoinRequestFailed = errors.New("join request failed")
+
 var ErrGroupFull = errors.New("group member limit reached")
 
 var ErrGroupNotFound = errors.New("group not found")
@@ -836,7 +853,7 @@ func (r *GroupRepo) JoinByQRCode(ctx context.Context, uid, token, remark string)
 		return models.JoinGroupByQRCodeResult{Action: "enter", Group: group}, nil
 	}
 	if resolved.JoinMode == "open" {
-		group, err := r.addMember(ctx, groupID, uid, true)
+		group, err := r.addMember(ctx, groupID, uid, true, "join")
 		if errors.Is(err, ErrApprovalRequired) {
 			request, requestErr := r.CreateJoinRequest(ctx, groupID, uid, remark)
 			if requestErr != nil {
@@ -853,15 +870,31 @@ func (r *GroupRepo) JoinByQRCode(ctx context.Context, uid, token, remark string)
 		return models.JoinGroupByQRCodeResult{Action: "joined", Group: group}, nil
 	}
 	request, err := r.CreateJoinRequest(ctx, groupID, uid, remark)
-	if err != nil {
-		// 群在解析后从审核切换为公开，或用户刚被其他管理员加入时，
-		// 重新按当前加群模式原子判断，避免把有效二维码误报为失效。
-		if errors.Is(err, pgx.ErrNoRows) {
-			group, joinErr := r.addMember(ctx, groupID, uid, true)
-			if joinErr == nil {
-				return models.JoinGroupByQRCodeResult{Action: "joined", Group: group}, nil
-			}
+	if errors.Is(err, ErrAlreadyGroupMember) {
+		group, getErr := r.GetByID(ctx, groupID, uid)
+		if getErr != nil {
+			return models.JoinGroupByQRCodeResult{}, getErr
 		}
+		return models.JoinGroupByQRCodeResult{Action: "enter", Group: group}, nil
+	}
+	if errors.Is(err, ErrInvalidGroupOperation) {
+		// 解析后群已改回公开，按当前模式直接加入
+		group, joinErr := r.addMember(ctx, groupID, uid, true, "join")
+		if joinErr == nil {
+			return models.JoinGroupByQRCodeResult{Action: "joined", Group: group}, nil
+		}
+		if !errors.Is(joinErr, ErrApprovalRequired) {
+			return models.JoinGroupByQRCodeResult{}, joinErr
+		}
+		request, requestErr := r.CreateJoinRequest(ctx, groupID, uid, remark)
+		if requestErr != nil {
+			return models.JoinGroupByQRCodeResult{}, requestErr
+		}
+		return models.JoinGroupByQRCodeResult{
+			Action: "pending_approval", Group: resolved.Group, RequestID: request.ID,
+		}, nil
+	}
+	if err != nil {
 		return models.JoinGroupByQRCodeResult{}, err
 	}
 	return models.JoinGroupByQRCodeResult{
@@ -966,7 +999,9 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 			}
 		}
 		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, map[string]string{
-			"userId": inviteeID,
+			"userId":     inviteeID,
+			"reason":     "invite",
+			"operatorId": uid,
 		}); err != nil {
 			return 0, err
 		}
@@ -988,7 +1023,7 @@ func (r *GroupRepo) AcceptInvitation(ctx context.Context, uid, token string) (mo
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
-	return r.addMember(ctx, groupID, uid, false)
+	return r.addMember(ctx, groupID, uid, false, "invite")
 }
 
 func (r *GroupRepo) UpdateMyNickname(ctx context.Context, groupID, uid, nickname string) error {
@@ -1038,17 +1073,68 @@ func (r *GroupRepo) CreateReport(ctx context.Context, groupID, uid, reason, desc
 }
 
 func (r *GroupRepo) CreateJoinRequest(ctx context.Context, groupID, uid, remark string) (models.GroupJoinRequestItem, error) {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return models.GroupJoinRequestItem{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var joinMode, status string
+	var isMember bool
+	err = tx.QueryRow(ctx, `
+		SELECT COALESCE(status,'active'), COALESCE(join_mode,'open'),
+			EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)
+		FROM groups WHERE id=$1::uuid`, groupID, uid).Scan(&status, &joinMode, &isMember)
+	if err != nil {
+		return models.GroupJoinRequestItem{}, err
+	}
+	if status != "active" {
+		return models.GroupJoinRequestItem{}, ErrForbidden
+	}
+	if isMember {
+		return models.GroupJoinRequestItem{}, ErrAlreadyGroupMember
+	}
+	if joinMode != "approval" {
+		return models.GroupJoinRequestItem{}, ErrInvalidGroupOperation
+	}
+
 	var id string
 	var createdAt time.Time
-	err := r.DB.QueryRow(ctx, `
-		INSERT INTO group_join_requests(group_id, user_id, remark, status)
-		SELECT $1::uuid,$2::uuid,$3,'pending'
-		WHERE EXISTS(SELECT 1 FROM groups WHERE id=$1::uuid AND status='active' AND join_mode='approval')
-		  AND NOT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)
-		ON CONFLICT (group_id, user_id) WHERE status='pending'
-		DO UPDATE SET remark=EXCLUDED.remark
-		RETURNING id::text, created_at`, groupID, uid, remark).Scan(&id, &createdAt)
-	if err != nil {
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, created_at FROM group_join_requests
+		WHERE group_id=$1::uuid AND user_id=$2::uuid AND status='pending'`,
+		groupID, uid).Scan(&id, &createdAt)
+	if err == nil {
+		if err := tx.QueryRow(ctx, `
+			UPDATE group_join_requests SET remark=$2
+			WHERE id=$1::uuid
+			RETURNING id::text, created_at`, id, remark).Scan(&id, &createdAt); err != nil {
+			return models.GroupJoinRequestItem{}, err
+		}
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		err = tx.QueryRow(ctx, `
+			INSERT INTO group_join_requests(group_id, user_id, remark, status)
+			VALUES($1::uuid,$2::uuid,$3,'pending')
+			RETURNING id::text, created_at`, groupID, uid, remark).Scan(&id, &createdAt)
+		if err != nil {
+			var existingID string
+			if findErr := tx.QueryRow(ctx, `
+				SELECT id::text FROM group_join_requests
+				WHERE group_id=$1::uuid AND user_id=$2::uuid AND status='pending'`,
+				groupID, uid).Scan(&existingID); findErr == nil {
+				err = tx.QueryRow(ctx, `
+					UPDATE group_join_requests SET remark=$2
+					WHERE id=$1::uuid
+					RETURNING id::text, created_at`, existingID, remark).Scan(&id, &createdAt)
+			}
+			if err != nil {
+				return models.GroupJoinRequestItem{}, fmtJoinRequestError(err)
+			}
+		}
+	} else {
+		return models.GroupJoinRequestItem{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return models.GroupJoinRequestItem{}, err
 	}
 	u, _ := r.userSummary(ctx, uid)
@@ -1059,6 +1145,17 @@ func (r *GroupRepo) CreateJoinRequest(ctx context.Context, groupID, uid, remark 
 	}, nil
 }
 
+func fmtJoinRequestError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "unique") || strings.Contains(msg, "duplicate") {
+		return ErrJoinRequestFailed
+	}
+	return err
+}
+
 func (r *GroupRepo) ListJoinRequests(ctx context.Context, groupID, uid string) ([]models.GroupJoinRequestItem, error) {
 	role, err := r.memberRole(ctx, groupID, uid)
 	if err != nil || (role != "owner" && role != "admin") {
@@ -1066,7 +1163,7 @@ func (r *GroupRepo) ListJoinRequests(ctx context.Context, groupID, uid string) (
 	}
 	rows, err := r.DB.Query(ctx, `
 		SELECT jr.id::text, jr.status, jr.remark, jr.created_at,
-			u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar
+			u.id::text, COALESCE(u.public_id,''), COALESCE(u.nickname,''), COALESCE(u.avatar,'')
 		FROM group_join_requests jr
 		JOIN users u ON u.id=jr.user_id
 		WHERE jr.group_id=$1::uuid AND jr.status='pending'
@@ -1102,7 +1199,7 @@ func (r *GroupRepo) ApproveJoinRequest(ctx context.Context, groupID, uid, reques
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
-	return r.addMember(ctx, groupID, applicantID, false)
+	return r.addMember(ctx, groupID, applicantID, false, "join")
 }
 
 func (r *GroupRepo) RejectJoinRequest(ctx context.Context, groupID, uid, requestID string) error {
@@ -1141,7 +1238,7 @@ func (r *GroupRepo) RemoveMember(ctx context.Context, groupID, uid, targetID str
 	if actorRole == "admin" && targetRole == "admin" {
 		return ErrForbidden
 	}
-	return r.Leave(ctx, groupID, targetID)
+	return r.removeMembership(ctx, groupID, targetID, "kick", uid)
 }
 
 func (r *GroupRepo) userSummary(ctx context.Context, uid string) (models.UserSummary, error) {

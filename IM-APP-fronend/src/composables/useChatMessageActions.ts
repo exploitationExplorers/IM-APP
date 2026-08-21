@@ -192,9 +192,11 @@ export function useChatMessageActions(opts: {
         ? 'file'
         : message.type === 'image'
           ? 'image'
-          : message.type === 'voice'
-            ? 'voice'
-            : 'text'
+          : message.type === 'video'
+            ? 'video'
+            : message.type === 'voice'
+              ? 'voice'
+              : 'text'
     let content = message.content
     if (isCard) {
       try {

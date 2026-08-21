@@ -92,6 +92,50 @@ function previewImage() {
   uni.previewImage({ urls, current })
 }
 
+const videoMeta = computed(() => {
+  if (props.message.type !== 'video') return { url: '', snapshotUrl: '', duration: 0 }
+  try {
+    const parsed = JSON.parse(props.message.content) as {
+      url?: string
+      snapshotUrl?: string
+      duration?: number
+    }
+    return {
+      url: parsed.url || '',
+      snapshotUrl: parsed.snapshotUrl || '',
+      duration: Number(parsed.duration || 0),
+    }
+  } catch {
+    return { url: props.message.content, snapshotUrl: '', duration: 0 }
+  }
+})
+
+const videoPoster = computed(() =>
+  toPlayableMediaUrl(videoMeta.value.snapshotUrl || videoMeta.value.url),
+)
+
+function playVideo() {
+  const url = toPlayableMediaUrl(videoMeta.value.url)
+  if (!url) {
+    uni.showToast({ title: '视频无法播放', icon: 'none' })
+    return
+  }
+  const anyUni = uni as UniNamespace.Uni & {
+    previewMedia?: (opt: {
+      sources: Array<{ url: string; type: 'video' | 'image'; poster?: string }>
+      current?: number
+    }) => void
+  }
+  if (typeof anyUni.previewMedia === 'function') {
+    anyUni.previewMedia({
+      sources: [{ url, type: 'video', poster: videoPoster.value || undefined }],
+      current: 0,
+    })
+    return
+  }
+  uni.previewImage({ urls: [videoPoster.value || url], current: videoPoster.value || url })
+}
+
 function onContextMenu(event: Event) {
   event.preventDefault()
   emit('longpress')
@@ -333,6 +377,16 @@ function openLink(url: string) {
         <image class="msg-image" :src="message.content" mode="widthFix" />
       </view>
       <view
+        v-else-if="message.type === 'video'"
+        class="bubble image-bubble video-bubble"
+        @click="playVideo"
+        @longpress="onLongPress"
+        @contextmenu.prevent="onContextMenu"
+      >
+        <image class="msg-image" :src="videoPoster || '/static/icon-photo.png'" mode="widthFix" />
+        <view class="video-play">▶</view>
+      </view>
+      <view
         v-else-if="message.type === 'voice'"
         class="bubble voice-bubble"
         :class="[mine ? 'bubble-mine voice-mine' : 'bubble-other voice-other', { playing: playing }]"
@@ -498,6 +552,27 @@ function openLink(url: string) {
   width: 420rpx;
   border-radius: 12rpx;
   display: block;
+}
+
+.video-bubble {
+  position: relative;
+}
+
+.video-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32rpx;
+  padding-left: 6rpx;
 }
 
 .voice-bubble {

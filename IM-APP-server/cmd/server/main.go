@@ -232,6 +232,14 @@ func main() {
 	{
 		api.GET("/public/countries", countryH.Countries)
 		api.GET("/public/app-release", middleware.RateLimitIP(redisClient, 30, time.Minute, "app-release"), appReleaseH.Check)
+		// 线上 Nginx 只反代 /api/，本机 pack:wgt 走公网发布时用这组，仍要内部密钥
+		adminRelease := api.Group("/admin")
+		adminRelease.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+		{
+			adminRelease.POST("/app-releases/uploads", appReleaseH.CreateUpload)
+			adminRelease.POST("/app-releases", appReleaseH.Publish)
+			adminRelease.GET("/app-releases", appReleaseH.List)
+		}
 		api.POST("/auth/sms/send", authH.SendSMS)
 		api.POST("/auth/login", authH.Login)
 		api.POST("/auth/login/sms", authH.LoginSMS)
