@@ -36,6 +36,26 @@ const STATUS_LABEL_MAP: Record<TaskStatus, string> = {
   cancelled: "已终止",
 };
 
+const FAIL_CODE_LABEL_MAP: Record<string, string> = {
+  openim_send_failed: "OpenIM 发送失败",
+  invalid_sender_id: "发送方 ID 非法",
+  invalid_target_id: "目标 ID 非法",
+  account_not_found: "账号不存在",
+  sender_inactive: "发送方账号已停用",
+  target_inactive: "目标账号已停用",
+  blocked: "已被拉黑",
+  friend_blocked: "已被拉黑",
+  not_friend: "非好友关系",
+  not_group_member: "不在群内",
+  group_dissolved: "群已解散",
+};
+
+function formatFailCode(code?: string | null): string {
+  const key = String(code ?? "").trim();
+  if (!key) return "—";
+  return FAIL_CODE_LABEL_MAP[key] ?? key;
+}
+
 interface Filters {
   status: "" | TaskStatus;
 }
@@ -556,6 +576,19 @@ watch(activeDetailTab, () => {
                 <el-table-column label="尝试次数" width="100" align="center">
                   <template #default="{ row }">{{ row.attempts ?? 0 }}</template>
                 </el-table-column>
+                <el-table-column label="失败原因" min-width="260" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <template v-if="row.status === 'failed'">
+                      <div class="fail-reason">
+                        <span class="fail-code">{{ formatFailCode(row.failCode) }}</span>
+                        <span v-if="row.failureMessage && row.failureMessage !== row.failCode" class="fail-detail">
+                          {{ row.failureMessage }}
+                        </span>
+                      </div>
+                    </template>
+                    <template v-else>—</template>
+                  </template>
+                </el-table-column>
                 <el-table-column label="完成时间" min-width="180">
                   <template #default="{ row }">{{ formatTime(row.finishedAt) }}</template>
                 </el-table-column>
@@ -574,13 +607,15 @@ watch(activeDetailTab, () => {
             <el-tab-pane label="失败原因统计" name="failures">
               <el-table v-loading="failuresLoading" :data="failures" style="width: 100%">
                 <el-table-column label="失败码" min-width="200" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.failCode || "—" }}</template>
+                  <template #default="{ row }">
+                    <span :title="row.failCode || ''">{{ formatFailCode(row.failCode) }}</span>
+                  </template>
                 </el-table-column>
                 <el-table-column label="数量" width="120" align="center">
                   <template #default="{ row }">{{ row.count ?? 0 }}</template>
                 </el-table-column>
                 <el-table-column label="原因/说明" min-width="260" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.reason || row.message || "—" }}</template>
+                  <template #default="{ row }">{{ row.message || row.reason || "—" }}</template>
                 </el-table-column>
               </el-table>
               <el-empty v-if="!failuresLoading && !failures.length" description="暂无失败原因数据" />
@@ -706,6 +741,26 @@ watch(activeDetailTab, () => {
 
 .mono-text {
   font-family: "Courier New", monospace;
+}
+
+.fail-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+}
+
+.fail-code {
+  color: var(--el-color-danger);
+  font-weight: 600;
+}
+
+.fail-detail {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail-ops {
