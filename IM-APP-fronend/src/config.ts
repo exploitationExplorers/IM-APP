@@ -13,6 +13,8 @@ export const APP_CONFIG = {
   displayName: '66快捷版',
   version: 'v1.0.0',
   apiBaseUrl,
+  /** 热更新渠道，打包测试 APK 保持 test，正式包再改为 prod */
+  updateChannel: env.VITE_UPDATE_CHANNEL === 'prod' ? 'prod' : 'test',
   defaultCountryCode: '+86',
   /** 参考站默认头像 */
   defaultAvatarUrl:

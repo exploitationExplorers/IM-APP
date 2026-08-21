@@ -2,6 +2,8 @@
 
 export type { ApiResponse } from './api'
 
+export type { AppUpdateType, AppReleaseCheckResult, AppReleaseLocalVersion } from './app-release'
+
 export type {
   UserInfo,
   TokenPair,

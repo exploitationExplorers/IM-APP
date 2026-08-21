@@ -23,4 +23,7 @@ dist
 # 参考站抓取截图（本地对照用，不入库）
 design-ref/
 
+# 热更新本地产物
+unpackage/release/
+
 .env

@@ -42,12 +42,13 @@ func main() {
 		"reports":              {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
 		"report_files":         {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
 		"feedbacks":            {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
+		"app_releases":         {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
 		"forward_tasks":        {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
 		"forward_task_targets": {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
 		"forward_kafka_outbox": {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
 		"im_message_recalls":   {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql, 024_im_message_recalls.sql, 029_feedbacks.sql", err)
+		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql, 024_im_message_recalls.sql, 029_feedbacks.sql, 030_app_releases.sql", err)
 	}
 	log.Println("migrations applied")
 
@@ -96,6 +97,7 @@ func main() {
 	imAccessRepo := &repository.IMAccessRepo{DB: pool}
 	reportRepo := &repository.ReportRepo{DB: pool}
 	feedbackRepo := &repository.FeedbackRepo{DB: pool}
+	appReleaseRepo := &repository.AppReleaseRepo{DB: pool}
 	forwardRepo := &repository.ForwardRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
@@ -119,6 +121,7 @@ func main() {
 	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue}
 	reportSvc := &service.ReportService{Reports: reportRepo}
 	feedbackSvc := &service.FeedbackService{Feedbacks: feedbackRepo}
+	appReleaseSvc := &service.AppReleaseService{Releases: appReleaseRepo, MinIO: minioClient}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
 	var smsGateway service.SMSGateway = service.DevSMSGateway{}
@@ -145,6 +148,7 @@ func main() {
 	imH := &handler.IMHandler{Service: imSvc}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
 	feedbackH := &handler.FeedbackHandler{Svc: feedbackSvc}
+	appReleaseH := &handler.AppReleaseHandler{Svc: appReleaseSvc}
 	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
 	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
 	pushSvc := service.NewLoggingPushService()
@@ -219,11 +223,15 @@ func main() {
 		internalAdmin.POST("/users/:id/sessions/revoke", adminUserH.RevokeSessions)
 		internalAdmin.POST("/users/:id/reset-profile", adminUserH.ResetProfile)
 		internalAdmin.POST("/messages/:id/recall", adminMessageH.RecallMessage)
+		internalAdmin.POST("/app-releases/uploads", appReleaseH.CreateUpload)
+		internalAdmin.POST("/app-releases", appReleaseH.Publish)
+		internalAdmin.GET("/app-releases", appReleaseH.List)
 	}
 
 	api := r.Group("/api/v1")
 	{
 		api.GET("/public/countries", countryH.Countries)
+		api.GET("/public/app-release", middleware.RateLimitIP(redisClient, 30, time.Minute, "app-release"), appReleaseH.Check)
 		api.POST("/auth/sms/send", authH.SendSMS)
 		api.POST("/auth/login", authH.Login)
 		api.POST("/auth/login/sms", authH.LoginSMS)

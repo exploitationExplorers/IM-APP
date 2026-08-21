@@ -2,6 +2,7 @@
 import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { setupAppAuthGuard } from '@/composables/useAuthGuard'
+import { checkAndPromptAppUpdate } from '@/composables/useAppUpdate'
 import { getStatusBarHeight } from '@/utils/status-bar'
 
 onLaunch(() => {
@@ -16,10 +17,12 @@ onLaunch(() => {
   } catch {
     /* App 端由运行时注入 */
   }
+  void checkAndPromptAppUpdate()
 })
 
 onShow(() => {
   setupAppAuthGuard()
+  void checkAndPromptAppUpdate()
 })
 </script>
 

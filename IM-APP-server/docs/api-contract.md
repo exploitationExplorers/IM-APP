@@ -24,6 +24,36 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 登录、注册前查询已启用的国家/地区和国际电话区号。响应项包含 `code`、`dialCode`、`cnName`、`enName`、`enabled`。注册、密码登录、验证码登录、发送验证码和重置密码均传 `countryCode + phone`；`countryCode` 不传时兼容默认 `+86`，传入时按 libphonenumber 的各国规则校验并统一存为 E.164。
 
+### GET `/api/v1/public/app-release`
+
+客户端检查是否有 wgt 热更新或整包更新。无需 JWT；按 IP 限流。`channel` 不传时默认 `test`。
+
+Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前安装包 versionCode）、`wgtVersion`（当前资源包 versionCode）。
+
+**Response**
+```json
+{
+  "hasUpdate": true,
+  "updateType": "wgt",
+  "versionName": "1.0.12",
+  "versionCode": 112,
+  "minNativeVersion": 100,
+  "downloadUrl": "https://www.ke58.com/minio/im-uploads/app-releases/android/uuid.wgt?X-Amz-...",
+  "changelog": "修复聊天气泡错位",
+  "forceUpdate": false
+}
+```
+
+`updateType`：`none` | `wgt` | `native`。无发布记录或已是最新时 `hasUpdate=false` 且 `updateType=none`。`downloadUrl` 为限时预签名地址。
+
+发布接口走内部密钥，不面向 App：
+
+- `POST /internal/admin/app-releases/uploads` Body：`{ "platform", "packageType", "fileName" }`，返回 `uploadUrl`（PUT）、`objectKey`、`fileUrl`
+- `POST /internal/admin/app-releases` Body：`{ "platform", "channel", "versionName", "versionCode", "packageType", "objectKey", "changelog", "forceUpdate", "minNativeVersion?" }`
+- `GET /internal/admin/app-releases?platform=&channel=&limit=`
+
+Header 均需 `X-Internal-API-Key`。日常用前端 `npm run pack:wgt -- --build --publish --min-native=100` 发布。详见仓库根目录 [plan.md](../../plan.md)。
+
 ### POST `/api/v1/auth/sms/send`
 
 发送短信验证码。`scene`: `register` | `login` | `reset`。
