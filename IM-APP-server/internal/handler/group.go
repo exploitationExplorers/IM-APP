@@ -235,6 +235,10 @@ func (h *GroupHandler) JoinByQRCode(c *gin.Context) {
 		switch {
 		case errors.Is(err, repository.ErrInvalidGroupOperation):
 			response.Fail(c, http.StatusBadRequest, "参数错误")
+		case errors.Is(err, repository.ErrApprovalRequired), errors.Is(err, repository.ErrJoinRequestFailed):
+			response.Fail(c, http.StatusBadRequest, "提交入群申请失败，请稍后重试")
+		case errors.Is(err, repository.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, "该群不可加入")
 		default:
 			response.Fail(c, http.StatusNotFound, "二维码无效、已过期或群不可加入")
 		}
@@ -325,7 +329,16 @@ func (h *GroupHandler) CreateJoinRequest(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	item, err := h.Svc.CreateJoinRequest(c.Request.Context(), c.Param("id"), uid, req.Remark)
 	if err != nil {
-		response.Fail(c, http.StatusBadRequest, "提交失败")
+		switch {
+		case errors.Is(err, repository.ErrAlreadyGroupMember):
+			response.Fail(c, http.StatusBadRequest, "你已在群中")
+		case errors.Is(err, repository.ErrInvalidGroupOperation):
+			response.Fail(c, http.StatusBadRequest, "当前群不需要申请")
+		case errors.Is(err, repository.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, "该群不可加入")
+		default:
+			response.Fail(c, http.StatusBadRequest, "提交入群申请失败")
+		}
 		return
 	}
 	response.OK(c, item)

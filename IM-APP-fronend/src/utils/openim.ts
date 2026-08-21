@@ -858,6 +858,103 @@ export async function sendImageMessage(target: IMTarget, filePath: string): Prom
   return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
 }
 
+function videoDurationSeconds(duration: number): number {
+  return Math.max(1, Math.round(duration > 1000 ? duration / 1000 : duration))
+}
+
+async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<string> {
+  if (snapshotPath) return toNativeFullPath(snapshotPath)
+  try {
+    const cover = await IMSDK.getVideoCover?.(videoPath)
+    if (typeof cover === 'string' && cover) return toNativeFullPath(cover)
+  } catch {
+    /* 封面失败仍发视频 */
+  }
+  return ''
+}
+
+/**
+ * 视频消息。app 端走原生插件读本地全路径；web 先上传再按 URL 创建。
+ */
+export async function sendVideoMessage(
+  target: IMTarget,
+  filePath: string,
+  duration: number,
+  snapshotPath = '',
+): Promise<MessageItem> {
+  const seconds = videoDurationSeconds(duration)
+  if (isAppPlatform) {
+    const videoPath = toNativeFullPath(filePath)
+    const snap = await snapshotOfVideo(videoPath, snapshotPath)
+    let message: MessageItem
+    try {
+      message = await imCall<MessageItem>(IMMethods.CreateVideoMessageFromFullPath, videoPath)
+    } catch {
+      try {
+        message = await imCall<MessageItem>(IMMethods.CreateVideoMessageFromFullPath, {
+          videoFullPath: videoPath,
+          videoPath,
+          duration: seconds,
+          snapshotPath: snap,
+        })
+      } catch {
+        const uploaded = await uploadFileFromPath(videoPath, `video_${Date.now()}.mp4`, 'video/mp4')
+        let snapshotUrl = ''
+        if (snap) {
+          try {
+            const cover = await uploadFileFromPath(snap, `video_cover_${Date.now()}.jpg`, 'image/jpeg')
+            snapshotUrl = cover.url
+          } catch {
+            /* 无封面仍发视频 */
+          }
+        }
+        message = await imCall<MessageItem>(IMMethods.CreateVideoMessageByURL, {
+          videoPath: '',
+          duration: seconds,
+          videoType: 'mp4',
+          snapshotPath: '',
+          videoUUID: IMSDK.uuid(),
+          videoUrl: uploaded.url,
+          videoSize: uploaded.size,
+          snapshotUUID: IMSDK.uuid(),
+          snapshotSize: 0,
+          snapshotUrl,
+          snapshotWidth: 0,
+          snapshotHeight: 0,
+        })
+        return sendCreatedMessage(target, message, { alreadyUploaded: true })
+      }
+    }
+    return sendCreatedMessage(target, message)
+  }
+  const file = await pathToFile(filePath)
+  const url = await uploadFile(file)
+  let snapshotUrl = ''
+  if (snapshotPath) {
+    try {
+      const coverFile = await pathToFile(snapshotPath)
+      snapshotUrl = await uploadFile(coverFile)
+    } catch {
+      /* 无封面仍发视频 */
+    }
+  }
+  const message = await imCall<MessageItem>(IMMethods.CreateVideoMessageByURL, {
+    videoPath: '',
+    duration: seconds,
+    videoType: file.type || 'mp4',
+    snapshotPath: '',
+    videoUUID: IMSDK.uuid(),
+    videoUrl: url,
+    videoSize: file.size,
+    snapshotUUID: IMSDK.uuid(),
+    snapshotSize: 0,
+    snapshotUrl,
+    snapshotWidth: 0,
+    snapshotHeight: 0,
+  })
+  return sendCreatedMessage(target, message, { alreadyUploaded: true })
+}
+
 export async function sendVoiceMessage(
   target: IMTarget,
   filePath: string,
@@ -919,7 +1016,7 @@ async function uploadFileFromPath(
       fail: () => resolve(0),
     })
   })
-  if (size <= 0) throw new Error('语音文件无效')
+  if (size <= 0) throw new Error('文件无效')
   const res = await imCall<{ url: string }>(IMMethods.UploadFile, {
     name: fileName,
     contentType,
@@ -927,7 +1024,7 @@ async function uploadFileFromPath(
     filepath: fullPath,
     filePath: fullPath,
   })
-  if (!res?.url) throw new Error('语音上传失败')
+  if (!res?.url) throw new Error('文件上传失败')
   return { url: res.url, size }
 }
 
@@ -1149,8 +1246,9 @@ function toAppMessageType(contentType: number): AppMessageType {
       return 'voice'
     case MessageType.CardMessage:
       return 'card'
-    case MessageType.FileMessage:
     case MessageType.VideoMessage:
+      return 'video'
+    case MessageType.FileMessage:
       return 'file'
     default:
       return 'system'
@@ -1197,6 +1295,36 @@ function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
     }
   }
   return { path: '', duration: 0 }
+}
+
+function jsonVideoMeta(raw: unknown): { url: string; snapshotUrl: string; duration: number } {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    if (obj.videoElem && typeof obj.videoElem === 'object') {
+      const nested = jsonVideoMeta(obj.videoElem)
+      if (nested.url || nested.snapshotUrl) return nested
+    }
+    const url =
+      (typeof obj.videoUrl === 'string' && obj.videoUrl) ||
+      (typeof obj.videoPath === 'string' && obj.videoPath) ||
+      (typeof obj.url === 'string' && obj.url) ||
+      (typeof obj.sourceUrl === 'string' && obj.sourceUrl) ||
+      ''
+    const snapshotUrl =
+      (typeof obj.snapshotUrl === 'string' && obj.snapshotUrl) ||
+      (typeof obj.snapshotPath === 'string' && obj.snapshotPath) ||
+      ''
+    return { url, snapshotUrl, duration: Number(obj.duration || 0) }
+  }
+  if (typeof raw === 'string' && raw) {
+    if (raw[0] !== '{') return { url: raw, snapshotUrl: '', duration: 0 }
+    try {
+      return jsonVideoMeta(JSON.parse(raw))
+    } catch {
+      return { url: raw, snapshotUrl: '', duration: 0 }
+    }
+  }
+  return { url: '', snapshotUrl: '', duration: 0 }
 }
 
 function jsonPictureUrl(raw: unknown): string {
@@ -1258,8 +1386,19 @@ function extractContent(item: MessageItem): string {
     }
     case MessageType.FileMessage:
       return item.fileElem?.sourceUrl || ''
-    case MessageType.VideoMessage:
-      return item.videoElem?.videoUrl || ''
+    case MessageType.VideoMessage: {
+      const fromElem = {
+        url: item.videoElem?.videoUrl || item.videoElem?.videoPath || '',
+        snapshotUrl: item.videoElem?.snapshotUrl || item.videoElem?.snapshotPath || '',
+        duration: item.videoElem?.duration || 0,
+      }
+      const fromJson = jsonVideoMeta(item.content)
+      return JSON.stringify({
+        url: fromElem.url || fromJson.url,
+        snapshotUrl: fromElem.snapshotUrl || fromJson.snapshotUrl,
+        duration: fromElem.duration || fromJson.duration,
+      })
+    }
     case MessageType.CardMessage: {
       // 名片：content 统一存 {userId, nickname, avatar}，userId 为业务 UUID。
       // 发送时把业务 ID 冗余进 ex；旧消息没有 ex 则从 OpenIM userID 反推。
@@ -1440,6 +1579,7 @@ function summarize(latestMsg: string | MessageItem | null | undefined): string {
   const type = toAppMessageType(message.contentType)
   if (type === 'image') return '[图片]'
   if (type === 'voice') return '[语音]'
+  if (type === 'video') return '[视频]'
   if (type === 'file') return '[文件]'
   if (type === 'card') return '[名片]'
   return extractContent(message)

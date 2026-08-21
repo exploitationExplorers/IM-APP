@@ -1,6 +1,6 @@
 /** 聊天相关类型 */
 
-export type MessageType = 'text' | 'image' | 'voice' | 'file' | 'card' | 'system'
+export type MessageType = 'text' | 'image' | 'voice' | 'video' | 'file' | 'card' | 'system'
 
 /** 名片消息内容（card 消息的 content，JSON 字符串） */
 export interface CardPayload {

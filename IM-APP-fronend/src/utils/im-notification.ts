@@ -193,10 +193,16 @@ export function formatIMNotification(item: MessageItem): string {
     }
     case GroupNotice.MemberKicked: {
       const targets = namesOf(detail.kickedUserList) || '成员'
+      if (isOpenIMAdmin(detail.opUser)) {
+        return `${targets} 退出了群聊`
+      }
       return op ? `${op} 将 ${targets} 移出群聊` : `${targets} 被移出群聊`
     }
     case GroupNotice.MemberInvited: {
       const targets = namesOf(detail.invitedUserList) || '成员'
+      if (isOpenIMAdmin(detail.opUser)) {
+        return `${targets} 加入了群聊`
+      }
       return op ? `${op} 邀请 ${targets} 加入群聊` : `${targets} 加入了群聊`
     }
     case GroupNotice.MemberSetAdmin: {

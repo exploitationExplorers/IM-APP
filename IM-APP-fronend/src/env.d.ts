@@ -8,6 +8,8 @@ declare module '*.vue' {
 
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string
+  /** 热更新渠道：test 给客户测试包，prod 给正式包，互不串包 */
+  readonly VITE_UPDATE_CHANNEL?: string
   /** 设为 'false' 关闭 OpenIM 聊天（排查用），默认启用 */
   readonly VITE_OPENIM_ENABLED?: string
   readonly VITE_DEFAULT_AVATAR_URL?: string
@@ -80,11 +82,35 @@ interface PlusIo {
   ): void
 }
 
+interface PlusRuntime {
+  appid?: string
+  version?: string
+  versionCode?: string | number
+  getProperty(
+    appid: string,
+    callback: (info: {
+      appid?: string
+      name?: string
+      version?: string
+      versionCode?: string | number
+    }) => void,
+  ): void
+  install(
+    filePath: string,
+    options: { force?: boolean },
+    success?: () => void,
+    fail?: (err: unknown) => void,
+  ): void
+  restart(): void
+  openURL(url: string): void
+}
+
 interface PlusNative {
   nativeObj?: {
     Bitmap?: new (id: string) => PlusNativeObjBitmap
   }
   io?: PlusIo
+  runtime?: PlusRuntime
   barcode?: {
     scan: (
       path: string,

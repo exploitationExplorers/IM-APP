@@ -24,6 +24,7 @@ import {
   sendImageUrlMessage,
   sendQuoteMessage,
   sendTextMessage,
+  sendVideoMessage,
   sendVoiceMessage,
   subscribeUsersStatus,
   unsubscribeUsersStatus,
@@ -770,6 +771,7 @@ export const useChatStore = defineStore('chat', () => {
   function previewOf(message: ChatMessage): string {
     if (message.type === 'image') return '[图片]'
     if (message.type === 'voice') return '[语音]'
+    if (message.type === 'video') return '[视频]'
     if (message.type === 'file') return '[文件]'
     if (message.type === 'card') return '[名片]'
     return message.content
@@ -829,6 +831,26 @@ export const useChatStore = defineStore('chat', () => {
       conversationId,
       placeholderOf(conversationId, senderId, 'image', filePath),
       () => sendImageMessage(target, filePath),
+    )
+  }
+
+  async function sendVideo(
+    conversationId: string,
+    filePath: string,
+    senderId: string,
+    duration = 0,
+    snapshotPath = '',
+  ) {
+    const target = targetOf(requireConversation(conversationId))
+    const content = JSON.stringify({
+      url: filePath,
+      snapshotUrl: snapshotPath,
+      duration,
+    })
+    await sendWithPlaceholder(
+      conversationId,
+      placeholderOf(conversationId, senderId, 'video', content),
+      () => sendVideoMessage(target, filePath, duration, snapshotPath),
     )
   }
 
@@ -1035,6 +1057,7 @@ export const useChatStore = defineStore('chat', () => {
     sendCard,
     sendFile,
     sendImageUrl,
+    sendVideo,
     sendVoice,
     sendQuote,
     recall,

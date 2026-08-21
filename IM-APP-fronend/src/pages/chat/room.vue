@@ -80,7 +80,7 @@ let recordingTimer: ReturnType<typeof setInterval> | null = null
 
 /** 通知类没有可读正文时不渲染；群禁言等系统提示要保留，例如 `张三: [全体禁言]` */
 function isVisibleMessage(m: ChatMessage): boolean {
-  if (m.type === 'image' || m.type === 'voice' || m.type === 'file') return true
+  if (m.type === 'image' || m.type === 'voice' || m.type === 'video' || m.type === 'file') return true
   if (m.type === 'system') {
     const text = m.content.trim()
     return !!text && !text.startsWith('{')
@@ -514,6 +514,19 @@ async function doRetry(m: ChatMessage) {
     } else if (m.type === 'file') {
       const name = m.content.split(/[\\/]/).filter(Boolean).pop() || '文件'
       await chatStore.sendFile(conversationId.value, m.content, name, senderId)
+    } else if (m.type === 'video') {
+      let path = m.content
+      let duration = 0
+      let snapshot = ''
+      try {
+        const meta = JSON.parse(m.content) as { url?: string; duration?: number; snapshotUrl?: string }
+        path = meta.url || m.content
+        duration = Number(meta.duration || 0)
+        snapshot = meta.snapshotUrl || ''
+      } catch {
+        /* 旧失败气泡可能直接存路径 */
+      }
+      if (path) await chatStore.sendVideo(conversationId.value, path, senderId, duration, snapshot)
     }
     await chatStore.removeLocal(conversationId.value, m.id).catch(() => undefined)
     await nextTick()
@@ -1013,7 +1026,6 @@ function pickImage() {
     sourceType: ['album'],
     success: async (res) => {
       showPlusPanel.value = false
-      // 各端选择器一般已按 count 限制，这里再截一次兜底
       const paths = (res.tempFilePaths || []).slice(0, MAX_PICK_COUNT)
       let failed = 0
       for (const path of paths) {
@@ -1045,6 +1057,31 @@ function pickCamera() {
         scrollToBottom()
       } catch (e) {
         uni.showToast({ title: (e as Error).message, icon: 'none' })
+      }
+    },
+  })
+}
+
+/** 选视频发送：相册或拍摄，走系统自带 chooseVideo，不依赖 chooseMedia 模块 */
+function pickVideo() {
+  uni.chooseVideo({
+    sourceType: ['album', 'camera'],
+    compressed: true,
+    maxDuration: 60,
+    success: async (res) => {
+      showPlusPanel.value = false
+      try {
+        await chatStore.sendVideo(
+          conversationId.value,
+          res.tempFilePath,
+          imUserId.value || myId.value,
+          Number(res.duration || 0),
+          (res as { thumbTempFilePath?: string }).thumbTempFilePath || '',
+        )
+        await nextTick()
+        scrollToBottom()
+      } catch (e) {
+        uni.showToast({ title: (e as Error).message || '视频发送失败', icon: 'none' })
       }
     },
   })
@@ -1224,6 +1261,12 @@ function pickFavorite() {
             <image class="plus-icon-img" src="/static/icon-photo.png" mode="aspectFit" />
           </view>
           <text>照片</text>
+        </view>
+        <view class="plus-item" @click="pickVideo">
+          <view class="plus-icon">
+            <image class="plus-icon-img" src="/static/icon-video.svg" mode="aspectFit" />
+          </view>
+          <text>视频</text>
         </view>
         <view class="plus-item" @click="pickCard">
           <view class="plus-icon">

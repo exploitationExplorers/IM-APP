@@ -94,12 +94,69 @@ func (m *MinIO) FileURL(objectKey string) string {
 // ObjectExists 检查对象是否真实存在于 MinIO。
 // 用于上传完成确认：Android PUT 空包问题下 MinIO 可能返回 200 但对象为空/不存在，
 // 直接 MarkReady 会把死链 URL 标记为可用，导致头像等资源 404 后显示灰色。
+type ObjectInfo struct {
+	Size int64
+}
+
 func (m *MinIO) ObjectExists(ctx context.Context, objectKey string) bool {
+	_, ok := m.ObjectStat(ctx, objectKey)
+	return ok
+}
+
+// ObjectStat 返回对象大小；对象不存在或 MinIO 未配置时 ok=false。
+func (m *MinIO) ObjectStat(ctx context.Context, objectKey string) (ObjectInfo, bool) {
 	if !m.Available() {
-		return false
+		return ObjectInfo{}, false
 	}
-	_, err := m.Client.StatObject(ctx, m.Bucket, objectKey, minio.StatObjectOptions{})
-	return err == nil
+	info, err := m.Client.StatObject(ctx, m.Bucket, objectKey, minio.StatObjectOptions{})
+	if err != nil {
+		return ObjectInfo{}, false
+	}
+	return ObjectInfo{Size: info.Size}, true
+}
+
+// PresignGet 生成限时下载地址，避免依赖桶公开读。
+func (m *MinIO) PresignGet(ctx context.Context, objectKey string, expiry time.Duration) (string, error) {
+	if !m.Available() {
+		return "", fmt.Errorf("minio not configured")
+	}
+	signClient, _, err := m.signClientForPublic()
+	if err != nil {
+		return "", err
+	}
+	u, err := signClient.PresignedGetObject(ctx, m.Bucket, objectKey, expiry, nil)
+	if err != nil {
+		return "", err
+	}
+	return m.rewritePublicPath(u.String()), nil
+}
+func (m *MinIO) PresignPut(ctx context.Context, objectKey, contentType string, expiry time.Duration) (string, error) {
+	if !m.Available() {
+		return "", fmt.Errorf("minio not configured")
+	}
+	signClient, _, err := m.signClientForPublic()
+	if err != nil {
+		return "", err
+	}
+	u, err := signClient.PresignedPutObject(ctx, m.Bucket, objectKey, expiry)
+	if err != nil {
+		return "", err
+	}
+	_ = contentType
+	return m.rewritePublicPath(u.String()), nil
+}
+
+func (m *MinIO) rewritePublicPath(raw string) string {
+	prefix := strings.TrimSuffix(m.publicPathPrefix, "/")
+	if prefix == "" {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Path == "" || strings.HasPrefix(u.Path, prefix+"/") {
+		return raw
+	}
+	u.Path = prefix + u.Path
+	return u.String()
 }
 
 func (m *MinIO) signClientForPublic() (*minio.Client, string, error) {

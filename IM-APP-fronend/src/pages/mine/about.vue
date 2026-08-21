@@ -1,26 +1,40 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG } from '@/config'
+import { checkAndPromptAppUpdate, readLocalAppVersion } from '@/composables/useAppUpdate'
 import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
 
 const appName = APP_CONFIG.displayName
 const versionText = ref(APP_CONFIG.version)
+const checking = ref(false)
 
-onMounted(() => {
+async function refreshVersion() {
   try {
-    const info = uni.getSystemInfoSync()
-    const raw =
-      (info as { appWgtVersion?: string }).appWgtVersion ||
-      (info as { appVersion?: string }).appVersion ||
-      APP_CONFIG.version
-    versionText.value = String(raw).startsWith('v') ? String(raw) : `v${raw}`
+    const local = await readLocalAppVersion()
+    const name = local.versionName || APP_CONFIG.version
+    versionText.value = String(name).startsWith('v') ? String(name) : `v${name}`
   } catch {
     versionText.value = APP_CONFIG.version
   }
+}
+
+onShow(() => {
+  void refreshVersion()
 })
+
+async function onCheckUpdate() {
+  if (checking.value) return
+  checking.value = true
+  try {
+    await checkAndPromptAppUpdate({ manual: true })
+  } finally {
+    checking.value = false
+  }
+}
 
 function goBack() {
   const pages = getCurrentPages()
@@ -40,6 +54,9 @@ function goBack() {
       <image class="logo" src="/static/auth/icon-256.png" mode="aspectFit" />
       <text class="name">{{ appName }}</text>
       <text class="version">{{ versionText }}</text>
+      <view class="check-btn" @click="onCheckUpdate">
+        <text class="check-btn-text">{{ checking ? '检查中...' : '检查更新' }}</text>
+      </view>
     </view>
   </view>
 </template>
@@ -85,5 +102,28 @@ $text: #212121;
   font-size: 26rpx;
   color: #3a4558;
   line-height: 40rpx;
+}
+
+.check-btn {
+  margin-top: 48rpx;
+  min-width: 240rpx;
+  height: 80rpx;
+  padding: 0 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a2fc2;
+  border-radius: 12rpx;
+}
+
+.check-btn:active {
+  opacity: 0.85;
+}
+
+.check-btn-text {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #fff;
+  line-height: 44rpx;
 }
 </style>
