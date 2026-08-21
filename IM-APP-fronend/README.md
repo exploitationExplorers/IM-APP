@@ -31,6 +31,10 @@ VITE_WS_BASE_URL=wss://www.ke58.com/openim-ws
 
 改 `.env` 后需重启 `npm run dev:h5`。
 
+## 热更新（wgt）
+
+改完页面/逻辑发给客户：不要重打 APK，见 [docs/wgt热更新发布.md](./docs/wgt热更新发布.md)。
+
 ## 联调
 
 1. 启动后端（见 `../IM-APP-server/README.md`）
