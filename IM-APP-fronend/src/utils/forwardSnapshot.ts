@@ -24,7 +24,7 @@ function contentFromMessage(item: MessageItem): unknown {
       if (item.quoteElem) return item.quoteElem
       break
     case MessageType.PictureMessage:
-      if (item.pictureElem) return item.pictureElem
+      if (item.pictureElem) return normalizePictureElem(item.pictureElem)
       break
     case MessageType.VoiceMessage:
       if (item.soundElem) return item.soundElem
@@ -52,6 +52,52 @@ function parseStoredContent(raw: string): unknown {
   }
   if (raw && typeof raw === 'object') return raw
   throw new Error('无法读取消息内容')
+}
+
+/**
+ * OpenIM 服务端对 PictureElem 的每个图片对象都有 required 校验（至少 type 必填，url 亦然）。
+ * App 原生插件发出的图片，其缩略图 snapshotPicture 常常缺 type，本人发送时不暴露，
+ * 一到转发（经服务端 send_msg）才被 OpenIM 拒成
+ * ServerInternalError: Field validation for 'Type' failed on the 'required' tag。
+ * 冻结快照前在此补齐：用兄弟图片的 type 兜底，仍缺则默认 image/jpeg；整对象缺失时用 sourcePicture 补。
+ */
+const DEFAULT_PICTURE_TYPE = 'image/jpeg'
+
+interface PictureInfo {
+  uuid?: string
+  type?: string
+  size?: number
+  width?: number
+  height?: number
+  url?: string
+}
+
+function firstPictureType(pics: Array<PictureInfo | undefined>): string {
+  for (const pic of pics) {
+    const type = pic?.type?.trim()
+    if (type) return type
+  }
+  return DEFAULT_PICTURE_TYPE
+}
+
+function withPictureType(pic: PictureInfo | undefined, fallbackType: string): PictureInfo | undefined {
+  if (!pic || typeof pic !== 'object') return undefined
+  if (pic.type && pic.type.trim()) return pic
+  return { ...pic, type: fallbackType }
+}
+
+function normalizePictureElem(elem: unknown): unknown {
+  if (!elem || typeof elem !== 'object') return elem
+  const e = elem as {
+    sourcePicture?: PictureInfo
+    bigPicture?: PictureInfo
+    snapshotPicture?: PictureInfo
+  }
+  const fallbackType = firstPictureType([e.sourcePicture, e.bigPicture, e.snapshotPicture])
+  const source = withPictureType(e.sourcePicture, fallbackType)
+  const big = withPictureType(e.bigPicture, fallbackType) ?? source
+  const snapshot = withPictureType(e.snapshotPicture, fallbackType) ?? source
+  return { ...e, sourcePicture: source, bigPicture: big, snapshotPicture: snapshot }
 }
 
 export function createIdempotencyKey(): string {
