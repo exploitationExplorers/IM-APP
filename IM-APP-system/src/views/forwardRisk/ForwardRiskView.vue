@@ -56,6 +56,34 @@ function formatFailCode(code?: string | null): string {
   return FAIL_CODE_LABEL_MAP[key] ?? key;
 }
 
+// OpenIM 数字消息类型 → 中文（转发主表 source_content_type）
+const SOURCE_CONTENT_TYPE_MAP: Record<number, string> = {
+  101: "文本",
+  102: "图片",
+  103: "语音",
+  104: "视频",
+  105: "文件",
+  106: "@消息",
+  107: "合并转发",
+  108: "名片",
+  114: "引用",
+};
+
+function formatContentType(value?: number | null): string {
+  if (!value) return "—";
+  return SOURCE_CONTENT_TYPE_MAP[value] ?? `其他(${value})`;
+}
+
+// 发给谁摘要：首个接收人（群名/昵称）+ 共 N 个
+function formatFirstTarget(task: AdminForwardRisk.ForwardTask): string {
+  const name = String(task.firstTargetName ?? "").trim();
+  const count = task.targetCount ?? 0;
+  if (!name && count === 0) return "—";
+  const prefix = task.firstTargetPeer === "group" ? "群 " : "";
+  const head = name ? `${prefix}${name}` : "（未知接收人）";
+  return count > 1 ? `${head} 等 ${count} 个` : head;
+}
+
 interface Filters {
   status: "" | TaskStatus;
 }
@@ -416,10 +444,21 @@ watch(activeDetailTab, () => {
             <span class="mono-text">{{ row.id }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="用户ID" min-width="220" show-overflow-tooltip>
+        <el-table-column label="发起人" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="mono-text">{{ row.userId }}</span>
+            <span v-if="row.senderNickname">{{ row.senderNickname }}</span>
+            <span class="mono-text" :class="{ 'sub-id': row.senderNickname }" :title="row.userId">
+              {{ row.senderNickname ? `(${row.userId})` : row.userId }}
+            </span>
           </template>
+        </el-table-column>
+        <el-table-column label="消息类型" min-width="110" align="center">
+          <template #default="{ row }">
+            <el-tag effect="plain" round>{{ formatContentType(row.sourceContentType) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="发给谁" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatFirstTarget(row) }}</template>
         </el-table-column>
         <el-table-column label="状态" min-width="110">
           <template #default="{ row }">
@@ -513,8 +552,12 @@ watch(activeDetailTab, () => {
                 <el-descriptions-item label="任务ID">
                   <span class="mono-text">{{ selectedTask.id }}</span>
                 </el-descriptions-item>
-                <el-descriptions-item label="用户ID">
+                <el-descriptions-item label="发起人">
+                  <span v-if="selectedTask.senderNickname">{{ selectedTask.senderNickname }} </span>
                   <span class="mono-text">{{ selectedTask.userId }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="消息类型">
+                  <el-tag effect="plain" round>{{ formatContentType(selectedTask.sourceContentType) }}</el-tag>
                 </el-descriptions-item>
                 <el-descriptions-item label="状态">
                   <el-tag :type="pickStatusTagType(selectedTask.status)" effect="light">
@@ -741,6 +784,12 @@ watch(activeDetailTab, () => {
 
 .mono-text {
   font-family: "Courier New", monospace;
+}
+
+.sub-id {
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .fail-reason {

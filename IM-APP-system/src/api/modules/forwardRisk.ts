@@ -38,6 +38,7 @@ export namespace AdminForwardRisk {
   export interface ForwardTask {
     id: string;
     userId: string;
+    senderNickname?: string;
     status: ForwardTaskStatus;
     targetCount: number;
     successCount: number;
@@ -48,7 +49,10 @@ export namespace AdminForwardRisk {
     isDuplicate?: boolean;
     contentSummary?: string;
     contentType?: string;
+    sourceContentType?: number;
     riskLevel?: string;
+    firstTargetName?: string;
+    firstTargetPeer?: "c2c" | "group";
   }
 
   export interface ReqForwardTaskTargetsParams {

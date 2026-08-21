@@ -16,21 +16,38 @@ type OpsRepo struct{ DB *pgxpool.Pool }
 // ===== 转发/群发与风控（清单 06） =====
 
 const forwardSelect = `
-	SELECT ft.id::text, ft.user_id::text, ft.status, ft.target_count, ft.created_at,
+	SELECT ft.id::text, ft.user_id::text,
+	       COALESCE(su.nickname,'') AS sender_nickname,
+	       ft.source_content_type,
+	       ft.status, ft.target_count, ft.created_at,
 	       COALESCE(ft.finished_at, ft.updated_at),
 	       ft.success_count, ft.failed_count, ft.skipped_count,
 	       (ft.idempotency_key <> '' AND EXISTS (
 	           SELECT 1 FROM forward_tasks f2
 	           WHERE f2.idempotency_key = ft.idempotency_key
 	             AND f2.id <> ft.id AND f2.created_at <= ft.created_at
-	       )) AS is_duplicate
-	FROM forward_tasks ft`
+	       )) AS is_duplicate,
+	       COALESCE(tgt.peer_type,'') AS first_target_peer,
+	       COALESCE(tgt.name,'')      AS first_target_name
+	FROM forward_tasks ft
+	LEFT JOIN users su ON su.id = ft.user_id
+	LEFT JOIN LATERAL (
+	    SELECT t.peer_type, COALESCE(u.nickname, g.name, '') AS name
+	    FROM forward_task_targets t
+	    LEFT JOIN users  u ON u.id = t.user_id
+	    LEFT JOIN groups g ON g.id = t.group_id
+	    WHERE t.task_id = ft.id
+	    ORDER BY t.created_at, t.id
+	    LIMIT 1
+	) tgt ON true`
 
 func scanForwardTask(row pgx.Row) (models.ForwardTask, error) {
 	var t models.ForwardTask
 	var finishedAt time.Time
-	err := row.Scan(&t.ID, &t.UserID, &t.Status, &t.TargetCount, &t.CreatedAt, &finishedAt,
-		&t.SuccessCount, &t.FailedCount, &t.SkippedCount, &t.IsDuplicate)
+	err := row.Scan(&t.ID, &t.UserID, &t.SenderNickname, &t.SourceContentType,
+		&t.Status, &t.TargetCount, &t.CreatedAt, &finishedAt,
+		&t.SuccessCount, &t.FailedCount, &t.SkippedCount, &t.IsDuplicate,
+		&t.FirstTargetPeer, &t.FirstTargetName)
 	if !finishedAt.IsZero() {
 		t.FinishedAt = &finishedAt
 	}
