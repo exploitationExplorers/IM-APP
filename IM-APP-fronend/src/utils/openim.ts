@@ -863,40 +863,74 @@ export async function sendVoiceMessage(
   filePath: string,
   duration: number,
 ): Promise<MessageItem> {
-  // 录音上限 60 秒，超过 120 的入参只可能是毫秒，统一换算成秒
   const seconds = Math.max(1, Math.round(duration > 120 ? duration / 1000 : duration))
-  let message: MessageItem
   if (isAppPlatform) {
     const soundPath = toNativeFullPath(filePath)
+    let message: MessageItem
     try {
-      message = await imCall<MessageItem>(
-        IMMethods.CreateSoundMessageFromFullPath,
-        soundPath,
-        seconds,
-      )
-    } catch {
-      // 部分原生插件把参数收成对象，而不是 (path, duration)
       message = await imCall<MessageItem>(IMMethods.CreateSoundMessageFromFullPath, {
         soundPath,
         duration: seconds,
       })
+    } catch {
+      try {
+        message = await imCall<MessageItem>(
+          IMMethods.CreateSoundMessageFromFullPath,
+          soundPath,
+          seconds,
+        )
+      } catch {
+        const uploaded = await uploadFileFromPath(soundPath, `voice_${Date.now()}.aac`, 'audio/mp4')
+        message = await imCall<MessageItem>(IMMethods.CreateSoundMessageByURL, {
+          uuid: IMSDK.uuid(),
+          soundPath: '',
+          sourceUrl: uploaded.url,
+          dataSize: uploaded.size,
+          duration: seconds,
+          soundType: 'aac',
+        })
+        return sendCreatedMessage(target, message, { alreadyUploaded: true })
+      }
     }
-  } else {
-    const file = await pathToFile(filePath)
-    const url = await uploadFile(file)
-    message = await imCall<MessageItem>(IMMethods.CreateSoundMessageByURL, {
-      uuid: IMSDK.uuid(),
-      soundPath: '',
-      sourceUrl: url,
-      dataSize: file.size,
-      duration: seconds,
-      soundType: file.type,
-    })
+    return sendCreatedMessage(target, message)
   }
-  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
+  const file = await pathToFile(filePath)
+  const url = await uploadFile(file)
+  const message = await imCall<MessageItem>(IMMethods.CreateSoundMessageByURL, {
+    uuid: IMSDK.uuid(),
+    soundPath: '',
+    sourceUrl: url,
+    dataSize: file.size,
+    duration: seconds,
+    soundType: file.type,
+  })
+  return sendCreatedMessage(target, message, { alreadyUploaded: true })
 }
 
-/** 走 OpenIM 自己的对象存储，不经过业务后端 */
+async function uploadFileFromPath(
+  fullPath: string,
+  fileName: string,
+  contentType: string,
+): Promise<{ url: string; size: number }> {
+  const size = await new Promise<number>((resolve) => {
+    uni.getFileInfo({
+      filePath: fullPath,
+      success: (res) => resolve(Number(res.size) || 0),
+      fail: () => resolve(0),
+    })
+  })
+  if (size <= 0) throw new Error('语音文件无效')
+  const res = await imCall<{ url: string }>(IMMethods.UploadFile, {
+    name: fileName,
+    contentType,
+    uuid: IMSDK.uuid(),
+    filepath: fullPath,
+    filePath: fullPath,
+  })
+  if (!res?.url) throw new Error('语音上传失败')
+  return { url: res.url, size }
+}
+
 async function uploadFile(file: File): Promise<string> {
   const res = await imCall<{ url: string }>(IMMethods.UploadFile, {
     name: file.name,

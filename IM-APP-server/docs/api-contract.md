@@ -662,6 +662,25 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 该接口写入管理后台共用的 `report_reasons`、`reports`、`report_files`，不写入也不修改原有 `group_reports`。
 
+### POST `/api/v1/feedbacks`
+
+**Body**
+```json
+{
+  "contact": "手机号码、邮箱、QQ、微信等",
+  "content": "反馈内容",
+  "imageFileIds": ["已完成上传的文件UUID"]
+}
+```
+
+**Response**
+```json
+{
+  "id": "uuid",
+  "createdAt": "2026-08-21T15:00:00Z"
+}
+```
+
 ---
 
 ## 文件上传（需 JWT）
