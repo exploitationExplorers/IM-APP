@@ -93,32 +93,64 @@ export const useChatStore = defineStore('chat', () => {
   let onIncomingForDissolve: ((m: ChatMessage) => void) | null = null
 
   /**
-   * H5 平台 SDK 不支持 hideConversation，已隐藏会话在 loadConversations 重新拉时
-   * 仍会回来；用本地持久化维护隐藏列表，刷新/重连后仍生效。
-   * 收到新消息时（OnNewConversation / OnConversationChanged）用户仍会看到该会话重新出现。
-   * App 原生平台 hideConversation 由 SDK 真正通知服务端，无需本地兜底。
+   * OpenIM hideConversation 在 H5 WASM 不可用；用本地隐藏列表兜底。
+   * 必须全平台落盘：H5 的 uniPlatform 可能是 web 而非 h5，仅判断 h5 会导致不写存储，刷新后全回来。
    */
-  const HIDDEN_KEY = 'chat:hidden-conversations'
-  const isH5Platform = uni.getSystemInfoSync().uniPlatform === 'h5'
-  function readHiddenIds(): Set<string> {
-    if (!isH5Platform) return new Set()
+  const HIDDEN_KEY_PREFIX = 'chat:hidden-conversations:'
+  function hiddenStorageKey() {
+    return `${HIDDEN_KEY_PREFIX}${imUserId.value || 'anon'}`
+  }
+  function normalizeHiddenIdList(raw: unknown): string[] {
+    const fromArr = (arr: unknown[]) =>
+      arr.filter((id): id is string => typeof id === 'string' && !!id)
+    if (Array.isArray(raw)) return fromArr(raw)
+    if (typeof raw !== 'string' || !raw) return []
     try {
-      const raw = uni.getStorageSync(HIDDEN_KEY)
-      if (Array.isArray(raw)) return new Set(raw as string[])
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) return fromArr(parsed)
+      if (typeof parsed === 'string') {
+        const nested: unknown = JSON.parse(parsed)
+        if (Array.isArray(nested)) return fromArr(nested)
+      }
     } catch {
-      /* 忽略 */
+      /* 忽略损坏数据 */
     }
-    return new Set()
+    return []
+  }
+  function readHiddenIds(): Set<string> {
+    try {
+      return new Set(normalizeHiddenIdList(uni.getStorageSync(hiddenStorageKey())))
+    } catch {
+      return new Set()
+    }
   }
   function writeHiddenIds(ids: Set<string>) {
-    if (!isH5Platform) return
     try {
-      uni.setStorageSync(HIDDEN_KEY, Array.from(ids))
+      uni.setStorageSync(hiddenStorageKey(), Array.from(ids))
     } catch {
       /* 忽略 */
     }
   }
   const hiddenIds = readHiddenIds()
+
+  function syncHiddenIdsFromStorage() {
+    const stored = readHiddenIds()
+    hiddenIds.clear()
+    stored.forEach((id) => hiddenIds.add(id))
+  }
+
+  function unhideConversation(conversationId: string) {
+    if (!conversationId || !hiddenIds.has(conversationId)) return
+    hiddenIds.delete(conversationId)
+    writeHiddenIds(hiddenIds)
+  }
+
+  watch(imUserId, () => {
+    syncHiddenIdsFromStorage()
+    if (conversations.value.length) {
+      conversations.value = conversations.value.filter((c) => !hiddenIds.has(c.id))
+    }
+  })
 
   const totalUnread = computed(() =>
     conversations.value.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
@@ -189,6 +221,14 @@ export const useChatStore = defineStore('chat', () => {
     if (message.notificationKind === 'dissolved') {
       onIncomingForDissolve?.(message)
     }
+    // 已移除的会话：仅普通新消息才取消隐藏；解散/系统通知保持隐藏，避免 H5 刷新又刷回来
+    if (hiddenIds.has(message.conversationId)) {
+      if (message.notificationKind === 'dissolved' || isIMNotification(item.contentType)) {
+        return
+      }
+      unhideConversation(message.conversationId)
+      void conversationOf(message.conversationId).catch(() => undefined)
+    }
     const list = messagesMap.value[message.conversationId] || []
     if (list.some((m) => m.id === message.id)) return
     messagesMap.value = {
@@ -237,7 +277,10 @@ export const useChatStore = defineStore('chat', () => {
   function upsertConversations(raw: ConversationItem | ConversationItem[] | null) {
     const items = Array.isArray(raw) ? raw : raw ? [raw] : []
     if (!items.length) return
-    const incoming = items.map((item) => decorateConversation(toConversation(item)))
+    const incoming = items
+      .map((item) => decorateConversation(toConversation(item)))
+      .filter((conv) => !hiddenIds.has(conv.id))
+    if (!incoming.length) return
     const merged = [...conversations.value]
     incoming.forEach((conv) => {
       const idx = merged.findIndex((c) => c.id === conv.id)
@@ -349,6 +392,7 @@ export const useChatStore = defineStore('chat', () => {
     loading.value = true
     try {
       await ensureIMLogin()
+      syncHiddenIdsFromStorage()
       subscribeRealtime()
       let list
       try {
@@ -358,6 +402,7 @@ export const useChatStore = defineStore('chat', () => {
         if (msg.includes('10004') || msg.includes('10005')) {
           invalidateIMLoginCache()
           await ensureIMLogin()
+          syncHiddenIdsFromStorage()
           await waitForSync(5000)
           list = await getConversationList()
         } else {
@@ -459,6 +504,10 @@ export const useChatStore = defineStore('chat', () => {
   }): Promise<Conversation> {
     await ensureIMLogin()
     subscribeRealtime()
+
+    if (params.conversationId) {
+      unhideConversation(params.conversationId)
+    }
 
     const cached = params.conversationId
       ? conversations.value.find((c) => c.id === params.conversationId)
@@ -647,11 +696,8 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await hideConversation(conversationId)
     } catch (e) {
-      await conversationOf(conversationId).catch((err) => {
-        console.warn('[chat] 移除失败后会话回滚重拉失败', conversationId, err)
-        return null
-      })
-      throw new Error((e as Error)?.message || '移除失败')
+      // H5 不支持 hide 时 openim 已吞错；若真失败且已从列表移除，仍保留本地隐藏，避免回滚又出现
+      console.warn('[chat] hideConversation 调用失败，已保留本地隐藏', conversationId, e)
     }
   }
 
@@ -672,8 +718,7 @@ export const useChatStore = defineStore('chat', () => {
    */
   async function reappearConversation(conversationId: string) {
     if (!hiddenIds.has(conversationId)) return
-    hiddenIds.delete(conversationId)
-    writeHiddenIds(hiddenIds)
+    unhideConversation(conversationId)
     try {
       await conversationOf(conversationId)
     } catch (e) {

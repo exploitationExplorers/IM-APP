@@ -515,12 +515,11 @@ async function doRetry(m: ChatMessage) {
       const name = m.content.split(/[\\/]/).filter(Boolean).pop() || '文件'
       await chatStore.sendFile(conversationId.value, m.content, name, senderId)
     }
-    // 重发成功：移除旧的失败气泡，避免同一条消息出现两次
     await chatStore.removeLocal(conversationId.value, m.id).catch(() => undefined)
     await nextTick()
     scrollToBottom()
   } catch (e) {
-    console.warn('[room] 重发失败', (e as Error)?.message)
+    uni.showToast({ title: (e as Error)?.message || '重发失败', icon: 'none' })
   }
 }
 
@@ -769,6 +768,23 @@ function requestAudioPermission(): Promise<boolean> {
   })
 }
 
+function persistVoiceFile(tempPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    uni.saveFile({
+      tempFilePath: tempPath,
+      success: (res) => resolve(res.savedFilePath || tempPath),
+      fail: () => {
+        try {
+          const converted = plus?.io?.convertLocalFileSystemURL?.(tempPath)
+          resolve(converted || tempPath)
+        } catch {
+          reject(new Error('录音文件保存失败'))
+        }
+      },
+    })
+  })
+}
+
 async function startVoiceRecord() {
   if (recording.value) return
 
@@ -787,17 +803,24 @@ async function startVoiceRecord() {
     recorder.onStop((res: { tempFilePath?: string; duration?: number }) => {
       recording.value = false
       clearRecordingTimer()
-      const path = res.tempFilePath || ''
-      // App 端 onStop 的 duration 单位是毫秒，统一换算成秒；缺失时退回计时器秒数
+      const rawPath = res.tempFilePath || ''
       const rawDuration = Number(res.duration || 0)
       const duration =
         rawDuration > 0 ? Math.max(1, Math.round(rawDuration / 1000)) : Math.max(1, recordingSeconds.value)
-      if (!path) {
+      if (!rawPath) {
         voiceMode.value = false
         uni.showToast({ title: '录音文件无效', icon: 'none' })
         return
       }
-      voiceDraft.value = { path, duration }
+      persistVoiceFile(rawPath)
+        .then((path) => {
+          voiceDraft.value = { path, duration }
+        })
+        .catch(() => {
+          voiceMode.value = false
+          voiceDraft.value = null
+          uni.showToast({ title: '录音文件保存失败', icon: 'none' })
+        })
     })
 
     recorder.onError(() => {
@@ -809,9 +832,7 @@ async function startVoiceRecord() {
       uni.showToast({ title: '录音失败', icon: 'none' })
     })
 
-    recorder.start({
-      format: uni.getSystemInfoSync().platform === 'ios' ? 'aac' : 'mp3',
-    })
+    recorder.start({ format: 'aac' })
     recordingTimer = setInterval(() => {
       recordingSeconds.value += 1
       if (recordingSeconds.value >= 60) {
