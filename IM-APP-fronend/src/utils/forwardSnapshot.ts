@@ -81,29 +81,98 @@ function numberOf(obj: Record<string, unknown>, keys: string[]): number {
 
 /**
  * App 原生桥可能返回 VideoElem/PascalCase，或只在 content 中留下简化元数据。
- * 转发前冻结成 OpenIM send_msg 接口要求的标准 VideoElem，避免原视频能播但转发校验失败。
+ * 转发前冻结成 OpenIM VideoElem；snapshotUrl 必须是远程地址，否则 send_msg 会被拒。
  */
-function normalizeVideoElem(item: MessageItem): Record<string, unknown> {
+export function normalizeVideoElem(item: MessageItem): Record<string, unknown> {
   const raw = item as unknown as Record<string, unknown>
   const elem = asObject(raw.videoElem ?? raw.VideoElem) || asObject(raw.content) || {}
-  const videoUrl = stringOf(elem, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'videoPath', 'VideoPath', 'url', 'URL'])
-  if (!videoUrl) throw new Error('视频地址不存在，无法转发')
-  const snapshotUrl = stringOf(elem, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL', 'snapshotPath', 'SnapshotPath'])
+  const videoUrl = preferHttpUrl(
+    stringOf(elem, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'url', 'URL']),
+    stringOf(elem, ['videoPath', 'VideoPath']),
+  )
+  if (!videoUrl || !/^https?:\/\//i.test(videoUrl)) {
+    throw new Error('视频地址不存在，无法转发')
+  }
+  const snapshotUrl = preferHttpUrl(
+    stringOf(elem, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL']),
+    stringOf(elem, ['snapshotPath', 'SnapshotPath']),
+  )
   const fallbackId = item.clientMsgID || stringOf(raw, ['ClientMsgID', 'clientMsgId']) || `video_${Date.now()}`
+  const duration = numberOf(elem, ['duration', 'Duration'])
+  const videoSize = numberOf(elem, ['videoSize', 'VideoSize'])
+  const snapshotWidth = numberOf(elem, ['snapshotWidth', 'SnapshotWidth'])
+  const snapshotHeight = numberOf(elem, ['snapshotHeight', 'SnapshotHeight'])
   return {
-    videoPath: stringOf(elem, ['videoPath', 'VideoPath']),
+    videoPath: '',
     videoUUID: stringOf(elem, ['videoUUID', 'VideoUUID', 'videoUuid']) || `${fallbackId}_video`,
     videoUrl,
     videoType: stringOf(elem, ['videoType', 'VideoType']) || 'mp4',
-    videoSize: numberOf(elem, ['videoSize', 'VideoSize']),
-    duration: numberOf(elem, ['duration', 'Duration']),
-    snapshotPath: stringOf(elem, ['snapshotPath', 'SnapshotPath']),
+    // OpenIM send_msg 要求 videoSize；未知时用 1 占位，避免 0 触发校验失败
+    videoSize: videoSize > 0 ? videoSize : 1,
+    duration: duration > 0 ? duration : 1,
+    snapshotPath: '',
     snapshotUUID: stringOf(elem, ['snapshotUUID', 'SnapshotUUID', 'snapshotUuid']) || `${fallbackId}_cover`,
     snapshotSize: numberOf(elem, ['snapshotSize', 'SnapshotSize']),
-    snapshotUrl,
-    snapshotWidth: numberOf(elem, ['snapshotWidth', 'SnapshotWidth']),
-    snapshotHeight: numberOf(elem, ['snapshotHeight', 'SnapshotHeight']),
+    snapshotUrl: /^https?:\/\//i.test(snapshotUrl) ? snapshotUrl : '',
+    snapshotWidth: snapshotWidth > 0 ? snapshotWidth : 720,
+    snapshotHeight: snapshotHeight > 0 ? snapshotHeight : 1280,
   }
+}
+
+function preferHttpUrl(...candidates: string[]): string {
+  const cleaned = candidates.map((v) => String(v || '').trim()).filter(Boolean)
+  const remote = cleaned.find((v) => /^https?:\/\//i.test(v))
+  return remote || cleaned[0] || ''
+}
+
+/** 用聊天层简化 content 补齐 raw 消息里缺失的视频 URL（App 偶发只落在 ChatMessage.content）。 */
+export function mergeVideoSnapshotFromChatContent(
+  snapshot: ForwardMessageSnapshot,
+  chatContent: string,
+): ForwardMessageSnapshot {
+  if (snapshot.contentType !== MESSAGE_TYPE.Video) return snapshot
+  const meta = (() => {
+    try {
+      return typeof chatContent === 'string' ? (JSON.parse(chatContent) as Record<string, unknown>) : null
+    } catch {
+      return null
+    }
+  })()
+  if (!meta || typeof meta !== 'object') return snapshot
+  const content = { ...(asObject(snapshot.content) || {}) }
+  const chatUrl = preferHttpUrl(String(meta.url || ''), String(meta.videoUrl || ''))
+  const chatSnap = preferHttpUrl(String(meta.snapshotUrl || ''), String(meta.SnapshotUrl || ''))
+  if ((!content.videoUrl || !/^https?:\/\//i.test(String(content.videoUrl))) && chatUrl) {
+    content.videoUrl = chatUrl
+  }
+  if ((!content.snapshotUrl || !/^https?:\/\//i.test(String(content.snapshotUrl))) && chatSnap) {
+    content.snapshotUrl = chatSnap
+  }
+  const chatDuration = Number(meta.duration || 0)
+  if (!(Number(content.duration) > 0) && chatDuration > 0) content.duration = chatDuration
+  return { contentType: snapshot.contentType, content }
+}
+
+export function patchVideoSnapshotCover(
+  snapshot: ForwardMessageSnapshot,
+  cover: { url: string; width?: number; height?: number; size?: number },
+): ForwardMessageSnapshot {
+  if (snapshot.contentType !== MESSAGE_TYPE.Video) return snapshot
+  const content = { ...(asObject(snapshot.content) || {}) }
+  content.snapshotUrl = cover.url
+  content.snapshotPath = ''
+  if (cover.width && cover.width > 0) content.snapshotWidth = cover.width
+  if (cover.height && cover.height > 0) content.snapshotHeight = cover.height
+  if (cover.size && cover.size > 0) content.snapshotSize = cover.size
+  if (!(Number(content.snapshotWidth) > 0)) content.snapshotWidth = 720
+  if (!(Number(content.snapshotHeight) > 0)) content.snapshotHeight = 1280
+  return { contentType: snapshot.contentType, content }
+}
+
+export function videoSnapshotNeedsRemoteCover(snapshot: ForwardMessageSnapshot): boolean {
+  if (snapshot.contentType !== MESSAGE_TYPE.Video) return false
+  const content = asObject(snapshot.content) || {}
+  return !/^https?:\/\//i.test(String(content.snapshotUrl || ''))
 }
 
 function parseStoredContent(raw: string): unknown {

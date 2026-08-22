@@ -433,6 +433,22 @@ export function useChatMessageActions(opts: {
     void deleteMessages(selectedMessages())
   }
 
+  async function forwardMessages(messages: ChatMessage[]) {
+    goForward(messages)
+  }
+
+  async function saveVideoMessage(message: ChatMessage) {
+    uni.showLoading({ title: '正在保存' })
+    try {
+      await saveVideoToDevice(message.content)
+      uni.hideLoading()
+      uni.showToast({ title: '已保存到相册', icon: 'success' })
+    } catch (e) {
+      uni.hideLoading()
+      uni.showToast({ title: (e as Error).message || '保存视频失败', icon: 'none' })
+    }
+  }
+
   return {
     menuVisible,
     menuItems,
@@ -451,6 +467,8 @@ export function useChatMessageActions(opts: {
     cancelSelect,
     onSelectForward,
     onSelectDelete,
+    forwardMessages,
+    saveVideoMessage,
     clearQuote,
   }
 }

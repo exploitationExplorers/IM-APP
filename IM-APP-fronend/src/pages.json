@@ -86,6 +86,18 @@
       }
     },
     {
+      "path": "pages/chat/video-viewer",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "视频",
+        "backgroundColor": "#000000",
+        "disableScroll": true,
+        "app-plus": {
+          "background": "#000000"
+        }
+      }
+    },
+    {
       "path": "pages/chat/card-picker",
       "style": {
         "navigationStyle": "custom",

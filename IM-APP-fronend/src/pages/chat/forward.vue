@@ -9,9 +9,10 @@ import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
 import { useForwardStore } from '@/stores/forward'
 import type { ContactTagItem, Conversation, FriendForwardPlan } from '@/types'
-import { snapshotFromMessage } from '@/utils/forwardSnapshot'
+import { snapshotFromMessage, mergeVideoSnapshotFromChatContent, patchVideoSnapshotCover, videoSnapshotNeedsRemoteCover } from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
-import { businessUserIdFromIM } from '@/utils/openim'
+import { businessUserIdFromIM, uploadLocalImageForForward, extractVideoCoverForForward } from '@/utils/openim'
+import { captureVideoPosterFromUrl, parseVideoMeta } from '@/utils/chatMedia'
 import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
@@ -353,17 +354,51 @@ function afterNativeModal() {
   return new Promise<void>((resolve) => setTimeout(resolve, 120))
 }
 
-function buildSources() {
-  return forwardStore.messageIds.map((id) => {
-    const raw = chatStore.getRawMessage(id)
-    if (!raw) throw new Error('原消息不存在')
-    return {
-      sourceConversationId: forwardStore.sourceConversationId,
-      sourceClientMsgId: raw.clientMsgID,
-      sourceServerMsgId: raw.serverMsgID || undefined,
-      snapshot: snapshotFromMessage(raw),
-    }
-  })
+async function buildSources() {
+  return Promise.all(
+    forwardStore.messageIds.map(async (id) => {
+      const raw = chatStore.getRawMessage(id)
+      const chatMsg = (chatStore.messagesMap[forwardStore.sourceConversationId] || []).find((m) => m.id === id)
+      if (!raw && !chatMsg) throw new Error('原消息不存在')
+
+      let snapshot = raw
+        ? snapshotFromMessage(raw)
+        : snapshotFromMessage({
+            clientMsgID: chatMsg!.id,
+            contentType: chatMsg!.type === 'video' ? 104 : chatMsg!.type === 'image' ? 102 : 101,
+            content: chatMsg!.content,
+          } as never)
+
+      if (chatMsg?.type === 'video') {
+        snapshot = mergeVideoSnapshotFromChatContent(snapshot, chatMsg.content)
+      }
+
+      if (videoSnapshotNeedsRemoteCover(snapshot)) {
+        const meta = parseVideoMeta(
+          (snapshot.content as { videoUrl?: string })?.videoUrl || chatMsg?.content || '',
+        )
+        const videoUrl = meta.url || String((snapshot.content as { videoUrl?: string })?.videoUrl || '')
+        if (!videoUrl) throw new Error('视频地址不存在，无法转发')
+        let localCover = ''
+        // #ifdef H5
+        localCover = await captureVideoPosterFromUrl(videoUrl)
+        // #endif
+        // #ifdef APP-PLUS
+        localCover = await extractVideoCoverForForward(videoUrl)
+        // #endif
+        if (!localCover) throw new Error('无法生成视频封面，转发失败')
+        const uploaded = await uploadLocalImageForForward(localCover)
+        snapshot = patchVideoSnapshotCover(snapshot, { url: uploaded.url, size: uploaded.size })
+      }
+
+      return {
+        sourceConversationId: forwardStore.sourceConversationId,
+        sourceClientMsgId: raw?.clientMsgID || chatMsg!.id,
+        sourceServerMsgId: raw?.serverMsgID || undefined,
+        snapshot,
+      }
+    }),
+  )
 }
 
 async function resolveGroupTargetIds(groupTargets: ForwardTarget[]) {
@@ -393,21 +428,34 @@ async function onSend() {
   const ok = await confirmSend(confirmHint())
   if (!ok) return
   sending.value = true
+  uni.showLoading({ title: '提交中', mask: true })
   try {
     await afterNativeModal()
-    const sources = buildSources()
+    const sources = await buildSources()
     const targetGroupIds = await resolveGroupTargetIds(aliveGroupTargets)
     await forwardStore.submitBatch(sources, friendPlan, targetGroupIds)
     forwardStore.markSucceeded()
     forwardStore.clear()
+    uni.hideLoading()
     uni.showToast({ title: '已加入队列', icon: 'success' })
     safeBack('/pages/chat/index')
   } catch (e) {
-    uni.showToast({ title: e instanceof Error ? e.message : '提交失败', icon: 'none' })
+    uni.hideLoading()
+    uni.showToast({ title: forwardSubmitErrorMessage(e), icon: 'none' })
   } finally {
     sending.value = false
-    uni.hideLoading()
   }
+}
+
+function forwardSubmitErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : '提交失败'
+  if (/no eligible targets/i.test(raw)) {
+    return '所选对象不是好友或群不可用，无法转发'
+  }
+  if (/invalid forward request/i.test(raw)) {
+    return '转发请求无效，请重新选择接收人'
+  }
+  return raw || '提交失败'
 }
 
 function goBack() {

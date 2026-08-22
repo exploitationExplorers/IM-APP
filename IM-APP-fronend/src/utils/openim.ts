@@ -905,6 +905,18 @@ async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<st
   return ''
 }
 
+/**
+ * 转发/展示缺封面时：远程先下载，再用原生 getVideoCover 取帧。
+ * getVideoInfo 在多数 App 基座不返回 thumbTempFilePath，不能当封面用。
+ */
+export async function extractVideoCoverForForward(videoUrl: string): Promise<string> {
+  if (!videoUrl) return ''
+  const { downloadRemoteVideoForCover } = await import('@/utils/chatMedia')
+  const local = await downloadRemoteVideoForCover(videoUrl)
+  if (!local) return ''
+  return snapshotOfVideo(toNativeFullPath(local))
+}
+
 interface VideoSnapshotFile {
   file: File
   width: number
@@ -1232,6 +1244,25 @@ async function uploadFileFromPath(
   })
   if (!res?.url) throw new Error('文件上传失败')
   return { url: res.url, size }
+}
+
+/** 转发视频缺封面时，把本地截帧图上传成可访问的 snapshotUrl。 */
+export async function uploadLocalImageForForward(localPath: string): Promise<{ url: string; size: number }> {
+  const fullPath = toNativeFullPath(localPath)
+  // #ifdef H5
+  if (localPath.startsWith('data:')) {
+    const file = await dataUrlToFile(localPath, `video_cover_${Date.now()}.jpg`)
+    const url = await uploadFile(file)
+    return { url, size: file.size }
+  }
+  // #endif
+  return uploadFileFromPath(fullPath, `video_cover_${Date.now()}.jpg`, 'image/jpeg')
+}
+
+async function dataUrlToFile(dataUrl: string, fileName: string): Promise<File> {
+  const res = await fetch(dataUrl)
+  const blob = await res.blob()
+  return new File([blob], fileName, { type: blob.type || 'image/jpeg' })
 }
 
 async function uploadFile(file: File): Promise<string> {
@@ -1680,17 +1711,12 @@ function extractContent(item: MessageItem): string {
     case MessageType.FileMessage:
       return item.fileElem?.sourceUrl || ''
     case MessageType.VideoMessage: {
-      const fromNative = jsonVideoMeta(item as unknown)
-      const fromElem = {
-        url: item.videoElem?.videoUrl || item.videoElem?.videoPath || '',
-        snapshotUrl: item.videoElem?.snapshotUrl || item.videoElem?.snapshotPath || '',
-        duration: item.videoElem?.duration || 0,
-      }
-      const fromJson = jsonVideoMeta(item.content)
+      const merged = parseVideoMeta(item)
+      const fromJson = parseVideoMeta(item.content)
       return JSON.stringify({
-        url: fromElem.url || fromNative.url || fromJson.url,
-        snapshotUrl: fromElem.snapshotUrl || fromNative.snapshotUrl || fromJson.snapshotUrl,
-        duration: fromElem.duration || fromNative.duration || fromJson.duration,
+        url: merged.url || fromJson.url,
+        snapshotUrl: merged.snapshotUrl || fromJson.snapshotUrl,
+        duration: merged.duration || fromJson.duration,
       })
     }
     case MessageType.CardMessage: {
@@ -1781,9 +1807,39 @@ function coerceMessage(raw: unknown): MessageItem | null {
   }
   // OpenIM App 原生桥在部分版本中使用 PascalCase，统一成 Web SDK 的字段名，
   // 后续渲染、收藏和转发就不需要各自判断平台。
-  const videoElem = obj.videoElem ?? obj.VideoElem
-  if (!item.videoElem && videoElem && typeof videoElem === 'object') {
-    item.videoElem = videoElem as MessageItem['videoElem']
+  const videoElemRaw = obj.videoElem ?? obj.VideoElem
+  if (videoElemRaw) {
+    if (typeof videoElemRaw === 'string') {
+      try {
+        const parsed = JSON.parse(videoElemRaw) as Record<string, unknown>
+        if (parsed && typeof parsed === 'object') {
+          item.videoElem = {
+            videoUrl: pickString(parsed, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL']),
+            videoPath: pickString(parsed, ['videoPath', 'VideoPath']),
+            snapshotUrl: pickString(parsed, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL']),
+            snapshotPath: pickString(parsed, ['snapshotPath', 'SnapshotPath']),
+            duration: Number(parsed.duration ?? parsed.Duration ?? 0),
+            videoSize: Number(parsed.videoSize ?? parsed.VideoSize ?? 0),
+            snapshotWidth: Number(parsed.snapshotWidth ?? parsed.SnapshotWidth ?? 0),
+            snapshotHeight: Number(parsed.snapshotHeight ?? parsed.SnapshotHeight ?? 0),
+          } as MessageItem['videoElem']
+        }
+      } catch {
+        /* VideoElem 不是 JSON 时保持原样 */
+      }
+    } else if (typeof videoElemRaw === 'object') {
+      const ve = videoElemRaw as Record<string, unknown>
+      item.videoElem = {
+        videoUrl: pickString(ve, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL']),
+        videoPath: pickString(ve, ['videoPath', 'VideoPath']),
+        snapshotUrl: pickString(ve, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL']),
+        snapshotPath: pickString(ve, ['snapshotPath', 'SnapshotPath']),
+        duration: Number(ve.duration ?? ve.Duration ?? 0),
+        videoSize: Number(ve.videoSize ?? ve.VideoSize ?? 0),
+        snapshotWidth: Number(ve.snapshotWidth ?? ve.SnapshotWidth ?? 0),
+        snapshotHeight: Number(ve.snapshotHeight ?? ve.SnapshotHeight ?? 0),
+      } as MessageItem['videoElem']
+    }
   }
   return item
 }

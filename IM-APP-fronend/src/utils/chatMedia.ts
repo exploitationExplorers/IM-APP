@@ -4,6 +4,14 @@ export interface VideoMeta {
   duration: number
 }
 
+/** 气泡角标：09 → 00:09，65 → 01:05 */
+export function formatVideoDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
 /** 取视频靠前但非首帧的位置，尽量避开黑场；短视频也保证不越过结尾。 */
 export function videoSnapshotTime(duration: number): number {
   if (!Number.isFinite(duration) || duration <= 0.05) return 0
@@ -18,6 +26,32 @@ function firstString(obj: Record<string, unknown>, keys: string[]): string {
   return ''
 }
 
+export function isRemoteMediaUrl(path: string): boolean {
+  return /^https?:\/\//i.test(path) || path.startsWith('blob:')
+}
+
+/** 封面/视频地址优先取可跨端访问的远程 URL，避免 App 把发送端本地路径当封面。 */
+export function preferRemoteMediaUrl(...candidates: string[]): string {
+  const cleaned = candidates.map((v) => String(v || '').trim()).filter(Boolean)
+  const remote = cleaned.find((v) => isRemoteMediaUrl(v))
+  if (remote) return remote
+  return cleaned[0] || ''
+}
+
+function looksLikeLocalFilePath(path: string): boolean {
+  if (!path || isRemoteMediaUrl(path) || path.startsWith('blob:')) return false
+  if (path.startsWith('file://')) return true
+  return (
+    path.startsWith('/storage/') ||
+    path.startsWith('/data/') ||
+    path.startsWith('/var/') ||
+    path.startsWith('_doc/') ||
+    path.startsWith('_www/') ||
+    path.startsWith('wxfile://') ||
+    /^[a-zA-Z]:[\\/]/.test(path)
+  )
+}
+
 /** 兼容 H5 camelCase 与 App 原生桥 PascalCase 的视频消息结构。 */
 export function parseVideoMeta(raw: unknown): VideoMeta {
   if (typeof raw === 'string') {
@@ -25,7 +59,7 @@ export function parseVideoMeta(raw: unknown): VideoMeta {
     try {
       return parseVideoMeta(JSON.parse(raw) as unknown)
     } catch {
-      return { url: raw, snapshotUrl: '', duration: 0 }
+      return { url: isRemoteMediaUrl(raw) || looksLikeLocalFilePath(raw) ? raw : '', snapshotUrl: '', duration: 0 }
     }
   }
   if (!raw || typeof raw !== 'object') return { url: '', snapshotUrl: '', duration: 0 }
@@ -35,11 +69,37 @@ export function parseVideoMeta(raw: unknown): VideoMeta {
     const result = parseVideoMeta(nested)
     if (result.url || result.snapshotUrl) return result
   }
+  const url = preferRemoteMediaUrl(
+    firstString(obj, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'url', 'URL']),
+    firstString(obj, ['videoPath', 'VideoPath']),
+  )
+  const snapshotUrl = preferRemoteMediaUrl(
+    firstString(obj, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL']),
+    firstString(obj, ['snapshotPath', 'SnapshotPath']),
+  )
   return {
-    url: firstString(obj, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'videoPath', 'VideoPath', 'url', 'URL']),
-    snapshotUrl: firstString(obj, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL', 'snapshotPath', 'SnapshotPath']),
+    url,
+    snapshotUrl,
     duration: Number(obj.duration ?? obj.Duration ?? 0),
   }
+}
+
+/** 归一化可播放地址：http(s)/blob/file 原样返回，App 本地路径转 file://。 */
+export function playableMediaUrl(path: string): string {
+  if (!path) return ''
+  if (isRemoteMediaUrl(path) || path.startsWith('blob:') || path.startsWith('file://')) return path
+  if (!looksLikeLocalFilePath(path)) return path
+  try {
+    const converted = plus?.io?.convertLocalFileSystemURL?.(path)
+    if (converted) return converted.startsWith('file://') ? converted : `file://${converted}`
+  } catch {
+    /* H5 无 plus */
+  }
+  return path.startsWith('/') ? `file://${path}` : path
+}
+
+export function videoPlayUrlFromContent(content: string): string {
+  return playableMediaUrl(parseVideoMeta(content).url)
 }
 
 function downloadVideo(url: string): Promise<string> {
@@ -91,4 +151,104 @@ export async function saveVideoToDevice(content: string): Promise<void> {
   // #endif
 
   throw new Error('当前平台暂不支持保存视频')
+}
+
+function captureH5VideoPoster(url: string): Promise<string> {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined') {
+      resolve('')
+      return
+    }
+    const video = document.createElement('video')
+    const finish = (poster: string) => {
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+      video.remove()
+      resolve(poster)
+    }
+    video.muted = true
+    video.preload = 'auto'
+    video.playsInline = true
+    video.setAttribute('playsinline', 'true')
+    video.setAttribute('webkit-playsinline', 'true')
+    video.crossOrigin = 'anonymous'
+    video.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0'
+    video.onerror = () => finish('')
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : 0
+      const target = videoSnapshotTime(duration)
+      const capture = () => {
+        try {
+          const width = video.videoWidth
+          const height = video.videoHeight
+          if (!width || !height) {
+            finish('')
+            return
+          }
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const context = canvas.getContext('2d')
+          if (!context) {
+            finish('')
+            return
+          }
+          context.drawImage(video, 0, 0, width, height)
+          finish(canvas.toDataURL('image/jpeg', 0.82))
+        } catch {
+          finish('')
+        }
+      }
+      if (target > 0) {
+        video.onseeked = capture
+        try {
+          video.currentTime = target
+        } catch {
+          video.onloadeddata = capture
+        }
+      } else if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        capture()
+      } else {
+        video.onloadeddata = capture
+      }
+    }
+    document.body.appendChild(video)
+    video.src = url
+    video.load()
+  })
+}
+
+/**
+ * snapshotUrl 缺失时截取封面。
+ * H5：canvas 截帧为 dataURL。
+ * App：本函数不返回封面（getVideoInfo 无缩略图）；转发请用 extractVideoCoverForForward。
+ */
+export function captureVideoPosterFromUrl(url: string): Promise<string> {
+  if (!url) return Promise.resolve('')
+
+  // #ifdef H5
+  return captureH5VideoPoster(url)
+  // #endif
+
+  return Promise.resolve('')
+}
+
+/** App：把远程视频下到临时路径，供 OpenIM getVideoCover 取帧。 */
+export function downloadRemoteVideoForCover(url: string): Promise<string> {
+  if (!url) return Promise.resolve('')
+  if (!isRemoteMediaUrl(url)) return Promise.resolve(url)
+  return new Promise((resolve) => {
+    uni.downloadFile({
+      url,
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath) {
+          resolve(res.tempFilePath)
+          return
+        }
+        resolve('')
+      },
+      fail: () => resolve(''),
+    })
+  })
 }

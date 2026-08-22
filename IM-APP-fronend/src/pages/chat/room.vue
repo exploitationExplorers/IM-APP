@@ -32,7 +32,6 @@ const userStore = useUserStore()
 const contactStore = useContactStore()
 const forwardStore = useForwardStore()
 const successVisible = ref(false)
-const playingVideoUrl = ref('')
 
 const statusBarHeight = getStatusBarHeight()
 
@@ -321,7 +320,6 @@ onHide(() => {
 })
 
 onUnload(() => {
-  playingVideoUrl.value = ''
   stopGroupReadPolling()
   if (groupReadReportTimer) clearTimeout(groupReadReportTimer)
   groupReadReportTimer = null
@@ -1060,17 +1058,10 @@ function onPlus() {
 /** 相册 / 文件一次最多可选数量 */
 const MAX_PICK_COUNT = 9
 
-function closePlayingVideo() {
-  playingVideoUrl.value = ''
-}
-
-function onPlayVideo(url: string) {
-  playingVideoUrl.value = url
-}
-
-function onOverlayVideoError() {
-  playingVideoUrl.value = ''
-  uni.showToast({ title: '视频无法播放', icon: 'none' })
+function onPlayVideo(message: ChatMessage) {
+  uni.navigateTo({
+    url: `/pages/chat/video-viewer?conversationId=${encodeURIComponent(conversationId.value)}&messageId=${encodeURIComponent(message.id)}&content=${encodeURIComponent(message.content)}&senderNickname=${encodeURIComponent(message.senderNickname || '')}&createdAt=${encodeURIComponent(message.createdAt)}`,
+  })
 }
 
 function chooseFailToast(err: { errMsg?: string } | undefined, fallback: string) {
@@ -1285,18 +1276,6 @@ function pickFavorite() {
            滚到垫底的锚点等于滚到真正的底部，保证最新消息完整可见 -->
       <view id="bottom-anchor" class="bottom-anchor"></view>
     </scroll-view>
-
-    <view v-if="playingVideoUrl" class="video-overlay" @click="closePlayingVideo">
-      <video
-        class="video-overlay-player"
-        :src="playingVideoUrl"
-        autoplay
-        controls
-        object-fit="contain"
-        @click.stop
-        @error="onOverlayVideoError"
-      />
-    </view>
 
     <view v-if="actions.selecting.value" class="composer safe-bottom">
       <ImMessageSelectBar
@@ -1806,20 +1785,5 @@ function pickFavorite() {
 .plus-icon-img {
   width: 56rpx;
   height: 56rpx;
-}
-
-.video-overlay {
-  position: fixed;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 2000;
-  background: #000;
-}
-
-.video-overlay-player {
-  width: 100%;
-  height: 100%;
 }
 </style>

@@ -7,7 +7,7 @@ let activeVoiceStopper: (() => void) | null = null
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, MessageQuote } from '@/types'
-import { parseVideoMeta } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -45,7 +45,7 @@ const emit = defineEmits<{
   longpress: []
   cardView: [card: CardPayload]
   retry: [message: ChatMessage]
-  playVideo: [url: string]
+  playVideo: [message: ChatMessage]
 }>()
 
 function onAvatarClick() {
@@ -100,9 +100,22 @@ const videoMeta = computed(() => {
 })
 
 const videoPosterFailed = ref(false)
-const videoPoster = computed(() =>
-  videoPosterFailed.value ? '' : toPlayableMediaUrl(videoMeta.value.snapshotUrl),
-)
+const fallbackPoster = ref('')
+
+const videoUrl = computed(() => toPlayableMediaUrl(videoMeta.value.url))
+
+const videoPoster = computed(() => {
+  if (videoPosterFailed.value) return fallbackPoster.value
+  const snap = videoMeta.value.snapshotUrl
+  // 远程封面可直接展示；发送端本地路径在接收端无效，交给截帧兜底
+  if (isRemoteMediaUrl(snap)) return toPlayableMediaUrl(snap)
+  return fallbackPoster.value
+})
+
+const videoDurationLabel = computed(() => {
+  const d = videoMeta.value.duration
+  return d > 0 ? formatVideoDuration(d) : ''
+})
 
 watch(
   () => videoMeta.value.snapshotUrl,
@@ -111,18 +124,42 @@ watch(
   },
 )
 
+watch(
+  [() => videoMeta.value.snapshotUrl, videoUrl],
+  async ([snapshot, url]) => {
+    fallbackPoster.value = ''
+    if (isRemoteMediaUrl(snapshot) || !url) return
+    // #ifdef H5
+    // App 列表不下载整段视频截帧（基座 getVideoInfo 也无缩略图）；用下方 video 组件出首帧
+    try {
+      fallbackPoster.value = await captureVideoPosterFromUrl(url)
+    } catch {
+      fallbackPoster.value = ''
+    }
+    // #endif
+  },
+  { immediate: true },
+)
+
 function onVideoPosterError() {
   videoPosterFailed.value = true
+  const url = videoUrl.value
+  if (!url || fallbackPoster.value) return
+  // #ifdef H5
+  void captureVideoPosterFromUrl(url).then((poster) => {
+    if (poster) fallbackPoster.value = poster
+  })
+  // #endif
 }
 
 function playVideo() {
-  const url = toPlayableMediaUrl(videoMeta.value.url)
+  const url = videoUrl.value
   if (!url) {
     const sending = props.message.status === 'sending'
     uni.showToast({ title: sending ? '视频发送中' : '视频无法播放', icon: 'none' })
     return
   }
-  emit('playVideo', url)
+  emit('playVideo', props.message)
 }
 
 function onContextMenu(event: Event) {
@@ -387,12 +424,34 @@ function openLink(url: string) {
         @contextmenu.prevent="onContextMenu"
       >
         <image
+          v-if="videoPoster"
           class="msg-image"
-          :src="videoPoster || '/static/icon-photo.png'"
+          :src="videoPoster"
           mode="widthFix"
           @error="onVideoPosterError"
         />
-        <view class="video-play">▶</view>
+        <!-- App：无远程封面时用原生 video 解码首帧，避免灰底占位 -->
+        <!-- #ifdef APP-PLUS -->
+        <video
+          v-else-if="videoUrl"
+          class="msg-image video-thumb-video"
+          :src="videoUrl"
+          :controls="false"
+          :show-center-play-btn="false"
+          :show-play-btn="false"
+          :show-fullscreen-btn="false"
+          :show-progress="false"
+          :enable-progress-gesture="false"
+          :muted="true"
+          :autoplay="false"
+          object-fit="cover"
+        />
+        <!-- #endif -->
+        <view v-else class="msg-image video-poster-placeholder" />
+        <view class="video-play">
+          <text class="video-play-icon">▶</text>
+        </view>
+        <text v-if="videoDurationLabel" class="video-duration">{{ videoDurationLabel }}</text>
       </view>
       <view
         v-else-if="message.type === 'voice'"
@@ -573,21 +632,48 @@ function openLink(url: string) {
   position: relative;
 }
 
+.video-poster-placeholder {
+  width: 420rpx;
+  min-height: 240rpx;
+  background: #e8e8e8;
+  border-radius: 12rpx;
+}
+
+.video-thumb-video {
+  width: 420rpx;
+  height: 560rpx;
+  border-radius: 12rpx;
+  background: #111;
+  pointer-events: none;
+}
+
 .video-play {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 80rpx;
-  height: 80rpx;
-  border-radius: 50%;
+  pointer-events: none;
+}
+
+.video-play-icon {
+  color: #fff;
+  font-size: 64rpx;
+  line-height: 1;
+  text-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.45);
+}
+
+.video-duration {
+  position: absolute;
+  left: 50%;
+  bottom: 16rpx;
+  transform: translateX(-50%);
+  padding: 4rpx 14rpx;
+  border-radius: 8rpx;
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32rpx;
-  padding-left: 6rpx;
+  font-size: 24rpx;
+  line-height: 1.3;
+  pointer-events: none;
 }
 
 .voice-bubble {

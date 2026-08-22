@@ -6,6 +6,7 @@ import type { MessageItem } from 'openim-uniapp-polyfill'
 import EmptyState from '@/components/EmptyState.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { collectHistoryMessages, resolveGroupConversationID } from '@/utils/openim'
+import { parseVideoMeta } from '@/utils/chatMedia'
 
 type MediaTab = 'all' | 'image' | 'video' | 'file'
 
@@ -28,6 +29,7 @@ const groupId = ref('')
 const tab = ref<MediaTab>('all')
 const loading = ref(false)
 const items = ref<MediaItem[]>([])
+const conversationIdRef = ref('')
 
 const visible = computed(() => {
   if (tab.value === 'all') return items.value
@@ -40,6 +42,7 @@ onLoad(async (query) => {
   loading.value = true
   try {
     const conversationId = await resolveGroupConversationID(groupId.value)
+    conversationIdRef.value = conversationId
     const history = await collectHistoryMessages(conversationId)
     items.value = history.map(toMedia).filter((item): item is MediaItem => !!item)
   } catch (e) {
@@ -70,8 +73,9 @@ function toMedia(item: MessageItem): MediaItem | null {
     }
   }
   if (item.contentType === MessageType.VideoMessage) {
-    const url = item.videoElem?.videoUrl || ''
-    const thumb = item.videoElem?.snapshotUrl || url
+    const meta = parseVideoMeta(item)
+    const url = meta.url
+    const thumb = meta.snapshotUrl || url
     if (!url && !thumb) return null
     return {
       id: item.clientMsgID,
@@ -99,6 +103,13 @@ function onPreview(item: MediaItem) {
   if (item.kind === 'image') {
     const urls = visible.value.filter((row) => row.kind === 'image').map((row) => row.url)
     uni.previewImage({ current: item.url, urls })
+    return
+  }
+  if (item.kind === 'video' && item.url) {
+    const content = JSON.stringify(parseVideoMeta({ url: item.url, snapshotUrl: item.thumb, duration: 0 }))
+    uni.navigateTo({
+      url: `/pages/chat/video-viewer?conversationId=${encodeURIComponent(conversationIdRef.value)}&messageId=${encodeURIComponent(item.id)}&content=${encodeURIComponent(content)}`,
+    })
     return
   }
   if (item.url) {
