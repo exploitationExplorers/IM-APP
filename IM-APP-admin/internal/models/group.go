@@ -21,8 +21,8 @@ type AppGroupDetail struct {
 	JoinMode             string     `json:"joinMode"`
 	AllowMemberAddFriend bool       `json:"allowMemberAddFriend"`
 	Announcement         string     `json:"announcement"`
-	MaxMembers           int        `json:"maxMembers"`              // 群成员上限（server 024）
-	DissolvedAt          *time.Time `json:"dissolvedAt,omitempty"`   // 解散时间
+	MaxMembers           int        `json:"maxMembers"`                   // 群成员上限（server 024）
+	DissolvedAt          *time.Time `json:"dissolvedAt,omitempty"`        // 解散时间
 	DissolvedByAdminId   string     `json:"dissolvedByAdminId,omitempty"` // 解散操作管理员ID
 	DissolveReason       string     `json:"dissolveReason,omitempty"`     // 解散原因
 }
@@ -51,6 +51,12 @@ type DissolveRequest struct {
 	Reason         string `json:"reason" binding:"required"`
 	TicketNo       string `json:"ticketNo,omitempty"`
 	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+type UpdateGroupMemberLimitRequest struct {
+	GroupID    string `json:"groupId" binding:"required"`
+	MaxMembers int    `json:"maxMembers" binding:"required"`
+	Reason     string `json:"reason" binding:"required"`
 }
 
 type AdminRecallRequest struct {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"im-app-admin/internal/models"
 )
@@ -53,11 +54,34 @@ func (s *OpsService) SetReportReasonStatus(ctx context.Context, id, status strin
 }
 
 func (s *OpsService) GetSystemLimits(ctx context.Context) (*models.SystemLimits, error) {
-	return s.Repo.GetSystemLimits(ctx)
+	l, err := s.Repo.GetSystemLimits(ctx)
+	if l != nil {
+		l.GroupMemberHardLimit = s.groupMemberHardLimit()
+	}
+	return l, err
 }
 
 func (s *OpsService) SaveSystemLimits(ctx context.Context, l *models.SystemLimits, operatorID string) error {
+	if l == nil || l.MaxGroupMembers < 3 || l.MaxGroupMembers > s.groupMemberHardLimit() ||
+		l.DefaultGroupMaxMembers < 3 || l.DefaultGroupMaxMembers > l.MaxGroupMembers {
+		return errors.New("群人数配置必须满足 3 ≤ 新群默认上限 ≤ 平台上限 ≤ 技术安全上限")
+	}
+	l.GroupMemberHardLimit = 0
 	return s.Repo.SaveSystemLimits(ctx, l, operatorID)
+}
+
+func (s *OpsService) GroupLimitImpact(ctx context.Context, limit int) (models.GroupLimitImpact, error) {
+	if limit < 3 || limit > s.groupMemberHardLimit() {
+		return models.GroupLimitImpact{}, errors.New("群人数上限不合法")
+	}
+	return s.Repo.GroupLimitImpact(ctx, limit)
+}
+
+func (s *OpsService) groupMemberHardLimit() int {
+	if s.GroupMemberHardLimit < 3 {
+		return 4000
+	}
+	return s.GroupMemberHardLimit
 }
 
 func (s *OpsService) GetFeatureFlags(ctx context.Context) (*models.FeatureFlags, error) {
@@ -69,5 +93,13 @@ func (s *OpsService) SaveFeatureFlags(ctx context.Context, flags *models.Feature
 }
 
 func (s *OpsService) PublishSystemLimits(ctx context.Context, operatorID string) error {
+	l, err := s.Repo.GetSystemLimits(ctx)
+	if err != nil {
+		return err
+	}
+	if l.MaxGroupMembers < 3 || l.MaxGroupMembers > s.groupMemberHardLimit() ||
+		l.DefaultGroupMaxMembers < 3 || l.DefaultGroupMaxMembers > l.MaxGroupMembers {
+		return errors.New("草稿群人数配置不合法，请先按当前技术安全上限重新保存草稿")
+	}
 	return s.Repo.PublishSystemLimits(ctx, operatorID)
 }

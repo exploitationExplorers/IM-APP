@@ -666,23 +666,14 @@ paths:
         '502': {$ref: '#/components/responses/BadGateway'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
 
-  /api/v1/im/messages/read-status:
+  /api/v1/im/group-read-cursors/report:
     post:
       tags: [OpenIM Client]
-      summary: 查询自己发送的群消息的已读状态
+      summary: 上报当前用户的群会话已读游标
       description: |
-        群聊场景：发送者查询自己发送的若干条消息，获取每条消息在群内的已读人数 / 未读人数 / 已读成员列表，用于气泡下方"已读 x/y"。
-
-        计算规则（服务端以 OpenIM 每个成员会话上的已读游标 `hasReadSeq` 为准）：
-        - 已读判定：`成员.hasReadSeq >= 消息.seq`，即成员读到该消息序号为止。
-        - `totalCount / hasReadCount / unreadCount` 均**不含发送者本人**。
-        - 消息发送后才入群的成员不计入 totalCount（既不算已读也不算未读）。
-        - 退群成员不参与计算（以当前群成员列表为准）。
-        - `readMemberIds` 返回已读成员的 **OpenIM userID**（前端用 `businessUserIdFromIM` 还原业务 UUID 后展示昵称头像）。
-
-        conversationID 形如 `sg_<imGroupId>`，`imGroupId` 为 OpenIM 群 ID；非群会话、参数非法返回 400，非群成员返回 403。
-        服务端使用 Redis 缓存成员游标（3s）与整条消息结果（8s），前端可按 ~5s 轮询。
-      operationId: queryMessageReadStatus
+        服务端仅向 OpenIM 查询当前调用者一次，以单调递增方式写入 PostgreSQL 和 Redis。
+        请求量不随群人数增长。
+      operationId: reportGroupReadCursor
       x-change-type: new
       security: [{bearerAuth: []}]
       requestBody:
@@ -691,22 +682,36 @@ paths:
           application/json:
             schema:
               type: object
-              required: [conversationID, messages]
+              required: [conversationId]
               additionalProperties: false
               properties:
-                conversationID: {type: string, pattern: '^sg_[a-f0-9]{32}$', description: 群会话 ID，`sg_` + OpenIM 群 ID。}
-                messages:
-                  type: array
-                  minItems: 1
-                  maxItems: 50
-                  description: 待查已读状态的消息（发送者自己发送的）。
-                  items: {$ref: '#/components/schemas/MessageReadQuery'}
+                conversationId: {type: string, pattern: '^sg_[a-f0-9]{32}$'}
       responses:
-        '200': {$ref: '#/components/responses/MessageReadStatusResponse'}
+        '200': {description: 返回当前用户 hasReadSeq}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '502': {$ref: '#/components/responses/BadGateway'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /api/v1/im/group-read-state:
+    get:
+      tags: [OpenIM Client]
+      summary: 查询其他群成员的最大已读游标
+      description: 不调用 OpenIM；Redis 未命中时使用 PostgreSQL 索引查询。消息 seq 不大于返回值即表示至少一人已读。
+      operationId: getGroupReadState
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      parameters:
+        - in: query
+          name: conversationId
+          required: true
+          schema: {type: string, pattern: '^sg_[a-f0-9]{32}$'}
+      responses:
+        '200': {description: 返回 maxOtherReadSeq}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
 
   /api/v1/im/peers/{businessUserId}:
@@ -1629,11 +1634,6 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/MessageRecallEnvelope'}
-    MessageReadStatusResponse:
-      description: 群消息已读状态（key 为请求中的 clientMsgId）
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/MessageReadResultMapEnvelope'}
     OpenIMPeerResponse:
       description: 单聊目标与权限
       content:
@@ -2100,37 +2100,6 @@ components:
         - type: object
           properties:
             data: {$ref: '#/components/schemas/MessageRecallResult'}
-
-    MessageReadQuery:
-      type: object
-      required: [clientMsgId, seq, sendTime]
-      additionalProperties: false
-      properties:
-        clientMsgId: {type: string, minLength: 1, maxLength: 128, description: OpenIM clientMsgID，结果按它回填。}
-        seq: {type: integer, format: int64, minimum: 1, description: 消息在 OpenIM 会话中的序号，已读判定 `成员.hasReadSeq >= seq`。}
-        sendTime: {type: integer, format: int64, minimum: 1, description: 消息发送时间（毫秒时间戳），用于排除晚于消息入群的成员。}
-
-    MessageReadResult:
-      type: object
-      required: [totalCount, hasReadCount, unreadCount, readMemberIds]
-      properties:
-        totalCount: {type: integer, minimum: 0, description: 应读人数（不含发送者；晚于消息发送才入群的成员不计）。}
-        hasReadCount: {type: integer, minimum: 0, description: 已读人数。}
-        unreadCount: {type: integer, minimum: 0, description: 未读人数，= totalCount - hasReadCount。}
-        readMemberIds:
-          type: array
-          description: 已读成员的 OpenIM userID 列表（前端还原业务 UUID 后展示）。
-          items: {type: string}
-
-    MessageReadResultMapEnvelope:
-      allOf:
-        - $ref: '#/components/schemas/BaseEnvelope'
-        - type: object
-          properties:
-            data:
-              type: object
-              description: key 为请求中的 clientMsgId，value 为该消息的已读结果。
-              additionalProperties: {$ref: '#/components/schemas/MessageReadResult'}
 
     GroupQRCodeResult:
       type: object

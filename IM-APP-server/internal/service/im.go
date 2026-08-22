@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,14 +57,7 @@ const (
 	imTokenCachePrefix  = "openim:user-token:v1:"
 	imTokenRefreshAhead = 5 * time.Minute
 
-	// 群聊已读状态缓存（复用 TokenCache 的 CacheGet/CacheSet）。
-	// 成员游标单调递增、结果 TTL 极短，缓存安全。
-	imReadCursorCachePrefix = "im:read:cursor:v1:"
-	imReadResultCachePrefix = "im:read:status:v1:"
-	imReadCursorCacheTTL    = 3 * time.Second
-	imReadResultCacheTTL    = 8 * time.Second
-	// imReadFetchConcurrency 并发拉取成员已读游标的上限。
-	imReadFetchConcurrency = 10
+	imGroupReadCursorPrefix = "im:group:read:v1:"
 )
 
 // IMTokenCache is intentionally small so the IM service can use Redis without
@@ -74,6 +66,11 @@ type IMTokenCache interface {
 	Available() bool
 	CacheGet(ctx context.Context, key string) (value string, found bool, err error)
 	CacheSet(ctx context.Context, key, value string, ttl time.Duration) error
+}
+
+type IMGroupReadCursorCache interface {
+	GroupReadCursorUpsert(ctx context.Context, key, userID string, seq int64) error
+	GroupReadCursorMaxOther(ctx context.Context, key, userID string) (seq int64, found bool, err error)
 }
 
 type cachedIMToken struct {
@@ -88,12 +85,13 @@ type imTokenKeyLock struct {
 }
 
 type IMService struct {
-	Client     *im.Client
-	Users      *repository.UserRepo
-	Groups     *repository.GroupRepo
-	Access     *repository.IMAccessRepo
-	Config     config.OpenIMConfig
-	TokenCache IMTokenCache
+	Client      *im.Client
+	Users       *repository.UserRepo
+	Groups      *repository.GroupRepo
+	Access      *repository.IMAccessRepo
+	ReadCursors *repository.GroupReadCursorRepo
+	Config      config.OpenIMConfig
+	TokenCache  IMTokenCache
 
 	tokenLocksMu sync.Mutex
 	tokenLocks   map[string]*imTokenKeyLock
@@ -861,168 +859,77 @@ func (s *IMService) ensureOpenIMGroup(ctx context.Context, requesterID, internal
 	return nil
 }
 
-// MessageReadQuery 一条待查已读状态的消息（发送者自己发送的群消息）。
-type MessageReadQuery struct {
-	ClientMsgID string `json:"clientMsgId"`
-	Seq         int64  `json:"seq"`     // OpenIM 会话内消息序号，单调递增
-	SendTime    int64  `json:"sendTime"` // 毫秒时间戳
+type GroupReadState struct {
+	MaxOtherReadSeq int64 `json:"maxOtherReadSeq"`
 }
 
-// MessageReadResult 一条消息的已读聚合结果。计数均不含发送者本人。
-type MessageReadResult struct {
-	TotalCount    int      `json:"totalCount"`    // 应读人数（不含发送者；晚于消息入群的成员不计）
-	HasReadCount  int      `json:"hasReadCount"`  // 已读人数
-	UnreadCount   int      `json:"unreadCount"`   // 未读人数
-	ReadMemberIDs []string `json:"readMemberIds"` // 已读成员的 OpenIM userID（前端还原业务 UUID）
-}
-
-// MessageReadStatus 计算某群会话里若干消息各自被哪些成员已读。
-//
-// conversationID 形如 "sg_<imGroupId>"；messages 来自发送者自己发送的消息。
-// 判定规则：成员.hasReadSeq >= 消息.seq 即视为已读（详见《群聊消息已读-后端改造清单》§6）。
-func (s *IMService) MessageReadStatus(ctx context.Context, callerUserID, conversationID string, messages []MessageReadQuery) (map[string]MessageReadResult, error) {
-	if s.Client == nil || !s.Client.Available() {
-		return nil, ErrIMUnavailable
-	}
-	if len(messages) == 0 || len(messages) > 50 {
-		return nil, ErrIMInvalidReadStatusRequest
-	}
-	imGroupID, ok := strings.CutPrefix(conversationID, "sg_")
+func parseGroupConversationID(conversationID string) (string, error) {
+	imGroupID, ok := strings.CutPrefix(strings.TrimSpace(conversationID), "sg_")
 	if !ok || imGroupID == "" {
-		return nil, ErrIMInvalidReadStatusRequest
+		return "", ErrIMInvalidReadStatusRequest
 	}
-	if _, err := im.BusinessIDFromUserID(imGroupID); err != nil {
-		return nil, ErrIMInvalidReadStatusRequest
+	groupID, err := im.BusinessIDFromUserID(imGroupID)
+	if err != nil {
+		return "", ErrIMInvalidReadStatusRequest
+	}
+	return groupID, nil
+}
+
+// ReportGroupReadCursor 每次只向 OpenIM 查询当前阅读者自己的游标，随后单调写入 PostgreSQL/Redis。
+// 无论群里 2 人还是 4000 人，每次上报的 OpenIM 请求数都固定为 1。
+func (s *IMService) ReportGroupReadCursor(ctx context.Context, callerUserID, conversationID string) (int64, error) {
+	if s.Client == nil || !s.Client.Available() || s.ReadCursors == nil {
+		return 0, ErrIMUnavailable
+	}
+	groupID, err := parseGroupConversationID(conversationID)
+	if err != nil {
+		return 0, err
+	}
+	ok, err := s.ReadCursors.IsActiveMember(ctx, groupID, callerUserID)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, ErrIMNotGroupMember
 	}
 	callerIMID, err := im.UserIDFromBusinessID(callerUserID)
 	if err != nil {
-		return nil, ErrIMInvalidReadStatusRequest
+		return 0, ErrIMInvalidReadStatusRequest
 	}
-	for _, m := range messages {
-		if m.ClientMsgID == "" || m.Seq <= 0 || m.SendTime <= 0 {
-			return nil, ErrIMInvalidReadStatusRequest
-		}
-	}
-
-	results := make(map[string]MessageReadResult, len(messages))
-	// 1) 命中整条结果缓存的直接返回，未命中才进入后续计算。
-	pending := make([]MessageReadQuery, 0, len(messages))
-	for _, m := range messages {
-		key := imReadResultCachePrefix + conversationID + ":" + strconv.FormatInt(m.Seq, 10)
-		if s.TokenCache != nil && s.TokenCache.Available() {
-			if payload, found, err := s.TokenCache.CacheGet(ctx, key); err == nil && found {
-				var r MessageReadResult
-				if json.Unmarshal([]byte(payload), &r) == nil {
-					results[m.ClientMsgID] = r
-					continue
-				}
-			}
-		}
-		pending = append(pending, m)
-	}
-	if len(pending) == 0 {
-		return results, nil
-	}
-
-	// 2) 拉一次全量成员，校验调用者是成员；成员池 = 除调用者外的当前成员。
-	members, err := s.Client.ListGroupMembers(ctx, imGroupID)
+	seq, err := s.Client.GetConversationHasReadSeq(ctx, callerIMID, conversationID)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	isMember := false
-	memberPool := make(map[string]int64, len(members)) // OpenIM userID → joinTime
-	for _, m := range members {
-		if m.UserID == callerIMID {
-			isMember = true
-			continue
-		}
-		memberPool[m.UserID] = m.JoinTime
+	if err := s.ReadCursors.Upsert(ctx, conversationID, groupID, callerUserID, seq); err != nil {
+		return 0, err
 	}
-	if !isMember {
-		return nil, ErrIMNotGroupMember
+	if cache, ok := s.TokenCache.(IMGroupReadCursorCache); ok {
+		_ = cache.GroupReadCursorUpsert(ctx, imGroupReadCursorPrefix+conversationID, callerUserID, seq)
 	}
-
-	// 3) 并发取每个成员的已读游标（失败重试 1 次后跳过，视为未读）。
-	readSeq := s.memberReadSeqs(ctx, conversationID, memberPool)
-
-	// 4) 逐条消息计算，并写入结果缓存。
-	for _, m := range pending {
-		total, hasRead := 0, 0
-		readIDs := make([]string, 0)
-		for memberID, joinTime := range memberPool {
-			if joinTime > m.SendTime {
-				continue // 晚于消息发送才入群，不计入应读
-			}
-			total++
-			if readSeq[memberID] >= m.Seq {
-				hasRead++
-				readIDs = append(readIDs, memberID)
-			}
-		}
-		r := MessageReadResult{
-			TotalCount:    total,
-			HasReadCount:  hasRead,
-			UnreadCount:   total - hasRead,
-			ReadMemberIDs: readIDs,
-		}
-		results[m.ClientMsgID] = r
-		if s.TokenCache != nil && s.TokenCache.Available() {
-			key := imReadResultCachePrefix + conversationID + ":" + strconv.FormatInt(m.Seq, 10)
-			if payload, err := json.Marshal(r); err == nil {
-				_ = s.TokenCache.CacheSet(ctx, key, string(payload), imReadResultCacheTTL)
-			}
-		}
-	}
-	return results, nil
+	return seq, nil
 }
 
-// memberReadSeqs 并发获取每个成员在指定会话上的已读游标。
-// 结果 key 为成员 OpenIM userID；获取失败（重试后仍失败）的成员不写入结果，调用方按未读处理。
-func (s *IMService) memberReadSeqs(ctx context.Context, conversationID string, memberPool map[string]int64) map[string]int64 {
-	readSeq := make(map[string]int64, len(memberPool))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, imReadFetchConcurrency)
-	for memberID := range memberPool {
-		wg.Add(1)
-		go func(memberID string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			seq := int64(0)
-			cacheKey := imReadCursorCachePrefix + conversationID + ":" + memberID
-			cached := false
-			if s.TokenCache != nil && s.TokenCache.Available() {
-				if payload, found, err := s.TokenCache.CacheGet(ctx, cacheKey); err == nil && found {
-					if json.Unmarshal([]byte(payload), &seq) == nil {
-						cached = true
-					}
-				}
-			}
-			if !cached {
-				var err error
-				for attempt := 0; attempt < 2; attempt++ {
-					seq, err = s.Client.GetConversationHasReadSeq(ctx, memberID, conversationID)
-					if err == nil {
-						break
-					}
-				}
-				if err != nil {
-					log.Printf("read-status: fetch hasReadSeq for %s in %s failed: %v", memberID, conversationID, err)
-					return // 不写入结果，调用方按 0 处理
-				}
-				if s.TokenCache != nil && s.TokenCache.Available() {
-					if payload, err := json.Marshal(seq); err == nil {
-						_ = s.TokenCache.CacheSet(ctx, cacheKey, string(payload), imReadCursorCacheTTL)
-					}
-				}
-			}
-			mu.Lock()
-			readSeq[memberID] = seq
-			mu.Unlock()
-		}(memberID)
+// GroupReadState 读取“除发送者外的最高已读游标”。消息 seq 不大于它时，即至少一人已读。
+func (s *IMService) GroupReadState(ctx context.Context, callerUserID, conversationID string) (GroupReadState, error) {
+	if s.ReadCursors == nil {
+		return GroupReadState{}, ErrIMUnavailable
 	}
-	wg.Wait()
-	return readSeq
+	groupID, err := parseGroupConversationID(conversationID)
+	if err != nil {
+		return GroupReadState{}, err
+	}
+	ok, err := s.ReadCursors.IsActiveMember(ctx, groupID, callerUserID)
+	if err != nil {
+		return GroupReadState{}, err
+	}
+	if !ok {
+		return GroupReadState{}, ErrIMNotGroupMember
+	}
+	if cache, ok := s.TokenCache.(IMGroupReadCursorCache); ok {
+		if seq, found, cacheErr := cache.GroupReadCursorMaxOther(ctx, imGroupReadCursorPrefix+conversationID, callerUserID); cacheErr == nil && found {
+			return GroupReadState{MaxOtherReadSeq: seq}, nil
+		}
+	}
+	seq, err := s.ReadCursors.MaxOther(ctx, conversationID, callerUserID)
+	return GroupReadState{MaxOtherReadSeq: seq}, err
 }

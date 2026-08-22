@@ -17,7 +17,7 @@ const props = defineProps<{
   nickname?: string
   /** 本会话全部图片消息的地址：预览时可左右滑动切换，缺省只预览本条 */
   previewUrls?: string[]
-  /** 私聊已读回执：'read' 已读 / 'unread' 未读；群聊与发送中/失败不传 */
+  /** 已读回执：私聊=对方已读，群聊=至少一名其他成员已读；两者共用单双勾样式。 */
   readState?: 'read' | 'unread'
 }>()
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"im-app-admin/internal/middleware"
 	"im-app-admin/internal/models"
@@ -158,6 +159,20 @@ func (h *OpsHandler) GetSystemLimits(c *gin.Context) {
 		return
 	}
 	response.OK(c, l)
+}
+
+func (h *OpsHandler) GetGroupLimitImpact(c *gin.Context) {
+	limit, err := strconv.Atoi(c.Query("maxGroupMembers"))
+	if err != nil {
+		response.BadRequest(c, "maxGroupMembers 不正确")
+		return
+	}
+	result, err := h.Svc.GroupLimitImpact(c.Request.Context(), limit)
+	if err != nil {
+		response.FailErr(c, http.StatusBadRequest, "预估失败", err)
+		return
+	}
+	response.OK(c, result)
 }
 
 func (h *OpsHandler) SaveSystemLimits(c *gin.Context) {

@@ -38,17 +38,19 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
-		"report_reasons":       {"id", "target_type", "reason", "language", "sort_order", "status"},
-		"reports":              {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
-		"report_files":         {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
-		"feedbacks":            {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
-		"app_releases":         {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
-		"forward_tasks":        {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
-		"forward_task_targets": {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
-		"forward_kafka_outbox": {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
-		"im_message_recalls":   {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
+		"report_reasons":          {"id", "target_type", "reason", "language", "sort_order", "status"},
+		"reports":                 {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
+		"report_files":            {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
+		"feedbacks":               {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
+		"app_releases":            {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
+		"forward_tasks":           {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
+		"forward_task_targets":    {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
+		"forward_kafka_outbox":    {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
+		"im_message_recalls":      {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
+		"im_group_read_cursors":   {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
+		"group_member_limit_logs": {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations: 017_app_reports.sql, 021_forward_queue.sql, 024_im_message_recalls.sql, 029_feedbacks.sql, 030_app_releases.sql", err)
+		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
 	}
 	log.Println("migrations applied")
 
@@ -101,10 +103,12 @@ func main() {
 	forwardRepo := &repository.ForwardRepo{DB: pool}
 
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
+	groupRepo.GroupMemberHardLimit = cfg.GroupMemberHardLimit
+	groupReadCursorRepo := &repository.GroupReadCursorRepo{DB: pool}
 
 	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo}
 	imSvc := &service.IMService{
-		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Config: cfg.OpenIM, TokenCache: redisClient,
+		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, ReadCursors: groupReadCursorRepo, Config: cfg.OpenIM, TokenCache: redisClient,
 	}
 	imAdminSvc := &service.IMAdminService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Outbox: imOutboxRepo,
@@ -213,6 +217,7 @@ func main() {
 		internalAdmin.POST("/groups/:id/dismiss", adminGroupH.DismissGroup)
 		internalAdmin.POST("/groups/:id/mute", adminGroupH.MuteGroup)
 		internalAdmin.POST("/groups/:id/add-friend", adminGroupH.SetAddFriend)
+		internalAdmin.POST("/group-member-limits/update", adminGroupH.UpdateMemberLimit)
 		internalAdmin.POST("/forward-tasks/:id/cancel", adminForwardH.CancelForwardTask)
 		internalAdmin.POST("/forward-tasks/:id/retry", adminForwardH.RetryForwardTask)
 		internalAdmin.GET("/forward-settings", adminForwardH.GetForwardSettings)
@@ -343,7 +348,8 @@ func main() {
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
 			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
 			auth.POST("/im/messages/recall", imH.RecallMessage)
-			auth.POST("/im/messages/read-status", imH.MessageReadStatus)
+			auth.POST("/im/group-read-cursors/report", imH.ReportGroupReadCursor)
+			auth.GET("/im/group-read-state", imH.GroupReadState)
 			auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)
 			auth.PUT("/im/me/global-msg-recv-opt", imH.SetGlobalMsgRecvOpt)
 

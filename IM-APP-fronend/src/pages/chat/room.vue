@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
+import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
@@ -15,8 +15,8 @@ import { useForwardStore } from '@/stores/forward'
 import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
-import { resolveIMGroupByIM } from '@/api/im'
-import { fetchGroupDetail, fetchGroupMembers } from '@/api/group'
+import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
+import { fetchGroupDetail } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices, replaceOpenIMAdminLabel } from '@/utils/im-notification'
@@ -67,6 +67,8 @@ const announcementDismissEpoch = ref(0)
 /** 群是否已被解散（APP 端 GetByID 已过滤 status<>'active'，进入时 404 即视为解散） */
 const groupDissolved = ref(false)
 let muteExpireTimer: ReturnType<typeof setTimeout> | null = null
+let groupReadPollTimer: ReturnType<typeof setInterval> | null = null
+let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
@@ -163,14 +165,61 @@ function nicknameOf(message: ChatMessage): string {
 }
 
 /**
- * 私聊已读回执展示条件：仅私聊 + 自己发的 + 已成功发出的消息。
- * 发送中 / 失败的消息没有已读语义；群聊 OpenIM 单聊回执能力不覆盖，不展示。
+ * 私聊与群聊共用同一套单双勾。群聊的“已读”表示至少一名其他成员已读。
  */
 function readStateOf(message: ChatMessage): 'read' | 'unread' | undefined {
-  if (chatType.value !== 'private' || !isMine(message)) return undefined
+	if (!isMine(message)) return undefined
   if (message.status !== 'sent') return undefined
-  return message.hasRead ? 'read' : 'unread'
+	if (chatType.value === 'group') return message.groupHasRead ? 'read' : 'unread'
+	return message.hasRead ? 'read' : 'unread'
 }
+
+function ownPendingGroupMessages(): ChatMessage[] {
+  if (chatType.value !== 'group') return []
+  return messages.value.filter((m) => isMine(m) && m.status === 'sent' && !!m.seq && !m.groupHasRead)
+}
+
+async function refreshGroupReadState(): Promise<void> {
+  const pending = ownPendingGroupMessages()
+  if (!conversationId.value || pending.length === 0) return
+  try {
+    const state = await fetchGroupReadState(conversationId.value)
+    const maxSeq = Number(state.maxOtherReadSeq || 0)
+    for (const message of messages.value) {
+      if (isMine(message) && message.seq && message.seq <= maxSeq) message.groupHasRead = true
+    }
+    if (ownPendingGroupMessages().length === 0) stopGroupReadPolling()
+  } catch { /* 轮询失败不影响聊天；下一轮自动恢复 */ }
+}
+
+function startGroupReadPolling(): void {
+  if (chatType.value !== 'group' || groupReadPollTimer || ownPendingGroupMessages().length === 0) return
+  void refreshGroupReadState()
+  groupReadPollTimer = setInterval(() => void refreshGroupReadState(), 5000)
+}
+
+function stopGroupReadPolling(): void {
+  if (groupReadPollTimer) clearInterval(groupReadPollTimer)
+  groupReadPollTimer = null
+}
+
+function scheduleGroupReadReport(): void {
+  if (chatType.value !== 'group' || !conversationId.value) return
+  if (groupReadReportTimer) clearTimeout(groupReadReportTimer)
+  groupReadReportTimer = setTimeout(() => {
+    groupReadReportTimer = null
+    void reportGroupReadCursor(conversationId.value).catch(() => undefined)
+  }, 1000)
+}
+
+watch(
+  () => `${myId.value}|${messages.value.map((m) => `${m.id}:${m.status}:${m.seq || 0}`).join('|')}`,
+  () => {
+    if (chatType.value !== 'group') return
+    scheduleGroupReadReport()
+    startGroupReadPolling()
+  },
+)
 
 function systemTextOf(message: ChatMessage): string {
   return replaceOpenIMAdminLabel(message.content, groupOwnerName.value)
@@ -254,15 +303,28 @@ const actions = useChatMessageActions({
 })
 
 onShow(() => {
-  if (chatType.value === 'group') void refreshGroupMeta()
+	if (chatType.value === 'group') {
+    void refreshGroupMeta()
+    scheduleGroupReadReport()
+    startGroupReadPolling()
+  }
   if (chatType.value === 'private') refreshPrivateTitle()
   if (!forwardStore.consumeSucceeded()) return
   actions.cancelSelect()
   successVisible.value = true
 })
 
+onHide(() => {
+  stopGroupReadPolling()
+  if (groupReadReportTimer) clearTimeout(groupReadReportTimer)
+  groupReadReportTimer = null
+})
+
 onUnload(() => {
   playingVideoUrl.value = ''
+  stopGroupReadPolling()
+  if (groupReadReportTimer) clearTimeout(groupReadReportTimer)
+  groupReadReportTimer = null
   if (muteExpireTimer) {
     clearTimeout(muteExpireTimer)
     muteExpireTimer = null
@@ -583,9 +645,7 @@ async function refreshGroupMeta(): Promise<boolean> {
   businessId.value = gid
   let detailApplied = false
   try {
-    const [ms, detail] = await Promise.all([
-      fetchGroupMembers(gid),
-      fetchGroupDetail(gid).catch((e: any) => {
+    const detail = await fetchGroupDetail(gid).catch((e: any) => {
         // APP 端 GetByID 过滤了已解散群，返回 404「群不存在或无权访问」，
         // 与已解散语义对齐，避免被静默吞掉后还继续去 OpenIM 拉历史（errCode 10006）
         if (e?.message?.includes('群不存在')) {
@@ -593,38 +653,16 @@ async function refreshGroupMeta(): Promise<boolean> {
           return null
         }
         return null
-      }),
-    ])
+      })
     // 拿到 detail 说明群有效，重置解散标记
     if (detail) {
       groupDissolved.value = false
     }
-    const map: Record<string, string> = {}
-    const avatarMap: Record<string, string> = {}
-    const metaMap: Record<string, MemberMeta> = {}
-    for (const m of ms) {
-      const r = m.memberRemark?.trim()
-      if (r) map[m.id] = r
-      const av = m.avatar?.trim()
-      if (av) avatarMap[m.id] = av
-      metaMap[m.id] = { role: m.role, isMuted: !!m.isMuted }
-    }
-    memberRemarkMap.value = map
-    memberAvatarMap.value = avatarMap
-    memberMetaMap.value = metaMap
-    memberCount.value = ms.length
-    const owner = ms.find((m) => m.role === 'owner')
-    groupOwnerName.value =
-      owner?.memberRemark?.trim() ||
-      owner?.displayName?.trim() ||
-      owner?.groupNickname?.trim() ||
-      owner?.nickname?.trim() ||
-      ''
-    const me = userStore.profile?.id
-    const self = me ? ms.find((m) => m.id === me) : undefined
-    if (self) myRole.value = self.role
     if (detail) {
-      applyGroupChatPermission(detail, self)
+	  memberCount.value = detail.memberCount || 0
+	  myRole.value = detail.myRole || 'member'
+	  groupOwnerName.value = detail.ownerName || ''
+	  applyGroupChatPermission(detail)
       announcementText.value = (detail.announcement || '').trim()
       detailApplied = true
     }

@@ -58,6 +58,31 @@ func (r *Redis) CacheSet(ctx context.Context, key, value string, ttl time.Durati
 	return r.Client.Set(ctx, key, value, ttl).Err()
 }
 
+// GroupReadCursorUpsert 保存群成员的单调已读游标。ZSET 只保留每个用户一个分值。
+func (r *Redis) GroupReadCursorUpsert(ctx context.Context, key, userID string, seq int64) error {
+	if !r.Available() {
+		return nil
+	}
+	return r.Client.ZAdd(ctx, key, redis.Z{Score: float64(seq), Member: userID}).Err()
+}
+
+// GroupReadCursorMaxOther 只读取最高的两个游标，从而排除查询者本人，复杂度不随群人数线性增长。
+func (r *Redis) GroupReadCursorMaxOther(ctx context.Context, key, userID string) (int64, bool, error) {
+	if !r.Available() {
+		return 0, false, nil
+	}
+	items, err := r.Client.ZRevRangeWithScores(ctx, key, 0, 1).Result()
+	if err != nil {
+		return 0, false, err
+	}
+	for _, item := range items {
+		if fmt.Sprint(item.Member) != userID {
+			return int64(item.Score), true, nil
+		}
+	}
+	return 0, false, nil
+}
+
 // AllowSMS checks per-phone SMS send rate (1/min). Returns false if limited.
 func (r *Redis) AllowSMS(ctx context.Context, phone string) (bool, error) {
 	if !r.Available() {

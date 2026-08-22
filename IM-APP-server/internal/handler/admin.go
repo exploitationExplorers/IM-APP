@@ -305,3 +305,21 @@ func (h *AdminGroupHandler) SetAddFriend(c *gin.Context) {
 	}
 	response.OK(c, gin.H{"ok": true})
 }
+
+func (h *AdminGroupHandler) UpdateMemberLimit(c *gin.Context) {
+	var req struct {
+		GroupID    string `json:"groupId" binding:"required"`
+		AdminID    string `json:"adminId" binding:"required"`
+		MaxMembers int    `json:"maxMembers" binding:"required"`
+		Reason     string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "groupId、adminId、maxMembers、reason 必填")
+		return
+	}
+	if err := h.Repo.UpdateMemberLimitByAdmin(c.Request.Context(), req.GroupID, req.AdminID, req.MaxMembers, req.Reason); err != nil {
+		response.Fail(c, http.StatusBadRequest, "设置失败："+err.Error())
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}

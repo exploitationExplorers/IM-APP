@@ -50,16 +50,23 @@ type ReportReason struct {
 }
 
 type SystemLimits struct {
-	MaxFileSizeMB     int `json:"maxFileSizeMb"`
-	MaxGroupMembers   int `json:"maxGroupMembers"`
-	RecallWindowSec   int `json:"recallWindowSec"`
-	MaxForwardTargets int `json:"maxForwardTargets"`
-	MaxNicknameLen    int `json:"maxNicknameLen"`
+	MaxFileSizeMB          int `json:"maxFileSizeMb"`
+	MaxGroupMembers        int `json:"maxGroupMembers"`
+	DefaultGroupMaxMembers int `json:"defaultGroupMaxMembers"`
+	GroupMemberHardLimit   int `json:"groupMemberHardLimit,omitempty"`
+	RecallWindowSec        int `json:"recallWindowSec"`
+	MaxForwardTargets      int `json:"maxForwardTargets"`
+	MaxNicknameLen         int `json:"maxNicknameLen"`
 }
 
 type SystemLimitsRequest struct {
 	Limits *SystemLimits `json:"limits" binding:"required"`
 	Reason string        `json:"reason" binding:"required"`
+}
+
+type GroupLimitImpact struct {
+	ConfiguredAboveLimit int64 `json:"configuredAboveLimit"`
+	CurrentlyOverLimit   int64 `json:"currentlyOverLimit"`
 }
 
 // FeatureFlags 功能开关（供 meta /features 返回，APP 端读取）

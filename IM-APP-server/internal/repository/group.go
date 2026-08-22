@@ -15,8 +15,90 @@ import (
 )
 
 type GroupRepo struct {
-	DB                *pgxpool.Pool
-	LegacyChatEnabled bool
+	DB                   *pgxpool.Pool
+	LegacyChatEnabled    bool
+	GroupMemberHardLimit int
+}
+
+type publishedGroupLimits struct {
+	MaxGroupMembers        int `json:"maxGroupMembers"`
+	DefaultGroupMaxMembers int `json:"defaultGroupMaxMembers"`
+}
+
+func (r *GroupRepo) hardGroupLimit() int {
+	if r.GroupMemberHardLimit < 3 {
+		return 4000
+	}
+	return r.GroupMemberHardLimit
+}
+
+func (r *GroupRepo) publishedGroupLimits(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}) publishedGroupLimits {
+	limits := publishedGroupLimits{MaxGroupMembers: 500, DefaultGroupMaxMembers: 200}
+	var raw string
+	err := q.QueryRow(ctx, `SELECT data_json FROM app_config_versions
+		WHERE status='published' ORDER BY version DESC, id DESC LIMIT 1`).Scan(&raw)
+	if err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &limits)
+	}
+	hard := r.hardGroupLimit()
+	if limits.MaxGroupMembers < 3 || limits.MaxGroupMembers > hard {
+		limits.MaxGroupMembers = hard
+	}
+	if limits.DefaultGroupMaxMembers < 3 {
+		limits.DefaultGroupMaxMembers = 200
+		if limits.DefaultGroupMaxMembers > limits.MaxGroupMembers {
+			limits.DefaultGroupMaxMembers = limits.MaxGroupMembers
+		}
+	}
+	if limits.DefaultGroupMaxMembers > limits.MaxGroupMembers {
+		limits.DefaultGroupMaxMembers = limits.MaxGroupMembers
+	}
+	return limits
+}
+
+func (r *GroupRepo) effectiveGroupLimit(ctx context.Context, tx pgx.Tx, configured int) int {
+	limits := r.publishedGroupLimits(ctx, tx)
+	effective := configured
+	if effective < 3 {
+		effective = limits.DefaultGroupMaxMembers
+	}
+	if effective > limits.MaxGroupMembers {
+		effective = limits.MaxGroupMembers
+	}
+	if effective > r.hardGroupLimit() {
+		effective = r.hardGroupLimit()
+	}
+	return effective
+}
+
+func (r *GroupRepo) UpdateMemberLimitByAdmin(ctx context.Context, groupID, adminID string, newLimit int, reason string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var oldLimit, memberCount int
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(max_members,200),
+		(SELECT COUNT(*) FROM group_members WHERE group_id=g.id)
+		FROM groups g WHERE id=$1::uuid FOR UPDATE`, groupID).Scan(&oldLimit, &memberCount); err != nil {
+		return err
+	}
+	limits := r.publishedGroupLimits(ctx, tx)
+	if newLimit < 3 || newLimit > limits.MaxGroupMembers || newLimit > r.hardGroupLimit() {
+		return ErrInvalidGroupOperation
+	}
+	if _, err := tx.Exec(ctx, `UPDATE groups SET max_members=$2 WHERE id=$1::uuid`, groupID, newLimit); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO group_member_limit_logs(
+		group_id,old_limit,new_limit,member_count_snapshot,platform_limit_snapshot,operator_type,operator_id,reason)
+		VALUES($1::uuid,$2,$3,$4,$5,'admin',$6::uuid,$7)`,
+		groupID, oldLimit, newLimit, memberCount, limits.MaxGroupMembers, adminID, reason); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // InternalIDByPublicID resolves the short numeric ID used by clients to the
@@ -71,6 +153,18 @@ func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs 
 		return models.GroupInfo{}, err
 	}
 	defer tx.Rollback(ctx)
+	limits := r.publishedGroupLimits(ctx, tx)
+	uniqueCount := 1
+	seenForLimit := map[string]bool{ownerID: true}
+	for _, id := range memberIDs {
+		if !seenForLimit[id] {
+			seenForLimit[id] = true
+			uniqueCount++
+		}
+	}
+	if uniqueCount > limits.DefaultGroupMaxMembers {
+		return models.GroupInfo{}, ErrGroupFull
+	}
 	var validMembers int
 	if err := tx.QueryRow(ctx, `
 		SELECT COUNT(*) FROM users
@@ -94,9 +188,9 @@ func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs 
 
 	var groupID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO groups(name, avatar, owner_id, conversation_id, allow_member_add_friend)
-		VALUES($1, '', $2::uuid, NULLIF($3,'')::uuid, true)
-		RETURNING id::text`, name, ownerID, convID).Scan(&groupID)
+		INSERT INTO groups(name, avatar, owner_id, conversation_id, allow_member_add_friend, max_members)
+		VALUES($1, '', $2::uuid, NULLIF($3,'')::uuid, true, $4)
+		RETURNING id::text`, name, ownerID, convID, limits.DefaultGroupMaxMembers).Scan(&groupID)
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
@@ -160,8 +254,9 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 	var g models.GroupInfo
 	var allow bool
 	err := r.DB.QueryRow(ctx, `
-		SELECT g.public_id, g.name, COALESCE(g.avatar,''), g.owner_id::text,
+		SELECT g.public_id, g.name, COALESCE(g.avatar,''), g.owner_id::text, COALESCE(owner.nickname,''),
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
+			COALESCE(g.max_members,200),
 			COALESCE(g.announcement,''), COALESCE(g.allow_member_add_friend, true),
 			COALESCE(g.conversation_id::text,''),
 			gm.role, COALESCE(gm.nickname,''), COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false),
@@ -169,8 +264,9 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 		COALESCE((SELECT remark FROM group_remarks gr WHERE gr.user_id=$2::uuid AND gr.group_id=g.id),'')
 		FROM groups g
 		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2::uuid
+		LEFT JOIN users owner ON owner.id=g.owner_id
 		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID, uid).Scan(
-		&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.MemberCount,
+		&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.OwnerName, &g.MemberCount, &g.MaxMembers,
 		&g.Announcement, &allow, &g.ConversationID, &g.MyRole, &g.MyNickname,
 		&g.JoinMode, &g.AllMuted, &g.MutedUntil, &g.Remark)
 	g.AllowMemberAddFriend = allow
@@ -251,9 +347,10 @@ func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJ
 	}
 	defer tx.Rollback(ctx)
 	var convID, joinMode string
+	var configuredMax int
 	err = tx.QueryRow(ctx, `
-		SELECT COALESCE(conversation_id::text,''), join_mode
-		FROM groups WHERE id=$1 AND status='active' FOR UPDATE`, groupID).Scan(&convID, &joinMode)
+		SELECT COALESCE(conversation_id::text,''), join_mode, COALESCE(max_members,200)
+		FROM groups WHERE id=$1 AND status='active' FOR UPDATE`, groupID).Scan(&convID, &joinMode, &configuredMax)
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
@@ -270,15 +367,12 @@ func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJ
 	if enforceJoinMode && joinMode == "approval" {
 		return models.GroupInfo{}, ErrApprovalRequired
 	}
-	// 校验群成员上限（024 扩展列 groups.max_members）
-	var curCount, maxMembers int
+	// 单群配置、已发布平台配置、环境技术硬上限取最小值。
+	var curCount int
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM group_members WHERE group_id=$1`, groupID).Scan(&curCount); err != nil {
 		return models.GroupInfo{}, err
 	}
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(max_members,200) FROM groups WHERE id=$1::uuid`, groupID).Scan(&maxMembers); err != nil {
-		return models.GroupInfo{}, err
-	}
-	if curCount >= maxMembers {
+	if curCount >= r.effectiveGroupLimit(ctx, tx, configuredMax) {
 		return models.GroupInfo{}, ErrGroupFull
 	}
 	_, err = tx.Exec(ctx, `
@@ -940,9 +1034,10 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 	defer tx.Rollback(ctx)
 
 	var convID, status string
+	var configuredMax int
 	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(conversation_id::text,''), status
-		FROM groups WHERE id=$1::uuid FOR UPDATE`, groupID).Scan(&convID, &status); err != nil {
+		SELECT COALESCE(conversation_id::text,''), status, COALESCE(max_members,200)
+		FROM groups WHERE id=$1::uuid FOR UPDATE`, groupID).Scan(&convID, &status, &configuredMax); err != nil {
 		return 0, err
 	}
 	if status != "active" {
@@ -950,7 +1045,7 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 	}
 
 	seen := map[string]bool{uid: true}
-	count := 0
+	candidates := make([]string, 0, len(userIDs))
 	for _, rawID := range userIDs {
 		inviteeID := strings.TrimSpace(rawID)
 		if inviteeID == "" || seen[inviteeID] {
@@ -984,7 +1079,18 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 		if alreadyMember {
 			continue
 		}
+		candidates = append(candidates, inviteeID)
+	}
+	var currentCount int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM group_members WHERE group_id=$1::uuid`, groupID).Scan(&currentCount); err != nil {
+		return 0, err
+	}
+	if currentCount+len(candidates) > r.effectiveGroupLimit(ctx, tx, configuredMax) {
+		return 0, ErrGroupFull
+	}
 
+	count := 0
+	for _, inviteeID := range candidates {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO group_members(group_id, user_id, role)
 			VALUES($1::uuid,$2::uuid,'member')
@@ -1016,14 +1122,18 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 
 func (r *GroupRepo) AcceptInvitation(ctx context.Context, uid, token string) (models.GroupInfo, error) {
 	var groupID string
-	err := r.DB.QueryRow(ctx, `
-		UPDATE group_invitations SET status='accepted', handled_at=NOW()
-		WHERE token=$1 AND invitee_id=$2::uuid AND status='pending'
-		RETURNING group_id::text`, token, uid).Scan(&groupID)
+	err := r.DB.QueryRow(ctx, `SELECT group_id::text FROM group_invitations
+		WHERE token=$1 AND invitee_id=$2::uuid AND status='pending'`, token, uid).Scan(&groupID)
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
-	return r.addMember(ctx, groupID, uid, false, "invite")
+	group, err := r.addMember(ctx, groupID, uid, false, "invite")
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	_, err = r.DB.Exec(ctx, `UPDATE group_invitations SET status='accepted', handled_at=NOW()
+		WHERE token=$1 AND invitee_id=$2::uuid AND status='pending'`, token, uid)
+	return group, err
 }
 
 func (r *GroupRepo) UpdateMyNickname(ctx context.Context, groupID, uid, nickname string) error {
@@ -1192,14 +1302,18 @@ func (r *GroupRepo) ApproveJoinRequest(ctx context.Context, groupID, uid, reques
 		return models.GroupInfo{}, ErrForbidden
 	}
 	var applicantID string
-	err = r.DB.QueryRow(ctx, `
-		UPDATE group_join_requests SET status='approved', handler_id=$3::uuid, handled_at=NOW()
-		WHERE id=$1::uuid AND group_id=$2::uuid AND status='pending'
-		RETURNING user_id::text`, requestID, groupID, uid).Scan(&applicantID)
+	err = r.DB.QueryRow(ctx, `SELECT user_id::text FROM group_join_requests
+		WHERE id=$1::uuid AND group_id=$2::uuid AND status='pending'`, requestID, groupID).Scan(&applicantID)
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
-	return r.addMember(ctx, groupID, applicantID, false, "join")
+	group, err := r.addMember(ctx, groupID, applicantID, false, "join")
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	_, err = r.DB.Exec(ctx, `UPDATE group_join_requests SET status='approved', handler_id=$3::uuid, handled_at=NOW()
+		WHERE id=$1::uuid AND group_id=$2::uuid AND status='pending'`, requestID, groupID, uid)
+	return group, err
 }
 
 func (r *GroupRepo) RejectJoinRequest(ctx context.Context, groupID, uid, requestID string) error {

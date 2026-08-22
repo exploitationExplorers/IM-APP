@@ -240,22 +240,31 @@ func (h *IMHandler) RecallMessage(c *gin.Context) {
 	response.OK(c, result)
 }
 
-// MessageReadStatus 查询发送者自己的群消息的已读状态（已读人数 / 已读成员）。
-func (h *IMHandler) MessageReadStatus(c *gin.Context) {
+// ReportGroupReadCursor 上报当前阅读者自己的群会话已读游标。
+func (h *IMHandler) ReportGroupReadCursor(c *gin.Context) {
 	var req struct {
-		ConversationID string                     `json:"conversationID"`
-		Messages       []service.MessageReadQuery `json:"messages"`
+		ConversationID string `json:"conversationId"`
 	}
 	if err := bindBusinessJSON(c, &req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "请求体格式错误")
 		return
 	}
-	results, err := h.Service.MessageReadStatus(c.Request.Context(), middleware.UserID(c), req.ConversationID, req.Messages)
+	seq, err := h.Service.ReportGroupReadCursor(c.Request.Context(), middleware.UserID(c), req.ConversationID)
 	if err != nil {
 		h.handleIMError(c, err)
 		return
 	}
-	response.OK(c, results)
+	response.OK(c, gin.H{"hasReadSeq": seq})
+}
+
+// GroupReadState 返回其他成员的最大已读游标；不会遍历群成员或调用 OpenIM。
+func (h *IMHandler) GroupReadState(c *gin.Context) {
+	result, err := h.Service.GroupReadState(c.Request.Context(), middleware.UserID(c), c.Query("conversationId"))
+	if err != nil {
+		h.handleIMError(c, err)
+		return
+	}
+	response.OK(c, result)
 }
 
 // parsePeer 从路径参数解析 peerType/peerId，并校验 peerType 合法性。
