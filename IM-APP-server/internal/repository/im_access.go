@@ -106,6 +106,41 @@ func (r *IMAccessRepo) RecordMessageAudit(ctx context.Context, command, serverMs
 	return err
 }
 
+// SendFailureRecord 一条消息发送失败记录（客户端上报 / beforeSend 拒绝）。
+// sender_id / target_id 为可空业务 UUID，空串写入 NULL。
+type SendFailureRecord struct {
+	ClientMsgID    string
+	Source         string // client | before_hook
+	SenderID       string // 业务用户 UUID（可空串）
+	SenderIMID     string
+	PeerType       string // c2c | group
+	TargetID       string // 业务用户/群 UUID（可空串）
+	TargetIMID     string
+	ContentType    int
+	Stage          string // create|upload|send|timeout|blocked
+	FailCode       string
+	FailMessage    string
+	ClientPlatform string
+	AppVersion     string
+	OccurredAt     *time.Time // 可空，nil 时用 NOW()
+}
+
+// RecordSendFailure 写入一条发送失败记录，按 (client_msg_id, stage) 幂等（唯一索引冲突忽略）。
+// 写库失败由调用方决定是否忽略（webhook 拒绝分支为 best-effort）。
+func (r *IMAccessRepo) RecordSendFailure(ctx context.Context, f SendFailureRecord) error {
+	_, err := r.DB.Exec(ctx, `
+		INSERT INTO im_message_send_failures(
+			client_msg_id, source, sender_id, sender_im_id, peer_type,
+			target_id, target_im_id, content_type, stage, fail_code, fail_message,
+			client_platform, app_version, occurred_at)
+		VALUES($1,$2,NULLIF($3,'')::uuid,$4,$5,NULLIF($6,'')::uuid,$7,$8,$9,$10,$11,$12,$13,COALESCE($14, NOW()))
+		ON CONFLICT (client_msg_id, stage) WHERE client_msg_id <> '' DO NOTHING`,
+		f.ClientMsgID, f.Source, f.SenderID, f.SenderIMID, f.PeerType,
+		f.TargetID, f.TargetIMID, f.ContentType, f.Stage, f.FailCode, f.FailMessage,
+		f.ClientPlatform, f.AppVersion, f.OccurredAt)
+	return err
+}
+
 // FindAuditByClientMsgID 按 client_msg_id 反查消息审计（用于撤回定位 OpenIM 消息的 conversation_id + seq）
 func (r *IMAccessRepo) FindAuditByClientMsgID(ctx context.Context, clientMsgID string) (conversationID string, seq int64, found bool, err error) {
 	err = r.DB.QueryRow(ctx, `

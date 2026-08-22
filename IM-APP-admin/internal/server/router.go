@@ -143,6 +143,10 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.GET("/forward-queue-metrics", middleware.RequirePermission(rbacRepo, "forward.read"), d.OpsH.GetForwardQueueMetrics)
 			auth.PUT("/forward-settings", middleware.RequirePermission(rbacRepo, "forward.settings.write"), d.OpsH.SetForwardSettings)
 
+			// 消息发送记录与失败排查（读核心库 im_message_audit / im_message_send_failures）
+			auth.GET("/messages", middleware.RequirePermission(rbacRepo, "messages.audit.read"), d.OpsH.ListMessages)
+			auth.GET("/messages/failures", middleware.RequirePermission(rbacRepo, "messages.audit.read"), d.OpsH.ListMessageFailures)
+
 			// 模块 07：国家与短信运营
 			auth.GET("/countries", middleware.RequirePermission(rbacRepo, "countries.read"), d.OpsH.ListCountries)
 			auth.POST("/countries", middleware.RequirePermission(rbacRepo, "countries.write"), d.OpsH.CreateCountry)

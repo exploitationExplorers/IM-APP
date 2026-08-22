@@ -349,6 +349,7 @@ func main() {
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
 			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
 			auth.POST("/im/messages/recall", imH.RecallMessage)
+			auth.POST("/im/message-send-failures", imH.ReportSendFailure)
 			auth.POST("/im/group-read-cursors/report", imH.ReportGroupReadCursor)
 			auth.GET("/im/group-read-state", imH.GroupReadState)
 			auth.POST("/im/conversations/:peerType/:peerId/read", imH.MarkConversationRead)

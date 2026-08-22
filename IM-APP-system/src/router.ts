@@ -62,6 +62,11 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "转发风控", activeMenu: "/forward-risk" },
       },
       {
+        path: "messages/send-records",
+        component: () => import("./views/messageAudit/MessageAuditView.vue"),
+        meta: { title: "消息发送记录", activeMenu: "/messages/send-records" },
+      },
+      {
         path: "app-config/app-versions",
         component: () => import("./views/appConfig/AppVersionsView.vue"),
         meta: { title: "APP配置-APP版本", icon: "Iphone" },

@@ -13,7 +13,7 @@ import IMSDK, {
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
-import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
+import { fetchIMToken, resolveIMGroup, reportSendFailure, type IMTokenResult } from '@/api/im'
 import { getToken } from '@/utils/request'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
@@ -734,10 +734,69 @@ async function sendCreatedMessage(
   if (isAppPlatform) {
     return sendOnAppNative(method, params, message.clientMsgID, options.timeoutMs)
   }
-  const sent = await imCall<unknown>(method, params)
-  if (!isMessageItem(sent)) throw new Error('发送失败')
-  if (sent.status === MessageStatus.Failed) throw new Error('发送失败')
+  const sent = await imCall<unknown>(method, params).catch((err: unknown) => {
+    reportTargetSendFailure(target, message, 'send', 'send_failed', (err as Error)?.message)
+    throw err
+  })
+  if (!isMessageItem(sent) || sent.status === MessageStatus.Failed) {
+    reportTargetSendFailure(target, message, 'send', 'send_failed', '发送失败')
+    throw new Error('发送失败')
+  }
   return sent
+}
+
+/**
+ * 基于 IMTarget + 已创建消息的失败上报（best-effort），用于 web/非原生发送路径。
+ */
+function reportTargetSendFailure(
+  target: IMTarget,
+  message: MessageItem,
+  stage: string,
+  failCode: string,
+  failMessage?: string,
+): void {
+  try {
+    const isGroup = target.sessionType !== SessionType.Single
+    void reportSendFailure({
+      clientMsgId: message?.clientMsgID,
+      peerType: isGroup ? 'group' : 'c2c',
+      targetId: isGroup ? target.groupId : target.recvId,
+      contentType: message?.contentType,
+      stage,
+      failCode,
+      failMessage: failMessage || '发送失败',
+      platform: 'h5',
+    })
+  } catch {
+    /* 上报构造异常也不得影响发送流程 */
+  }
+}
+
+/**
+ * App 原生发送失败/超时统一上报（best-effort）。
+ * params 内含 recvID/groupID（OpenIM id）与 message.contentType，据此还原会话类型与目标。
+ * 超时归 timeout 阶段（视频大文件超时的主要形态），其余归 send。
+ */
+function reportAppNativeSendFailure(params: unknown, clientMsgID: string, err?: Error): void {
+  try {
+    const p = (params ?? {}) as { recvID?: string; groupID?: string; message?: { contentType?: number } }
+    const groupID = String(p.groupID ?? '').trim()
+    const recvID = String(p.recvID ?? '').trim()
+    const message = String(err?.message ?? '').trim()
+    const isTimeout = /超时|timeout/i.test(message)
+    void reportSendFailure({
+      clientMsgId: clientMsgID,
+      peerType: groupID ? 'group' : 'c2c',
+      targetId: groupID || recvID,
+      contentType: p.message?.contentType,
+      stage: isTimeout ? 'timeout' : 'send',
+      failCode: isTimeout ? 'send_timeout' : 'send_failed',
+      failMessage: message || '发送失败',
+      platform: 'app',
+    })
+  } catch {
+    /* 上报构造异常也不得影响发送流程 */
+  }
 }
 
 /**
@@ -776,7 +835,9 @@ function sendOnAppNative(
           return
         }
       }
-      reject(err || new Error('发送失败'))
+      const failure = err || new Error('发送失败')
+      reportAppNativeSendFailure(params, clientMsgID, failure)
+      reject(failure)
     }
     const timer = setTimeout(() => {
       if (isVideo) console.warn('[video][send] TIMEOUT 未收到成功/失败回调', { clientMsgID, waitMs })
