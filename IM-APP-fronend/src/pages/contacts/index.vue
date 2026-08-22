@@ -11,6 +11,7 @@ import { useTabBar } from '@/composables/useTabBar'
 import type { Contact, ContactListSort, GroupPreview } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { openQrScanner } from '@/utils/qrcode'
+import { readFriendRequestBadge } from '@/utils/friend-request-badge'
 
 useAuthGuard()
 useTabBar()
@@ -18,9 +19,10 @@ useTabBar()
 const statusBarHeight = getStatusBarHeight()
 const contactStore = useContactStore()
 const { contacts, contactTotal, contactHasMore, contactsLoading, groups, pendingFriendRequestCount } = storeToRefs(contactStore)
+const storageFriendBadge = ref(readFriendRequestBadge())
 
 const friendRequestBadge = computed(() => {
-  const n = pendingFriendRequestCount.value
+  const n = Math.max(pendingFriendRequestCount.value, storageFriendBadge.value)
   if (n <= 0) return ''
   return n > 99 ? '99+' : String(n)
 })
@@ -59,6 +61,7 @@ function refreshDirectory() {
 
 /** 切回通讯录页面时刷新群列表与好友申请角标 */
 onShow(() => {
+  storageFriendBadge.value = readFriendRequestBadge()
   void refreshDirectory()
 })
 

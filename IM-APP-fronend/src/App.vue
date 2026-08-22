@@ -25,8 +25,9 @@ onLaunch(() => {
 onShow(() => {
   setupAppAuthGuard()
   void checkAndPromptAppUpdate()
-  // App 回前台时同步待处理好友申请（H5 切 tab 会刷，原生 App 常停在聊天页）
-  if (getToken()) {
+  const userStore = useUserStore()
+  const token = userStore.token || getToken()
+  if (token) {
     void useContactStore().loadFriendRequests().catch(() => undefined)
   }
 })

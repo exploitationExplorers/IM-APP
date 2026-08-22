@@ -206,6 +206,13 @@ func (h *ContactHandler) ListGroups(c *gin.Context) {
 func (h *ContactHandler) ListFriendRequests(c *gin.Context) {
 	uid := middleware.UserID(c)
 	direction := c.Query("direction")
+	if direction == "" && c.Request.Method == http.MethodPost {
+		var req struct {
+			Direction string `json:"direction"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		direction = req.Direction
+	}
 	list, err := h.Svc.ListFriendRequests(c.Request.Context(), uid, direction)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "查询失败")

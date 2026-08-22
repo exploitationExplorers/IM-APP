@@ -2,7 +2,7 @@
     "version" : "1.0",
     "configurations" : [
         {
-            "customPlaygroundType" : "device",
+            "customPlaygroundType" : "local",
             "packageName" : "uni.app.UNIEC9D1AE",
             "playground" : "custom",
             "type" : "uni-app:app-android"
