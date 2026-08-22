@@ -207,6 +207,21 @@ func (h *IMHandler) ClearConversationMessages(c *gin.Context) {
 	response.OK(c, gin.H{"ok": true, "scope": "self"})
 }
 
+// ReportSendFailure 接收客户端上报的发送失败记录。sender 取自 JWT，落库幂等。
+// 上报为 best-effort：入参不合法直接 400，落库失败返回 500，但不影响客户端主流程。
+func (h *IMHandler) ReportSendFailure(c *gin.Context) {
+	var req models.ReportSendFailureRequest
+	if err := bindBusinessJSON(c, &req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+	if err := h.Service.ReportSendFailure(c.Request.Context(), middleware.UserID(c), req); err != nil {
+		response.Fail(c, http.StatusInternalServerError, "上报失败")
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
 func (h *IMHandler) RecallMessage(c *gin.Context) {
 	var req models.RecallMessageRequest
 	if err := bindBusinessJSON(c, &req); err != nil {

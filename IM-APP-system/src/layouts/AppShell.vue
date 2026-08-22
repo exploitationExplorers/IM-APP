@@ -105,6 +105,10 @@ onMounted(async () => {
                   <el-icon><Warning /></el-icon>
                   <template #title>转发风控</template>
                 </el-menu-item>
+                <el-menu-item index="/messages/send-records">
+                  <el-icon><Message /></el-icon>
+                  <template #title>消息发送记录</template>
+                </el-menu-item>
               </el-sub-menu>
               <el-sub-menu index="/app-config">
                 <template #title>

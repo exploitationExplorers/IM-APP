@@ -612,6 +612,60 @@ func (s *IMService) ClearConversationMessages(ctx context.Context, userID, peerT
 	return s.Client.ClearConversationMessages(ctx, target.OpUserID, []string{target.ConversationID})
 }
 
+// ReportSendFailure 落库一条客户端上报的发送失败记录。
+// sender 身份取自 JWT 的 userID（业务 UUID），忽略请求体伪造；
+// target 兼容业务 UUID 与 OpenIM id 两种写法；按 client_msg_id+stage 幂等。
+func (s *IMService) ReportSendFailure(ctx context.Context, userID string, req models.ReportSendFailureRequest) error {
+	peerType := strings.TrimSpace(req.PeerType)
+	if peerType != "c2c" && peerType != "group" {
+		peerType = "c2c"
+	}
+
+	// sender：JWT userID 为业务 UUID，解析出 OpenIM id；解析失败则不落 sender_id（保持 best-effort）。
+	senderID := userID
+	senderIMID, err := im.UserIDFromBusinessID(userID)
+	if err != nil {
+		senderID, senderIMID = "", ""
+	}
+
+	// target：可能是业务 UUID（转 OpenIM id）或 OpenIM id（反解业务 UUID）。
+	var targetID, targetIMID string
+	if raw := strings.TrimSpace(req.TargetID); raw != "" {
+		if imID, err := im.UserIDFromBusinessID(raw); err == nil {
+			targetID, targetIMID = raw, imID
+		} else if bizID, err := im.BusinessIDFromUserID(raw); err == nil {
+			targetID, targetIMID = bizID, strings.ToLower(raw)
+		} else {
+			targetIMID = raw
+		}
+	}
+
+	// occurredAt：RFC3339 可空，解析失败交由 DB 用 NOW()。
+	var occurredAt *time.Time
+	if raw := strings.TrimSpace(req.OccurredAt); raw != "" {
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			occurredAt = &t
+		}
+	}
+
+	return s.Access.RecordSendFailure(ctx, repository.SendFailureRecord{
+		ClientMsgID:    strings.TrimSpace(req.ClientMsgID),
+		Source:         "client",
+		SenderID:       senderID,
+		SenderIMID:     senderIMID,
+		PeerType:       peerType,
+		TargetID:       targetID,
+		TargetIMID:     targetIMID,
+		ContentType:    req.ContentType,
+		Stage:          strings.TrimSpace(req.Stage),
+		FailCode:       strings.TrimSpace(req.FailCode),
+		FailMessage:    strings.TrimSpace(req.FailMessage),
+		ClientPlatform: strings.TrimSpace(req.Platform),
+		AppVersion:     strings.TrimSpace(req.AppVersion),
+		OccurredAt:     occurredAt,
+	})
+}
+
 func (s *IMService) RecallMessage(ctx context.Context, userID string, req models.RecallMessageRequest) (models.MessageRecallResult, error) {
 	result := models.MessageRecallResult{
 		PeerType: req.PeerType, PeerID: req.PeerID, ClientMsgID: req.ClientMsgID,

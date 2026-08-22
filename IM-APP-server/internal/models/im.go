@@ -120,3 +120,18 @@ type MessageRecallResult struct {
 	AlreadyRecalled bool      `json:"alreadyRecalled"`
 	RecalledAt      time.Time `json:"recalledAt"`
 }
+
+// ReportSendFailureRequest 客户端上报的一条发送失败记录（POST /im/message-send-failures）。
+// 字段与设计文档 5.1 对齐；sender 身份不取此结构，由 JWT 解析。
+type ReportSendFailureRequest struct {
+	ClientMsgID string `json:"clientMsgId"`
+	PeerType    string `json:"peerType"`    // c2c | group
+	TargetID    string `json:"targetId"`    // 业务 UUID 或 OpenIM id
+	ContentType int    `json:"contentType"` // OpenIM 数字类型
+	Stage       string `json:"stage"`       // create|upload|send|timeout
+	FailCode    string `json:"failCode"`
+	FailMessage string `json:"failMessage"`
+	Platform    string `json:"platform"`
+	AppVersion  string `json:"appVersion"`
+	OccurredAt  string `json:"occurredAt"` // RFC3339，可空
+}

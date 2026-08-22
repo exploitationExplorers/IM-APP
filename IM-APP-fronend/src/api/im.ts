@@ -131,3 +131,36 @@ export async function unregisterPushToken(deviceToken: string): Promise<{ ok: bo
     data: { deviceToken },
   })
 }
+
+/** 发送失败上报入参。sender 由服务端从 JWT 解析，前端不传。 */
+export interface ReportSendFailureInput {
+  clientMsgId?: string
+  peerType: 'c2c' | 'group'
+  /** 业务 UUID 或 OpenIM id 均可，服务端会双向解析 */
+  targetId?: string
+  contentType?: number
+  /** create | upload | send | timeout */
+  stage?: string
+  failCode?: string
+  failMessage?: string
+  platform?: string
+  appVersion?: string
+  /** RFC3339，可空，缺省服务端 NOW() */
+  occurredAt?: string
+}
+
+/**
+ * 上报一条客户端发送失败记录（管理后台「发送失败」可见）。
+ * best-effort：上报自身失败绝不影响用户发送流程，静默吞掉异常。
+ */
+export async function reportSendFailure(input: ReportSendFailureInput): Promise<void> {
+  try {
+    await request<{ ok: boolean }>({
+      url: '/im/message-send-failures',
+      method: 'POST',
+      data: input,
+    })
+  } catch {
+    /* 静默失败，不打扰用户 */
+  }
+}

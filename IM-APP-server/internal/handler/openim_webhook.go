@@ -91,10 +91,11 @@ func (h *OpenIMWebhookHandler) BeforeSingle(c *gin.Context) {
 		if reason == "" {
 			reason = "chat is not allowed"
 		}
+		h.recordBeforeHookFailure(c.Request.Context(), req, "c2c", senderID, receiverID, reason)
 		c.JSON(http.StatusOK, denyWebhook(reason))
 		return
 	}
-	if h.checkMessageRestriction(c, senderID) {
+	if h.checkMessageRestriction(c, req, "c2c", senderID, receiverID) {
 		return
 	}
 	c.JSON(http.StatusOK, allowWebhook())
@@ -131,23 +132,53 @@ func (h *OpenIMWebhookHandler) BeforeGroup(c *gin.Context) {
 		if reason == "" {
 			reason = "group chat is not allowed"
 		}
+		h.recordBeforeHookFailure(c.Request.Context(), req, "group", senderID, groupID, reason)
 		c.JSON(http.StatusOK, denyWebhook(reason))
 		return
 	}
-	if h.checkMessageRestriction(c, senderID) {
+	if h.checkMessageRestriction(c, req, "group", senderID, groupID) {
 		return
 	}
 	c.JSON(http.StatusOK, allowWebhook())
 }
 
-// checkMessageRestriction 检查发送者是否被管理端限制发消息（message 限制；命中则 deny 并返回 true）
-func (h *OpenIMWebhookHandler) checkMessageRestriction(c *gin.Context, senderID string) bool {
+// recordBeforeHookFailure best-effort 记录一条 beforeSend 拒绝的失败记录。
+// 写库失败仅记日志、绝不阻断回调响应（拒绝语义已由 denyWebhook 保证）。
+func (h *OpenIMWebhookHandler) recordBeforeHookFailure(ctx context.Context, req openIMWebhookMessage, peerType, senderID, targetID, reason string) {
+	if h.Access == nil {
+		return
+	}
+	targetIMID := req.RecvID
+	if peerType == "group" {
+		targetIMID = req.GroupID
+	}
+	if err := h.Access.RecordSendFailure(ctx, repository.SendFailureRecord{
+		ClientMsgID: req.ClientMsgID,
+		Source:      "before_hook",
+		SenderID:    senderID,
+		SenderIMID:  req.SendID,
+		PeerType:    peerType,
+		TargetID:    targetID,
+		TargetIMID:  targetIMID,
+		ContentType: req.ContentType,
+		Stage:       "blocked",
+		FailCode:    reason,
+		FailMessage: reason,
+	}); err != nil {
+		log.Printf("openim webhook: record before-hook failure failed: %v", err)
+	}
+}
+
+// checkMessageRestriction 检查发送者是否被管理端限制发消息（message 限制；命中则落库 + deny 并返回 true）
+func (h *OpenIMWebhookHandler) checkMessageRestriction(c *gin.Context, req openIMWebhookMessage, peerType, senderID, targetID string) bool {
 	if h.Restrictions == nil {
 		return false
 	}
 	_, _, messageBanned, err := h.Restrictions.UserRestrictions(c.Request.Context(), senderID)
 	if err == nil && messageBanned {
-		c.JSON(http.StatusOK, denyWebhook("message restricted by admin"))
+		reason := "message restricted by admin"
+		h.recordBeforeHookFailure(c.Request.Context(), req, peerType, senderID, targetID, reason)
+		c.JSON(http.StatusOK, denyWebhook(reason))
 		return true
 	}
 	return false
