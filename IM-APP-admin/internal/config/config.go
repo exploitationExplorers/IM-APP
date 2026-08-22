@@ -32,31 +32,41 @@ type Config struct {
 	RequestIDHeader string
 
 	// 与 server 服务的内部调用（方案 A：写操作走 server 执行业务 + OpenIM 同步）
-	ServerBaseURL     string // server 地址，如 http://127.0.0.1:8080
-	ServerInternalKey string // 与 server 的 IM_INTERNAL_API_KEY 一致
+	ServerBaseURL        string // server 地址，如 http://127.0.0.1:8080
+	ServerInternalKey    string // 与 server 的 IM_INTERNAL_API_KEY 一致
+	GroupMemberHardLimit int    // 技术安全上限，仅环境变量可改
 }
 
 func Load() Config {
 	return Config{
-		HTTPAddr:           getenv("HTTP_ADDR", ":8081"),
+		HTTPAddr: getenv("HTTP_ADDR", ":8081"),
 		// 默认值不携带口令，避免弱默认口令被复用；生产必须显式配置 DATABASE_URL
-		DatabaseURL:        getenv("DATABASE_URL", "postgres://im@127.0.0.1:5433/im_app?sslmode=disable"),
-		AdminJWTSecret:     adminJWTSecret(),
-		JWTIssuer:          "im-admin",
-		JWTAudience:        "im-admin-web",
-		AccessTokenTTL:     durationEnv("ADMIN_ACCESS_TTL", 2*time.Hour),
-		RefreshTokenTTL:    durationEnv("ADMIN_REFRESH_TTL", 7*24*time.Hour),
-		LoginFailThreshold: intEnv("ADMIN_LOGIN_FAIL_THRESHOLD", 5),
-		LoginLockMinutes:   intEnv("ADMIN_LOGIN_LOCK_MINUTES", 15),
-		BootstrapPassword:  rawEnv("ADMIN_BOOTSTRAP_PASSWORD"),
-		BootstrapUsername:  getenv("ADMIN_BOOTSTRAP_USERNAME", "admin"),
-		CORSOrigins:        splitCSV(getenv("ADMIN_CORS_ORIGINS", "http://localhost:5180")),
-		MaxBodyBytes:       1 << 20, // 1MB
-		TrustedProxies:     splitCSV(getenv("ADMIN_TRUSTED_PROXIES", "")),
-		RequestIDHeader:    "X-Request-Id",
-		ServerBaseURL:      getenv("SERVER_BASE_URL", ""),
-		ServerInternalKey:  getenv("SERVER_INTERNAL_KEY", ""),
+		DatabaseURL:          getenv("DATABASE_URL", "postgres://im@127.0.0.1:5433/im_app?sslmode=disable"),
+		AdminJWTSecret:       adminJWTSecret(),
+		JWTIssuer:            "im-admin",
+		JWTAudience:          "im-admin-web",
+		AccessTokenTTL:       durationEnv("ADMIN_ACCESS_TTL", 2*time.Hour),
+		RefreshTokenTTL:      durationEnv("ADMIN_REFRESH_TTL", 7*24*time.Hour),
+		LoginFailThreshold:   intEnv("ADMIN_LOGIN_FAIL_THRESHOLD", 5),
+		LoginLockMinutes:     intEnv("ADMIN_LOGIN_LOCK_MINUTES", 15),
+		BootstrapPassword:    rawEnv("ADMIN_BOOTSTRAP_PASSWORD"),
+		BootstrapUsername:    getenv("ADMIN_BOOTSTRAP_USERNAME", "admin"),
+		CORSOrigins:          splitCSV(getenv("ADMIN_CORS_ORIGINS", "http://localhost:5180")),
+		MaxBodyBytes:         1 << 20, // 1MB
+		TrustedProxies:       splitCSV(getenv("ADMIN_TRUSTED_PROXIES", "")),
+		RequestIDHeader:      "X-Request-Id",
+		ServerBaseURL:        getenv("SERVER_BASE_URL", ""),
+		ServerInternalKey:    getenv("SERVER_INTERNAL_KEY", ""),
+		GroupMemberHardLimit: positiveIntEnv("GROUP_MEMBER_HARD_LIMIT", 4000),
 	}
+}
+
+func positiveIntEnv(key string, fallback int) int {
+	n := intEnv(key, fallback)
+	if n < 3 {
+		return fallback
+	}
+	return n
 }
 
 // fileEnv 从同目录 .env 文件加载的键值（系统环境变量优先，.env 兜底）

@@ -7,7 +7,9 @@ type GroupInfo struct {
 	Name                 string            `json:"name"`
 	Avatar               string            `json:"avatar"`
 	OwnerID              string            `json:"ownerId"`
+	OwnerName            string            `json:"ownerName,omitempty"`
 	MemberCount          int               `json:"memberCount"`
+	MaxMembers           int               `json:"maxMembers"`
 	Announcement         string            `json:"announcement,omitempty"`
 	AllowMemberAddFriend bool              `json:"allowMemberAddFriend"`
 	ConversationID       string            `json:"conversationId,omitempty"`

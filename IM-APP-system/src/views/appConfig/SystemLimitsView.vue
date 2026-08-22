@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, shallowRef } from "vue";
 import { ElMessage } from "element-plus";
 
-import { AppConfig, getSystemLimitsApi, postSystemLimitsPublishApi, putSystemLimitsDraftApi } from "@/api/modules/appConfig";
+import { AppConfig, getGroupLimitImpactApi, getSystemLimitsApi, postSystemLimitsPublishApi, putSystemLimitsDraftApi } from "@/api/modules/appConfig";
 
 type ActionMode = "draft" | "publish";
 
@@ -15,6 +15,8 @@ const formModel = reactive<AppConfig.SystemLimits>({
   maxFileSizeMb: 0,
   maxForwardTargets: 0,
   maxGroupMembers: 0,
+  defaultGroupMaxMembers: 0,
+  groupMemberHardLimit: 4000,
   maxNicknameLen: 0,
   recallWindowSec: 0,
 });
@@ -23,6 +25,7 @@ const actionVisible = shallowRef(false);
 const actionLoading = shallowRef(false);
 const actionMode = shallowRef<ActionMode>("draft");
 const actionReason = shallowRef("");
+const groupImpact = shallowRef<AppConfig.GroupLimitImpact | null>(null);
 
 const actionTitle = computed(() => (actionMode.value === "draft" ? "保存系统限制草稿" : "发布系统限制配置"));
 
@@ -42,19 +45,29 @@ function applyPublished(): void {
   formModel.maxFileSizeMb = limits.maxFileSizeMb ?? 0;
   formModel.maxForwardTargets = limits.maxForwardTargets ?? 0;
   formModel.maxGroupMembers = limits.maxGroupMembers ?? 0;
+  formModel.defaultGroupMaxMembers = limits.defaultGroupMaxMembers ?? 0;
+  formModel.groupMemberHardLimit = limits.groupMemberHardLimit ?? 4000;
   formModel.maxNicknameLen = limits.maxNicknameLen ?? 0;
   formModel.recallWindowSec = limits.recallWindowSec ?? 0;
 }
 
-function openAction(mode: ActionMode): void {
+async function openAction(mode: ActionMode): Promise<void> {
   actionMode.value = mode;
   actionReason.value = "";
   actionVisible.value = true;
+  groupImpact.value = null;
+  if (mode === "publish" && formModel.maxGroupMembers) {
+    try { groupImpact.value = (await getGroupLimitImpactApi(formModel.maxGroupMembers)).data ?? null; } catch { /* 发布接口仍会做最终校验 */ }
+  }
 }
 
 async function submitAction(): Promise<void> {
   if (!actionReason.value.trim()) {
     ElMessage.warning("请填写操作原因");
+    return;
+  }
+  if ((formModel.defaultGroupMaxMembers ?? 0) > (formModel.maxGroupMembers ?? 0)) {
+    ElMessage.warning("新群默认上限不能超过平台群人数上限");
     return;
   }
   actionLoading.value = true;
@@ -65,6 +78,7 @@ async function submitAction(): Promise<void> {
           maxFileSizeMb: formModel.maxFileSizeMb,
           maxForwardTargets: formModel.maxForwardTargets,
           maxGroupMembers: formModel.maxGroupMembers,
+          defaultGroupMaxMembers: formModel.defaultGroupMaxMembers,
           maxNicknameLen: formModel.maxNicknameLen,
           recallWindowSec: formModel.recallWindowSec,
         },
@@ -115,7 +129,11 @@ onMounted(() => {
           <el-input-number v-model="formModel.maxForwardTargets" :min="0" :max="999999" />
         </el-form-item>
         <el-form-item label="单群成员数上限">
-          <el-input-number v-model="formModel.maxGroupMembers" :min="0" :max="9999999" />
+          <el-input-number v-model="formModel.maxGroupMembers" :min="3" :max="formModel.groupMemberHardLimit || 4000" />
+          <el-text type="info" class="limit-tip">技术安全上限 {{ formModel.groupMemberHardLimit || 4000 }}（环境变量控制）</el-text>
+        </el-form-item>
+        <el-form-item label="新建群默认人数上限">
+          <el-input-number v-model="formModel.defaultGroupMaxMembers" :min="3" :max="formModel.maxGroupMembers || 3" />
         </el-form-item>
         <el-form-item label="昵称最大长度">
           <el-input-number v-model="formModel.maxNicknameLen" :min="0" :max="9999" />
@@ -127,6 +145,13 @@ onMounted(() => {
     </el-card>
 
     <el-dialog v-model="actionVisible" :title="actionTitle" width="560px" destroy-on-close>
+	  <el-alert
+		v-if="actionMode === 'publish' && groupImpact"
+		type="warning"
+		:closable="false"
+		show-icon
+		:title="`发布后 ${groupImpact.configuredAboveLimit} 个群的单群配置会被平台上限截断；${groupImpact.currentlyOverLimit} 个群将进入只出不进状态。`"
+	  />
       <el-form label-width="90px">
         <el-form-item label="操作原因" required>
           <el-input
@@ -161,5 +186,6 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 10px;
 }
+.limit-tip { margin-left: 12px; }
 </style>
 

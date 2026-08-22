@@ -53,7 +53,7 @@ func (s *ContactService) ListGroups(ctx context.Context, uid, role string) ([]mo
 	return s.Contacts.ListGroups(ctx, uid, role)
 }
 
-func (s *ContactService) ListFriendRequests(ctx context.Context, uid, direction string) ([]models.FriendRequest, error) {
+func (s *ContactService) ListFriendRequests(ctx context.Context, uid, direction string) (models.FriendRequestList, error) {
 	if direction == "" {
 		direction = "received"
 	}

@@ -105,32 +105,11 @@ func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]model
 
 const friendRequestListLimit = 100
 
-func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction string) ([]models.FriendRequest, error) {
-	var query string
-	if direction == "sent" {
-		query = `
-			SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
-				fr.message, fr.status, fr.created_at
-			FROM friend_requests fr
-			JOIN users u ON u.id = fr.to_user
-			WHERE fr.from_user=$1 AND fr.status='pending'
-			ORDER BY fr.created_at DESC
-			LIMIT $2`
-	} else {
-		query = `
-			SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
-				fr.message, fr.status, fr.created_at
-			FROM friend_requests fr
-			JOIN users u ON u.id = fr.from_user
-			WHERE fr.to_user=$1 AND fr.status='pending'
-			ORDER BY fr.created_at DESC
-			LIMIT $2`
-	}
-	rows, err := r.DB.Query(ctx, query, uid, friendRequestListLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+const friendRequestSelectReceived = `
+	SELECT fr.id::text, u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar,
+		fr.message, fr.status, fr.created_at`
+
+func scanFriendRequestRows(rows pgx.Rows) ([]models.FriendRequest, error) {
 	list := make([]models.FriendRequest, 0)
 	for rows.Next() {
 		var fr models.FriendRequest
@@ -141,6 +120,77 @@ func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction str
 		list = append(list, fr)
 	}
 	return list, rows.Err()
+}
+
+func (r *ContactRepo) ListFriendRequests(ctx context.Context, uid, direction string) (models.FriendRequestList, error) {
+	empty := models.FriendRequestList{Pending: []models.FriendRequest{}, Recent: []models.FriendRequest{}}
+	if direction == "sent" {
+		rows, err := r.DB.Query(ctx, `
+			`+friendRequestSelectReceived+`
+			FROM (
+				SELECT DISTINCT ON (to_user) * FROM friend_requests
+				WHERE from_user=$1 AND status='pending'
+				ORDER BY to_user, created_at DESC, id DESC
+			) fr
+			JOIN users u ON u.id = fr.to_user
+			ORDER BY fr.created_at DESC
+			LIMIT $2`, uid, friendRequestListLimit)
+		if err != nil {
+			return empty, err
+		}
+		defer rows.Close()
+		pending, err := scanFriendRequestRows(rows)
+		if err != nil {
+			return empty, err
+		}
+		empty.Pending = pending
+		return empty, nil
+	}
+
+	pendingRows, err := r.DB.Query(ctx, `
+		`+friendRequestSelectReceived+`
+		FROM (
+			SELECT DISTINCT ON (from_user) * FROM friend_requests
+			WHERE to_user=$1 AND status='pending'
+			ORDER BY from_user, created_at DESC, id DESC
+		) fr
+		JOIN users u ON u.id = fr.from_user
+		ORDER BY fr.created_at DESC
+		LIMIT $2`, uid, friendRequestListLimit)
+	if err != nil {
+		return empty, err
+	}
+	defer pendingRows.Close()
+	pending, err := scanFriendRequestRows(pendingRows)
+	if err != nil {
+		return empty, err
+	}
+
+	recentRows, err := r.DB.Query(ctx, `
+		`+friendRequestSelectReceived+`
+		FROM (
+			SELECT DISTINCT ON (from_user) * FROM friend_requests
+			WHERE to_user=$1
+				AND status IN ('accepted', 'rejected')
+				AND from_user NOT IN (
+					SELECT from_user FROM friend_requests
+					WHERE to_user=$1 AND status='pending'
+				)
+			ORDER BY from_user, created_at DESC, id DESC
+		) fr
+		JOIN users u ON u.id = fr.from_user
+		ORDER BY fr.created_at DESC
+		LIMIT $2`, uid, friendRequestListLimit)
+	if err != nil {
+		return empty, err
+	}
+	defer recentRows.Close()
+	recent, err := scanFriendRequestRows(recentRows)
+	if err != nil {
+		return empty, err
+	}
+
+	return models.FriendRequestList{Pending: pending, Recent: recent}, nil
 }
 
 func (r *ContactRepo) IsFriend(ctx context.Context, uid, friendID string) (bool, error) {
@@ -160,6 +210,9 @@ func (r *ContactRepo) CreateFriendRequest(ctx context.Context, fromID, toID, mes
 	err := r.DB.QueryRow(ctx, `
 		INSERT INTO friend_requests(from_user, to_user, message, status, source, source_group_id)
 		VALUES($1,$2,$3,'pending',$4,$5)
+		ON CONFLICT (from_user, to_user) WHERE status='pending'
+		DO UPDATE SET message=EXCLUDED.message, source=EXCLUDED.source,
+			source_group_id=EXCLUDED.source_group_id, created_at=NOW()
 		RETURNING id::text`, fromID, toID, message, source, groupID).Scan(&id)
 	return id, err
 }
@@ -280,6 +333,12 @@ func (r *ContactRepo) AcceptFriendRequest(ctx context.Context, requestID, uid st
 		WHERE id=$1 AND to_user=$2 AND status='pending'
 		RETURNING from_user::text, to_user::text`, requestID, uid).Scan(&fromID, &toID)
 	if err != nil {
+		return err
+	}
+	// 兼容唯一索引上线前产生的重复申请：接受任意一条后，同一方向全部结束。
+	if _, err = tx.Exec(ctx, `
+		UPDATE friend_requests SET status='accepted'
+		WHERE from_user=$1::uuid AND to_user=$2::uuid AND status='pending'`, fromID, toID); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `

@@ -28,6 +28,10 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	}
 	g, err := h.Svc.Create(c.Request.Context(), uid, req.Name, req.MemberIDs)
 	if err != nil {
+		if errors.Is(err, repository.ErrGroupFull) {
+			response.Fail(c, http.StatusConflict, "建群成员数超过当前群人数上限")
+			return
+		}
 		if errors.Is(err, repository.ErrInvalidGroupOperation) {
 			response.Fail(c, http.StatusBadRequest, "创建群聊至少需要 3 名有效成员（包含群主）")
 			return
@@ -129,6 +133,10 @@ func (h *GroupHandler) Join(c *gin.Context) {
 	uid := middleware.UserID(c)
 	g, err := h.Svc.Join(c.Request.Context(), c.Param("id"), uid)
 	if err != nil {
+		if errors.Is(err, repository.ErrGroupFull) {
+			response.Fail(c, http.StatusConflict, "群人数已达上限")
+			return
+		}
 		if errors.Is(err, repository.ErrApprovalRequired) {
 			response.Fail(c, http.StatusConflict, "该群需要管理员审核，请提交入群申请")
 			return
@@ -233,6 +241,8 @@ func (h *GroupHandler) JoinByQRCode(c *gin.Context) {
 	result, err := h.Svc.JoinByQRCode(c.Request.Context(), middleware.UserID(c), token, req.Remark)
 	if err != nil {
 		switch {
+		case errors.Is(err, repository.ErrGroupFull):
+			response.Fail(c, http.StatusConflict, "群人数已达上限")
 		case errors.Is(err, repository.ErrInvalidGroupOperation):
 			response.Fail(c, http.StatusBadRequest, "参数错误")
 		case errors.Is(err, repository.ErrApprovalRequired), errors.Is(err, repository.ErrJoinRequestFailed):
@@ -303,6 +313,10 @@ func (h *GroupHandler) InviteMembers(c *gin.Context) {
 	}
 	count, err := h.Svc.InviteMembers(c.Request.Context(), c.Param("id"), uid, req.UserIDs)
 	if err != nil {
+		if errors.Is(err, repository.ErrGroupFull) {
+			response.Fail(c, http.StatusConflict, "群人数已达上限，本批邀请未添加任何成员")
+			return
+		}
 		if errors.Is(err, repository.ErrForbidden) {
 			response.Fail(c, http.StatusForbidden, "无权限")
 			return
@@ -317,6 +331,10 @@ func (h *GroupHandler) AcceptInvitation(c *gin.Context) {
 	uid := middleware.UserID(c)
 	g, err := h.Svc.AcceptInvitation(c.Request.Context(), uid, c.Param("token"))
 	if err != nil {
+		if errors.Is(err, repository.ErrGroupFull) {
+			response.Fail(c, http.StatusConflict, "群人数已达上限")
+			return
+		}
 		response.Fail(c, http.StatusBadRequest, "邀请无效或已过期")
 		return
 	}
@@ -362,6 +380,10 @@ func (h *GroupHandler) ApproveJoinRequest(c *gin.Context) {
 	uid := middleware.UserID(c)
 	g, err := h.Svc.ApproveJoinRequest(c.Request.Context(), c.Param("id"), uid, c.Param("requestId"))
 	if err != nil {
+		if errors.Is(err, repository.ErrGroupFull) {
+			response.Fail(c, http.StatusConflict, "群人数已达上限")
+			return
+		}
 		response.Fail(c, http.StatusBadRequest, "操作失败")
 		return
 	}

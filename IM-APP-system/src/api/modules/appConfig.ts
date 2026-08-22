@@ -104,6 +104,8 @@ export namespace AppConfig {
     maxFileSizeMb?: number;
     maxForwardTargets?: number;
     maxGroupMembers?: number;
+    defaultGroupMaxMembers?: number;
+    groupMemberHardLimit?: number;
     maxNicknameLen?: number;
     recallWindowSec?: number;
   }
@@ -115,6 +117,10 @@ export namespace AppConfig {
 
   export interface ReqPublishSystemLimitsBody {
     reason: string;
+  }
+  export interface GroupLimitImpact {
+    configuredAboveLimit: number;
+    currentlyOverLimit: number;
   }
 }
 
@@ -169,6 +175,10 @@ export const putReportReasonStatusApi = (id: string, body: AppConfig.ReqUpdateRe
 
 export const getSystemLimitsApi = () => {
   return http.get<AppConfig.SystemLimits>(SYSTEM_LIMITS_BASE, undefined, { loading: false });
+};
+
+export const getGroupLimitImpactApi = (maxGroupMembers: number) => {
+  return http.get<AppConfig.GroupLimitImpact>(`${SYSTEM_LIMITS_BASE}/group-impact`, { maxGroupMembers }, { loading: false });
 };
 
 export const putSystemLimitsDraftApi = (body: AppConfig.ReqSaveSystemLimitsDraftBody) => {

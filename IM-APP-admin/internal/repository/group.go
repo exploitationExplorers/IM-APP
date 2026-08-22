@@ -96,25 +96,33 @@ func (r *DataRepo) GetGroupDetail(ctx context.Context, groupID string) (*models.
 	return &g, nil
 }
 
-func (r *DataRepo) ListGroupMembers(ctx context.Context, groupID string) ([]models.AppGroupMember, error) {
+func (r *DataRepo) ListGroupMembers(ctx context.Context, groupID, keyword string, limit, offset int) ([]models.AppGroupMember, int64, error) {
+	pattern := "%" + keyword + "%"
+	var total int64
+	if err := r.DB.QueryRow(ctx, `SELECT COUNT(*) FROM group_members gm JOIN users u ON u.id=gm.user_id
+		WHERE gm.group_id=$1::uuid AND ($2='' OR u.nickname ILIKE $3 OR gm.user_id::text=$2)`, groupID, keyword, pattern).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := r.DB.Query(ctx, `
 		SELECT gm.user_id::text, COALESCE(u.nickname,''), COALESCE(gm.role,'member'),
 		       gm.muted_until, gm.joined_at
 		FROM group_members gm JOIN users u ON u.id=gm.user_id
-		WHERE gm.group_id=$1::uuid`, groupID)
+		WHERE gm.group_id=$1::uuid AND ($2='' OR u.nickname ILIKE $3 OR gm.user_id::text=$2)
+		ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, gm.joined_at
+		LIMIT $4 OFFSET $5`, groupID, keyword, pattern, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	out := make([]models.AppGroupMember, 0)
 	for rows.Next() {
 		var m models.AppGroupMember
 		if err := rows.Scan(&m.UserID, &m.Nickname, &m.Role, &m.MutedUntil, &m.JoinedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, m)
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // logGroupStatus 记录群状态变更到 group_status_logs（不扩展 groups 表）

@@ -17,7 +17,9 @@ export interface GroupInfo {
   name: string
   avatar: string
   ownerId: string
+  ownerName?: string
   memberCount: number
+  maxMembers?: number
   announcement?: string
   allowMemberAddFriend?: boolean
   /** 关联的群聊会话 ID */

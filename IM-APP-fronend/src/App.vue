@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
+import { useContactStore } from '@/stores/contact'
 import { setupAppAuthGuard } from '@/composables/useAuthGuard'
 import { checkAndPromptAppUpdate } from '@/composables/useAppUpdate'
 import { getStatusBarHeight } from '@/utils/status-bar'
+import { getToken } from '@/utils/request'
 
 onLaunch(() => {
   const userStore = useUserStore()
@@ -23,6 +25,10 @@ onLaunch(() => {
 onShow(() => {
   setupAppAuthGuard()
   void checkAndPromptAppUpdate()
+  // App 回前台时同步待处理好友申请（H5 切 tab 会刷，原生 App 常停在聊天页）
+  if (getToken()) {
+    void useContactStore().loadFriendRequests().catch(() => undefined)
+  }
 })
 </script>
 

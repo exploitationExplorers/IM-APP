@@ -105,6 +105,12 @@ type FriendRequest struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+/** 收到的好友申请：待处理 + 近期已处理（对齐参考站好友申请页） */
+type FriendRequestList struct {
+	Pending []FriendRequest `json:"pending"`
+	Recent  []FriendRequest `json:"recent"`
+}
+
 // PrivacySettings 对齐参考站：默认加好友无需验证
 type PrivacySettings struct {
 	RequireFriendApproval bool `json:"requireFriendApproval"`

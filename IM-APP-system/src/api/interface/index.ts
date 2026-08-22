@@ -340,6 +340,7 @@ export namespace Groups {
   }
 
   export interface GroupDetail extends GroupItem {
+	maxMembers?: number;
     allowMemberAddFriend?: boolean;
     announcement?: string;
     joinMode?: string;
