@@ -1326,6 +1326,7 @@ function pickFavorite() {
           <input
             class="input"
             v-model="input"
+            :maxlength="-1"
             :confirm-type="confirmType"
             placeholder="输入消息"
             placeholder-style="color:#B0B0B0"

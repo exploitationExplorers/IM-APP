@@ -655,6 +655,7 @@ function stopRecord() {
           <input
             v-model="input"
             class="input"
+            :maxlength="-1"
             :placeholder="props.placeholder || '输入消息'"
             :confirm-type="confirmType"
             placeholder-style="color:#B0B0B0"
