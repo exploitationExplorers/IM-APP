@@ -588,11 +588,13 @@ export async function collectHistoryMessages(
 
 /** 只清当前用户本端及云端副本，不影响其他人设备 */
 export async function clearConversationMessages(conversationID: string): Promise<void> {
-  try {
-    await imCall('clearConversationAndDeleteAllMsg' as IMMethods, conversationID)
-  } catch {
-    await imCall('clearConversationMsgs' as IMMethods, conversationID)
-  }
+  // H5 client-sdk 没有 clearConversationAndDeleteAllMsg；调用不存在的方法会在
+  // SDK 代理层抛出 "Cannot read properties of undefined (reading 'apply')"。
+  // App 原生插件则继续使用已经验证可用的 ClearConversationAndDeleteAllMsg。
+  const method = isAppPlatform
+    ? IMMethods.ClearConversationAndDeleteAllMsg
+    : IMMethods.DeleteConversationAndDeleteAllMsg
+  await imCall(method, conversationID)
 }
 
 /** 会话已全部读完时 OpenIM 报 hasReadSeq equal max，对调用方等价于成功 */
@@ -886,7 +888,13 @@ async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<st
   if (snapshotPath) return toNativeFullPath(snapshotPath)
   try {
     const cover = await IMSDK.getVideoCover?.(videoPath)
-    if (typeof cover === 'string' && cover) return toNativeFullPath(cover)
+    const path =
+      typeof cover === 'string'
+        ? cover
+        : cover && typeof cover === 'object'
+          ? pickString(cover as Record<string, unknown>, ['path', 'snapshotPath', 'coverPath'])
+          : ''
+    if (path) return toNativeFullPath(path)
   } catch {
     /* 封面失败仍发视频 */
   }
@@ -1279,7 +1287,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     notificationKind: notificationKind || undefined,
     quote: quotePreviewOf(item),
     hasRead: messageIsRead(item),
-    seq: Number((item as { seq?: number }).seq || 0) || undefined,
+    seq: seqOf(item) || undefined,
     status:
       item.status === MessageStatus.Failed
         ? 'failed'
@@ -1361,21 +1369,16 @@ function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
 function jsonVideoMeta(raw: unknown): { url: string; snapshotUrl: string; duration: number } {
   if (raw && typeof raw === 'object') {
     const obj = raw as Record<string, unknown>
-    if (obj.videoElem && typeof obj.videoElem === 'object') {
-      const nested = jsonVideoMeta(obj.videoElem)
+    const elem = obj.videoElem ?? obj.VideoElem
+    if (elem) {
+      const nested = jsonVideoMeta(elem)
       if (nested.url || nested.snapshotUrl) return nested
     }
     const url =
-      (typeof obj.videoUrl === 'string' && obj.videoUrl) ||
-      (typeof obj.videoPath === 'string' && obj.videoPath) ||
-      (typeof obj.url === 'string' && obj.url) ||
-      (typeof obj.sourceUrl === 'string' && obj.sourceUrl) ||
-      ''
+      pickString(obj, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'videoPath', 'VideoPath', 'url', 'URL', 'sourceUrl'])
     const snapshotUrl =
-      (typeof obj.snapshotUrl === 'string' && obj.snapshotUrl) ||
-      (typeof obj.snapshotPath === 'string' && obj.snapshotPath) ||
-      ''
-    return { url, snapshotUrl, duration: Number(obj.duration || 0) }
+      pickString(obj, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL', 'snapshotPath', 'SnapshotPath'])
+    return { url, snapshotUrl, duration: Number(obj.duration ?? obj.Duration ?? 0) }
   }
   if (typeof raw === 'string' && raw) {
     if (raw[0] !== '{') return { url: raw, snapshotUrl: '', duration: 0 }
@@ -1535,6 +1538,7 @@ function extractContent(item: MessageItem): string {
     case MessageType.FileMessage:
       return item.fileElem?.sourceUrl || ''
     case MessageType.VideoMessage: {
+      const fromNative = jsonVideoMeta(item as unknown)
       const fromElem = {
         url: item.videoElem?.videoUrl || item.videoElem?.videoPath || '',
         snapshotUrl: item.videoElem?.snapshotUrl || item.videoElem?.snapshotPath || '',
@@ -1542,9 +1546,9 @@ function extractContent(item: MessageItem): string {
       }
       const fromJson = jsonVideoMeta(item.content)
       return JSON.stringify({
-        url: fromElem.url || fromJson.url,
-        snapshotUrl: fromElem.snapshotUrl || fromJson.snapshotUrl,
-        duration: fromElem.duration || fromJson.duration,
+        url: fromElem.url || fromNative.url || fromJson.url,
+        snapshotUrl: fromElem.snapshotUrl || fromNative.snapshotUrl || fromJson.snapshotUrl,
+        duration: fromElem.duration || fromNative.duration || fromJson.duration,
       })
     }
     case MessageType.CardMessage: {
@@ -1627,12 +1631,19 @@ function coerceMessage(raw: unknown): MessageItem | null {
   const clientMsgID = pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
   if (!clientMsgID) return null
   const contentType = Number(obj.contentType ?? obj.ContentType ?? 0)
-  return {
+  const item = {
     ...(obj as unknown as MessageItem),
     clientMsgID,
     seq: seqOf(obj),
     contentType: Number.isFinite(contentType) ? contentType : 0,
   }
+  // OpenIM App 原生桥在部分版本中使用 PascalCase，统一成 Web SDK 的字段名，
+  // 后续渲染、收藏和转发就不需要各自判断平台。
+  const videoElem = obj.videoElem ?? obj.VideoElem
+  if (!item.videoElem && videoElem && typeof videoElem === 'object') {
+    item.videoElem = videoElem as MessageItem['videoElem']
+  }
+  return item
 }
 
 function parseFindMessageResult(res: unknown, clientMsgID: string): MessageItem | null {

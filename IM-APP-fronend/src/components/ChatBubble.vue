@@ -7,6 +7,7 @@ let activeVoiceStopper: (() => void) | null = null
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, MessageQuote } from '@/types'
+import { parseVideoMeta } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -95,20 +96,7 @@ function previewImage() {
 
 const videoMeta = computed(() => {
   if (props.message.type !== 'video') return { url: '', snapshotUrl: '', duration: 0 }
-  try {
-    const parsed = JSON.parse(props.message.content) as {
-      url?: string
-      snapshotUrl?: string
-      duration?: number
-    }
-    return {
-      url: parsed.url || '',
-      snapshotUrl: parsed.snapshotUrl || '',
-      duration: Number(parsed.duration || 0),
-    }
-  } catch {
-    return { url: props.message.content, snapshotUrl: '', duration: 0 }
-  }
+  return parseVideoMeta(props.message.content)
 })
 
 const videoPoster = computed(() =>
