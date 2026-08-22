@@ -19,6 +19,7 @@ import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
 import { formatIMNotification, imNotificationEventKey, notificationKindOf } from '@/utils/im-notification'
 import { highlightTagsOf } from '@/utils/group-announcement'
+import { parseVideoMeta, videoSnapshotTime } from '@/utils/chatMedia'
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
 export interface IMTarget {
@@ -887,7 +888,10 @@ function videoDurationSeconds(duration: number): number {
 async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<string> {
   if (snapshotPath) return toNativeFullPath(snapshotPath)
   try {
-    const cover = await IMSDK.getVideoCover?.(videoPath)
+    const cover = await Promise.race([
+      IMSDK.getVideoCover?.(videoPath),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8000)),
+    ])
     const path =
       typeof cover === 'string'
         ? cover
@@ -899,6 +903,110 @@ async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<st
     /* 封面失败仍发视频 */
   }
   return ''
+}
+
+interface VideoSnapshotFile {
+  file: File
+  width: number
+  height: number
+}
+
+/**
+ * H5 的 chooseVideo 通常不返回 thumbTempFilePath，因此必须由浏览器解码本地视频并截帧。
+ * 取 10% 处（最多 1 秒）的画面，避开不少视频开头的黑帧；长边限制为 720，控制上传大小。
+ */
+async function createH5VideoSnapshot(videoFile: File): Promise<VideoSnapshotFile | null> {
+  // #ifdef H5
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    const objectUrl = URL.createObjectURL(videoFile)
+    let settled = false
+    let timer = 0
+
+    const finish = (result: VideoSnapshotFile | null) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+      video.remove()
+      URL.revokeObjectURL(objectUrl)
+      resolve(result)
+    }
+
+    const capture = () => {
+      const sourceWidth = video.videoWidth
+      const sourceHeight = video.videoHeight
+      if (!sourceWidth || !sourceHeight) {
+        finish(null)
+        return
+      }
+      const scale = Math.min(1, 720 / Math.max(sourceWidth, sourceHeight))
+      const width = Math.max(1, Math.round(sourceWidth * scale))
+      const height = Math.max(1, Math.round(sourceHeight * scale))
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d')
+      if (!context) {
+        finish(null)
+        return
+      }
+      try {
+        context.drawImage(video, 0, 0, width, height)
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              finish(null)
+              return
+            }
+            finish({
+              file: new File([blob], `video_cover_${Date.now()}.jpg`, { type: 'image/jpeg' }),
+              width,
+              height,
+            })
+          },
+          'image/jpeg',
+          0.82,
+        )
+      } catch {
+        finish(null)
+      }
+    }
+
+    video.muted = true
+    video.preload = 'auto'
+    video.playsInline = true
+    video.setAttribute('playsinline', 'true')
+    video.setAttribute('webkit-playsinline', 'true')
+    video.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0'
+    video.onerror = () => finish(null)
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : 0
+      const target = videoSnapshotTime(duration)
+      if (target > 0.01) {
+        video.onseeked = capture
+        try {
+          video.currentTime = target
+        } catch {
+          video.onloadeddata = capture
+        }
+      } else if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        capture()
+      } else {
+        video.onloadeddata = capture
+      }
+    }
+    timer = window.setTimeout(() => finish(null), 10000)
+    document.body.appendChild(video)
+    video.src = objectUrl
+    video.load()
+  })
+  // #endif
+  // #ifndef H5
+  return null
+  // #endif
 }
 
 function persistTempMedia(filePath: string): Promise<string> {
@@ -915,6 +1023,10 @@ function videoElemSendable(message: MessageItem): boolean {
   return !!(message.videoElem?.videoUrl || message.videoElem?.videoPath)
 }
 
+function videoElemHasSnapshot(message: MessageItem): boolean {
+  return !!parseVideoMeta(message).snapshotUrl
+}
+
 async function sendUploadedVideoMessage(
   target: IMTarget,
   videoPath: string,
@@ -923,14 +1035,18 @@ async function sendUploadedVideoMessage(
 ): Promise<MessageItem> {
   const uploaded = await uploadFileFromPath(videoPath, `video_${Date.now()}.mp4`, 'video/mp4')
   let snapshotUrl = ''
+  let snapshotSize = 0
+  let snapshotWidth = 0
+  let snapshotHeight = 0
   if (snapshotPath) {
-    try {
-      const cover = await uploadFileFromPath(snapshotPath, `video_cover_${Date.now()}.jpg`, 'image/jpeg')
-      snapshotUrl = cover.url
-    } catch {
-      /* 无封面仍发视频 */
-    }
+    const cover = await uploadFileFromPath(snapshotPath, `video_cover_${Date.now()}.jpg`, 'image/jpeg')
+    snapshotUrl = cover.url
+    snapshotSize = cover.size
+    const dimensions = await imageSizeOf(snapshotPath)
+    snapshotWidth = dimensions.width
+    snapshotHeight = dimensions.height
   }
+  if (!snapshotUrl) throw new Error('视频封面上传失败')
   const message = await imCall<MessageItem>(IMMethods.CreateVideoMessageByURL, {
     videoPath: '',
     duration: seconds,
@@ -940,10 +1056,10 @@ async function sendUploadedVideoMessage(
     videoUrl: uploaded.url,
     videoSize: uploaded.size,
     snapshotUUID: IMSDK.uuid(),
-    snapshotSize: 0,
+    snapshotSize,
     snapshotUrl,
-    snapshotWidth: 0,
-    snapshotHeight: 0,
+    snapshotWidth,
+    snapshotHeight,
   })
   return sendCreatedMessage(target, message, { alreadyUploaded: true, timeoutMs: 30000 })
 }
@@ -960,9 +1076,12 @@ export async function sendVideoMessage(
 ): Promise<MessageItem> {
   const seconds = videoDurationSeconds(duration)
   if (isAppPlatform) {
+    // 原生取帧插件对 chooseVideo 的原始临时路径兼容性最好，保存后的 _doc 路径作为后备。
+    let snap = await snapshotOfVideo(filePath, snapshotPath)
     const saved = await persistTempMedia(filePath)
     const videoPath = toNativeFullPath(saved)
-    const snap = await snapshotOfVideo(videoPath, snapshotPath)
+    if (!snap) snap = await snapshotOfVideo(videoPath)
+    if (!snap) throw new Error('无法提取视频封面，请重新选择视频')
     console.log('[video][send] app 路径', {
       filePath,
       saved,
@@ -986,22 +1105,45 @@ export async function sendVideoMessage(
     } catch {
       message = await imCall<MessageItem>(IMMethods.CreateVideoMessageFromFullPath, videoPath)
     }
-    if (!videoElemSendable(message)) {
+    if (!videoElemSendable(message) || !videoElemHasSnapshot(message)) {
       return sendUploadedVideoMessage(target, videoPath, seconds, snap)
     }
     return sendCreatedMessage(target, message, { timeoutMs: 180000 })
   }
   const file = await pathToFile(filePath)
-  const url = await uploadFile(file)
   let snapshotUrl = ''
+  let snapshotSize = 0
+  let snapshotWidth = 0
+  let snapshotHeight = 0
   if (snapshotPath) {
     try {
       const coverFile = await pathToFile(snapshotPath)
       snapshotUrl = await uploadFile(coverFile)
-    } catch {
-      /* 无封面仍发视频 */
+      snapshotSize = coverFile.size
+      const dimensions = await imageSizeOf(snapshotPath)
+      snapshotWidth = dimensions.width
+      snapshotHeight = dimensions.height
+    } catch (error) {
+      console.warn('[video][cover] H5 自带封面上传失败，将重新截帧', (error as Error)?.message)
     }
   }
+  if (!snapshotUrl) {
+    const generated = await createH5VideoSnapshot(file)
+    if (generated) {
+      try {
+        snapshotUrl = await uploadFile(generated.file)
+        snapshotSize = generated.file.size
+        snapshotWidth = generated.width
+        snapshotHeight = generated.height
+      } catch (error) {
+        console.warn('[video][cover] H5 截帧上传失败', (error as Error)?.message)
+      }
+    } else {
+      console.warn('[video][cover] H5 无法从所选视频提取画面')
+    }
+  }
+  if (!snapshotUrl) throw new Error('无法生成视频封面，请确认浏览器支持该视频格式')
+  const url = await uploadFile(file)
   const message = await imCall<MessageItem>(IMMethods.CreateVideoMessageByURL, {
     videoPath: '',
     duration: seconds,
@@ -1011,10 +1153,10 @@ export async function sendVideoMessage(
     videoUrl: url,
     videoSize: file.size,
     snapshotUUID: IMSDK.uuid(),
-    snapshotSize: 0,
+    snapshotSize,
     snapshotUrl,
-    snapshotWidth: 0,
-    snapshotHeight: 0,
+    snapshotWidth,
+    snapshotHeight,
   })
   return sendCreatedMessage(target, message, { alreadyUploaded: true })
 }

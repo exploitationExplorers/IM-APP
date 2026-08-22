@@ -99,8 +99,12 @@ export const useChatStore = defineStore('chat', () => {
    * 必须全平台落盘：H5 的 uniPlatform 可能是 web 而非 h5，仅判断 h5 会导致不写存储，刷新后全回来。
    */
   const HIDDEN_KEY_PREFIX = 'chat:hidden-conversations:'
+  const EXITED_GROUP_KEY_PREFIX = 'chat:exited-group-conversations:'
   function hiddenStorageKey() {
     return `${HIDDEN_KEY_PREFIX}${imUserId.value || 'anon'}`
+  }
+  function exitedGroupStorageKey() {
+    return `${EXITED_GROUP_KEY_PREFIX}${imUserId.value || 'anon'}`
   }
   function normalizeHiddenIdList(raw: unknown): string[] {
     const fromArr = (arr: unknown[]) =>
@@ -135,10 +139,34 @@ export const useChatStore = defineStore('chat', () => {
   }
   const hiddenIds = readHiddenIds()
 
+  function readExitedGroupIds(): Set<string> {
+    try {
+      return new Set(normalizeHiddenIdList(uni.getStorageSync(exitedGroupStorageKey())))
+    } catch {
+      return new Set()
+    }
+  }
+
+  function writeExitedGroupIds(ids: Set<string>) {
+    try {
+      uni.setStorageSync(exitedGroupStorageKey(), Array.from(ids))
+    } catch {
+      /* 忽略 */
+    }
+  }
+
+  const exitedGroupIds = readExitedGroupIds()
+
   function syncHiddenIdsFromStorage() {
     const stored = readHiddenIds()
     hiddenIds.clear()
     stored.forEach((id) => hiddenIds.add(id))
+  }
+
+  function syncExitedGroupIdsFromStorage() {
+    const stored = readExitedGroupIds()
+    exitedGroupIds.clear()
+    stored.forEach((id) => exitedGroupIds.add(id))
   }
 
   function unhideConversation(conversationId: string) {
@@ -149,8 +177,11 @@ export const useChatStore = defineStore('chat', () => {
 
   watch(imUserId, () => {
     syncHiddenIdsFromStorage()
+    syncExitedGroupIdsFromStorage()
     if (conversations.value.length) {
-      conversations.value = conversations.value.filter((c) => !hiddenIds.has(c.id))
+      conversations.value = conversations.value.filter(
+        (c) => !hiddenIds.has(c.id) && !exitedGroupIds.has(c.id),
+      )
     }
   })
 
@@ -213,6 +244,10 @@ export const useChatStore = defineStore('chat', () => {
 
   function appendMessage(item: MessageItem) {
     if (!item?.clientMsgID) return
+    const incomingConversationId = conversationIdOf(item)
+    // 退出群与普通“删除会话”不同：OpenIM 异步退群完成前仍可能推送尾部消息，
+    // 这些消息不能把已经退出的群重新插回会话列表。
+    if (incomingConversationId && exitedGroupIds.has(incomingConversationId)) return
     rememberRaw(item)
     const message = toChatMessage(item)
     if (!message.conversationId) return
@@ -281,7 +316,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!items.length) return
     const incoming = items
       .map((item) => decorateConversation(toConversation(item)))
-      .filter((conv) => !hiddenIds.has(conv.id))
+      .filter((conv) => !hiddenIds.has(conv.id) && !exitedGroupIds.has(conv.id))
     if (!incoming.length) return
     const merged = [...conversations.value]
     incoming.forEach((conv) => {
@@ -417,7 +452,7 @@ export const useChatStore = defineStore('chat', () => {
         list
           .filter((item) => {
             const id = (item as { conversationID?: string }).conversationID || ''
-            return !hiddenIds.has(id)
+            return !hiddenIds.has(id) && !exitedGroupIds.has(id)
           })
           .map((item) => {
             const mapped = decorateConversation(toConversation(item))
@@ -507,20 +542,23 @@ export const useChatStore = defineStore('chat', () => {
     await ensureIMLogin()
     subscribeRealtime()
 
-    if (params.conversationId) {
-      unhideConversation(params.conversationId)
-    }
-
     const cached = params.conversationId
       ? conversations.value.find((c) => c.id === params.conversationId)
       : undefined
-    if (cached) return cached
+    if (cached) {
+      await assertConversationAccessible(cached)
+      unhideConversation(cached.id)
+      return cached
+    }
 
     if (params.conversationId) {
       const item = await findConversationById(params.conversationId)
       if (item) {
+        const mapped = toConversation(item)
+        await assertConversationAccessible(mapped)
+        unhideConversation(mapped.id)
         upsertConversations([item])
-        return toConversation(item)
+        return mapped
       }
     }
 
@@ -541,8 +579,23 @@ export const useChatStore = defineStore('chat', () => {
       ? (target as { imGroupId: string }).imGroupId
       : (target as { imUserId: string }).imUserId
     const item = await getGroupOrPeerConversation(sourceId, isGroup)
+    if (isGroup) allowGroupConversation(item.conversationID)
     upsertConversations([item])
     return toConversation(item)
+  }
+
+  async function assertConversationAccessible(conversation: Conversation): Promise<void> {
+    if (conversation.type !== 'group') return
+    if (!conversation.groupId) throw new Error('群聊信息不完整，请刷新会话列表')
+    try {
+      await resolveIMGroupByIM(conversation.groupId)
+      allowGroupConversation(conversation.id)
+    } catch (e) {
+      const message = (e as Error)?.message || ''
+      if (!message.includes('群聊不存在或无权访问')) throw e
+      await removeExitedGroupConversation(conversation.id)
+      throw new Error('你已退出该群聊或群聊已解散')
+    }
   }
 
   async function getGroupOrPeerConversation(sourceId: string, isGroup: boolean) {
@@ -703,6 +756,37 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function allowGroupConversation(conversationId: string) {
+    if (!conversationId || !exitedGroupIds.has(conversationId)) return
+    exitedGroupIds.delete(conversationId)
+    writeExitedGroupIds(exitedGroupIds)
+    unhideConversation(conversationId)
+  }
+
+  /** 退出/被移出群后永久隐藏会话；只有重新入群并通过后端成员校验才允许恢复。 */
+  async function removeExitedGroupConversation(conversationId: string) {
+    if (!conversationId) return
+    const messageIds = (messagesMap.value[conversationId] || []).map((message) => message.id)
+    conversations.value = conversations.value.filter((conversation) => conversation.id !== conversationId)
+    messagesMap.value = { ...messagesMap.value, [conversationId]: [] }
+    historyEnd.value = { ...historyEnd.value, [conversationId]: true }
+    if (messageIds.length) {
+      const nextRaw = { ...rawMessages.value }
+      messageIds.forEach((id) => delete nextRaw[id])
+      rawMessages.value = nextRaw
+    }
+    hiddenIds.add(conversationId)
+    exitedGroupIds.add(conversationId)
+    writeHiddenIds(hiddenIds)
+    writeExitedGroupIds(exitedGroupIds)
+    // “退出群并删除对话”需要清消息 + 隐藏会话；任何一个 SDK 能力失败都不回滚
+    // 本地退出状态，否则异步 OpenIM 退群窗口内会话会再次出现。
+    await Promise.allSettled([
+      clearConversationMessages(conversationId),
+      hideConversation(conversationId),
+    ])
+  }
+
   /** 局部更新本地会话（如置顶、会话级免打扰），命中才重排，保证 UI 即时反映 */
   function patchConversation(conversationId: string, patch: Partial<Conversation>) {
     const idx = conversations.value.findIndex((c) => c.id === conversationId)
@@ -719,6 +803,9 @@ export const useChatStore = defineStore('chat', () => {
    * - 失败回滚：hiddenIds 重新加入。
    */
   async function reappearConversation(conversationId: string) {
+    if (exitedGroupIds.has(conversationId)) {
+      throw new Error('你已退出该群聊，不能发送消息')
+    }
     if (!hiddenIds.has(conversationId)) return
     unhideConversation(conversationId)
     try {
@@ -1083,6 +1170,7 @@ export const useChatStore = defineStore('chat', () => {
     patchConversation,
     togglePin,
     hideConversationLocal,
+    removeExitedGroupConversation,
     reappearConversation,
     applyContactRemarks,
     dismissGroupAnnouncement,
