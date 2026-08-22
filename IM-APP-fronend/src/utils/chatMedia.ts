@@ -4,6 +4,12 @@ export interface VideoMeta {
   duration: number
 }
 
+/** 取视频靠前但非首帧的位置，尽量避开黑场；短视频也保证不越过结尾。 */
+export function videoSnapshotTime(duration: number): number {
+  if (!Number.isFinite(duration) || duration <= 0.05) return 0
+  return Math.min(1, Math.max(0.1, duration * 0.1), duration - 0.05)
+}
+
 function firstString(obj: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const value = obj[key]

@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseVideoMeta } from '../src/utils/chatMedia.ts'
+import { parseVideoMeta, videoSnapshotTime } from '../src/utils/chatMedia.ts'
 
 const { snapshotFromMessage } = await import('../src/utils/forwardSnapshot.ts')
 const VIDEO_MESSAGE = 104
+
+test('截帧位置避开首帧且不会越过视频结尾', () => {
+  assert.equal(videoSnapshotTime(20), 1)
+  assert.equal(videoSnapshotTime(5), 0.5)
+  assert.ok(Math.abs(videoSnapshotTime(0.12) - 0.07) < 1e-9)
+  assert.equal(videoSnapshotTime(0), 0)
+})
 
 test('解析 App 原生 PascalCase 视频和封面字段', () => {
   assert.deepEqual(

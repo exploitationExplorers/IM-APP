@@ -99,9 +99,21 @@ const videoMeta = computed(() => {
   return parseVideoMeta(props.message.content)
 })
 
+const videoPosterFailed = ref(false)
 const videoPoster = computed(() =>
-  toPlayableMediaUrl(videoMeta.value.snapshotUrl || videoMeta.value.url),
+  videoPosterFailed.value ? '' : toPlayableMediaUrl(videoMeta.value.snapshotUrl),
 )
+
+watch(
+  () => videoMeta.value.snapshotUrl,
+  () => {
+    videoPosterFailed.value = false
+  },
+)
+
+function onVideoPosterError() {
+  videoPosterFailed.value = true
+}
 
 function playVideo() {
   const url = toPlayableMediaUrl(videoMeta.value.url)
@@ -374,7 +386,12 @@ function openLink(url: string) {
         @longpress="onLongPress"
         @contextmenu.prevent="onContextMenu"
       >
-        <image class="msg-image" :src="videoPoster || '/static/icon-photo.png'" mode="widthFix" />
+        <image
+          class="msg-image"
+          :src="videoPoster || '/static/icon-photo.png'"
+          mode="widthFix"
+          @error="onVideoPosterError"
+        />
         <view class="video-play">▶</view>
       </view>
       <view
