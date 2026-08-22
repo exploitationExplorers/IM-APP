@@ -7,6 +7,7 @@ import { MUTE_OPTIONS } from '@/constants/mute'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
 import { rememberConversationTitle } from '@/utils/favoriteMeta'
+import { saveVideoToDevice } from '@/utils/chatMedia'
 import { businessUserIdFromIM } from '@/utils/openim'
 
 /** 群成员的发言管控元信息（房间页从群成员接口构建，业务用户 ID 索引） */
@@ -90,6 +91,7 @@ export function useChatMessageActions(opts: {
     if (canRevoke(message)) items.push({ key: 'revoke', label: '撤回' })
     items.push({ key: 'forward', label: '转发' }, { key: 'quote', label: '引用' })
     if (message.type === 'text') items.push({ key: 'copy', label: '复制' })
+    if (message.type === 'video') items.push({ key: 'save', label: '保存视频', wide: true })
     items.push({ key: 'favorite', label: '收藏' })
     if (!mine) {
       items.push({ key: 'report', label: '检举' })
@@ -368,6 +370,18 @@ export function useChatMessageActions(opts: {
     }
     if (key === 'copy') {
       copyText(message)
+      return
+    }
+    if (key === 'save' && message.type === 'video') {
+      uni.showLoading({ title: '正在保存' })
+      try {
+        await saveVideoToDevice(message.content)
+        uni.hideLoading()
+        uni.showToast({ title: '已保存到相册', icon: 'success' })
+      } catch (e) {
+        uni.hideLoading()
+        uni.showToast({ title: (e as Error).message || '保存视频失败', icon: 'none' })
+      }
       return
     }
     if (key === 'favorite') {

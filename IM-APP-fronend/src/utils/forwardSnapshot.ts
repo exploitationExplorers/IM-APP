@@ -1,44 +1,109 @@
-import { MessageType } from 'openim-uniapp-polyfill'
 import type { MessageItem } from 'openim-uniapp-polyfill'
 import type { ForwardMessageSnapshot } from '@/types/forward'
 
+// 仅需协议固定值；避免纯函数测试加载会初始化 uni/OpenIM 的运行时 SDK。
+const MESSAGE_TYPE = {
+  Text: 101,
+  Picture: 102,
+  Voice: 103,
+  Video: 104,
+  File: 105,
+  AtText: 106,
+  Quote: 114,
+} as const
+
 export function snapshotFromMessage(item: MessageItem): ForwardMessageSnapshot {
-  if (!item.contentType || item.contentType >= 1000) {
+  const raw = item as unknown as Record<string, unknown>
+  const contentType = Number(raw.contentType ?? raw.ContentType ?? 0)
+  if (!contentType || contentType >= 1000) {
     throw new Error('该消息不支持转发')
   }
   return {
-    contentType: item.contentType,
-    content: contentFromMessage(item),
+    contentType,
+    content: contentFromMessage(item, contentType),
   }
 }
 
-function contentFromMessage(item: MessageItem): unknown {
-  switch (item.contentType) {
-    case MessageType.TextMessage:
+function contentFromMessage(item: MessageItem, contentType: number): unknown {
+  switch (contentType) {
+    case MESSAGE_TYPE.Text:
       if (item.textElem?.content) return { content: item.textElem.content }
       break
-    case MessageType.AtTextMessage:
+    case MESSAGE_TYPE.AtText:
       if (item.atTextElem) return item.atTextElem
       break
-    case MessageType.QuoteMessage:
+    case MESSAGE_TYPE.Quote:
       if (item.quoteElem) return item.quoteElem
       break
-    case MessageType.PictureMessage:
+    case MESSAGE_TYPE.Picture:
       if (item.pictureElem) return normalizePictureElem(item.pictureElem)
       break
-    case MessageType.VoiceMessage:
+    case MESSAGE_TYPE.Voice:
       if (item.soundElem) return item.soundElem
       break
-    case MessageType.FileMessage:
+    case MESSAGE_TYPE.File:
       if (item.fileElem) return item.fileElem
       break
-    case MessageType.VideoMessage:
-      if (item.videoElem) return item.videoElem
-      break
+    case MESSAGE_TYPE.Video:
+      return normalizeVideoElem(item)
     default:
       break
   }
   return parseStoredContent(item.content)
+}
+
+function asObject(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw === 'string' && raw) {
+    try {
+      return asObject(JSON.parse(raw) as unknown)
+    } catch {
+      return null
+    }
+  }
+  return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+}
+
+function stringOf(obj: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = obj[key]
+    if (typeof value === 'string' && value) return value
+  }
+  return ''
+}
+
+function numberOf(obj: Record<string, unknown>, keys: string[]): number {
+  for (const key of keys) {
+    const value = Number(obj[key])
+    if (Number.isFinite(value) && value >= 0) return value
+  }
+  return 0
+}
+
+/**
+ * App 原生桥可能返回 VideoElem/PascalCase，或只在 content 中留下简化元数据。
+ * 转发前冻结成 OpenIM send_msg 接口要求的标准 VideoElem，避免原视频能播但转发校验失败。
+ */
+function normalizeVideoElem(item: MessageItem): Record<string, unknown> {
+  const raw = item as unknown as Record<string, unknown>
+  const elem = asObject(raw.videoElem ?? raw.VideoElem) || asObject(raw.content) || {}
+  const videoUrl = stringOf(elem, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'videoPath', 'VideoPath', 'url', 'URL'])
+  if (!videoUrl) throw new Error('视频地址不存在，无法转发')
+  const snapshotUrl = stringOf(elem, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL', 'snapshotPath', 'SnapshotPath'])
+  const fallbackId = item.clientMsgID || stringOf(raw, ['ClientMsgID', 'clientMsgId']) || `video_${Date.now()}`
+  return {
+    videoPath: stringOf(elem, ['videoPath', 'VideoPath']),
+    videoUUID: stringOf(elem, ['videoUUID', 'VideoUUID', 'videoUuid']) || `${fallbackId}_video`,
+    videoUrl,
+    videoType: stringOf(elem, ['videoType', 'VideoType']) || 'mp4',
+    videoSize: numberOf(elem, ['videoSize', 'VideoSize']),
+    duration: numberOf(elem, ['duration', 'Duration']),
+    snapshotPath: stringOf(elem, ['snapshotPath', 'SnapshotPath']),
+    snapshotUUID: stringOf(elem, ['snapshotUUID', 'SnapshotUUID', 'snapshotUuid']) || `${fallbackId}_cover`,
+    snapshotSize: numberOf(elem, ['snapshotSize', 'SnapshotSize']),
+    snapshotUrl,
+    snapshotWidth: numberOf(elem, ['snapshotWidth', 'SnapshotWidth']),
+    snapshotHeight: numberOf(elem, ['snapshotHeight', 'SnapshotHeight']),
+  }
 }
 
 function parseStoredContent(raw: string): unknown {

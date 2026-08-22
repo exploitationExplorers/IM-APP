@@ -36,6 +36,7 @@
     "build:quickapp-webview-union": "uni build -p quickapp-webview-union",
     "type-check": "vue-tsc --noEmit",
     "test:notifications": "node --test tests/im-notification.test.mts",
+    "test:video-compat": "node --test tests/video-compat.test.mts",
     "build:app": "uni build -p app-plus",
     "pack:wgt": "node scripts/pack-wgt.cjs",
     "postinstall": "node scripts/fix-openim-protocol.cjs"

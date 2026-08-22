@@ -757,6 +757,15 @@ export const useChatStore = defineStore('chat', () => {
       rememberRaw(sent)
       const mapped = toChatMessage(sent)
       replaceMessage(conversationId, placeholder.id, mapped)
+      // App 原生发送成功回调经常暂时没有 seq；群聊已读游标必须依赖 seq。
+      // 后台短轮询本地库补齐，不阻塞发送成功 UI，也不会按群成员数放大请求量。
+      if (requireConversation(conversationId).type === 'group' && !mapped.seq) {
+        void resolveMessageSeq(conversationId, mapped.id, sent).then((resolved) => {
+          if (!resolved.seq) return
+          if (resolved.message) rememberRaw(resolved.message)
+          replaceMessage(conversationId, mapped.id, { ...mapped, seq: resolved.seq })
+        }).catch(() => undefined)
+      }
       // 自己给已隐藏的会话主动发消息时，让该会话重新出现在列表顶部
       await reappearConversation(conversationId)
       patchConversation(conversationId, {
