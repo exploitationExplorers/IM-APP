@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { Contact, ContactListSort, FriendRequest, GroupPreview, SendFriendResult } from '@/types'
 import {
   acceptFriendRequest,
@@ -23,6 +23,11 @@ export const useContactStore = defineStore('contact', () => {
   const groups = ref<GroupPreview[]>([])
   const friendRequests = ref<FriendRequest[]>([])
   const groupsExpanded = ref(false)
+
+  /** 待处理的收到申请数，对齐参考站通讯录 / 新的朋友角标 */
+  const pendingFriendRequestCount = computed(() =>
+    friendRequests.value.filter((fr) => fr.status === 'pending').length,
+  )
 
   async function reloadContacts(opts?: { keyword?: string; sort?: ContactListSort }) {
     if (opts?.keyword !== undefined) contactKeyword.value = opts.keyword
@@ -141,6 +146,7 @@ export const useContactStore = defineStore('contact', () => {
     contactSort,
     groups,
     friendRequests,
+    pendingFriendRequestCount,
     groupsExpanded,
     reloadContacts,
     loadMoreContacts,

@@ -2,19 +2,24 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/stores/chat'
+import { useContactStore } from '@/stores/contact'
 
 const props = defineProps<{
   current: 'contacts' | 'chat' | 'mine'
 }>()
 
 const chatStore = useChatStore()
+const contactStore = useContactStore()
 const { totalUnread } = storeToRefs(chatStore)
+const { pendingFriendRequestCount } = storeToRefs(contactStore)
 
-const badgeText = computed(() => {
-  const n = totalUnread.value
+function badgeOf(n: number): string {
   if (n <= 0) return ''
   return n > 99 ? '99+' : String(n)
-})
+}
+
+const chatBadge = computed(() => badgeOf(totalUnread.value))
+const contactsBadge = computed(() => badgeOf(pendingFriendRequestCount.value))
 
 const contactsIcon = computed(() =>
   props.current === 'contacts'
@@ -40,7 +45,12 @@ function switchTo(url: string) {
       :class="{ active: current === 'contacts' }"
       @click="switchTo('/pages/contacts/index')"
     >
-      <image class="icon" :src="contactsIcon" mode="aspectFit" />
+      <view class="icon-wrap">
+        <image class="icon" :src="contactsIcon" mode="aspectFit" />
+        <view v-if="contactsBadge" class="badge">
+          <text class="badge-text">{{ contactsBadge }}</text>
+        </view>
+      </view>
       <text class="label">通讯录</text>
     </view>
 
@@ -51,8 +61,8 @@ function switchTo(url: string) {
     >
       <view class="icon-wrap">
         <image class="icon" :src="chatIcon" mode="aspectFit" />
-        <view v-if="badgeText" class="badge">
-          <text class="badge-text">{{ badgeText }}</text>
+        <view v-if="chatBadge" class="badge">
+          <text class="badge-text">{{ chatBadge }}</text>
         </view>
       </view>
       <text class="label">聊天</text>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { onReachBottom } from '@dcloudio/uni-app'
+import { computed, ref } from 'vue'
+import { onReachBottom, onShow } from '@dcloudio/uni-app'
 import EmptyState from '@/components/EmptyState.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
@@ -19,7 +19,7 @@ const hasMore = computed(
   () => visibleCount.value < contactStore.friendRequests.length
 )
 
-onMounted(async () => {
+onShow(async () => {
   await contactStore.loadFriendRequests()
   loaded.value = true
 })

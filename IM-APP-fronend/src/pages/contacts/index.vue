@@ -17,7 +17,13 @@ useTabBar()
 
 const statusBarHeight = getStatusBarHeight()
 const contactStore = useContactStore()
-const { contacts, contactTotal, contactHasMore, contactsLoading, groups } = storeToRefs(contactStore)
+const { contacts, contactTotal, contactHasMore, contactsLoading, groups, pendingFriendRequestCount } = storeToRefs(contactStore)
+
+const friendRequestBadge = computed(() => {
+  const n = pendingFriendRequestCount.value
+  if (n <= 0) return ''
+  return n > 99 ? '99+' : String(n)
+})
 const keyword = ref('')
 const sortKey = ref<'recent' | 'name' | 'chat'>('recent')
 const showSort = ref(false)
@@ -155,6 +161,9 @@ function closeMenus() {
         <view class="menu-item" @click="go('/pages/contacts/new-friends')">
           <image class="menu-icon" src="/static/icons/menu-new-friend.svg" mode="aspectFit" />
           <text class="menu-text">新的朋友</text>
+          <view v-if="friendRequestBadge" class="menu-badge">
+            <text class="menu-badge-text">{{ friendRequestBadge }}</text>
+          </view>
           <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
         </view>
         <view class="menu-item" @click="go('/pages/contacts/tags')">
@@ -346,6 +355,25 @@ function closeMenus() {
   font-size: 34rpx;
   color: #212121;
   line-height: 48rpx;
+}
+
+.menu-badge {
+  min-width: 32rpx;
+  height: 32rpx;
+  padding: 0 8rpx;
+  margin-right: 8rpx;
+  border-radius: 16rpx;
+  background: #ef4343;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.menu-badge-text {
+  color: #fff;
+  font-size: 18rpx;
+  line-height: 1;
 }
 
 .arrow {

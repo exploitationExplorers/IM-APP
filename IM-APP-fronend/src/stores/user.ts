@@ -135,6 +135,7 @@ export const useUserStore = defineStore('user', () => {
     initOpenIM()
       .then(() => useChatStore().loadConversations())
       .catch(() => undefined)
+    void useContactStore().loadFriendRequests().catch(() => undefined)
   }
 
   function bootstrap() {
