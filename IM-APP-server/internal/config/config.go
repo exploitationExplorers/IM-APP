@@ -7,20 +7,21 @@ import (
 )
 
 type Config struct {
-	HTTPAddr          string
-	DatabaseURL       string
-	JWTSecret         string
-	DevSMSCode        string
-	RedisURL          string
-	MinIO             MinIOConfig
-	OpenIM            OpenIMConfig
-	IMInternalAPIKey  string
-	LegacyChatEnabled bool
-	SeedDemo          bool
-	Kafka             KafkaConfig
-	Forward           ForwardConfig
-	SMS               SMSConfig
-	CORSAllowOrigins  []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
+	HTTPAddr             string
+	DatabaseURL          string
+	JWTSecret            string
+	DevSMSCode           string
+	RedisURL             string
+	MinIO                MinIOConfig
+	OpenIM               OpenIMConfig
+	IMInternalAPIKey     string
+	LegacyChatEnabled    bool
+	GroupMemberHardLimit int
+	SeedDemo             bool
+	Kafka                KafkaConfig
+	Forward              ForwardConfig
+	SMS                  SMSConfig
+	CORSAllowOrigins     []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
 }
 
 type MinIOConfig struct {
@@ -73,14 +74,15 @@ func Load() Config {
 	loadDotEnv(".env")
 
 	return Config{
-		HTTPAddr:          getenv("HTTP_ADDR", ":8080"),
-		DatabaseURL:       getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
-		JWTSecret:         getenv("JWT_SECRET", "im-local-dev-secret-change-me"),
-		IMInternalAPIKey:  getenv("IM_INTERNAL_API_KEY", ""),
-		LegacyChatEnabled: getenvBool("LEGACY_CHAT_ENABLED", false),
-		SeedDemo:          getenvBool("SEED_DEMO", false),
-		DevSMSCode:        getenv("DEV_SMS_CODE", ""),
-		RedisURL:          getenv("REDIS_URL", ""),
+		HTTPAddr:             getenv("HTTP_ADDR", ":8080"),
+		DatabaseURL:          getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
+		JWTSecret:            getenv("JWT_SECRET", "im-local-dev-secret-change-me"),
+		IMInternalAPIKey:     getenv("IM_INTERNAL_API_KEY", ""),
+		LegacyChatEnabled:    getenvBool("LEGACY_CHAT_ENABLED", false),
+		GroupMemberHardLimit: boundedPositiveInt("GROUP_MEMBER_HARD_LIMIT", 4000),
+		SeedDemo:             getenvBool("SEED_DEMO", false),
+		DevSMSCode:           getenv("DEV_SMS_CODE", ""),
+		RedisURL:             getenv("REDIS_URL", ""),
 		MinIO: MinIOConfig{
 			Endpoint:   getenv("MINIO_ENDPOINT", ""),
 			AccessKey:  getenv("MINIO_ACCESS_KEY", "minioadmin"),
@@ -123,6 +125,14 @@ func Load() Config {
 		},
 		CORSAllowOrigins: splitCSV(getenv("CORS_ALLOW_ORIGINS", "")),
 	}
+}
+
+func boundedPositiveInt(key string, fallback int) int {
+	n := GetenvInt(key, fallback)
+	if n < 3 {
+		return fallback
+	}
+	return n
 }
 
 // loadDotEnv 读取工作目录下的 .env，让 `go run ./cmd/server` 与 README 描述一致。

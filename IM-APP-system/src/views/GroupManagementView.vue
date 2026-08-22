@@ -3,6 +3,7 @@ import { onMounted, reactive, shallowRef, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { Delete, RefreshLeft, Search } from "@element-plus/icons-vue";
 import { getGroups, getGroupDetail, dissolveGroup as dissolveGroupApi, muteGroupAll, getGroupRecallLogs, getGroupReports, getGroupStatusLogs } from "@/api/modules/admin";
+import GroupCapacityEditor from "@/components/groups/GroupCapacityEditor.vue";
 import { getGroupMembersApi, postGroupRecallMessageApi, putGroupMemberAddFriendApi } from "@/api/modules/adminGroups";
 import type { AdminGroups } from "@/api/modules/adminGroups";
 import type { Groups, Reports } from "@/api/interface";
@@ -75,6 +76,9 @@ const groupReportsTotal = shallowRef(0);
 
 const groupMembers = shallowRef<AdminGroups.GroupMember[]>([]);
 const membersLoading = shallowRef(false);
+const membersPage = shallowRef(1);
+const membersSize = shallowRef(50);
+const membersTotal = shallowRef(0);
 
 const statusLogs = shallowRef<Groups.GroupStatusLogItem[]>([]);
 const statusLogsLoading = shallowRef(false);
@@ -273,10 +277,12 @@ async function loadGroupReports(groupId: string): Promise<void> {
 async function loadGroupMembers(groupId: string): Promise<void> {
   membersLoading.value = true;
   try {
-    const res = await getGroupMembersApi(groupId);
-    groupMembers.value = Array.isArray(res.data) ? res.data : [];
+    const res = await getGroupMembersApi(groupId, { page: membersPage.value, size: membersSize.value });
+    groupMembers.value = res.data?.items ?? [];
+    membersTotal.value = res.data?.total ?? 0;
   } catch {
     groupMembers.value = [];
+    membersTotal.value = 0;
   } finally {
     membersLoading.value = false;
   }
@@ -299,6 +305,8 @@ async function openGroupDetail(group: Groups.GroupItem): Promise<void> {
   groupReportsTotal.value = 0;
   groupReportsPage.value = 1;
   groupMembers.value = [];
+  membersPage.value = 1;
+  membersTotal.value = 0;
   statusLogs.value = [];
   statusLogsTotal.value = 0;
   statusLogsPage.value = 1;
@@ -697,6 +705,12 @@ onMounted(() => {
 
           <div class="detail-section">
             <h4>群设置</h4>
+            <GroupCapacityEditor
+              :group-id="selectedGroup.id"
+              :member-count="selectedGroup.memberCount || 0"
+              :max-members="selectedGroup.maxMembers || 200"
+              @updated="(maxMembers) => { if (selectedGroup) selectedGroup.maxMembers = maxMembers; }"
+            />
             <div class="switch-row">
               <span>全员禁言</span>
               <el-switch
@@ -740,6 +754,14 @@ onMounted(() => {
                 </div>
               </div>
               <el-empty v-else-if="!membersLoading" description="暂无成员数据" :image-size="60" />
+              <el-pagination
+                v-if="membersTotal > membersSize"
+                v-model:current-page="membersPage"
+                :page-size="membersSize"
+                layout="total, prev, pager, next"
+                :total="membersTotal"
+                @current-change="() => selectedGroup && loadGroupMembers(selectedGroup.id)"
+              />
             </div>
           </div>
 

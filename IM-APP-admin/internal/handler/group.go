@@ -31,13 +31,28 @@ func (h *DataHandler) GetGroup(c *gin.Context) {
 	response.OK(c, g)
 }
 
+func (h *DataHandler) UpdateGroupMemberLimit(c *gin.Context) {
+	var req models.UpdateGroupMemberLimitRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+		response.BadRequest(c, "groupId、maxMembers、reason 必填")
+		return
+	}
+	if err := h.Data.UpdateGroupMemberLimit(c.Request.Context(), req, middleware.AdminID(c)); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "设置失败", err)
+		return
+	}
+	c.Set("auditReason", req.Reason)
+	response.OK(c, gin.H{"ok": true})
+}
+
 func (h *DataHandler) ListGroupMembers(c *gin.Context) {
-	list, err := h.Data.ListGroupMembers(c.Request.Context(), c.Param("id"))
+	page, size := pageParams(c)
+	list, total, err := h.Data.ListGroupMembers(c.Request.Context(), c.Param("id"), c.Query("keyword"), page, size)
 	if err != nil {
 		response.FailErr(c, 500, "查询失败", err)
 		return
 	}
-	response.OK(c, list)
+	response.OKPage(c, list, total, page, size)
 }
 
 func (h *DataHandler) ListGroupReports(c *gin.Context) {

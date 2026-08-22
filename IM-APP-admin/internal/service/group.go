@@ -16,8 +16,14 @@ func (s *DataService) GetGroupDetail(ctx context.Context, id string) (*models.Ap
 	return s.Repo.GetGroupDetail(ctx, id)
 }
 
-func (s *DataService) ListGroupMembers(ctx context.Context, id string) ([]models.AppGroupMember, error) {
-	return s.Repo.ListGroupMembers(ctx, id)
+func (s *DataService) UpdateGroupMemberLimit(ctx context.Context, req models.UpdateGroupMemberLimitRequest, operatorID string) error {
+	return s.callServerGroupAction(ctx, "member-limit", "", map[string]any{
+		"groupId": req.GroupID, "adminId": operatorID, "maxMembers": req.MaxMembers, "reason": req.Reason,
+	})
+}
+
+func (s *DataService) ListGroupMembers(ctx context.Context, id, keyword string, page, size int) ([]models.AppGroupMember, int64, error) {
+	return s.Repo.ListGroupMembers(ctx, id, keyword, size, (page-1)*size)
 }
 
 func (s *DataService) ListGroupReports(ctx context.Context, id string, page, size int) ([]models.Report, int64, error) {
@@ -62,6 +68,10 @@ func (s *DataService) ListGroupStatusLogs(ctx context.Context, id string, page, 
 
 // callServerGroupAction 调 server /internal/admin 接口执行群管理操作（由 server 改库 + 同步 OpenIM）
 func (s *DataService) callServerGroupAction(ctx context.Context, action, groupID string, payload map[string]any) error {
+	if action == "member-limit" {
+		_, err := callServerInternal(ctx, s.ServerBaseURL, s.ServerInternalKey, "/internal/admin/group-member-limits/update", payload)
+		return err
+	}
 	_, err := callServerInternal(ctx, s.ServerBaseURL, s.ServerInternalKey,
 		"/internal/admin/groups/"+groupID+"/"+action, payload)
 	return err

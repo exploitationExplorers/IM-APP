@@ -131,3 +131,19 @@ export async function unregisterPushToken(deviceToken: string): Promise<{ ok: bo
     data: { deviceToken },
   })
 }
+
+export async function reportGroupReadCursor(conversationId: string): Promise<{ hasReadSeq: number }> {
+  return request<{ hasReadSeq: number }>({
+    url: '/im/group-read-cursors/report',
+    method: 'POST',
+    data: { conversationId },
+  })
+}
+
+export async function fetchGroupReadState(conversationId: string): Promise<{ maxOtherReadSeq: number }> {
+  return request<{ maxOtherReadSeq: number }>({
+    url: '/im/group-read-state',
+    method: 'GET',
+    data: { conversationId },
+  })
+}

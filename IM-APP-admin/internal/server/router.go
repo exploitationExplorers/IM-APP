@@ -109,6 +109,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			// 模块 04：群组管理
 			auth.GET("/groups", middleware.RequirePermission(rbacRepo, "groups.read"), d.DataH.ListGroups)
 			auth.GET("/groups/:id", middleware.RequirePermission(rbacRepo, "groups.read"), d.DataH.GetGroup)
+			auth.POST("/group-member-limits/update", middleware.RequirePermission(rbacRepo, "groups.member-limit.write"), d.DataH.UpdateGroupMemberLimit)
 			auth.GET("/groups/:id/members", middleware.RequirePermission(rbacRepo, "groups.members.read"), d.DataH.ListGroupMembers)
 			auth.GET("/groups/:id/reports", middleware.RequirePermission(rbacRepo, "reports.read"), d.DataH.ListGroupReports)
 			auth.PUT("/groups/:id/mute-all", middleware.RequirePermission(rbacRepo, "groups.mute"), d.DataH.SetGroupMuteAll)
@@ -164,6 +165,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.PUT("/report-reasons/:id", middleware.RequirePermission(rbacRepo, "report-reasons.write"), d.OpsH.UpdateReportReason)
 			auth.PUT("/report-reasons/:id/status", middleware.RequirePermission(rbacRepo, "report-reasons.write"), d.OpsH.SetReportReasonStatus)
 			auth.GET("/system-limits", middleware.RequirePermission(rbacRepo, "system-limits.read"), d.OpsH.GetSystemLimits)
+			auth.GET("/system-limits/group-impact", middleware.RequirePermission(rbacRepo, "system-limits.read"), d.OpsH.GetGroupLimitImpact)
 			auth.PUT("/system-limits", middleware.RequirePermission(rbacRepo, "system-limits.write"), d.OpsH.SaveSystemLimits)
 			auth.POST("/system-limits/publish", middleware.RequirePermission(rbacRepo, "system-limits.write"), d.OpsH.PublishSystemLimits)
 

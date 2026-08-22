@@ -1219,6 +1219,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     notificationKind: notificationKind || undefined,
     quote: quotePreviewOf(item),
     hasRead: messageIsRead(item),
+    seq: Number((item as { seq?: number }).seq || 0) || undefined,
     status:
       item.status === MessageStatus.Failed
         ? 'failed'

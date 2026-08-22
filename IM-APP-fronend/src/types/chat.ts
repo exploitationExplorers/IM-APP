@@ -41,6 +41,10 @@ export interface ChatMessage {
    * 群聊与对方发来的消息不展示该状态。
    */
   hasRead?: boolean
+  /** OpenIM 会话内单调序号；群聊聚合已读判定使用。 */
+  seq?: number
+  /** 群聊中是否至少有一名其他成员读到本消息。 */
+  groupHasRead?: boolean
   /** 本地发送中状态 */
   status?: 'sending' | 'sent' | 'failed'
 }

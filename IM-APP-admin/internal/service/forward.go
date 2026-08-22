@@ -11,9 +11,10 @@ import (
 
 // OpsService 转发/国家短信/配置/敏感词/审计/工作台
 type OpsService struct {
-	Repo              *repository.OpsRepo
-	ServerBaseURL     string // server 地址（方案 A：写操作走 server 执行+OpenIM 同步）
-	ServerInternalKey string
+	Repo                 *repository.OpsRepo
+	ServerBaseURL        string // server 地址（方案 A：写操作走 server 执行+OpenIM 同步）
+	ServerInternalKey    string
+	GroupMemberHardLimit int
 }
 
 // ===== 转发/群发与风控（清单 06） =====

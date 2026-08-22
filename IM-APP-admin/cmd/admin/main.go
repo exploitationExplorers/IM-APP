@@ -76,9 +76,10 @@ func main() {
 		ServerInternalKey: cfg.ServerInternalKey,
 	}
 	opsSvc := &service.OpsService{
-		Repo:              &repository.OpsRepo{DB: pool},
-		ServerBaseURL:     cfg.ServerBaseURL,
-		ServerInternalKey: cfg.ServerInternalKey,
+		Repo:                 &repository.OpsRepo{DB: pool},
+		ServerBaseURL:        cfg.ServerBaseURL,
+		ServerInternalKey:    cfg.ServerInternalKey,
+		GroupMemberHardLimit: cfg.GroupMemberHardLimit,
 	}
 
 	authH := &handler.AuthHandler{
