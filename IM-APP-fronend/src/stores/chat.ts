@@ -41,6 +41,7 @@ import {
   invalidateIMLoginCache,
   waitForSync,
 } from '@/utils/openim'
+import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { isIMNotification, isGroupAnnouncementNotice, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { playMessageSound, vibrateShort } from '@/utils/notify'
 import { useChatSettingsStore } from '@/stores/chatSettings'
@@ -972,10 +973,12 @@ export const useChatStore = defineStore('chat', () => {
     const quote = rawMessages.value[quoteMessageId]
     if (!quote) throw new Error('原消息不存在')
     const target = targetOf(requireConversation(conversationId))
+    const quoted = toChatMessage(quote)
     const placeholder = placeholderOf(conversationId, senderId, 'text', text)
     placeholder.quote = {
-      senderNickname: quote.senderNickname || '',
-      content: toChatMessage(quote).content || '[消息]',
+      senderNickname: quoted.senderNickname || '',
+      thumbUrl: quoteThumbOf(quoted.type, quoted.content, quoted.senderAvatar) || undefined,
+      content: quoteSummaryOf(quoted.type, quoted.content),
     }
     await sendWithPlaceholder(conversationId, placeholder, () => sendQuoteMessage(target, text, quote))
   }

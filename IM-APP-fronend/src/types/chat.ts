@@ -12,6 +12,11 @@ export interface CardPayload {
 
 export interface MessageQuote {
   senderNickname: string
+  /**
+   * 左侧缩略图：引用图片/视频用媒体本身（封面），名片用名片头像，其它类型用发送者头像。
+   * 与参考站一致——引用图片时不显示用户头像。
+   */
+  thumbUrl?: string
   content: string
 }
 

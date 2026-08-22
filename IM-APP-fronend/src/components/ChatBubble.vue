@@ -6,8 +6,8 @@ let activeVoiceStopper: (() => void) | null = null
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
-import type { CardPayload, ChatMessage } from '@/types'
-import { formatClock, splitTextWithLinks } from '@/utils/format'
+import type { CardPayload, ChatMessage, MessageQuote } from '@/types'
+import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
   message: ChatMessage
@@ -44,6 +44,7 @@ const emit = defineEmits<{
   longpress: []
   cardView: [card: CardPayload]
   retry: [message: ChatMessage]
+  playVideo: [url: string]
 }>()
 
 function onAvatarClick() {
@@ -117,28 +118,30 @@ const videoPoster = computed(() =>
 function playVideo() {
   const url = toPlayableMediaUrl(videoMeta.value.url)
   if (!url) {
-    uni.showToast({ title: '视频无法播放', icon: 'none' })
+    const sending = props.message.status === 'sending'
+    uni.showToast({ title: sending ? '视频发送中' : '视频无法播放', icon: 'none' })
     return
   }
-  const anyUni = uni as UniNamespace.Uni & {
-    previewMedia?: (opt: {
-      sources: Array<{ url: string; type: 'video' | 'image'; poster?: string }>
-      current?: number
-    }) => void
-  }
-  if (typeof anyUni.previewMedia === 'function') {
-    anyUni.previewMedia({
-      sources: [{ url, type: 'video', poster: videoPoster.value || undefined }],
-      current: 0,
-    })
-    return
-  }
-  uni.previewImage({ urls: [videoPoster.value || url], current: videoPoster.value || url })
+  emit('playVideo', url)
 }
 
 function onContextMenu(event: Event) {
   event.preventDefault()
   emit('longpress')
+}
+
+/** 引用摘要展示：历史消息若误存了 URL/本地路径，这里再收敛成「图片」等 */
+function quoteTextOf(quote: MessageQuote): string {
+  return quoteSummaryOf('text', quote.content)
+}
+
+/** 引用左侧图：优先媒体地址，避免误用发送者头像 */
+function quoteThumbSrc(quote: MessageQuote): string {
+  if (quote.thumbUrl && looksLikeImageUrl(quote.thumbUrl)) return quote.thumbUrl
+  if (looksLikeImageUrl(quote.content)) return quote.content
+  if ((quote.content === '图片' || quote.content === '视频') && quote.thumbUrl) return quote.thumbUrl
+  if (quote.thumbUrl) return quote.thumbUrl
+  return APP_CONFIG.defaultAvatarUrl
 }
 
 const parts = computed(() =>
@@ -447,8 +450,15 @@ function openLink(url: string) {
       </view>
       <view v-else class="bubble" :class="mine ? 'bubble-mine' : 'bubble-other'" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
         <view v-if="message.quote" class="quote-box" :class="mine ? 'quote-mine' : 'quote-other'">
-          <text class="quote-name">{{ message.quote.senderNickname }}</text>
-          <text class="quote-text">{{ message.quote.content }}</text>
+          <image
+            class="quote-thumb"
+            :src="quoteThumbSrc(message.quote)"
+            mode="aspectFill"
+          />
+          <view class="quote-meta">
+            <text class="quote-name">{{ message.quote.senderNickname }}</text>
+            <text class="quote-text">{{ quoteTextOf(message.quote) }}</text>
+          </view>
         </view>
         <text
           v-for="(p, idx) in parts"
@@ -770,9 +780,15 @@ function openLink(url: string) {
 }
 
 .quote-box {
-  margin-bottom: 10rpx;
-  padding: 10rpx 12rpx;
-  border-radius: 10rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  min-width: 336rpx;
+  margin-bottom: 8rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 8rpx;
+  border-left: 8rpx solid #0a2fc2;
+  box-sizing: border-box;
 }
 
 .quote-other {
@@ -780,23 +796,49 @@ function openLink(url: string) {
 }
 
 .quote-mine {
-  background: rgba(255, 255, 255, 0.18);
+  background: #91c3fd;
 }
 
-.quote-name {
-  display: block;
-  font-size: 22rpx;
-  font-weight: 700;
-  margin-bottom: 4rpx;
+.quote-thumb {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 0;
+  flex-shrink: 0;
+  background: #ddd;
 }
 
+.quote-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.quote-name,
 .quote-text {
   display: block;
-  font-size: 22rpx;
-  opacity: 0.85;
+  font-size: 24rpx;
+  line-height: 34rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.quote-name {
+  font-weight: 400;
+  color: #212121;
+}
+
+.quote-other .quote-name {
+  color: #0a2fc2;
+}
+
+.quote-text {
+  color: #212121;
+}
+
+.quote-mine .quote-name,
+.quote-mine .quote-text {
+  color: #212121;
+  opacity: 1;
 }
 
 /** 气泡下方的元信息行：已读钩 + 时间（自己一侧右对齐） */

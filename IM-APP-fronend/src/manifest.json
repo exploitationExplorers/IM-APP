@@ -2,8 +2,8 @@
     "name" : "IM",
     "appid" : "__UNI__EC9D1AE",
     "description" : "",
-    "versionName" : "1.0.2",
-    "versionCode" : "102",
+    "versionName" : "1.0.8",
+    "versionCode" : "108",
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
@@ -36,6 +36,10 @@
                     "<uses-feature android:name=\"android.hardware.camera.autofocus\"/>",
                     "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
                     "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+                    "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>",
+                    "<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>",
+                    "<uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\"/>",
+                    "<uses-permission android:name=\"android.permission.READ_MEDIA_VIDEO\"/>",
                     "<uses-permission android:name=\"android.permission.GET_ACCOUNTS\"/>",
                     "<uses-permission android:name=\"android.permission.READ_PHONE_STATE\"/>",
                     "<uses-permission android:name=\"android.permission.CHANGE_WIFI_STATE\"/>",
@@ -50,8 +54,9 @@
             "ios" : {
                 "dSYMs" : false,
                 "privacyDescription" : {
-                    "NSCameraUsageDescription" : "用于扫描二维码添加好友或加入群聊",
-                    "NSPhotoLibraryUsageDescription" : "用于从相册选取二维码"
+                    "NSCameraUsageDescription" : "用于拍照、拍摄视频以及扫描二维码",
+                    "NSMicrophoneUsageDescription" : "用于拍摄视频时录制声音",
+                    "NSPhotoLibraryUsageDescription" : "用于从相册选择照片、视频或二维码"
                 }
             },
             /* SDK配置 */

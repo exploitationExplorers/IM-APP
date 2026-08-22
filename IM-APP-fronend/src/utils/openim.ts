@@ -16,6 +16,7 @@ import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, type IMTokenResult } from '@/api/im'
 import { getToken } from '@/utils/request'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
+import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
 import { formatIMNotification, imNotificationEventKey, notificationKindOf } from '@/utils/im-notification'
 import { highlightTagsOf } from '@/utils/group-announcement'
 
@@ -892,8 +893,56 @@ async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<st
   return ''
 }
 
+function persistTempMedia(filePath: string): Promise<string> {
+  return new Promise((resolve) => {
+    uni.saveFile({
+      tempFilePath: filePath,
+      success: (res) => resolve(res.savedFilePath || filePath),
+      fail: () => resolve(filePath),
+    })
+  })
+}
+
+function videoElemSendable(message: MessageItem): boolean {
+  return !!(message.videoElem?.videoUrl || message.videoElem?.videoPath)
+}
+
+async function sendUploadedVideoMessage(
+  target: IMTarget,
+  videoPath: string,
+  seconds: number,
+  snapshotPath: string,
+): Promise<MessageItem> {
+  const uploaded = await uploadFileFromPath(videoPath, `video_${Date.now()}.mp4`, 'video/mp4')
+  let snapshotUrl = ''
+  if (snapshotPath) {
+    try {
+      const cover = await uploadFileFromPath(snapshotPath, `video_cover_${Date.now()}.jpg`, 'image/jpeg')
+      snapshotUrl = cover.url
+    } catch {
+      /* 无封面仍发视频 */
+    }
+  }
+  const message = await imCall<MessageItem>(IMMethods.CreateVideoMessageByURL, {
+    videoPath: '',
+    duration: seconds,
+    videoType: 'mp4',
+    snapshotPath: '',
+    videoUUID: IMSDK.uuid(),
+    videoUrl: uploaded.url,
+    videoSize: uploaded.size,
+    snapshotUUID: IMSDK.uuid(),
+    snapshotSize: 0,
+    snapshotUrl,
+    snapshotWidth: 0,
+    snapshotHeight: 0,
+  })
+  return sendCreatedMessage(target, message, { alreadyUploaded: true, timeoutMs: 30000 })
+}
+
 /**
- * 视频消息。app 端走原生插件读本地全路径；web 先上传再按 URL 创建。
+ * 视频消息。app 端先落到可访问的本地文件并走对象存储 URL 发送，
+ * 避免 CreateVideoMessageFromFullPath 缺路径时原生上传一直等到超时。
  */
 export async function sendVideoMessage(
   target: IMTarget,
@@ -903,62 +952,35 @@ export async function sendVideoMessage(
 ): Promise<MessageItem> {
   const seconds = videoDurationSeconds(duration)
   if (isAppPlatform) {
-    const videoPath = toNativeFullPath(filePath)
+    const saved = await persistTempMedia(filePath)
+    const videoPath = toNativeFullPath(saved)
     const snap = await snapshotOfVideo(videoPath, snapshotPath)
     console.log('[video][send] app 路径', {
       filePath,
+      saved,
       videoPath,
-      pathConverted: videoPath !== filePath,
-      stillUri: /^(content|file):\/\//.test(videoPath),
       snap,
       seconds,
     })
+    try {
+      return await sendUploadedVideoMessage(target, videoPath, seconds, snap)
+    } catch (uploadErr) {
+      console.warn('[video][send] 上传后按 URL 发失败，改走原生 FullPath', (uploadErr as Error)?.message)
+    }
     let message: MessageItem
     try {
+      message = await imCall<MessageItem>(IMMethods.CreateVideoMessageFromFullPath, {
+        videoFullPath: videoPath,
+        videoPath,
+        duration: seconds,
+        snapshotPath: snap,
+      })
+    } catch {
       message = await imCall<MessageItem>(IMMethods.CreateVideoMessageFromFullPath, videoPath)
-    } catch (e1) {
-      console.warn('[video][send] FromFullPath(字符串) 失败，降级传对象', (e1 as Error)?.message)
-      try {
-        message = await imCall<MessageItem>(IMMethods.CreateVideoMessageFromFullPath, {
-          videoFullPath: videoPath,
-          videoPath,
-          duration: seconds,
-          snapshotPath: snap,
-        })
-      } catch (e2) {
-        console.warn('[video][send] FromFullPath(对象) 失败，改为上传后按 URL 发', (e2 as Error)?.message)
-        const uploaded = await uploadFileFromPath(videoPath, `video_${Date.now()}.mp4`, 'video/mp4')
-        let snapshotUrl = ''
-        if (snap) {
-          try {
-            const cover = await uploadFileFromPath(snap, `video_cover_${Date.now()}.jpg`, 'image/jpeg')
-            snapshotUrl = cover.url
-          } catch {
-            /* 无封面仍发视频 */
-          }
-        }
-        message = await imCall<MessageItem>(IMMethods.CreateVideoMessageByURL, {
-          videoPath: '',
-          duration: seconds,
-          videoType: 'mp4',
-          snapshotPath: '',
-          videoUUID: IMSDK.uuid(),
-          videoUrl: uploaded.url,
-          videoSize: uploaded.size,
-          snapshotUUID: IMSDK.uuid(),
-          snapshotSize: 0,
-          snapshotUrl,
-          snapshotWidth: 0,
-          snapshotHeight: 0,
-        })
-        return sendCreatedMessage(target, message, { alreadyUploaded: true })
-      }
     }
-    console.log('[video][send] 创建完成，交原生上传+发送', {
-      clientMsgID: message?.clientMsgID,
-      contentType: message?.contentType,
-      hasVideoElem: !!(message as { videoElem?: unknown })?.videoElem,
-    })
+    if (!videoElemSendable(message)) {
+      return sendUploadedVideoMessage(target, videoPath, seconds, snap)
+    }
     return sendCreatedMessage(target, message, { timeoutMs: 180000 })
   }
   const file = await pathToFile(filePath)
@@ -1240,14 +1262,18 @@ export function toConversation(item: ConversationItem): Conversation {
 
 export function toChatMessage(item: MessageItem): ChatMessage {
   const notificationKind = notificationKindOf(item.contentType)
+  const content = extractContent(item)
+  const rawType = toAppMessageType(Number(item.contentType))
+  // App 原生桥偶发 contentType 丢失/类型错标，图片会变成 text + file:// 路径；按 content 再收敛一次
+  const type = (resolveQuoteType(rawType, content) as AppMessageType) || rawType
   return {
     id: item.clientMsgID,
     conversationId: conversationIdOf(item),
     senderId: item.sendID,
     senderAvatar: item.senderFaceUrl || undefined,
     senderNickname: item.senderNickname || undefined,
-    type: toAppMessageType(item.contentType),
-    content: extractContent(item),
+    type,
+    content,
     createdAt: toISOTime(item.sendTime),
     systemEventKey: imNotificationEventKey(item) || undefined,
     notificationKind: notificationKind || undefined,
@@ -1269,7 +1295,7 @@ function messageIsRead(item: MessageItem): boolean {
 }
 
 function toAppMessageType(contentType: number): AppMessageType {
-  switch (contentType) {
+  switch (Number(contentType)) {
     case MessageType.TextMessage:
     case MessageType.AtTextMessage:
     case MessageType.QuoteMessage:
@@ -1378,35 +1404,122 @@ function jsonPictureUrl(raw: unknown): string {
   try {
     return jsonPictureUrl(JSON.parse(raw))
   } catch {
-    return ''
+    return looksLikeImageUrl(raw) ? raw : ''
   }
+}
+
+/** 图片地址：优先远程 URL，避免 App 端引用/回显时只剩 file:// 本地路径 */
+function pictureUrlOf(item: MessageItem): string {
+  const candidates = [
+    item.pictureElem?.snapshotPicture?.url,
+    item.pictureElem?.sourcePicture?.url,
+    item.pictureElem?.bigPicture?.url,
+    jsonPictureUrl(item.content),
+    item.pictureElem?.sourcePath,
+    typeof item.content === 'string' ? item.content : '',
+  ].filter((u): u is string => typeof u === 'string' && !!u.trim())
+
+  const remote = candidates.find((u) => /^https?:\/\//i.test(u.trim()))
+  if (remote) return remote.trim()
+  const local = candidates.find((u) => looksLikeImageUrl(u))
+  return (local || candidates[0] || '').trim()
 }
 
 function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {
-  const quoted = item.quoteElem?.quoteMessage
+  const quoted = quotedMessageOf(item)
   if (!quoted) return undefined
-  const content = extractContent(quoted).trim()
+  const type = resolveQuotedAppType(quoted)
+  const rawContent = extractContent(quoted)
   return {
-    senderNickname: quoted.senderNickname || '',
-    content: content || '[消息]',
+    senderNickname: quoted.senderNickname || pickQuotedNickname(quoted) || '',
+    thumbUrl: quoteThumbOf(type, rawContent, quoted.senderFaceUrl || undefined) || undefined,
+    content: quoteSummaryOf(type, rawContent),
   }
 }
 
+/** App 原生桥里 quoteElem / quoteMessage 经常是 JSON 字符串，且 contentType 可能是字符串数字 */
+function quotedMessageOf(item: MessageItem): MessageItem | undefined {
+  const elem = normalizeQuoteElem(item)
+  if (!elem?.quoteMessage) return undefined
+  return coerceMessage(elem.quoteMessage) || elem.quoteMessage
+}
+
+function normalizeQuoteElem(
+  item: MessageItem,
+): { text?: string; quoteMessage?: MessageItem } | undefined {
+  let raw: unknown = (item as { quoteElem?: unknown }).quoteElem
+  if (raw == null && typeof item.content === 'string' && item.content.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(item.content) as { quoteElem?: unknown }
+      raw = parsed.quoteElem
+    } catch {
+      /* content 不是带 quoteElem 的 JSON */
+    }
+  }
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw) as unknown
+    } catch {
+      return undefined
+    }
+  }
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  let quoteMessage = obj.quoteMessage ?? obj.QuoteMessage
+  if (typeof quoteMessage === 'string') {
+    try {
+      quoteMessage = JSON.parse(quoteMessage) as unknown
+    } catch {
+      quoteMessage = undefined
+    }
+  }
+  const text =
+    (typeof obj.text === 'string' && obj.text) ||
+    (typeof obj.Text === 'string' && obj.Text) ||
+    undefined
+  if (!quoteMessage || typeof quoteMessage !== 'object') {
+    return text ? { text } : undefined
+  }
+  return {
+    text,
+    quoteMessage: quoteMessage as MessageItem,
+  }
+}
+
+function resolveQuotedAppType(quoted: MessageItem): AppMessageType {
+  const type = toAppMessageType(Number(quoted.contentType))
+  if (type !== 'text' && type !== 'system') return type
+  const pictureUrl =
+    quoted.pictureElem?.snapshotPicture?.url ||
+    quoted.pictureElem?.sourcePicture?.url ||
+    quoted.pictureElem?.sourcePath ||
+    jsonPictureUrl(quoted.content) ||
+    (typeof quoted.content === 'string' ? quoted.content : '')
+  if (looksLikeImageUrl(pictureUrl) || quoted.pictureElem) return 'image'
+  if (quoted.videoElem || jsonVideoMeta(quoted.content).url) return 'video'
+  if (quoted.soundElem || jsonSoundMeta(quoted.content).path) return 'voice'
+  if (quoted.fileElem) return 'file'
+  if (quoted.cardElem) return 'card'
+  return type
+}
+
+function pickQuotedNickname(quoted: MessageItem): string {
+  const obj = quoted as unknown as Record<string, unknown>
+  return pickString(obj, ['senderNickname', 'SenderNickname', 'senderNickName'])
+}
+
 function extractContent(item: MessageItem): string {
-  switch (item.contentType) {
+  switch (Number(item.contentType)) {
     case MessageType.TextMessage:
       return item.textElem?.content || jsonContentField(item.content, 'content')
     case MessageType.AtTextMessage:
       return item.atTextElem?.text || jsonContentField(item.content, 'text')
-    case MessageType.QuoteMessage:
-      return item.quoteElem?.text || jsonContentField(item.content, 'text')
+    case MessageType.QuoteMessage: {
+      const elem = normalizeQuoteElem(item)
+      return elem?.text || item.quoteElem?.text || jsonContentField(item.content, 'text')
+    }
     case MessageType.PictureMessage:
-      return (
-        item.pictureElem?.snapshotPicture?.url ||
-        item.pictureElem?.sourcePicture?.url ||
-        item.pictureElem?.sourcePath ||
-        jsonPictureUrl(item.content)
-      )
+      return pictureUrlOf(item)
     case MessageType.VoiceMessage: {
       const fromElem = {
         path: item.soundElem?.sourceUrl || item.soundElem?.soundPath || '',
@@ -1451,8 +1564,13 @@ function extractContent(item: MessageItem): string {
         avatar: card?.faceURL || '',
       })
     }
-    default:
+    default: {
+      // App 偶发 contentType 丢失，但 content 已是图片 URL
+      if (typeof item.content === 'string' && looksLikeImageUrl(item.content)) return item.content
+      const pictureUrl = jsonPictureUrl(item.content)
+      if (pictureUrl) return pictureUrl
       return formatIMNotification(item)
+    }
   }
 }
 

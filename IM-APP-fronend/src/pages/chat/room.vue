@@ -21,6 +21,7 @@ import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
+import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import {
   isAnnouncementDismissed,
   rememberDismissedAnnouncement,
@@ -31,6 +32,7 @@ const userStore = useUserStore()
 const contactStore = useContactStore()
 const forwardStore = useForwardStore()
 const successVisible = ref(false)
+const playingVideoUrl = ref('')
 
 const statusBarHeight = getStatusBarHeight()
 
@@ -260,6 +262,7 @@ onShow(() => {
 })
 
 onUnload(() => {
+  playingVideoUrl.value = ''
   if (muteExpireTimer) {
     clearTimeout(muteExpireTimer)
     muteExpireTimer = null
@@ -1019,71 +1022,126 @@ function onPlus() {
 /** 相册 / 文件一次最多可选数量 */
 const MAX_PICK_COUNT = 9
 
+function closePlayingVideo() {
+  playingVideoUrl.value = ''
+}
+
+function onPlayVideo(url: string) {
+  playingVideoUrl.value = url
+}
+
+function onOverlayVideoError() {
+  playingVideoUrl.value = ''
+  uni.showToast({ title: '视频无法播放', icon: 'none' })
+}
+
+function chooseFailToast(err: { errMsg?: string } | undefined, fallback: string) {
+  const msg = String(err?.errMsg || '')
+  if (/cancel/i.test(msg)) return
+  uni.showToast({ title: msg.replace(/^[^:]+:\s*/, '') || fallback, icon: 'none' })
+}
+
+function requestAlbumAccess(): Promise<void> {
+  return new Promise((resolve) => {
+    const os = String(uni.getSystemInfoSync().osName || uni.getSystemInfoSync().platform || '').toLowerCase()
+    const request = plus?.android?.requestPermissions
+    if (!os.includes('android') || typeof request !== 'function') {
+      resolve()
+      return
+    }
+    request(
+      [
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VIDEO',
+        'android.permission.READ_EXTERNAL_STORAGE',
+      ],
+      () => resolve(),
+      () => resolve(),
+    )
+  })
+}
+
+function afterPlusClosed(run: () => void) {
+  showPlusPanel.value = false
+  setTimeout(run, 120)
+}
+
 /** 相册多选：一次最多 9 张，逐张发送保持顺序，单张失败不中断并汇总提示 */
 function pickImage() {
-  uni.chooseImage({
-    count: MAX_PICK_COUNT,
-    sourceType: ['album'],
-    success: async (res) => {
-      showPlusPanel.value = false
-      const paths = (res.tempFilePaths || []).slice(0, MAX_PICK_COUNT)
-      let failed = 0
-      for (const path of paths) {
-        try {
-          await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
-          await nextTick()
-          scrollToBottom()
-        } catch {
-          failed++
-        }
-      }
-      if (failed) {
-        uni.showToast({ title: `${failed} 张图片发送失败`, icon: 'none' })
-      }
-    },
+  afterPlusClosed(() => {
+    void requestAlbumAccess().then(() => {
+      uni.chooseImage({
+        count: MAX_PICK_COUNT,
+        sourceType: ['album'],
+        sizeType: ['compressed', 'original'],
+        fail: (err) => chooseFailToast(err, '无法打开相册'),
+        success: async (res) => {
+          const paths = (res.tempFilePaths || []).slice(0, MAX_PICK_COUNT)
+          let failed = 0
+          for (const path of paths) {
+            try {
+              await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
+              await nextTick()
+              scrollToBottom()
+            } catch {
+              failed++
+            }
+          }
+          if (failed) {
+            uni.showToast({ title: `${failed} 张图片发送失败`, icon: 'none' })
+          }
+        },
+      })
+    })
   })
 }
 
 /** 相机拍照即发 */
 function pickCamera() {
-  uni.chooseImage({
-    count: 1,
-    sourceType: ['camera'],
-    success: async (res) => {
-      showPlusPanel.value = false
-      try {
-        await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
-        await nextTick()
-        scrollToBottom()
-      } catch (e) {
-        uni.showToast({ title: (e as Error).message, icon: 'none' })
-      }
-    },
+  afterPlusClosed(() => {
+    uni.chooseImage({
+      count: 1,
+      sourceType: ['camera'],
+      fail: (err) => chooseFailToast(err, '无法打开相机'),
+      success: async (res) => {
+        try {
+          await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
+          await nextTick()
+          scrollToBottom()
+        } catch (e) {
+          uni.showToast({ title: (e as Error).message, icon: 'none' })
+        }
+      },
+    })
   })
 }
 
 /** 选视频发送：相册或拍摄，走系统自带 chooseVideo，不依赖 chooseMedia 模块 */
 function pickVideo() {
-  uni.chooseVideo({
-    sourceType: ['album', 'camera'],
-    compressed: true,
-    maxDuration: 60,
-    success: async (res) => {
-      showPlusPanel.value = false
-      try {
-        await chatStore.sendVideo(
-          conversationId.value,
-          res.tempFilePath,
-          imUserId.value || myId.value,
-          Number(res.duration || 0),
-          (res as { thumbTempFilePath?: string }).thumbTempFilePath || '',
-        )
-        await nextTick()
-        scrollToBottom()
-      } catch (e) {
-        uni.showToast({ title: (e as Error).message || '视频发送失败', icon: 'none' })
-      }
-    },
+  afterPlusClosed(() => {
+    void requestAlbumAccess().then(() => {
+      uni.chooseVideo({
+        sourceType: ['album', 'camera'],
+        compressed: true,
+        maxDuration: 60,
+        fail: (err) => chooseFailToast(err, '无法选择视频'),
+        success: async (res) => {
+          try {
+            await chatStore.sendVideo(
+              conversationId.value,
+              res.tempFilePath,
+              imUserId.value || myId.value,
+              Number(res.duration || 0),
+              (res as { thumbTempFilePath?: string }).thumbTempFilePath || '',
+            )
+            await nextTick()
+            scrollToBottom()
+          } catch (e) {
+            uni.showToast({ title: (e as Error).message || '视频发送失败', icon: 'none' })
+          }
+        },
+      })
+    })
   })
 }
 
@@ -1182,12 +1240,25 @@ function pickFavorite() {
           @card-view="onViewCard"
           @longpress="actions.openMenu(m)"
           @retry="onRetry(m)"
+          @play-video="onPlayVideo"
         />
       </view>
       <!-- 底部锚点：scroll-into-view 只保证元素「顶部」进入视口，最后一条比视口高时会露出上半截；
            滚到垫底的锚点等于滚到真正的底部，保证最新消息完整可见 -->
       <view id="bottom-anchor" class="bottom-anchor"></view>
     </scroll-view>
+
+    <view v-if="playingVideoUrl" class="video-overlay" @click="closePlayingVideo">
+      <video
+        class="video-overlay-player"
+        :src="playingVideoUrl"
+        autoplay
+        controls
+        object-fit="contain"
+        @click.stop
+        @error="onOverlayVideoError"
+      />
+    </view>
 
     <view v-if="actions.selecting.value" class="composer safe-bottom">
       <ImMessageSelectBar
@@ -1201,8 +1272,9 @@ function pickFavorite() {
     <view v-else class="composer safe-bottom">
       <ImQuoteBar
         v-if="actions.quote.value"
-        :nickname="actions.quote.value.senderNickname || nicknameOf(actions.quote.value) || '我'"
-        :text="actions.quote.value.content"
+        :nickname="nicknameOf(actions.quote.value) || actions.quote.value.senderNickname || '我'"
+        :thumb="quoteThumbOf(actions.quote.value.type, actions.quote.value.content, avatarOf(actions.quote.value))"
+        :text="quoteSummaryOf(actions.quote.value.type, actions.quote.value.content)"
         @close="actions.clearQuote"
       />
       <view v-if="composerBlocked" class="composer-blocked">
@@ -1696,5 +1768,20 @@ function pickFavorite() {
 .plus-icon-img {
   width: 56rpx;
   height: 56rpx;
+}
+
+.video-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2000;
+  background: #000;
+}
+
+.video-overlay-player {
+  width: 100%;
+  height: 100%;
 }
 </style>
