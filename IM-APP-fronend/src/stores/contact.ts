@@ -10,9 +10,11 @@ import {
   sendFriendRequest,
 } from '@/api/contact'
 import { getToken } from '@/utils/request'
+import { writeFriendRequestBadge } from '@/utils/friend-request-badge'
+import { useUserStore } from '@/stores/user'
 
 const PAGE_SIZE = 50
-const FRIEND_REQUEST_RETRY_MS = [0, 400, 1200]
+const FRIEND_REQUEST_RETRY_MS = [0, 400, 1200, 3000, 5000]
 
 export const useContactStore = defineStore('contact', () => {
   const contacts = ref<Contact[]>([])
@@ -78,16 +80,19 @@ export const useContactStore = defineStore('contact', () => {
   }
 
   async function loadFriendRequests() {
+    const userStore = useUserStore()
     let lastError: unknown
     for (const delayMs of FRIEND_REQUEST_RETRY_MS) {
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs))
       }
-      if (!getToken()) continue
+      const accessToken = userStore.token || getToken()
+      if (!accessToken) continue
       try {
-        const list = await fetchFriendRequests()
+        const list = await fetchFriendRequests(accessToken)
         pendingFriendRequests.value = list.pending
         recentFriendRequests.value = list.recent
+        writeFriendRequestBadge(list.pending.length)
         return
       } catch (err) {
         lastError = err
@@ -151,6 +156,7 @@ export const useContactStore = defineStore('contact', () => {
     pendingFriendRequests.value = []
     recentFriendRequests.value = []
     groupsExpanded.value = false
+    writeFriendRequestBadge(0)
   }
 
   return {

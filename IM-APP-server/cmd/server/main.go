@@ -323,6 +323,7 @@ func main() {
 			auth.POST("/groups/:id/dissolved/remove", groupH.RemoveDissolvedGroup)
 			auth.POST("/group-invitations/:token/accept", groupH.AcceptInvitation)
 			auth.GET("/friend-requests", contactH.ListFriendRequests)
+			auth.POST("/friend-requests/sync", contactH.ListFriendRequests)
 			auth.POST("/friend-requests", contactH.CreateFriendRequest)
 			auth.POST("/group-friend-requests", contactH.CreateGroupFriendRequest)
 			auth.POST("/friend-requests/:id/accept", contactH.AcceptFriendRequest)

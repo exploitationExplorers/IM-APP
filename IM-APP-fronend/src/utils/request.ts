@@ -59,6 +59,8 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   data?: Record<string, unknown> | unknown
   auth?: boolean
+  /** 显式传入 accessToken，避免 App 端 storage 读写竞态导致 Authorization 为空 */
+  token?: string
   header?: Record<string, string>
 }
 
@@ -94,7 +96,7 @@ function isRefreshEndpoint(url: string): boolean {
 
 function rawRequest<T>(options: RequestOptions, tokenOverride?: string): Promise<RawResponse<T>> {
   const { url, method = 'GET', data, auth = true, header = {} } = options
-  const token = tokenOverride ?? getToken()
+  const token = tokenOverride ?? options.token ?? getToken()
   return new Promise((resolve, reject) => {
     uni.request({
       url: url.startsWith('http') ? url : `${APP_CONFIG.apiBaseUrl}${url}`,

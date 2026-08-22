@@ -340,7 +340,19 @@ async function onLeave() {
   if (!res.confirm) return
   leaving.value = true
   try {
+    // 必须在退出接口前拿到会话 ID；退出后后端成员校验会拒绝再次解析。
+    let conversationId = convId.value
+    if (!conversationId) {
+      conversationId = await resolveGroupConversationID(groupId.value).catch(() => '')
+    }
     await groupStore.leave(groupId.value)
+    if (conversationId) {
+      await chatStore.removeExitedGroupConversation(conversationId)
+    } else {
+      // 极端情况下 OpenIM 会话 ID 未解析成功，业务退群仍应成功；重新拉列表等待
+      // OpenIM 退群事件收敛，不能因为本地 SDK 异常阻断业务退出。
+      await chatStore.loadConversations().catch(() => undefined)
+    }
     uni.reLaunch({ url: '/pages/chat/index' })
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '退出失败', icon: 'none' })

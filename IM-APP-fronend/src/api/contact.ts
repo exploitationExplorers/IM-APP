@@ -81,14 +81,12 @@ function normalizeFriendRequestList(raw: unknown): FriendRequestList {
   return { pending: [], recent: [] }
 }
 
-export async function fetchFriendRequests(): Promise<FriendRequestList> {
+export async function fetchFriendRequests(accessToken?: string): Promise<FriendRequestList> {
   const result = await request<FriendRequestList | FriendRequest[] | string>({
-    url: `/friend-requests?direction=received&_=${Date.now()}`,
-    method: 'GET',
-    header: {
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
-    },
+    url: '/friend-requests/sync',
+    method: 'POST',
+    data: { direction: 'received' },
+    token: accessToken,
   })
   return normalizeFriendRequestList(result)
 }

@@ -21,6 +21,8 @@ import {
 } from '@/utils/request'
 import { initOpenIM, logoutOpenIM } from '@/utils/openim'
 import { applyLoginPhone, clearLoginPhone, saveLoginPhone } from '@/utils/login-phone'
+import { clearSessionStorage } from '@/utils/app-cache'
+import { clearFriendRequestBadge } from '@/utils/friend-request-badge'
 import { syncPushRegistration, unregisterPushRegistration } from '@/utils/push-register'
 import { useChatStore } from '@/stores/chat'
 import { useChatSettingsStore } from '@/stores/chatSettings'
@@ -122,6 +124,8 @@ export const useUserStore = defineStore('user', () => {
     profile.value = null
     clearLoginPhone()
     clearToken()
+    clearFriendRequestBadge()
+    clearSessionStorage()
     useChatStore().reset()
     useContactStore().reset()
     useGroupStore().reset()

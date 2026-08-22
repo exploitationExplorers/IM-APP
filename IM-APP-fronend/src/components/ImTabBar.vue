@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
+import {
+  onFriendRequestBadgeUpdated,
+  readFriendRequestBadge,
+} from '@/utils/friend-request-badge'
 
 const props = defineProps<{
   current: 'contacts' | 'chat' | 'mine'
@@ -12,6 +16,21 @@ const chatStore = useChatStore()
 const contactStore = useContactStore()
 const { totalUnread } = storeToRefs(chatStore)
 const { pendingFriendRequestCount } = storeToRefs(contactStore)
+const storageFriendBadge = ref(readFriendRequestBadge())
+
+onMounted(() => {
+  storageFriendBadge.value = readFriendRequestBadge()
+})
+
+const offBadgeUpdated = onFriendRequestBadgeUpdated((count) => {
+  storageFriendBadge.value = count
+})
+
+onUnmounted(offBadgeUpdated)
+
+function friendBadgeCount() {
+  return Math.max(pendingFriendRequestCount.value, storageFriendBadge.value)
+}
 
 function badgeOf(n: number): string {
   if (n <= 0) return ''
@@ -19,7 +38,7 @@ function badgeOf(n: number): string {
 }
 
 const chatBadge = computed(() => badgeOf(totalUnread.value))
-const contactsBadge = computed(() => badgeOf(pendingFriendRequestCount.value))
+const contactsBadge = computed(() => badgeOf(friendBadgeCount()))
 
 const contactsIcon = computed(() =>
   props.current === 'contacts'

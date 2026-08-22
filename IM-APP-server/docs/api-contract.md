@@ -389,7 +389,16 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### GET `/api/v1/friend-requests?direction=received|sent`
 
-好友申请列表（默认 `received`）。
+好友申请列表（默认 `received`）。H5 / 调试可用；**App 端请用下方 POST sync**，避免 CDN / WebView 缓存 GET。
+
+### POST `/api/v1/friend-requests/sync`
+
+拉取好友申请列表（与 GET 等价，不会被中间层缓存）。App 端统一走此接口。
+
+**Body**
+```json
+{ "direction": "received" }
+```
 
 **Response（`direction=received`）**
 ```json
