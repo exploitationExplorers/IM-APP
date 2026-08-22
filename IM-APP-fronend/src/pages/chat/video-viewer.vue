@@ -3,7 +3,7 @@ import { computed, ref, watch, nextTick } from 'vue'
 import { onLoad, onReady, onUnload } from '@dcloudio/uni-app'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
-import { parseVideoMeta, saveVideoToDevice, videoPlayUrlFromContent } from '@/utils/chatMedia'
+import { saveVideoToDevice, videoPlayUrlFromContent } from '@/utils/chatMedia'
 import { formatFavoriteDay } from '@/utils/format'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import type { ChatMessage } from '@/types'
@@ -175,6 +175,8 @@ onUnload(() => {
 </script>
 
 <template>
+  <!-- H5：DOM video 与普通 view 同层，三段布局即可 -->
+  <!-- #ifdef H5 -->
   <view class="page">
     <view class="header" :style="{ height: `${layout.headerH}px`, paddingTop: `${statusBarHeight}px` }">
       <view class="header-left">
@@ -192,29 +194,9 @@ onUnload(() => {
       </view>
     </view>
 
-    <!-- #ifdef H5 -->
     <view class="player-host" :style="{ height: `${layout.playerH}px` }">
       <view v-if="!videoUrl" class="empty-tip">视频地址无效</view>
     </view>
-    <!-- #endif -->
-
-    <!-- #ifndef H5 -->
-    <view class="player-host" :style="{ height: `${layout.playerH}px` }">
-      <video
-        v-if="videoUrl"
-        class="app-player"
-        :src="videoUrl"
-        autoplay
-        controls
-        object-fit="contain"
-        :show-center-play-btn="true"
-        :enable-progress-gesture="true"
-        :show-fullscreen-btn="true"
-        @error="onVideoError"
-      />
-      <view v-else class="empty-tip">视频地址无效</view>
-    </view>
-    <!-- #endif -->
 
     <view class="bottom-bar" :style="{ height: `${layout.bottomH}px` }">
       <view class="tool-btn" @click="onDelete">
@@ -228,6 +210,57 @@ onUnload(() => {
       </view>
     </view>
   </view>
+  <!-- #endif -->
+
+  <!--
+    App 真机：原生 video 会盖住普通 view（模拟器往往正常），顶栏/底栏必须用 cover-view。
+    关掉全屏按钮，避免再跳进系统全屏播放器把自定义栏冲掉。
+  -->
+  <!-- #ifndef H5 -->
+  <view class="page app-page">
+    <video
+      v-if="videoUrl"
+      class="app-player-full"
+      :src="videoUrl"
+      autoplay
+      controls
+      object-fit="contain"
+      :show-center-play-btn="true"
+      :show-fullscreen-btn="false"
+      :enable-progress-gesture="true"
+      :vslide-gesture-in-fullscreen="false"
+      @error="onVideoError"
+    />
+    <view v-else class="empty-tip app-empty">视频地址无效</view>
+
+    <cover-view
+      class="cover-header"
+      :style="{ height: `${layout.headerH}px`, paddingTop: `${statusBarHeight}px` }"
+    >
+      <cover-view class="cover-header-left">
+        <cover-view class="cover-back" @tap="goBack">
+          <cover-view class="cover-back-text">‹</cover-view>
+        </cover-view>
+        <cover-view class="cover-meta">
+          <cover-view class="cover-sender">{{ senderLabel }}</cover-view>
+          <cover-view class="cover-time">{{ timeLabel }}</cover-view>
+        </cover-view>
+      </cover-view>
+    </cover-view>
+
+    <cover-view class="cover-bottom" :style="{ height: `${layout.bottomH}px` }">
+      <cover-view class="cover-tool" @tap="onDelete">
+        <cover-view class="cover-tool-text">删除</cover-view>
+      </cover-view>
+      <cover-view class="cover-tool" @tap="onSave">
+        <cover-view class="cover-tool-text">保存</cover-view>
+      </cover-view>
+      <cover-view class="cover-tool" @tap="onForward">
+        <cover-view class="cover-tool-text">转发</cover-view>
+      </cover-view>
+    </cover-view>
+  </view>
+  <!-- #endif -->
 </template>
 
 <style scoped lang="scss">
@@ -318,12 +351,6 @@ onUnload(() => {
   position: relative;
 }
 
-.app-player {
-  width: 100%;
-  height: 100%;
-  background: #000;
-}
-
 .empty-tip {
   position: absolute;
   left: 50%;
@@ -361,5 +388,128 @@ onUnload(() => {
 .tool-icon-forward {
   width: 26px;
   height: 26px;
+}
+
+/* —— App：全屏 video + cover 浮层 —— */
+.app-page {
+  position: relative;
+  display: block;
+}
+
+.app-player-full {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.app-empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.cover-header {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 4px;
+  padding-right: 12px;
+  padding-bottom: 8px;
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+.cover-header-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex: 1;
+  overflow: hidden;
+}
+
+.cover-back {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-back-text {
+  color: #ffffff;
+  font-size: 28px;
+  line-height: 36px;
+  text-align: center;
+}
+
+.cover-meta {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-right: 8px;
+}
+
+.cover-sender {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 20px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cover-time {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  line-height: 16px;
+  margin-top: 2px;
+}
+
+.cover-header-right {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.cover-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-around;
+  padding-left: 36px;
+  padding-right: 36px;
+  background-color: rgba(0, 0, 0, 0.55);
+}
+
+.cover-tool {
+  width: 64px;
+  height: 44px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-tool-text {
+  color: #ffffff;
+  font-size: 15px;
+  line-height: 44px;
+  text-align: center;
 }
 </style>
