@@ -54,6 +54,12 @@ export interface FriendRequest {
   createdAt: string
 }
 
+/** GET /friend-requests 收到的好友申请列表 */
+export interface FriendRequestList {
+  pending: FriendRequest[]
+  recent: FriendRequest[]
+}
+
 export type FriendRequestAction = 'accept' | 'reject'
 
 export interface PrivacySettings {

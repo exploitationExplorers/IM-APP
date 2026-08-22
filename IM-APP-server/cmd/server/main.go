@@ -254,7 +254,7 @@ func main() {
 		api.POST("/auth/logout", authH.Logout)
 
 		auth := api.Group("")
-		auth.Use(middleware.AuthRequired(cfg.JWTSecret))
+		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.NoStore())
 		{
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)

@@ -72,6 +72,20 @@ interface RawResponse<T> {
   body: ApiResponse<T>
 }
 
+function parseResponseBody<T>(raw: unknown): ApiResponse<T> {
+  if (typeof raw === 'string') {
+    try {
+      return parseResponseBody<T>(JSON.parse(raw) as unknown)
+    } catch {
+      return { code: -1, message: '响应解析失败', data: undefined as T }
+    }
+  }
+  if (raw && typeof raw === 'object' && 'code' in raw) {
+    return raw as ApiResponse<T>
+  }
+  return { code: -1, message: '响应格式错误', data: undefined as T }
+}
+
 let refreshingTokenPromise: Promise<string> | null = null
 
 function isRefreshEndpoint(url: string): boolean {
@@ -94,7 +108,7 @@ function rawRequest<T>(options: RequestOptions, tokenOverride?: string): Promise
       success: (res) => {
         resolve({
           statusCode: res.statusCode,
-          body: res.data as ApiResponse<T>,
+          body: parseResponseBody<T>(res.data),
         })
       },
       fail: (err) => {

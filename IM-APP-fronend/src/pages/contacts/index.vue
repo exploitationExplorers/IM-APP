@@ -50,10 +50,14 @@ function refreshContacts() {
 }
 
 function refreshDirectory() {
-  return Promise.all([refreshContacts(), contactStore.loadGroups()])
+  return Promise.all([
+    refreshContacts(),
+    contactStore.loadGroups(),
+    contactStore.loadFriendRequests(),
+  ])
 }
 
-/** 切回通讯录页面时刷新群列表（已解散群由服务端过滤后自动消失） */
+/** 切回通讯录页面时刷新群列表与好友申请角标 */
 onShow(() => {
   void refreshDirectory()
 })

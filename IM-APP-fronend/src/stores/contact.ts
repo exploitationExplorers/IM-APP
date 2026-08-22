@@ -9,9 +9,10 @@ import {
   rejectFriendRequest,
   sendFriendRequest,
 } from '@/api/contact'
-import { mergeReceivedFriendRequests } from '@/utils/friend-request'
+import { getToken } from '@/utils/request'
 
 const PAGE_SIZE = 50
+const FRIEND_REQUEST_RETRY_MS = [0, 400, 1200]
 
 export const useContactStore = defineStore('contact', () => {
   const contacts = ref<Contact[]>([])
@@ -22,13 +23,12 @@ export const useContactStore = defineStore('contact', () => {
   const contactKeyword = ref('')
   const contactSort = ref<ContactListSort>('recent')
   const groups = ref<GroupPreview[]>([])
-  const friendRequests = ref<FriendRequest[]>([])
+  const pendingFriendRequests = ref<FriendRequest[]>([])
+  const recentFriendRequests = ref<FriendRequest[]>([])
   const groupsExpanded = ref(false)
 
   /** 待处理的收到申请数，对齐参考站通讯录 / 新的朋友角标 */
-  const pendingFriendRequestCount = computed(() =>
-    friendRequests.value.filter((fr) => fr.status === 'pending').length,
-  )
+  const pendingFriendRequestCount = computed(() => pendingFriendRequests.value.length)
 
   async function reloadContacts(opts?: { keyword?: string; sort?: ContactListSort }) {
     if (opts?.keyword !== undefined) contactKeyword.value = opts.keyword
@@ -78,7 +78,22 @@ export const useContactStore = defineStore('contact', () => {
   }
 
   async function loadFriendRequests() {
-    friendRequests.value = mergeReceivedFriendRequests(await fetchFriendRequests())
+    let lastError: unknown
+    for (const delayMs of FRIEND_REQUEST_RETRY_MS) {
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+      }
+      if (!getToken()) continue
+      try {
+        const list = await fetchFriendRequests()
+        pendingFriendRequests.value = list.pending
+        recentFriendRequests.value = list.recent
+        return
+      } catch (err) {
+        lastError = err
+      }
+    }
+    if (lastError) throw lastError
   }
 
   async function loadAll() {
@@ -87,13 +102,12 @@ export const useContactStore = defineStore('contact', () => {
 
   async function acceptRequest(id: string) {
     await acceptFriendRequest(id)
-    await loadAll()
-    goToContacts()
+    await Promise.all([loadFriendRequests(), loadDirectory()])
   }
 
   async function rejectRequest(id: string) {
     await rejectFriendRequest(id)
-    friendRequests.value = friendRequests.value.filter((fr) => fr.id !== id)
+    await loadFriendRequests()
   }
 
   /** 只有真正成为好友才回通讯录；仅发出申请时留在原页面等对方通过 */
@@ -134,7 +148,8 @@ export const useContactStore = defineStore('contact', () => {
     contactCursor.value = ''
     contactHasMore.value = false
     groups.value = []
-    friendRequests.value = []
+    pendingFriendRequests.value = []
+    recentFriendRequests.value = []
     groupsExpanded.value = false
   }
 
@@ -146,7 +161,8 @@ export const useContactStore = defineStore('contact', () => {
     contactKeyword,
     contactSort,
     groups,
-    friendRequests,
+    pendingFriendRequests,
+    recentFriendRequests,
     pendingFriendRequestCount,
     groupsExpanded,
     reloadContacts,

@@ -5,6 +5,7 @@ import type {
   ContactPage,
   ContactTagItem,
   FriendRequest,
+  FriendRequestList,
   GroupFriendRequestResult,
   GroupPreview,
   SendFriendResult,
@@ -51,8 +52,45 @@ export async function fetchGroups(role?: 'owner' | 'member'): Promise<GroupPrevi
   return request<GroupPreview[]>({ url: '/groups', method: 'GET', data })
 }
 
-export async function fetchFriendRequests(): Promise<FriendRequest[]> {
-  return request<FriendRequest[]>({ url: '/friend-requests', method: 'GET' })
+function normalizeFriendRequestList(raw: unknown): FriendRequestList {
+  if (!raw) return { pending: [], recent: [] }
+  if (typeof raw === 'string') {
+    try {
+      return normalizeFriendRequestList(JSON.parse(raw) as unknown)
+    } catch {
+      return { pending: [], recent: [] }
+    }
+  }
+  if (Array.isArray(raw)) {
+    return { pending: raw, recent: [] }
+  }
+  if (typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    // 兼容 App 端偶发双层 data 包装
+    if (obj.data && typeof obj.data === 'object') {
+      const inner = obj.data as Record<string, unknown>
+      if (Array.isArray(inner) || 'pending' in inner || 'recent' in inner) {
+        return normalizeFriendRequestList(obj.data)
+      }
+    }
+    return {
+      pending: Array.isArray(obj.pending) ? (obj.pending as FriendRequest[]) : [],
+      recent: Array.isArray(obj.recent) ? (obj.recent as FriendRequest[]) : [],
+    }
+  }
+  return { pending: [], recent: [] }
+}
+
+export async function fetchFriendRequests(): Promise<FriendRequestList> {
+  const result = await request<FriendRequestList | FriendRequest[] | string>({
+    url: `/friend-requests?direction=received&_=${Date.now()}`,
+    method: 'GET',
+    header: {
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
+  })
+  return normalizeFriendRequestList(result)
 }
 
 export async function sendFriendRequest(toUserId: string, message: string): Promise<SendFriendResult> {

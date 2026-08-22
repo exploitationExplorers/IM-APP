@@ -389,7 +389,36 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### GET `/api/v1/friend-requests?direction=received|sent`
 
-好友申请列表（默认 `received`）。只返回 `pending`，按时间倒序，最多 100 条。
+好友申请列表（默认 `received`）。
+
+**Response（`direction=received`）**
+```json
+{
+  "pending": [
+    {
+      "id": "uuid",
+      "fromUser": { "id": "uuid", "nickname": "...", "avatar": "..." },
+      "message": "验证说明",
+      "status": "pending",
+      "createdAt": "2026-08-22T10:00:00Z"
+    }
+  ],
+  "recent": [
+    {
+      "id": "uuid",
+      "fromUser": { "id": "uuid", "nickname": "...", "avatar": "..." },
+      "message": "你好，我是 xxx",
+      "status": "accepted",
+      "createdAt": "2026-08-12T10:00:00Z"
+    }
+  ]
+}
+```
+
+- `pending`：待处理（同一申请人只保留最近一条），按时间倒序，最多 100 条。
+- `recent`：近期已处理（`accepted` / `rejected`），不含当前仍有 `pending` 的申请人，按时间倒序，最多 100 条。
+
+**Response（`direction=sent`）**：`{ "pending": [...], "recent": [] }`，`pending` 为我发出的待对方同意申请。
 
 ### POST `/api/v1/friend-requests`
 

@@ -34,6 +34,7 @@ export type {
   ContactTagItem,
   GroupPreview,
   FriendRequest,
+  FriendRequestList,
   FriendRequestAction,
   PrivacySettings,
   SendFriendResult,

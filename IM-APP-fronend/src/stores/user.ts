@@ -135,7 +135,24 @@ export const useUserStore = defineStore('user', () => {
     initOpenIM()
       .then(() => useChatStore().loadConversations())
       .catch(() => undefined)
-    void useContactStore().loadFriendRequests().catch(() => undefined)
+    scheduleFriendRequestSync()
+  }
+
+  /** App 冷启动时 token / 网络栈可能略晚就绪，多次拉取避免角标一直为 0 */
+  function scheduleFriendRequestSync() {
+    const run = () => {
+      if (!getToken()) return
+      void useContactStore().loadFriendRequests().catch(() => undefined)
+    }
+    run()
+    try {
+      if (uni.getSystemInfoSync().uniPlatform === 'app') {
+        setTimeout(run, 400)
+        setTimeout(run, 1500)
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   function bootstrap() {
