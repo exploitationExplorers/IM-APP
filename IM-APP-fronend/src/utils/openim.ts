@@ -18,8 +18,15 @@ import { getToken } from '@/utils/request'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
 import { formatIMNotification, imNotificationEventKey, notificationKindOf } from '@/utils/im-notification'
-import { highlightTagsOf } from '@/utils/group-announcement'
-import { parseVideoMeta, videoSnapshotTime } from '@/utils/chatMedia'
+import { effectiveGroupAtType, GroupAtType, highlightTagsOf } from '@/utils/group-announcement'
+import { parseVideoMeta, videoSnapshotTime, downloadRemoteVideoForCover } from '@/utils/chatMedia'
+import { devLog, devWarn } from '@/utils/devLog'
+
+/** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
+const H5_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 5 // Warn : Silent
+/** openim-uniapp-polyfill LogLevel：App 原生 InitSDK */
+const APP_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 2 // Warn : Error
+const APP_SDK_LOG_STDOUT = import.meta.env.DEV
 
 /** OpenIM 会话目标，发消息时决定填 recvID 还是 groupID */
 export interface IMTarget {
@@ -317,6 +324,7 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
     platformID: imToken.platform,
     apiAddr: imToken.apiAddr,
     wsAddr: imToken.wsAddr,
+    logLevel: H5_SDK_LOG_LEVEL,
   }
   let synced = waitForSync()
   try {
@@ -357,8 +365,8 @@ async function doLogin(): Promise<string> {
       apiAddr: imToken.apiAddr,
       wsAddr: imToken.wsAddr,
       dataDir,
-      logLevel: 4,
-      isLogStandardOutput: true,
+      logLevel: APP_SDK_LOG_LEVEL,
+      isLogStandardOutput: APP_SDK_LOG_STDOUT,
     })
   }
 
@@ -840,7 +848,7 @@ function sendOnAppNative(
       reject(failure)
     }
     const timer = setTimeout(() => {
-      if (isVideo) console.warn('[video][send] TIMEOUT 未收到成功/失败回调', { clientMsgID, waitMs })
+      if (isVideo) devWarn('[video][send] TIMEOUT 未收到成功/失败回调', { clientMsgID, waitMs })
       finish(false, undefined, new Error('发送超时'))
     }, waitMs)
     const offOk = onIMEvent<MessageItem>(IMEvents.SendMessageSuccess, (msg) => {
@@ -863,7 +871,7 @@ function sendOnAppNative(
       }
       if (isVideo) {
         const m = coerceMessage(data)
-        console.log('[video][send] native cb', {
+        devLog('[video][send] native cb', {
           errCode: res?.errCode,
           dataType: typeof res?.data,
           isProgress: isSendProgressData(data),
@@ -972,7 +980,6 @@ async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<st
  */
 export async function extractVideoCoverForForward(videoUrl: string): Promise<string> {
   if (!videoUrl) return ''
-  const { downloadRemoteVideoForCover } = await import('@/utils/chatMedia')
   const local = await downloadRemoteVideoForCover(videoUrl)
   if (!local) return ''
   return snapshotOfVideo(toNativeFullPath(local))
@@ -1155,7 +1162,7 @@ export async function sendVideoMessage(
     const videoPath = toNativeFullPath(saved)
     if (!snap) snap = await snapshotOfVideo(videoPath)
     if (!snap) throw new Error('无法提取视频封面，请重新选择视频')
-    console.log('[video][send] app 路径', {
+    devLog('[video][send] app 路径', {
       filePath,
       saved,
       videoPath,
@@ -1165,7 +1172,7 @@ export async function sendVideoMessage(
     try {
       return await sendUploadedVideoMessage(target, videoPath, seconds, snap)
     } catch (uploadErr) {
-      console.warn('[video][send] 上传后按 URL 发失败，改走原生 FullPath', (uploadErr as Error)?.message)
+      devWarn('[video][send] 上传后按 URL 发失败，改走原生 FullPath', (uploadErr as Error)?.message)
     }
     let message: MessageItem
     try {
@@ -1197,7 +1204,7 @@ export async function sendVideoMessage(
       snapshotWidth = dimensions.width
       snapshotHeight = dimensions.height
     } catch (error) {
-      console.warn('[video][cover] H5 自带封面上传失败，将重新截帧', (error as Error)?.message)
+      devWarn('[video][cover] H5 自带封面上传失败，将重新截帧', (error as Error)?.message)
     }
   }
   if (!snapshotUrl) {
@@ -1209,10 +1216,10 @@ export async function sendVideoMessage(
         snapshotWidth = generated.width
         snapshotHeight = generated.height
       } catch (error) {
-        console.warn('[video][cover] H5 截帧上传失败', (error as Error)?.message)
+        devWarn('[video][cover] H5 截帧上传失败', (error as Error)?.message)
       }
     } else {
-      console.warn('[video][cover] H5 无法从所选视频提取画面')
+      devWarn('[video][cover] H5 无法从所选视频提取画面')
     }
   }
   if (!snapshotUrl) throw new Error('无法生成视频封面，请确认浏览器支持该视频格式')
@@ -1479,10 +1486,20 @@ export function targetOf(conversation: ConversationItem | Conversation): IMTarge
   }
 }
 
+function conversationNumericField(item: ConversationItem, camel: string, pascal: string): number {
+  const raw = item as ConversationItem & Record<string, unknown>
+  const value = raw[camel] ?? raw[pascal]
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
 export function toConversation(item: ConversationItem): Conversation {
   const isGroup = item.conversationType !== SessionType.Single
   const groupId = item.groupID || groupIdFromConversationId(item.conversationID)
   const remark = isGroup ? groupRemarkFromEx(conversationEx(item)) : ''
+  const unreadCount = conversationNumericField(item, 'unreadCount', 'UnreadCount')
+  const groupAtType = conversationNumericField(item, 'groupAtType', 'GroupAtType')
+  const atType = effectiveGroupAtType(groupAtType, unreadCount)
   return {
     id: item.conversationID,
     type: isGroup ? 'group' : 'private',
@@ -1492,13 +1509,13 @@ export function toConversation(item: ConversationItem): Conversation {
       (isGroup ? APP_CONFIG.defaultGroupAvatarUrl : APP_CONFIG.defaultAvatarUrl),
     lastMessage: summarize(item.latestMsg),
     lastMessageAt: toISOTime(item.latestMsgSendTime),
-    unreadCount: item.unreadCount || 0,
+    unreadCount,
     pinned: item.isPinned,
     recvMsgOpt: item.recvMsgOpt,
     peerUserId: item.userID || undefined,
     groupId: groupId || undefined,
-    groupAtType: item.groupAtType || 0,
-    highlightTags: highlightTagsOf(item.groupAtType || 0, false),
+    groupAtType,
+    highlightTags: highlightTagsOf(atType, false),
   }
 }
 
@@ -2049,7 +2066,7 @@ export async function hideConversation(conversationID: string): Promise<void> {
   } catch (e) {
     // H5 SDK 不支持 hideConversation；本地 hideConversationLocal 已经在调用前把会话从列表中移除，
     // 因此本次操作在 UI 上已生效。吞掉底层错误即可。
-    console.warn('[openim] hideConversation 调用失败（H5 SDK 可能不支持该接口）', e)
+    devWarn('[openim] hideConversation 调用失败（H5 SDK 可能不支持该接口）', e)
   }
 }
 
@@ -2091,10 +2108,34 @@ export async function setConversationGroupRemark(conversationID: string, remark:
 
 /** 清掉会话上的 @ / 新公告强提醒，对应参考站「不再提示」 */
 export async function resetConversationGroupAtType(conversationID: string): Promise<void> {
-  try {
-    await imCall('resetConversationGroupAtType' as IMMethods, conversationID)
-  } catch {
-    await imCall('setConversation' as IMMethods, { conversationID, groupAtType: 0 })
+  const attempts: unknown[] = [
+    conversationID,
+    { conversationID, groupAtType: GroupAtType.AtNormal },
+  ]
+  if (isAppPlatform) {
+    attempts.push({ conversationID, GroupAtType: GroupAtType.AtNormal })
+  }
+  for (const params of attempts) {
+    try {
+      await imCall('resetConversationGroupAtType' as IMMethods, params)
+      return
+    } catch {
+      /* 原生桥参数形态不一致，继续尝试 setConversation */
+    }
+  }
+  const setArgs = isAppPlatform
+    ? [
+        { conversationID, groupAtType: GroupAtType.AtNormal },
+        { conversationID, GroupAtType: GroupAtType.AtNormal },
+      ]
+    : [{ conversationID, groupAtType: GroupAtType.AtNormal }]
+  for (const params of setArgs) {
+    try {
+      await imCall('setConversation' as IMMethods, params)
+      return
+    } catch {
+      /* try next shape */
+    }
   }
 }
 

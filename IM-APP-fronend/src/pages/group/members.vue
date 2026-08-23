@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import {
   fetchGroupDetail,
-  fetchGroupMembers,
+  fetchAllGroupMembers,
   muteGroupMember,
   removeGroupMember,
   unmuteGroupMember,
@@ -53,7 +53,7 @@ onShow(async () => {
   try {
     const [detail, list] = await Promise.all([
       fetchGroupDetail(groupId.value),
-      fetchGroupMembers(groupId.value),
+      fetchAllGroupMembers(groupId.value),
     ])
     group.value = detail
     members.value = list

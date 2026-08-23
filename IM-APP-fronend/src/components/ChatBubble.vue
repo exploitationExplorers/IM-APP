@@ -42,15 +42,26 @@ const showNickname = computed(() => !props.mine && !!props.nickname)
 
 const emit = defineEmits<{
   avatarClick: []
+  avatarLongpress: []
   longpress: []
   cardView: [card: CardPayload]
   retry: [message: ChatMessage]
   playVideo: [message: ChatMessage]
 }>()
 
+/** 长按头像后短时间内吞掉 click，避免又跳进资料页 */
+let avatarLongpressLockUntil = 0
+
 function onAvatarClick() {
   if (props.mine) return
+  if (Date.now() < avatarLongpressLockUntil) return
   emit('avatarClick')
+}
+
+function onAvatarLongPress() {
+  if (props.mine) return
+  avatarLongpressLockUntil = Date.now() + 400
+  emit('avatarLongpress')
 }
 
 /** 名片消息 content 为 JSON；解析失败时兜底成空名片，不影响其它类型渲染 */
@@ -404,6 +415,8 @@ function openLink(url: string) {
       :src="avatarSrc"
       mode="aspectFill"
       @click="onAvatarClick"
+      @longpress.stop="onAvatarLongPress"
+      @contextmenu.prevent="onAvatarLongPress"
       @error="onAvatarError"
     />
     <view class="content-wrap">

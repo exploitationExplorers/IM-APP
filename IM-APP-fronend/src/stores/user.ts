@@ -29,6 +29,7 @@ import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useContactStore } from '@/stores/contact'
 import { useGroupStore } from '@/stores/group'
 import { useMassSendStore } from '@/stores/massSend'
+import { perfColdStartDone } from '@/utils/perf'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(getToken())
@@ -101,13 +102,23 @@ export const useUserStore = defineStore('user', () => {
     refreshToken.value = res.refreshToken
     setToken(res.accessToken)
     setRefreshToken(res.refreshToken)
-    // 异步落盘 + 回读校验，避免 App 杀进程后 token 丢失
     void persistTokenAsync(res.accessToken).then(() => {
       if (getToken() !== res.accessToken) setToken(res.accessToken)
     })
     void persistRefreshTokenAsync(res.refreshToken).then(() => {
       if (getRefreshToken() !== res.refreshToken) setRefreshToken(res.refreshToken)
     })
+  }
+
+  /** 401 时清内存会话，不跳转（跳转由 request 层统一处理） */
+  function invalidateSession() {
+    token.value = ''
+    refreshToken.value = ''
+    profile.value = null
+    clearLoginPhone()
+    clearToken()
+    clearFriendRequestBadge()
+    useContactStore().reset()
   }
 
   async function logout() {
@@ -136,9 +147,17 @@ export const useUserStore = defineStore('user', () => {
 
   /** 登录 SDK 后立刻挂上收消息监听，不能等到用户点开会话列表才订阅 */
   function startIMSession() {
-    initOpenIM()
-      .then(() => useChatStore().loadConversations())
-      .catch(() => undefined)
+    const run = () => {
+      initOpenIM()
+        .then(() => useChatStore().loadConversations())
+        .catch(() => undefined)
+    }
+    // H5 空闲时预初始化 OpenIM WASM，避免阻塞首屏渲染
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(() => run(), { timeout: 2000 })
+    } else {
+      setTimeout(run, 0)
+    }
     scheduleFriendRequestSync()
   }
 
@@ -184,6 +203,7 @@ export const useUserStore = defineStore('user', () => {
         void syncPushRegistration()
       }
     }
+    perfColdStartDone()
   }
 
   return {
@@ -197,6 +217,7 @@ export const useUserStore = defineStore('user', () => {
     loadProfile,
     saveProfile,
     tryRefreshToken,
+    invalidateSession,
     logout,
     bootstrap,
   }

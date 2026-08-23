@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
-import { inviteGroupMembers, fetchGroupMembers } from '@/api/group'
+import { inviteGroupMembers, fetchAllGroupMembers } from '@/api/group'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useContactStore } from '@/stores/contact'
 import { useGroupStore } from '@/stores/group'
@@ -65,7 +65,7 @@ onLoad(async (query) => {
   }
   try {
     const [members] = await Promise.all([
-      fetchGroupMembers(groupId.value),
+      fetchAllGroupMembers(groupId.value),
       refreshContacts(),
     ])
     memberIds.value = new Set(members.map((m) => m.id))

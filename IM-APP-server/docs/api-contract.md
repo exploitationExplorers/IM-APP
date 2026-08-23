@@ -337,6 +337,8 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 | `cursor` | 上一页最后一条好友 ID，首页省略 |
 | `limit` | 默认 50，最大 100 |
 
+**说明**：带 `cursor` 翻页时服务端跳过 `COUNT(*)`，`total` 为 0；首页仍返回 `total`。
+
 **Response `data`**
 ```json
 {
@@ -552,7 +554,18 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### GET `/api/v1/groups`
 
-见通讯录章节（支持 `role` 筛选）。
+群列表（分页）。支持 `role=owner|member|admin` 筛选。
+
+**Query**：`cursor`（上一页最后一条群 public_id）、`limit`（默认 100，最大 200）
+
+**Response `data`**
+```json
+{
+  "items": [{ "id": "100001", "name": "群名", "avatar": "", "role": "owner", "conversationId": "sg_xxx", "status": "active" }],
+  "nextCursor": "100001",
+  "hasMore": false
+}
+```
 
 ### GET `/api/v1/groups/:id`
 
@@ -562,9 +575,22 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 响应包含 `myRole`、`myNickname`、`joinMode`、`allMuted` 以及 `permissions`，前端据此展示群资料编辑、二维码、成员管理和举报入口。
 
+### GET `/api/v1/group-members`
+
+群成员列表（分页）。Query：`groupId`（必填）、`cursor`、`limit`（默认 100，最大 200）。
+
+**Response `data`**
+```json
+{
+  "items": [{ "id": "uuid", "nickname": "成员", "role": "member" }],
+  "nextCursor": "uuid",
+  "hasMore": false
+}
+```
+
 ### GET `/api/v1/groups/:id/members`
 
-群成员列表。
+（旧路径，仍可用）群成员全量列表；新客户端请用 `/group-members` 分页接口。
 
 ### GET `/api/v1/groups/:id/qrcode`
 

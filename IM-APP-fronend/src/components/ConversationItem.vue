@@ -27,7 +27,6 @@ const lastFailed = computed(() => {
   const list = chatStore.messagesMap[props.item.id] || []
   return list[list.length - 1]?.status === 'failed'
 })
-console.log('[online] ConversationItem', props.item.title, 'peerUserId=', props.item.peerUserId, 'isOnline=', isOnline.value)
 </script>
 
 <template>

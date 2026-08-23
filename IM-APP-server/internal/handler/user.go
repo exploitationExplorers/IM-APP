@@ -195,12 +195,12 @@ func (h *ContactHandler) ListContacts(c *gin.Context) {
 func (h *ContactHandler) ListGroups(c *gin.Context) {
 	uid := middleware.UserID(c)
 	role := c.Query("role")
-	list, err := h.Svc.ListGroups(c.Request.Context(), uid, role)
+	page, err := h.Svc.ListGroups(c.Request.Context(), uid, role, c.Query("cursor"), queryInt(c, "limit", 100))
 	if err != nil {
-		response.OK(c, []interface{}{})
+		response.OK(c, models.GroupPage{Items: []models.GroupPreview{}})
 		return
 	}
-	response.OK(c, list)
+	response.OK(c, page)
 }
 
 func (h *ContactHandler) ListFriendRequests(c *gin.Context) {

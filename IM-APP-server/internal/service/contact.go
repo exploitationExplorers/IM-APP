@@ -49,8 +49,8 @@ func escapeLike(raw string) string {
 	return replacer.Replace(raw)
 }
 
-func (s *ContactService) ListGroups(ctx context.Context, uid, role string) ([]models.GroupPreview, error) {
-	return s.Contacts.ListGroups(ctx, uid, role)
+func (s *ContactService) ListGroups(ctx context.Context, uid, role, cursor string, limit int) (models.GroupPage, error) {
+	return s.Contacts.ListGroups(ctx, uid, role, cursor, limit)
 }
 
 func (s *ContactService) ListFriendRequests(ctx context.Context, uid, direction string) (models.FriendRequestList, error) {

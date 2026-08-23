@@ -99,7 +99,7 @@ function goForgot() {
 <template>
   <view class="auth-page">
     <view class="auth-inner">
-      <image class="auth-logo" src="/static/auth/logo.png" mode="aspectFit" />
+      <image class="auth-logo" src="/static/logo/logo.png" mode="heightFix" />
 
       <view class="auth-form">
         <view class="auth-tabs">

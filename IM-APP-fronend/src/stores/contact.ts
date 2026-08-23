@@ -9,12 +9,15 @@ import {
   rejectFriendRequest,
   sendFriendRequest,
 } from '@/api/contact'
-import { getToken } from '@/utils/request'
+import { getToken, isAuthFailureError } from '@/utils/request'
 import { writeFriendRequestBadge } from '@/utils/friend-request-badge'
-import { useUserStore } from '@/stores/user'
 
 const PAGE_SIZE = 50
-const FRIEND_REQUEST_RETRY_MS = [0, 400, 1200, 3000, 5000]
+/** 冷启动时等 token 落盘；鉴权失败不重试 */
+const FRIEND_REQUEST_TOKEN_RETRY_MS = [0, 400, 1200]
+const FRIEND_REQUEST_NETWORK_RETRY_MS = [0, 1500]
+
+let friendRequestSyncInFlight: Promise<void> | null = null
 
 export const useContactStore = defineStore('contact', () => {
   const contacts = ref<Contact[]>([])
@@ -80,25 +83,55 @@ export const useContactStore = defineStore('contact', () => {
   }
 
   async function loadFriendRequests() {
-    const userStore = useUserStore()
-    let lastError: unknown
-    for (const delayMs of FRIEND_REQUEST_RETRY_MS) {
-      if (delayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs))
-      }
-      const accessToken = userStore.token || getToken()
-      if (!accessToken) continue
+    if (!getToken()) return
+    if (friendRequestSyncInFlight) return friendRequestSyncInFlight
+
+    friendRequestSyncInFlight = (async () => {
+      let lastError: unknown
       try {
-        const list = await fetchFriendRequests(accessToken)
-        pendingFriendRequests.value = list.pending
-        recentFriendRequests.value = list.recent
-        writeFriendRequestBadge(list.pending.length)
-        return
-      } catch (err) {
-        lastError = err
+        for (const delayMs of FRIEND_REQUEST_TOKEN_RETRY_MS) {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs))
+          }
+          if (!getToken()) return
+          try {
+            const list = await fetchFriendRequests(getToken())
+            pendingFriendRequests.value = list.pending
+            recentFriendRequests.value = list.recent
+            writeFriendRequestBadge(list.pending.length)
+            return
+          } catch (err) {
+            if (isAuthFailureError(err)) return
+            lastError = err
+            break
+          }
+        }
+
+        for (const delayMs of FRIEND_REQUEST_NETWORK_RETRY_MS) {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs))
+          }
+          if (!getToken()) return
+          try {
+            const list = await fetchFriendRequests(getToken())
+            pendingFriendRequests.value = list.pending
+            recentFriendRequests.value = list.recent
+            writeFriendRequestBadge(list.pending.length)
+            return
+          } catch (err) {
+            if (isAuthFailureError(err)) return
+            lastError = err
+          }
+        }
+      } finally {
+        friendRequestSyncInFlight = null
       }
-    }
-    if (lastError) throw lastError
+      if (lastError && import.meta.env.DEV) {
+        console.warn('[contact] 好友申请同步失败', lastError)
+      }
+    })()
+
+    return friendRequestSyncInFlight
   }
 
   async function loadAll() {

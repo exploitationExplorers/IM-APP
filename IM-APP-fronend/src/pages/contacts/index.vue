@@ -12,6 +12,7 @@ import type { Contact, ContactListSort, GroupPreview } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { openQrScanner } from '@/utils/qrcode'
 import { readFriendRequestBadge } from '@/utils/friend-request-badge'
+import { getToken } from '@/utils/request'
 
 useAuthGuard()
 useTabBar()
@@ -62,6 +63,7 @@ function refreshDirectory() {
 /** 切回通讯录页面时刷新群列表与好友申请角标 */
 onShow(() => {
   storageFriendBadge.value = readFriendRequestBadge()
+  if (!getToken()) return
   void refreshDirectory()
 })
 

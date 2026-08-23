@@ -89,6 +89,38 @@ function parseResponseBody<T>(raw: unknown): ApiResponse<T> {
 }
 
 let refreshingTokenPromise: Promise<string> | null = null
+let authExpiredHandler: (() => void) | null = null
+let authRedirectScheduled = false
+
+/** 401 时同步清空 Pinia 中的 token，避免内存残留导致无限重试 */
+export function setAuthExpiredHandler(handler: () => void) {
+  authExpiredHandler = handler
+}
+
+export function isAuthFailureError(err: unknown): boolean {
+  const msg = (err as Error)?.message || ''
+  return (
+    msg.includes('未登录') ||
+    msg.includes('登录已过期') ||
+    msg.includes('刷新登录失败') ||
+    msg.includes('请求失败(401)')
+  )
+}
+
+function handleAuthExpired() {
+  clearToken()
+  authExpiredHandler?.()
+  if (authRedirectScheduled) return
+  authRedirectScheduled = true
+  uni.reLaunch({
+    url: '/pages/auth/sign-in',
+    complete: () => {
+      setTimeout(() => {
+        authRedirectScheduled = false
+      }, 2000)
+    },
+  })
+}
 
 function isRefreshEndpoint(url: string): boolean {
   return url === '/auth/token/refresh' || url.endsWith('/auth/token/refresh')
@@ -177,21 +209,19 @@ export async function request<T>(options: RequestOptions, retried = false): Prom
         return retriedRes.body.data
       }
       if (retriedRes.statusCode === 401) {
-        clearToken()
-        uni.reLaunch({ url: '/pages/auth/sign-in' })
+        handleAuthExpired()
         throw new Error('未登录或登录已过期')
       }
       throw new Error(retriedRes.body?.message || `请求失败(${retriedRes.statusCode})`)
-    } catch {
-      clearToken()
-      uni.reLaunch({ url: '/pages/auth/sign-in' })
+    } catch (e) {
+      if (isAuthFailureError(e)) throw e
+      handleAuthExpired()
       throw new Error('未登录或登录已过期')
     }
   }
 
   if (statusCode === 401) {
-    clearToken()
-    uni.reLaunch({ url: '/pages/auth/sign-in' })
+    handleAuthExpired()
     throw new Error('未登录或登录已过期')
   }
   if (statusCode >= 200 && statusCode < 300 && body && body.code === 0) {

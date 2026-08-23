@@ -62,7 +62,7 @@ export interface Conversation {
   lastMessage: string
   lastMessageAt: string
   unreadCount: number
-  /** 会话预览红色提醒，如 [有人@你]、[有新公告] */
+  /** 会话预览红色提醒，如 [有人@我]、[有新公告] */
   highlightTags?: string[]
   /** OpenIM ConversationItem.groupAtType：0 无 / 1 @我 / 2 @所有人 / 3 两者 / 4 有新公告 */
   groupAtType?: number

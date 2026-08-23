@@ -113,7 +113,7 @@ func (h *GroupHandler) Members(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "groupId 必填")
 		return
 	}
-	list, err := h.Svc.ListMembers(c.Request.Context(), groupID, uid)
+	page, err := h.Svc.ListMembers(c.Request.Context(), groupID, uid, c.Query("cursor"), queryInt(c, "limit", 100))
 	if err != nil {
 		if errors.Is(err, repository.ErrGroupNotFound) {
 			response.Fail(c, http.StatusNotFound, "群不存在")
@@ -126,7 +126,7 @@ func (h *GroupHandler) Members(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, "查询失败")
 		return
 	}
-	response.OK(c, list)
+	response.OK(c, page)
 }
 
 func (h *GroupHandler) Join(c *gin.Context) {

@@ -7,6 +7,7 @@ import type {
   FriendRequest,
   FriendRequestList,
   GroupFriendRequestResult,
+  GroupPage,
   GroupPreview,
   SendFriendResult,
 } from '@/types'
@@ -46,10 +47,28 @@ export async function updateContact(
 }
 
 export async function fetchGroups(role?: 'owner' | 'member'): Promise<GroupPreview[]> {
-  const data: Record<string, string> = {}
+  const data: Record<string, string | number> = { limit: 100 }
   if (role === 'owner') data.role = 'owner'
   else if (role === 'member') data.role = 'member'
-  return request<GroupPreview[]>({ url: '/groups', method: 'GET', data })
+
+  const all: GroupPreview[] = []
+  let cursor = ''
+  for (;;) {
+    const query = { ...data }
+    if (cursor) query.cursor = cursor
+    const result = await request<GroupPage | GroupPreview[]>({
+      url: '/groups',
+      method: 'GET',
+      data: query,
+    })
+    if (Array.isArray(result)) {
+      return result
+    }
+    all.push(...result.items)
+    if (!result.hasMore || !result.nextCursor) break
+    cursor = result.nextCursor
+  }
+  return all
 }
 
 function normalizeFriendRequestList(raw: unknown): FriendRequestList {

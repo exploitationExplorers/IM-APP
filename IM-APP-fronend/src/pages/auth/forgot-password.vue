@@ -92,7 +92,7 @@ function goBack() {
         <text class="auth-top-back-icon">‹</text>
       </view>
 
-      <image class="auth-logo is-forgot" src="/static/auth/logo.png" mode="aspectFit" />
+      <image class="auth-logo is-forgot" src="/static/logo/logo.png" mode="heightFix" />
       <view class="auth-title">{{ step === 1 ? '忘记密码' : '设置新密码' }}</view>
 
       <view class="auth-form">

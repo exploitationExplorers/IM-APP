@@ -46,6 +46,20 @@ export interface GroupPreview {
   status?: 'active' | 'dismissed'
 }
 
+export interface GroupPage {
+  items: GroupPreview[]
+  nextCursor?: string
+  hasMore: boolean
+}
+
+import type { GroupMember } from './group'
+
+export interface GroupMemberPage {
+  items: GroupMember[]
+  nextCursor?: string
+  hasMore: boolean
+}
+
 export interface FriendRequest {
   id: string
   fromUser: Contact

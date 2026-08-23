@@ -48,14 +48,20 @@ import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useContactStore } from '@/stores/contact'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import {
+  effectiveGroupAtType,
   GroupAtType,
   highlightTagsOf,
   isAtMeType,
   unreadAnnouncementState,
   writeUnreadAnnouncement,
 } from '@/utils/group-announcement'
+import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
 
 const PAGE_SIZE = 20
+/** 单会话内存中保留的最大消息条数，超出时裁剪最早的消息 */
+const MESSAGE_WINDOW_SIZE = 200
+/** rawMessages 单会话最大缓存条数 */
+const RAW_MESSAGE_WINDOW_SIZE = 300
 
 /** OnNewRecvMessageRevoked 事件载荷；conversationID 仅 App 原生插件可能携带 */
 interface RevokedNotice {
@@ -192,6 +198,61 @@ export const useChatStore = defineStore('chat', () => {
   function rememberRaw(item: MessageItem) {
     if (!item?.clientMsgID) return
     rawMessages.value = { ...rawMessages.value, [item.clientMsgID]: item }
+    trimRawMessagesWindow(conversationIdOf(item))
+  }
+
+  /** 裁剪单会话 rawMessages，避免无界增长 */
+  function trimRawMessagesWindow(conversationId: string) {
+    if (!conversationId) return
+    const list = messagesMap.value[conversationId] || []
+    if (list.length <= RAW_MESSAGE_WINDOW_SIZE) return
+    const keepIds = new Set(list.slice(-RAW_MESSAGE_WINDOW_SIZE).map((m) => m.id))
+    const nextRaw = { ...rawMessages.value }
+    let changed = false
+    for (const id of Object.keys(nextRaw)) {
+      const item = nextRaw[id]
+      if (item && conversationIdOf(item) === conversationId && !keepIds.has(id)) {
+        delete nextRaw[id]
+        changed = true
+      }
+    }
+    if (changed) rawMessages.value = nextRaw
+  }
+
+  /** 裁剪单会话 messagesMap，保留最近 MESSAGE_WINDOW_SIZE 条 */
+  function trimMessageWindow(conversationId: string) {
+    const list = messagesMap.value[conversationId]
+    if (!list || list.length <= MESSAGE_WINDOW_SIZE) return
+    const trimmed = list.slice(-MESSAGE_WINDOW_SIZE)
+    const removedIds = list.slice(0, list.length - MESSAGE_WINDOW_SIZE).map((m) => m.id)
+    messagesMap.value = { ...messagesMap.value, [conversationId]: trimmed }
+    if (removedIds.length) {
+      const nextRaw = { ...rawMessages.value }
+      removedIds.forEach((id) => {
+        delete nextRaw[id]
+      })
+      rawMessages.value = nextRaw
+    }
+    historyEnd.value = { ...historyEnd.value, [conversationId]: false }
+  }
+
+  /** 离开聊天室时释放非当前会话内存（可选 aggressive） */
+  function trimConversationMemory(activeConversationId: string) {
+    if (!activeConversationId) return
+    for (const cid of Object.keys(messagesMap.value)) {
+      if (cid !== activeConversationId) {
+        const ids = (messagesMap.value[cid] || []).map((m) => m.id)
+        delete messagesMap.value[cid]
+        if (ids.length) {
+          const nextRaw = { ...rawMessages.value }
+          ids.forEach((id) => delete nextRaw[id])
+          rawMessages.value = nextRaw
+        }
+      } else {
+        trimMessageWindow(cid)
+        trimRawMessagesWindow(cid)
+      }
+    }
   }
 
   function announcementOwnerId() {
@@ -204,7 +265,10 @@ export const useChatStore = defineStore('chat', () => {
     const conv = conversations.value.find((c) => c.id === conversationId)
     if (!conv) return
     patchConversation(conversationId, {
-      highlightTags: highlightTagsOf(unread ? conv.groupAtType : GroupAtType.AtNormal, unread),
+      highlightTags: highlightTagsOf(
+        effectiveGroupAtType(conv.groupAtType, conv.unreadCount),
+        unread,
+      ),
     })
   }
 
@@ -215,7 +279,10 @@ export const useChatStore = defineStore('chat', () => {
     if (stored === undefined && conv.groupAtType === GroupAtType.AtGroupNotice) {
       writeUnreadAnnouncement(announcementOwnerId(), conv.id, true)
     }
-    const next = { ...conv, highlightTags: highlightTagsOf(conv.groupAtType, unread) }
+    const next = {
+      ...conv,
+      highlightTags: highlightTagsOf(effectiveGroupAtType(conv.groupAtType, conv.unreadCount), unread),
+    }
     if (next.lastMessage) {
       next.lastMessage = replaceOpenIMAdminLabel(next.lastMessage)
     }
@@ -272,6 +339,7 @@ export const useChatStore = defineStore('chat', () => {
       ...messagesMap.value,
       [message.conversationId]: [...list, message],
     }
+    trimMessageWindow(message.conversationId)
   }
 
   /** SDK 有时推单条，有时推数组；解析失败时不能让监听器抛错把后续消息吃掉 */
@@ -331,10 +399,36 @@ export const useChatStore = defineStore('chat', () => {
   function keepNewerPreview(prev: Conversation, next: Conversation): Conversation {
     const prevTime = new Date(prev.lastMessageAt).getTime() || 0
     const nextTime = new Date(next.lastMessageAt).getTime() || 0
-    if (prev.lastMessage && prevTime > nextTime) {
-      return { ...next, lastMessage: prev.lastMessage, lastMessageAt: prev.lastMessageAt }
+    let merged =
+      prev.lastMessage && prevTime > nextTime
+        ? { ...next, lastMessage: prev.lastMessage, lastMessageAt: prev.lastMessageAt }
+        : next
+    // SDK 同步偶发滞后：未读已为 0 时不应再展示 @ 强提醒；本地已清 @ 时也不被 SDK 推回
+    if (merged.type === 'group') {
+      const hasUnreadAnn = unreadAnnouncementState(announcementOwnerId(), merged.id) === true
+      const atType = effectiveGroupAtType(merged.groupAtType, merged.unreadCount)
+      const prevAtType = effectiveGroupAtType(prev.groupAtType, prev.unreadCount)
+      const clearedLocally = !isAtMeType(prevAtType) && isAtMeType(atType)
+      if (!(merged.unreadCount || 0) && isAtMeType(merged.groupAtType)) {
+        merged = {
+          ...merged,
+          groupAtType: GroupAtType.AtNormal,
+          highlightTags: highlightTagsOf(GroupAtType.AtNormal, hasUnreadAnn),
+        }
+      } else if (clearedLocally && !(merged.unreadCount || 0)) {
+        merged = {
+          ...merged,
+          groupAtType: GroupAtType.AtNormal,
+          highlightTags: highlightTagsOf(GroupAtType.AtNormal, hasUnreadAnn),
+        }
+      } else if (atType !== merged.groupAtType) {
+        merged = {
+          ...merged,
+          highlightTags: highlightTagsOf(atType, hasUnreadAnn),
+        }
+      }
     }
-    return next
+    return merged
   }
 
   function dropRevokedMessage(conversationId: string, clientMsgId: string, tip = '消息已撤回') {
@@ -413,7 +507,6 @@ export const useChatStore = defineStore('chat', () => {
       // 私聊已读回执：对方进入会话标记已读后，把自己发过的消息翻成已读
       onIMEvent<C2CReadReceipt[]>(IMEvents.OnRecvC2CReadReceipt, ingestReadReceipts),
       onUserStatusChanged((state) => {
-        console.log('[online] 状态变更事件:', state)
         onlineStatus.value[state.userID] = state.status
       }),
     ]
@@ -425,7 +518,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadConversations() {
-    console.log('[chat] loadConversations start')
+    perfMarkStart('chat:load-conversations')
     loading.value = true
     try {
       await ensureIMLogin()
@@ -446,7 +539,6 @@ export const useChatStore = defineStore('chat', () => {
           throw e
         }
       }
-      console.log('[chat] getConversationList count:', list.length)
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       conversations.value = sortConversations(
         list
@@ -460,10 +552,10 @@ export const useChatStore = defineStore('chat', () => {
             return prev ? keepNewerPreview(prev, mapped) : mapped
           }),
       )
-      console.log('[chat] conversations mapped, will refresh online status')
-      refreshOnlineStatus().catch((e) => console.warn('[chat] 刷新在线状态失败', e))
+      refreshOnlineStatus().catch(() => undefined)
     } finally {
       loading.value = false
+      perfMarkEnd('chat:load-conversations')
     }
   }
 
@@ -471,8 +563,7 @@ export const useChatStore = defineStore('chat', () => {
   watch(
     () => conversations.value.map((c) => c.peerUserId).filter(Boolean),
     () => {
-      console.log('[chat] conversations changed, refresh online status')
-      refreshOnlineStatus().catch((e) => console.warn('[chat] 刷新在线状态失败', e))
+      refreshOnlineStatus().catch(() => undefined)
     },
     { immediate: true, deep: true },
   )
@@ -489,7 +580,6 @@ export const useChatStore = defineStore('chat', () => {
           .map((c) => c.peerUserId!),
       ),
     ]
-    console.log('[online] 私聊会话 peerUserIds:', userIDs)
     if (!userIDs.length && !subscribedUserIDs.value.size) return
 
     // 退订已不在列表中的用户
@@ -502,12 +592,7 @@ export const useChatStore = defineStore('chat', () => {
     // 订阅新增用户
     const toSubscribe = userIDs.filter((id) => !subscribedUserIDs.value.has(id))
     if (toSubscribe.length) {
-      console.log('[online] 订阅用户:', toSubscribe)
-      const states = await subscribeUsersStatus(toSubscribe).catch((e) => {
-        console.warn('[online] subscribeUsersStatus 失败:', e)
-        return [] as { userID: string; status: OnlineState }[]
-      })
-      console.log('[online] 订阅返回:', states)
+      const states = await subscribeUsersStatus(toSubscribe).catch(() => [] as { userID: string; status: OnlineState }[])
       states.forEach((s) => {
         onlineStatus.value[s.userID] = s.status
       })
@@ -515,11 +600,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // 再查询一次所有已订阅用户的最新状态，补齐事件推送可能漏掉的状态
-    const allStates = await getSubscribeUsersStatus().catch((e) => {
-      console.warn('[online] getSubscribeUsersStatus 失败:', e)
-      return [] as { userID: string; status: OnlineState }[]
-    })
-    console.log('[online] 查询全部状态:', allStates)
+    const allStates = await getSubscribeUsersStatus().catch(() => [] as { userID: string; status: OnlineState }[])
     allStates.forEach((s) => {
       onlineStatus.value[s.userID] = s.status
     })
@@ -546,8 +627,11 @@ export const useChatStore = defineStore('chat', () => {
       ? conversations.value.find((c) => c.id === params.conversationId)
       : undefined
     if (cached) {
-      await assertConversationAccessible(cached)
       unhideConversation(cached.id)
+      // 列表点进已缓存会话：权限校验后台进行，不阻塞首屏拉历史
+      if (cached.type === 'group') {
+        void assertConversationAccessible(cached).catch(() => undefined)
+      }
       return cached
     }
 
@@ -555,9 +639,11 @@ export const useChatStore = defineStore('chat', () => {
       const item = await findConversationById(params.conversationId)
       if (item) {
         const mapped = toConversation(item)
-        await assertConversationAccessible(mapped)
         unhideConversation(mapped.id)
         upsertConversations([item])
+        if (mapped.type === 'group') {
+          void assertConversationAccessible(mapped).catch(() => undefined)
+        }
         return mapped
       }
     }
@@ -631,14 +717,18 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadMessages(conversationId: string) {
+    perfMarkStart('chat:load-messages')
     const existing = messagesMap.value[conversationId] || []
+    perfMarkStart('chat:load-messages:sdk')
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
+    perfMarkEnd('chat:load-messages:sdk', `${messageList.length} msgs`)
     messageList.forEach(rememberRaw)
     const mapped = messageList.map(toChatMessage)
     // App 历史接口偶发空结果时不要把房间里刚发出的消息整表冲掉
     if (!mapped.length && existing.length) {
       historyEnd.value = { ...historyEnd.value, [conversationId]: false }
       await markAsRead(conversationId)
+      perfMarkEnd('chat:load-messages', 'empty-skip')
       return
     }
     // 已读回执先于历史快照落在本地的（H5 缓存偶发滞后），不要回退成未读
@@ -651,7 +741,9 @@ export const useChatStore = defineStore('chat', () => {
       [conversationId]: mergeLocalPending(withRead, existing),
     }
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
+    trimMessageWindow(conversationId)
     await markAsRead(conversationId)
+    perfMarkEnd('chat:load-messages', conversationId)
   }
 
   /** 历史还没跟上 SDK 时，保留本地发送中 / 刚发出的图片，避免返回再进入就消失 */
@@ -670,20 +762,29 @@ export const useChatStore = defineStore('chat', () => {
   /** 上滑加载更早的消息，返回本次是否有新增 */
   async function loadMoreMessages(conversationId: string): Promise<boolean> {
     if (historyEnd.value[conversationId]) return false
+    perfMarkStart('chat:load-more-messages')
     const list = messagesMap.value[conversationId] || []
-    if (!list.length) return false
+    if (!list.length) {
+      perfMarkEnd('chat:load-more-messages', 'no-list')
+      return false
+    }
     const { messageList, isEnd } = await getHistoryMessages(
       conversationId,
       PAGE_SIZE,
       list[0].id,
     )
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
-    if (!messageList.length) return false
+    if (!messageList.length) {
+      perfMarkEnd('chat:load-more-messages', 'empty')
+      return false
+    }
     messageList.forEach(rememberRaw)
     messagesMap.value = {
       ...messagesMap.value,
       [conversationId]: [...messageList.map(toChatMessage), ...list],
     }
+    trimMessageWindow(conversationId)
+    perfMarkEnd('chat:load-more-messages', `${messageList.length} msgs`)
     return true
   }
 
@@ -695,7 +796,17 @@ export const useChatStore = defineStore('chat', () => {
       console.warn('[chat] 标记已读失败', e)
     }
     const conv = conversations.value.find((c) => c.id === conversationId)
-    if (conv) conv.unreadCount = 0
+    if (!conv) return
+    conv.unreadCount = 0
+    // 对齐微信：进入群聊并标记已读后，会话列表不再保留 [有人@我]
+    if (conv.type === 'group' && isAtMeType(conv.groupAtType)) {
+      const hasUnreadAnn = unreadAnnouncementState(announcementOwnerId(), conversationId) === true
+      patchConversation(conversationId, {
+        groupAtType: GroupAtType.AtNormal,
+        highlightTags: highlightTagsOf(GroupAtType.AtNormal, hasUnreadAnn),
+      })
+      await resetConversationGroupAtType(conversationId).catch(() => undefined)
+    }
   }
 
   function requireConversation(conversationId: string): Conversation {
@@ -1176,6 +1287,7 @@ export const useChatStore = defineStore('chat', () => {
     dismissGroupAnnouncement,
     clearHistory,
     reset,
+    trimConversationMemory,
   }
 })
 

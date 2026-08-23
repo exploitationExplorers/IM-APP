@@ -84,7 +84,7 @@ function goPrivacy() {
         <text class="auth-top-back-icon">‹</text>
       </view>
 
-      <image class="auth-logo is-sign-up" src="/static/auth/logo.png" mode="aspectFit" />
+      <image class="auth-logo is-sign-up" src="/static/logo/logo.png" mode="heightFix" />
       <view class="auth-title">注册</view>
 
       <view class="auth-form">

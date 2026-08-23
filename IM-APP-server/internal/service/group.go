@@ -73,12 +73,12 @@ func (s *GroupService) RemoveDissolvedGroup(ctx context.Context, groupID, uid st
 	return s.Groups.RemoveDissolvedMembership(ctx, internalID, uid)
 }
 
-func (s *GroupService) ListMembers(ctx context.Context, groupID, uid string) ([]models.GroupMember, error) {
+func (s *GroupService) ListMembers(ctx context.Context, groupID, uid, cursor string, limit int) (models.GroupMemberPage, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
-		return nil, err
+		return models.GroupMemberPage{}, err
 	}
-	return s.Groups.ListMembers(ctx, internalID, uid)
+	return s.Groups.ListMembers(ctx, internalID, uid, cursor, limit)
 }
 
 func (s *GroupService) Join(ctx context.Context, groupID, uid string) (models.GroupInfo, error) {

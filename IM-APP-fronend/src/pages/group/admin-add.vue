@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import ImNavBar from '@/components/ImNavBar.vue'
-import { fetchGroupMembers } from '@/api/group'
+import { fetchAllGroupMembers } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
 import type { GroupMember } from '@/types'
 
@@ -32,7 +32,7 @@ onLoad(async (query) => {
   groupId.value = String(query?.id || '')
   if (!groupId.value) return
   try {
-    members.value = await fetchGroupMembers(groupId.value)
+    members.value = await fetchAllGroupMembers(groupId.value)
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载失败', icon: 'none' })
   }

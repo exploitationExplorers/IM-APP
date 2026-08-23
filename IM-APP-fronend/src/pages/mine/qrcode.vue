@@ -85,16 +85,18 @@ async function onSave() {
     link.download = `${nickname.value || 'qrcode'}.png`
     link.click()
     uni.showToast({ title: '已保存', icon: 'success' })
-    return
     // #endif
 
     // #ifdef APP-PLUS
     await saveBase64ImageToAlbum(cardUrl)
     uni.showToast({ title: '已保存到相册', icon: 'success' })
-    return
     // #endif
 
+    // #ifndef H5
+    // #ifndef APP-PLUS
     uni.showToast({ title: '请长按图片保存', icon: 'none' })
+    // #endif
+    // #endif
   } catch (e) {
     uni.showToast({ title: (e as Error).message || '保存失败', icon: 'none' })
   } finally {

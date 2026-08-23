@@ -66,15 +66,25 @@ export async function resolveIMGroup(businessGroupId: string): Promise<IMGroupTa
   })
 }
 
+/** 进房链路会连续命中 enterConversation + resolveBusinessTarget，短 TTL 避免重复请求 */
+const imGroupByIMCache = new Map<string, { data: IMGroupTarget; ts: number }>()
+const IM_GROUP_BY_IM_CACHE_MS = 30_000
+
 /**
  * OpenIM 群 ID（会话列表拿到的 groupID）→ 业务群资料。
  * 聊天列表点进来时只有 OpenIM 群 ID，没有对外 public ID，靠它换出资料页所需的 ID。
  */
 export async function resolveIMGroupByIM(imGroupId: string): Promise<IMGroupTarget> {
-  return request<IMGroupTarget>({
+  const cached = imGroupByIMCache.get(imGroupId)
+  if (cached && Date.now() - cached.ts < IM_GROUP_BY_IM_CACHE_MS) {
+    return cached.data
+  }
+  const data = await request<IMGroupTarget>({
     url: `/im/groups/by-im/${encodeURIComponent(imGroupId)}`,
     method: 'GET',
   })
+  imGroupByIMCache.set(imGroupId, { data, ts: Date.now() })
+  return data
 }
 
 /**

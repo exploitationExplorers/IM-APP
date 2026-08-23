@@ -5,9 +5,14 @@ import { useContactStore } from '@/stores/contact'
 import { setupAppAuthGuard } from '@/composables/useAuthGuard'
 import { checkAndPromptAppUpdate } from '@/composables/useAppUpdate'
 import { getStatusBarHeight } from '@/utils/status-bar'
-import { getToken } from '@/utils/request'
+import { getToken, setAuthExpiredHandler } from '@/utils/request'
+import { initPerfMonitoring } from '@/utils/perf'
 
 onLaunch(() => {
+  setAuthExpiredHandler(() => {
+    useUserStore().invalidateSession()
+  })
+  initPerfMonitoring()
   const userStore = useUserStore()
   userStore.bootstrap()
   // H5 没有 App 那套 CSS 变量注入；写上也不影响，App 端无 document 会跳过
@@ -25,9 +30,7 @@ onLaunch(() => {
 onShow(() => {
   setupAppAuthGuard()
   void checkAndPromptAppUpdate()
-  const userStore = useUserStore()
-  const token = userStore.token || getToken()
-  if (token) {
+  if (getToken()) {
     void useContactStore().loadFriendRequests().catch(() => undefined)
   }
 })

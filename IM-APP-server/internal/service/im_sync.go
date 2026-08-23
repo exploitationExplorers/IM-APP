@@ -215,55 +215,25 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 	if state.Status != "active" {
 		return nil
 	}
-	ownerID, err := im.UserIDFromBusinessID(state.OwnerID)
+	group, memberByID, err := w.buildGroupFromState(state)
 	if err != nil {
 		return err
 	}
-	group := im.Group{
-		GroupID: groupID, GroupName: state.Name, Notification: state.Announcement,
-		FaceURL: state.Avatar, OwnerUserID: ownerID,
-		AllowMemberAddFriend: state.AllowMemberAddFriend,
-	}
-	memberByID := make(map[string]models.IMGroupSyncMember, len(state.Members))
-	for _, member := range state.Members {
-		if member.Status != "active" {
-			continue
-		}
-		memberID, err := im.UserIDFromBusinessID(member.ID)
-		if err != nil {
-			return err
-		}
-		memberByID[memberID] = member
-		if err := w.Client.EnsureUser(ctx, im.User{
-			UserID: memberID, Nickname: member.Nickname, FaceURL: member.Avatar,
-		}); err != nil {
-			return err
-		}
-		switch member.Role {
-		case "owner":
-		case "admin":
-			group.AdminUserIDs = append(group.AdminUserIDs, memberID)
-		default:
-			group.MemberUserIDs = append(group.MemberUserIDs, memberID)
-		}
-	}
 
-	if event.EventType == repository.IMEventGroupCreated {
+	switch event.EventType {
+	case repository.IMEventGroupCreated:
+		if err := w.ensureGroupMembersRegistered(ctx, state.Members); err != nil {
+			return err
+		}
 		if err := w.Client.EnsureGroup(ctx, group); err != nil {
 			return err
 		}
-		// 建群不要再跑邀请/改昵称/禁言/设角色：这些 OpenIM 通知会计入未读，
-		// 会话列表会显示十几条，聊天页又把空通知滤掉，只剩欢迎语。
 		return w.sendGroupCreatedWelcome(ctx, state.ID, groupID)
-	}
-	if event.EventType == repository.IMEventGroupUpdated {
+	case repository.IMEventGroupUpdated:
 		var updatePayload repository.IMGroupUpdatePayload
 		if err := json.Unmarshal(event.Payload, &updatePayload); err != nil {
 			return fmt.Errorf("decode %s payload: %w", event.EventType, err)
 		}
-		// Old group.updated rows used an empty payload and cannot tell which field
-		// really changed. Replaying them as a full update would recreate the fake
-		// group-name notices, so completing them without a remote write is safer.
 		if updatePayload.Name == nil && updatePayload.Avatar == nil && updatePayload.Announcement == nil && updatePayload.AllowMemberAddFriend == nil {
 			return nil
 		}
@@ -272,6 +242,9 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 			return err
 		}
 		if !registered {
+			if err := w.ensureGroupMembersRegistered(ctx, state.Members); err != nil {
+				return err
+			}
 			return w.Client.EnsureGroup(ctx, group)
 		}
 		return w.Client.UpdateGroup(ctx, groupID, im.GroupUpdate{
@@ -281,18 +254,24 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 			AllowMemberAddFriend: updatePayload.AllowMemberAddFriend,
 		})
 	}
+
 	registered, err := w.Client.IsGroupRegistered(ctx, groupID)
 	if err != nil {
 		return err
 	}
 	if !registered {
+		if err := w.ensureGroupMembersRegistered(ctx, state.Members); err != nil {
+			return err
+		}
 		if err := w.Client.EnsureGroup(ctx, group); err != nil {
 			return err
 		}
 	}
+
 	if event.EventType == repository.IMEventGroupMute {
 		return w.Client.SetGroupMute(ctx, groupID, state.AllMuted)
 	}
+
 	var payload struct {
 		UserID       string `json:"userId"`
 		Role         string `json:"role"`
@@ -314,7 +293,28 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 			return err
 		}
 	}
-	if event.EventType == repository.IMEventGroupMemberRole {
+
+	switch event.EventType {
+	case repository.IMEventGroupMemberJoined:
+		if err := w.ensureSingleMemberRegistered(ctx, state.Members, payload.UserID); err != nil {
+			return err
+		}
+		if _, exists := memberByID[memberID]; !exists {
+			return nil
+		}
+		if payload.Reason == "invite" {
+			return w.Client.InviteGroupMemberAs(ctx, operatorID, groupID, []string{memberID})
+		}
+		return w.Client.JoinGroup(ctx, memberID, groupID)
+	case repository.IMEventGroupMemberLeft:
+		if _, exists := memberByID[memberID]; exists {
+			return nil
+		}
+		if payload.Reason == "kick" {
+			return w.Client.KickGroupMemberAs(ctx, operatorID, groupID, []string{memberID})
+		}
+		return w.Client.QuitGroup(ctx, memberID, groupID)
+	case repository.IMEventGroupMemberRole:
 		member, exists := memberByID[memberID]
 		if !exists {
 			return nil
@@ -324,40 +324,92 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 			roleLevel = 60
 		}
 		return w.Client.SetGroupMemberRole(ctx, groupID, memberID, roleLevel)
-	}
-	if event.EventType == repository.IMEventGroupMemberMute {
+	case repository.IMEventGroupMemberMute:
 		member, exists := memberByID[memberID]
 		if !exists {
 			return nil
 		}
 		return w.Client.SetGroupMemberMute(ctx, groupID, memberID, remainingMuteSeconds(member.MutedUntil))
-	}
-	if event.EventType == repository.IMEventGroupMemberProfile {
+	case repository.IMEventGroupMemberProfile:
+		if err := w.ensureSingleMemberRegistered(ctx, state.Members, payload.UserID); err != nil {
+			return err
+		}
 		member, exists := memberByID[memberID]
 		if !exists {
 			return nil
 		}
 		return w.Client.SetGroupMemberNickname(ctx, groupID, memberID, member.GroupNickname)
+	default:
+		return fmt.Errorf("unsupported OpenIM group event type %q", event.EventType)
 	}
-	if event.EventType == repository.IMEventGroupMemberJoined {
-		if _, exists := memberByID[memberID]; !exists {
-			return nil
-		}
-		if payload.Reason == "invite" {
-			return w.Client.InviteGroupMemberAs(ctx, operatorID, groupID, []string{memberID})
-		}
-		return w.Client.JoinGroup(ctx, memberID, groupID)
+}
+
+func (w *IMSyncWorker) buildGroupFromState(state models.IMGroupSyncState) (im.Group, map[string]models.IMGroupSyncMember, error) {
+	ownerID, err := im.UserIDFromBusinessID(state.OwnerID)
+	if err != nil {
+		return im.Group{}, nil, err
 	}
-	if event.EventType == repository.IMEventGroupMemberLeft {
-		if _, exists := memberByID[memberID]; exists {
-			return nil
-		}
-		if payload.Reason == "kick" {
-			return w.Client.KickGroupMemberAs(ctx, operatorID, groupID, []string{memberID})
-		}
-		return w.Client.QuitGroup(ctx, memberID, groupID)
+	groupID, err := im.UserIDFromBusinessID(state.ID)
+	if err != nil {
+		return im.Group{}, nil, err
 	}
-	return fmt.Errorf("unsupported OpenIM group event type %q", event.EventType)
+	group := im.Group{
+		GroupID: groupID, GroupName: state.Name, Notification: state.Announcement,
+		FaceURL: state.Avatar, OwnerUserID: ownerID,
+		AllowMemberAddFriend: state.AllowMemberAddFriend,
+	}
+	memberByID := make(map[string]models.IMGroupSyncMember, len(state.Members))
+	for _, member := range state.Members {
+		if member.Status != "active" {
+			continue
+		}
+		memberID, err := im.UserIDFromBusinessID(member.ID)
+		if err != nil {
+			return im.Group{}, nil, err
+		}
+		memberByID[memberID] = member
+		switch member.Role {
+		case "owner":
+		case "admin":
+			group.AdminUserIDs = append(group.AdminUserIDs, memberID)
+		default:
+			group.MemberUserIDs = append(group.MemberUserIDs, memberID)
+		}
+	}
+	return group, memberByID, nil
+}
+
+func (w *IMSyncWorker) ensureGroupMembersRegistered(ctx context.Context, members []models.IMGroupSyncMember) error {
+	users := make([]im.User, 0, len(members))
+	for _, member := range members {
+		if member.Status != "active" {
+			continue
+		}
+		memberID, err := im.UserIDFromBusinessID(member.ID)
+		if err != nil {
+			return err
+		}
+		users = append(users, im.User{
+			UserID: memberID, Nickname: member.Nickname, FaceURL: member.Avatar,
+		})
+	}
+	return w.Client.EnsureUsersBatch(ctx, users)
+}
+
+func (w *IMSyncWorker) ensureSingleMemberRegistered(ctx context.Context, members []models.IMGroupSyncMember, businessUserID string) error {
+	for _, member := range members {
+		if member.ID != businessUserID || member.Status != "active" {
+			continue
+		}
+		memberID, err := im.UserIDFromBusinessID(member.ID)
+		if err != nil {
+			return err
+		}
+		return w.Client.EnsureUser(ctx, im.User{
+			UserID: memberID, Nickname: member.Nickname, FaceURL: member.Avatar,
+		})
+	}
+	return nil
 }
 
 func (w *IMSyncWorker) sendGroupCreatedWelcome(ctx context.Context, businessGroupID, imGroupID string) error {

@@ -1,10 +1,47 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
+import { visualizer } from 'rollup-plugin-visualizer'
+
+const analyze = process.env.ANALYZE === 'true'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [uni()],
+  plugins: [
+    uni(),
+    analyze &&
+      visualizer({
+        filename: 'dist/stats.html',
+        gzipSize: true,
+        open: false,
+      }),
+  ].filter(Boolean),
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('@openim/client-sdk') || id.includes('openim-uniapp-polyfill')) {
+            return 'openim-sdk'
+          }
+          if (id.includes('@openim/protocol')) {
+            return 'openim-protocol'
+          }
+          if (id.includes('node_modules')) {
+            if (id.includes('vue') || id.includes('pinia')) return 'vendor-vue'
+            if (id.includes('qrcode') || id.includes('jsqr')) return 'vendor-qrcode'
+          }
+        },
+      },
+    },
+  },
+  css: {
+    preprocessorOptions: {
+      scss: {
+        api: 'modern-compiler',
+        silenceDeprecations: ['legacy-js-api', 'import'],
+      },
+    },
+  },
   resolve: {
     alias: [
       {

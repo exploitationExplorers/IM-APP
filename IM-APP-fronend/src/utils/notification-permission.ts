@@ -1,3 +1,5 @@
+import { getDeviceId } from '@/utils/device'
+
 export type NotificationAuthStatus = 'authorized' | 'denied' | 'notDetermined'
 
 function isAppPlatform(): boolean {
@@ -98,7 +100,6 @@ export async function getPushDeviceToken(): Promise<string | null> {
     if (cid) return cid
   }
   try {
-    const { getDeviceId } = await import('@/utils/device')
     return getDeviceId()
   } catch {
     return null

@@ -89,6 +89,20 @@ type GroupPreview struct {
 	Status         string `json:"status,omitempty"`
 }
 
+// GroupPage 群列表分页
+type GroupPage struct {
+	Items      []GroupPreview `json:"items"`
+	NextCursor string         `json:"nextCursor,omitempty"`
+	HasMore    bool           `json:"hasMore"`
+}
+
+// GroupMemberPage 群成员分页
+type GroupMemberPage struct {
+	Items      []GroupMember `json:"items"`
+	NextCursor string        `json:"nextCursor,omitempty"`
+	HasMore    bool          `json:"hasMore"`
+}
+
 // DissolvedGroupInfo 已解散群的轻量资料（通讯录详情页只读展示用）
 type DissolvedGroupInfo struct {
 	ID     string `json:"id"`

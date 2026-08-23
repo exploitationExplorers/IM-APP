@@ -33,6 +33,8 @@ export type {
   ContactListSort,
   ContactTagItem,
   GroupPreview,
+  GroupPage,
+  GroupMemberPage,
   FriendRequest,
   FriendRequestList,
   FriendRequestAction,

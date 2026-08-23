@@ -4,6 +4,7 @@ import type {
   GroupInfo,
   GroupJoinRequestItem,
   GroupMember,
+  GroupMemberPage,
   GroupMemberMuteResult,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
@@ -23,9 +24,34 @@ export async function fetchGroupDetail(groupId: string): Promise<GroupInfo> {
   return request<GroupInfo>({ url: '/groups/detail', method: 'GET', data: { groupId } })
 }
 
-/** 群成员列表：后端已改为 /group-members?groupId=，成员带禁言状态 */
-export async function fetchGroupMembers(groupId: string): Promise<GroupMember[]> {
-  return request<GroupMember[]>({ url: '/group-members', method: 'GET', data: { groupId } })
+/** 群成员列表：支持 cursor 分页；不传 cursor 时自动拉取全部页 */
+export async function fetchGroupMembers(
+  groupId: string,
+  opts?: { cursor?: string; limit?: number },
+): Promise<GroupMemberPage | GroupMember[]> {
+  const data: Record<string, string | number> = { groupId, limit: opts?.limit ?? 100 }
+  if (opts?.cursor) data.cursor = opts.cursor
+  const result = await request<GroupMemberPage | GroupMember[]>({
+    url: '/group-members',
+    method: 'GET',
+    data,
+  })
+  if (Array.isArray(result)) return result
+  return result
+}
+
+/** 拉取群全部成员（兼容分页 API） */
+export async function fetchAllGroupMembers(groupId: string): Promise<GroupMember[]> {
+  const all: GroupMember[] = []
+  let cursor = ''
+  for (;;) {
+    const page = await fetchGroupMembers(groupId, { cursor, limit: 100 })
+    if (Array.isArray(page)) return page
+    all.push(...page.items)
+    if (!page.hasMore || !page.nextCursor) break
+    cursor = page.nextCursor
+  }
+  return all
 }
 
 export async function joinGroup(groupId: string): Promise<GroupInfo> {

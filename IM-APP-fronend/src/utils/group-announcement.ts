@@ -55,10 +55,18 @@ export function isAtMeType(groupAtType: number | undefined): boolean {
   )
 }
 
-/** 会话列表预览红色标签：可同时出现 [有人@你] 与 [有新公告] */
+/** 无未读时不展示 @ 强提醒（App SDK 清 groupAtType 可能滞后于已读） */
+export function effectiveGroupAtType(
+  groupAtType: number | undefined,
+  unreadCount: number | undefined,
+): number {
+  return (unreadCount || 0) > 0 ? (groupAtType ?? GroupAtType.AtNormal) : GroupAtType.AtNormal
+}
+
+/** 会话列表预览红色标签：可同时出现 [有人@我] 与 [有新公告] */
 export function highlightTagsOf(groupAtType: number | undefined, hasUnreadAnnouncement: boolean): string[] {
   const tags: string[] = []
-  if (isAtMeType(groupAtType)) tags.push('[有人@你]')
+  if (isAtMeType(groupAtType)) tags.push('[有人@我]')
   if (groupAtType === GroupAtType.AtGroupNotice || hasUnreadAnnouncement) tags.push('[有新公告]')
   return tags
 }

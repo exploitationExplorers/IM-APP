@@ -43,7 +43,8 @@ type openIMWebhookResponse struct {
 }
 
 type OpenIMWebhookHandler struct {
-	Access       *repository.IMAccessRepo
+	Access       *service.IMWebhookAccess
+	Audit        *repository.IMAccessRepo
 	Client       *im.Client
 	Restrictions *repository.RestrictionRepo
 	Secret       string
@@ -53,9 +54,9 @@ type OpenIMWebhookHandler struct {
 	Pusher service.PushService
 }
 
-func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, client *im.Client, restrictions *repository.RestrictionRepo, secret, adminUser string, allowCIDRs []string, pusher service.PushService) *OpenIMWebhookHandler {
+func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, webhookAccess *service.IMWebhookAccess, client *im.Client, restrictions *repository.RestrictionRepo, secret, adminUser string, allowCIDRs []string, pusher service.PushService) *OpenIMWebhookHandler {
 	return &OpenIMWebhookHandler{
-		Access: access, Client: client, Restrictions: restrictions, Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
+		Access: webhookAccess, Audit: access, Client: client, Restrictions: restrictions, Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
 		AllowNets: parseAllowNets(allowCIDRs), Pusher: pusher,
 	}
 }
@@ -145,14 +146,14 @@ func (h *OpenIMWebhookHandler) BeforeGroup(c *gin.Context) {
 // recordBeforeHookFailure best-effort 记录一条 beforeSend 拒绝的失败记录。
 // 写库失败仅记日志、绝不阻断回调响应（拒绝语义已由 denyWebhook 保证）。
 func (h *OpenIMWebhookHandler) recordBeforeHookFailure(ctx context.Context, req openIMWebhookMessage, peerType, senderID, targetID, reason string) {
-	if h.Access == nil {
+	if h.Audit == nil {
 		return
 	}
 	targetIMID := req.RecvID
 	if peerType == "group" {
 		targetIMID = req.GroupID
 	}
-	if err := h.Access.RecordSendFailure(ctx, repository.SendFailureRecord{
+	if err := h.Audit.RecordSendFailure(ctx, repository.SendFailureRecord{
 		ClientMsgID: req.ClientMsgID,
 		Source:      "before_hook",
 		SenderID:    senderID,
@@ -205,7 +206,7 @@ func (h *OpenIMWebhookHandler) AfterMessage(c *gin.Context) {
 	if conversationID == "" {
 		conversationID = h.resolveAuditConversationID(c.Request.Context(), senderID, req.RecvID, req.GroupID)
 	}
-	if err := h.Access.RecordMessageAudit(c.Request.Context(), req.CallbackCommand,
+	if err := h.Audit.RecordMessageAudit(c.Request.Context(), req.CallbackCommand,
 		req.ServerMsgID, req.ClientMsgID, conversationID, senderID,
 		req.RecvID, req.GroupID, req.ContentType, req.Seq, req.SendTime); err != nil {
 		c.JSON(http.StatusInternalServerError, denyWebhook("audit storage failed"))
@@ -294,7 +295,7 @@ func limitWebhookBody(c *gin.Context) {
 }
 
 func (h *OpenIMWebhookHandler) authorized(c *gin.Context) bool {
-	if h == nil || h.Access == nil || h.Secret == "" || len(h.AllowNets) == 0 {
+	if h == nil || h.Audit == nil || h.Access == nil || h.Secret == "" || len(h.AllowNets) == 0 {
 		return false
 	}
 	provided := c.Param("secret")

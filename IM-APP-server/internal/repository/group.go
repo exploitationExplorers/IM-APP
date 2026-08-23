@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -293,7 +294,11 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 	return g, err
 }
 
-func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]models.GroupMember, error) {
+func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid, cursor string, limit int) (models.GroupMemberPage, error) {
+	page := models.GroupMemberPage{Items: make([]models.GroupMember, 0)}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
 	var exists bool
 	_ = r.DB.QueryRow(ctx, `
 		SELECT EXISTS(
@@ -301,39 +306,57 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid string) ([]mod
 			WHERE gm.group_id=$1 AND gm.user_id=$2 AND g.status='active')`,
 		groupID, uid).Scan(&exists)
 	if !exists {
-		return nil, ErrForbidden
+		return page, ErrForbidden
 	}
-	rows, err := r.DB.Query(ctx, `
+	query := `
 		SELECT u.id::text, COALESCE(u.nickname,''), COALESCE(gm.nickname,''),
 			CASE WHEN COALESCE(gm.nickname,'')='' THEN COALESCE(u.nickname,'') ELSE gm.nickname END,
 			COALESCE(u.avatar,''), gm.role,
 			CASE WHEN gm.muted_until > NOW() THEN gm.muted_until ELSE NULL END
 		FROM group_members gm
 		JOIN users u ON u.id = gm.user_id
-		WHERE gm.group_id=$1::uuid AND COALESCE(u.status,'active')='active'
-		ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END`,
-		groupID)
+		WHERE gm.group_id=$1::uuid AND COALESCE(u.status,'active')='active'`
+	args := []interface{}{groupID}
+	argIdx := 2
+	if cursor != "" {
+		query += fmt.Sprintf(` AND u.id::text > $%d`, argIdx)
+		args = append(args, cursor)
+		argIdx++
+	}
+	query += fmt.Sprintf(` ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.id::text ASC LIMIT $%d`, argIdx)
+	args = append(args, limit+1)
+	rows, err := r.DB.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return page, err
 	}
 	defer rows.Close()
-	list := make([]models.GroupMember, 0)
+	items := make([]models.GroupMember, 0, limit+1)
 	for rows.Next() {
 		var m models.GroupMember
 		if err := rows.Scan(&m.ID, &m.Nickname, &m.GroupNickname, &m.DisplayName, &m.Avatar, &m.Role, &m.MutedUntil); err != nil {
-			return nil, err
+			return page, err
 		}
 		m.IsMuted = m.MutedUntil != nil
-		list = append(list, m)
+		items = append(items, m)
+	}
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	if len(items) > limit {
+		page.HasMore = true
+		page.Items = items[:limit]
+		page.NextCursor = page.Items[len(page.Items)-1].ID
+	} else {
+		page.Items = items
 	}
 	if rm, rerr := r.GetMemberRemarks(ctx, groupID, uid); rerr == nil {
-		for i := range list {
-			if r2, ok := rm[list[i].ID]; ok {
-				list[i].MemberRemark = r2
+		for i := range page.Items {
+			if r2, ok := rm[page.Items[i].ID]; ok {
+				page.Items[i].MemberRemark = r2
 			}
 		}
 	}
-	return list, nil
+	return page, nil
 }
 
 func (r *GroupRepo) Join(ctx context.Context, groupID, uid string) (models.GroupInfo, error) {

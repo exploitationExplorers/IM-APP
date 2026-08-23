@@ -261,6 +261,34 @@ func (c *Client) EnsureUser(ctx context.Context, user User) error {
 	return c.UpdateUser(ctx, user)
 }
 
+// EnsureUsersBatch registers missing users in chunks; existing accounts are updated individually.
+func (c *Client) EnsureUsersBatch(ctx context.Context, users []User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	for i := range users {
+		if strings.TrimSpace(users[i].FaceURL) == "" {
+			users[i].FaceURL = models.DefaultAvatar
+		}
+	}
+	const chunkSize = 50
+	for start := 0; start < len(users); start += chunkSize {
+		end := start + chunkSize
+		if end > len(users) {
+			end = len(users)
+		}
+		chunk := users[start:end]
+		if err := c.RegisterUsers(ctx, chunk); err != nil {
+			for _, user := range chunk {
+				if err := c.EnsureUser(ctx, user); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Client) GetUserToken(ctx context.Context, userID string, platformID int) (TokenResult, error) {
 	if platformID < 1 || platformID > 11 {
 		return TokenResult{}, ErrInvalidPlatform

@@ -156,8 +156,9 @@ func main() {
 	imInternalH := &handler.IMInternalHandler{Service: imAdminSvc}
 	// 消息推送服务：当前用日志桩（仅打印推送意图），后续替换为接入 APNs/FCM/个推 的实现。
 	pushSvc := service.NewLoggingPushService()
+	webhookAccess := &service.IMWebhookAccess{Access: imAccessRepo, Redis: redisClient}
 	openIMWebhookH := handler.NewOpenIMWebhookHandler(
-		imAccessRepo, imClient, &repository.RestrictionRepo{DB: pool}, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
+		imAccessRepo, webhookAccess, imClient, &repository.RestrictionRepo{DB: pool}, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
 	)
 	// 安全提醒：配置了 webhook 密钥却没配来源 CIDR 白名单时，authorized 会整体拒绝所有回调，
 	// 等同于 webhook 功能静默失效——显式打 warning，避免排查时一脸懵。

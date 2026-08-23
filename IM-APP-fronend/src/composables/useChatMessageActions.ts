@@ -42,7 +42,7 @@ export function useChatMessageActions(opts: {
   const selectMode = ref<'forward' | 'multi'>('multi')
   const selectedIds = ref<Set<string>>(new Set())
   const quote = ref<ChatMessage | null>(null)
-  /** 长按 @TA 记下被 @ 的人（OpenIM userID + 群昵称），发送时走 AtText */
+  /** 头像长按 @TA 记下被 @ 的人（OpenIM userID + 群昵称），发送时走 AtText */
   const atList = ref<Array<{ atUserID: string; groupNickname: string }>>([])
 
   const selectedCount = computed(() => selectedIds.value.size)
@@ -95,7 +95,7 @@ export function useChatMessageActions(opts: {
     items.push({ key: 'favorite', label: '收藏' })
     if (!mine) {
       items.push({ key: 'report', label: '检举' })
-      if (opts.chatType.value === 'group') items.push({ key: 'at', label: '@TA' })
+      // @TA 只挂在头像长按（对齐参考站），不放消息气泡菜单
       if (canActOnTarget(message)) {
         const muted = !!memberMetaOf(message)?.isMuted
         items.push(muted ? { key: 'unmute', label: '解除禁言' } : { key: 'mute', label: '禁言' })
@@ -280,15 +280,20 @@ export function useChatMessageActions(opts: {
     quote.value = null
   }
 
-  function atUser(message: ChatMessage) {
-    const name = opts.nicknameOf(message) || message.senderNickname || 'TA'
+  /**
+   * 写入输入框的是「@昵称」，按钮文案 @TA 只是动作名。
+   * displayName 优先用气泡已展示的昵称，避免 maps 未就绪时落到字面量 TA。
+   */
+  function atUser(message: ChatMessage, displayName?: string) {
+    const name =
+      (displayName || opts.nicknameOf(message) || message.senderNickname || '').trim() || '用户'
     const token = `@${name} `
     if (!opts.input.value.includes(token)) {
       opts.input.value = `${token}${opts.input.value}`
-      // 记下被 @ 的人。atUserID 必须用 OpenIM userID（message.senderId 就是），不要转业务 ID
-      if (message.senderId && !atList.value.some((a) => a.atUserID === message.senderId)) {
-        atList.value.push({ atUserID: message.senderId, groupNickname: name })
-      }
+    }
+    // atUserID 必须用 OpenIM userID（message.senderId），不要转业务 ID
+    if (message.senderId && !atList.value.some((a) => a.atUserID === message.senderId)) {
+      atList.value.push({ atUserID: message.senderId, groupNickname: name })
     }
   }
 
@@ -404,10 +409,6 @@ export function useChatMessageActions(opts: {
       reportUser(message)
       return
     }
-    if (key === 'at') {
-      atUser(message)
-      return
-    }
     if (key === 'mute') {
       muteUser(message)
       return
@@ -460,6 +461,7 @@ export function useChatMessageActions(opts: {
     selectedCount,
     quote,
     atList,
+    atUser,
     openMenu,
     closeMenu,
     onMenuSelect,

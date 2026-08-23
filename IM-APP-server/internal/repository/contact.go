@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"im-app-server/internal/models"
 
@@ -27,8 +28,11 @@ func (r *ContactRepo) ListContacts(ctx context.Context, uid, keyword, sort, curs
 		limit = 50
 	}
 	page := models.ContactPage{Items: make([]models.Contact, 0)}
-	if err := r.DB.QueryRow(ctx, `SELECT COUNT(*)`+contactListWhere, uid, keyword).Scan(&page.Total); err != nil {
-		return page, err
+	// 翻页时不做 COUNT(*)，避免大通讯录双扫
+	if cursor == "" {
+		if err := r.DB.QueryRow(ctx, `SELECT COUNT(*)`+contactListWhere, uid, keyword).Scan(&page.Total); err != nil {
+			return page, err
+		}
 	}
 
 	order := `ORDER BY f.created_at DESC, f.friend_id DESC`
@@ -72,13 +76,18 @@ func (r *ContactRepo) ListContacts(ctx context.Context, uid, keyword, sort, curs
 	return page, nil
 }
 
-func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]models.GroupPreview, error) {
+func (r *ContactRepo) ListGroups(ctx context.Context, uid, role, cursor string, limit int) (models.GroupPage, error) {
+	page := models.GroupPage{Items: make([]models.GroupPreview, 0)}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
 	query := `
 		SELECT g.public_id, g.name, g.avatar, gm.role, COALESCE(g.conversation_id::text,''), COALESCE(g.status,'active')
 		FROM groups g
 		JOIN group_members gm ON gm.group_id = g.id
 		WHERE gm.user_id=$1 AND COALESCE(gm.status,'active')='active' AND COALESCE(g.status,'active') IN ('active','dismissed')`
 	args := []interface{}{uid}
+	argIdx := 2
 	if role == "owner" {
 		query += ` AND gm.role='owner'`
 	} else if role == "joined" || role == "member" {
@@ -86,21 +95,38 @@ func (r *ContactRepo) ListGroups(ctx context.Context, uid, role string) ([]model
 	} else if role == "admin" {
 		query += ` AND gm.role='admin'`
 	}
-	query += ` ORDER BY CASE g.status WHEN 'active' THEN 0 ELSE 1 END, g.created_at DESC`
+	if cursor != "" {
+		query += fmt.Sprintf(` AND (g.created_at, g.public_id) < (
+			SELECT g2.created_at, g2.public_id FROM groups g2 WHERE g2.public_id=$%d)`, argIdx)
+		args = append(args, cursor)
+		argIdx++
+	}
+	query += fmt.Sprintf(` ORDER BY CASE g.status WHEN 'active' THEN 0 ELSE 1 END, g.created_at DESC, g.public_id DESC LIMIT $%d`, argIdx)
+	args = append(args, limit+1)
 	rows, err := r.DB.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return page, err
 	}
 	defer rows.Close()
-	list := make([]models.GroupPreview, 0)
+	items := make([]models.GroupPreview, 0, limit+1)
 	for rows.Next() {
 		var g models.GroupPreview
 		if err := rows.Scan(&g.ID, &g.Name, &g.Avatar, &g.Role, &g.ConversationID, &g.Status); err != nil {
-			return nil, err
+			return page, err
 		}
-		list = append(list, g)
+		items = append(items, g)
 	}
-	return list, nil
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	if len(items) > limit {
+		page.HasMore = true
+		page.Items = items[:limit]
+		page.NextCursor = page.Items[len(page.Items)-1].ID
+	} else {
+		page.Items = items
+	}
+	return page, nil
 }
 
 const friendRequestListLimit = 100

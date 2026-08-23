@@ -5,7 +5,7 @@ import {
   createGroup,
   dismissGroup,
   fetchGroupDetail,
-  fetchGroupMembers,
+  fetchAllGroupMembers,
   joinGroup,
   leaveGroup,
   updateGroupMyNickname,
@@ -19,7 +19,7 @@ export const useGroupStore = defineStore('group', () => {
 
   async function loadDetail(groupId: string) {
     currentGroup.value = await fetchGroupDetail(groupId)
-    members.value = await fetchGroupMembers(groupId)
+    members.value = await fetchAllGroupMembers(groupId)
     return currentGroup.value
   }
 
@@ -42,7 +42,7 @@ export const useGroupStore = defineStore('group', () => {
 
   async function setMemberRole(groupId: string, userId: string, role: 'admin' | 'member') {
     await updateMemberRole(groupId, userId, role)
-    members.value = await fetchGroupMembers(groupId)
+    members.value = await fetchAllGroupMembers(groupId)
   }
 
   async function dismiss(groupId: string) {

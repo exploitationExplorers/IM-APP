@@ -3,6 +3,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
+import ImAtActionSheet from '@/components/ImAtActionSheet.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
@@ -22,6 +23,7 @@ import type { CardPayload, ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
+import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
 import {
   isAnnouncementDismissed,
   rememberDismissedAnnouncement,
@@ -95,6 +97,17 @@ const messages = computed(() =>
   collapseRepeatedGroupNameNotices(
     (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
   ),
+)
+
+let roomFirstMessagesMarked = false
+watch(
+  () => messages.value.length,
+  (len) => {
+    if (len > 0 && !roomFirstMessagesMarked) {
+      roomFirstMessagesMarked = true
+      perfMarkEnd('chat:room-first-messages', `${len} visible`)
+    }
+  },
 )
 
 /** 图片预览列表：点开任意图片后可左右滑动查看本会话其它图片 */
@@ -301,9 +314,14 @@ const actions = useChatMessageActions({
   },
 })
 
+/** onLoad 刚拉过群详情时 onShow 会紧跟着触发，跳过重复请求 */
+let groupMetaLoadedAt = 0
+
 onShow(() => {
 	if (chatType.value === 'group') {
-    void refreshGroupMeta()
+    if (Date.now() - groupMetaLoadedAt > 2000) {
+      void refreshGroupMeta()
+    }
     scheduleGroupReadReport()
     startGroupReadPolling()
   }
@@ -332,6 +350,7 @@ onUnload(() => {
     dissolveExitTimer = null
   }
   chatStore.setOnIncomingForDissolve(null)
+  chatStore.trimConversationMemory(conversationId.value)
 })
 
 /**
@@ -375,6 +394,8 @@ watch(groupDissolved, (dissolved) => {
 })
 
 onLoad(async (query) => {
+  roomFirstMessagesMarked = false
+  perfMarkStart('chat:room-first-messages')
   title.value = decodeURIComponent(String(query?.title || '聊天'))
   peerAvatar.value = decodeURIComponent(String(query?.avatar || APP_CONFIG.defaultAvatarUrl))
   chatType.value = String(query?.type || 'group') === 'private' ? 'private' : 'group'
@@ -383,54 +404,78 @@ onLoad(async (query) => {
   uni.hideNavigationBarLoading?.()
 
   try {
-    const conv = await chatStore.enterConversation({
-      conversationId: String(query?.conversationId || ''),
-      type: chatType.value,
-      businessId: businessId.value,
-    })
-    convRef.value = conv
-    conversationId.value = conv.id
-    if (!query?.title) title.value = conv.title
+    const convIdHint = String(query?.conversationId || '')
+    if (convIdHint) conversationId.value = convIdHint
 
-    // 确保当前 OpenIM 用户 ID 已就绪（某些 H5/热更新场景下 imUserId 可能未同步到本页）
-    if (!imUserId.value) {
-      await ensureIMLogin()
-    }
-    myId.value = imUserId.value
-    if (!myId.value) {
-      throw new Error('当前 IM 用户 ID 未初始化，请重新登录')
-    }
+    await ensureIMLogin()
 
-    if (chatType.value === 'group' && !businessId.value) {
-      try {
-        businessId.value = await resolveBusinessTarget()
-      } catch {
-        businessId.value = ''
+    const enterTask = (async () => {
+      perfMarkStart('chat:room-enter-conversation')
+      const conv = await chatStore.enterConversation({
+        conversationId: convIdHint,
+        type: chatType.value,
+        businessId: businessId.value,
+      })
+      perfMarkEnd('chat:room-enter-conversation')
+      return conv
+    })()
+
+    const loadTask = (async () => {
+      if (convIdHint) {
+        return chatStore.loadMessages(convIdHint).catch((e: any) => {
+          if (chatType.value === 'group' && e?.message?.includes('10006')) {
+            exitDissolvedRoom()
+            return
+          }
+          throw e
+        })
       }
-    }
-
-    // 群聊先查群详情：群已解散时提示并回聊天列表，不再调 OpenIM 拉历史
-    // （避免触发 getAdvancedHistoryMessageList errCode=10006）
-    if (chatType.value === 'group' && businessId.value) {
-      await refreshGroupMeta()
-      if (groupDissolved.value) {
-        exitDissolvedRoom()
-        return
-      }
-    }
-
-    await Promise.all([
-      chatStore.loadMessages(conv.id).catch((e: any) => {
-        // 兜底：预检测失败时 OpenIM SDK 直接抛 getAdvancedHistoryMessageList errCode=10006，
-        // 同样提示并回聊天列表
+      const conv = await enterTask
+      return chatStore.loadMessages(conv.id).catch((e: any) => {
         if (chatType.value === 'group' && e?.message?.includes('10006')) {
           exitDissolvedRoom()
           return
         }
         throw e
-      }),
-      chatType.value === 'group' ? refreshGroupMeta() : Promise.resolve(),
-    ])
+      })
+    })()
+
+    const groupMetaTask = (async () => {
+      if (chatType.value !== 'group') return
+      perfMarkStart('chat:room-group-meta')
+      try {
+        const conv = await enterTask
+        convRef.value = conv
+        if (!businessId.value) {
+          try {
+            businessId.value = await resolveBusinessTarget()
+          } catch {
+            businessId.value = ''
+          }
+        }
+        if (businessId.value) {
+          await refreshGroupMeta()
+        }
+      } finally {
+        perfMarkEnd('chat:room-group-meta')
+      }
+    })()
+
+    const conv = await enterTask
+    convRef.value = conv
+    conversationId.value = conv.id
+    if (!query?.title) title.value = conv.title
+
+    myId.value = imUserId.value
+    if (!myId.value) {
+      throw new Error('当前 IM 用户 ID 未初始化，请重新登录')
+    }
+
+    await Promise.all([loadTask, groupMetaTask])
+    if (chatType.value === 'group' && groupDissolved.value) {
+      exitDissolvedRoom()
+      return
+    }
     await nextTick()
     scrollToBottom()
   } catch (e) {
@@ -667,6 +712,9 @@ async function refreshGroupMeta(): Promise<boolean> {
   } catch {
     // 人数刷新失败时保留当前值
   }
+  if (detailApplied) {
+    groupMetaLoadedAt = Date.now()
+  }
   return detailApplied
 }
 
@@ -791,6 +839,29 @@ async function onAvatarClick(message: ChatMessage) {
     return
   }
   await openProfileById(userId)
+}
+
+/** 群聊长按对方头像：弹出 @TA 面板（对齐参考站） */
+const atSheetVisible = ref(false)
+const atSheetMessage = ref<ChatMessage | null>(null)
+
+function onAvatarLongpress(message: ChatMessage) {
+  if (chatType.value !== 'group' || isMine(message) || actions.selecting.value) return
+  atSheetMessage.value = message
+  atSheetVisible.value = true
+}
+
+function closeAtSheet() {
+  atSheetVisible.value = false
+  atSheetMessage.value = null
+}
+
+function confirmAtFromSheet() {
+  const message = atSheetMessage.value
+  closeAtSheet()
+  if (!message) return
+  const displayName = nicknameOf(message) || message.senderNickname || ''
+  actions.atUser(message, displayName)
 }
 
 /** 名片消息点「查看」：直接进对应好友详情页 */
@@ -1266,6 +1337,7 @@ function pickFavorite() {
           :preview-urls="imagePreviewUrls"
           :read-state="readStateOf(m)"
           @avatar-click="onAvatarClick(m)"
+          @avatar-longpress="onAvatarLongpress(m)"
           @card-view="onViewCard"
           @longpress="actions.openMenu(m)"
           @retry="onRetry(m)"
@@ -1393,6 +1465,11 @@ function pickFavorite() {
       :left="actions.menuLeft.value"
       @select="actions.onMenuSelect"
       @close="actions.closeMenu"
+    />
+    <ImAtActionSheet
+      :visible="atSheetVisible"
+      @at="confirmAtFromSheet"
+      @cancel="closeAtSheet"
     />
     <ImSuccessToast
       :visible="successVisible"
