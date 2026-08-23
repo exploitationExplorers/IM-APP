@@ -75,6 +75,8 @@ type loadClient struct {
 	userID string
 	conn   *websocket.Conn
 	seen   map[string]struct{}
+	done   chan struct{}
+	once   sync.Once
 }
 
 type metricSet struct {
@@ -345,6 +347,7 @@ func connectClients(ctx context.Context, opts options, imClient *im.Client, memb
 		metrics.mu.Lock()
 		metrics.connectLatencies = append(metrics.connectLatencies, item.latency)
 		metrics.mu.Unlock()
+		go item.client.heartbeat()
 		go item.client.readLoop(metrics)
 		if len(clients)%10 == 0 || len(clients) == len(members) {
 			log.Printf("connected %d/%d", len(clients), len(members))
@@ -396,10 +399,16 @@ func dialClient(ctx context.Context, opts options, userID, token string) (*loadC
 		conn.Close()
 		return nil, fmt.Errorf("handshake errCode=%d msg=%s detail=%s", envelope.ErrCode, envelope.ErrMsg, envelope.ErrDlt)
 	}
-	return &loadClient{userID: userID, conn: conn, seen: make(map[string]struct{})}, nil
+	return &loadClient{
+		userID: userID,
+		conn:   conn,
+		seen:   make(map[string]struct{}),
+		done:   make(chan struct{}),
+	}, nil
 }
 
 func (c *loadClient) readLoop(metrics *metricSet) {
+	defer c.once.Do(func() { close(c.done) })
 	for {
 		_, raw, err := c.conn.ReadMessage()
 		if err != nil {
@@ -427,6 +436,29 @@ func (c *loadClient) readLoop(metrics *metricSet) {
 		metrics.mu.Lock()
 		metrics.deliveryLatencies = append(metrics.deliveryLatencies, time.Since(op.sentAt))
 		metrics.mu.Unlock()
+	}
+}
+
+// heartbeat mirrors the OpenIM SDK WebSocket keepalive. The official SDK
+// sends a control-frame ping every 24 seconds (30-second pong/read window).
+// Without this, long-running raw WebSocket load clients are disconnected by
+// the gateway and sustained tests report false delivery loss.
+func (c *loadClient) heartbeat() {
+	ticker := time.NewTicker(24 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case now := <-ticker.C:
+			if err := c.conn.WriteControl(
+				websocket.PingMessage,
+				[]byte(fmt.Sprint(now.UnixMilli())),
+				time.Now().Add(10*time.Second),
+			); err != nil {
+				return
+			}
+		}
 	}
 }
 
