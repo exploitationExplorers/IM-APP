@@ -43,10 +43,20 @@ function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
   return bytes.buffer
 }
 
+function isPlusAvailable(): boolean {
+  return isAppPlatform() && typeof plus !== 'undefined'
+}
+
 function toAppFileUrl(path: string): string {
-  if (path.startsWith('file://') || path.startsWith('http://') || path.startsWith('https://')) {
+  if (
+    path.startsWith('file://') ||
+    path.startsWith('http://') ||
+    path.startsWith('https://') ||
+    path.startsWith('blob:')
+  ) {
     return path
   }
+  if (!isPlusAvailable()) return path
   try {
     return plus.io.convertLocalFileSystemURL(path) || path
   } catch {
@@ -71,6 +81,9 @@ function downloadToTemp(url: string): Promise<string> {
 }
 
 function readAppFile(filePath: string, fallbackName = 'avatar.jpg'): Promise<ImageBytes> {
+  if (!isPlusAvailable()) {
+    return Promise.reject(new Error('读取图片失败'))
+  }
   return new Promise((resolve, reject) => {
     const fail = () => reject(new Error('读取图片失败'))
     plus.io.resolveLocalFileSystemURL(
@@ -131,6 +144,9 @@ async function loadImageBytes(localPath?: string, remoteUrl?: string): Promise<I
         size: blob.size,
       }
     }
+    if (!isAppPlatform()) {
+      throw new Error('读取图片失败')
+    }
     return readAppFile(localPath)
   }
   if (remoteUrl) {
@@ -144,6 +160,9 @@ async function loadImageBytes(localPath?: string, remoteUrl?: string): Promise<I
         contentType: meta.contentType,
         size: blob.size,
       }
+    }
+    if (!isAppPlatform()) {
+      throw new Error('读取图片失败')
     }
     const tempPath = await downloadToTemp(remoteUrl)
     return readAppFile(tempPath, 'avatar.jpg')
@@ -205,6 +224,10 @@ function getLocalFileMeta(filePath: string): Promise<{ fileName: string; content
       filePath,
       success: (res) => finish(res.size, getFileName(filePath), ''),
       fail: () => {
+        if (!isPlusAvailable()) {
+          fail()
+          return
+        }
         plus.io.resolveLocalFileSystemURL(
           toAppFileUrl(filePath),
           (rawEntry) => {

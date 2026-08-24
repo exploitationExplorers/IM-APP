@@ -19,7 +19,7 @@ import { useDesktopListResize } from '@/composables/useDesktopListResize'
 import type { Conversation } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { openQrScanner } from '@/utils/qrcode'
-import { isDissolvedGroupConversationPreview } from '@/utils/im-notification'
+import { isDissolvedGroupConversationPreview, isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-notification'
 
 useAuthGuard()
 useTabBar()
@@ -100,13 +100,26 @@ async function reloadConversations() {
 
 const { refreshing, onRefresherRefresh } = usePullRefresh(reloadConversations)
 
-function openConversation(item: Conversation) {
+async function openConversation(item: Conversation) {
   showAddMenu.value = false
   showFilter.value = false
   if (isDesktop.value) {
     if (isDissolvedGroupConversation(item)) {
-      notifyChatUnavailable()
+      notifyGroupUnavailable(true)
       return
+    }
+    if (item.type === 'group') {
+      try {
+        await chatStore.assertConversationAccessible(item)
+      } catch (e) {
+        const msg = (e as Error)?.message || ''
+        if (isGroupUnavailableError(msg)) {
+          notifyGroupUnavailable(true)
+          return
+        }
+        uni.showToast({ title: msg || '打开群聊失败', icon: 'none' })
+        return
+      }
     }
     selectedConv.value = item
     return
@@ -162,10 +175,6 @@ function pickDesktopConversation(list: Conversation[]): Conversation | null {
   return list.find((c) => !isDissolvedGroupConversation(c)) ?? null
 }
 
-function notifyChatUnavailable() {
-  uni.showToast({ title: '这个聊天已不存在', icon: 'none', duration: 2000 })
-}
-
 /** 通讯录 PC 内联群列表点进：切到聊天 tab 后打开对应群聊 */
 onShow(() => {
   if (!isDesktop.value) return
@@ -181,21 +190,40 @@ onShow(() => {
         businessId: pending.businessId,
       })
       const matched = chatStore.conversations.find((c) => c.id === conv.id)
-      if (matched && !isDissolvedGroupConversation(matched)) {
-        selectedConv.value = matched
+      const candidate: Conversation =
+        matched ||
+        ({
+          id: conv.id,
+          type: 'group',
+          title: conv.title || pending.title,
+          avatar: conv.avatar || pending.avatar,
+          lastMessage: conv.lastMessage || '',
+          lastMessageAt: conv.lastMessageAt || '',
+          unreadCount: conv.unreadCount || 0,
+          pinned: false,
+        } as Conversation)
+      if (isDissolvedGroupConversation(candidate)) {
+        notifyGroupUnavailable(true)
         return
       }
-      selectedConv.value = {
-        id: conv.id,
-        type: 'group',
-        title: conv.title || pending.title,
-        avatar: conv.avatar || pending.avatar,
-        lastMessage: conv.lastMessage || '',
-        lastMessageAt: conv.lastMessageAt || '',
-        unreadCount: conv.unreadCount || 0,
+      try {
+        await chatStore.assertConversationAccessible(candidate)
+      } catch (e) {
+        const msg = (e as Error)?.message || ''
+        if (isGroupUnavailableError(msg)) {
+          notifyGroupUnavailable(true)
+          return
+        }
+        throw e
       }
+      selectedConv.value = candidate
     } catch (e) {
-      uni.showToast({ title: (e as Error)?.message || '打开群聊失败', icon: 'none' })
+      const msg = (e as Error)?.message || ''
+      if (isGroupUnavailableError(msg)) {
+        notifyGroupUnavailable(true)
+        return
+      }
+      uni.showToast({ title: msg || '打开群聊失败', icon: 'none' })
     }
   })()
 })

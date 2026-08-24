@@ -256,3 +256,25 @@ export function isDissolvedGroupConversationPreview(lastMessage?: string): boole
   if (!text) return false
   return text.includes('解散了群聊') || text.includes('群聊已解散')
 }
+
+/** 业务 API / 进房校验：群已解散、已退出或无权访问 */
+export function isGroupUnavailableError(message?: string): boolean {
+  const text = (message || '').trim()
+  if (!text) return false
+  return (
+    text.includes('群不存在') ||
+    text.includes('无权访问') ||
+    text.includes('你已退出该群聊') ||
+    text.includes('群聊已解散') ||
+    text.includes('GROUP_UNAVAILABLE')
+  )
+}
+
+/** 群不可用时的统一提示（PC 对齐参考站文案） */
+export function notifyGroupUnavailable(desktop = true) {
+  uni.showToast({
+    title: desktop ? '这个聊天已不存在' : '该群已解散',
+    icon: 'none',
+    duration: 2000,
+  })
+}

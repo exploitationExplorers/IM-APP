@@ -903,12 +903,11 @@ func (s *IMService) ensureOpenIMGroup(ctx context.Context, requesterID, internal
 		return fmt.Errorf("ensure group member: %w", err)
 	}
 	if err := s.Client.JoinGroup(ctx, requesterIMID, imGroupID); err != nil {
-		log.Printf("OpenIM invite member %s for group %s: %v", requesterID, internalID, err)
-		registered, checkErr := s.Client.IsGroupRegistered(ctx, imGroupID)
-		if checkErr == nil && registered {
+		log.Printf("OpenIM join member %s for group %s: %v", requesterID, internalID, err)
+		if inviteErr := s.Client.InviteGroupMember(ctx, imGroupID, []string{requesterIMID}); inviteErr == nil {
 			return nil
 		}
-		return err
+		return fmt.Errorf("ensure OpenIM group membership: %w", err)
 	}
 	return nil
 }

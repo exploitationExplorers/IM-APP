@@ -50,6 +50,8 @@ export interface ChatMessage {
   seq?: number
   /** 群聊中是否至少有一名其他成员读到本消息。 */
   groupHasRead?: boolean
+  /** 本会话内发送的消息才追踪群已读（避免历史消息触发轮询）。 */
+  trackGroupRead?: boolean
   /** 本地发送中状态 */
   status?: 'sending' | 'sent' | 'failed'
 }

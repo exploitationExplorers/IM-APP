@@ -14,14 +14,14 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useForwardStore } from '@/stores/forward'
-import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId } from '@/utils/openim'
+import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId, isNotInGroupIMError } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
 import { fetchGroupDetail } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation } from '@/types'
-import { collapseRepeatedGroupNameNotices, replaceOpenIMAdminLabel } from '@/utils/im-notification'
+import { collapseRepeatedGroupNameNotices, isGroupUnavailableError, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
@@ -88,6 +88,10 @@ const announcementDismissEpoch = ref(0)
 const groupDissolved = ref(false)
 let muteExpireTimer: ReturnType<typeof setTimeout> | null = null
 let groupReadPollTimer: ReturnType<typeof setInterval> | null = null
+/** 仅追踪本次会话内新发出的群消息已读，避免历史消息误触发轮询 */
+const GROUP_READ_POLL_INTERVAL_MS = 15_000
+const GROUP_READ_POLL_MAX_MS = 3 * 60_000
+let groupReadPollStartedAt = 0
 let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const scrollInto = ref('')
@@ -207,7 +211,9 @@ function readStateOf(message: ChatMessage): 'read' | 'unread' | undefined {
 
 function ownPendingGroupMessages(): ChatMessage[] {
   if (chatType.value !== 'group') return []
-  return messages.value.filter((m) => isMine(m) && m.status === 'sent' && !!m.seq && !m.groupHasRead)
+  return messages.value.filter(
+    (m) => isMine(m) && m.status === 'sent' && !!m.seq && m.trackGroupRead && !m.groupHasRead,
+  )
 }
 
 async function refreshGroupReadState(): Promise<void> {
@@ -225,13 +231,21 @@ async function refreshGroupReadState(): Promise<void> {
 
 function startGroupReadPolling(): void {
   if (chatType.value !== 'group' || groupReadPollTimer || ownPendingGroupMessages().length === 0) return
+  groupReadPollStartedAt = Date.now()
   void refreshGroupReadState()
-  groupReadPollTimer = setInterval(() => void refreshGroupReadState(), 5000)
+  groupReadPollTimer = setInterval(() => {
+    if (Date.now() - groupReadPollStartedAt > GROUP_READ_POLL_MAX_MS) {
+      stopGroupReadPolling()
+      return
+    }
+    void refreshGroupReadState()
+  }, GROUP_READ_POLL_INTERVAL_MS)
 }
 
 function stopGroupReadPolling(): void {
   if (groupReadPollTimer) clearInterval(groupReadPollTimer)
   groupReadPollTimer = null
+  groupReadPollStartedAt = 0
 }
 
 function scheduleGroupReadReport(): void {
@@ -369,29 +383,22 @@ onUnload(() => {
     dissolveExitTimer = null
   }
   chatStore.setOnIncomingForDissolve(null)
+  chatStore.setOnGroupUnavailable(null)
   chatStore.trimConversationMemory(conversationId.value)
 })
 
 /**
  * 群已解散的统一出口：提示「该群已解散」并回到聊天列表。
- * 聊天列表是 tabBar 页，App/H5 都必须用 switchTab（navigateBack 只能回到来源页，
- * 从通讯录/扫码等入口进房间时会回到错误页面）。dissolveExited 防止多触发源重复弹提示。
- * 触发源：
- * 1. 进入房间时群已解散（onLoad 预检，群详情 404）
- * 2. 在房间时实时收到解散通知（chatStore.setOnIncomingForDissolve 回调）
- * 3. App 切后台期间群被解散，回前台 onShow 重拉群详情发现（watch groupDissolved）
- * 4. 拉历史兜底 OpenIM errCode=10006
+ * 触发源：群详情 404、实时解散通知、OpenIM errCode=10006 等。
  */
-let dissolveExited = false
+let roomExited = false
 let dissolveExitTimer: ReturnType<typeof setTimeout> | null = null
-function exitDissolvedRoom() {
-  if (dissolveExited) return
-  dissolveExited = true
-  uni.showToast({
-    title: props.embedded ? '这个聊天已不存在' : '该群已解散',
-    icon: 'none',
-    duration: 2000,
-  })
+
+function leaveRoomAfterToast(title: string) {
+  if (roomExited) return
+  roomExited = true
+  stopGroupReadPolling()
+  uni.showToast({ title, icon: 'none', duration: 2000 })
   if (props.embedded) {
     emit('dissolved')
     return
@@ -400,6 +407,15 @@ function exitDissolvedRoom() {
     dissolveExitTimer = null
     uni.switchTab({ url: '/pages/chat/index' })
   }, 400)
+}
+
+function exitDissolvedRoom() {
+  leaveRoomAfterToast(props.embedded ? '这个聊天已不存在' : '该群已解散')
+}
+
+/** 业务库仍有记录但 OpenIM 侧已不在群（1002 等），与「群已解散」区分 */
+function exitUnavailableGroupRoom() {
+  leaveRoomAfterToast(props.embedded ? '这个聊天已不存在' : '你已不在该群聊')
 }
 
 /**
@@ -413,6 +429,13 @@ function handleIncomingForDissolve(message: { conversationId?: string; notificat
   exitDissolvedRoom()
 }
 chatStore.setOnIncomingForDissolve(handleIncomingForDissolve)
+
+function handleGroupUnavailable(payload: { conversationId: string }) {
+  if (chatType.value !== 'group') return
+  if (payload.conversationId !== conversationId.value) return
+  exitUnavailableGroupRoom()
+}
+chatStore.setOnGroupUnavailable(handleGroupUnavailable)
 
 /** onShow 重拉群详情发现已解散（如 App 后台期间群被解散）时，同样提示并退出 */
 watch(groupDissolved, (dissolved) => {
@@ -442,7 +465,7 @@ onMounted(() => {
 })
 
 async function bootstrapRoom(query: Record<string, string | undefined>) {
-  dissolveExited = false
+  roomExited = false
   roomFirstMessagesMarked = false
   perfMarkStart('chat:room-first-messages')
   title.value = decodeURIComponent(String(query?.title || '聊天'))
@@ -523,6 +546,16 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     }
 
     await Promise.all([loadTask, groupMetaTask])
+    if (chatType.value === 'group') {
+      try {
+        await chatStore.assertConversationAccessible(conv)
+      } catch (e) {
+        if (isGroupUnavailableError((e as Error)?.message)) {
+          exitUnavailableGroupRoom()
+          return
+        }
+      }
+    }
     if (chatType.value === 'group' && groupDissolved.value) {
       exitDissolvedRoom()
       return
@@ -624,6 +657,10 @@ async function onSend() {
   } catch (e) {
     // 发送失败（如被对方拉黑、网络异常）：消息气泡已由 store 标为 failed（红色感叹号），
     // 用户点感叹号可重发，这里不弹 toast 打扰，避免出现 blocked 等原始错误提示。
+    if (isGroupUnavailableError((e as Error)?.message) || isNotInGroupIMError(e)) {
+      exitUnavailableGroupRoom()
+      return
+    }
     console.warn('[room] 发送失败', (e as Error)?.message)
   }
 }
@@ -743,10 +780,11 @@ async function refreshGroupMeta(): Promise<boolean> {
   businessId.value = gid
   let detailApplied = false
   try {
-    const detail = await fetchGroupDetail(gid).catch((e: any) => {
+    const detail = await fetchGroupDetail(gid).catch((e: unknown) => {
+        const msg = (e as Error)?.message || ''
         // APP 端 GetByID 过滤了已解散群，返回 404「群不存在或无权访问」，
         // 与已解散语义对齐，避免被静默吞掉后还继续去 OpenIM 拉历史（errCode 10006）
-        if (e?.message?.includes('群不存在')) {
+        if (isGroupUnavailableError(msg)) {
           groupDissolved.value = true
           return null
         }
@@ -1218,6 +1256,18 @@ function chooseFailToast(err: { errMsg?: string } | undefined, fallback: string)
 
 function requestAlbumAccess(): Promise<void> {
   return new Promise((resolve) => {
+    // H5 / 小程序没有 HTML5+ 运行时，相册权限由浏览器或 uni.chooseImage 自行处理
+    let uniPlatform = ''
+    try {
+      uniPlatform = uni.getSystemInfoSync().uniPlatform || ''
+    } catch {
+      resolve()
+      return
+    }
+    if (uniPlatform !== 'app') {
+      resolve()
+      return
+    }
     const os = String(uni.getSystemInfoSync().osName || uni.getSystemInfoSync().platform || '').toLowerCase()
     const request = plus?.android?.requestPermissions
     if (!os.includes('android') || typeof request !== 'function') {

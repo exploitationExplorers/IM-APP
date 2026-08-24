@@ -260,9 +260,30 @@ async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
 function toIMError(raw: unknown, method: IMMethods): Error {
   if (raw instanceof Error) return raw
   if (typeof raw === 'string') return new Error(`${raw}（${method}）`)
-  const { errCode, errMsg } = (raw || {}) as { errCode?: number; errMsg?: string }
+  const { errCode, errMsg, errDlt } = (raw || {}) as {
+    errCode?: number
+    errMsg?: string
+    errDlt?: string
+  }
   const detail = `${method} errCode=${errCode ?? 'unknown'}`
-  return new Error(errMsg ? `${errMsg}（${detail}）` : `IM 调用失败（${detail}）`)
+  const hint = [errMsg, errDlt].filter(Boolean).join(': ')
+  return new Error(hint ? `${hint}（${detail}）` : `IM 调用失败（${detail}）`)
+}
+
+/** OpenIM 侧操作者不在群内（已退群 / 被踢 / 成员状态不同步） */
+export function isNotInGroupIMError(err: unknown): boolean {
+  const text =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'object' && err
+        ? JSON.stringify(err)
+        : String(err || '')
+  return (
+    /errCode=1002\b/.test(text) ||
+    /NoPermissionError/i.test(text) ||
+    /not in group/i.test(text) ||
+    /op user not in group/i.test(text)
+  )
 }
 
 function isLoginRepeat(raw: unknown): boolean {

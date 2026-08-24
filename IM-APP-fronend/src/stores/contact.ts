@@ -9,7 +9,9 @@ import {
   rejectFriendRequest,
   sendFriendRequest,
 } from '@/api/contact'
+import { fetchGroupDetail } from '@/api/group'
 import { getToken, isAuthFailureError } from '@/utils/request'
+import { isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-notification'
 import { writeFriendRequestBadge } from '@/utils/friend-request-badge'
 
 const PAGE_SIZE = 50
@@ -182,8 +184,19 @@ export const useContactStore = defineStore('contact', () => {
     })
   }
 
-  /** H5 PC 三栏：切到聊天 tab 并在右侧内嵌打开群聊 */
-  function openChatWithGroupDesktop(groupId: string, groupName: string, avatar: string) {
+  /** H5 PC 三栏：切到聊天 tab 并在右侧内嵌打开群聊；进房前校验群是否仍有效 */
+  async function openChatWithGroupDesktop(groupId: string, groupName: string, avatar: string) {
+    try {
+      await fetchGroupDetail(groupId)
+    } catch (e) {
+      const msg = (e as Error)?.message || ''
+      if (isGroupUnavailableError(msg)) {
+        notifyGroupUnavailable(true)
+        return
+      }
+      uni.showToast({ title: msg || '打开群聊失败', icon: 'none' })
+      return
+    }
     pendingDesktopChat.value = {
       type: 'group',
       businessId: groupId,

@@ -17,6 +17,7 @@ import { useDesktopListResize } from '@/composables/useDesktopListResize'
 import type { Contact, ContactListSort, GroupPreview } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { openQrScanner } from '@/utils/qrcode'
+import { notifyGroupUnavailable } from '@/utils/im-notification'
 import { readFriendRequestBadge } from '@/utils/friend-request-badge'
 import { getToken } from '@/utils/request'
 
@@ -52,18 +53,21 @@ const sortLabel = computed(() => {
 
 const listSort = computed<ContactListSort>(() => (sortKey.value === 'name' ? 'name' : 'recent'))
 
-/** PC 内联群列表：不展示已解散群，默认预览 3 条 */
-const DESKTOP_GROUP_PREVIEW = 3
+/** PC / 移动端内联群列表：不展示已解散群，默认预览 3 条 */
+const GROUP_PREVIEW = 3
 
 const activeGroups = computed(() => groups.value.filter((g) => g.status !== 'dismissed'))
 
 const desktopGroupsVisible = computed(() => {
   const list = activeGroups.value
-  if (list.length <= DESKTOP_GROUP_PREVIEW) return list
-  return list.slice(0, DESKTOP_GROUP_PREVIEW)
+  if (list.length <= GROUP_PREVIEW) return list
+  return list.slice(0, GROUP_PREVIEW)
 })
 
-const showDesktopGroupExpand = computed(() => activeGroups.value.length > DESKTOP_GROUP_PREVIEW)
+const mobileGroupsVisible = computed(() => desktopGroupsVisible.value)
+
+const showDesktopGroupExpand = computed(() => activeGroups.value.length > GROUP_PREVIEW)
+const showMobileGroupExpand = computed(() => activeGroups.value.length > GROUP_PREVIEW)
 
 function listName(c: Contact) {
   return c.remark?.trim() || c.nickname
@@ -132,21 +136,17 @@ function openContact(c: Contact) {
 }
 
 function openGroupChat(g: GroupPreview) {
+  if (g.status === 'dismissed') {
+    notifyGroupUnavailable(isDesktop.value)
+    return
+  }
   if (isDesktop.value) {
     selectedContact.value = null
-    if (g.status === 'dismissed') {
-      uni.showToast({ title: '这个聊天已不存在', icon: 'none' })
-      return
-    }
-    contactStore.openChatWithGroupDesktop(
+    void contactStore.openChatWithGroupDesktop(
       g.id,
       g.name,
       g.avatar || '/static/icons/menu-group.svg',
     )
-    return
-  }
-  if (g.status === 'dismissed') {
-    uni.navigateTo({ url: `/pages/group/detail?id=${encodeURIComponent(g.id)}&dissolved=1` })
     return
   }
   contactStore.openChatWithGroup(g.id, g.name, g.avatar || '/static/icons/menu-group.svg')
@@ -171,6 +171,10 @@ function closeMenus() {
 function expandDesktopGroups() {
   selectedContact.value = null
   showGroupsPanel.value = true
+}
+
+function expandMobileGroups() {
+  go('/pages/contacts/groups')
 }
 
 function onPanelGroupSelect(g: GroupPreview) {
@@ -271,16 +275,22 @@ function onPanelGroupSelect(g: GroupPreview) {
           </view>
         </view>
 
-        <view v-if="!isDesktop && groups.length" class="group-band">
+        <view v-if="!isDesktop && activeGroups.length" class="group-band">
           <view
-            v-for="g in groups.slice(0, 5)"
+            v-for="g in mobileGroupsVisible"
             :key="g.id"
             class="group-card"
             @click="openGroupChat(g)"
           >
             <image class="group-avatar" :src="g.avatar || '/static/icons/menu-group.svg'" mode="aspectFill" />
             <text class="group-name">{{ g.name }}</text>
-            <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
+          </view>
+          <view
+            v-if="showMobileGroupExpand"
+            class="mobile-group-expand"
+            @click.stop="expandMobileGroups"
+          >
+            <text class="mobile-group-expand-text">展开所有群聊 ({{ activeGroups.length }})</text>
           </view>
         </view>
         <view v-if="!isDesktop" class="section-divider" />
@@ -596,6 +606,25 @@ function onPanelGroupSelect(g: GroupPreview) {
 
 .group-card:last-child {
   margin-bottom: 0;
+}
+
+.mobile-group-expand {
+  min-height: 72rpx;
+  padding: 8rpx 16rpx 4rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-group-expand:active {
+  opacity: 0.7;
+}
+
+.mobile-group-expand-text {
+  font-size: 26rpx;
+  line-height: 40rpx;
+  color: #0a2fc2;
+  text-align: center;
 }
 
 .group-avatar {

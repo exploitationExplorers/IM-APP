@@ -32,7 +32,7 @@ watch(tab, () => {
 /** 与聊天列表保持一致：点群聊直接进会话，而不是先跳群资料页 */
 function openGroup(g: GroupPreview) {
   if (g.status === 'dismissed') {
-    uni.navigateTo({ url: `/pages/group/detail?id=${encodeURIComponent(g.id)}&dissolved=1` })
+    uni.showToast({ title: '该群已解散', icon: 'none' })
     return
   }
   contactStore.openChatWithGroup(g.id, g.name, g.avatar || APP_CONFIG.defaultGroupAvatarUrl)

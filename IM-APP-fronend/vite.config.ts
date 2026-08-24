@@ -20,12 +20,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('@openim/client-sdk') || id.includes('openim-uniapp-polyfill')) {
-            return 'openim-sdk'
-          }
-          if (id.includes('@openim/protocol')) {
-            return 'openim-protocol'
-          }
+          // 不要把 openim-uniapp-polyfill / @openim/* 单独拆包：
+          // H5 产物里该包在模块加载期会读 __uniConfig，独立 chunk 可能先于 uni 入口执行 → 白屏。
           if (id.includes('node_modules')) {
             if (id.includes('vue') || id.includes('pinia')) return 'vendor-vue'
             if (id.includes('qrcode') || id.includes('jsqr')) return 'vendor-qrcode'

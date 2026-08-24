@@ -40,9 +40,15 @@ import {
   setConversationPin,
   invalidateIMLoginCache,
   waitForSync,
+  isNotInGroupIMError,
 } from '@/utils/openim'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
-import { isIMNotification, isGroupAnnouncementNotice, replaceOpenIMAdminLabel } from '@/utils/im-notification'
+import {
+  isIMNotification,
+  isGroupAnnouncementNotice,
+  isGroupUnavailableError,
+  replaceOpenIMAdminLabel,
+} from '@/utils/im-notification'
 import { playMessageSound, vibrateShort } from '@/utils/notify'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useContactStore } from '@/stores/contact'
@@ -99,6 +105,8 @@ export const useChatStore = defineStore('chat', () => {
    * 时自动 toast + 返回。挂在 store 外避免大 messagesMap 的 reactive watch 触发循环。
    */
   let onIncomingForDissolve: ((m: ChatMessage) => void) | null = null
+  /** 退群 / 被踢 / OpenIM 无权限时通知当前房间退出 */
+  let onGroupUnavailable: ((payload: { conversationId: string }) => void) | null = null
 
   /**
    * OpenIM hideConversation 在 H5 WASM 不可用；用本地隐藏列表兜底。
@@ -954,14 +962,20 @@ export const useChatStore = defineStore('chat', () => {
       const sent = await send()
       rememberRaw(sent)
       const mapped = toChatMessage(sent)
-      replaceMessage(conversationId, placeholder.id, mapped)
+      const isGroup = requireConversation(conversationId).type === 'group'
+      const delivered = isGroup ? { ...mapped, trackGroupRead: true } : mapped
+      replaceMessage(conversationId, placeholder.id, delivered)
       // App 原生发送成功回调经常暂时没有 seq；群聊已读游标必须依赖 seq。
       // 后台短轮询本地库补齐，不阻塞发送成功 UI，也不会按群成员数放大请求量。
-      if (requireConversation(conversationId).type === 'group' && !mapped.seq) {
+      if (isGroup && !mapped.seq) {
         void resolveMessageSeq(conversationId, mapped.id, sent).then((resolved) => {
           if (!resolved.seq) return
           if (resolved.message) rememberRaw(resolved.message)
-          replaceMessage(conversationId, mapped.id, { ...mapped, seq: resolved.seq })
+          replaceMessage(conversationId, mapped.id, {
+            ...delivered,
+            seq: resolved.seq,
+            trackGroupRead: true,
+          })
         }).catch(() => undefined)
       }
       // 自己给已隐藏的会话主动发消息时，让该会话重新出现在列表顶部
@@ -972,7 +986,13 @@ export const useChatStore = defineStore('chat', () => {
       })
     } catch (e) {
       replaceMessage(conversationId, placeholder.id, { ...placeholder, status: 'failed' })
-      throw new Error((e as Error)?.message || '发送失败')
+      const msg = (e as Error)?.message || ''
+      if (isNotInGroupIMError(e) || isGroupUnavailableError(msg)) {
+        void removeExitedGroupConversation(conversationId)
+        onGroupUnavailable?.({ conversationId })
+        throw new Error('GROUP_UNAVAILABLE')
+      }
+      throw new Error(msg || '发送失败')
     }
   }
 
@@ -1247,6 +1267,10 @@ export const useChatStore = defineStore('chat', () => {
     onIncomingForDissolve = fn
   }
 
+  function setOnGroupUnavailable(fn: ((payload: { conversationId: string }) => void) | null) {
+    onGroupUnavailable = fn
+  }
+
   return {
     conversations,
     messagesMap,
@@ -1257,12 +1281,14 @@ export const useChatStore = defineStore('chat', () => {
     isPeerOnline,
     loadConversations,
     enterConversation,
+    assertConversationAccessible,
     loadMessages,
     loadMoreMessages,
     markAsRead,
     sendText,
     sendAtText,
     setOnIncomingForDissolve,
+    setOnGroupUnavailable,
     sendImage,
     sendCard,
     sendFile,
