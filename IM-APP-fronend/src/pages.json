@@ -472,6 +472,13 @@
         "navigationStyle": "custom",
         "navigationBarTitleText": "我的表情"
       }
+    },
+    {
+      "path": "pages/mine/debug",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "调试资讯"
+      }
     }
   ],
   "globalStyle": {

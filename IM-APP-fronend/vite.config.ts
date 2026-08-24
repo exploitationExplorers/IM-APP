@@ -56,6 +56,10 @@ export default defineConfig({
         target: 'https://www.ke58.com',
         changeOrigin: true,
       },
+      '/health': {
+        target: 'https://www.ke58.com',
+        changeOrigin: true,
+      },
     },
   },
 })

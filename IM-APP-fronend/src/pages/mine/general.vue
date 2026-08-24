@@ -38,7 +38,7 @@ function onDisplayMode() {
 }
 
 function onDebug() {
-  uni.showToast({ title: '调试资讯仅内部可见', icon: 'none' })
+  uni.navigateTo({ url: '/pages/mine/debug' })
 }
 
 function openClearModal() {
