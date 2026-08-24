@@ -35,9 +35,34 @@ export function useChatMessageActions(opts: {
   const chatStore = useChatStore()
   const forwardStore = useForwardStore()
 
+  const SENDER_LEFT_GROUP_TOAST = '该群友不在群聊'
+
+  function isMemberListLoaded(): boolean {
+    const map = opts.memberMeta?.value
+    return !!map && Object.keys(map).length > 0
+  }
+
+  /** 消息发送者是否仍在当前群（已移除成员的历史消息返回 false） */
+  function isSenderInGroup(message: ChatMessage): boolean {
+    if (opts.chatType.value !== 'group' || opts.isMine(message)) return true
+    const userId = businessUserIdFromIM(message.senderId)
+    if (!userId) return false
+    if (!isMemberListLoaded()) return true
+    return !!opts.memberMeta!.value[userId]
+  }
+
+  function notifySenderLeftGroup() {
+    uni.showToast({ title: SENDER_LEFT_GROUP_TOAST, icon: 'none' })
+  }
+
+  /** 涉及发送者本人的菜单动作：已退群/被踢则仅提示，不继续交互 */
+  function guardSenderInGroup(message: ChatMessage): boolean {
+    if (isSenderInGroup(message)) return true
+    notifySenderLeftGroup()
+    return false
+  }
+
   const menuMessage = ref<ChatMessage | null>(null)
-  const menuTop = ref(120)
-  const menuLeft = ref(24)
   const selecting = ref(false)
   const selectMode = ref<'forward' | 'multi'>('multi')
   const selectedIds = ref<Set<string>>(new Set())
@@ -62,8 +87,13 @@ export function useChatMessageActions(opts: {
     const myRole = opts.myRole.value
     if (myRole === 'member' || opts.isMine(message)) return false
     const meta = memberMetaOf(message)
-    if (!meta || meta.role === 'owner') return false
-    return myRole === 'owner' || meta.role === 'member'
+    if (meta?.role === 'owner') return false
+    if (meta) {
+      if (meta.role === 'admin' && myRole !== 'owner') return false
+      return myRole === 'owner' || meta.role === 'member'
+    }
+    // 成员列表尚未加载时先展示管控项，最终由后端校验
+    return myRole === 'owner' || myRole === 'admin'
   }
 
   /**
@@ -87,22 +117,33 @@ export function useChatMessageActions(opts: {
     const message = menuMessage.value
     if (!message) return []
     const mine = opts.isMine(message)
+    const isGroup = opts.chatType.value === 'group'
+    const canManage = canActOnTarget(message)
     const items: MessageMenuItem[] = []
-    if (canRevoke(message)) items.push({ key: 'revoke', label: '撤回' })
+
+    // 参考站顺序：转发|引用 → 复制|收藏 → 检举|@TA → 禁言|删除 → 多选|空
+    if (mine && canRevoke(message)) {
+      items.push({ key: 'revoke', label: '撤回' })
+    }
     items.push({ key: 'forward', label: '转发' }, { key: 'quote', label: '引用' })
     if (message.type === 'text') items.push({ key: 'copy', label: '复制' })
-    if (message.type === 'video') items.push({ key: 'save', label: '保存视频', wide: true })
+    if (message.type === 'video') items.push({ key: 'save', label: '保存视频' })
     items.push({ key: 'favorite', label: '收藏' })
-    if (!mine) {
-      items.push({ key: 'report', label: '检举' })
-      // @TA 只挂在头像长按（对齐参考站），不放消息气泡菜单
-      if (canActOnTarget(message)) {
-        const muted = !!memberMetaOf(message)?.isMuted
-        items.push(muted ? { key: 'unmute', label: '解除禁言' } : { key: 'mute', label: '禁言' })
-      }
+    if (!mine && isGroup) {
+      items.push({ key: 'report', label: '检举' }, { key: 'at', label: '@TA' })
+    }
+    if (!mine && canManage) {
+      const muted = !!memberMetaOf(message)?.isMuted
+      items.push(muted ? { key: 'unmute', label: '解除禁言' } : { key: 'mute', label: '禁言' })
     }
     items.push({ key: 'delete', label: '删除' }, { key: 'multi', label: '多选' })
-    if (canActOnTarget(message)) {
+
+    const gridCount = items.length
+    if (gridCount % 2 === 1) {
+      items.push({ key: '_spacer', label: '', spacer: true })
+    }
+
+    if (!mine && canManage) {
       items.push({ key: 'kick', label: '移除该成员', wide: true })
       items.push({ key: 'kickAndDelete', label: '移除该成员并删除消息', wide: true })
     }
@@ -115,13 +156,7 @@ export function useChatMessageActions(opts: {
 
   function openMenu(message: ChatMessage, event?: { touches?: Array<{ clientX: number; clientY: number }> }) {
     if (selecting.value || message.type === 'system') return
-    const touch = event?.touches?.[0]
-    const sys = uni.getSystemInfoSync()
-    const menuWidth = 180
-    const x = touch?.clientX ?? sys.windowWidth / 2
-    const y = touch?.clientY ?? sys.windowHeight / 2
-    menuLeft.value = Math.min(Math.max(12, x - menuWidth / 2), sys.windowWidth - menuWidth - 12)
-    menuTop.value = Math.min(Math.max(80, y - 20), sys.windowHeight - 280)
+    void event
     menuMessage.value = message
   }
 
@@ -171,13 +206,13 @@ export function useChatMessageActions(opts: {
     })
   }
 
-  function confirm(content: string, confirmText = '确定') {
+  function confirm(content: string, confirmText = '确定', cancelText = '取消') {
     return new Promise<boolean>((resolve) => {
       uni.showModal({
         title: '提示',
         content,
         confirmText,
-        cancelText: '取消',
+        cancelText,
         success: (res) => resolve(!!res.confirm),
       })
     })
@@ -285,6 +320,7 @@ export function useChatMessageActions(opts: {
    * displayName 优先用气泡已展示的昵称，避免 maps 未就绪时落到字面量 TA。
    */
   function atUser(message: ChatMessage, displayName?: string) {
+    if (!guardSenderInGroup(message)) return
     const name =
       (displayName || opts.nicknameOf(message) || message.senderNickname || '').trim() || '用户'
     const token = `@${name} `
@@ -298,6 +334,7 @@ export function useChatMessageActions(opts: {
   }
 
   function reportUser(message: ChatMessage) {
+    if (!guardSenderInGroup(message)) return
     const userId = businessUserIdFromIM(message.senderId)
     if (!userId) {
       uni.showToast({ title: '无法检举该用户', icon: 'none' })
@@ -309,6 +346,7 @@ export function useChatMessageActions(opts: {
   }
 
   function muteUser(message: ChatMessage) {
+    if (!guardSenderInGroup(message)) return
     const userId = businessUserIdFromIM(message.senderId)
     if (!userId || !opts.businessId.value) return
     uni.showActionSheet({
@@ -328,6 +366,7 @@ export function useChatMessageActions(opts: {
   }
 
   async function unmuteUser(message: ChatMessage) {
+    if (!guardSenderInGroup(message)) return
     const userId = businessUserIdFromIM(message.senderId)
     if (!userId || !opts.businessId.value) return
     const ok = await confirm('确定解除该成员的禁言吗？')
@@ -342,9 +381,13 @@ export function useChatMessageActions(opts: {
   }
 
   async function kickUser(message: ChatMessage, deleteMsgs: boolean) {
+    if (!guardSenderInGroup(message)) return
     const userId = businessUserIdFromIM(message.senderId)
     if (!userId || !opts.businessId.value) return
-    const ok = await confirm(deleteMsgs ? '确定移除该成员并删除消息吗？' : '确定移除该成员吗？')
+    const ok = await confirm(
+      deleteMsgs ? '确定移除该成员并删除消息吗？' : '确定要移除该成员吗？',
+      deleteMsgs ? '移除并删除' : '移除该成员',
+    )
     if (!ok) return
     try {
       await removeGroupMember(opts.businessId.value, userId)
@@ -356,6 +399,7 @@ export function useChatMessageActions(opts: {
         )
       }
       uni.showToast({ title: '已移除', icon: 'none' })
+      opts.onMuteChanged?.()
     } catch (e) {
       uni.showToast({ title: (e as Error).message || '移除失败', icon: 'none' })
     }
@@ -409,6 +453,10 @@ export function useChatMessageActions(opts: {
       reportUser(message)
       return
     }
+    if (key === 'at') {
+      atUser(message, opts.nicknameOf(message) || message.senderNickname || undefined)
+      return
+    }
     if (key === 'mute') {
       muteUser(message)
       return
@@ -453,8 +501,6 @@ export function useChatMessageActions(opts: {
   return {
     menuVisible,
     menuItems,
-    menuTop,
-    menuLeft,
     selecting,
     selectMode,
     selectedIds,
@@ -472,5 +518,7 @@ export function useChatMessageActions(opts: {
     forwardMessages,
     saveVideoMessage,
     clearQuote,
+    isSenderInGroup,
+    notifySenderLeftGroup,
   }
 }

@@ -18,7 +18,7 @@ import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId, isNotI
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
-import { fetchGroupDetail } from '@/api/group'
+import { fetchAllGroupMembers, fetchGroupDetail } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation } from '@/types'
 import { collapseRepeatedGroupNameNotices, isGroupUnavailableError, replaceOpenIMAdminLabel } from '@/utils/im-notification'
@@ -94,6 +94,7 @@ const GROUP_READ_POLL_MAX_MS = 3 * 60_000
 let groupReadPollStartedAt = 0
 let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
+const inputRef = ref<{ $el?: HTMLElement } | HTMLTextAreaElement | null>(null)
 const scrollInto = ref('')
 const showPlusPanel = ref(false)
 const showEmojiPanel = ref(false)
@@ -282,8 +283,9 @@ function refreshPrivateTitle() {
 }
 
 const enterToSend = computed(() => settingsStore.enterToSend)
-const confirmType = computed(() => (enterToSend.value ? 'send' : 'done'))
 const hasInput = computed(() => input.value.trim().length > 0)
+/** 关闭回车发送时用 return（非 done），H5 才允许 Enter 自然换行 */
+const composerConfirmType = computed(() => (enterToSend.value ? 'send' : 'return'))
 
 /** 被禁言（单人 / 全员）时隐藏输入区，换成居中提示条 */
 const composerBlocked = computed(() => chatType.value === 'group' && !canChat.value)
@@ -665,9 +667,59 @@ async function onSend() {
   }
 }
 
+function isH5ComposerPlatform(): boolean {
+  try {
+    const platform = uni.getSystemInfoSync().uniPlatform
+    return platform === 'web' || platform === 'h5'
+  } catch {
+    return false
+  }
+}
+
+function getComposerTextareaEl(preferred?: EventTarget | null): HTMLTextAreaElement | null {
+  if (preferred instanceof HTMLTextAreaElement) return preferred
+  const raw = inputRef.value
+  if (raw instanceof HTMLTextAreaElement) return raw
+  const wrapped = (raw as { $el?: HTMLElement } | null)?.$el
+  if (wrapped instanceof HTMLTextAreaElement) return wrapped
+  if (wrapped?.querySelector) {
+    const nested = wrapped.querySelector('textarea')
+    if (nested instanceof HTMLTextAreaElement) return nested
+  }
+  return null
+}
+
+let lastSendTriggerAt = 0
+
+function triggerSend() {
+  if (Date.now() - lastSendTriggerAt < 200) return
+  lastSendTriggerAt = Date.now()
+  void onSend()
+}
+
 function onConfirmSend() {
   if (!enterToSend.value) return
-  onSend()
+  triggerSend()
+}
+
+/** 回车发送开启时：Shift+Enter 换行（uni-app send 模式会拦截 Enter） */
+function onComposerKeydown(e: KeyboardEvent) {
+  if (!enterToSend.value || e.key !== 'Enter' || !e.shiftKey) return
+  if (!isH5ComposerPlatform()) return
+  e.preventDefault()
+  e.stopPropagation()
+  const el = getComposerTextareaEl(e.target)
+  if (!el) return
+  const start = el.selectionStart ?? input.value.length
+  const end = el.selectionEnd ?? start
+  const val = input.value
+  input.value = `${val.slice(0, start)}\n${val.slice(end)}`
+  void nextTick(() => {
+    const pos = start + 1
+    el.selectionStart = pos
+    el.selectionEnd = pos
+    el.focus()
+  })
 }
 
 /** 重发：先二次确认，再按原类型重新发送 */
@@ -765,6 +817,27 @@ async function resolveBusinessTarget(): Promise<string> {
   return ''
 }
 
+/** 拉群成员元信息：长按菜单的禁言/踢人权限、头像与备注兜底 */
+async function loadGroupMembersMeta(groupId: string): Promise<void> {
+  try {
+    const members = await fetchAllGroupMembers(groupId)
+    const meta: Record<string, MemberMeta> = {}
+    const avatars: Record<string, string> = {}
+    const remarks: Record<string, string> = {}
+    for (const m of members) {
+      meta[m.id] = { role: m.role, isMuted: !!m.isMuted }
+      if (m.avatar) avatars[m.id] = m.avatar
+      const remark = m.memberRemark?.trim()
+      if (remark) remarks[m.id] = remark
+    }
+    memberMetaMap.value = meta
+    memberAvatarMap.value = avatars
+    memberRemarkMap.value = remarks
+  } catch {
+    // 成员列表失败不阻断聊天；管控项由后端兜底
+  }
+}
+
 /** 进群 / 退群 / 踢人 / 禁言后标题旁人数与禁言状态要跟着变，不能只在首次进入时拉一次。返回群详情是否拉取成功（「检查禁言状态」用它区分失败） */
 async function refreshGroupMeta(): Promise<boolean> {
   if (chatType.value !== 'group') return false
@@ -807,6 +880,7 @@ async function refreshGroupMeta(): Promise<boolean> {
   }
   if (detailApplied) {
     groupMetaLoadedAt = Date.now()
+    void loadGroupMembersMeta(gid)
   }
   return detailApplied
 }
@@ -973,6 +1047,10 @@ function confirmAtFromSheet() {
   const message = atSheetMessage.value
   closeAtSheet()
   if (!message) return
+  if (!actions.isSenderInGroup(message)) {
+    actions.notifySenderLeftGroup()
+    return
+  }
   const displayName = nicknameOf(message) || message.senderNickname || ''
   actions.atUser(message, displayName)
 }
@@ -1531,14 +1609,22 @@ function pickFavorite() {
           <image class="tool-icon" src="/static/icon-mic.png" mode="aspectFit" />
         </view>
         <view class="input-wrap">
-          <input
+          <textarea
+            ref="inputRef"
             class="input"
             v-model="input"
             :maxlength="-1"
-            :confirm-type="confirmType"
+            :auto-height="true"
+            :confirm-type="composerConfirmType"
+            :show-confirm-bar="false"
+            :disable-default-padding="true"
+            :hold-keyboard="true"
+            :adjust-position="true"
             placeholder="输入消息"
             placeholder-style="color:#B0B0B0"
+            :cursor-spacing="20"
             @confirm="onConfirmSend"
+            @keydown="onComposerKeydown"
           />
           <text class="emoji" @click="onEmoji">☺</text>
         </view>
@@ -1597,8 +1683,6 @@ function pickFavorite() {
     <ImMessageActionMenu
       v-if="actions.menuVisible.value"
       :items="actions.menuItems.value"
-      :top="actions.menuTop.value"
-      :left="actions.menuLeft.value"
       @select="actions.onMenuSelect"
       @close="actions.closeMenu"
     />
@@ -1804,7 +1888,7 @@ function pickFavorite() {
 
 .composer-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   padding: 16rpx 20rpx;
   gap: 12rpx;
 }
@@ -1875,24 +1959,61 @@ function pickFavorite() {
 
 .input-wrap {
   flex: 1;
+  position: relative;
   background: #fff;
   border-radius: 36rpx;
   min-height: 72rpx;
-  display: flex;
-  align-items: center;
-  padding: 0 24rpx;
+  padding: 8rpx 72rpx 8rpx 16rpx;
+  box-sizing: border-box;
 }
 
 .input {
-  flex: 1;
-  font-size: 28rpx;
-  height: 72rpx;
+  width: 100%;
+  font-size: 16px;
+  line-height: 24px;
+  min-height: 24px;
+  max-height: 144px;
+  color: #1a1a1a;
+  text-align: left;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  display: block;
+  word-break: break-word;
+  overflow-y: auto;
+  padding: 0;
+  margin: 0;
+}
+
+.input-wrap :deep(.uni-textarea-wrapper),
+.input-wrap :deep(.uni-textarea-textarea),
+.input-wrap :deep(textarea) {
+  font-size: 16px !important;
+  line-height: 24px !important;
+  min-height: 24px !important;
+  padding: 0 !important;
+}
+
+.input-wrap :deep(.uni-textarea-compute),
+.input-wrap :deep(.uni-textarea-compute-auto-height) {
+  font-size: 16px !important;
+  line-height: 24px !important;
+}
+
+.input-wrap :deep(.uni-textarea-line) {
+  height: 0 !important;
+  overflow: hidden !important;
 }
 
 .emoji {
+  position: absolute;
+  right: 20rpx;
+  bottom: 12rpx;
   font-size: 36rpx;
   color: #666;
-  margin-left: 8rpx;
+  line-height: 1;
 }
 
 .voice-bar {
