@@ -80,19 +80,31 @@ function refreshContacts() {
   })
 }
 
-function refreshDirectory() {
-  return Promise.all([
+const CONTACTS_TOKEN_RETRY_MS = [0, 300, 800, 1500, 2500, 4000]
+
+async function waitTokenReady(): Promise<boolean> {
+  for (const delayMs of CONTACTS_TOKEN_RETRY_MS) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+    if (getToken()) return true
+  }
+  return false
+}
+
+async function refreshDirectory() {
+  const ready = await waitTokenReady()
+  if (!ready) return
+  await Promise.all([
     refreshContacts(),
-    contactStore.loadGroups(),
+    contactStore.loadGroups().catch(() => undefined),
     contactStore.loadFriendRequests(),
   ])
 }
 
-/** 切回通讯录页面时刷新群列表与好友申请角标 */
+/** 切回通讯录页面时刷新好友申请角标（列表数据由 usePullRefresh 统一拉取，避免重复请求导致抖动） */
 onShow(() => {
   storageFriendBadge.value = readFriendRequestBadge()
-  if (!getToken()) return
-  void refreshDirectory()
 })
 
 const { refreshing, onRefresherRefresh } = usePullRefresh(refreshDirectory)
@@ -637,6 +649,7 @@ function onPanelGroupSelect(g: GroupPreview) {
 
 .group-name {
   flex: 1;
+  min-width: 0;
   font-size: 34rpx;
   color: #212121;
   line-height: 48rpx;

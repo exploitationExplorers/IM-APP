@@ -74,6 +74,21 @@ func (r *FileRepo) FindReadyAvatarByID(ctx context.Context, fileID, ownerID stri
 	return f, err
 }
 
+// FindReadyStickerByID 校验已上传完成的表情图（purpose=sticker 或 image）
+func (r *FileRepo) FindReadyStickerByID(ctx context.Context, fileID, ownerID string) (models.FileObject, error) {
+	var f models.FileObject
+	err := r.DB.QueryRow(ctx, `
+		SELECT id::text, purpose, content_type, size, status, url
+		FROM files
+		WHERE id=$1::uuid AND owner_id=$2::uuid AND status='ready'
+		  AND purpose IN ('sticker','image')
+		  AND content_type LIKE 'image/%'
+		  AND size > 0 AND size <= 10485760 AND url <> ''`,
+		fileID, ownerID,
+	).Scan(&f.ID, &f.Purpose, &f.ContentType, &f.Size, &f.Status, &f.URL)
+	return f, err
+}
+
 // FindReadyReportImagePaths resolves uploaded report images to public, directly accessible URLs.
 func (r *FileRepo) FindReadyReportImagePaths(ctx context.Context, fileIDs []string, ownerID string) ([]string, error) {
 	paths := make([]string, 0, len(fileIDs))

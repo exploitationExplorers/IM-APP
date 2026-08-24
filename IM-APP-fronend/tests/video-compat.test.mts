@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseVideoMeta, videoSnapshotTime, formatVideoDuration } from '../src/utils/chatMedia.ts'
+import { parseVideoMeta, videoSnapshotTime, formatVideoDuration, isUsableVideoPoster, mergeVideoContent } from '../src/utils/chatMedia.ts'
 
 const { snapshotFromMessage } = await import('../src/utils/forwardSnapshot.ts')
 const VIDEO_MESSAGE = 104
@@ -102,4 +102,55 @@ test('视频时长格式化为 mm:ss', () => {
   assert.equal(formatVideoDuration(9), '00:09')
   assert.equal(formatVideoDuration(65), '01:05')
   assert.equal(formatVideoDuration(0), '00:00')
+})
+
+test('合并封面时远程 URL 优先于发送端本地路径', () => {
+  assert.equal(
+    mergeVideoContent(
+      JSON.stringify({
+        url: 'https://cdn.example/a.mp4',
+        snapshotUrl: '/storage/emulated/0/cover.jpg',
+        duration: 3,
+      }),
+      JSON.stringify({
+        url: 'https://cdn.example/a.mp4',
+        snapshotUrl: 'https://cdn.example/a.jpg',
+        duration: 3,
+      }),
+    ),
+    JSON.stringify({
+      url: 'https://cdn.example/a.mp4',
+      snapshotUrl: 'https://cdn.example/a.jpg',
+      duration: 3,
+    }),
+  )
+})
+
+test('本地封面路径可用作气泡封面，视频地址不行', () => {
+  assert.equal(isUsableVideoPoster('/storage/emulated/0/cover.jpg'), true)
+  assert.equal(isUsableVideoPoster('https://cdn.example/a.jpg'), true)
+  assert.equal(isUsableVideoPoster('https://cdn.example/a.mp4'), false)
+})
+
+test('仅有本地 snapshotPath 时解析仍能得到路径，但远程优先逻辑可筛掉死链', () => {
+  const meta = parseVideoMeta({
+    videoUrl: 'https://cdn.example/a.mp4',
+    snapshotPath: '/storage/emulated/0/cover.jpg',
+    duration: 2,
+  })
+  assert.equal(meta.url, 'https://cdn.example/a.mp4')
+  assert.equal(meta.snapshotUrl, '/storage/emulated/0/cover.jpg')
+  // 气泡入库时应只留远程封面：本地路径对接收端无效
+  assert.equal(/^https?:\/\//i.test(meta.snapshotUrl), false)
+})
+
+test('snapshotUrl 为对象时取出内部 url', () => {
+  assert.deepEqual(
+    parseVideoMeta({
+      videoUrl: 'https://cdn.example/a.mp4',
+      snapshotUrl: { url: 'https://cdn.example/a.jpg' },
+      duration: 2,
+    }),
+    { url: 'https://cdn.example/a.mp4', snapshotUrl: 'https://cdn.example/a.jpg', duration: 2 },
+  )
 })

@@ -19,7 +19,13 @@ import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
 import { formatIMNotification, imNotificationEventKey, notificationKindOf } from '@/utils/im-notification'
 import { effectiveGroupAtType, GroupAtType, highlightTagsOf } from '@/utils/group-announcement'
-import { parseVideoMeta, videoSnapshotTime, downloadRemoteVideoForCover } from '@/utils/chatMedia'
+import {
+  parseVideoMeta,
+  videoSnapshotTime,
+  downloadRemoteVideoForCover,
+  preferRemoteMediaUrl,
+  isRemoteMediaUrl,
+} from '@/utils/chatMedia'
 import { devLog, devWarn } from '@/utils/devLog'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
@@ -975,11 +981,15 @@ function videoDurationSeconds(duration: number): number {
   return Math.max(1, Math.round(duration > 1000 ? duration / 1000 : duration))
 }
 
-async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<string> {
+async function snapshotOfVideo(videoPath: string, snapshotPath = '', durationSec = 0): Promise<string> {
   if (snapshotPath) return toNativeFullPath(snapshotPath)
+  const fullPath = toNativeFullPath(videoPath)
+  // Android：按时间点取帧，避开片头黑场（OpenIM getVideoCover 多半是首帧）
+  const androidCover = captureAndroidVideoFrame(fullPath, durationSec)
+  if (androidCover) return androidCover
   try {
     const cover = await Promise.race([
-      IMSDK.getVideoCover?.(videoPath),
+      IMSDK.getVideoCover?.(fullPath),
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8000)),
     ])
     const path =
@@ -995,6 +1005,65 @@ async function snapshotOfVideo(videoPath: string, snapshotPath = ''): Promise<st
   return ''
 }
 
+/** Android MediaMetadataRetriever：在 duration 约 10% 处截帧，写入临时 jpg。 */
+function captureAndroidVideoFrame(videoPath: string, durationSec = 0): string {
+  // #ifdef APP-PLUS
+  try {
+    const os = plus.os?.name || ''
+    if (!/android/i.test(os) || !videoPath) return ''
+    const MediaMetadataRetriever = plus.android.importClass('android.media.MediaMetadataRetriever') as unknown as {
+      new (): {
+        setDataSource: (path: string) => void
+        extractMetadata: (key: number) => string
+        getFrameAtTime: (timeUs: number, option: number) => unknown
+        release: () => void
+      }
+      METADATA_KEY_DURATION: number
+      OPTION_CLOSEST_SYNC: number
+    }
+    const Bitmap = plus.android.importClass('android.graphics.Bitmap') as unknown as {
+      CompressFormat: { JPEG: unknown }
+    }
+    const File = plus.android.importClass('java.io.File') as unknown as new (path: string) => {
+      getAbsolutePath: () => string
+    }
+    const FileOutputStream = plus.android.importClass('java.io.FileOutputStream') as unknown as new (
+      file: unknown,
+    ) => {
+      close: () => void
+    }
+    const retriever = new MediaMetadataRetriever()
+    retriever.setDataSource(videoPath.replace(/^file:\/\//, ''))
+    const durationMs = Number(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION) || 0)
+    const seconds = durationSec > 0 ? durationSec : durationMs / 1000
+    const seekSec = videoSnapshotTime(seconds)
+    const timeUs = Math.max(0, Math.floor(seekSec * 1_000_000))
+    const bitmap = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+    if (!bitmap) {
+      retriever.release()
+      return ''
+    }
+    const docRoot = plus.io.convertLocalFileSystemURL('_doc') || ''
+    const outPath = `${docRoot.replace(/\/$/, '')}/video_cover_${Date.now()}.jpg`
+    const file = new File(outPath.replace(/^file:\/\//, ''))
+    const stream = new FileOutputStream(file)
+    const bmp = bitmap as {
+      compress: (format: unknown, quality: number, out: unknown) => boolean
+      recycle: () => void
+    }
+    bmp.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+    stream.close()
+    bmp.recycle()
+    retriever.release()
+    const abs = file.getAbsolutePath()
+    return abs ? toNativeFullPath(abs) : ''
+  } catch {
+    return ''
+  }
+  // #endif
+  return ''
+}
+
 /**
  * 转发/展示缺封面时：远程先下载，再用原生 getVideoCover 取帧。
  * getVideoInfo 在多数 App 基座不返回 thumbTempFilePath，不能当封面用。
@@ -1004,6 +1073,23 @@ export async function extractVideoCoverForForward(videoUrl: string): Promise<str
   const local = await downloadRemoteVideoForCover(videoUrl)
   if (!local) return ''
   return snapshotOfVideo(toNativeFullPath(local))
+}
+
+/** App 气泡缺远程封面时：按视频 URL 截帧，同 URL 共用一次下载/取帧。 */
+const appPosterByVideoUrl = new Map<string, Promise<string>>()
+
+export function captureAppVideoPosterFromUrl(videoUrl: string): Promise<string> {
+  if (!isAppPlatform || !isRemoteMediaUrl(videoUrl)) return Promise.resolve('')
+  const key = videoUrl.trim()
+  if (!key) return Promise.resolve('')
+  let pending = appPosterByVideoUrl.get(key)
+  if (!pending) {
+    pending = extractVideoCoverForForward(key)
+      .then((path) => path || '')
+      .catch(() => '')
+    appPosterByVideoUrl.set(key, pending)
+  }
+  return pending
 }
 
 interface VideoSnapshotFile {
@@ -1148,6 +1234,7 @@ async function sendUploadedVideoMessage(
     snapshotHeight = dimensions.height
   }
   if (!snapshotUrl) throw new Error('视频封面上传失败')
+  // App 原生桥部分版本只认 PascalCase；两套字段一起传，避免创建出的消息丢封面。
   const message = await imCall<MessageItem>(IMMethods.CreateVideoMessageByURL, {
     videoPath: '',
     duration: seconds,
@@ -1155,14 +1242,36 @@ async function sendUploadedVideoMessage(
     snapshotPath: '',
     videoUUID: IMSDK.uuid(),
     videoUrl: uploaded.url,
+    VideoUrl: uploaded.url,
+    VideoURL: uploaded.url,
     videoSize: uploaded.size,
     snapshotUUID: IMSDK.uuid(),
     snapshotSize,
     snapshotUrl,
+    SnapshotUrl: snapshotUrl,
+    SnapshotURL: snapshotUrl,
     snapshotWidth,
     snapshotHeight,
   })
-  return sendCreatedMessage(target, message, { alreadyUploaded: true, timeoutMs: 30000 })
+  const ensured = keepRemoteVideoUrls(message, uploaded.url, snapshotUrl)
+  const sent = await sendCreatedMessage(target, ensured, { alreadyUploaded: true, timeoutMs: 30000 })
+  return keepRemoteVideoUrls(sent, uploaded.url, snapshotUrl)
+}
+
+/** 原生发送回调偶发丢掉已上传的 snapshotUrl，回填后气泡才能用 <image> 封面。 */
+function keepRemoteVideoUrls(message: MessageItem, videoUrl: string, snapshotUrl: string): MessageItem {
+  const meta = parseVideoMeta(message)
+  const nextUrl = preferRemoteMediaUrl(meta.url, videoUrl)
+  const nextSnap = preferRemoteMediaUrl(meta.snapshotUrl, snapshotUrl)
+  if (nextUrl === meta.url && nextSnap === meta.snapshotUrl) return message
+  return {
+    ...message,
+    videoElem: {
+      ...(message.videoElem || {}),
+      videoUrl: nextUrl,
+      snapshotUrl: nextSnap,
+    } as MessageItem['videoElem'],
+  }
 }
 
 /**
@@ -1178,10 +1287,10 @@ export async function sendVideoMessage(
   const seconds = videoDurationSeconds(duration)
   if (isAppPlatform) {
     // 原生取帧插件对 chooseVideo 的原始临时路径兼容性最好，保存后的 _doc 路径作为后备。
-    let snap = await snapshotOfVideo(filePath, snapshotPath)
+    let snap = await snapshotOfVideo(filePath, snapshotPath, seconds)
     const saved = await persistTempMedia(filePath)
     const videoPath = toNativeFullPath(saved)
-    if (!snap) snap = await snapshotOfVideo(videoPath)
+    if (!snap) snap = await snapshotOfVideo(videoPath, '', seconds)
     if (!snap) throw new Error('无法提取视频封面，请重新选择视频')
     devLog('[video][send] app 路径', {
       filePath,
@@ -1252,14 +1361,20 @@ export async function sendVideoMessage(
     snapshotPath: '',
     videoUUID: IMSDK.uuid(),
     videoUrl: url,
+    VideoUrl: url,
+    VideoURL: url,
     videoSize: file.size,
     snapshotUUID: IMSDK.uuid(),
     snapshotSize,
     snapshotUrl,
+    SnapshotUrl: snapshotUrl,
+    SnapshotURL: snapshotUrl,
     snapshotWidth,
     snapshotHeight,
   })
-  return sendCreatedMessage(target, message, { alreadyUploaded: true })
+  const ensured = keepRemoteVideoUrls(message, url, snapshotUrl)
+  const sent = await sendCreatedMessage(target, ensured, { alreadyUploaded: true })
+  return keepRemoteVideoUrls(sent, url, snapshotUrl)
 }
 
 export async function sendVoiceMessage(
@@ -1638,31 +1753,6 @@ function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
   return { path: '', duration: 0 }
 }
 
-function jsonVideoMeta(raw: unknown): { url: string; snapshotUrl: string; duration: number } {
-  if (raw && typeof raw === 'object') {
-    const obj = raw as Record<string, unknown>
-    const elem = obj.videoElem ?? obj.VideoElem
-    if (elem) {
-      const nested = jsonVideoMeta(elem)
-      if (nested.url || nested.snapshotUrl) return nested
-    }
-    const url =
-      pickString(obj, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'videoPath', 'VideoPath', 'url', 'URL', 'sourceUrl'])
-    const snapshotUrl =
-      pickString(obj, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL', 'snapshotPath', 'SnapshotPath'])
-    return { url, snapshotUrl, duration: Number(obj.duration ?? obj.Duration ?? 0) }
-  }
-  if (typeof raw === 'string' && raw) {
-    if (raw[0] !== '{') return { url: raw, snapshotUrl: '', duration: 0 }
-    try {
-      return jsonVideoMeta(JSON.parse(raw))
-    } catch {
-      return { url: raw, snapshotUrl: '', duration: 0 }
-    }
-  }
-  return { url: '', snapshotUrl: '', duration: 0 }
-}
-
 function jsonPictureUrl(raw: unknown): string {
   if (raw && typeof raw === 'object') {
     const obj = raw as Record<string, unknown>
@@ -1772,7 +1862,7 @@ function resolveQuotedAppType(quoted: MessageItem): AppMessageType {
     jsonPictureUrl(quoted.content) ||
     (typeof quoted.content === 'string' ? quoted.content : '')
   if (looksLikeImageUrl(pictureUrl) || quoted.pictureElem) return 'image'
-  if (quoted.videoElem || jsonVideoMeta(quoted.content).url) return 'video'
+  if (quoted.videoElem || parseVideoMeta(quoted.content).url) return 'video'
   if (quoted.soundElem || jsonSoundMeta(quoted.content).path) return 'voice'
   if (quoted.fileElem) return 'file'
   if (quoted.cardElem) return 'card'
@@ -1812,9 +1902,12 @@ function extractContent(item: MessageItem): string {
     case MessageType.VideoMessage: {
       const merged = parseVideoMeta(item)
       const fromJson = parseVideoMeta(item.content)
+      // 气泡只保留可跨端访问的远程封面；发送端本地 snapshotPath 在接收端/App 历史里是死链，
+      // 写进 content 会让 H5 走截帧、App 却去加载坏图，表现为「H5 有封面、App 没有」。
+      const snap = preferRemoteMediaUrl(merged.snapshotUrl, fromJson.snapshotUrl)
       return JSON.stringify({
-        url: merged.url || fromJson.url,
-        snapshotUrl: merged.snapshotUrl || fromJson.snapshotUrl,
+        url: preferRemoteMediaUrl(merged.url, fromJson.url),
+        snapshotUrl: isRemoteMediaUrl(snap) ? snap : '',
         duration: merged.duration || fromJson.duration,
       })
     }
@@ -1937,6 +2030,22 @@ function coerceMessage(raw: unknown): MessageItem | null {
         videoSize: Number(ve.videoSize ?? ve.VideoSize ?? 0),
         snapshotWidth: Number(ve.snapshotWidth ?? ve.SnapshotWidth ?? 0),
         snapshotHeight: Number(ve.snapshotHeight ?? ve.SnapshotHeight ?? 0),
+      } as MessageItem['videoElem']
+    }
+  }
+  // 本地 snapshotPath 不能盖住 content / 其它字段里的远程封面
+  if (item.contentType === MessageType.VideoMessage || item.videoElem) {
+    const fromElem = parseVideoMeta(item)
+    const fromContent = parseVideoMeta(item.content)
+    const url = preferRemoteMediaUrl(fromElem.url, fromContent.url)
+    const snap = preferRemoteMediaUrl(fromElem.snapshotUrl, fromContent.snapshotUrl)
+    const snapshotUrl = isRemoteMediaUrl(snap) ? snap : ''
+    if (url || snapshotUrl) {
+      item.videoElem = {
+        ...(item.videoElem || {}),
+        videoUrl: url,
+        snapshotUrl,
+        duration: fromElem.duration || fromContent.duration,
       } as MessageItem['videoElem']
     }
   }

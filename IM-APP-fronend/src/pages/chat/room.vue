@@ -1310,6 +1310,21 @@ function onEmojiSelect(value: string) {
   showEmojiPanel.value = false
 }
 
+async function onStickerSelect(url: string) {
+  if (!url || composerBlocked.value) return
+  showEmojiPanel.value = false
+  try {
+    await chatStore.sendImageUrl(conversationId.value, url, imUserId.value || myId.value)
+    await nextTick()
+    scrollToBottom()
+  } catch (e) {
+    uni.showToast({
+      title: e instanceof Error ? e.message : '发送失败',
+      icon: 'none',
+    })
+  }
+}
+
 function onPlus() {
   showPlusPanel.value = !showPlusPanel.value
   if (showPlusPanel.value) {
@@ -1676,6 +1691,7 @@ function pickFavorite() {
         v-if="showEmojiPanel && !composerBlocked"
         class="emoji-panel-shell"
         @select="onEmojiSelect"
+        @sticker="onStickerSelect"
         @close="showEmojiPanel = false"
       />
     </view>

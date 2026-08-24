@@ -29,7 +29,7 @@ function safeParse<T>(raw: string | null): T | null {
 }
 
 export const useChatSettingsStore = defineStore('chatSettings', () => {
-  const enterToSend = ref(true)
+  const enterToSend = ref(false)
   const noDisturb = ref(false)
   const message = ref(true)
   const voice = ref(true)

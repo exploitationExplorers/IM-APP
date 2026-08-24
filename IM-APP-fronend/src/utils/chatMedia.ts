@@ -18,10 +18,19 @@ export function videoSnapshotTime(duration: number): number {
   return Math.min(1, Math.max(0.1, duration * 0.1), duration - 0.05)
 }
 
+function stringFromUnknown(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    return stringFromUnknown(obj.url ?? obj.URL ?? obj.Url ?? obj.src)
+  }
+  return ''
+}
+
 function firstString(obj: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
-    const value = obj[key]
-    if (typeof value === 'string' && value) return value
+    const text = stringFromUnknown(obj[key])
+    if (text) return text
   }
   return ''
 }
@@ -70,11 +79,21 @@ export function parseVideoMeta(raw: unknown): VideoMeta {
     if (result.url || result.snapshotUrl) return result
   }
   const url = preferRemoteMediaUrl(
-    firstString(obj, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'url', 'URL']),
+    firstString(obj, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'video_url', 'sourceUrl', 'SourceUrl', 'url', 'URL']),
     firstString(obj, ['videoPath', 'VideoPath']),
   )
   const snapshotUrl = preferRemoteMediaUrl(
-    firstString(obj, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL']),
+    firstString(obj, [
+      'snapshotUrl',
+      'SnapshotUrl',
+      'snapshotURL',
+      'SnapshotURL',
+      'snapshot_url',
+      'coverUrl',
+      'CoverUrl',
+      'thumbUrl',
+      'ThumbUrl',
+    ]),
     firstString(obj, ['snapshotPath', 'SnapshotPath']),
   )
   return {
@@ -96,6 +115,25 @@ export function playableMediaUrl(path: string): string {
     /* H5 无 plus */
   }
   return path.startsWith('/') ? `file://${path}` : path
+}
+
+/** 气泡封面：远程图、blob、以及本机截图路径可展示；视频地址不能当 <image> 用。 */
+export function isUsableVideoPoster(path: string): boolean {
+  const t = String(path || '').trim()
+  if (!t) return false
+  if (/\.(mp4|mov|m4v|webm|avi)(\?|#|$)/i.test(t)) return false
+  return isRemoteMediaUrl(t) || t.startsWith('file://') || t.startsWith('blob:') || looksLikeLocalFilePath(t)
+}
+
+/** 两条视频 content 合并时优先远程封面，避免本地 snapshotPath 盖掉已上传的 URL。 */
+export function mergeVideoContent(primary: string, fallback: string): string {
+  const a = parseVideoMeta(primary)
+  const b = parseVideoMeta(fallback)
+  return JSON.stringify({
+    url: preferRemoteMediaUrl(a.url, b.url),
+    snapshotUrl: preferRemoteMediaUrl(a.snapshotUrl, b.snapshotUrl),
+    duration: a.duration || b.duration,
+  })
 }
 
 export function videoPlayUrlFromContent(content: string): string {

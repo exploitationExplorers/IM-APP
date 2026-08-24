@@ -309,3 +309,11 @@ export async function uploadReportImage(localPath: string): Promise<string> {
   }
   return uploadViaTask('image', await loadImageBytes(localPath))
 }
+
+/** 上传自定义表情并返回 fileId */
+export async function uploadSticker(localPath: string): Promise<string> {
+  if (isAppPlatform()) {
+    return uploadViaNativeFile('sticker', localPath)
+  }
+  return uploadViaTask('sticker', await loadImageBytes(localPath))
+}

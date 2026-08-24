@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { fetchGroups } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
@@ -8,19 +8,24 @@ import type { GroupPreview } from '@/types'
 
 const contactStore = useContactStore()
 const tab = ref<'created' | 'joined'>('created')
+const pageGroups = ref<GroupPreview[]>([])
+const loading = ref(false)
 
-const visibleGroups = computed(() => contactStore.groups)
+const visibleGroups = computed(() => pageGroups.value.filter((g) => g.status !== 'dismissed'))
 
 async function loadGroups() {
-  const role = tab.value === 'created' ? 'owner' : 'member'
-  contactStore.groups = await fetchGroups(role)
+  loading.value = true
+  try {
+    const role = tab.value === 'created' ? 'owner' : 'member'
+    pageGroups.value = await fetchGroups(role)
+  } catch (e) {
+    pageGroups.value = []
+    uni.showToast({ title: (e as Error)?.message || '群列表加载失败', icon: 'none' })
+  } finally {
+    loading.value = false
+  }
 }
 
-onMounted(() => {
-  void loadGroups()
-})
-
-/** 切回此页时刷新群列表，确保已解散群能立即消失 */
 onShow(() => {
   void loadGroups()
 })
@@ -58,23 +63,26 @@ function goCreate() {
       >我加入的</view>
     </view>
 
-    <view
-      v-for="g in visibleGroups"
-      :key="g.id"
-      class="row"
-      @click="openGroup(g)"
-    >
-      <image
-        class="avatar"
-        :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
-        mode="aspectFit"
-      />
-      <text class="name">{{ g.name }}</text>
-      <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
-      <text class="arrow">›</text>
-    </view>
+    <view v-if="loading" class="empty">加载中…</view>
+    <template v-else>
+      <view
+        v-for="g in visibleGroups"
+        :key="g.id"
+        class="row"
+        @click="openGroup(g)"
+      >
+        <image
+          class="avatar"
+          :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
+          mode="aspectFill"
+        />
+        <text class="name">{{ g.name || '群聊' }}</text>
+        <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
+        <text class="arrow">›</text>
+      </view>
 
-    <view v-if="!visibleGroups.length" class="empty">无群组</view>
+      <view v-if="!visibleGroups.length" class="empty">无群组</view>
+    </template>
     <view class="fab" @click="goCreate">＋</view>
   </view>
 </template>
@@ -129,12 +137,17 @@ function goCreate() {
   border-radius: 12rpx;
   margin-right: 20rpx;
   background: #eee;
+  flex-shrink: 0;
 }
 
 .name {
   flex: 1;
+  min-width: 0;
   font-size: 30rpx;
   color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dissolved-tag {
@@ -150,6 +163,7 @@ function goCreate() {
 .arrow {
   color: #c8ccd6;
   font-size: 36rpx;
+  flex-shrink: 0;
 }
 
 .empty {

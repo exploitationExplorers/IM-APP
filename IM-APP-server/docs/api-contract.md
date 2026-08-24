@@ -1099,6 +1099,50 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ---
 
+## 我的表情
+
+用户自定义表情图。先走文件上传（`purpose=sticker` 或 `image`），完成后用 `fileId` 登记；同一用户同一 `fileId` 幂等。单用户上限 200 张。
+
+### GET `/api/v1/stickers`
+
+**Query**：`page`（默认 1）、`size`（默认 100，最大 100）
+
+**Response**
+```json
+[
+  {
+    "id": "uuid",
+    "fileId": "uuid",
+    "url": "https://...",
+    "createdAt": "2026-08-24T12:00:00Z"
+  }
+]
+```
+
+按 `createdAt` 倒序。
+
+### POST `/api/v1/stickers`
+
+**Body**
+```json
+{ "fileId": "uuid" }
+```
+
+`fileId` 须为当前用户已 `ready` 的图片（`purpose` 为 `sticker` 或 `image`）。成功返回表情对象。
+
+### POST `/api/v1/stickers/delete`
+
+批量删除本人表情（编辑多选）。
+
+**Body**
+```json
+{ "stickerIds": ["uuid", "uuid"] }
+```
+
+成功返回 `{ "ok": true }`；均不存在返回 404。
+
+---
+
 ## WebSocket
 
 唯一生产聊天连接是 `/api/v1/im/token` 返回的 OpenIM `wsAddr`。Go 后端不代理 OpenIM WebSocket。

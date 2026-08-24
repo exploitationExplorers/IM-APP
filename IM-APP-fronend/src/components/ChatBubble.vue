@@ -7,7 +7,8 @@ let activeVoiceStopper: (() => void) | null = null
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster } from '@/utils/chatMedia'
+import { captureAppVideoPosterFromUrl } from '@/utils/openim'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -118,8 +119,9 @@ const videoUrl = computed(() => toPlayableMediaUrl(videoMeta.value.url))
 const videoPoster = computed(() => {
   if (videoPosterFailed.value) return fallbackPoster.value
   const snap = videoMeta.value.snapshotUrl
-  // 远程封面可直接展示；发送端本地路径在接收端无效，交给截帧兜底
-  if (isRemoteMediaUrl(snap)) return toPlayableMediaUrl(snap)
+  // 远程封面可直接展示；发送中本机截图也可展示。历史里的本地 snapshotPath 是死链，交给截帧兜底。
+  if (isRemoteMediaUrl(snap) || snap.startsWith('blob:')) return toPlayableMediaUrl(snap)
+  if (props.message.status === 'sending' && isUsableVideoPoster(snap)) return toPlayableMediaUrl(snap)
   return fallbackPoster.value
 })
 
@@ -136,18 +138,20 @@ watch(
 )
 
 watch(
-  [() => videoMeta.value.snapshotUrl, videoUrl],
-  async ([snapshot, url]) => {
+  [() => videoMeta.value.snapshotUrl, videoUrl, () => props.message.status],
+  async ([snapshot, url, status]) => {
     fallbackPoster.value = ''
-    if (isRemoteMediaUrl(snapshot) || !url) return
-    // #ifdef H5
-    // App 列表不下载整段视频截帧（基座 getVideoInfo 也无缩略图）；用下方 video 组件出首帧
+    if (!url) return
+    if (isRemoteMediaUrl(snapshot) || snapshot.startsWith('blob:')) return
+    if (status === 'sending' && isUsableVideoPoster(snapshot)) return
     try {
-      fallbackPoster.value = await captureVideoPosterFromUrl(url)
+      // H5：canvas 截帧；App：download + 取帧（内部按平台分流）
+      const poster =
+        (await captureVideoPosterFromUrl(url)) || (await captureAppVideoPosterFromUrl(url))
+      fallbackPoster.value = poster
     } catch {
       fallbackPoster.value = ''
     }
-    // #endif
   },
   { immediate: true },
 )
@@ -156,11 +160,11 @@ function onVideoPosterError() {
   videoPosterFailed.value = true
   const url = videoUrl.value
   if (!url || fallbackPoster.value) return
-  // #ifdef H5
-  void captureVideoPosterFromUrl(url).then((poster) => {
-    if (poster) fallbackPoster.value = poster
-  })
-  // #endif
+  void Promise.resolve()
+    .then(async () => (await captureVideoPosterFromUrl(url)) || (await captureAppVideoPosterFromUrl(url)))
+    .then((poster) => {
+      if (poster) fallbackPoster.value = poster
+    })
 }
 
 function playVideo() {
@@ -443,23 +447,6 @@ function openLink(url: string) {
           mode="widthFix"
           @error="onVideoPosterError"
         />
-        <!-- App：无远程封面时用原生 video 解码首帧，避免灰底占位 -->
-        <!-- #ifdef APP-PLUS -->
-        <video
-          v-else-if="videoUrl"
-          class="msg-image video-thumb-video"
-          :src="videoUrl"
-          :controls="false"
-          :show-center-play-btn="false"
-          :show-play-btn="false"
-          :show-fullscreen-btn="false"
-          :show-progress="false"
-          :enable-progress-gesture="false"
-          :muted="true"
-          :autoplay="false"
-          object-fit="cover"
-        />
-        <!-- #endif -->
         <view v-else class="msg-image video-poster-placeholder" />
         <view class="video-play">
           <text class="video-play-icon">▶</text>
@@ -581,6 +568,7 @@ function openLink(url: string) {
 
 .content-wrap {
   max-width: 70%;
+  min-width: 0;
   margin: 0 16rpx;
   display: flex;
   flex-direction: column;
@@ -637,27 +625,24 @@ function openLink(url: string) {
 
 .msg-image {
   width: 420rpx;
+  max-width: 100%;
   border-radius: 12rpx;
   display: block;
 }
 
 .video-bubble {
   position: relative;
+  width: 420rpx;
+  max-width: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .video-poster-placeholder {
-  width: 420rpx;
+  width: 100%;
   min-height: 240rpx;
   background: #e8e8e8;
   border-radius: 12rpx;
-}
-
-.video-thumb-video {
-  width: 420rpx;
-  height: 560rpx;
-  border-radius: 12rpx;
-  background: #111;
-  pointer-events: none;
 }
 
 .video-play {

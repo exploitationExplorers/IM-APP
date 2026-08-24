@@ -5,6 +5,8 @@ import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { useMassSendStore, type MassTarget } from '@/stores/massSend'
+import type { Conversation } from '@/types'
+import { isDissolvedGroupConversationPreview } from '@/utils/im-notification'
 
 const chatStore = useChatStore()
 const contactStore = useContactStore()
@@ -25,7 +27,7 @@ onShow(async () => {
   }
   await Promise.all([
     contactStore.reloadContacts({ keyword: '', sort: 'recent' }).catch(() => undefined),
-    contactStore.groups.length ? Promise.resolve() : contactStore.loadGroups().catch(() => undefined),
+    contactStore.loadGroups().catch(() => undefined),
   ])
 })
 
@@ -35,13 +37,27 @@ const selectedCount = computed(() => selected.value.length)
 const selectedLabel = computed(() => `已选(${selectedCount.value})`)
 const confirmLabel = computed(() => `确认(${selectedCount.value})`)
 
+/** 群发选择列表不展示已解散群（最近聊天 / 群组 tab） */
+function isDissolvedGroupConversation(c: Conversation): boolean {
+  if (c.type !== 'group') return false
+  if (isDissolvedGroupConversationPreview(c.lastMessage)) return true
+  return contactStore.groups.some((g) => {
+    if (g.status !== 'dismissed') return false
+    if (g.conversationId === c.id || g.name === c.title) return true
+    if (c.groupId && (g.id === c.groupId || g.conversationId === c.groupId)) return true
+    return false
+  })
+}
+
 const listRecent = computed<MassTarget[]>(() =>
-  chatStore.conversations.map((c) => ({
-    id: `r_${c.id}`,
-    type: 'contact',
-    name: c.title,
-    avatar: c.avatar,
-  })),
+  chatStore.conversations
+    .filter((c) => !isDissolvedGroupConversation(c))
+    .map((c) => ({
+      id: `r_${c.id}`,
+      type: 'contact',
+      name: c.title,
+      avatar: c.avatar,
+    })),
 )
 
 const listContacts = computed<MassTarget[]>(() =>
@@ -54,12 +70,14 @@ const listContacts = computed<MassTarget[]>(() =>
 )
 
 const listGroups = computed<MassTarget[]>(() =>
-  contactStore.groups.map((g) => ({
-    id: `g_${g.id}`,
-    type: 'group',
-    name: g.name,
-    avatar: g.avatar,
-  })),
+  contactStore.groups
+    .filter((g) => g.status !== 'dismissed')
+    .map((g) => ({
+      id: `g_${g.id}`,
+      type: 'group',
+      name: g.name,
+      avatar: g.avatar,
+    })),
 )
 
 const listTags = computed<MassTarget[]>(() => {

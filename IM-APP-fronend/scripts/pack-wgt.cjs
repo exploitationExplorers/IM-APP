@@ -24,7 +24,17 @@ const ORIGIN_PIN_HOSTS = new Set(['www.ke58.com', 'ke58.com'])
 
 const root = path.resolve(__dirname, '..')
 const manifestPath = path.join(root, 'src', 'manifest.json')
-const distDir = path.join(root, 'dist', 'build', 'app-plus')
+/** uni-cli（Vite）产物在 dist/build/app；旧 HBuilderX / 部分版本写在 app-plus */
+function resolveDistDir() {
+  const candidates = [
+    path.join(root, 'dist', 'build', 'app'),
+    path.join(root, 'dist', 'build', 'app-plus'),
+  ]
+  const existing = candidates.filter((dir) => fs.existsSync(path.join(dir, 'manifest.json')))
+  if (!existing.length) return candidates[0]
+  existing.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+  return existing[0]
+}
 const releaseDir = path.join(root, 'unpackage', 'release')
 
 function parseArgs(argv) {
@@ -115,7 +125,7 @@ function zipDir(srcDir, destFile) {
   fs.renameSync(zipFile, destFile)
 }
 
-function syncDistWidgetVersion(versionName, versionCode) {
+function syncDistWidgetVersion(distDir, versionName, versionCode) {
   const distManifestPath = path.join(distDir, 'manifest.json')
   const json = JSON.parse(fs.readFileSync(distManifestPath, 'utf8'))
   json.version = { ...(json.version || {}), name: versionName, code: String(versionCode) }
@@ -351,16 +361,25 @@ async function main() {
     }
     const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
     execFileSync(npmCmd, ['run', 'build:app'], { cwd: root, stdio: 'inherit', shell: true })
-    syncDistWidgetVersion(versionName, versionCode)
   }
+
+  const distDir = resolveDistDir()
+  console.log(`使用构建产物目录: ${distDir}`)
 
   let filePath = args.file ? path.resolve(root, args.file) : ''
   if (args.packageType === 'wgt' && !filePath) {
     if (!fs.existsSync(path.join(distDir, 'manifest.json'))) {
       throw new Error(`未找到 ${distDir}，请先加 --build 或使用 HBuilderX 打自定义基座资源`)
     }
-    if (!args.build) {
-      syncDistWidgetVersion(versionName, versionCode)
+    syncDistWidgetVersion(distDir, versionName, versionCode)
+    const serviceJs = path.join(distDir, 'app-service.js')
+    if (fs.existsSync(serviceJs)) {
+      const bundled = fs.readFileSync(serviceJs, 'utf8')
+      if (bundled.includes('video-thumb-video')) {
+        throw new Error(
+          `构建产物仍含旧版视频黑块组件(video-thumb-video)：${distDir}。请确认已重新 --build，且脚本选中了最新的 dist/build/app`,
+        )
+      }
     }
     filePath = path.join(releaseDir, `im-${versionCode}.wgt`)
     zipDir(distDir, filePath)

@@ -46,6 +46,51 @@ export async function updateContact(
   })
 }
 
+function normalizeGroupPreview(raw: unknown): GroupPreview | null {
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  const id = String(obj.id ?? obj.ID ?? '').trim()
+  if (!id) return null
+  const name = String(obj.name ?? obj.Name ?? '').trim()
+  const avatar = String(obj.avatar ?? obj.Avatar ?? '')
+  const roleRaw = obj.role ?? obj.Role
+  const convRaw = obj.conversationId ?? obj.ConversationID
+  const statusRaw = obj.status ?? obj.Status
+  return {
+    id,
+    name,
+    avatar,
+    role: typeof roleRaw === 'string' ? roleRaw : undefined,
+    conversationId: typeof convRaw === 'string' && convRaw ? convRaw : undefined,
+    status: statusRaw === 'dismissed' ? 'dismissed' : statusRaw === 'active' ? 'active' : undefined,
+  }
+}
+
+/** 兼容 App 端偶发双层 data / 字符串 JSON / PascalCase 字段 */
+function normalizeGroupList(raw: unknown): GroupPreview[] {
+  if (!raw) return []
+  if (typeof raw === 'string') {
+    try {
+      return normalizeGroupList(JSON.parse(raw) as unknown)
+    } catch {
+      return []
+    }
+  }
+  if (Array.isArray(raw)) {
+    return raw.map(normalizeGroupPreview).filter((g): g is GroupPreview => !!g)
+  }
+  if (typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    if (obj.data !== undefined && obj.data !== raw) {
+      return normalizeGroupList(obj.data)
+    }
+    if (Array.isArray(obj.items)) {
+      return normalizeGroupList(obj.items)
+    }
+  }
+  return []
+}
+
 export async function fetchGroups(role?: 'owner' | 'member'): Promise<GroupPreview[]> {
   const data: Record<string, string | number> = { limit: 100 }
   if (role === 'owner') data.role = 'owner'
@@ -56,17 +101,23 @@ export async function fetchGroups(role?: 'owner' | 'member'): Promise<GroupPrevi
   for (;;) {
     const query = { ...data }
     if (cursor) query.cursor = cursor
-    const result = await request<GroupPage | GroupPreview[]>({
+    const result = await request<GroupPage | GroupPreview[] | unknown>({
       url: '/groups',
       method: 'GET',
       data: query,
     })
     if (Array.isArray(result)) {
-      return result
+      return normalizeGroupList(result)
     }
-    all.push(...result.items)
-    if (!result.hasMore || !result.nextCursor) break
-    cursor = result.nextCursor
+    const pageItems = normalizeGroupList(
+      result && typeof result === 'object' && 'items' in result
+        ? (result as GroupPage).items
+        : result,
+    )
+    all.push(...pageItems)
+    const page = result as GroupPage
+    if (!page?.hasMore || !page?.nextCursor) break
+    cursor = page.nextCursor
   }
   return all
 }

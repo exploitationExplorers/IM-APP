@@ -43,6 +43,7 @@ import {
   isNotInGroupIMError,
 } from '@/utils/openim'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
+import { mergeVideoContent } from '@/utils/chatMedia'
 import {
   isIMNotification,
   isGroupAnnouncementNotice,
@@ -962,16 +963,20 @@ export const useChatStore = defineStore('chat', () => {
       const sent = await send()
       rememberRaw(sent)
       const mapped = toChatMessage(sent)
+      const withCover =
+        placeholder.type === 'video' && mapped.type === 'video'
+          ? { ...mapped, content: mergeVideoContent(mapped.content, placeholder.content) }
+          : mapped
       const isGroup = requireConversation(conversationId).type === 'group'
-      const delivered = isGroup ? { ...mapped, trackGroupRead: true } : mapped
+      const delivered = isGroup ? { ...withCover, trackGroupRead: true } : withCover
       replaceMessage(conversationId, placeholder.id, delivered)
       // App 原生发送成功回调经常暂时没有 seq；群聊已读游标必须依赖 seq。
       // 后台短轮询本地库补齐，不阻塞发送成功 UI，也不会按群成员数放大请求量。
-      if (isGroup && !mapped.seq) {
-        void resolveMessageSeq(conversationId, mapped.id, sent).then((resolved) => {
+      if (isGroup && !withCover.seq) {
+        void resolveMessageSeq(conversationId, withCover.id, sent).then((resolved) => {
           if (!resolved.seq) return
           if (resolved.message) rememberRaw(resolved.message)
-          replaceMessage(conversationId, mapped.id, {
+          replaceMessage(conversationId, withCover.id, {
             ...delivered,
             seq: resolved.seq,
             trackGroupRead: true,
@@ -981,8 +986,8 @@ export const useChatStore = defineStore('chat', () => {
       // 自己给已隐藏的会话主动发消息时，让该会话重新出现在列表顶部
       await reappearConversation(conversationId)
       patchConversation(conversationId, {
-        lastMessage: previewOf(mapped),
-        lastMessageAt: mapped.createdAt,
+        lastMessage: previewOf(withCover),
+        lastMessageAt: withCover.createdAt,
       })
     } catch (e) {
       replaceMessage(conversationId, placeholder.id, { ...placeholder, status: 'failed' })

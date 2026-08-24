@@ -49,6 +49,7 @@ func main() {
 		"im_message_recalls":      {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
 		"im_group_read_cursors":   {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
 		"group_member_limit_logs": {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
+		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
 		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
 	}
@@ -120,6 +121,8 @@ func main() {
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
 	favSvc := &service.FavoriteService{Fav: favRepo}
+	stickerRepo := &repository.StickerRepo{DB: pool}
+	stickerSvc := &service.StickerService{Stickers: stickerRepo, Files: fileRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo}
 	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue}
@@ -171,6 +174,7 @@ func main() {
 	adminUserH := &handler.AdminUserHandler{Restrictions: &repository.RestrictionRepo{DB: pool}, Client: imClient}
 	adminMessageH := &handler.AdminMessageHandler{Client: imClient, DB: pool, IMAccess: imAccessRepo}
 	favH := &handler.FavoriteHandler{Svc: favSvc}
+	stickerH := &handler.StickerHandler{Svc: stickerSvc}
 
 	r := gin.New()
 	loggerConfig := gin.LoggerConfig{}
@@ -381,6 +385,11 @@ func main() {
 			auth.POST("/favorites/list", favH.List)
 			auth.POST("/favorites", favH.Create)
 			auth.DELETE("/favorites/:favoriteId", favH.Delete)
+
+			// 我的表情
+			auth.GET("/stickers", stickerH.List)
+			auth.POST("/stickers", stickerH.Create)
+			auth.POST("/stickers/delete", stickerH.Delete)
 		}
 	}
 

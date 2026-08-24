@@ -126,14 +126,30 @@ function isRefreshEndpoint(url: string): boolean {
   return url === '/auth/token/refresh' || url.endsWith('/auth/token/refresh')
 }
 
+/** App 端 GET 的 data 偶发未拼进 query，显式序列化到 URL。不用 URLSearchParams：部分 App 运行时没有该 API。 */
+function appendQueryParams(url: string, data?: Record<string, unknown> | unknown): string {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return url
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    if (value === undefined || value === null || value === '') continue
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+  }
+  if (!parts.length) return url
+  const qs = parts.join('&')
+  return url.includes('?') ? `${url}&${qs}` : `${url}?${qs}`
+}
+
 function rawRequest<T>(options: RequestOptions, tokenOverride?: string): Promise<RawResponse<T>> {
   const { url, method = 'GET', data, auth = true, header = {} } = options
   const token = tokenOverride ?? options.token ?? getToken()
+  const baseUrl = url.startsWith('http') ? url : `${APP_CONFIG.apiBaseUrl}${url}`
+  const requestUrl = method === 'GET' ? appendQueryParams(baseUrl, data) : baseUrl
+  const requestData = method === 'GET' ? undefined : (data as UniApp.RequestOptions['data'])
   return new Promise((resolve, reject) => {
     uni.request({
-      url: url.startsWith('http') ? url : `${APP_CONFIG.apiBaseUrl}${url}`,
+      url: requestUrl,
       method: method as UniApp.RequestOptions['method'],
-      data: data as UniApp.RequestOptions['data'],
+      data: requestData,
       header: {
         'Content-Type': 'application/json',
         ...(auth && token ? { Authorization: `Bearer ${token}` } : {}),

@@ -20,6 +20,7 @@ const FRIEND_REQUEST_TOKEN_RETRY_MS = [0, 400, 1200]
 const FRIEND_REQUEST_NETWORK_RETRY_MS = [0, 1500]
 
 let friendRequestSyncInFlight: Promise<void> | null = null
+let groupsLoadErrorToastShown = false
 
 export const useContactStore = defineStore('contact', () => {
   const contacts = ref<Contact[]>([])
@@ -83,7 +84,18 @@ export const useContactStore = defineStore('contact', () => {
   }
 
   async function loadGroups() {
-    groups.value = await fetchGroups()
+    try {
+      groups.value = await fetchGroups()
+    } catch (e) {
+      groups.value = []
+      if (import.meta.env.DEV) {
+        console.warn('[contact] 群列表加载失败', e)
+      }
+      if (!groupsLoadErrorToastShown) {
+        groupsLoadErrorToastShown = true
+        uni.showToast({ title: '群列表加载失败', icon: 'none', duration: 2000 })
+      }
+    }
   }
 
   async function loadDirectory() {

@@ -1,110 +1,140 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import {
+  createSticker,
+  deleteStickers,
+  fetchStickers,
+  type StickerItem,
+} from '@/api/sticker'
 import ImNavBar from '@/components/ImNavBar.vue'
+import { uploadSticker } from '@/utils/file-upload'
+import { safeBack } from '@/utils/nav'
 
-// 状态
+const VALID_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+
 const isEditMode = ref(false)
-const emotions = ref<{ id: string; url: string }[]>([])
+const emotions = shallowRef<StickerItem[]>([])
 const selectedIds = ref<string[]>([])
+const loading = ref(false)
+const uploading = ref(false)
 
-// 计算属性
 const hasSelected = computed(() => selectedIds.value.length > 0)
 
-// 返回上一页
 function goBack() {
-  uni.navigateBack()
+  safeBack()
 }
 
-// 切换编辑模式
 function toggleEdit() {
+  if (!emotions.value.length && !isEditMode.value) {
+    uni.showToast({ title: '暂无表情可编辑', icon: 'none' })
+    return
+  }
   isEditMode.value = !isEditMode.value
   if (!isEditMode.value) {
-    selectedIds.value = [] // 退出时清空选中
+    selectedIds.value = []
   }
 }
 
-// 上传图片
+async function loadStickers() {
+  if (loading.value) return
+  loading.value = true
+  try {
+    emotions.value = await fetchStickers({ page: 1, size: 100 })
+  } catch (e) {
+    uni.showToast({
+      title: e instanceof Error ? e.message : '加载失败',
+      icon: 'none',
+    })
+  } finally {
+    loading.value = false
+  }
+}
+
+function isValidImagePath(path: string, file?: { name?: string; type?: string }): boolean {
+  const name = (file?.name || path).toLowerCase()
+  const extMatch = name.match(/\.[0-9a-z]+$/i)
+  const ext = extMatch ? extMatch[0] : ''
+  if (ext && VALID_EXTS.includes(ext)) return true
+  if (file?.type && file.type.startsWith('image/')) return true
+  // App 临时路径常无扩展名，仍按图片处理
+  if (!ext) return true
+  return false
+}
+
 function onUpload() {
-  if (isEditMode.value) return // 编辑模式下禁止上传（可选，这里看需求，我们选择禁止）
-  
+  if (isEditMode.value || uploading.value) return
+
   uni.chooseImage({
-    count: 9, // 允许一次多选
+    count: 9,
     sizeType: ['compressed'],
     sourceType: ['album', 'camera'],
-    success: (res) => {
-      // res.tempFiles 包含文件的详细信息（H5等平台可能依赖扩展名）
-      // res.tempFilePaths 就是图片路径数组
-      const tempFiles = res.tempFiles as unknown as { path: string; name?: string; type?: string }[]
-      const paths = res.tempFilePaths as string[]
-      
-      // 过滤只允许的图片格式
-      const validImageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+    success: async (res) => {
+      const tempFiles = (res.tempFiles || []) as unknown as { path: string; name?: string; type?: string }[]
+      const paths = (res.tempFilePaths || []) as string[]
       const validPaths: string[] = []
-      let hasInvalidFile = false
+      let hasInvalid = false
 
       paths.forEach((path, index) => {
-        const file = tempFiles?.[index]
-        const fileName = file?.name || path
-        
-        // 判断扩展名或 MIME 类型（针对 H5 等特殊情况）
-        const extMatch = fileName.toLowerCase().match(/\.[0-9a-z]+$/i)
-        const ext = extMatch ? extMatch[0] : ''
-        if (
-          (ext && validImageExtensions.includes(ext)) || 
-          (file?.type && file.type.startsWith('image/')) ||
-          (ext && !validImageExtensions.includes(ext)) 
-        ) {
-          if (ext && !validImageExtensions.includes(ext)) {
-             hasInvalidFile = true
-          } else {
-             validPaths.push(path)
-          }
+        const file = tempFiles[index]
+        if (isValidImagePath(path, file)) {
+          validPaths.push(path)
         } else {
-           validPaths.push(path)
+          hasInvalid = true
         }
       })
 
-      if (hasInvalidFile) {
+      if (hasInvalid) {
         uni.showToast({ title: '仅支持上传图片格式', icon: 'none' })
-        if (validPaths.length === 0) return
       }
-      uni.showLoading({ title: '上传中...' })
-      setTimeout(() => {
-        const newEmotions = validPaths.map((path) => ({
-          id: Math.random().toString(36).substring(2),
-          url: path
-        }))
-        emotions.value.push(...newEmotions)
+      if (!validPaths.length) return
+
+      uploading.value = true
+      uni.showLoading({ title: '上传中...', mask: true })
+      let ok = 0
+      let fail = 0
+      try {
+        for (const path of validPaths) {
+          try {
+            const fileId = await uploadSticker(path)
+            await createSticker(fileId)
+            ok++
+          } catch {
+            fail++
+          }
+        }
+        await loadStickers()
+        if (ok && !fail) {
+          uni.showToast({ title: '上传成功', icon: 'success' })
+        } else if (ok && fail) {
+          uni.showToast({ title: `${ok} 张成功，${fail} 张失败`, icon: 'none' })
+        } else {
+          uni.showToast({ title: '上传失败', icon: 'none' })
+        }
+      } finally {
         uni.hideLoading()
-        uni.showToast({ title: '上传成功', icon: 'success' })
-      }, 800)
+        uploading.value = false
+      }
     },
-    fail: () => {
-      // 取消选择等情况
-    }
   })
 }
 
-// 点击图片
-function onEmotionClick(item: { id: string; url: string }) {
+function onEmotionClick(item: StickerItem) {
   if (isEditMode.value) {
-    // 编辑模式下切换选中状态
     const index = selectedIds.value.indexOf(item.id)
     if (index > -1) {
       selectedIds.value.splice(index, 1)
     } else {
       selectedIds.value.push(item.id)
     }
-  } else {
-    // 普通模式下可以预览大图
-    uni.previewImage({
-      urls: emotions.value.map(e => e.url),
-      current: item.url
-    })
+    return
   }
+  uni.previewImage({
+    urls: emotions.value.map((e) => e.url),
+    current: item.url,
+  })
 }
 
-// 删除选中图片
 function onDelete() {
   if (!hasSelected.value) return
 
@@ -112,28 +142,36 @@ function onDelete() {
     title: '提示',
     content: `确定删除这 ${selectedIds.value.length} 个表情吗？`,
     confirmColor: '#ff4d4f',
-    success: (res) => {
-      if (res.confirm) {
-        uni.showLoading({ title: '删除中...' })
-        setTimeout(() => {
-          emotions.value = emotions.value.filter(e => !selectedIds.value.includes(e.id))
-          selectedIds.value = []
-          uni.hideLoading()
-          uni.showToast({ title: '已删除', icon: 'success' })
-          
-          if (emotions.value.length === 0) {
-            isEditMode.value = false
-          }
-        }, 500)
+    success: async (res) => {
+      if (!res.confirm) return
+      uni.showLoading({ title: '删除中...', mask: true })
+      try {
+        await deleteStickers([...selectedIds.value])
+        selectedIds.value = []
+        await loadStickers()
+        if (emotions.value.length === 0) {
+          isEditMode.value = false
+        }
+        uni.showToast({ title: '已删除', icon: 'success' })
+      } catch (e) {
+        uni.showToast({
+          title: e instanceof Error ? e.message : '删除失败',
+          icon: 'none',
+        })
+      } finally {
+        uni.hideLoading()
       }
-    }
+    },
   })
 }
+
+onShow(() => {
+  void loadStickers()
+})
 </script>
 
 <template>
   <view class="page">
-    <!-- 自定义导航栏 -->
     <ImNavBar title="我的表情" @back="goBack">
       <template #right>
         <view class="edit-btn" :class="{ 'cancel-btn': isEditMode }" @click="toggleEdit">
@@ -142,27 +180,22 @@ function onDelete() {
       </template>
     </ImNavBar>
 
-    <!-- 主体内容 -->
     <scroll-view scroll-y class="content" :class="{ 'has-bottom-bar': isEditMode }">
       <view class="grid-container">
-        <!-- 添加按钮 -->
-        <view class="emotion-item add-btn-wrap" @click="onUpload" v-if="!isEditMode">
+        <view v-if="!isEditMode" class="emotion-item add-btn-wrap" @click="onUpload">
           <view class="add-btn">
             <text class="add-icon">+</text>
           </view>
         </view>
 
-        <!-- 图片列表 -->
-        <view 
-          class="emotion-item" 
-          v-for="item in emotions" 
+        <view
+          v-for="item in emotions"
           :key="item.id"
+          class="emotion-item"
           @click="onEmotionClick(item)"
         >
           <image class="emotion-img" :src="item.url" mode="aspectFill" />
-          
-          <!-- 编辑模式下的复选框 -->
-          <view class="checkbox-wrap" v-if="isEditMode">
+          <view v-if="isEditMode" class="checkbox-wrap">
             <view class="checkbox" :class="{ checked: selectedIds.includes(item.id) }">
               <view v-if="selectedIds.includes(item.id)" class="check-mark"></view>
             </view>
@@ -171,13 +204,8 @@ function onDelete() {
       </view>
     </scroll-view>
 
-    <!-- 底部删除操作栏 -->
-    <view class="bottom-bar" v-if="isEditMode">
-      <view 
-        class="delete-btn" 
-        :class="{ active: hasSelected }"
-        @click="onDelete"
-      >
+    <view v-if="isEditMode" class="bottom-bar">
+      <view class="delete-btn" :class="{ active: hasSelected }" @click="onDelete">
         删除
       </view>
     </view>
@@ -192,7 +220,6 @@ function onDelete() {
   flex-direction: column;
 }
 
-/* 导航栏右侧编辑按钮 */
 .edit-btn {
   font-size: 28rpx;
   color: #333;
@@ -203,19 +230,16 @@ function onDelete() {
   background: #f5f6f8;
 }
 
-/* 主体内容 */
 .content {
   flex: 1;
   width: 100%;
   box-sizing: border-box;
   padding: 32rpx;
-  /* 如果有底部栏，增加底部内边距防止遮挡 */
 }
 .content.has-bottom-bar {
   padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
 }
 
-/* 网格布局 */
 .grid-container {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -237,7 +261,6 @@ function onDelete() {
   display: block;
 }
 
-/* 添加按钮 */
 .add-btn-wrap {
   background: transparent;
 }
@@ -257,7 +280,6 @@ function onDelete() {
   font-weight: 300;
 }
 
-/* 复选框 */
 .checkbox-wrap {
   position: absolute;
   top: 0;
@@ -269,7 +291,7 @@ function onDelete() {
   justify-content: flex-end;
   padding: 8rpx;
   box-sizing: border-box;
-  background: linear-gradient(to bottom left, rgba(0,0,0,0.2), transparent);
+  background: linear-gradient(to bottom left, rgba(0, 0, 0, 0.2), transparent);
 }
 .checkbox {
   width: 36rpx;
@@ -283,8 +305,8 @@ function onDelete() {
   justify-content: center;
 }
 .checkbox.checked {
-  background: #0A2FC2;
-  border-color: #0A2FC2;
+  background: #0a2fc2;
+  border-color: #0a2fc2;
 }
 .check-mark {
   width: 10rpx;
@@ -295,7 +317,6 @@ function onDelete() {
   margin-bottom: 4rpx;
 }
 
-/* 底部操作栏 */
 .bottom-bar {
   position: fixed;
   bottom: 0;
@@ -318,7 +339,6 @@ function onDelete() {
   justify-content: center;
   font-size: 32rpx;
   font-weight: 500;
-  transition: all 0.3s;
 }
 .delete-btn.active {
   background: #ff4d4f;
