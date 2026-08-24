@@ -1,38 +1,48 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watchEffect } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
+import ConversationItem from '@/components/ConversationItem.vue'
 import ImSwipeActionItem from '@/components/ImSwipeActionItem.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
 import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
+import ImDesktopSidebar from '@/components/desktop/ImDesktopSidebar.vue'
+import ImDesktopListResizer from '@/components/desktop/ImDesktopListResizer.vue'
+import ChatRoom from '@/pages/chat/room.vue'
 import { useChatStore } from '@/stores/chat'
+import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { usePullRefresh } from '@/composables/usePullRefresh'
 import { useTabBar } from '@/composables/useTabBar'
+import { useDesktopLayout } from '@/composables/useDesktopLayout'
+import { useDesktopListResize } from '@/composables/useDesktopListResize'
 import type { Conversation } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { openQrScanner } from '@/utils/qrcode'
+import { isDissolvedGroupConversationPreview } from '@/utils/im-notification'
 
 useAuthGuard()
 useTabBar()
+const { isDesktop } = useDesktopLayout()
+const { listWidth, isResizing, onResizeStart } = useDesktopListResize(isDesktop)
 
 const statusBarHeight = getStatusBarHeight()
 const chatStore = useChatStore()
+const contactStore = useContactStore()
 const keyword = ref('')
 const showAddMenu = ref(false)
 const showFilter = ref(false)
 const filterKey = ref<'all' | 'unread'>('all')
+const selectedConv = ref<Conversation | null>(null)
 
 const filterLabel = computed(() => (filterKey.value === 'unread' ? '未读' : '全部'))
 
-// 当前左滑展开的会话 id（同一时间只允许一个 row 展开）
 const activeSwipeId = ref<string | null>(null)
 
-// uni-swipe-action-item 通过 change 事件回报展开/收起状态，同步到 activeSwipeId
 function onSwipeChange(item: Conversation, open: string) {
   activeSwipeId.value = open === 'right' ? item.id : null
 }
 
-// 点击「置顶」按钮
 async function onTogglePin(item: Conversation) {
   activeSwipeId.value = null
   try {
@@ -45,11 +55,13 @@ async function onTogglePin(item: Conversation) {
   }
 }
 
-// 点击「移除」按钮
 async function onHideConversation(item: Conversation) {
   activeSwipeId.value = null
   try {
     await chatStore.hideConversationLocal(item.id)
+    if (selectedConv.value?.id === item.id) {
+      selectedConv.value = null
+    }
   } catch (e) {
     uni.showToast({
       title: (e as Error)?.message || '移除失败',
@@ -58,7 +70,6 @@ async function onHideConversation(item: Conversation) {
   }
 }
 
-// 点击 row 内容区 → 打开会话
 function onSwipeItemClick(item: Conversation) {
   activeSwipeId.value = null
   openConversation(item)
@@ -92,6 +103,14 @@ const { refreshing, onRefresherRefresh } = usePullRefresh(reloadConversations)
 function openConversation(item: Conversation) {
   showAddMenu.value = false
   showFilter.value = false
+  if (isDesktop.value) {
+    if (isDissolvedGroupConversation(item)) {
+      notifyChatUnavailable()
+      return
+    }
+    selectedConv.value = item
+    return
+  }
   uni.navigateTo({
     url: `/pages/chat/room?conversationId=${encodeURIComponent(item.id)}&type=${item.type}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}`,
   })
@@ -122,96 +141,215 @@ function closeMenus() {
   showFilter.value = false
   activeSwipeId.value = null
 }
+
+function clearSelectedConv() {
+  selectedConv.value = null
+}
+
+/** PC 宽屏：已解散群聊不允许进入右侧聊天区（对齐参考站「这个聊天已不存在」） */
+function isDissolvedGroupConversation(conv: Conversation): boolean {
+  if (conv.type !== 'group') return false
+  if (isDissolvedGroupConversationPreview(conv.lastMessage)) return true
+  const msgs = chatStore.messagesMap[conv.id]
+  if (msgs?.length) {
+    const last = msgs[msgs.length - 1]
+    if (last.notificationKind === 'dissolved') return true
+  }
+  return false
+}
+
+function pickDesktopConversation(list: Conversation[]): Conversation | null {
+  return list.find((c) => !isDissolvedGroupConversation(c)) ?? null
+}
+
+function notifyChatUnavailable() {
+  uni.showToast({ title: '这个聊天已不存在', icon: 'none', duration: 2000 })
+}
+
+/** 通讯录 PC 内联群列表点进：切到聊天 tab 后打开对应群聊 */
+onShow(() => {
+  if (!isDesktop.value) return
+  const pending = contactStore.takePendingDesktopChat()
+  if (!pending) return
+  void (async () => {
+    try {
+      if (!chatStore.conversations.length) {
+        await chatStore.loadConversations()
+      }
+      const conv = await chatStore.enterConversation({
+        type: pending.type,
+        businessId: pending.businessId,
+      })
+      const matched = chatStore.conversations.find((c) => c.id === conv.id)
+      if (matched && !isDissolvedGroupConversation(matched)) {
+        selectedConv.value = matched
+        return
+      }
+      selectedConv.value = {
+        id: conv.id,
+        type: 'group',
+        title: conv.title || pending.title,
+        avatar: conv.avatar || pending.avatar,
+        lastMessage: conv.lastMessage || '',
+        lastMessageAt: conv.lastMessageAt || '',
+        unreadCount: conv.unreadCount || 0,
+      }
+    } catch (e) {
+      uni.showToast({ title: (e as Error)?.message || '打开群聊失败', icon: 'none' })
+    }
+  })()
+})
+
+/** PC 宽屏：默认选中第一条可用会话，跳过已解散群聊 */
+watchEffect(() => {
+  if (!isDesktop.value) return
+  const list = filtered.value
+  if (!list.length) {
+    selectedConv.value = null
+    return
+  }
+  if (
+    selectedConv.value &&
+    list.some((c) => c.id === selectedConv.value!.id) &&
+    !isDissolvedGroupConversation(selectedConv.value)
+  ) {
+    return
+  }
+  selectedConv.value = pickDesktopConversation(list)
+})
 </script>
 
 <template>
-  <view class="page" @click="closeMenus">
-    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
-      <text class="title">聊天</text>
-      <view class="add-wrap" @click.stop="onAdd">
-        <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
-        <view v-if="showAddMenu" class="popup-menu">
-          <view class="popup-item" @click="go('/pages/contacts/add-friend')">
-            <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
-            <text>添加朋友</text>
-          </view>
-          <view class="popup-item" @click="goScan">
-            <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
-            <text>添加群聊</text>
-          </view>
-          <view class="popup-item" @click="go('/pages/group/create')">
-            <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
-            <text>创建群聊</text>
-          </view>
-        </view>
-      </view>
-    </view>
+  <view
+    :class="isDesktop ? 'im-desktop-workspace' : 'page'"
+    @click="closeMenus"
+  >
+    <ImDesktopSidebar v-if="isDesktop" current="chat" />
 
-    <AppSearchBar v-model="keyword" />
-
-    <view class="filter-row">
-      <view class="filter-wrap" @click.stop="showFilter = !showFilter">
-        <text class="filter">{{ filterLabel }}</text>
-        <view class="filter-caret" />
-        <view v-if="showFilter" class="popup-menu filter-menu">
-          <view
-            class="popup-item"
-            :class="{ active: filterKey === 'all' }"
-            @click="setFilter('all')"
-          >全部</view>
-          <view
-            class="popup-item"
-            :class="{ active: filterKey === 'unread' }"
-            @click="setFilter('unread')"
-          >未读</view>
-        </view>
-      </view>
-    </view>
-
-    <scroll-view
-      scroll-y
-      class="list"
-      refresher-enabled
-      refresher-default-style="black"
-      :refresher-triggered="refreshing"
-      @refresherrefresh="onRefresherRefresh"
+    <view
+      :class="isDesktop ? 'im-desktop-list-column page-desktop-list' : ''"
+      class="list-panel"
+      :style="isDesktop ? { width: `${listWidth}px` } : undefined"
     >
-      <uni-swipe-action>
-        <ImSwipeActionItem
-          v-for="item in filtered"
-          :key="item.id"
-          :item="item"
-          :show="activeSwipeId === item.id ? 'right' : 'none'"
-          @item-click="onSwipeItemClick"
-          @change="(open) => onSwipeChange(item, open)"
-        >
-          <template #right>
-            <view class="swipe-actions">
-              <view
-                class="swipe-btn swipe-btn-pin"
-                :class="{ active: item.pinned }"
-                @click.stop="onTogglePin(item)"
-              >
-                <text>{{ item.pinned ? '取消置顶' : '置顶' }}</text>
-              </view>
-              <view class="swipe-btn swipe-btn-remove" @click.stop="onHideConversation(item)">
-                <text>移除</text>
-              </view>
+      <view
+        class="header"
+        :style="isDesktop ? undefined : { paddingTop: statusBarHeight + 'px' }"
+      >
+        <text class="title">聊天</text>
+        <view class="add-wrap" @click.stop="onAdd">
+          <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
+          <view v-if="showAddMenu" class="popup-menu">
+            <view class="popup-item" @click="go('/pages/contacts/add-friend')">
+              <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
+              <text>添加朋友</text>
             </view>
-          </template>
-        </ImSwipeActionItem>
-      </uni-swipe-action>
-      <view v-if="!filtered.length" class="empty">无聊天消息</view>
-    </scroll-view>
+            <view class="popup-item" @click="goScan">
+              <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
+              <text>添加群聊</text>
+            </view>
+            <view class="popup-item" @click="go('/pages/group/create')">
+              <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
+              <text>创建群聊</text>
+            </view>
+          </view>
+        </view>
+      </view>
 
-    <ImTabBar current="chat" />
+      <AppSearchBar v-model="keyword" />
+
+      <view v-if="!isDesktop" class="filter-row">
+        <view class="filter-wrap" @click.stop="showFilter = !showFilter">
+          <text class="filter">{{ filterLabel }}</text>
+          <view class="filter-caret" />
+          <view v-if="showFilter" class="popup-menu filter-menu">
+            <view
+              class="popup-item"
+              :class="{ active: filterKey === 'all' }"
+              @click="setFilter('all')"
+            >全部</view>
+            <view
+              class="popup-item"
+              :class="{ active: filterKey === 'unread' }"
+              @click="setFilter('unread')"
+            >未读</view>
+          </view>
+        </view>
+      </view>
+
+      <scroll-view
+        scroll-y
+        class="list"
+        refresher-enabled
+        refresher-default-style="black"
+        :refresher-triggered="refreshing"
+        @refresherrefresh="onRefresherRefresh"
+      >
+        <template v-if="isDesktop">
+          <ConversationItem
+            v-for="item in filtered"
+            :key="item.id"
+            :item="item"
+            :selected="selectedConv?.id === item.id"
+            @click="openConversation"
+          />
+        </template>
+        <uni-swipe-action v-else>
+          <ImSwipeActionItem
+            v-for="item in filtered"
+            :key="item.id"
+            :item="item"
+            :show="activeSwipeId === item.id ? 'right' : 'none'"
+            @item-click="onSwipeItemClick"
+            @change="(open) => onSwipeChange(item, open)"
+          >
+            <template #right>
+              <view class="swipe-actions">
+                <view
+                  class="swipe-btn swipe-btn-pin"
+                  :class="{ active: item.pinned }"
+                  @click.stop="onTogglePin(item)"
+                >
+                  <text>{{ item.pinned ? '取消置顶' : '置顶' }}</text>
+                </view>
+                <view class="swipe-btn swipe-btn-remove" @click.stop="onHideConversation(item)">
+                  <text>移除</text>
+                </view>
+              </view>
+            </template>
+          </ImSwipeActionItem>
+        </uni-swipe-action>
+        <view v-if="!filtered.length" class="empty">无聊天消息</view>
+      </scroll-view>
+    </view>
+
+    <ImDesktopListResizer
+      v-if="isDesktop"
+      :active="isResizing"
+      @start="onResizeStart"
+    />
+
+    <view v-if="isDesktop" class="im-desktop-room-column">
+      <ChatRoom
+        v-if="selectedConv"
+        :key="selectedConv.id"
+        embedded
+        :conversation-id="selectedConv.id"
+        :type="selectedConv.type"
+        :title="selectedConv.title"
+        :avatar="selectedConv.avatar"
+        @close="clearSelectedConv"
+        @dissolved="clearSelectedConv"
+      />
+      <view v-else class="im-desktop-room-empty">选择一个会话开始聊天</view>
+    </view>
+
+    <ImTabBar v-if="!isDesktop" current="chat" />
     <ImNotificationPermissionDialog />
   </view>
 </template>
 
 <style scoped lang="scss">
 .page {
-  /* iOS Safari：只有 min-height 时，flex 子项 height:0 会塌成 0，会话列表整页空白 */
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -222,7 +360,16 @@ function closeMenus() {
   box-sizing: border-box;
 }
 
-/* 与 contacts/mine 的 tab 大标题行统一：固定 96rpx 行高 + 垂直居中 */
+.list-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+
 .header {
   display: flex;
   align-items: center;

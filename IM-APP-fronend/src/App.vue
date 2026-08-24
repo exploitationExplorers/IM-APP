@@ -38,4 +38,5 @@ onShow(() => {
 
 <style lang="scss">
 @import '@/styles/common.scss';
+@import '@/styles/desktop.scss';
 </style>

@@ -1,0 +1,124 @@
+/* H5 PC 模式：参考站三栏布局 https://qwa.11skrmx6.net */
+
+@media (min-width: 960px) {
+  html.im-desktop,
+  html.im-desktop body,
+  html.im-desktop #app {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html.im-desktop page,
+  html.im-desktop uni-page-body {
+    height: 100%;
+    min-height: 100%;
+  }
+
+  html.im-desktop .tabbar {
+    display: none !important;
+  }
+}
+
+.im-desktop-workspace {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: #fff;
+}
+
+.im-desktop-main {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.im-desktop-list-column {
+  flex-shrink: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  overflow: hidden;
+}
+
+.im-desktop-room-column {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: #f5f5f5;
+  overflow: hidden;
+}
+
+.im-desktop-room-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a8f9c;
+  font-size: 15px;
+}
+
+html.im-desktop .page-desktop-list {
+  padding-bottom: 0 !important;
+  flex: 0 0 auto !important;
+}
+
+html.im-desktop .page-desktop-list .header {
+  height: 56px;
+  padding: 0 16px !important;
+}
+
+html.im-desktop .page-desktop-list .title {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+html.im-desktop .im-desktop-main.page {
+  padding-bottom: 0 !important;
+}
+
+html.im-desktop .im-desktop-detail-column {
+  background: #fff;
+  position: relative;
+}
+
+html.im-desktop .page-desktop-contacts .section-head {
+  margin-top: 8px;
+}
+
+html.im-desktop .page-desktop-contacts .contact-row {
+  height: 64px;
+  padding: 0 16px;
+  gap: 12px;
+}
+
+html.im-desktop .page-desktop-contacts .avatar {
+  width: 40px;
+  height: 40px;
+}
+
+html.im-desktop .page-desktop-contacts .name {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+html.im-desktop .page-desktop-contacts .menu-item {
+  height: 48px;
+  padding: 0 16px;
+}
+
+html.im-desktop .page-desktop-contacts .menu-text {
+  font-size: 14px;
+}
+
+html.im-desktop.im-desktop-resizing,
+html.im-desktop.im-desktop-resizing body {
+  cursor: col-resize !important;
+  user-select: none !important;
+}

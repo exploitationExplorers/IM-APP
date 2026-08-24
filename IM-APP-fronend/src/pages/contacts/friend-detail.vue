@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { APP_CONFIG, THEME } from '@/config'
 import {
@@ -17,6 +17,19 @@ import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { setConversationPin, setConversationRecvOpt } from '@/utils/openim'
 import { safeBack } from '@/utils/nav'
 import type { Contact, GroupPreview } from '@/types'
+
+const props = withDefaults(
+  defineProps<{
+    /** H5 PC 三栏内嵌，不走 navigateTo */
+    embedded?: boolean
+    contactId?: string
+  }>(),
+  { embedded: false },
+)
+
+const emit = defineEmits<{
+  close: []
+}>()
 
 useAuthGuard()
 
@@ -42,10 +55,27 @@ const tagText = computed(() =>
 const groups = computed(() => contact.value?.commonGroups || [])
 
 onLoad((query) => {
+  if (props.embedded) return
   contactId.value = String(query?.id || '')
 })
 
+onMounted(() => {
+  if (!props.embedded || !props.contactId) return
+  contactId.value = props.contactId
+  void loadDetail()
+})
+
+watch(
+  () => props.contactId,
+  (id) => {
+    if (!props.embedded || !id) return
+    contactId.value = id
+    void loadDetail()
+  },
+)
+
 onShow(() => {
+  if (props.embedded) return
   if (contactId.value) loadDetail()
 })
 
@@ -103,6 +133,10 @@ async function onTogglePin(v: boolean) {
 }
 
 function goBack() {
+  if (props.embedded) {
+    emit('close')
+    return
+  }
   safeBack('/pages/contacts/index')
 }
 
@@ -198,6 +232,10 @@ function onDelete() {
         await deleteContact(contact.value.id)
         await contactStore.loadDirectory()
         uni.showToast({ title: '已删除', icon: 'success' })
+        if (props.embedded) {
+          emit('close')
+          return
+        }
         setTimeout(() => uni.navigateBack(), 400)
       } catch (e) {
         uni.showToast({ title: (e as Error).message, icon: 'none' })
@@ -208,13 +246,12 @@ function onDelete() {
 </script>
 
 <template>
-  <view class="page" @click="closeMore">
-    <!-- 参考站：主色底 + friend-info.webp luminosity 混合 -->
+  <view class="page" :class="{ 'page-embedded': embedded }" @click="closeMore">
     <view class="hero">
       <view class="hero-img" />
     </view>
 
-    <ImNavBar title="好友详情" @back="goBack">
+    <ImNavBar v-if="!embedded" title="好友详情" @back="goBack">
       <template #right>
         <view class="nav-btn" @click.stop="onMore">
           <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
@@ -231,6 +268,22 @@ function onDelete() {
         </view>
       </template>
     </ImNavBar>
+
+    <view v-else class="embedded-toolbar">
+      <view class="embedded-more" @click.stop="onMore">
+        <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
+        <view v-if="showMore" class="more-menu">
+          <view class="more-item" @click.stop="onBlock">
+            <image class="more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
+            <text>{{ contact?.isBlocked ? '移出黑名单' : '加入黑名单' }}</text>
+          </view>
+          <view class="more-item danger" @click.stop="onDelete">
+            <image class="more-icon" src="/static/icons/icon-profile-remove.svg" mode="aspectFit" />
+            <text>删除联络人</text>
+          </view>
+        </view>
+      </view>
+    </view>
 
     <view v-if="contact" class="body">
       <view class="sheet">
@@ -328,6 +381,31 @@ function onDelete() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.page-embedded {
+  min-height: 0;
+  height: 100%;
+}
+
+.embedded-toolbar {
+  position: relative;
+  z-index: 20;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.embedded-more {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
 }
 
 /* 参考站 h-35dvh */

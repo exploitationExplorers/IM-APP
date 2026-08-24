@@ -7,6 +7,8 @@ import { useChatStore } from '@/stores/chat'
 
 const props = defineProps<{
   item: Conversation
+  /** H5 PC 三栏：当前选中会话高亮 */
+  selected?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -30,7 +32,7 @@ const lastFailed = computed(() => {
 </script>
 
 <template>
-  <view class="conv" @click="emit('click', item)">
+  <view class="conv" :class="{ selected }" @click="emit('click', item)">
     <view class="avatar-wrap">
       <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
       <image v-if="item.pinned" class="pin-badge" src="/static/icons/icon-pin.svg" mode="aspectFit" />
@@ -62,6 +64,10 @@ const lastFailed = computed(() => {
   padding: 24rpx 40rpx;
   background: #fff;
   border-bottom: 1rpx solid #f0f1f4;
+}
+
+.conv.selected {
+  background: #f0f1f4;
 }
 
 .avatar-wrap {

@@ -31,6 +31,12 @@ export const useContactStore = defineStore('contact', () => {
   const pendingFriendRequests = ref<FriendRequest[]>([])
   const recentFriendRequests = ref<FriendRequest[]>([])
   const groupsExpanded = ref(false)
+  const pendingDesktopChat = ref<{
+    type: 'group'
+    businessId: string
+    title: string
+    avatar: string
+  } | null>(null)
 
   /** 待处理的收到申请数，对齐参考站通讯录 / 新的朋友角标 */
   const pendingFriendRequestCount = computed(() => pendingFriendRequests.value.length)
@@ -176,6 +182,23 @@ export const useContactStore = defineStore('contact', () => {
     })
   }
 
+  /** H5 PC 三栏：切到聊天 tab 并在右侧内嵌打开群聊 */
+  function openChatWithGroupDesktop(groupId: string, groupName: string, avatar: string) {
+    pendingDesktopChat.value = {
+      type: 'group',
+      businessId: groupId,
+      title: groupName,
+      avatar,
+    }
+    uni.switchTab({ url: '/pages/chat/index' })
+  }
+
+  function takePendingDesktopChat() {
+    const pending = pendingDesktopChat.value
+    pendingDesktopChat.value = null
+    return pending
+  }
+
   function toggleGroupsExpanded() {
     groupsExpanded.value = !groupsExpanded.value
   }
@@ -216,6 +239,8 @@ export const useContactStore = defineStore('contact', () => {
     goToContacts,
     openChatWithContact,
     openChatWithGroup,
+    openChatWithGroupDesktop,
+    takePendingDesktopChat,
     toggleGroupsExpanded,
     reset,
   }

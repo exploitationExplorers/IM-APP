@@ -5,10 +5,13 @@ import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
 import { APP_CONFIG } from '@/config'
 import ImTabBar from '@/components/ImTabBar.vue'
+import ImDesktopSidebar from '@/components/desktop/ImDesktopSidebar.vue'
 import { getStatusBarHeight } from '@/utils/status-bar'
+import { useDesktopLayout } from '@/composables/useDesktopLayout'
 
 useAuthGuard()
 useTabBar()
+const { isDesktop } = useDesktopLayout()
 const userStore = useUserStore()
 const statusBarHeight = getStatusBarHeight()
 const heroPadTop = `calc(144rpx + ${statusBarHeight}px)`
@@ -49,7 +52,10 @@ function onLogout() {
 </script>
 
 <template>
-  <view class="page">
+  <view :class="isDesktop ? 'im-desktop-workspace' : 'page'">
+    <ImDesktopSidebar v-if="isDesktop" current="mine" />
+
+    <view :class="isDesktop ? 'im-desktop-main page' : ''">
     <view class="mine-header">
         <view class="mine-hero-card" :style="{ paddingTop: heroPadTop }">
         <view class="mine-profile">
@@ -69,7 +75,7 @@ function onLogout() {
         </view>
       </view>
 
-      <view class="mine-nav" :style="{ paddingTop: statusBarHeight + 'px' }">
+      <view class="mine-nav" :style="{ paddingTop: isDesktop ? '0px' : statusBarHeight + 'px' }">
         <view class="mine-nav-row">
           <text class="mine-nav-title">个人中心</text>
           <view class="mine-nav-spacer" />
@@ -95,7 +101,8 @@ function onLogout() {
       <text class="logout-text">退出</text>
     </view>
 
-    <ImTabBar current="mine" />
+    <ImTabBar v-if="!isDesktop" current="mine" />
+    </view>
   </view>
 </template>
 

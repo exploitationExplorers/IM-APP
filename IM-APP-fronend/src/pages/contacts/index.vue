@@ -4,10 +4,16 @@ import { onShow } from '@dcloudio/uni-app'
 import { storeToRefs } from 'pinia'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ImTabBar from '@/components/ImTabBar.vue'
+import ImDesktopSidebar from '@/components/desktop/ImDesktopSidebar.vue'
+import ImDesktopListResizer from '@/components/desktop/ImDesktopListResizer.vue'
+import ImDesktopGroupsPanel from '@/components/desktop/ImDesktopGroupsPanel.vue'
+import FriendDetail from '@/pages/contacts/friend-detail.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { usePullRefresh } from '@/composables/usePullRefresh'
 import { useTabBar } from '@/composables/useTabBar'
+import { useDesktopLayout } from '@/composables/useDesktopLayout'
+import { useDesktopListResize } from '@/composables/useDesktopListResize'
 import type { Contact, ContactListSort, GroupPreview } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { openQrScanner } from '@/utils/qrcode'
@@ -16,11 +22,16 @@ import { getToken } from '@/utils/request'
 
 useAuthGuard()
 useTabBar()
+const { isDesktop } = useDesktopLayout()
+const { listWidth, isResizing, onResizeStart } = useDesktopListResize(isDesktop)
+
+const selectedContact = ref<Contact | null>(null)
 
 const statusBarHeight = getStatusBarHeight()
 const contactStore = useContactStore()
 const { contacts, contactTotal, contactHasMore, contactsLoading, groups, pendingFriendRequestCount } = storeToRefs(contactStore)
 const storageFriendBadge = ref(readFriendRequestBadge())
+const showGroupsPanel = ref(false)
 
 const friendRequestBadge = computed(() => {
   const n = Math.max(pendingFriendRequestCount.value, storageFriendBadge.value)
@@ -40,6 +51,19 @@ const sortLabel = computed(() => {
 })
 
 const listSort = computed<ContactListSort>(() => (sortKey.value === 'name' ? 'name' : 'recent'))
+
+/** PC 内联群列表：不展示已解散群，默认预览 3 条 */
+const DESKTOP_GROUP_PREVIEW = 3
+
+const activeGroups = computed(() => groups.value.filter((g) => g.status !== 'dismissed'))
+
+const desktopGroupsVisible = computed(() => {
+  const list = activeGroups.value
+  if (list.length <= DESKTOP_GROUP_PREVIEW) return list
+  return list.slice(0, DESKTOP_GROUP_PREVIEW)
+})
+
+const showDesktopGroupExpand = computed(() => activeGroups.value.length > DESKTOP_GROUP_PREVIEW)
 
 function listName(c: Contact) {
   return c.remark?.trim() || c.nickname
@@ -100,10 +124,27 @@ function goScan() {
 }
 
 function openContact(c: Contact) {
+  if (isDesktop.value) {
+    selectedContact.value = c
+    return
+  }
   go(`/pages/contacts/friend-detail?id=${c.id}`)
 }
 
 function openGroupChat(g: GroupPreview) {
+  if (isDesktop.value) {
+    selectedContact.value = null
+    if (g.status === 'dismissed') {
+      uni.showToast({ title: '这个聊天已不存在', icon: 'none' })
+      return
+    }
+    contactStore.openChatWithGroupDesktop(
+      g.id,
+      g.name,
+      g.avatar || '/static/icons/menu-group.svg',
+    )
+    return
+  }
   if (g.status === 'dismissed') {
     uni.navigateTo({ url: `/pages/group/detail?id=${encodeURIComponent(g.id)}&dissolved=1` })
     return
@@ -126,121 +167,188 @@ function closeMenus() {
   showAddMenu.value = false
   showSort.value = false
 }
+
+function expandDesktopGroups() {
+  selectedContact.value = null
+  showGroupsPanel.value = true
+}
+
+function onPanelGroupSelect(g: GroupPreview) {
+  openGroupChat(g)
+}
 </script>
 
 <template>
-  <view class="page" @click="closeMenus">
-    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
-      <view class="header-row">
-      <text class="title">通讯录</text>
-      <view class="add-wrap" @click.stop="onAdd">
-        <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
-        <view v-if="showAddMenu" class="popup-menu">
-          <view class="popup-item" @click="go('/pages/contacts/add-friend')">
-            <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
-            <text>添加朋友</text>
-          </view>
-          <view class="popup-item" @click="goScan">
-            <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
-            <text>添加群聊</text>
-          </view>
-          <view class="popup-item" @click="go('/pages/group/create')">
-            <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
-            <text>创建群聊</text>
+  <view
+    :class="isDesktop ? 'im-desktop-workspace' : 'page'"
+    @click="closeMenus"
+  >
+    <ImDesktopSidebar v-if="isDesktop" current="contacts" />
+
+    <view
+      :class="isDesktop ? 'im-desktop-list-column page-desktop-list page-desktop-contacts' : ''"
+      class="list-panel"
+      :style="isDesktop ? { width: `${listWidth}px` } : undefined"
+    >
+      <view class="header" :style="{ paddingTop: isDesktop ? '0px' : statusBarHeight + 'px' }">
+        <view class="header-row">
+          <text class="title">通讯录</text>
+          <view class="add-wrap" @click.stop="onAdd">
+            <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
+            <view v-if="showAddMenu" class="popup-menu">
+              <view class="popup-item" @click="go('/pages/contacts/add-friend')">
+                <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
+                <text>添加朋友</text>
+              </view>
+              <view class="popup-item" @click="goScan">
+                <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
+                <text>添加群聊</text>
+              </view>
+              <view class="popup-item" @click="go('/pages/group/create')">
+                <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
+                <text>创建群聊</text>
+              </view>
+            </view>
           </view>
         </view>
       </view>
-      </view>
+
+      <AppSearchBar v-model="keyword" />
+
+      <scroll-view
+        scroll-y
+        class="body"
+        refresher-enabled
+        refresher-default-style="black"
+        :refresher-triggered="refreshing"
+        :lower-threshold="80"
+        @refresherrefresh="onRefresherRefresh"
+        @scrolltolower="onLoadMore"
+        @scroll="onScroll"
+      >
+        <view class="menu-list">
+          <view class="menu-item" @click="go('/pages/contacts/new-friends')">
+            <image class="menu-icon" src="/static/icons/menu-new-friend.svg" mode="aspectFit" />
+            <text class="menu-text">新的朋友</text>
+            <view v-if="friendRequestBadge" class="menu-badge">
+              <text class="menu-badge-text">{{ friendRequestBadge }}</text>
+            </view>
+            <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+          </view>
+          <view class="menu-item" @click="go('/pages/contacts/tags')">
+            <image class="menu-icon" src="/static/icons/menu-tag.svg" mode="aspectFit" />
+            <text class="menu-text">标签</text>
+            <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+          </view>
+          <view class="menu-item" @click="go('/pages/contacts/groups')">
+            <image class="menu-icon" src="/static/icons/menu-group.svg" mode="aspectFit" />
+            <text class="menu-text">{{ isDesktop ? '群聊' : '群聊天' }}</text>
+            <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+          </view>
+
+          <!-- PC：参考站在「群聊」下方内联展示群列表（不显示已解散群） -->
+          <view v-if="isDesktop && activeGroups.length" class="desktop-group-panel">
+            <view
+              v-for="g in desktopGroupsVisible"
+              :key="g.id"
+              class="desktop-group-row"
+              @click.stop="openGroupChat(g)"
+            >
+              <image
+                class="desktop-group-avatar"
+                :src="g.avatar || '/static/icons/menu-group.svg'"
+                mode="aspectFill"
+              />
+              <text class="desktop-group-name">{{ g.name }}</text>
+            </view>
+            <view
+              v-if="showDesktopGroupExpand"
+              class="desktop-group-expand"
+              @click.stop="expandDesktopGroups"
+            >
+              <text class="desktop-group-expand-text">展开所有群聊 ({{ activeGroups.length }})</text>
+            </view>
+          </view>
+        </view>
+
+        <view v-if="!isDesktop && groups.length" class="group-band">
+          <view
+            v-for="g in groups.slice(0, 5)"
+            :key="g.id"
+            class="group-card"
+            @click="openGroupChat(g)"
+          >
+            <image class="group-avatar" :src="g.avatar || '/static/icons/menu-group.svg'" mode="aspectFill" />
+            <text class="group-name">{{ g.name }}</text>
+            <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
+          </view>
+        </view>
+        <view v-if="!isDesktop" class="section-divider" />
+
+        <view class="section-head">
+          <text class="section-count">联络人 ({{ contactTotal }})</text>
+          <view class="sort-wrap" @click.stop="showSort = !showSort">
+            <text class="sort">{{ sortLabel }}</text>
+            <image class="sort-caret" src="/static/icons/icon-caret.svg" mode="aspectFit" />
+            <view v-if="showSort" class="popup-menu sort-menu">
+              <view
+                class="popup-item"
+                :class="{ active: sortKey === 'recent' }"
+                @click="setSort('recent')"
+              >最近加入(默认)</view>
+              <view
+                class="popup-item"
+                :class="{ active: sortKey === 'name' }"
+                @click="setSort('name')"
+              >名字</view>
+              <view
+                class="popup-item"
+                :class="{ active: sortKey === 'chat' }"
+                @click="setSort('chat')"
+              >最近聊天</view>
+            </view>
+          </view>
+        </view>
+
+        <view
+          v-for="c in contacts"
+          :key="c.id"
+          class="contact-row"
+          :class="{ selected: isDesktop && selectedContact?.id === c.id }"
+          @click="openContact(c)"
+        >
+          <image class="avatar" :src="c.avatar" mode="aspectFill" />
+          <text class="name">{{ listName(c) }}</text>
+        </view>
+        <view v-if="contactsLoading" class="list-status">加载中</view>
+        <view v-else-if="!contacts.length" class="list-status">暂无联络人</view>
+        <view v-else-if="!contactHasMore" class="list-status">没有更多了</view>
+      </scroll-view>
     </view>
 
-    <AppSearchBar v-model="keyword" />
+    <ImDesktopListResizer
+      v-if="isDesktop"
+      :active="isResizing"
+      @start="onResizeStart"
+    />
 
-    <scroll-view
-      scroll-y
-      class="body"
-      refresher-enabled
-      refresher-default-style="black"
-      :refresher-triggered="refreshing"
-      :lower-threshold="80"
-      @refresherrefresh="onRefresherRefresh"
-      @scrolltolower="onLoadMore"
-      @scroll="onScroll"
-    >
-      <view class="menu-list">
-        <view class="menu-item" @click="go('/pages/contacts/new-friends')">
-          <image class="menu-icon" src="/static/icons/menu-new-friend.svg" mode="aspectFit" />
-          <text class="menu-text">新的朋友</text>
-          <view v-if="friendRequestBadge" class="menu-badge">
-            <text class="menu-badge-text">{{ friendRequestBadge }}</text>
-          </view>
-          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
-        </view>
-        <view class="menu-item" @click="go('/pages/contacts/tags')">
-          <image class="menu-icon" src="/static/icons/menu-tag.svg" mode="aspectFit" />
-          <text class="menu-text">标签</text>
-          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
-        </view>
-        <view class="menu-item" @click="go('/pages/contacts/groups')">
-          <image class="menu-icon" src="/static/icons/menu-group.svg" mode="aspectFit" />
-          <text class="menu-text">群聊天</text>
-          <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
-        </view>
-      </view>
+    <view v-if="isDesktop" class="im-desktop-room-column im-desktop-detail-column">
+      <FriendDetail
+        v-if="selectedContact && !showGroupsPanel"
+        :key="selectedContact.id"
+        embedded
+        :contact-id="selectedContact.id"
+        @close="selectedContact = null"
+      />
+      <view v-else-if="!showGroupsPanel" class="im-desktop-room-empty" />
 
-      <view v-if="groups.length" class="group-band">
-        <view
-          v-for="g in groups.slice(0, 5)"
-          :key="g.id"
-          class="group-card"
-          @click="openGroupChat(g)"
-        >
-          <image class="group-avatar" :src="g.avatar || '/static/icons/menu-group.svg'" mode="aspectFill" />
-          <text class="group-name">{{ g.name }}</text>
-          <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
-        </view>
-      </view>
-      <view class="section-divider" />
+      <ImDesktopGroupsPanel
+        v-model="showGroupsPanel"
+        @select="onPanelGroupSelect"
+      />
+    </view>
 
-      <view class="section-head">
-        <text class="section-count">联络人 ({{ contactTotal }})</text>
-        <view class="sort-wrap" @click.stop="showSort = !showSort">
-          <text class="sort">{{ sortLabel }}</text>
-          <image class="sort-caret" src="/static/icons/icon-caret.svg" mode="aspectFit" />
-          <view v-if="showSort" class="popup-menu sort-menu">
-            <view
-              class="popup-item"
-              :class="{ active: sortKey === 'recent' }"
-              @click="setSort('recent')"
-            >最近加入(默认)</view>
-            <view
-              class="popup-item"
-              :class="{ active: sortKey === 'name' }"
-              @click="setSort('name')"
-            >名字</view>
-            <view
-              class="popup-item"
-              :class="{ active: sortKey === 'chat' }"
-              @click="setSort('chat')"
-            >最近聊天</view>
-          </view>
-        </view>
-      </view>
-
-      <view
-        v-for="c in contacts"
-        :key="c.id"
-        class="contact-row"
-        @click="openContact(c)"
-      >
-        <image class="avatar" :src="c.avatar" mode="aspectFill" />
-        <text class="name">{{ listName(c) }}</text>
-      </view>
-      <view v-if="contactsLoading" class="list-status">加载中</view>
-      <view v-else-if="!contacts.length" class="list-status">暂无联络人</view>
-      <view v-else-if="!contactHasMore" class="list-status">没有更多了</view>
-    </scroll-view>
-
-    <ImTabBar current="contacts" />
+    <ImTabBar v-if="!isDesktop" current="contacts" />
   </view>
 </template>
 
@@ -254,6 +362,16 @@ function closeMenus() {
   flex-direction: column;
   padding-bottom: calc(144rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
+}
+
+.list-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
 }
 
 .header {
@@ -397,6 +515,74 @@ function closeMenus() {
   margin-bottom: 16rpx;
 }
 
+.desktop-group-panel {
+  margin: 0 16px 12px;
+  padding: 4px 0;
+  background: #fff;
+  border: 1px solid #ececec;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.desktop-group-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.desktop-group-row:active {
+  background: #f5f6f8;
+}
+
+.desktop-group-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #f3f4f7;
+  flex-shrink: 0;
+}
+
+.desktop-group-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-group-row .dissolved-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  margin-left: 0;
+}
+
+.desktop-group-expand {
+  min-height: 40px;
+  padding: 8px 12px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.desktop-group-expand:active {
+  background: #f5f6f8;
+}
+
+.desktop-group-expand-text {
+  font-size: 13px;
+  line-height: 20px;
+  color: #0a2fc2;
+  text-align: center;
+}
+
 .group-card {
   display: flex;
   align-items: center;
@@ -487,6 +673,10 @@ function closeMenus() {
   padding: 0 40rpx;
   background: #fff;
   box-sizing: border-box;
+}
+
+.contact-row.selected {
+  background: #f0f1f4;
 }
 
 .avatar {

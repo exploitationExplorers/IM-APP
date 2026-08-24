@@ -249,3 +249,10 @@ export function formatIMNotification(item: MessageItem): string {
       return ''
   }
 }
+
+/** 会话列表预览是否表明群已解散（PC 宽屏进房前拦截用） */
+export function isDissolvedGroupConversationPreview(lastMessage?: string): boolean {
+  const text = (lastMessage || '').trim()
+  if (!text) return false
+  return text.includes('解散了群聊') || text.includes('群聊已解散')
+}

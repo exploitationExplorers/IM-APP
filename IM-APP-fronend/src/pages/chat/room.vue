@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
@@ -8,6 +8,7 @@ import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
+import ImDesktopGroupMenu from '@/components/desktop/ImDesktopGroupMenu.vue'
 import { useChatMessageActions, type MemberMeta } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
@@ -29,11 +30,29 @@ import {
   rememberDismissedAnnouncement,
 } from '@/utils/group-announcement'
 
+const props = withDefaults(
+  defineProps<{
+    /** H5 PC 三栏内嵌，不走 navigateTo */
+    embedded?: boolean
+    conversationId?: string
+    type?: 'private' | 'group'
+    title?: string
+    avatar?: string
+  }>(),
+  { embedded: false },
+)
+
+const emit = defineEmits<{
+  close: []
+  dissolved: []
+}>()
+
 const chatStore = useChatStore()
 const userStore = useUserStore()
 const contactStore = useContactStore()
 const forwardStore = useForwardStore()
 const successVisible = ref(false)
+const showGroupMenu = ref(false)
 
 const statusBarHeight = getStatusBarHeight()
 
@@ -368,8 +387,15 @@ let dissolveExitTimer: ReturnType<typeof setTimeout> | null = null
 function exitDissolvedRoom() {
   if (dissolveExited) return
   dissolveExited = true
-  uni.showToast({ title: '该群已解散', icon: 'none', duration: 2000 })
-  // 稍等 toast 渲染再切页；App 端 toast 为原生层，切页后仍可见
+  uni.showToast({
+    title: props.embedded ? '这个聊天已不存在' : '该群已解散',
+    icon: 'none',
+    duration: 2000,
+  })
+  if (props.embedded) {
+    emit('dissolved')
+    return
+  }
   dissolveExitTimer = setTimeout(() => {
     dissolveExitTimer = null
     uni.switchTab({ url: '/pages/chat/index' })
@@ -393,15 +419,40 @@ watch(groupDissolved, (dissolved) => {
   if (dissolved) exitDissolvedRoom()
 })
 
+watch(
+  () => props.conversationId,
+  () => {
+    showGroupMenu.value = false
+  },
+)
+
 onLoad(async (query) => {
+  if (props.embedded) return
+  await bootstrapRoom(query as Record<string, string | undefined>)
+})
+
+onMounted(() => {
+  if (!props.embedded || !props.conversationId) return
+  void bootstrapRoom({
+    conversationId: props.conversationId,
+    type: props.type,
+    title: props.title,
+    avatar: props.avatar,
+  })
+})
+
+async function bootstrapRoom(query: Record<string, string | undefined>) {
+  dissolveExited = false
   roomFirstMessagesMarked = false
   perfMarkStart('chat:room-first-messages')
   title.value = decodeURIComponent(String(query?.title || '聊天'))
   peerAvatar.value = decodeURIComponent(String(query?.avatar || APP_CONFIG.defaultAvatarUrl))
   chatType.value = String(query?.type || 'group') === 'private' ? 'private' : 'group'
   businessId.value = String(query?.targetId || '')
-  uni.setNavigationBarTitle({ title: '' })
-  uni.hideNavigationBarLoading?.()
+  if (!props.embedded) {
+    uni.setNavigationBarTitle({ title: '' })
+    uni.hideNavigationBarLoading?.()
+  }
 
   try {
     const convIdHint = String(query?.conversationId || '')
@@ -482,7 +533,7 @@ onLoad(async (query) => {
     console.error('[chat] 打开会话失败', e)
     uni.showToast({ title: (e as Error)?.message || '会话打开失败', icon: 'none', duration: 4000 })
   }
-})
+}
 
 async function onScrollToUpper() {
   if (!conversationId.value) return
@@ -645,6 +696,10 @@ async function doRetry(m: ChatMessage) {
 }
 
 function goBack() {
+  if (props.embedded) {
+    emit('close')
+    return
+  }
   safeBack('/pages/chat/index')
 }
 
@@ -781,6 +836,26 @@ async function goToProfile() {
   uni.navigateTo({
     url: `/pages/group/detail?id=${encodeURIComponent(id)}&code=group`,
   })
+}
+
+/** H5 PC 三栏：群聊右上角显示下拉菜单，不跳转整页详情 */
+async function onHeaderMoreClick() {
+  if (props.embedded && chatType.value === 'group') {
+    if (!businessId.value) {
+      try {
+        businessId.value = await resolveBusinessTarget()
+      } catch {
+        businessId.value = ''
+      }
+    }
+    if (!businessId.value) {
+      uni.showToast({ title: '暂无可跳转的资料', icon: 'none' })
+      return
+    }
+    showGroupMenu.value = !showGroupMenu.value
+    return
+  }
+  goToProfile()
 }
 
 function resolveSenderBusinessId(message: ChatMessage): string {
@@ -1289,14 +1364,25 @@ function pickFavorite() {
 </script>
 
 <template>
-  <view class="room">
-    <view class="chat-header" :style="{ paddingTop: statusBarHeight + 'px' }">
-      <view class="back-btn" @click="goBack">‹</view>
+  <view class="room" :class="{ 'room-embedded': embedded }">
+    <view
+      class="chat-header"
+      :style="{ paddingTop: embedded ? '0px' : statusBarHeight + 'px' }"
+    >
+      <view v-if="!embedded" class="back-btn" @click="goBack">‹</view>
       <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text>
       <view class="header-title" @click="goToProfile">
         <text class="header-title-text">{{ title }}</text>
       </view>
-      <view class="header-icon" @click="goToProfile">⋯</view>
+      <view class="header-icon-wrap">
+        <view class="header-icon" @click.stop="onHeaderMoreClick">⋯</view>
+        <ImDesktopGroupMenu
+          v-if="embedded && chatType === 'group' && businessId && conversationId"
+          v-model="showGroupMenu"
+          :group-id="businessId"
+          :conversation-id="conversationId"
+        />
+      </view>
     </view>
 
     <view v-if="showAnnouncementBanner" class="announce-bar">
@@ -1490,6 +1576,10 @@ function pickFavorite() {
   overflow: hidden;
 }
 
+.room-embedded {
+  height: 100%;
+}
+
 .chat-header {
   display: flex;
   align-items: center;
@@ -1499,6 +1589,9 @@ function pickFavorite() {
   background: #ffffff;
   border-bottom: 1rpx solid #ececec;
   flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+  overflow: visible;
 }
 
 .back-btn {
@@ -1539,6 +1632,11 @@ function pickFavorite() {
   color: #111;
 }
 
+.header-icon-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .header-icon {
   width: 52rpx;
   height: 52rpx;
@@ -1548,6 +1646,7 @@ function pickFavorite() {
   font-size: 42rpx;
   color: #444;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .announce-bar {
