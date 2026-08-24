@@ -7,6 +7,7 @@ import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { resolveIMGroup } from '@/api/im'
+import { GROUP_CREATED_WELCOME_TEXT } from '@/utils/im-notification'
 import { APP_CONFIG } from '@/config'
 import ImNavBar from '@/components/ImNavBar.vue'
 import type { Contact, ContactListSort } from '@/types'
@@ -128,7 +129,7 @@ function onConfirmSelect() {
 
 async function waitForGroupConversation(groupId: string) {
   const deadline = Date.now() + 12000
-  const welcome = '新群创建成功，一起来聊天吧'
+  const welcome = GROUP_CREATED_WELCOME_TEXT
   let found: { id: string; lastMessage: string } | undefined
   while (Date.now() < deadline) {
     try {
@@ -137,9 +138,8 @@ async function waitForGroupConversation(groupId: string) {
       found = chatStore.conversations.find(
         (c) => c.type === 'group' && c.groupId === target.imGroupId,
       )
-      // 等欢迎语落到会话后再标已读，避免随后到达又把红点加回来
-      if (found?.lastMessage.includes(welcome)) {
-        await chatStore.markAsRead(found.id)
+      // 等欢迎语落到会话预览即可返回；不要 markAsRead，保留未读红点（对齐参考站）
+      if (found && found.lastMessage.includes(welcome)) {
         return
       }
     } catch {
@@ -147,7 +147,6 @@ async function waitForGroupConversation(groupId: string) {
     }
     await new Promise((resolve) => setTimeout(resolve, 400))
   }
-  if (found) await chatStore.markAsRead(found.id)
 }
 
 async function onCreate() {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -225,10 +224,9 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		if err := w.ensureGroupMembersRegistered(ctx, state.Members); err != nil {
 			return err
 		}
-		if err := w.Client.EnsureGroup(ctx, group); err != nil {
-			return err
-		}
-		return w.sendGroupCreatedWelcome(ctx, state.ID, groupID)
+		// 欢迎语由 OpenIM 群创建通知（contentType 1501）以系统消息展示；
+		// 不再用 imAdmin 发文本气泡，否则会出现「假用户」头像且点资料失败。
+		return w.Client.EnsureGroup(ctx, group)
 	case repository.IMEventGroupUpdated:
 		var updatePayload repository.IMGroupUpdatePayload
 		if err := json.Unmarshal(event.Payload, &updatePayload); err != nil {
@@ -410,27 +408,6 @@ func (w *IMSyncWorker) ensureSingleMemberRegistered(ctx context.Context, members
 		})
 	}
 	return nil
-}
-
-func (w *IMSyncWorker) sendGroupCreatedWelcome(ctx context.Context, businessGroupID, imGroupID string) error {
-	if w.Access == nil || w.Client == nil {
-		return nil
-	}
-	key := "group-created-welcome:" + businessGroupID
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte("text:"+models.GroupCreatedWelcomeText)))
-	reservation, err := w.Access.ReserveSystemMessage(ctx, key, "group", businessGroupID, "text", hash)
-	if err != nil {
-		return err
-	}
-	if reservation.Status == "sent" || !reservation.ShouldSend {
-		return nil
-	}
-	sent, err := w.Client.SendTextMessage(ctx, imGroupID, 3, models.GroupCreatedWelcomeText)
-	if err != nil {
-		_ = w.Access.FailSystemMessage(ctx, reservation.ID, truncateError(err.Error(), 2000))
-		return err
-	}
-	return w.Access.CompleteSystemMessage(ctx, reservation.ID, sent.ServerMsgID, sent.ClientMsgID)
 }
 
 func remainingMuteSeconds(until *time.Time) int64 {

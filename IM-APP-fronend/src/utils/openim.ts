@@ -17,7 +17,7 @@ import { fetchIMToken, resolveIMGroup, reportSendFailure, type IMTokenResult } f
 import { getToken } from '@/utils/request'
 import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
-import { formatIMNotification, imNotificationEventKey, notificationKindOf } from '@/utils/im-notification'
+import { formatIMNotification, imNotificationEventKey, notificationKindOf, GROUP_CREATED_WELCOME_TEXT } from '@/utils/im-notification'
 import { effectiveGroupAtType, GroupAtType, highlightTagsOf } from '@/utils/group-announcement'
 import {
   parseVideoMeta,
@@ -1660,7 +1660,15 @@ export function toChatMessage(item: MessageItem): ChatMessage {
   const content = extractContent(item)
   const rawType = toAppMessageType(Number(item.contentType))
   // App 原生桥偶发 contentType 丢失/类型错标，图片会变成 text + file:// 路径；按 content 再收敛一次
-  const type = (resolveQuoteType(rawType, content) as AppMessageType) || rawType
+  let type = (resolveQuoteType(rawType, content) as AppMessageType) || rawType
+  // 历史：建群欢迎语曾由 imAdmin 以文本气泡下发；归一为系统提示，避免假用户头像
+  if (
+    type === 'text' &&
+    content.trim() === GROUP_CREATED_WELCOME_TEXT &&
+    (item.sendID === 'imAdmin' || item.senderNickname === 'imAdmin')
+  ) {
+    type = 'system'
+  }
   return {
     id: item.clientMsgID,
     conversationId: conversationIdOf(item),

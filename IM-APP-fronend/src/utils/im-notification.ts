@@ -34,6 +34,9 @@ const FriendNotice = {
 
 export const FRIEND_CONNECTED_TEXT = '你们已成为好友，现在可以开始聊天了'
 
+/** 新群欢迎语（OpenIM 群创建通知文案；历史 imAdmin 文本气泡也会归一成系统消息） */
+export const GROUP_CREATED_WELCOME_TEXT = '新群创建成功，一起来聊天吧'
+
 interface NoticeUser {
   userID?: string
   nickname?: string
@@ -163,15 +166,26 @@ export function isGroupMuteNotice(contentType: number): boolean {
 /**
  * 只折叠连续、签名相同的群改名通知。普通聊天消息会切断折叠；A→B→A 这类
  * 真实改名序列的签名也不同，不会被吞掉。
+ * 同时折叠连续重复的「新群创建成功」系统提示（通知 + 历史 imAdmin 文本并存时）。
  */
 export function collapseRepeatedGroupNameNotices(messages: ChatMessage[]): ChatMessage[] {
   let previousKey = ''
+  let previousWelcome = false
   return messages.filter((message) => {
+    const isWelcome =
+      message.type === 'system' && message.content.trim() === GROUP_CREATED_WELCOME_TEXT
+    if (isWelcome) {
+      if (previousWelcome) return false
+      previousWelcome = true
+      previousKey = ''
+      return true
+    }
+    previousWelcome = false
     const key =
       message.systemEventKey?.startsWith('group-name:') ||
       message.systemEventKey?.startsWith('friend-connected:')
-      ? message.systemEventKey
-      : ''
+        ? message.systemEventKey
+        : ''
     if (!key) {
       previousKey = ''
       return true
@@ -243,7 +257,7 @@ export function formatIMNotification(item: MessageItem): string {
       return op ? `${op} 将群主转让给 ${targets || '新群主'}` : '群主已转让'
     }
     case GroupNotice.Created:
-      return '新群创建成功，一起来聊天吧'
+      return GROUP_CREATED_WELCOME_TEXT
     default:
       // 改「禁止互加好友」等资料同步通知，参考站聊天里不展示
       return ''
