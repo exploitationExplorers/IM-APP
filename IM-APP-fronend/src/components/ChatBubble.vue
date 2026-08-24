@@ -8,7 +8,6 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, MessageQuote } from '@/types'
 import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster } from '@/utils/chatMedia'
-import { captureAppVideoPosterFromUrl } from '@/utils/openim'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -145,10 +144,8 @@ watch(
     if (isRemoteMediaUrl(snapshot) || snapshot.startsWith('blob:')) return
     if (status === 'sending' && isUsableVideoPoster(snapshot)) return
     try {
-      // H5：canvas 截帧；App：download + 取帧（内部按平台分流）
-      const poster =
-        (await captureVideoPosterFromUrl(url)) || (await captureAppVideoPosterFromUrl(url))
-      fallbackPoster.value = poster
+      // 仅 H5 用 Canvas 截帧。App 不在消息列表批量下载整段视频，避免与点击播放争抢网络。
+      fallbackPoster.value = await captureVideoPosterFromUrl(url)
     } catch {
       fallbackPoster.value = ''
     }
@@ -160,11 +157,9 @@ function onVideoPosterError() {
   videoPosterFailed.value = true
   const url = videoUrl.value
   if (!url || fallbackPoster.value) return
-  void Promise.resolve()
-    .then(async () => (await captureVideoPosterFromUrl(url)) || (await captureAppVideoPosterFromUrl(url)))
-    .then((poster) => {
-      if (poster) fallbackPoster.value = poster
-    })
+  void captureVideoPosterFromUrl(url).then((poster) => {
+    if (poster) fallbackPoster.value = poster
+  })
 }
 
 function playVideo() {
@@ -447,6 +442,25 @@ function openLink(url: string) {
           mode="widthFix"
           @error="onVideoPosterError"
         />
+        <!-- App：旧消息缺远程封面时只让原生播放器按需读取首帧；不再先完整下载视频。 -->
+        <!-- #ifdef APP-PLUS -->
+        <video
+          v-else-if="videoUrl"
+          class="msg-image video-thumb-video"
+          :src="videoUrl"
+          :controls="false"
+          :show-center-play-btn="false"
+          :show-play-btn="false"
+          :show-fullscreen-btn="false"
+          :show-progress="false"
+          :enable-progress-gesture="false"
+          :muted="true"
+          :autoplay="false"
+          :http-cache="true"
+          :play-strategy="0"
+          object-fit="cover"
+        />
+        <!-- #endif -->
         <view v-else class="msg-image video-poster-placeholder" />
         <view class="video-play">
           <text class="video-play-icon">▶</text>
@@ -643,6 +657,13 @@ function openLink(url: string) {
   min-height: 240rpx;
   background: #e8e8e8;
   border-radius: 12rpx;
+}
+
+.video-thumb-video {
+  width: 100%;
+  height: 320rpx;
+  background: #111;
+  pointer-events: none;
 }
 
 .video-play {

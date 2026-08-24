@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseVideoMeta, videoSnapshotTime, formatVideoDuration, isUsableVideoPoster, mergeVideoContent } from '../src/utils/chatMedia.ts'
+import {
+  parseVideoMeta,
+  videoSnapshotTime,
+  formatVideoDuration,
+  isUsableVideoPoster,
+  mergeVideoContent,
+  videoPosterUrlFromContent,
+} from '../src/utils/chatMedia.ts'
 
 const { snapshotFromMessage } = await import('../src/utils/forwardSnapshot.ts')
 const VIDEO_MESSAGE = 104
@@ -153,4 +160,12 @@ test('snapshotUrl 为对象时取出内部 url', () => {
     }),
     { url: 'https://cdn.example/a.mp4', snapshotUrl: 'https://cdn.example/a.jpg', duration: 2 },
   )
+})
+
+test('播放页使用消息封面作为视频缓冲首屏', () => {
+  assert.equal(
+    videoPosterUrlFromContent(JSON.stringify({ snapshotUrl: 'https://cdn.example/a.jpg' })),
+    'https://cdn.example/a.jpg',
+  )
+  assert.equal(videoPosterUrlFromContent(JSON.stringify({ snapshotUrl: 'https://cdn.example/a.mp4' })), '')
 })

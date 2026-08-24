@@ -1075,23 +1075,6 @@ export async function extractVideoCoverForForward(videoUrl: string): Promise<str
   return snapshotOfVideo(toNativeFullPath(local))
 }
 
-/** App 气泡缺远程封面时：按视频 URL 截帧，同 URL 共用一次下载/取帧。 */
-const appPosterByVideoUrl = new Map<string, Promise<string>>()
-
-export function captureAppVideoPosterFromUrl(videoUrl: string): Promise<string> {
-  if (!isAppPlatform || !isRemoteMediaUrl(videoUrl)) return Promise.resolve('')
-  const key = videoUrl.trim()
-  if (!key) return Promise.resolve('')
-  let pending = appPosterByVideoUrl.get(key)
-  if (!pending) {
-    pending = extractVideoCoverForForward(key)
-      .then((path) => path || '')
-      .catch(() => '')
-    appPosterByVideoUrl.set(key, pending)
-  }
-  return pending
-}
-
 interface VideoSnapshotFile {
   file: File
   width: number

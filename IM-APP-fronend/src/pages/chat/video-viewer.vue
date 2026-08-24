@@ -3,7 +3,7 @@ import { computed, ref, watch, nextTick } from 'vue'
 import { onLoad, onReady, onUnload } from '@dcloudio/uni-app'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
-import { saveVideoToDevice, videoPlayUrlFromContent } from '@/utils/chatMedia'
+import { saveVideoToDevice, videoPlayUrlFromContent, videoPosterUrlFromContent } from '@/utils/chatMedia'
 import { formatFavoriteDay } from '@/utils/format'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import type { ChatMessage } from '@/types'
@@ -60,6 +60,7 @@ const message = computed<ChatMessage | null>(() => {
 
 const videoContent = computed(() => message.value?.content || inlineContent.value)
 const videoUrl = computed(() => videoPlayUrlFromContent(videoContent.value))
+const videoPoster = computed(() => videoPosterUrlFromContent(videoContent.value))
 
 const senderLabel = computed(() => message.value?.senderNickname || senderNickname.value || '视频')
 
@@ -130,7 +131,7 @@ function onVideoError() {
 // #ifdef H5
 let h5VideoEl: HTMLVideoElement | null = null
 
-function mountH5Video(url: string) {
+function mountH5Video(url: string, poster: string) {
   const host = document.querySelector('.player-host') as HTMLElement | null
   if (!host) return
   if (!h5VideoEl) {
@@ -143,6 +144,7 @@ function mountH5Video(url: string) {
       'width:100%;height:100%;object-fit:contain;background:#000;display:block;max-width:100%;max-height:100%;'
     host.appendChild(h5VideoEl)
   }
+  h5VideoEl.poster = poster
   if (!url) {
     h5VideoEl.removeAttribute('src')
     h5VideoEl.load()
@@ -156,9 +158,9 @@ function mountH5Video(url: string) {
 }
 
 watch(
-  videoUrl,
-  (url) => {
-    void nextTick(() => mountH5Video(url))
+  [videoUrl, videoPoster],
+  ([url, poster]) => {
+    void nextTick(() => mountH5Video(url, poster))
   },
   { immediate: true },
 )
@@ -222,9 +224,13 @@ onUnload(() => {
       v-if="videoUrl"
       class="app-player-full"
       :src="videoUrl"
+      :poster="videoPoster"
       autoplay
       controls
       object-fit="contain"
+      codec="hardware"
+      :http-cache="true"
+      :play-strategy="0"
       :show-center-play-btn="true"
       :show-fullscreen-btn="false"
       :enable-progress-gesture="true"
