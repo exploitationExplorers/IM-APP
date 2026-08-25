@@ -27,6 +27,7 @@ type cachedPeerAccess struct {
 type cachedGroupAccess struct {
 	CanChat    bool   `json:"canChat"`
 	DenyReason string `json:"denyReason,omitempty"`
+	Role       string `json:"role,omitempty"`
 }
 
 func (s *IMWebhookAccess) ResolvePeer(ctx context.Context, requesterID, targetID string) (models.IMPeer, error) {
@@ -68,8 +69,9 @@ func (s *IMWebhookAccess) ResolveGroup(ctx context.Context, userID, groupID stri
 			if json.Unmarshal([]byte(raw), &cached) == nil {
 				return models.IMGroupTarget{
 					BusinessGroupID: groupID,
-					CanChat:           cached.CanChat,
-					DenyReason:        cached.DenyReason,
+					CanChat:         cached.CanChat,
+					DenyReason:      cached.DenyReason,
+					Role:            cached.Role,
 				}, nil
 			}
 		}
@@ -79,7 +81,9 @@ func (s *IMWebhookAccess) ResolveGroup(ctx context.Context, userID, groupID stri
 		return group, err
 	}
 	if s.Redis != nil && s.Redis.Available() {
-		payload, _ := json.Marshal(cachedGroupAccess{CanChat: group.CanChat, DenyReason: group.DenyReason})
+		payload, _ := json.Marshal(cachedGroupAccess{
+			CanChat: group.CanChat, DenyReason: group.DenyReason, Role: group.Role,
+		})
 		_ = s.Redis.CacheSet(ctx, key, string(payload), webhookAccessCacheTTL)
 	}
 	return group, nil

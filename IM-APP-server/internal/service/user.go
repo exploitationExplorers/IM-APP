@@ -22,6 +22,7 @@ type UserService struct {
 	Files    *repository.FileRepo
 	Contacts *repository.ContactRepo
 	Privacy  *repository.PrivacyRepo
+	Groups   *repository.GroupRepo
 }
 
 func (s *UserService) GetProfile(ctx context.Context, uid string) (models.User, error) {
@@ -68,12 +69,23 @@ func (s *UserService) SearchByPublicID(ctx context.Context, uid, publicID string
 	return &pub, nil
 }
 
-func (s *UserService) GetPublicProfile(ctx context.Context, userID string) (models.PublicProfile, error) {
+func (s *UserService) GetPublicProfile(ctx context.Context, viewerID, userID, groupPublicID string) (models.PublicProfile, error) {
 	u, err := s.Users.FindByID(ctx, userID)
 	if err != nil {
 		return models.PublicProfile{}, ErrNotFound
 	}
-	return repository.ToPublicProfile(u), nil
+	pub := repository.ToPublicProfile(u)
+	// 从群成员资料进入时：非群主只能看到脱敏聊天号，避免凭完整 ID 互加好友
+	if groupPublicID != "" && viewerID != "" && viewerID != userID && s.Groups != nil {
+		internalID, ierr := s.Groups.InternalIDByPublicID(ctx, groupPublicID)
+		if ierr == nil {
+			role, rerr := s.Groups.MemberRoleOf(ctx, internalID, viewerID)
+			if rerr == nil && role != "owner" {
+				pub.PublicID = MaskPublicID(pub.PublicID)
+			}
+		}
+	}
+	return pub, nil
 }
 
 func (s *UserService) Qrcode(ctx context.Context, uid string) (models.UserQRCodeResult, error) {

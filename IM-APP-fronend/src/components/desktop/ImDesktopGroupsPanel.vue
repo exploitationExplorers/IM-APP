@@ -53,6 +53,18 @@ function onSelect(g: GroupPreview) {
   close()
 }
 
+function roleTagOf(g: GroupPreview) {
+  const role = (g.role || '').toLowerCase()
+  if (role === 'owner') return '群主'
+  if (role === 'admin') return '管理员'
+  return ''
+}
+
+function roleTagClass(g: GroupPreview) {
+  const role = (g.role || '').toLowerCase()
+  return role === 'owner' ? 'role-owner' : 'role-admin'
+}
+
 function goCreate() {
   close()
   uni.navigateTo({ url: '/pages/group/create' })
@@ -103,6 +115,11 @@ function goCreate() {
               mode="aspectFill"
             />
             <text class="groups-panel-name">{{ g.name }}</text>
+            <text
+              v-if="roleTagOf(g)"
+              class="groups-panel-role"
+              :class="roleTagClass(g)"
+            >{{ roleTagOf(g) }}</text>
             <image class="groups-panel-arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
           </view>
           <view v-if="!visibleGroups.length" class="groups-panel-status">无群组</view>
@@ -237,6 +254,24 @@ function goCreate() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.groups-panel-role {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.groups-panel-role.role-owner {
+  color: #636e86;
+  border: 1px solid #c5cad6;
+}
+
+.groups-panel-role.role-admin {
+  color: #0a2fc2;
+  border: 1px solid #0a2fc2;
 }
 
 .groups-panel-arrow {

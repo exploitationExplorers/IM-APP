@@ -31,13 +31,40 @@ export async function fetchGroupMembers(
 ): Promise<GroupMemberPage | GroupMember[]> {
   const data: Record<string, string | number> = { groupId, limit: opts?.limit ?? 100 }
   if (opts?.cursor) data.cursor = opts.cursor
-  const result = await request<GroupMemberPage | GroupMember[]>({
+  const result = await request<GroupMemberPage | GroupMember[] | unknown>({
     url: '/group-members',
     method: 'GET',
     data,
   })
-  if (Array.isArray(result)) return result
-  return result
+  if (Array.isArray(result)) return normalizeMemberList(result)
+  if (result && typeof result === 'object' && Array.isArray((result as GroupMemberPage).items)) {
+    const page = result as GroupMemberPage
+    return { ...page, items: normalizeMemberList(page.items) }
+  }
+  return { items: [], hasMore: false }
+}
+
+function normalizeMember(raw: unknown): GroupMember | null {
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  const id = String(obj.id ?? obj.ID ?? '').trim()
+  if (!id) return null
+  const role = String(obj.role ?? obj.Role ?? 'member').trim().toLowerCase()
+  return {
+    id,
+    nickname: String(obj.nickname ?? obj.Nickname ?? ''),
+    groupNickname: String(obj.groupNickname ?? obj.GroupNickname ?? '') || undefined,
+    displayName: String(obj.displayName ?? obj.DisplayName ?? '') || undefined,
+    avatar: String(obj.avatar ?? obj.Avatar ?? ''),
+    role: (role === 'owner' || role === 'admin' ? role : 'member') as GroupMember['role'],
+    memberRemark: String(obj.memberRemark ?? obj.MemberRemark ?? '') || undefined,
+    isMuted: obj.isMuted === true || obj.IsMuted === true,
+    mutedUntil: (obj.mutedUntil ?? obj.MutedUntil) as string | null | undefined,
+  }
+}
+
+function normalizeMemberList(raw: unknown[]): GroupMember[] {
+  return raw.map(normalizeMember).filter((m): m is GroupMember => !!m)
 }
 
 /** æ‹‰å–ç¾¤å…¨éƒ¨æˆå‘˜ï¼ˆå…¼å®¹åˆ†é¡µ APIï¼‰ */
@@ -248,3 +275,13 @@ export async function inviteGroupMembers(
   })
 }
 
+
+/** Èº¹«¸æÀúÊ·£¨×î½ü 10 Ìõ£© */
+export async function fetchAnnouncementHistory(groupId: string) {
+  const res = await request<{ items: import('@/types').GroupAnnouncementHistoryItem[] }>({
+    url: '/group-announcements',
+    method: 'GET',
+    data: { groupId },
+  })
+  return res?.items || []
+}

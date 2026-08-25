@@ -1463,12 +1463,22 @@ function pickVideo() {
   })
 }
 
-/** 选好友发名片：跳好友选择页，发送在 card-picker 内完成后返回本页 */
+/** 选好友发名片：群聊禁止分享个人名片 */
 function pickCard() {
   showPlusPanel.value = false
+  if (chatType.value === 'group') {
+    uni.showToast({ title: '群内不可分享个人名片', icon: 'none' })
+    return
+  }
   uni.navigateTo({
     url: `/pages/chat/card-picker?conversationId=${encodeURIComponent(conversationId.value)}&title=${encodeURIComponent(title.value)}`,
   })
+}
+
+/** 群主/管理员 @所有人 */
+function pickAtAll() {
+  showPlusPanel.value = false
+  actions.atAll()
 }
 
 /** 选本地文件发送：一次最多 9 个（app 端原生选择器仅支持单选），逐个发送保持顺序，单个失败不中断并汇总提示 */
@@ -1667,11 +1677,21 @@ function pickFavorite() {
           </view>
           <text>视频</text>
         </view>
-        <view class="plus-item" @click="pickCard">
+        <view v-if="chatType !== 'group'" class="plus-item" @click="pickCard">
           <view class="plus-icon">
             <image class="plus-icon-img" src="/static/icon-card.png" mode="aspectFit" />
           </view>
           <text>名片</text>
+        </view>
+        <view
+          v-if="chatType === 'group' && (myRole === 'owner' || myRole === 'admin')"
+          class="plus-item"
+          @click="pickAtAll"
+        >
+          <view class="plus-icon">
+            <text class="plus-at-text">@</text>
+          </view>
+          <text>所有人</text>
         </view>
         <view class="plus-item" @click="pickFile">
           <view class="plus-icon">
@@ -2149,5 +2169,12 @@ function pickFavorite() {
 .plus-icon-img {
   width: 56rpx;
   height: 56rpx;
+}
+
+.plus-at-text {
+  font-size: 44rpx;
+  font-weight: 600;
+  color: #0a2fc2;
+  line-height: 1;
 }
 </style>

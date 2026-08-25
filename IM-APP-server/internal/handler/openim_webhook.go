@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"im-app-server/internal/im"
+	"im-app-server/internal/infra"
 	"im-app-server/internal/repository"
 	"im-app-server/internal/service"
 
@@ -18,6 +20,19 @@ import (
 )
 
 const maxOpenIMWebhookBodyBytes = 64 << 10
+
+// OpenIM contentType：与 SDK MessageType 对齐
+const (
+	openIMContentPicture = 102
+	openIMContentAtText  = 106
+	openIMContentCard    = 108
+)
+
+// OpenIM @所有人 占位 userID
+const openIMAtAllTag = "AtAllTag"
+
+// 普通成员群内发图：每分钟最多 10 张；群主/管理员不限
+const groupMemberImageLimitPerMin = 10
 
 type openIMWebhookMessage struct {
 	CallbackCommand string   `json:"callbackCommand"`
@@ -47,6 +62,7 @@ type OpenIMWebhookHandler struct {
 	Audit        *repository.IMAccessRepo
 	Client       *im.Client
 	Restrictions *repository.RestrictionRepo
+	Redis        *infra.Redis
 	Secret       string
 	AdminUser    string
 	AllowNets    []*net.IPNet
@@ -54,9 +70,19 @@ type OpenIMWebhookHandler struct {
 	Pusher service.PushService
 }
 
-func NewOpenIMWebhookHandler(access *repository.IMAccessRepo, webhookAccess *service.IMWebhookAccess, client *im.Client, restrictions *repository.RestrictionRepo, secret, adminUser string, allowCIDRs []string, pusher service.PushService) *OpenIMWebhookHandler {
+func NewOpenIMWebhookHandler(
+	access *repository.IMAccessRepo,
+	webhookAccess *service.IMWebhookAccess,
+	client *im.Client,
+	restrictions *repository.RestrictionRepo,
+	rdb *infra.Redis,
+	secret, adminUser string,
+	allowCIDRs []string,
+	pusher service.PushService,
+) *OpenIMWebhookHandler {
 	return &OpenIMWebhookHandler{
-		Access: webhookAccess, Audit: access, Client: client, Restrictions: restrictions, Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
+		Access: webhookAccess, Audit: access, Client: client, Restrictions: restrictions, Redis: rdb,
+		Secret: strings.TrimSpace(secret), AdminUser: strings.TrimSpace(adminUser),
 		AllowNets: parseAllowNets(allowCIDRs), Pusher: pusher,
 	}
 }
@@ -140,7 +166,44 @@ func (h *OpenIMWebhookHandler) BeforeGroup(c *gin.Context) {
 	if h.checkMessageRestriction(c, req, "group", senderID, groupID) {
 		return
 	}
+	if reason := h.checkGroupMessagePolicy(c.Request.Context(), req, group.Role, senderID, groupID); reason != "" {
+		h.recordBeforeHookFailure(c.Request.Context(), req, "group", senderID, groupID, reason)
+		c.JSON(http.StatusOK, denyWebhook(reason))
+		return
+	}
 	c.JSON(http.StatusOK, allowWebhook())
+}
+
+// checkGroupMessagePolicy 群聊消息策略：禁名片、普通成员发图限流、仅管理员 @所有人
+func (h *OpenIMWebhookHandler) checkGroupMessagePolicy(
+	ctx context.Context, req openIMWebhookMessage, role, senderID, groupID string,
+) string {
+	isManager := role == "owner" || role == "admin"
+	switch req.ContentType {
+	case openIMContentCard:
+		return "群内不可分享个人名片"
+	case openIMContentPicture:
+		if isManager {
+			return ""
+		}
+		if h.Redis != nil && !h.Redis.AllowIP(ctx, fmt.Sprintf("groupimg:%s:%s", senderID, groupID), groupMemberImageLimitPerMin, time.Minute) {
+			return "普通成员每分钟最多发送10张图片"
+		}
+	case openIMContentAtText:
+		if containsAtAll(req.AtUserList) && !isManager {
+			return "仅群主或管理员可以@所有人"
+		}
+	}
+	return ""
+}
+
+func containsAtAll(ids []string) bool {
+	for _, id := range ids {
+		if strings.EqualFold(strings.TrimSpace(id), openIMAtAllTag) {
+			return true
+		}
+	}
+	return false
 }
 
 // recordBeforeHookFailure best-effort 记录一条 beforeSend 拒绝的失败记录。

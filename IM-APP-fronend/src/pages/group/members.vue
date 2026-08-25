@@ -75,8 +75,22 @@ function goInvite() {
   })
 }
 
+/** 群主/管理员名字用群昵称，备注放到身份括号里；普通成员仍优先展示备注 */
 function displayName(member: GroupMember) {
+  const role = (member.role || '').toLowerCase()
+  if (role === 'owner' || role === 'admin') {
+    return member.groupNickname || member.nickname || '成员'
+  }
   return member.memberRemark?.trim() || member.groupNickname || member.nickname || '成员'
+}
+
+/** 群主/管理员徽章：有成员备注时在身份后括号展示，如 群主(产品负责人) */
+function roleBadgeText(member: GroupMember) {
+  const role = (member.role || '').toLowerCase()
+  const base = role === 'owner' ? '群主' : role === 'admin' ? '管理员' : ''
+  if (!base) return ''
+  const remark = member.memberRemark?.trim()
+  return remark ? `${base}(${remark})` : base
 }
 
 function memberAvatar(member: GroupMember) {
@@ -193,11 +207,17 @@ async function onRemove(member: GroupMember) {
       >
         <image class="avatar" :src="memberAvatar(member)" mode="aspectFill" />
         <text class="name">{{ displayName(member) }}</text>
-        <view v-if="member.role === 'owner'" class="badge badge-owner">
-          <text class="badge-text">群主</text>
+        <view
+          v-if="(member.role || '').toLowerCase() === 'owner'"
+          class="badge badge-owner"
+        >
+          <text class="badge-text">{{ roleBadgeText(member) }}</text>
         </view>
-        <view v-else-if="member.role === 'admin'" class="badge badge-admin">
-          <text class="badge-text">管理员</text>
+        <view
+          v-else-if="(member.role || '').toLowerCase() === 'admin'"
+          class="badge badge-admin"
+        >
+          <text class="badge-text">{{ roleBadgeText(member) }}</text>
         </view>
         <view v-else-if="member.isMuted" class="badge badge-muted">
           <text class="badge-text">已禁言</text>
@@ -279,9 +299,9 @@ async function onRemove(member: GroupMember) {
 }
 
 .badge {
-  min-width: 128rpx;
-  height: 48rpx;
-  padding: 0 22rpx;
+  max-width: 280rpx;
+  min-height: 48rpx;
+  padding: 6rpx 18rpx;
   border-radius: 999rpx;
   display: flex;
   align-items: center;
@@ -308,7 +328,10 @@ async function onRemove(member: GroupMember) {
 
 .badge-text {
   font-size: 24rpx;
-  line-height: 1;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .badge-owner .badge-text {

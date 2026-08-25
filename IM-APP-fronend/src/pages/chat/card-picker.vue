@@ -55,6 +55,11 @@ function displayName(contact: Contact) {
 
 async function onPick(contact: Contact) {
   if (sending.value || !conversationId.value) return
+  const conv = chatStore.conversations.find((c) => c.id === conversationId.value)
+  if (conv?.type === 'group') {
+    uni.showToast({ title: '群内不可分享个人名片', icon: 'none' })
+    return
+  }
   sending.value = true
   try {
     await chatStore.sendCard(

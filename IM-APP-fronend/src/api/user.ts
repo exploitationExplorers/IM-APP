@@ -47,8 +47,15 @@ export async function fetchQrcode(): Promise<UserQrcodeResult> {
   return request<UserQrcodeResult>({ url: '/me/qrcode', method: 'GET' })
 }
 
-export async function fetchUserProfile(userId: string): Promise<UserInfo> {
-  return request<UserInfo>({ url: `/users/${userId}`, method: 'GET' })
+/** 他人资料；从群成员进入时传 groupId，服务端对非群主脱敏 publicId */
+export async function fetchUserProfile(userId: string, groupId?: string): Promise<UserInfo> {
+  const data: Record<string, string> = {}
+  if (groupId) data.groupId = groupId
+  return request<UserInfo>({
+    url: `/users/${userId}`,
+    method: 'GET',
+    data: Object.keys(data).length ? data : undefined,
+  })
 }
 
 /** POST /me/password/verify：安全页校验旧密码 */

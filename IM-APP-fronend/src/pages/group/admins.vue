@@ -38,11 +38,20 @@ function goAdd() {
 }
 
 function displayName(member: GroupMember) {
+  // 与成员列表一致：群主/管理员名字用群昵称，备注挂在身份后
+  const role = (member.role || '').toLowerCase()
+  if (role === 'owner' || role === 'admin') {
+    return member.groupNickname || member.nickname || '成员'
+  }
   return member.memberRemark || member.groupNickname || member.nickname || '成员'
 }
 
+/** 身份后括号展示成员备注，如 管理员(产品负责人) */
 function roleLabel(member: GroupMember) {
-  return member.role === 'owner' ? '群主' : '管理员'
+  const role = (member.role || '').toLowerCase()
+  const base = role === 'owner' ? '群主' : '管理员'
+  const remark = member.memberRemark?.trim()
+  return remark ? `${base}(${remark})` : base
 }
 
 async function onTapMember(member: GroupMember) {

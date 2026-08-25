@@ -43,6 +43,18 @@ function openGroup(g: GroupPreview) {
   contactStore.openChatWithGroup(g.id, g.name, g.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 }
 
+function roleTagOf(g: GroupPreview) {
+  const role = (g.role || '').toLowerCase()
+  if (role === 'owner') return '群主'
+  if (role === 'admin') return '管理员'
+  return ''
+}
+
+function roleTagClass(g: GroupPreview) {
+  const role = (g.role || '').toLowerCase()
+  return role === 'owner' ? 'role-owner' : 'role-admin'
+}
+
 function goCreate() {
   uni.navigateTo({ url: '/pages/group/create' })
 }
@@ -77,6 +89,7 @@ function goCreate() {
           mode="aspectFill"
         />
         <text class="name">{{ g.name || '群聊' }}</text>
+        <text v-if="roleTagOf(g)" class="role-tag" :class="roleTagClass(g)">{{ roleTagOf(g) }}</text>
         <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
         <text class="arrow">›</text>
       </view>
@@ -148,6 +161,25 @@ function goCreate() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.role-tag {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 12rpx;
+  line-height: 1.4;
+}
+
+.role-owner {
+  color: #636e86;
+  border: 1rpx solid #c5cad6;
+}
+
+.role-admin {
+  color: #0a2fc2;
+  border: 1rpx solid #0a2fc2;
 }
 
 .dissolved-tag {

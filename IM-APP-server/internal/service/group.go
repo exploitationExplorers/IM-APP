@@ -127,6 +127,14 @@ func (s *GroupService) UpdateSettings(ctx context.Context, groupID, uid string, 
 	return s.Groups.UpdateSettings(ctx, internalID, uid, name, avatarURL, announcement, allow, joinMode, allMuted)
 }
 
+func (s *GroupService) ListAnnouncementHistory(ctx context.Context, groupID, uid string) ([]models.GroupAnnouncementHistoryItem, error) {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Groups.ListAnnouncementHistory(ctx, internalID, uid)
+}
+
 func (s *GroupService) Leave(ctx context.Context, groupID, uid string) error {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {

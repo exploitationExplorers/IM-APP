@@ -145,6 +145,15 @@ type GroupMemberMuteResult struct {
 	ChangedAt    time.Time  `json:"changedAt"`
 }
 
+// GroupAnnouncementHistoryItem 群公告历史一条
+type GroupAnnouncementHistoryItem struct {
+	ID              string `json:"id"`
+	Content         string `json:"content"`
+	PublisherID     string `json:"publisherId,omitempty"`
+	PublisherName   string `json:"publisherName,omitempty"`
+	CreatedAt       string `json:"createdAt"`
+}
+
 type UpdateGroupRemarkReq struct {
 	Remark string `json:"remark"`
 }

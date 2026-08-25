@@ -680,14 +680,19 @@ export async function sendAtTextMessage(
   text: string,
   atUserIDList: string[],
   atUsersInfo: Array<{ atUserID: string; groupNickname: string }>,
+  isAtAll = false,
 ): Promise<MessageItem> {
   const message = await imCall<MessageItem>(IMMethods.CreateTextAtMessage, {
     text,
     atUserIDList,
     atUsersInfo,
+    isAtAll,
   })
   return sendCreatedMessage(target, message)
 }
+
+/** OpenIM @所有人占位 ID */
+export const OPENIM_AT_ALL_TAG = 'AtAllTag'
 
 interface SendCreatedMessageOptions {
   /** 媒体文件已经上传并写入消息 URL，此时不能再让 SDK 查找本地文件并重复上传 */
@@ -1629,26 +1634,42 @@ function conversationNumericField(item: ConversationItem, camel: string, pascal:
   return Number.isFinite(n) ? n : 0
 }
 
+/** App 原生桥偶发 PascalCase / 字符串 / 数字布尔，统一成 true/false */
+function conversationBoolField(item: ConversationItem, camel: string, pascal: string): boolean {
+  const raw = item as ConversationItem & Record<string, unknown>
+  const value = raw[camel] ?? raw[pascal]
+  return value === true || value === 1 || value === '1' || value === 'true' || value === 'True'
+}
+
 export function toConversation(item: ConversationItem): Conversation {
-  const isGroup = item.conversationType !== SessionType.Single
-  const groupId = item.groupID || groupIdFromConversationId(item.conversationID)
+  const raw = item as ConversationItem & Record<string, unknown>
+  const conversationType = Number(raw.conversationType ?? raw.ConversationType ?? SessionType.Single)
+  const isGroup = conversationType !== SessionType.Single
+  const groupId =
+    String(raw.groupID ?? raw.GroupID ?? '') || groupIdFromConversationId(item.conversationID)
   const remark = isGroup ? groupRemarkFromEx(conversationEx(item)) : ''
   const unreadCount = conversationNumericField(item, 'unreadCount', 'UnreadCount')
   const groupAtType = conversationNumericField(item, 'groupAtType', 'GroupAtType')
   const atType = effectiveGroupAtType(groupAtType, unreadCount)
+  const showName = String(raw.showName ?? raw.ShowName ?? '')
+  const faceURL = String(raw.faceURL ?? raw.FaceURL ?? '')
+  const latestMsg = (raw.latestMsg ?? raw.LatestMsg) as ConversationItem['latestMsg']
+  const latestMsgSendTime = Number(raw.latestMsgSendTime ?? raw.LatestMsgSendTime ?? 0)
+  const recvMsgOpt = conversationNumericField(item, 'recvMsgOpt', 'RecvMsgOpt')
+  const userID = String(raw.userID ?? raw.UserID ?? '')
   return {
-    id: item.conversationID,
+    id: String(raw.conversationID ?? raw.ConversationID ?? item.conversationID),
     type: isGroup ? 'group' : 'private',
-    title: remark || item.showName,
+    title: remark || showName,
     avatar:
-      item.faceURL ||
+      faceURL ||
       (isGroup ? APP_CONFIG.defaultGroupAvatarUrl : APP_CONFIG.defaultAvatarUrl),
-    lastMessage: summarize(item.latestMsg),
-    lastMessageAt: toISOTime(item.latestMsgSendTime),
+    lastMessage: summarize(latestMsg),
+    lastMessageAt: toISOTime(latestMsgSendTime),
     unreadCount,
-    pinned: item.isPinned,
-    recvMsgOpt: item.recvMsgOpt,
-    peerUserId: item.userID || undefined,
+    pinned: conversationBoolField(item, 'isPinned', 'IsPinned'),
+    recvMsgOpt,
+    peerUserId: userID || undefined,
     groupId: groupId || undefined,
     groupAtType,
     highlightTags: highlightTagsOf(atType, false),
@@ -2177,9 +2198,15 @@ function toISOTime(timestamp: number): string {
 /**
  * 置顶 / 取消置顶某个会话。
  * 按 OpenIM 官方文档，uni-app 统一走 asyncApi('setConversation', ...)。
+ * App 原生桥部分版本只认 PascalCase 字段，失败时再试 IsPinned。
  */
 export async function setConversationPin(conversationID: string, isPinned: boolean): Promise<void> {
-  await imCall('setConversation' as IMMethods, { conversationID, isPinned })
+  try {
+    await imCall('setConversation' as IMMethods, { conversationID, isPinned })
+  } catch (first) {
+    if (!isAppPlatform) throw first
+    await imCall('setConversation' as IMMethods, { conversationID, IsPinned: isPinned })
+  }
 }
 
 /**
@@ -2209,7 +2236,9 @@ export async function hideConversation(conversationID: string): Promise<void> {
 }
 
 function conversationEx(item: ConversationItem): string {
-  return (item as ConversationItem & { ex?: string }).ex || ''
+  const raw = item as ConversationItem & Record<string, unknown>
+  const ex = raw.ex ?? raw.Ex
+  return typeof ex === 'string' ? ex : ''
 }
 
 function parseConversationEx(ex: string): Record<string, unknown> {

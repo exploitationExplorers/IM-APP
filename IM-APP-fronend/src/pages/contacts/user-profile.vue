@@ -24,7 +24,7 @@ onMounted(async () => {
   if (!userId.value) return
   loading.value = true
   try {
-    user.value = await fetchUserProfile(userId.value)
+    user.value = await fetchUserProfile(userId.value, groupId.value || undefined)
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   } finally {
@@ -67,7 +67,7 @@ async function onChat() {
     <view v-if="user" class="card">
       <image class="avatar" :src="user.avatar || '/static/avatar-me.png'" mode="aspectFill" />
       <text class="name">{{ user.nickname }}</text>
-      <text class="pid">公开 ID: {{ user.publicId }}</text>
+      <text class="pid">公开 ID: {{ user.publicId || '—' }}</text>
       <text v-if="user.bio" class="bio">{{ user.bio }}</text>
     </view>
 

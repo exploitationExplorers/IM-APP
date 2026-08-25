@@ -1051,10 +1051,18 @@ export const useChatStore = defineStore('chat', () => {
     atUsers: Array<{ atUserID: string; groupNickname: string }>,
   ) {
     const target = targetOf(requireConversation(conversationId))
+    const isAtAll = atUsers.some((a) => a.atUserID === 'AtAllTag')
     await sendWithPlaceholder(
       conversationId,
       placeholderOf(conversationId, senderId, 'text', content),
-      () => sendAtTextMessage(target, content, atUsers.map((a) => a.atUserID), atUsers),
+      () =>
+        sendAtTextMessage(
+          target,
+          content,
+          atUsers.map((a) => a.atUserID),
+          atUsers,
+          isAtAll,
+        ),
     )
   }
 
@@ -1087,13 +1095,17 @@ export const useChatStore = defineStore('chat', () => {
     )
   }
 
-  /** 发送好友名片：占位与气泡渲染共用同一份 content JSON */
+  /** 发送好友名片：占位与气泡渲染共用同一份 content JSON；群聊禁止 */
   async function sendCard(
     conversationId: string,
     friend: { id: string; nickname: string; avatar?: string },
     senderId: string,
   ) {
-    const target = targetOf(requireConversation(conversationId))
+    const conv = requireConversation(conversationId)
+    if (conv.type === 'group') {
+      throw new Error('群内不可分享个人名片')
+    }
+    const target = targetOf(conv)
     const card = {
       userId: friend.id,
       nickname: friend.nickname || '',

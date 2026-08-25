@@ -4,6 +4,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { fetchAllGroupMembers } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
+import { APP_CONFIG } from '@/config'
 import type { GroupMember } from '@/types'
 
 const groupStore = useGroupStore()
@@ -12,9 +13,14 @@ const keyword = ref('')
 const members = ref<GroupMember[]>([])
 const selected = ref<Set<string>>(new Set())
 const saving = ref(false)
+const loading = ref(false)
+
+function normalizeRole(role?: string) {
+  return (role || '').trim().toLowerCase()
+}
 
 const candidates = computed(() =>
-  members.value.filter((m) => m.role === 'member'),
+  members.value.filter((m) => normalizeRole(m.role) === 'member'),
 )
 
 const filtered = computed(() => {
@@ -31,10 +37,14 @@ const canSubmit = computed(() => selected.value.size > 0 && !saving.value)
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
   if (!groupId.value) return
+  loading.value = true
   try {
     members.value = await fetchAllGroupMembers(groupId.value)
   } catch (e) {
+    members.value = []
     uni.showToast({ title: (e as Error)?.message || '加载失败', icon: 'none' })
+  } finally {
+    loading.value = false
   }
 })
 
@@ -87,16 +97,26 @@ async function onSubmit() {
     </view>
 
     <scroll-view scroll-y class="list">
-      <view
-        v-for="member in filtered"
-        :key="member.id"
-        class="row"
-        @click="toggle(member.id)"
-      >
-        <image class="avatar" :src="member.avatar" mode="aspectFill" />
-        <text class="name">{{ displayName(member) }}</text>
-        <view class="check" :class="{ on: selected.has(member.id) }" />
-      </view>
+      <text v-if="loading" class="empty">加载中...</text>
+      <template v-else>
+        <view
+          v-for="member in filtered"
+          :key="member.id"
+          class="row"
+          @click="toggle(member.id)"
+        >
+          <image
+            class="avatar"
+            :src="member.avatar || APP_CONFIG.defaultAvatarUrl"
+            mode="aspectFill"
+          />
+          <text class="name">{{ displayName(member) }}</text>
+          <view class="check" :class="{ on: selected.has(member.id) }" />
+        </view>
+        <text v-if="!filtered.length" class="empty">
+          {{ candidates.length ? '无匹配成员' : '暂无可设为管理员的普通成员' }}
+        </text>
+      </template>
     </scroll-view>
 
     <view class="footer">
@@ -115,6 +135,7 @@ async function onSubmit() {
 
 .search-wrap {
   padding: 8rpx 24rpx 16rpx;
+  flex-shrink: 0;
 }
 
 .search-box {
@@ -141,6 +162,7 @@ async function onSubmit() {
 .list {
   flex: 1;
   height: 0;
+  min-height: 400rpx;
 }
 
 .row {
@@ -155,12 +177,17 @@ async function onSubmit() {
   height: 88rpx;
   border-radius: 50%;
   background: #eee;
+  flex-shrink: 0;
 }
 
 .name {
   flex: 1;
+  min-width: 0;
   font-size: 30rpx;
   color: #1d1d1d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .check {
@@ -168,6 +195,7 @@ async function onSubmit() {
   height: 40rpx;
   border-radius: 50%;
   border: 2rpx solid #c8ccd6;
+  flex-shrink: 0;
 }
 
 .check.on {
@@ -175,8 +203,17 @@ async function onSubmit() {
   background: #0a2fc2;
 }
 
+.empty {
+  display: block;
+  padding: 120rpx 40rpx;
+  text-align: center;
+  color: #8a8f9c;
+  font-size: 28rpx;
+}
+
 .footer {
   padding: 24rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
+  flex-shrink: 0;
 }
 
 .btn {

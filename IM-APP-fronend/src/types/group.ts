@@ -97,3 +97,12 @@ export interface GroupMemberMuteResult {
   mutedUntil: string | null
   changedAt: string
 }
+
+/** 群公告历史条目 */
+export interface GroupAnnouncementHistoryItem {
+  id: string
+  content: string
+  publisherId?: string
+  publisherName?: string
+  createdAt: string
+}

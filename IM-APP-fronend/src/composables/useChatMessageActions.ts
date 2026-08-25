@@ -333,6 +333,22 @@ export function useChatMessageActions(opts: {
     }
   }
 
+  /** 仅群主/管理员：@所有人（OpenIM AtAllTag）；普通成员由 webhook 拒绝 */
+  function atAll() {
+    const role = opts.myRole.value
+    if (role !== 'owner' && role !== 'admin') {
+      uni.showToast({ title: '仅群主或管理员可以@所有人', icon: 'none' })
+      return
+    }
+    const token = '@所有人 '
+    if (!opts.input.value.includes(token)) {
+      opts.input.value = `${token}${opts.input.value}`
+    }
+    if (!atList.value.some((a) => a.atUserID === 'AtAllTag')) {
+      atList.value.push({ atUserID: 'AtAllTag', groupNickname: '所有人' })
+    }
+  }
+
   function reportUser(message: ChatMessage) {
     if (!guardSenderInGroup(message)) return
     const userId = businessUserIdFromIM(message.senderId)
@@ -508,6 +524,7 @@ export function useChatMessageActions(opts: {
     quote,
     atList,
     atUser,
+    atAll,
     openMenu,
     closeMenu,
     onMenuSelect,

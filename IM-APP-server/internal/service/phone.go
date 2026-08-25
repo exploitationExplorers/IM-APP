@@ -50,3 +50,16 @@ func MaskPhone(national string) string {
 	}
 	return digits[:3] + "****" + digits[len(digits)-4:]
 }
+
+// MaskPublicID 脱敏聊天号：保留前 2 后 2，如 ch****01；短 ID 全掩码
+func MaskPublicID(publicID string) string {
+	runes := []rune(strings.TrimSpace(publicID))
+	n := len(runes)
+	if n == 0 {
+		return ""
+	}
+	if n <= 4 {
+		return strings.Repeat("*", n)
+	}
+	return string(runes[:2]) + "****" + string(runes[n-2:])
+}

@@ -107,7 +107,7 @@ func main() {
 	groupRepo.GroupMemberHardLimit = cfg.GroupMemberHardLimit
 	groupReadCursorRepo := &repository.GroupReadCursorRepo{DB: pool}
 
-	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo}
+	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo}
 	imSvc := &service.IMService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, ReadCursors: groupReadCursorRepo, Config: cfg.OpenIM, TokenCache: redisClient,
 	}
@@ -161,7 +161,8 @@ func main() {
 	pushSvc := service.NewLoggingPushService()
 	webhookAccess := &service.IMWebhookAccess{Access: imAccessRepo, Redis: redisClient}
 	openIMWebhookH := handler.NewOpenIMWebhookHandler(
-		imAccessRepo, webhookAccess, imClient, &repository.RestrictionRepo{DB: pool}, cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
+		imAccessRepo, webhookAccess, imClient, &repository.RestrictionRepo{DB: pool}, redisClient,
+		cfg.OpenIM.WebhookSecret, cfg.OpenIM.AdminUser, cfg.OpenIM.WebhookAllowCIDRs, pushSvc,
 	)
 	// 安全提醒：配置了 webhook 密钥却没配来源 CIDR 白名单时，authorized 会整体拒绝所有回调，
 	// 等同于 webhook 功能静默失效——显式打 warning，避免排查时一脸懵。
@@ -321,6 +322,7 @@ func main() {
 			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
 			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
 			auth.POST("/groups/settings/update", groupH.UpdateSettings)
+			auth.GET("/group-announcements", groupH.ListAnnouncementHistory)
 			auth.POST("/groups/reports", groupH.CreateReport)
 			auth.POST("/groups/:id/leave", groupH.Leave)
 			auth.POST("/groups/:id/dismiss", groupH.Dismiss)

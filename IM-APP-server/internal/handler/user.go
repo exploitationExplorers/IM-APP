@@ -161,8 +161,9 @@ func (h *UserHandler) Search(c *gin.Context) {
 }
 
 func (h *UserHandler) GetUser(c *gin.Context) {
+	viewerID := middleware.UserID(c)
 	userID := c.Param("id")
-	u, err := h.Svc.GetPublicProfile(c.Request.Context(), userID)
+	u, err := h.Svc.GetPublicProfile(c.Request.Context(), viewerID, userID, c.Query("groupId"))
 	if err != nil {
 		response.Fail(c, http.StatusNotFound, "用户不存在")
 		return

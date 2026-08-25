@@ -180,6 +180,29 @@ func (h *GroupHandler) UpdateSettings(c *gin.Context) {
 	response.OK(c, g)
 }
 
+func (h *GroupHandler) ListAnnouncementHistory(c *gin.Context) {
+	uid := middleware.UserID(c)
+	groupID := c.Query("groupId")
+	if groupID == "" {
+		response.Fail(c, http.StatusBadRequest, "groupId 必填")
+		return
+	}
+	items, err := h.Svc.ListAnnouncementHistory(c.Request.Context(), groupID, uid)
+	if err != nil {
+		if errors.Is(err, repository.ErrGroupNotFound) || errors.Is(err, repository.ErrInvalidGroupOperation) {
+			response.Fail(c, http.StatusNotFound, "群不存在")
+			return
+		}
+		if errors.Is(err, repository.ErrForbidden) {
+			response.Fail(c, http.StatusForbidden, "无权访问")
+			return
+		}
+		response.Fail(c, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	response.OK(c, gin.H{"items": items})
+}
+
 func (h *GroupHandler) Leave(c *gin.Context) {
 	uid := middleware.UserID(c)
 	if err := h.Svc.Leave(c.Request.Context(), c.Param("id"), uid); err != nil {

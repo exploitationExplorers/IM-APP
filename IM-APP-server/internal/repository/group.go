@@ -349,7 +349,8 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid, cursor string
 	} else {
 		page.Items = items
 	}
-	if rm, rerr := r.GetMemberRemarks(ctx, groupID, uid); rerr == nil {
+	// GetMemberRemarks(uid, groupID)：参数顺序不可颠倒，否则查不到成员备注
+	if rm, rerr := r.GetMemberRemarks(ctx, uid, groupID); rerr == nil {
 		for i := range page.Items {
 			if r2, ok := rm[page.Items[i].ID]; ok {
 				page.Items[i].MemberRemark = r2
@@ -482,6 +483,24 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 		WHERE id=$1`, groupID, name, avatarURL, announcement, allow, joinMode, allMuted)
 	if err != nil {
 		return err
+	}
+	// 公告变更写入历史，每个群只保留最近 10 条
+	if announcement != nil {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO group_announcement_history(group_id, content, publisher_id)
+			VALUES($1::uuid, $2, $3::uuid)`, groupID, *announcement, uid); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM group_announcement_history
+			WHERE group_id=$1::uuid AND id NOT IN (
+				SELECT id FROM group_announcement_history
+				WHERE group_id=$1::uuid
+				ORDER BY created_at DESC
+				LIMIT 10
+			)`, groupID); err != nil {
+			return err
+		}
 	}
 	if r.LegacyChatEnabled && (name != nil || avatarURL != nil) {
 		if _, err := tx.Exec(ctx, `
@@ -1042,6 +1061,47 @@ func (r *GroupRepo) memberRole(ctx context.Context, groupID, uid string) (string
 		SELECT role FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid`,
 		groupID, uid).Scan(&role)
 	return role, err
+}
+
+// MemberRoleOf 对外暴露成员角色查询（资料脱敏等）
+func (r *GroupRepo) MemberRoleOf(ctx context.Context, groupID, uid string) (string, error) {
+	return r.memberRole(ctx, groupID, uid)
+}
+
+// ListAnnouncementHistory 返回群最近公告（最多 10 条，新在前）；仅群成员可读
+func (r *GroupRepo) ListAnnouncementHistory(ctx context.Context, groupID, uid string) ([]models.GroupAnnouncementHistoryItem, error) {
+	var exists bool
+	_ = r.DB.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM group_members gm JOIN groups g ON g.id=gm.group_id
+			WHERE gm.group_id=$1::uuid AND gm.user_id=$2::uuid AND g.status='active')`,
+		groupID, uid).Scan(&exists)
+	if !exists {
+		return nil, ErrForbidden
+	}
+	rows, err := r.DB.Query(ctx, `
+		SELECT h.id::text, h.content, COALESCE(h.publisher_id::text,''),
+			COALESCE(u.nickname,''), h.created_at
+		FROM group_announcement_history h
+		LEFT JOIN users u ON u.id = h.publisher_id
+		WHERE h.group_id=$1::uuid
+		ORDER BY h.created_at DESC
+		LIMIT 10`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]models.GroupAnnouncementHistoryItem, 0, 10)
+	for rows.Next() {
+		var item models.GroupAnnouncementHistoryItem
+		var createdAt time.Time
+		if err := rows.Scan(&item.ID, &item.Content, &item.PublisherID, &item.PublisherName, &createdAt); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (int, error) {

@@ -318,6 +318,8 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 查看用户公开资料（不含完整手机号）。
 
+**Query**：`groupId`（可选，群号）。从群成员资料进入时传入：仅该群**群主**可见完整 `publicId`，其他成员返回脱敏值（如 `ch****01`），避免凭聊天号互加好友。
+
 ---
 
 ## 通讯录（需 JWT）
@@ -674,6 +676,14 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 ```
 
 群名称、头像和公告仅群主/管理员可修改。`avatarFileId` 必须属于操作者本人，且文件为 `ready + purpose=avatar + image/*`。
+
+正式写接口为 `POST /api/v1/groups/settings/update`（`groupId` 在 Body）。每次成功更新公告会写入历史，每群最多保留最近 **10** 条。
+
+### GET `/api/v1/group-announcements?groupId=100001`
+
+返回当前群近期公告历史（最多 10 条，新在前）。仅群成员可查。
+
+**Response** `{ "items": [{ "id", "content", "publisherId", "publisherName", "createdAt" }] }`
 
 ### PUT `/api/v1/groups/:id/me/nickname`
 
