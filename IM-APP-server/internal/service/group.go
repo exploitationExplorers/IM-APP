@@ -95,7 +95,13 @@ func (s *GroupService) Join(ctx context.Context, groupID, uid string) (models.Gr
 	return s.Groups.Join(ctx, internalID, uid)
 }
 
-func (s *GroupService) UpdateSettings(ctx context.Context, groupID, uid string, name, avatarFileID, announcement *string, allow *bool, joinMode *string, allMuted *bool) error {
+func (s *GroupService) UpdateSettings(
+	ctx context.Context,
+	groupID, uid string,
+	name, avatarFileID, announcement *string,
+	announcementImageFileIDs, keepAnnouncementImages *[]string,
+	allow *bool, joinMode *string, allMuted *bool,
+) error {
 	if name == nil && avatarFileID == nil && announcement == nil && allow == nil && joinMode == nil && allMuted == nil {
 		return repository.ErrInvalidGroupOperation
 	}
@@ -130,7 +136,96 @@ func (s *GroupService) UpdateSettings(ctx context.Context, groupID, uid string, 
 		}
 		avatarURL = &file.URL
 	}
-	return s.Groups.UpdateSettings(ctx, internalID, uid, name, avatarURL, announcement, allow, joinMode, allMuted)
+
+	var announcementImages *[]string
+	if announcement != nil {
+		images, err := s.resolveAnnouncementImages(ctx, internalID, uid, announcementImageFileIDs, keepAnnouncementImages)
+		if err != nil {
+			return err
+		}
+		announcementImages = &images
+	}
+	return s.Groups.UpdateSettings(ctx, internalID, uid, name, avatarURL, announcement, announcementImages, allow, joinMode, allMuted)
+}
+
+const maxAnnouncementImages = 9
+
+/** 合并保留 URL + 新上传 fileId，上限 9；非法引用直接拒绝 */
+func (s *GroupService) resolveAnnouncementImages(
+	ctx context.Context,
+	groupID, uid string,
+	fileIDs, keepURLs *[]string,
+) ([]string, error) {
+	keep := []string{}
+	if keepURLs != nil {
+		keep = *keepURLs
+	}
+	ids := []string{}
+	if fileIDs != nil {
+		ids = *fileIDs
+	}
+	if len(keep)+len(ids) > maxAnnouncementImages {
+		return nil, repository.ErrInvalidGroupOperation
+	}
+
+	current, err := s.Groups.AnnouncementImagesOf(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]struct{}{}
+	for _, u := range current {
+		if u != "" {
+			allowed[u] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(keep)+len(ids))
+	seen := map[string]struct{}{}
+	for _, raw := range keep {
+		u := strings.TrimSpace(raw)
+		if u == "" {
+			continue
+		}
+		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			return nil, repository.ErrInvalidGroupOperation
+		}
+		if _, ok := allowed[u]; !ok {
+			return nil, repository.ErrInvalidGroupOperation
+		}
+		if _, dup := seen[u]; dup {
+			continue
+		}
+		seen[u] = struct{}{}
+		out = append(out, u)
+	}
+	if len(ids) > 0 {
+		if s.Files == nil {
+			return nil, repository.ErrInvalidGroupOperation
+		}
+		for _, id := range ids {
+			if _, err := uuid.Parse(strings.TrimSpace(id)); err != nil {
+				return nil, repository.ErrInvalidGroupOperation
+			}
+		}
+		paths, err := s.Files.FindReadyReportImagePaths(ctx, ids, uid)
+		if err != nil {
+			return nil, repository.ErrInvalidGroupOperation
+		}
+		for _, u := range paths {
+			if u == "" {
+				continue
+			}
+			if _, dup := seen[u]; dup {
+				continue
+			}
+			seen[u] = struct{}{}
+			out = append(out, u)
+		}
+	}
+	if len(out) > maxAnnouncementImages {
+		return nil, repository.ErrInvalidGroupOperation
+	}
+	return out, nil
 }
 
 func (s *GroupService) ListAnnouncementHistory(ctx context.Context, groupID, uid string) ([]models.GroupAnnouncementHistoryItem, error) {

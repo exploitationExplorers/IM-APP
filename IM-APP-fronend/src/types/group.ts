@@ -21,6 +21,8 @@ export interface GroupInfo {
   memberCount: number
   maxMembers?: number
   announcement?: string
+  /** 群公告配图 URL 列表（最多 9 张） */
+  announcementImages?: string[]
   allowMemberAddFriend?: boolean
   /** 关联的群聊会话 ID */
   conversationId?: string
@@ -43,6 +45,10 @@ export interface GroupSettingsInput {
   name?: string
   avatarFileId?: string
   announcement?: string
+  /** 新上传的图片 fileId（purpose=image） */
+  announcementImageFileIds?: string[]
+  /** 继续保留的已有公告图片 URL */
+  keepAnnouncementImages?: string[]
   allowMemberAddFriend?: boolean
   joinMode?: GroupJoinMode
   allMuted?: boolean
@@ -102,6 +108,7 @@ export interface GroupMemberMuteResult {
 export interface GroupAnnouncementHistoryItem {
   id: string
   content: string
+  images?: string[]
   publisherId?: string
   publisherName?: string
   createdAt: string

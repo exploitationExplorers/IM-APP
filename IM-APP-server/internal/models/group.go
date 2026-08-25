@@ -11,6 +11,7 @@ type GroupInfo struct {
 	MemberCount          int               `json:"memberCount"`
 	MaxMembers           int               `json:"maxMembers"`
 	Announcement         string            `json:"announcement,omitempty"`
+	AnnouncementImages   []string          `json:"announcementImages,omitempty"`
 	AllowMemberAddFriend bool              `json:"allowMemberAddFriend"`
 	ConversationID       string            `json:"conversationId,omitempty"`
 	MyRole               string            `json:"myRole,omitempty"`
@@ -52,13 +53,16 @@ type CreateGroupReq struct {
 }
 
 type UpdateGroupSettingsReq struct {
-	GroupID              string  `json:"groupId"`
-	Name                 *string `json:"name"`
-	AvatarFileID         *string `json:"avatarFileId"`
-	Announcement         *string `json:"announcement"`
-	AllowMemberAddFriend *bool   `json:"allowMemberAddFriend"`
-	JoinMode             *string `json:"joinMode"`
-	AllMuted             *bool   `json:"allMuted"`
+	GroupID              string    `json:"groupId"`
+	Name                 *string   `json:"name"`
+	AvatarFileID         *string   `json:"avatarFileId"`
+	Announcement         *string   `json:"announcement"`
+	// 与公告一并提交：新上传 fileId；保留的已有图片 URL。仅当 announcement 非 nil 时生效。
+	AnnouncementImageFileIDs *[]string `json:"announcementImageFileIds"`
+	KeepAnnouncementImages   *[]string `json:"keepAnnouncementImages"`
+	AllowMemberAddFriend     *bool     `json:"allowMemberAddFriend"`
+	JoinMode                 *string   `json:"joinMode"`
+	AllMuted                 *bool     `json:"allMuted"`
 }
 
 type UpdateMyGroupNicknameReq struct {
@@ -160,11 +164,12 @@ type GroupMemberMuteResult struct {
 
 // GroupAnnouncementHistoryItem 群公告历史一条
 type GroupAnnouncementHistoryItem struct {
-	ID              string `json:"id"`
-	Content         string `json:"content"`
-	PublisherID     string `json:"publisherId,omitempty"`
-	PublisherName   string `json:"publisherName,omitempty"`
-	CreatedAt       string `json:"createdAt"`
+	ID            string   `json:"id"`
+	Content       string   `json:"content"`
+	Images        []string `json:"images,omitempty"`
+	PublisherID   string   `json:"publisherId,omitempty"`
+	PublisherName string   `json:"publisherName,omitempty"`
+	CreatedAt     string   `json:"createdAt"`
 }
 
 type UpdateGroupRemarkReq struct {

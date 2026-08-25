@@ -156,6 +156,7 @@ func (h *GroupHandler) UpdateSettings(c *gin.Context) {
 	}
 	if err := h.Svc.UpdateSettings(c.Request.Context(), req.GroupID, uid,
 		req.Name, req.AvatarFileID, req.Announcement,
+		req.AnnouncementImageFileIDs, req.KeepAnnouncementImages,
 		req.AllowMemberAddFriend, req.JoinMode, req.AllMuted); err != nil {
 		if errors.Is(err, repository.ErrGroupNotFound) {
 			response.Fail(c, http.StatusNotFound, "群不存在")

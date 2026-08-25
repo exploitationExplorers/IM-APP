@@ -258,7 +258,8 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 		SELECT g.public_id, g.name, COALESCE(g.avatar,''), g.owner_id::text, COALESCE(owner.nickname,''),
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
 			COALESCE(g.max_members,200),
-			COALESCE(g.announcement,''), COALESCE(g.allow_member_add_friend, true),
+			COALESCE(g.announcement,''), COALESCE(g.announcement_images, '{}'),
+			COALESCE(g.allow_member_add_friend, true),
 			COALESCE(g.conversation_id::text,''),
 			gm.role, COALESCE(gm.nickname,''), COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false),
 			CASE WHEN gm.muted_until > NOW() THEN gm.muted_until ELSE NULL END,
@@ -268,9 +269,12 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 		LEFT JOIN users owner ON owner.id=g.owner_id
 		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID, uid).Scan(
 		&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.OwnerName, &g.MemberCount, &g.MaxMembers,
-		&g.Announcement, &allow, &g.ConversationID, &g.MyRole, &g.MyNickname,
+		&g.Announcement, &g.AnnouncementImages, &allow, &g.ConversationID, &g.MyRole, &g.MyNickname,
 		&g.JoinMode, &g.AllMuted, &g.MutedUntil, &g.Remark)
 	g.AllowMemberAddFriend = allow
+	if g.AnnouncementImages == nil {
+		g.AnnouncementImages = []string{}
+	}
 	if err == nil {
 		isMuted := g.MutedUntil != nil
 		canChat := true
@@ -428,7 +432,13 @@ func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJ
 	return r.GetByID(ctx, groupID, uid)
 }
 
-func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, name, avatarURL, announcement *string, allow *bool, joinMode *string, allMuted *bool) error {
+func (r *GroupRepo) UpdateSettings(
+	ctx context.Context,
+	groupID, uid string,
+	name, avatarURL, announcement *string,
+	announcementImages *[]string,
+	allow *bool, joinMode *string, allMuted *bool,
+) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -436,12 +446,13 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 	defer tx.Rollback(ctx)
 	var role, currentName, currentAvatar, currentAnnouncement, currentJoinMode string
 	var currentAllow, currentAllMuted bool
+	var currentImages []string
 	err = tx.QueryRow(ctx, `
-		SELECT gm.role, g.name, g.avatar, g.announcement,
+		SELECT gm.role, g.name, g.avatar, g.announcement, COALESCE(g.announcement_images, '{}'),
 		       g.allow_member_add_friend, g.join_mode, g.all_muted
 		FROM group_members gm JOIN groups g ON g.id=gm.group_id
 		WHERE gm.group_id=$1 AND gm.user_id=$2 AND g.status='active'`, groupID, uid).Scan(
-		&role, &currentName, &currentAvatar, &currentAnnouncement,
+		&role, &currentName, &currentAvatar, &currentAnnouncement, &currentImages,
 		&currentAllow, &currentJoinMode, &currentAllMuted,
 	)
 	if err != nil || (role != "owner" && role != "admin") {
@@ -457,7 +468,10 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 		avatarURL = nil
 	}
 	if announcement != nil && *announcement == currentAnnouncement {
-		announcement = nil
+		if announcementImages != nil && sameStringSlice(*announcementImages, currentImages) {
+			announcement = nil
+			announcementImages = nil
+		}
 	}
 	if allow != nil && *allow == currentAllow {
 		allow = nil
@@ -468,27 +482,47 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 	if allMuted != nil && *allMuted == currentAllMuted {
 		allMuted = nil
 	}
-	if name == nil && avatarURL == nil && announcement == nil && allow == nil && joinMode == nil && allMuted == nil {
+	if name == nil && avatarURL == nil && announcement == nil && announcementImages == nil && allow == nil && joinMode == nil && allMuted == nil {
 		return tx.Commit(ctx)
+	}
+	var imagesArg any
+	if announcementImages != nil {
+		imgs := *announcementImages
+		if imgs == nil {
+			imgs = []string{}
+		}
+		imagesArg = imgs
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE groups SET
 			name = COALESCE($2, name),
 			avatar = COALESCE($3, avatar),
 			announcement = COALESCE($4, announcement),
-			allow_member_add_friend = COALESCE($5, allow_member_add_friend),
-			join_mode = COALESCE($6, join_mode),
-			all_muted = COALESCE($7, all_muted),
+			announcement_images = COALESCE($5, announcement_images),
+			allow_member_add_friend = COALESCE($6, allow_member_add_friend),
+			join_mode = COALESCE($7, join_mode),
+			all_muted = COALESCE($8, all_muted),
 			updated_at = NOW()
-		WHERE id=$1`, groupID, name, avatarURL, announcement, allow, joinMode, allMuted)
+		WHERE id=$1`, groupID, name, avatarURL, announcement, imagesArg, allow, joinMode, allMuted)
 	if err != nil {
 		return err
 	}
 	// 公告变更写入历史，每个群只保留最近 10 条
-	if announcement != nil {
+	if announcement != nil || announcementImages != nil {
+		content := currentAnnouncement
+		if announcement != nil {
+			content = *announcement
+		}
+		images := currentImages
+		if announcementImages != nil {
+			images = *announcementImages
+		}
+		if images == nil {
+			images = []string{}
+		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO group_announcement_history(group_id, content, publisher_id)
-			VALUES($1::uuid, $2, $3::uuid)`, groupID, *announcement, uid); err != nil {
+			INSERT INTO group_announcement_history(group_id, content, images, publisher_id)
+			VALUES($1::uuid, $2, $3, $4::uuid)`, groupID, content, images, uid); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
@@ -528,6 +562,32 @@ func (r *GroupRepo) UpdateSettings(ctx context.Context, groupID, uid string, nam
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func sameStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+/** 当前群公告图片（用于校验 keep URLs） */
+func (r *GroupRepo) AnnouncementImagesOf(ctx context.Context, groupID string) ([]string, error) {
+	var images []string
+	err := r.DB.QueryRow(ctx, `
+		SELECT COALESCE(announcement_images, '{}') FROM groups WHERE id=$1::uuid`, groupID).Scan(&images)
+	if err != nil {
+		return nil, err
+	}
+	if images == nil {
+		return []string{}, nil
+	}
+	return images, nil
 }
 
 func (r *GroupRepo) Leave(ctx context.Context, groupID, uid string) error {
@@ -1080,7 +1140,7 @@ func (r *GroupRepo) ListAnnouncementHistory(ctx context.Context, groupID, uid st
 		return nil, ErrForbidden
 	}
 	rows, err := r.DB.Query(ctx, `
-		SELECT h.id::text, h.content, COALESCE(h.publisher_id::text,''),
+		SELECT h.id::text, h.content, COALESCE(h.images, '{}'), COALESCE(h.publisher_id::text,''),
 			COALESCE(u.nickname,''), h.created_at
 		FROM group_announcement_history h
 		LEFT JOIN users u ON u.id = h.publisher_id
@@ -1095,8 +1155,11 @@ func (r *GroupRepo) ListAnnouncementHistory(ctx context.Context, groupID, uid st
 	for rows.Next() {
 		var item models.GroupAnnouncementHistoryItem
 		var createdAt time.Time
-		if err := rows.Scan(&item.ID, &item.Content, &item.PublisherID, &item.PublisherName, &createdAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Content, &item.Images, &item.PublisherID, &item.PublisherName, &createdAt); err != nil {
 			return nil, err
+		}
+		if item.Images == nil {
+			item.Images = []string{}
 		}
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 		items = append(items, item)

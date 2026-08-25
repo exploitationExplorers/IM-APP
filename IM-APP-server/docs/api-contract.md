@@ -689,6 +689,8 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
   "name": "新群名称",
   "avatarFileId": "已完成上传的本人图片 fileId",
   "announcement": "公告",
+  "announcementImageFileIds": ["新上传的 purpose=image 文件 UUID"],
+  "keepAnnouncementImages": ["继续保留的已有公告图片 URL"],
   "allowMemberAddFriend": false,
   "joinMode": "open|approval",
   "allMuted": false
@@ -697,13 +699,20 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 群名称、头像和公告仅群主/管理员可修改。`avatarFileId` 必须属于操作者本人，且文件为 `ready + purpose=avatar + image/*`。
 
-正式写接口为 `POST /api/v1/groups/settings/update`（`groupId` 在 Body）。每次成功更新公告会写入历史，每群最多保留最近 **10** 条。
+更新公告时（`announcement` 有传）：
+- 配图最多 **9** 张；先走 `POST /files/uploads`（`purpose=image`）再 complete。
+- `announcementImageFileIds`：本次新上传的 fileId。
+- `keepAnnouncementImages`：继续保留的已有图片 URL（必须是当前群公告里已有的 URL，防盗链他人资源）。
+- 两者都可省略或为空数组；省略 fileIds / keep 表示清空配图（仍以本次提交合并结果为准）。
+- 群详情返回 `announcementImages: string[]`。
+
+正式写接口为 `POST /api/v1/groups/settings/update`（`groupId` 在 Body）。每次成功更新公告会写入历史，每群最多保留最近 **10** 条（含图片）。
 
 ### GET `/api/v1/group-announcements?groupId=100001`
 
 返回当前群近期公告历史（最多 10 条，新在前）。仅群成员可查。
 
-**Response** `{ "items": [{ "id", "content", "publisherId", "publisherName", "createdAt" }] }`
+**Response** `{ "items": [{ "id", "content", "images", "publisherId", "publisherName", "createdAt" }] }`
 
 ### PUT `/api/v1/groups/:id/me/nickname`
 
