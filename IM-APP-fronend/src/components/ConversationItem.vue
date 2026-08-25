@@ -17,6 +17,12 @@ const emit = defineEmits<{
 
 const chatStore = useChatStore()
 const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
+/** 列表预览压成单行，避免长文/换行把会话行撑开（对齐参考站省略号） */
+const previewText = computed(() =>
+  String(props.item.lastMessage || '')
+    .replace(/\s+/g, ' ')
+    .trim(),
+)
 const isMuted = computed(() => props.item.recvMsgOpt === 1 || props.item.recvMsgOpt === 2)
 const isOnline = computed(
   () =>
@@ -48,7 +54,7 @@ const lastFailed = computed(() => {
           <view v-if="lastFailed" class="failed-mark">!</view>
           <image v-if="isMuted" class="mute-icon" src="/static/icons/icon-bell-slash.svg" mode="aspectFit" />
           <text v-for="tag in item.highlightTags" :key="tag" class="tag">{{ tag }}</text>
-          <text class="msg">{{ item.lastMessage }}</text>
+          <view class="msg">{{ previewText }}</view>
         </view>
         <view v-if="item.unreadCount > 0" class="badge">
           <text class="badge-text">{{ item.unreadCount > 99 ? '99+' : item.unreadCount }}</text>
@@ -125,6 +131,8 @@ const lastFailed = computed(() => {
 
 .title {
   flex: 1;
+  width: 0;
+  min-width: 0;
   font-size: 32rpx;
   color: #111;
   font-weight: 500;
@@ -145,6 +153,7 @@ const lastFailed = computed(() => {
   min-width: 0;
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   overflow: hidden;
 }
 
@@ -152,6 +161,7 @@ const lastFailed = computed(() => {
   color: #e54d42;
   font-size: 26rpx;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .mute-icon {
@@ -178,9 +188,12 @@ const lastFailed = computed(() => {
 }
 
 .msg {
+  flex: 1;
+  width: 0;
+  min-width: 0;
   color: #999;
   font-size: 26rpx;
-  min-width: 0;
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
