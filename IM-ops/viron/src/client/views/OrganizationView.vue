@@ -1,4 +1,5 @@
-<script setup lang="ts">import { translate as tr } from "../i18n";
+<script setup lang="ts">import { withBase } from "../base-path";
+import { translate as tr } from "../i18n";
 
 import {
   ArrowRight,
@@ -376,7 +377,7 @@ async function activateWorkspace(workspace: Workspace) {
   if (desktop) {
     await router.replace({ name: "organization" });
     await load();
-  } else window.location.assign("/organization");
+  } else window.location.assign(withBase("/organization"));
 }
 
 async function openInvitationFromLink() {
@@ -495,7 +496,7 @@ async function removeMember(member: Member) {
     await loadSession();
     if (session.workspace?.type !== "organization") {
       if (desktop) { await router.replace({ name: "organization" }); await load(); }
-      else window.location.assign("/organization");
+      else window.location.assign(withBase("/organization"));
     } else await load();
   } catch (error) {
     if (error === "cancel" || error === "close") return;

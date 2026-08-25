@@ -1,4 +1,5 @@
 import { translate as tr } from "./i18n";
+import { withBase } from "./base-path";
 import { computed, shallowRef } from "vue";
 import { resolveExecutionTargets, type DesktopExecutionMode } from "../shared/execution-mode";
 import type { DesktopTitleBarAppearance } from "../shared/desktop-titlebar";
@@ -454,7 +455,7 @@ export async function desktopRequest(path: string, init: RequestInit = {}): Prom
 
 export async function downloadApiFile(path: string, filename?: string): Promise<boolean> {
   if (window.vironDesktop) return (await window.vironDesktop.download(path, filename)).saved;
-  window.location.href = path;
+  window.location.href = withBase(path);
   return true;
 }
 

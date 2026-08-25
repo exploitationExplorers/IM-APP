@@ -1,6 +1,6 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import mysql, { type FieldPacket, type QueryResult, type ResultSetHeader, type RowDataPacket } from "mysql2/promise";
+import mysql, { type FieldPacket, type ResultSetHeader, type RowDataPacket } from "mysql2/promise";
 
 interface TunnelOptions {
   url: string;
@@ -187,7 +187,7 @@ export class NavicatHttpTunnelConnection {
     this.database = options.database;
   }
 
-  async query<T extends QueryResult = QueryResult>(sql: string, values?: unknown): Promise<[T, FieldPacket[]]> {
+  async query<T = unknown>(sql: string, values?: unknown): Promise<[T, unknown[]]> {
     this.assertOpen();
     const formatted = values === undefined ? sql : (mysql.format as (statement: string, parameters: unknown) => string)(sql, values);
     const use = formatted.trim().match(/^USE\s+`?([^`;]+)`?\s*;?$/i);

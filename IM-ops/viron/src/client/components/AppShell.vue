@@ -1,4 +1,5 @@
-<script setup lang="ts">import { translate as tr } from "../i18n";
+<script setup lang="ts">import { withBase } from "../base-path";
+import { translate as tr } from "../i18n";
 
 import {
   Boxes,
@@ -150,7 +151,7 @@ async function activateWorkspace(command: string) {
     if (desktop) {
       await router.replace({ name: "overview" });
       window.location.reload();
-    } else window.location.assign("/");
+    } else window.location.assign(withBase("/"));
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : tr("切换工作空间失败"));
     workspaceSwitching.value = false;

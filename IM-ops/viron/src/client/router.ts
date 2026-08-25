@@ -18,7 +18,7 @@ function isRecoverableRouteLoadError(error: unknown): boolean {
 }
 
 export const router = createRouter({
-  history: isDesktopApp() ? createWebHashHistory() : createWebHistory(),
+  history: isDesktopApp() ? createWebHashHistory() : createWebHistory(import.meta.env.BASE_URL),
   scrollBehavior: resolveRouteScrollPosition,
   routes: [
     { path: "/login", name: "login", component: () => import("./views/LoginView.vue"), meta: { public: true } },

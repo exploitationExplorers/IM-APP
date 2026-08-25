@@ -1,4 +1,5 @@
-<script setup lang="ts">import { currentLocale, language, setLanguage, translate as tr } from "../i18n";
+<script setup lang="ts">import { withBase } from "../base-path";
+import { currentLocale, language, setLanguage, translate as tr } from "../i18n";
 
 import {
   Activity,
@@ -758,7 +759,7 @@ async function restorePlatform() {
   }
   restoreProgress.value = 0;
   const request = new XMLHttpRequest();
-  request.open("POST", "/api/v1/platform-restore");
+  request.open("POST", withBase("/api/v1/platform-restore"));
   request.setRequestHeader("Accept-Language", currentLocale());
   request.upload.addEventListener("progress", (event) => {
     if (event.lengthComputable) restoreProgress.value = Math.round(event.loaded / event.total * 100);

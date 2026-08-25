@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   const apiTarget = `http://127.0.0.1:${apiPort}`;
 
   return {
-    base: mode === "desktop" ? "./" : "/",
+    base: mode === "desktop" ? "./" : "/opt/",
     plugins: [vue()],
     resolve: {
       alias: {

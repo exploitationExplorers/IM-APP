@@ -7,7 +7,7 @@ export interface DesktopInstallerInformation {
 }
 
 export interface ProductVersionInformation {
-  product: "viron";
+  product: string;
   serverVersion: string;
   apiVersion: number;
   apiProtocol: { min: number; max: number };

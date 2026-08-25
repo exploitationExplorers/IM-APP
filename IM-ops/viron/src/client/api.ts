@@ -3,6 +3,7 @@ import { desktopRequest, isDesktopApp } from "./desktop";
 import { dispatchConnectionLimit } from "./connection-limit";
 import { connectionQualityByteLength, recordConnectionQualityTraffic } from "./connection-quality-traffic";
 import { isAuthenticationRequired, notifyAuthenticationRequired } from "./authentication-required";
+import { withBase } from "./base-path";
 
 export class ApiError extends Error {
   constructor(
@@ -60,7 +61,7 @@ async function requestApi<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (response.status === 204 || !response.body) return undefined as T;
     return JSON.parse(response.body) as T;
   }
-  const response = await fetch(path, {
+  const response = await fetch(withBase(path), {
     ...init,
     headers,
     credentials: "same-origin",

@@ -1,4 +1,5 @@
-<script setup lang="ts">import { currentLocale, translate as tr } from "../i18n";
+<script setup lang="ts">import { withBase } from "../base-path";
+import { currentLocale, translate as tr } from "../i18n";
 
 import {
   ChevronDown,
@@ -223,7 +224,7 @@ function startItemDrag(item: SftpItem, event: DragEvent) {
   event.dataTransfer.setData("text/plain", dragItems.map((candidate) => candidate.name).join("\n"));
   emit("dragStart", { connectionId: props.connection.id, items: dragItems });
   if (dragItems.length === 1 && !isSftpDirectory(dragItems[0]) && !props.localExecution && props.connection.type === "ssh") {
-    const url = `${window.location.origin}/api/v1/ssh-connections/${props.connection.id}/sftp/download?path=${encodeURIComponent(dragItems[0].path)}`;
+    const url = `${window.location.origin}${withBase(`/api/v1/ssh-connections/${props.connection.id}/sftp/download?path=${encodeURIComponent(dragItems[0].path)}`)}`;
     event.dataTransfer.setData("DownloadURL", `application/octet-stream:${dragItems[0].name}:${url}`);
   }
 }

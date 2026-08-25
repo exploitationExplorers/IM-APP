@@ -1,10 +1,10 @@
-import type { FieldPacket, QueryResult, RowDataPacket } from "mysql2/promise";
+import type { RowDataPacket } from "mysql2/promise";
 
 export type DatabaseSyncMode = "data" | "structure";
 export type DatabaseSyncItemStatus = "ready" | "missing" | "different" | "extra" | "same" | "blocked";
 
 export interface DatabaseSyncClient {
-  query<T extends QueryResult = QueryResult>(sql: string, values?: unknown): Promise<[T, FieldPacket[]]>;
+  query<T = unknown>(sql: string, values?: unknown): Promise<[T, unknown[]]>;
   beginTransaction(): Promise<void>;
   commit(): Promise<void>;
   rollback(): Promise<void>;

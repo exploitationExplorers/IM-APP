@@ -1,6 +1,7 @@
 import { api } from "./api";
 import { desktopRequest, isDesktopApp, probeDesktopConnectionQualityTarget } from "./desktop";
 import { connectionQualityByteLength, recordConnectionQualityTraffic } from "./connection-quality-traffic";
+import { withBase } from "./base-path";
 import type { ConnectionQualitySpeedTestResult } from "../shared/connection-quality";
 
 const SPEED_TEST_BYTES = 256 * 1024;
@@ -29,7 +30,7 @@ async function rawRequest(path: string, init: RequestInit = {}): Promise<string>
     recordConnectionQualityTraffic("download", connectionQualityByteLength(response.body));
     return response.body;
   }
-  const response = await fetch(path, { ...init, credentials: "same-origin", cache: "no-store" });
+  const response = await fetch(withBase(path), { ...init, credentials: "same-origin", cache: "no-store" });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const text = await response.text();
   recordConnectionQualityTraffic("download", connectionQualityByteLength(text));

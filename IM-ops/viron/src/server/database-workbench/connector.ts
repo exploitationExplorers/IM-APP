@@ -1,7 +1,7 @@
 import type { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import mysql, { type ConnectionOptions, type FieldPacket, type QueryResult } from "mysql2/promise";
+import mysql, { type ConnectionOptions } from "mysql2/promise";
 import type { ClientChannel } from "ssh2";
 import type { WorkspaceType } from "../access-control.js";
 import { connectSsh, loadSshConnection, type ConnectedSsh } from "../ssh/connector.js";
@@ -11,7 +11,9 @@ import { IdleResourcePool } from "../../shared/idle-resource-pool.js";
 import { createPgConnection } from "./pg-connector.js";
 
 export interface DatabaseConnectionClient {
-  query<T extends QueryResult = QueryResult>(sql: string, values?: unknown): Promise<[T, FieldPacket[]]>;
+  // 返回行统一用 unknown[]：MySQL 传 FieldPacket[]、PostgreSQL 传 pg 字段描述，
+  // 上层只消费第一个元素（行数据），第二个元素按需自行断言
+  query<T = unknown>(sql: string, values?: unknown): Promise<[T, unknown[]]>;
   beginTransaction(): Promise<void>;
   commit(): Promise<void>;
   rollback(): Promise<void>;

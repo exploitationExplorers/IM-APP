@@ -213,7 +213,8 @@ export function buildPrivilegeUpdateStatements(input: {
   return statements;
 }
 
-export function userAuthenticationClause(engine: "mysql" | "mariadb", plugin: string, passwordSql: string): string {
+export function userAuthenticationClause(engine: "mysql" | "mariadb" | "postgresql", plugin: string, passwordSql: string): string {
+  if (engine === "postgresql") return `WITH PASSWORD ${passwordSql}`;
   if (!plugin) return `IDENTIFIED BY ${passwordSql}`;
   return engine === "mariadb"
     ? `IDENTIFIED VIA ${identifier(plugin)} USING PASSWORD(${passwordSql})`
