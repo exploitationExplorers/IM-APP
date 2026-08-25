@@ -22,6 +22,18 @@ type Config struct {
 	Forward              ForwardConfig
 	SMS                  SMSConfig
 	CORSAllowOrigins     []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
+	SMSRate              SMSRateConfig
+}
+
+// SMSRateConfig 设备指纹 + 多维度验证码限流配置
+type SMSRateConfig struct {
+	FingerprintLimit   int  // 每设备指纹每小时上限，默认 10
+	FingerprintWindow  int  // 指纹限流窗口(秒)，默认 3600
+	DeviceIDLimit      int  // 每客户端 DeviceID 每小时上限，默认 8
+	DeviceIDWindow     int  // DeviceID 限流窗口(秒)，默认 3600
+	IPMaxFingerprints  int  // 同 IP 每小时最大不同指纹数，超出判定为设备农场，默认 3
+	IPFarmBlockSeconds int  // 设备农场 IP 封禁时长(秒)，默认 3600
+	BlacklistEnabled   bool // 是否启用指纹/DeviceID 黑名单，默认 true
 }
 
 type MinIOConfig struct {
@@ -124,6 +136,15 @@ func Load() Config {
 			RegionID:        getenv("SMS_REGION_ID", "cn-hangzhou"),
 		},
 		CORSAllowOrigins: splitCSV(getenv("CORS_ALLOW_ORIGINS", "")),
+		SMSRate: SMSRateConfig{
+			FingerprintLimit:   GetenvInt("SMS_FP_LIMIT", 10),
+			FingerprintWindow:  GetenvInt("SMS_FP_WINDOW", 3600),
+			DeviceIDLimit:      GetenvInt("SMS_DEVICE_LIMIT", 8),
+			DeviceIDWindow:     GetenvInt("SMS_DEVICE_WINDOW", 3600),
+			IPMaxFingerprints:  GetenvInt("SMS_IP_MAX_FPS", 3),
+			IPFarmBlockSeconds: GetenvInt("SMS_IP_FARM_BLOCK_SEC", 3600),
+			BlacklistEnabled:   getenvBool("SMS_BLACKLIST_ENABLED", true),
+		},
 	}
 }
 

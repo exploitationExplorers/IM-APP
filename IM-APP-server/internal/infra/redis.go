@@ -112,6 +112,110 @@ func (r *Redis) AllowIP(ctx context.Context, key string, limit int, window time.
 	return cnt <= int64(limit)
 }
 
+// AllowFingerprint 按设备指纹限流：window 内最多 limit 次，超限返回 false。
+func (r *Redis) AllowFingerprint(ctx context.Context, fp string, limit int, window time.Duration) bool {
+	if !r.Available() {
+		return true
+	}
+	k := "sms:fp:" + fp
+	cnt, err := r.Client.Incr(ctx, k).Result()
+	if err != nil {
+		return true
+	}
+	if cnt == 1 {
+		r.Client.Expire(ctx, k, window)
+	}
+	return cnt <= int64(limit)
+}
+
+// AllowDeviceID 按客户端 DeviceID 限流：window 内最多 limit 次，超限返回 false。
+// DeviceID 为空时跳过检查（放行）。
+func (r *Redis) AllowDeviceID(ctx context.Context, deviceID string, limit int, window time.Duration) bool {
+	if !r.Available() || deviceID == "" {
+		return true
+	}
+	k := "sms:did:" + deviceID
+	cnt, err := r.Client.Incr(ctx, k).Result()
+	if err != nil {
+		return true
+	}
+	if cnt == 1 {
+		r.Client.Expire(ctx, k, window)
+	}
+	return cnt <= int64(limit)
+}
+
+// CheckIPDeviceFarm 检测同一 IP 下是否出现过多不同设备指纹（设备农场特征）。
+// 将当前指纹加入集合，若集合大小超过 maxFP 则封禁该 IP（设置标记 key，TTL=blockDur）。
+// 返回 true=放行, false=触发农场封禁。
+func (r *Redis) CheckIPDeviceFarm(ctx context.Context, ip, fp string, maxFP int, window, blockDur time.Duration) bool {
+	if !r.Available() {
+		return true
+	}
+	k := "sms:ip-fps:" + ip
+	r.Client.SAdd(ctx, k, fp)
+	r.Client.Expire(ctx, k, window)
+	count, err := r.Client.SCard(ctx, k).Result()
+	if err != nil {
+		return true
+	}
+	if count > int64(maxFP) {
+		r.Client.Set(ctx, "sms:ip-farmed:"+ip, "1", blockDur)
+		return false
+	}
+	return true
+}
+
+// IsIPFarmBlocked 检查 IP 是否已被标记为设备农场。
+func (r *Redis) IsIPFarmBlocked(ctx context.Context, ip string) bool {
+	if !r.Available() {
+		return false
+	}
+	_, err := r.Client.Get(ctx, "sms:ip-farmed:"+ip).Result()
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+// IsBlacklisted 检查设备指纹或 DeviceID 是否在黑名单中。
+// 任一命中即返回 true。
+func (r *Redis) IsBlacklisted(ctx context.Context, fp, deviceID string) bool {
+	if !r.Available() {
+		return false
+	}
+	if fp != "" {
+		if v, err := r.Client.Get(ctx, "sms:bl:fp:"+fp).Result(); err == nil && v != "" {
+			return true
+		}
+	}
+	if deviceID != "" {
+		if v, err := r.Client.Get(ctx, "sms:bl:did:"+deviceID).Result(); err == nil && v != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// AddToBlacklist 将设备指纹或 DeviceID 加入 Redis 黑名单。
+// reason 存为 value，ttl 为过期时间（0=永不过期）。
+func (r *Redis) AddToBlacklist(ctx context.Context, fp, deviceID, reason string, ttl time.Duration) error {
+	if !r.Available() {
+		return nil
+	}
+	if fp != "" {
+		if err := r.Client.Set(ctx, "sms:bl:fp:"+fp, reason, ttl).Err(); err != nil {
+			return err
+		}
+	}
+	if deviceID != "" {
+		if err := r.Client.Set(ctx, "sms:bl:did:"+deviceID, reason, ttl).Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *Redis) Close() error {
 	if !r.Available() {
 		return nil

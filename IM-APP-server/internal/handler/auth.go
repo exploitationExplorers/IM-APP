@@ -64,9 +64,12 @@ func (h *AuthHandler) SendSMS(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
-	// 限流：每分钟 1 条 / 每 IP 每小时 5 条 / 每号每日 10 条
+	// 计算服务端设备指纹
+	fp, suspicious := infra.ComputeFingerprint(c.Request)
+
+	// 限流：黑名单 → 手机号1/min → 指纹 → DeviceID → IP5/h → IP农场 → 手机号10/day
 	if h.Redis != nil && h.Redis.Available() {
-		if !h.smsRateAllow(ctx, e164, c.ClientIP()) {
+		if !h.smsRateAllow(ctx, e164, c.ClientIP(), fp, req.DeviceID, suspicious) {
 			response.Fail(c, http.StatusTooManyRequests, "发送过于频繁，请稍后再试")
 			return
 		}
@@ -87,9 +90,9 @@ func (h *AuthHandler) SendSMS(c *gin.Context) {
 		return
 	}
 	_, _ = h.DB.Exec(ctx, `
-		INSERT INTO sms_send_logs(phone_e164, country_code, scene, provider, device_id)
-		VALUES($1,$2,$3,'aliyun',$4)`,
-		e164, req.CountryCode, req.Scene, req.DeviceID,
+		INSERT INTO sms_send_logs(phone_e164, country_code, scene, provider, ip_hash, device_id)
+		VALUES($1,$2,$3,'aliyun',$4,$5)`,
+		e164, req.CountryCode, req.Scene, hashHex(c.ClientIP()), req.DeviceID,
 	)
 	// 真正发送短信（未配置阿里云短信时用 dev 网关，仅记日志）
 	if h.SMS != nil {
@@ -441,14 +444,40 @@ func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID str
 	})
 }
 
-// smsRateAllow 多维度限流：每分钟 / IP 每小时 / 号码每日
-func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip string) bool {
+// smsRateAllow 多维度限流：黑名单 → 手机号1/min → 指纹 → DeviceID → IP5/h → IP农场 → 手机号10/day
+func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID string, suspicious bool) bool {
 	cli := h.Redis.Client
+	rc := h.Cfg.SMSRate
+
+	// 0. 黑名单检查
+	if rc.BlacklistEnabled && h.Redis.IsBlacklisted(ctx, fp, deviceID) {
+		return false
+	}
+
+	// 1. 手机号 1/min
 	minKey := "sms:rate:" + e164
 	ok, err := cli.SetNX(ctx, minKey, "1", time.Minute).Result()
 	if err != nil || !ok {
 		return false
 	}
+
+	// 2. 设备指纹限流
+	fpWin := time.Duration(rc.FingerprintWindow) * time.Second
+	fpLimit := rc.FingerprintLimit
+	if suspicious && fpLimit > 1 {
+		fpLimit = fpLimit / 2 // 可疑请求阈值收紧一半
+	}
+	if !h.Redis.AllowFingerprint(ctx, fp, fpLimit, fpWin) {
+		return false
+	}
+
+	// 3. 客户端 DeviceID 限流（DeviceID 非空时检查）
+	didWin := time.Duration(rc.DeviceIDWindow) * time.Second
+	if !h.Redis.AllowDeviceID(ctx, deviceID, rc.DeviceIDLimit, didWin) {
+		return false
+	}
+
+	// 4. IP 5/hour
 	ipKey := "sms:ip:" + ip
 	if cnt, err := cli.Incr(ctx, ipKey).Result(); err == nil {
 		if cnt == 1 {
@@ -458,6 +487,19 @@ func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip string) bool {
 			return false
 		}
 	}
+
+	// 5. IP 农场封禁检查
+	if h.Redis.IsIPFarmBlocked(ctx, ip) {
+		return false
+	}
+
+	// 6. IP 多设备检测
+	blockDur := time.Duration(rc.IPFarmBlockSeconds) * time.Second
+	if !h.Redis.CheckIPDeviceFarm(ctx, ip, fp, rc.IPMaxFingerprints, time.Hour, blockDur) {
+		return false
+	}
+
+	// 7. 手机号 10/day
 	dailyKey := "sms:daily:" + e164
 	if cnt, err := cli.Incr(ctx, dailyKey).Result(); err == nil {
 		if cnt == 1 {
