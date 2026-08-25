@@ -4,6 +4,8 @@ import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
 import ImAtActionSheet from '@/components/ImAtActionSheet.vue'
+import ImAtMentionPanel from '@/components/ImAtMentionPanel.vue'
+import type { AtMentionMember } from '@/components/ImAtMentionPanel.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
@@ -20,7 +22,7 @@ import { useContactStore } from '@/stores/contact'
 import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
 import { fetchAllGroupMembers, fetchGroupDetail } from '@/api/group'
 import { safeBack } from '@/utils/nav'
-import type { CardPayload, ChatMessage, Conversation } from '@/types'
+import type { CardPayload, ChatMessage, Conversation, GroupMember } from '@/types'
 import { collapseRepeatedGroupNameNotices, isGroupUnavailableError, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
@@ -77,6 +79,13 @@ const denyReason = ref('')
 const myMutedUntil = ref<string | null>(null)
 /** 群成员角色 / 禁言元信息（业务用户 ID 索引），供长按菜单做权限与禁言项判断 */
 const memberMetaMap = ref<Record<string, MemberMeta>>({})
+/** 群成员完整列表，供输入 @ 提及面板使用 */
+const groupMembersForAt = ref<GroupMember[]>([])
+/** 输入 @ 后弹出的提及面板 */
+const atMentionVisible = ref(false)
+const atMentionKeyword = ref('')
+/** 当前触发提及的 `@` 在输入框中的起始下标 */
+const atMentionStart = ref(-1)
 /** 当前群公告正文，房间顶栏横幅用 */
 const announcementText = ref('')
 /**
@@ -634,6 +643,7 @@ async function onSend() {
   if (!text) return
   input.value = ''
   showPlusPanel.value = false
+  closeAtMention()
   try {
     if (actions.quote.value) {
       await chatStore.sendQuote(
@@ -817,7 +827,7 @@ async function resolveBusinessTarget(): Promise<string> {
   return ''
 }
 
-/** 拉群成员元信息：长按菜单的禁言/踢人权限、头像与备注兜底 */
+/** 拉群成员元信息：长按菜单的禁言/踢人权限、头像与备注兜底、@ 提及列表 */
 async function loadGroupMembersMeta(groupId: string): Promise<void> {
   try {
     const members = await fetchAllGroupMembers(groupId)
@@ -833,10 +843,111 @@ async function loadGroupMembersMeta(groupId: string): Promise<void> {
     memberMetaMap.value = meta
     memberAvatarMap.value = avatars
     memberRemarkMap.value = remarks
+    groupMembersForAt.value = members
   } catch {
     // 成员列表失败不阻断聊天；管控项由后端兜底
   }
 }
+
+/** 业务 UUID → OpenIM userID（去连字符） */
+function openIMUserIdOf(businessUserId: string): string {
+  return businessUserId.replace(/-/g, '').toLowerCase()
+}
+
+function memberDisplayName(m: GroupMember): string {
+  return m.memberRemark?.trim() || m.groupNickname || m.nickname || '成员'
+}
+
+const canAtAll = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
+
+const atMentionMembers = computed<AtMentionMember[]>(() => {
+  const me = myId.value
+  const meIm = (imUserId.value || '').toLowerCase()
+  return groupMembersForAt.value
+    .filter((m) => {
+      if (!m.id) return false
+      if (me && m.id === me) return false
+      if (meIm && openIMUserIdOf(m.id) === meIm) return false
+      return true
+    })
+    .map((m) => ({
+      id: m.id,
+      imUserId: openIMUserIdOf(m.id),
+      name: memberDisplayName(m),
+      avatar: m.avatar || APP_CONFIG.defaultAvatarUrl,
+    }))
+})
+
+/**
+ * 输入框末尾是否处于「刚打了 @」的提及态。
+ * 匹配：行首或空白后的 `@关键字`（关键字不含空白与 @）。
+ */
+function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
+  // App 端 @input 有时早于 v-model 落库，优先用事件值
+  const detail = e && 'detail' in e ? e.detail : undefined
+  if (detail && typeof detail.value === 'string') {
+    input.value = detail.value
+  }
+  if (chatType.value !== 'group' || composerBlocked.value) {
+    closeAtMention()
+    return
+  }
+  const text = input.value
+  const match = /(^|[\s\n])@([^\s@]*)$/.exec(text)
+  if (!match) {
+    closeAtMention()
+    return
+  }
+  const atIndex = text.length - (match[2]?.length || 0) - 1
+  atMentionStart.value = atIndex
+  atMentionKeyword.value = match[2] || ''
+  atMentionVisible.value = true
+  showPlusPanel.value = false
+  showEmojiPanel.value = false
+  // 成员列表尚未就绪时补拉一次，避免面板空白
+  if (!groupMembersForAt.value.length && businessId.value) {
+    void loadGroupMembersMeta(businessId.value)
+  }
+}
+
+function closeAtMention() {
+  atMentionVisible.value = false
+  atMentionKeyword.value = ''
+  atMentionStart.value = -1
+}
+
+/** 用选中的提及替换输入中的 `@关键字`，并写入 atList */
+function applyAtMention(name: string, imUserId: string) {
+  const start = atMentionStart.value
+  if (start < 0) {
+    closeAtMention()
+    return
+  }
+  const before = input.value.slice(0, start)
+  const rest = input.value.slice(start).replace(/^@[^\s@]*/, '')
+  const token = `@${name} `
+  input.value = `${before}${token}${rest}`
+  if (imUserId && !actions.atList.value.some((a) => a.atUserID === imUserId)) {
+    actions.atList.value.push({ atUserID: imUserId, groupNickname: name })
+  }
+  closeAtMention()
+}
+
+function onAtMentionSelect(member: AtMentionMember) {
+  applyAtMention(member.name, member.imUserId)
+}
+
+function onAtMentionSelectAll() {
+  if (!canAtAll.value) {
+    uni.showToast({ title: '仅群主或管理员可以@所有人', icon: 'none' })
+    return
+  }
+  applyAtMention('所有人', 'AtAllTag')
+}
+
+watch(input, () => {
+  syncAtMentionFromInput()
+})
 
 /** 进群 / 退群 / 踢人 / 禁言后标题旁人数与禁言状态要跟着变，不能只在首次进入时拉一次。返回群详情是否拉取成功（「检查禁言状态」用它区分失败） */
 async function refreshGroupMeta(): Promise<boolean> {
@@ -1302,6 +1413,7 @@ function onEmoji() {
   showEmojiPanel.value = !showEmojiPanel.value
   if (showEmojiPanel.value) {
     showPlusPanel.value = false
+    closeAtMention()
   }
 }
 
@@ -1329,6 +1441,7 @@ function onPlus() {
   showPlusPanel.value = !showPlusPanel.value
   if (showPlusPanel.value) {
     showEmojiPanel.value = false
+    closeAtMention()
   }
 }
 
@@ -1475,12 +1588,6 @@ function pickCard() {
   })
 }
 
-/** 群主/管理员 @所有人 */
-function pickAtAll() {
-  showPlusPanel.value = false
-  actions.atAll()
-}
-
 /** 选本地文件发送：一次最多 9 个（app 端原生选择器仅支持单选），逐个发送保持顺序，单个失败不中断并汇总提示 */
 async function pickFile() {
   showPlusPanel.value = false
@@ -1613,6 +1720,18 @@ function pickFavorite() {
       </view>
 
       <template v-else>
+      <!-- @ 提及面板：贴在输入栏上方（对齐参考站） -->
+      <ImAtMentionPanel
+        v-if="chatType === 'group'"
+        :visible="atMentionVisible"
+        :can-at-all="canAtAll"
+        :keyword="atMentionKeyword"
+        :members="atMentionMembers"
+        @close="closeAtMention"
+        @select-all="onAtMentionSelectAll"
+        @select="onAtMentionSelect"
+      />
+
       <view v-if="voiceMode" class="voice-bar">
         <view class="voice-trash" @click="cancelVoiceDraft">🗑</view>
 
@@ -1648,6 +1767,7 @@ function pickFavorite() {
             placeholder="输入消息"
             placeholder-style="color:#B0B0B0"
             :cursor-spacing="20"
+            @input="syncAtMentionFromInput"
             @confirm="onConfirmSend"
             @keydown="onComposerKeydown"
           />
@@ -1682,16 +1802,6 @@ function pickFavorite() {
             <image class="plus-icon-img" src="/static/icon-card.png" mode="aspectFit" />
           </view>
           <text>名片</text>
-        </view>
-        <view
-          v-if="chatType === 'group' && (myRole === 'owner' || myRole === 'admin')"
-          class="plus-item"
-          @click="pickAtAll"
-        >
-          <view class="plus-icon">
-            <text class="plus-at-text">@</text>
-          </view>
-          <text>所有人</text>
         </view>
         <view class="plus-item" @click="pickFile">
           <view class="plus-icon">
@@ -2169,12 +2279,5 @@ function pickFavorite() {
 .plus-icon-img {
   width: 56rpx;
   height: 56rpx;
-}
-
-.plus-at-text {
-  font-size: 44rpx;
-  font-weight: 600;
-  color: #0a2fc2;
-  line-height: 1;
 }
 </style>
