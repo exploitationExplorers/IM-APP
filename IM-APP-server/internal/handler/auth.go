@@ -83,7 +83,7 @@ func (h *AuthHandler) SendSMS(c *gin.Context) {
 	now := time.Now()
 	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO sms_codes(phone, scene, code, code_hash, expires_at, created_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7)`,
+		VALUES($1,$2,$3,$4,$5,$6)`,
 		e164, req.Scene, code, codeHash, now.Add(smsCodeTTL), now,
 	); err != nil {
 		response.Fail(c, http.StatusInternalServerError, "发送失败")
