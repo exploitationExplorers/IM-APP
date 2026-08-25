@@ -131,7 +131,7 @@ cp .env.example .env
 ./scripts/dev-service.sh start
 ```
 
-API: `http://127.0.0.1:8080`. With the Web client enabled, the dev UI is `http://127.0.0.1:5173`.
+API: `http://127.0.0.1:8080`. With the Web client enabled, the dev UI is `http://127.0.0.1:5273`.
 
 ```bash
 npm run typecheck

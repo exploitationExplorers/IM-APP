@@ -33,7 +33,8 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: env.HOST || "127.0.0.1",
-      port: 5173,
+      // 避开同仓库 IM-APP-fronend 默认 5173
+      port: 5273,
       proxy: {
         "/api": apiTarget,
         "/healthz": apiTarget,

@@ -130,7 +130,7 @@ cp .env.example .env
 ./scripts/dev-service.sh start
 ```
 
-默认 API 地址为 `http://127.0.0.1:8080`。启用浏览器客户端时，开发界面为 `http://127.0.0.1:5173`。
+默认 API 地址为 `http://127.0.0.1:8080`。启用浏览器客户端时，开发界面为 `http://127.0.0.1:5273`。
 
 ```bash
 npm run typecheck

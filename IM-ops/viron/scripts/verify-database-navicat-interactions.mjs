@@ -6,7 +6,7 @@ import { config as loadEnv } from "dotenv";
 
 loadEnv({ path: resolve(".env") });
 
-const baseUrl = process.env.VIRON_NAVICAT_BASE_URL || "http://127.0.0.1:5173";
+const baseUrl = process.env.VIRON_NAVICAT_BASE_URL || "http://127.0.0.1:5273";
 const browserPath = process.env.VIRON_NAVICAT_BROWSER || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const databaseName = process.env.DATABASE_NAME || "viron";
 const connectionPrefix = "__codex_navicat_parity__";

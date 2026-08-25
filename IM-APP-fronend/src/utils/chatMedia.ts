@@ -140,6 +140,12 @@ export function videoPlayUrlFromContent(content: string): string {
   return playableMediaUrl(parseVideoMeta(content).url)
 }
 
+/** 播放页首屏封面：视频缓冲期间先展示消息自带缩略图，避免打开后长时间黑屏。 */
+export function videoPosterUrlFromContent(content: string): string {
+  const poster = parseVideoMeta(content).snapshotUrl
+  return isUsableVideoPoster(poster) ? playableMediaUrl(poster) : ''
+}
+
 function downloadVideo(url: string): Promise<string> {
   if (!/^https?:\/\//i.test(url)) return Promise.resolve(url)
   return new Promise((resolve, reject) => {

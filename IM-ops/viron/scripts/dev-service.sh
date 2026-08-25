@@ -7,7 +7,7 @@ PID_FILE="$TMP_DIR/envman-dev.pid"
 LOG_FILE="$TMP_DIR/envman-dev.log"
 ENV_FILE="$ROOT_DIR/.env"
 DEFAULT_API_PORT="8080"
-DEFAULT_WEB_PORT="5173"
+DEFAULT_WEB_PORT="5273"
 LAUNCHD_LABEL="com.viron.dev"
 
 usage() {
