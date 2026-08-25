@@ -442,25 +442,6 @@ function openLink(url: string) {
           mode="widthFix"
           @error="onVideoPosterError"
         />
-        <!-- App：旧消息缺远程封面时只让原生播放器按需读取首帧；不再先完整下载视频。 -->
-        <!-- #ifdef APP-PLUS -->
-        <video
-          v-else-if="videoUrl"
-          class="msg-image video-thumb-video"
-          :src="videoUrl"
-          :controls="false"
-          :show-center-play-btn="false"
-          :show-play-btn="false"
-          :show-fullscreen-btn="false"
-          :show-progress="false"
-          :enable-progress-gesture="false"
-          :muted="true"
-          :autoplay="false"
-          :http-cache="true"
-          :play-strategy="0"
-          object-fit="cover"
-        />
-        <!-- #endif -->
         <view v-else class="msg-image video-poster-placeholder" />
         <view class="video-play">
           <text class="video-play-icon">▶</text>
@@ -657,13 +638,6 @@ function openLink(url: string) {
   min-height: 240rpx;
   background: #e8e8e8;
   border-radius: 12rpx;
-}
-
-.video-thumb-video {
-  width: 100%;
-  height: 320rpx;
-  background: #111;
-  pointer-events: none;
 }
 
 .video-play {
