@@ -66,6 +66,25 @@ func detectInconsistency(ua, chPlatform string) bool {
 	return !strings.Contains(chLower, uaPlatform)
 }
 
+// ParsePlatform 从 User-Agent 推断客户端平台，用于会话管理和互踢策略。
+// 返回 "ios"、"android" 或 "web"（兜底）。
+func ParsePlatform(ua string) string {
+	uaLower := strings.ToLower(ua)
+	switch {
+	case strings.Contains(uaLower, "iphone") || strings.Contains(uaLower, "ipad"):
+		return "ios"
+	case strings.Contains(uaLower, "android"):
+		return "android"
+	default:
+		return "web"
+	}
+}
+
+// IsMobilePlatform 判断平台是否为移动端（ios 或 android）。
+func IsMobilePlatform(platform string) bool {
+	return platform == "ios" || platform == "android"
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

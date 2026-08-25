@@ -83,7 +83,7 @@ func (h *AuthHandler) SendSMS(c *gin.Context) {
 	now := time.Now()
 	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO sms_codes(phone, scene, code, code_hash, expires_at, created_at)
-		VALUES($1,$2,$3,$4,$5,$6)`,
+		VALUES($1,$2,$3,$4,$5,$6,$7)`,
 		e164, req.Scene, code, codeHash, now.Add(smsCodeTTL), now,
 	); err != nil {
 		response.Fail(c, http.StatusInternalServerError, "发送失败")
@@ -398,7 +398,7 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 
 // ---- 内部方法 ----
 
-// respondAuth 签发 access+refresh 并创建 session
+// respondAuth 签发 access+refresh 并创建 session；移动端登录时互踢旧移动端 session
 func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID string) {
 	user.PasswordHash = ""
 	access, err := middleware.IssueToken(h.Cfg.JWTSecret, user.ID, accessTokenTTL)
@@ -418,12 +418,15 @@ func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID str
 	if len(userAgent) > 255 {
 		userAgent = userAgent[:255]
 	}
+	// 从 User-Agent 推断平台，用于移动端单设备互踢
+	platform := infra.ParsePlatform(userAgent)
+	rtHash := hashHex(refresh)
 	// 写会话：偶发瞬时连接错误时重试一次，避免登录失败
 	insertSession := func() error {
 		_, err := h.DB.Exec(c.Request.Context(), `
-			INSERT INTO auth_sessions(user_id, device_id, refresh_token_hash, ip, user_agent, expires_at)
-			VALUES($1,$2,$3,$4,$5,$6)`,
-			user.ID, deviceID, hashHex(refresh), c.ClientIP(), userAgent, time.Now().Add(refreshTokenTTL),
+			INSERT INTO auth_sessions(user_id, device_id, refresh_token_hash, ip, user_agent, platform, expires_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7)`,
+			user.ID, deviceID, rtHash, c.ClientIP(), userAgent, platform, time.Now().Add(refreshTokenTTL),
 		)
 		return err
 	}
@@ -432,6 +435,21 @@ func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID str
 			log.Printf("create auth session failed: %v (retry: %v)", err, err2)
 			response.Fail(c, http.StatusInternalServerError, "签发令牌失败")
 			return
+		}
+	}
+	// 移动端单设备互踢：新移动端登录时，撤销该用户所有其他活跃的移动端 session
+	if infra.IsMobilePlatform(platform) {
+		if _, err := h.DB.Exec(c.Request.Context(), `
+			UPDATE auth_sessions SET revoked_at=NOW()
+			WHERE user_id=$1::uuid
+			  AND platform IN ('ios','android')
+			  AND refresh_token_hash != $2
+			  AND revoked_at IS NULL
+			  AND expires_at > NOW()`,
+			user.ID, rtHash,
+		); err != nil {
+			log.Printf("revoke old mobile sessions failed: %v", err)
+			// 互踢失败不影响本次登录
 		}
 	}
 	response.OK(c, models.AuthResult{
@@ -481,10 +499,10 @@ func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID s
 	ipKey := "sms:ip:" + ip
 	if cnt, err := cli.Incr(ctx, ipKey).Result(); err == nil {
 		if cnt == 1 {
-			cli.Expire(ctx, ipKey, time.Hour)
+		cli.Expire(ctx, ipKey, time.Hour)
 		}
 		if cnt > 5 {
-			return false
+		return false
 		}
 	}
 
@@ -503,10 +521,10 @@ func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID s
 	dailyKey := "sms:daily:" + e164
 	if cnt, err := cli.Incr(ctx, dailyKey).Result(); err == nil {
 		if cnt == 1 {
-			cli.Expire(ctx, dailyKey, 24*time.Hour)
+		cli.Expire(ctx, dailyKey, 24*time.Hour)
 		}
 		if cnt > 10 {
-			return false
+		return false
 		}
 	}
 	return true
@@ -516,7 +534,7 @@ func (h *AuthHandler) findUserByE164(ctx context.Context, e164 string) (models.U
 	var u models.User
 	err := h.DB.QueryRow(ctx, `
 		SELECT id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
+		nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
 		FROM users WHERE phone_e164=$1 AND status='active'`, e164,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
 		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
@@ -527,7 +545,7 @@ func (h *AuthHandler) findUserByID(ctx context.Context, id string) (models.User,
 	var u models.User
 	err := h.DB.QueryRow(ctx, `
 		SELECT id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
+		nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
 		FROM users WHERE id=$1 AND status='active'`, id,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
 		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
@@ -541,7 +559,7 @@ func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, passwor
 	if password != "" {
 		b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
-			return models.User{}, err
+		return models.User{}, err
 		}
 		hash = string(b)
 		passwordSet = true
@@ -568,7 +586,7 @@ func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, passwor
 		INSERT INTO users(phone, country_code, phone_e164, password_hash, nickname, avatar, public_id, password_set)
 		VALUES($1,$2,$3,$4,$5,$7,$6,$8)
 		RETURNING id::text, phone, country_code, COALESCE(public_id,''), password_hash,
-			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)`,
+		nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)`,
 		local, cc, e164, hash, nickname, publicID, models.DefaultAvatar, passwordSet,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
 		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
@@ -636,7 +654,7 @@ func digitsOnly(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
+		b.WriteRune(r)
 		}
 	}
 	return b.String()
