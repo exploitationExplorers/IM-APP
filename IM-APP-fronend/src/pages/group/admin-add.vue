@@ -96,9 +96,13 @@ async function onSubmit() {
       </view>
     </view>
 
-    <scroll-view scroll-y class="list">
+    <view class="section-head">
+      <text class="section-title">可选成员 ({{ loading ? '…' : filtered.length }})</text>
+    </view>
+
+    <scroll-view scroll-y class="list" :show-scrollbar="false">
       <text v-if="loading" class="empty">加载中...</text>
-      <template v-else>
+      <block v-else>
         <view
           v-for="member in filtered"
           :key="member.id"
@@ -116,7 +120,7 @@ async function onSubmit() {
         <text v-if="!filtered.length" class="empty">
           {{ candidates.length ? '无匹配成员' : '暂无可设为管理员的普通成员' }}
         </text>
-      </template>
+      </block>
     </scroll-view>
 
     <view class="footer">
@@ -127,15 +131,28 @@ async function onSubmit() {
 
 <style scoped lang="scss">
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   background: #fff;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .search-wrap {
   padding: 8rpx 24rpx 16rpx;
   flex-shrink: 0;
+}
+
+.section-head {
+  padding: 0 32rpx 12rpx;
+  flex-shrink: 0;
+}
+
+.section-title {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #212121;
 }
 
 .search-box {
@@ -161,8 +178,9 @@ async function onSubmit() {
 
 .list {
   flex: 1;
-  height: 0;
-  min-height: 400rpx;
+  min-height: 0;
+  padding-bottom: 16rpx;
+  box-sizing: border-box;
 }
 
 .row {

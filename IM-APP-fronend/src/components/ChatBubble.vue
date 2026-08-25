@@ -6,8 +6,8 @@ let activeVoiceStopper: (() => void) | null = null
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
-import type { CardPayload, ChatMessage, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster } from '@/utils/chatMedia'
+import type { CardPayload, ChatMessage, GroupInvitePayload, MessageQuote } from '@/types'
+import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -23,14 +23,24 @@ const props = defineProps<{
 }>()
 
 /** 头像加载失败（死链/空对象）时切换到业务侧兜底头像，避免一直显示灰色占位 */
-const avatarSrc = ref(props.avatar)
+const isH5 = uni.getSystemInfoSync().uniPlatform === 'web'
+const avatarSrc = ref(sanitizeDisplayUrl(props.avatar) || props.avatar)
 
 watch(
   () => props.avatar,
   (v) => {
-    avatarSrc.value = v
+    avatarSrc.value = sanitizeDisplayUrl(v) || props.fallbackAvatar || v
   },
 )
+
+function sanitizeDisplayUrl(url: string): string {
+  const t = (url || '').trim()
+  if (!t) return ''
+  if (isRemoteMediaUrl(t) || t.startsWith('blob:') || t.startsWith('/static/')) return t
+  // H5 浏览器无法加载 App 本地路径
+  if (isH5 && looksLikeLocalFilePath(t)) return ''
+  return t
+}
 
 function onAvatarError() {
   if (props.fallbackAvatar && avatarSrc.value !== props.fallbackAvatar) {
@@ -45,6 +55,7 @@ const emit = defineEmits<{
   avatarLongpress: []
   longpress: []
   cardView: [card: CardPayload]
+  groupInviteApply: [invite: GroupInvitePayload]
   retry: [message: ChatMessage]
   playVideo: [message: ChatMessage]
 }>()
@@ -83,6 +94,42 @@ function onViewCard() {
   if (cardMeta.value) emit('cardView', cardMeta.value)
 }
 
+/** 入群邀请卡片 content */
+const groupInviteMeta = computed<GroupInvitePayload | null>(() => {
+  if (props.message.type !== 'groupInvite') return null
+  try {
+    const parsed = JSON.parse(props.message.content) as Partial<GroupInvitePayload>
+    if (!parsed.token || !parsed.groupId) return null
+    return {
+      token: parsed.token,
+      groupId: parsed.groupId,
+      groupName: parsed.groupName || '群聊',
+      groupAvatar: parsed.groupAvatar || '',
+      memberCount: Number(parsed.memberCount) || 0,
+    }
+  } catch {
+    return null
+  }
+})
+
+const groupInviteTitle = computed(() => {
+  const m = groupInviteMeta.value
+  if (!m) return '群聊'
+  const name = m.groupName || '群聊'
+  return m.memberCount > 0 ? `${name} (${m.memberCount})` : name
+})
+
+/** H5 不能加载 App 本地路径；无远程头像时用默认群头像 */
+const groupInviteAvatar = computed(() => {
+  const url = (groupInviteMeta.value?.groupAvatar || '').trim()
+  if (isRemoteMediaUrl(url)) return url
+  return APP_CONFIG.defaultGroupAvatarUrl
+})
+
+function onApplyGroupInvite() {
+  if (groupInviteMeta.value) emit('groupInviteApply', groupInviteMeta.value)
+}
+
 function onLongPress() {
   emit('longpress')
 }
@@ -98,9 +145,15 @@ function onRetry() {
  */
 function previewImage() {
   if (props.message.type !== 'image') return
-  const current = toPlayableMediaUrl(props.message.content || '')
+  const current = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
   const raw = props.previewUrls?.length ? props.previewUrls : [props.message.content]
-  const urls = raw.map((url) => toPlayableMediaUrl(url || '')).filter(Boolean)
+  const urls = raw
+    .map((url) => {
+      const t = (url || '').trim()
+      if (isRemoteMediaUrl(t) || t.startsWith('blob:')) return t
+      return toPlayableMediaUrl(t)
+    })
+    .filter(Boolean)
   if (!current || !urls.length) return
   uni.previewImage({ urls, current })
 }
@@ -182,12 +235,21 @@ function quoteTextOf(quote: MessageQuote): string {
   return quoteSummaryOf('text', quote.content)
 }
 
-/** 引用左侧图：优先媒体地址，避免误用发送者头像 */
+/** 引用左侧图：优先媒体地址；H5 过滤 App 本地路径 */
 function quoteThumbSrc(quote: MessageQuote): string {
-  if (quote.thumbUrl && looksLikeImageUrl(quote.thumbUrl)) return quote.thumbUrl
-  if (looksLikeImageUrl(quote.content)) return quote.content
-  if ((quote.content === '图片' || quote.content === '视频') && quote.thumbUrl) return quote.thumbUrl
-  if (quote.thumbUrl) return quote.thumbUrl
+  const candidates = [
+    quote.thumbUrl && looksLikeImageUrl(quote.thumbUrl) ? quote.thumbUrl : '',
+    looksLikeImageUrl(quote.content) ? quote.content : '',
+    (quote.content === '图片' || quote.content === '视频') && quote.thumbUrl ? quote.thumbUrl : '',
+    quote.thumbUrl || '',
+  ]
+  for (const raw of candidates) {
+    const t = (raw || '').trim()
+    if (!t) continue
+    if (isRemoteMediaUrl(t) || t.startsWith('blob:') || t.startsWith('/static/')) return t
+    if (isH5 && looksLikeLocalFilePath(t)) continue
+    if (!isH5) return t
+  }
   return APP_CONFIG.defaultAvatarUrl
 }
 
@@ -372,25 +434,34 @@ onUnmounted(() => {
   stopVoice()
 })
 
-/** 归一化媒体地址：网络/blob 路径原样返回，App 本地临时路径转 file:// 绝对路径（语音播放与图片预览共用） */
+/** 归一化媒体地址：网络/blob 原样；App 本地路径仅在 App 端转 file://；H5 绝不拼 file:// */
 function toPlayableMediaUrl(path: string): string {
   if (!path) return ''
-  if (
-    path.startsWith('http://') ||
-    path.startsWith('https://') ||
-    path.startsWith('blob:') ||
-    path.startsWith('file://')
-  ) {
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:')) {
     return path
   }
+  if (isH5) {
+    // 浏览器禁止加载 file:// 与设备本地路径，返回空避免控制台报错
+    return ''
+  }
+  if (path.startsWith('file://')) return path
   try {
     const converted = plus?.io?.convertLocalFileSystemURL?.(path)
     if (converted) return converted.startsWith('file://') ? converted : `file://${converted}`
   } catch {
-    /* H5 没有 plus */
+    /* ignore */
   }
   return path.startsWith('/') ? `file://${path}` : path
 }
+
+/** 图片气泡展示地址：H5 只用远程 URL */
+const imageDisplaySrc = computed(() => {
+  const raw = (props.message.content || '').trim()
+  if (!raw) return ''
+  if (isRemoteMediaUrl(raw) || raw.startsWith('blob:')) return raw
+  if (isH5) return ''
+  return toPlayableMediaUrl(raw)
+})
 
 function openLink(url: string) {
   const href = url.startsWith('http') ? url : `https://${url}`
@@ -426,7 +497,8 @@ function openLink(url: string) {
           <text class="retry-icon">!</text>
         </view>
         <view v-if="message.type === 'image'" class="bubble image-bubble" @click="previewImage" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
-        <image class="msg-image" :src="message.content" mode="widthFix" />
+        <image v-if="imageDisplaySrc" class="msg-image" :src="imageDisplaySrc" mode="widthFix" />
+        <view v-else class="msg-image image-placeholder" />
       </view>
       <view
         v-else-if="message.type === 'video'"
@@ -490,6 +562,21 @@ function openLink(url: string) {
         <view class="card-foot">
           <text class="card-view">查看</text>
         </view>
+      </view>
+      <view
+        v-else-if="message.type === 'groupInvite'"
+        class="bubble group-invite-bubble"
+        @longpress="onLongPress"
+        @contextmenu.prevent="onContextMenu"
+      >
+        <image
+          class="gi-avatar"
+          :src="groupInviteAvatar"
+          mode="aspectFill"
+        />
+        <text class="gi-title">{{ groupInviteTitle }}</text>
+        <text class="gi-desc">邀请你加入群聊</text>
+        <text class="gi-action" @click.stop="onApplyGroupInvite">点击申请入群</text>
       </view>
       <view
         v-else-if="message.type === 'file'"
@@ -623,6 +710,14 @@ function openLink(url: string) {
   max-width: 100%;
   border-radius: 12rpx;
   display: block;
+}
+
+.image-placeholder {
+  width: 420rpx;
+  max-width: 100%;
+  min-height: 240rpx;
+  background: #e8e8e8;
+  border-radius: 12rpx;
 }
 
 .video-bubble {
@@ -844,6 +939,49 @@ function openLink(url: string) {
   font-size: 24rpx;
   font-weight: 600;
   color: #2b5cff;
+}
+
+.group-invite-bubble {
+  width: 420rpx;
+  padding: 36rpx 32rpx 28rpx;
+  background: #f3f4f6;
+  border-radius: 16rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.gi-avatar {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  background: #e5e7eb;
+  margin-bottom: 20rpx;
+}
+
+.gi-title {
+  max-width: 100%;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #212121;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gi-desc {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  color: #6b7280;
+}
+
+.gi-action {
+  margin-top: 20rpx;
+  font-size: 28rpx;
+  color: #2563eb;
+  font-weight: 500;
 }
 
 .voice-other {

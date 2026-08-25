@@ -23,6 +23,7 @@ export type {
   MessageQuote,
   ChatMessage,
   CardPayload,
+  GroupInvitePayload,
   Conversation,
 } from './chat'
 

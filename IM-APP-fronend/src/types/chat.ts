@@ -1,6 +1,6 @@
 /** 聊天相关类型 */
 
-export type MessageType = 'text' | 'image' | 'voice' | 'video' | 'file' | 'card' | 'system'
+export type MessageType = 'text' | 'image' | 'voice' | 'video' | 'file' | 'card' | 'groupInvite' | 'system'
 
 /** 名片消息内容（card 消息的 content，JSON 字符串） */
 export interface CardPayload {
@@ -8,6 +8,15 @@ export interface CardPayload {
   userId: string
   nickname: string
   avatar: string
+}
+
+/** 入群邀请卡片（对方开启「邀请我加入群聊需验证」时下发） */
+export interface GroupInvitePayload {
+  token: string
+  groupId: string
+  groupName: string
+  groupAvatar: string
+  memberCount: number
 }
 
 export interface MessageQuote {

@@ -143,11 +143,24 @@ async function onConfirm() {
   try {
     const res = await inviteGroupMembers(groupId.value, [...selected.value])
     uni.hideLoading()
+    const invited = res.invitedCount || 0
+    const pending = res.pendingCount || 0
+    const cardFailed = res.cardFailedCount || 0
+    let title = '所选好友已在群中'
+    if (cardFailed > 0 && pending === 0 && invited === 0) {
+      title = '邀请卡片发送失败，请稍后重试'
+    } else if (invited > 0 && pending > 0) {
+      title = `已拉入 ${invited} 人，另向 ${pending} 人发送邀请`
+    } else if (invited > 0) {
+      title = `已邀请 ${invited} 人`
+    } else if (pending > 0) {
+      title = `已向 ${pending} 人发送入群邀请`
+    }
     uni.showToast({
-      title: res.invitedCount > 0 ? `已邀请 ${res.invitedCount} 人` : '所选好友已在群中',
-      icon: res.invitedCount > 0 ? 'success' : 'none',
+      title,
+      icon: invited + pending > 0 ? 'success' : cardFailed > 0 ? 'none' : 'none',
     })
-    if (res.invitedCount > 0) {
+    if (invited + pending > 0) {
       await groupStore.loadDetail(groupId.value).catch(() => undefined)
       setTimeout(() => uni.navigateBack(), 400)
     }

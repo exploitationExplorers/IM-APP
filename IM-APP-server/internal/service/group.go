@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 	"time"
 
+	"im-app-server/internal/im"
 	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
 
@@ -15,6 +19,8 @@ import (
 type GroupService struct {
 	Groups *repository.GroupRepo
 	Files  *repository.FileRepo
+	Users  *repository.UserRepo
+	IM     *im.Client
 }
 
 func (s *GroupService) internalGroupID(ctx context.Context, publicID string) (string, error) {
@@ -222,15 +228,81 @@ func (s *GroupService) CreateReport(ctx context.Context, groupID, uid, reason, d
 	return s.Groups.CreateReport(ctx, internalID, uid, reason, description, imagePaths)
 }
 
-func (s *GroupService) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (int, error) {
+func (s *GroupService) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (models.InviteGroupMembersResult, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
-		return 0, err
+		return models.InviteGroupMembersResult{}, err
 	}
-	return s.Groups.InviteMembers(ctx, internalID, uid, userIDs)
+	result, pending, err := s.Groups.InviteMembers(ctx, internalID, uid, userIDs)
+	if err != nil {
+		return models.InviteGroupMembersResult{}, err
+	}
+	cardFailed := 0
+	for _, card := range pending {
+		if sendErr := s.sendGroupInviteCard(ctx, uid, card); sendErr != nil {
+			cardFailed++
+			log.Printf("send group invite card failed inviter=%s invitee=%s: %v", uid, card.InviteeID, sendErr)
+		}
+	}
+	result.CardFailedCount = cardFailed
+	if cardFailed > 0 && result.PendingCount > 0 {
+		result.PendingCount -= cardFailed
+	}
+	return result, nil
 }
 
-func (s *GroupService) AcceptInvitation(ctx context.Context, uid, token string) (models.GroupInfo, error) {
+func (s *GroupService) sendGroupInviteCard(ctx context.Context, inviterID string, card repository.PendingGroupInviteCard) error {
+	if s.IM == nil || !s.IM.Available() {
+		return errors.New("openim unavailable")
+	}
+	sendID, err := im.UserIDFromBusinessID(inviterID)
+	if err != nil {
+		return err
+	}
+	recvID, err := im.UserIDFromBusinessID(card.InviteeID)
+	if err != nil {
+		return err
+	}
+	if s.Users != nil {
+		inviter, err := s.Users.FindByID(ctx, inviterID)
+		if err != nil {
+			return err
+		}
+		if err := s.IM.EnsureUser(ctx, im.User{
+			UserID: sendID, Nickname: inviter.Nickname, FaceURL: inviter.Avatar,
+		}); err != nil {
+			return err
+		}
+		invitee, err := s.Users.FindByID(ctx, card.InviteeID)
+		if err != nil {
+			return err
+		}
+		if err := s.IM.EnsureUser(ctx, im.User{
+			UserID: recvID, Nickname: invitee.Nickname, FaceURL: invitee.Avatar,
+		}); err != nil {
+			return err
+		}
+	}
+	payload, err := json.Marshal(map[string]any{
+		"businessKey": "group_invite",
+		"token":       card.Token,
+		"groupId":     card.PublicGroupID,
+		"groupName":   card.GroupName,
+		"groupAvatar": card.GroupAvatar,
+		"memberCount": card.MemberCount,
+	})
+	if err != nil {
+		return err
+	}
+	clientMsgID := fmt.Sprintf("gi_%s", card.Token)
+	if len(clientMsgID) > 64 {
+		clientMsgID = clientMsgID[:64]
+	}
+	_, err = s.IM.SendCustomC2CMessage(ctx, sendID, recvID, clientMsgID, string(payload), "邀请你加入群聊", "group_invite")
+	return err
+}
+
+func (s *GroupService) AcceptInvitation(ctx context.Context, uid, token string) (models.ApplyGroupInvitationResult, error) {
 	return s.Groups.AcceptInvitation(ctx, uid, token)
 }
 

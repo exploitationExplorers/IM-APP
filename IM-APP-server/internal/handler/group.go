@@ -334,7 +334,7 @@ func (h *GroupHandler) InviteMembers(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	count, err := h.Svc.InviteMembers(c.Request.Context(), c.Param("id"), uid, req.UserIDs)
+	result, err := h.Svc.InviteMembers(c.Request.Context(), c.Param("id"), uid, req.UserIDs)
 	if err != nil {
 		if errors.Is(err, repository.ErrGroupFull) {
 			response.Fail(c, http.StatusConflict, "群人数已达上限，本批邀请未添加任何成员")
@@ -347,21 +347,30 @@ func (h *GroupHandler) InviteMembers(c *gin.Context) {
 		response.Fail(c, http.StatusInternalServerError, "邀请失败")
 		return
 	}
-	response.OK(c, gin.H{"ok": true, "invitedCount": count})
+	response.OK(c, gin.H{
+		"ok":              true,
+		"invitedCount":    result.InvitedCount,
+		"pendingCount":    result.PendingCount,
+		"cardFailedCount": result.CardFailedCount,
+	})
 }
 
 func (h *GroupHandler) AcceptInvitation(c *gin.Context) {
 	uid := middleware.UserID(c)
-	g, err := h.Svc.AcceptInvitation(c.Request.Context(), uid, c.Param("token"))
+	result, err := h.Svc.AcceptInvitation(c.Request.Context(), uid, c.Param("token"))
 	if err != nil {
 		if errors.Is(err, repository.ErrGroupFull) {
 			response.Fail(c, http.StatusConflict, "群人数已达上限")
 			return
 		}
+		if errors.Is(err, repository.ErrAlreadyGroupMember) {
+			response.OK(c, models.ApplyGroupInvitationResult{NextAction: "already_member"})
+			return
+		}
 		response.Fail(c, http.StatusBadRequest, "邀请无效或已过期")
 		return
 	}
-	response.OK(c, g)
+	response.OK(c, result)
 }
 
 func (h *GroupHandler) CreateJoinRequest(c *gin.Context) {

@@ -1104,31 +1104,45 @@ func (r *GroupRepo) ListAnnouncementHistory(ctx context.Context, groupID, uid st
 	return items, rows.Err()
 }
 
-func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (int, error) {
+/** 邀请时需对方验证的待发卡项（事务提交后再发 OpenIM 自定义消息） */
+type PendingGroupInviteCard struct {
+	Token         string
+	InviteeID     string
+	PublicGroupID string
+	GroupName     string
+	GroupAvatar   string
+	MemberCount   int
+}
+
+func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (models.InviteGroupMembersResult, []PendingGroupInviteCard, error) {
 	role, err := r.memberRole(ctx, groupID, uid)
 	if err != nil || (role != "owner" && role != "admin") {
-		return 0, ErrForbidden
+		return models.InviteGroupMembersResult{}, nil, ErrForbidden
 	}
 
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return models.InviteGroupMembersResult{}, nil, err
 	}
 	defer tx.Rollback(ctx)
 
-	var convID, status string
-	var configuredMax int
+	var convID, status, publicID, groupName, groupAvatar string
+	var configuredMax, memberCount int
 	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(conversation_id::text,''), status, COALESCE(max_members,200)
-		FROM groups WHERE id=$1::uuid FOR UPDATE`, groupID).Scan(&convID, &status, &configuredMax); err != nil {
-		return 0, err
+		SELECT COALESCE(g.conversation_id::text,''), g.status, g.public_id,
+		       g.name, COALESCE(g.avatar,''), COALESCE(g.max_members,200),
+		       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id)
+		FROM groups g WHERE g.id=$1::uuid FOR UPDATE`, groupID).Scan(
+		&convID, &status, &publicID, &groupName, &groupAvatar, &configuredMax, &memberCount); err != nil {
+		return models.InviteGroupMembersResult{}, nil, err
 	}
 	if status != "active" {
-		return 0, ErrForbidden
+		return models.InviteGroupMembersResult{}, nil, ErrForbidden
 	}
 
 	seen := map[string]bool{uid: true}
-	candidates := make([]string, 0, len(userIDs))
+	var directIDs []string
+	var verifyIDs []string
 	for _, rawID := range userIDs {
 		inviteeID := strings.TrimSpace(rawID)
 		if inviteeID == "" || seen[inviteeID] {
@@ -1147,7 +1161,7 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 				WHERE f.user_id=$1::uuid AND f.friend_id=$2::uuid
 				  AND COALESCE(u.status,'active')='active'
 			)`, uid, inviteeID).Scan(&eligible); err != nil {
-			return 0, err
+			return models.InviteGroupMembersResult{}, nil, err
 		}
 		if !eligible {
 			continue
@@ -1157,34 +1171,45 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 		if err := tx.QueryRow(ctx, `
 			SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)`,
 			groupID, inviteeID).Scan(&alreadyMember); err != nil {
-			return 0, err
+			return models.InviteGroupMembersResult{}, nil, err
 		}
 		if alreadyMember {
 			continue
 		}
-		candidates = append(candidates, inviteeID)
-	}
-	var currentCount int
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM group_members WHERE group_id=$1::uuid`, groupID).Scan(&currentCount); err != nil {
-		return 0, err
-	}
-	if currentCount+len(candidates) > r.effectiveGroupLimit(ctx, tx, configuredMax) {
-		return 0, ErrGroupFull
+
+		// 未建隐私行时按默认 true（邀请入群需验证）
+		var needVerify bool
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(
+				(SELECT require_group_approval FROM privacy_settings WHERE user_id=$1::uuid),
+				TRUE
+			)`, inviteeID).Scan(&needVerify); err != nil {
+			return models.InviteGroupMembersResult{}, nil, err
+		}
+		if needVerify {
+			verifyIDs = append(verifyIDs, inviteeID)
+		} else {
+			directIDs = append(directIDs, inviteeID)
+		}
 	}
 
-	count := 0
-	for _, inviteeID := range candidates {
+	if memberCount+len(directIDs) > r.effectiveGroupLimit(ctx, tx, configuredMax) {
+		return models.InviteGroupMembersResult{}, nil, ErrGroupFull
+	}
+
+	invitedCount := 0
+	for _, inviteeID := range directIDs {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO group_members(group_id, user_id, role)
 			VALUES($1::uuid,$2::uuid,'member')
 			ON CONFLICT DO NOTHING`, groupID, inviteeID); err != nil {
-			return 0, err
+			return models.InviteGroupMembersResult{}, nil, err
 		}
 		if r.LegacyChatEnabled && convID != "" {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO conversation_members(conversation_id, user_id, unread_count)
 				VALUES($1::uuid, $2::uuid, 0) ON CONFLICT DO NOTHING`, convID, inviteeID); err != nil {
-				return 0, err
+				return models.InviteGroupMembersResult{}, nil, err
 			}
 		}
 		if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, map[string]string{
@@ -1192,31 +1217,112 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 			"reason":     "invite",
 			"operatorId": uid,
 		}); err != nil {
-			return 0, err
+			return models.InviteGroupMembersResult{}, nil, err
 		}
-		count++
+		invitedCount++
+	}
+
+	pendingCards := make([]PendingGroupInviteCard, 0, len(verifyIDs))
+	for _, inviteeID := range verifyIDs {
+		var token string
+		err := tx.QueryRow(ctx, `
+			SELECT token FROM group_invitations
+			WHERE group_id=$1::uuid AND invitee_id=$2::uuid AND status='pending'
+			ORDER BY created_at DESC LIMIT 1`, groupID, inviteeID).Scan(&token)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return models.InviteGroupMembersResult{}, nil, err
+			}
+			token = uuid.NewString()
+			token = strings.ReplaceAll(token, "-", "")
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO group_invitations(group_id, inviter_id, invitee_id, token, status)
+				VALUES($1::uuid,$2::uuid,$3::uuid,$4,'pending')`,
+				groupID, uid, inviteeID, token); err != nil {
+				return models.InviteGroupMembersResult{}, nil, err
+			}
+		}
+		pendingCards = append(pendingCards, PendingGroupInviteCard{
+			Token:         token,
+			InviteeID:     inviteeID,
+			PublicGroupID: publicID,
+			GroupName:     groupName,
+			GroupAvatar:   groupAvatar,
+			MemberCount:   memberCount,
+		})
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, err
+		return models.InviteGroupMembersResult{}, nil, err
 	}
-	return count, nil
+	return models.InviteGroupMembersResult{
+		InvitedCount: invitedCount,
+		PendingCount: len(pendingCards),
+	}, pendingCards, nil
 }
 
-func (r *GroupRepo) AcceptInvitation(ctx context.Context, uid, token string) (models.GroupInfo, error) {
-	var groupID string
-	err := r.DB.QueryRow(ctx, `SELECT group_id::text FROM group_invitations
-		WHERE token=$1 AND invitee_id=$2::uuid AND status='pending'`, token, uid).Scan(&groupID)
-	if err != nil {
-		return models.GroupInfo{}, err
+func (r *GroupRepo) AcceptInvitation(ctx context.Context, uid, token string) (models.ApplyGroupInvitationResult, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return models.ApplyGroupInvitationResult{}, ErrInvalidGroupOperation
 	}
+
+	var groupID, invStatus string
+	err := r.DB.QueryRow(ctx, `
+		SELECT group_id::text, status FROM group_invitations
+		WHERE token=$1 AND invitee_id=$2::uuid`, token, uid).Scan(&groupID, &invStatus)
+	if err != nil {
+		return models.ApplyGroupInvitationResult{}, err
+	}
+
+	var alreadyMember bool
+	if err := r.DB.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)`,
+		groupID, uid).Scan(&alreadyMember); err != nil {
+		return models.ApplyGroupInvitationResult{}, err
+	}
+	if alreadyMember {
+		g, gerr := r.GetByID(ctx, groupID, uid)
+		if gerr != nil {
+			return models.ApplyGroupInvitationResult{NextAction: "already_member"}, nil
+		}
+		return models.ApplyGroupInvitationResult{NextAction: "already_member", Group: &g}, nil
+	}
+
+	var joinMode, gStatus string
+	if err := r.DB.QueryRow(ctx, `
+		SELECT COALESCE(join_mode,'open'), COALESCE(status,'active')
+		FROM groups WHERE id=$1::uuid`, groupID).Scan(&joinMode, &gStatus); err != nil {
+		return models.ApplyGroupInvitationResult{}, err
+	}
+	if gStatus != "active" {
+		return models.ApplyGroupInvitationResult{}, ErrForbidden
+	}
+
+	// 审核群：点击卡片 = 提交入群申请（对齐参考站「点击申请入群」）
+	if joinMode == "approval" {
+		if _, err := r.CreateJoinRequest(ctx, groupID, uid, "好友邀请入群"); err != nil {
+			if !errors.Is(err, ErrAlreadyGroupMember) {
+				return models.ApplyGroupInvitationResult{}, err
+			}
+		}
+		_, _ = r.DB.Exec(ctx, `
+			UPDATE group_invitations SET status='accepted', handled_at=NOW()
+			WHERE token=$1 AND invitee_id=$2::uuid AND status='pending'`, token, uid)
+		return models.ApplyGroupInvitationResult{NextAction: "pending_approval"}, nil
+	}
+
 	group, err := r.addMember(ctx, groupID, uid, false, "invite")
 	if err != nil {
-		return models.GroupInfo{}, err
+		return models.ApplyGroupInvitationResult{}, err
 	}
-	_, err = r.DB.Exec(ctx, `UPDATE group_invitations SET status='accepted', handled_at=NOW()
+	_, err = r.DB.Exec(ctx, `
+		UPDATE group_invitations SET status='accepted', handled_at=NOW()
 		WHERE token=$1 AND invitee_id=$2::uuid AND status='pending'`, token, uid)
-	return group, err
+	if err != nil {
+		return models.ApplyGroupInvitationResult{}, err
+	}
+	return models.ApplyGroupInvitationResult{NextAction: "joined", Group: &group}, nil
 }
 
 func (r *GroupRepo) UpdateMyNickname(ctx context.Context, groupID, uid, nickname string) error {

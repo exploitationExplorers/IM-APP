@@ -39,15 +39,8 @@ export function isRemoteMediaUrl(path: string): boolean {
   return /^https?:\/\//i.test(path) || path.startsWith('blob:')
 }
 
-/** 封面/视频地址优先取可跨端访问的远程 URL，避免 App 把发送端本地路径当封面。 */
-export function preferRemoteMediaUrl(...candidates: string[]): string {
-  const cleaned = candidates.map((v) => String(v || '').trim()).filter(Boolean)
-  const remote = cleaned.find((v) => isRemoteMediaUrl(v))
-  if (remote) return remote
-  return cleaned[0] || ''
-}
-
-function looksLikeLocalFilePath(path: string): boolean {
+/** App 本地临时/相册路径；H5 浏览器无法加载，不能塞进 <image src> */
+export function looksLikeLocalFilePath(path: string): boolean {
   if (!path || isRemoteMediaUrl(path) || path.startsWith('blob:')) return false
   if (path.startsWith('file://')) return true
   return (
@@ -57,8 +50,18 @@ function looksLikeLocalFilePath(path: string): boolean {
     path.startsWith('_doc/') ||
     path.startsWith('_www/') ||
     path.startsWith('wxfile://') ||
+    path.startsWith('content://') ||
+    path.includes('/Android/data/') ||
     /^[a-zA-Z]:[\\/]/.test(path)
   )
+}
+
+/** 封面/视频地址优先取可跨端访问的远程 URL，避免 App 把发送端本地路径当封面。 */
+export function preferRemoteMediaUrl(...candidates: string[]): string {
+  const cleaned = candidates.map((v) => String(v || '').trim()).filter(Boolean)
+  const remote = cleaned.find((v) => isRemoteMediaUrl(v))
+  if (remote) return remote
+  return cleaned[0] || ''
 }
 
 /** 兼容 H5 camelCase 与 App 原生桥 PascalCase 的视频消息结构。 */

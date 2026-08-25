@@ -19,12 +19,12 @@ export async function createGroup(name: string, memberIds: string[]): Promise<Gr
   })
 }
 
-/** 群详情：后端已改为 /groups/detail?groupId=，带 canChat/isMuted 等实时发言权限 */
+/** ????????? /groups/detail?groupId=?? canChat/isMuted ??????? */
 export async function fetchGroupDetail(groupId: string): Promise<GroupInfo> {
   return request<GroupInfo>({ url: '/groups/detail', method: 'GET', data: { groupId } })
 }
 
-/** 群成员列表：支持 cursor 分页；不传 cursor 时自动拉取全部页 */
+/** ???????? cursor ????? cursor ???????? */
 export async function fetchGroupMembers(
   groupId: string,
   opts?: { cursor?: string; limit?: number },
@@ -67,7 +67,7 @@ function normalizeMemberList(raw: unknown[]): GroupMember[] {
   return raw.map(normalizeMember).filter((m): m is GroupMember => !!m)
 }
 
-/** 拉取群全部成员（兼容分页 API） */
+/** ???????????? API? */
 export async function fetchAllGroupMembers(groupId: string): Promise<GroupMember[]> {
   const all: GroupMember[] = []
   let cursor = ''
@@ -85,7 +85,7 @@ export async function joinGroup(groupId: string): Promise<GroupInfo> {
   return request<GroupInfo>({ url: `/groups/${groupId}/join`, method: 'POST' })
 }
 
-/** 更新群设置：后端已改为 POST /groups/settings/update，groupId 放请求体 */
+/** ??????????? POST /groups/settings/update?groupId ???? */
 export async function updateGroupSettings(groupId: string, input: GroupSettingsInput) {
   return request<GroupInfo>({
     url: '/groups/settings/update',
@@ -134,7 +134,7 @@ export async function dismissGroup(groupId: string): Promise<void> {
   })
 }
 
-/** 已解散群轻量资料（通讯录只读展示用） */
+/** ?????????????????? */
 export async function fetchDissolvedGroup(groupId: string): Promise<{
   id: string
   name: string
@@ -144,7 +144,7 @@ export async function fetchDissolvedGroup(groupId: string): Promise<{
   return request({ url: `/groups/${groupId}/dissolved`, method: 'GET' })
 }
 
-/** 成员删除已解散群（仅移除自己的成员记录，不碰 OpenIM） */
+/** ?????????????????????? OpenIM? */
 export async function removeDissolvedGroup(groupId: string): Promise<void> {
   await request({ url: `/groups/${groupId}/dissolved/remove`, method: 'POST' })
 }
@@ -232,7 +232,7 @@ export async function updateMemberRemark(
   })
 }
 
-/** 禁言成员：后端已改为 POST /group-members/mute，groupId/成员放请求体 */
+/** ?????????? POST /group-members/mute?groupId/?????? */
 export async function muteGroupMember(
   groupId: string,
   memberUserId: string,
@@ -245,7 +245,7 @@ export async function muteGroupMember(
   })
 }
 
-/** 解除禁言：POST /group-members/unmute，未禁言时幂等成功 */
+/** ?????POST /group-members/unmute????????? */
 export async function unmuteGroupMember(
   groupId: string,
   memberUserId: string,
@@ -267,16 +267,27 @@ export async function removeGroupMember(groupId: string, memberUserId: string): 
 export async function inviteGroupMembers(
   groupId: string,
   userIds: string[],
-): Promise<{ ok: boolean; invitedCount: number }> {
-  return request<{ ok: boolean; invitedCount: number }>({
+): Promise<{ ok: boolean; invitedCount: number; pendingCount: number; cardFailedCount?: number }> {
+  return request<{ ok: boolean; invitedCount: number; pendingCount: number; cardFailedCount?: number }>({
     url: `/groups/${groupId}/invitations`,
     method: 'POST',
     data: { userIds },
   })
 }
 
+/** ???????????????????????????? */
+export async function acceptGroupInvitation(token: string): Promise<{
+  nextAction: 'joined' | 'pending_approval' | 'already_member'
+  group?: import('@/types').GroupInfo
+}> {
+  return request({
+    url: `/group-invitations/${encodeURIComponent(token)}/accept`,
+    method: 'POST',
+  })
+}
 
-/** Ⱥ������ʷ����� 10 ���� */
+
+/** ????????????? 10 ???? */
 export async function fetchAnnouncementHistory(groupId: string) {
   const res = await request<{ items: import('@/types').GroupAnnouncementHistoryItem[] }>({
     url: '/group-announcements',

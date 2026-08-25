@@ -9,7 +9,9 @@ import type { AtMentionMember } from '@/components/ImAtMentionPanel.vue'
 import ImMessageActionMenu from '@/components/ImMessageActionMenu.vue'
 import ImMessageSelectBar from '@/components/ImMessageSelectBar.vue'
 import ImQuoteBar from '@/components/ImQuoteBar.vue'
+import ImConfirmDialogHost from '@/components/ImConfirmDialogHost.vue'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
+import { imConfirm } from '@/composables/useImConfirm'
 import ImDesktopGroupMenu from '@/components/desktop/ImDesktopGroupMenu.vue'
 import { useChatMessageActions, type MemberMeta } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
@@ -20,9 +22,9 @@ import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId, isNotI
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
-import { fetchAllGroupMembers, fetchGroupDetail } from '@/api/group'
+import { acceptGroupInvitation, fetchAllGroupMembers, fetchGroupDetail } from '@/api/group'
 import { safeBack } from '@/utils/nav'
-import type { CardPayload, ChatMessage, Conversation, GroupMember } from '@/types'
+import type { CardPayload, ChatMessage, Conversation, GroupInvitePayload, GroupMember } from '@/types'
 import { collapseRepeatedGroupNameNotices, isGroupUnavailableError, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
@@ -118,7 +120,16 @@ let recordingTimer: ReturnType<typeof setInterval> | null = null
 
 /** 通知类没有可读正文时不渲染；群禁言等系统提示要保留，例如 `张三: [全体禁言]` */
 function isVisibleMessage(m: ChatMessage): boolean {
-  if (m.type === 'image' || m.type === 'voice' || m.type === 'video' || m.type === 'file') return true
+  if (
+    m.type === 'image' ||
+    m.type === 'voice' ||
+    m.type === 'video' ||
+    m.type === 'file' ||
+    m.type === 'card' ||
+    m.type === 'groupInvite'
+  ) {
+    return true
+  }
   if (m.type === 'system') {
     const text = m.content.trim()
     return !!text && !text.startsWith('{')
@@ -878,8 +889,7 @@ const atMentionMembers = computed<AtMentionMember[]>(() => {
     }))
 })
 
-/**
- * 输入框末尾是否处于「刚打了 @」的提及态。
+/** 输入框末尾是否处于「刚打了 @」的提及态。
  * 匹配：行首或空白后的 `@关键字`（关键字不含空白与 @）。
  */
 function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
@@ -1173,6 +1183,45 @@ function onViewCard(card: CardPayload) {
     return
   }
   void openProfileById(card.userId)
+}
+
+/** 入群邀请卡片：先确认再申请（对齐参考站） */
+async function onGroupInviteApply(invite: GroupInvitePayload) {
+  if (!invite.token) {
+    uni.showToast({ title: '邀请已失效', icon: 'none' })
+    return
+  }
+  const confirmed = await imConfirm({
+    title: '确认加入群聊?',
+    content: '确认加入群聊?',
+    cancelText: '取消',
+    confirmText: '确认',
+  })
+  if (!confirmed) return
+
+  uni.showLoading({ title: '处理中...', mask: true })
+  try {
+    const res = await acceptGroupInvitation(invite.token)
+    uni.hideLoading()
+    if (res.nextAction === 'joined' || res.nextAction === 'already_member') {
+      uni.showToast({ title: res.nextAction === 'already_member' ? '你已在群中' : '已加入群聊', icon: 'success' })
+      const gid = res.group?.id || invite.groupId
+      if (gid) {
+        setTimeout(() => {
+          uni.navigateTo({ url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(gid)}` })
+        }, 400)
+      }
+      return
+    }
+    if (res.nextAction === 'pending_approval') {
+      uni.showToast({ title: '已提交入群申请，等待管理员审核', icon: 'none' })
+      return
+    }
+    uni.showToast({ title: '处理完成', icon: 'none' })
+  } catch (e) {
+    uni.hideLoading()
+    uni.showToast({ title: (e as Error).message || '申请失败', icon: 'none' })
+  }
 }
 
 function requestAudioPermission(): Promise<boolean> {
@@ -1685,6 +1734,7 @@ function pickFavorite() {
           @avatar-click="onAvatarClick(m)"
           @avatar-longpress="onAvatarLongpress(m)"
           @card-view="onViewCard"
+          @group-invite-apply="onGroupInviteApply"
           @longpress="actions.openMenu(m)"
           @retry="onRetry(m)"
           @play-video="onPlayVideo"
@@ -1843,6 +1893,7 @@ function pickFavorite() {
       placement="top"
       @close="successVisible = false"
     />
+    <ImConfirmDialogHost />
   </view>
 </template>
 

@@ -1661,10 +1661,24 @@ export function toConversation(item: ConversationItem): Conversation {
 
 export function toChatMessage(item: MessageItem): ChatMessage {
   const notificationKind = notificationKindOf(item.contentType)
-  const content = extractContent(item)
+  const inviteFromCustom =
+    Number(item.contentType) === MessageType.CustomMessage
+      ? parseGroupInvitePayload(customMessageDataOf(item))
+      : null
+  let content = inviteFromCustom ? JSON.stringify(inviteFromCustom) : extractContent(item)
   const rawType = toAppMessageType(Number(item.contentType))
   // App 原生桥偶发 contentType 丢失/类型错标，图片会变成 text + file:// 路径；按 content 再收敛一次
-  let type = (resolveQuoteType(rawType, content) as AppMessageType) || rawType
+  let type: AppMessageType = inviteFromCustom
+    ? 'groupInvite'
+    : ((resolveQuoteType(rawType, content) as AppMessageType) || rawType)
+  // CustomMessage：兜底再从 content 识别
+  if (type !== 'groupInvite' && Number(item.contentType) === MessageType.CustomMessage) {
+    const invite = parseGroupInvitePayload(content)
+    if (invite) {
+      type = 'groupInvite'
+      content = JSON.stringify(invite)
+    }
+  }
   // 历史：建群欢迎语曾由 imAdmin 以文本气泡下发；归一为系统提示，避免假用户头像
   if (
     type === 'text' &&
@@ -1718,8 +1732,72 @@ function toAppMessageType(contentType: number): AppMessageType {
       return 'video'
     case MessageType.FileMessage:
       return 'file'
+    case MessageType.CustomMessage:
+      return 'system'
     default:
       return 'system'
+  }
+}
+
+/** 从 OpenIM CustomMessage(110) 各端字段取出 data 字符串 */
+function customMessageDataOf(item: MessageItem): string {
+  const raw = item as MessageItem & Record<string, unknown>
+  const elem = (raw.customElem ?? raw.CustomElem) as Record<string, unknown> | undefined
+  if (elem) {
+    const data = elem.data ?? elem.Data
+    if (typeof data === 'string' && data) return data
+  }
+  const fromContent = jsonContentField(item.content, 'data')
+  if (fromContent) return fromContent
+  if (typeof item.content === 'string' && item.content.trim()) {
+    const text = item.content.trim()
+    if (text.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>
+        if (typeof parsed.data === 'string') return parsed.data
+        // H5 偶发直接把业务 JSON 放在 content
+        if (parsed.businessKey === 'group_invite' || parsed.BusinessKey === 'group_invite') {
+          return text
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return ''
+}
+
+/** 解析入群邀请自定义消息 payload（兼容 camel / Pascal） */
+export function parseGroupInvitePayload(raw: unknown): {
+  token: string
+  groupId: string
+  groupName: string
+  groupAvatar: string
+  memberCount: number
+} | null {
+  let obj: Record<string, unknown> | null = null
+  if (raw && typeof raw === 'object') {
+    obj = raw as Record<string, unknown>
+  } else if (typeof raw === 'string' && raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object') obj = parsed as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  if (!obj) return null
+  const key = String(obj.businessKey ?? obj.BusinessKey ?? '')
+  if (key !== 'group_invite') return null
+  const token = String(obj.token ?? obj.Token ?? '').trim()
+  const groupId = String(obj.groupId ?? obj.GroupId ?? obj.groupID ?? obj.GroupID ?? '').trim()
+  if (!token || !groupId) return null
+  return {
+    token,
+    groupId,
+    groupName: String(obj.groupName ?? obj.GroupName ?? '群聊'),
+    groupAvatar: String(obj.groupAvatar ?? obj.GroupAvatar ?? ''),
+    memberCount: Number(obj.memberCount ?? obj.MemberCount ?? 0) || 0,
   }
 }
 
@@ -1786,7 +1864,7 @@ function jsonPictureUrl(raw: unknown): string {
   }
 }
 
-/** 图片地址：优先远程 URL，避免 App 端引用/回显时只剩 file:// 本地路径 */
+/** 图片地址：优先远程 URL；H5 绝不回退到 App 本地路径（浏览器会报 Not allowed to load local resource） */
 function pictureUrlOf(item: MessageItem): string {
   const candidates = [
     item.pictureElem?.snapshotPicture?.url,
@@ -1797,8 +1875,10 @@ function pictureUrlOf(item: MessageItem): string {
     typeof item.content === 'string' ? item.content : '',
   ].filter((u): u is string => typeof u === 'string' && !!u.trim())
 
-  const remote = candidates.find((u) => /^https?:\/\//i.test(u.trim()))
+  const remote = candidates.find((u) => /^https?:\/\//i.test(u.trim()) || u.trim().startsWith('blob:'))
   if (remote) return remote.trim()
+  // H5：本地路径不可用；App：允许本地路径用于发送中预览
+  if (uni.getSystemInfoSync().uniPlatform === 'web') return ''
   const local = candidates.find((u) => looksLikeImageUrl(u))
   return (local || candidates[0] || '').trim()
 }
@@ -1940,6 +2020,21 @@ function extractContent(item: MessageItem): string {
         nickname: card?.nickname || '',
         avatar: card?.faceURL || '',
       })
+    }
+    case MessageType.CustomMessage: {
+      const dataStr = customMessageDataOf(item)
+      const invite = parseGroupInvitePayload(dataStr)
+      if (invite) return JSON.stringify(invite)
+      const raw = item as MessageItem & Record<string, unknown>
+      const elem = (raw.customElem ?? raw.CustomElem) as
+        | { description?: string; Description?: string }
+        | undefined
+      const desc =
+        (typeof elem?.description === 'string' && elem.description) ||
+        (typeof elem?.Description === 'string' && elem.Description) ||
+        jsonContentField(item.content, 'description') ||
+        ''
+      return desc || '[自定义消息]'
     }
     default: {
       // App 偶发 contentType 丢失，但 content 已是图片 URL
@@ -2157,6 +2252,10 @@ function summarize(latestMsg: string | MessageItem | null | undefined): string {
     return typeof latestMsg === 'string' && !latestMsg.startsWith('{') && !latestMsg.startsWith('[')
       ? latestMsg
       : ''
+  }
+  if (Number(message.contentType) === MessageType.CustomMessage) {
+    const invite = parseGroupInvitePayload(customMessageDataOf(message))
+    if (invite) return '[群邀请]'
   }
   const type = toAppMessageType(message.contentType)
   if (type === 'image') return '[图片]'

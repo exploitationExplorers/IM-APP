@@ -688,6 +688,39 @@ type UpdateConversationSettings struct {
 	BurnDuration  *int  `json:"burnDuration,omitempty"`
 }
 
+// SendCustomC2CMessage 以 sendID 身份向单聊对端发 CustomMessage(110)。
+// data 为业务 JSON 字符串（写入 customElem.data）；description 作会话预览文案。
+func (c *Client) SendCustomC2CMessage(
+	ctx context.Context,
+	sendID, recvID, clientMsgID, data, description, extension string,
+) (SendMessageResult, error) {
+	if sendID == "" || recvID == "" || clientMsgID == "" || strings.TrimSpace(data) == "" {
+		return SendMessageResult{}, errors.New("invalid custom c2c message")
+	}
+	if description == "" {
+		description = "自定义消息"
+	}
+	var result SendMessageResult
+	err := c.postWithAdmin(ctx, "/msg/send_msg", map[string]any{
+		"sendID":      sendID,
+		"recvID":      recvID,
+		"clientMsgID": clientMsgID,
+		"content": map[string]string{
+			"data":        data,
+			"description": description,
+			"extension":   extension,
+		},
+		"contentType":    110,
+		"sessionType":    1,
+		"isOnlineOnly":   false,
+		"notOfflinePush": false,
+	}, &result)
+	if result.ClientMsgID == "" {
+		result.ClientMsgID = clientMsgID
+	}
+	return result, err
+}
+
 // SendForwardMessage 以原发送者身份向单聊目标发送已经冻结的消息内容。
 // clientMsgID 由转发任务和目标用户确定性生成，Worker 重试时不会产生新的业务消息 ID。
 // 万人转发暂不接离线推送，因此明确设置 notOfflinePush=true。

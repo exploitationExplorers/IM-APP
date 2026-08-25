@@ -616,13 +616,33 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### POST `/api/v1/groups/:id/invitations`
 
-群主/管理员邀请好友入群：直接写入群成员并同步 OpenIM（不走待接受邀请）。已在群中或非好友会被跳过。
+群主/管理员邀请好友入群。
+
+- 被邀请人**未**开启「邀请我加入群聊需验证」：直接写入群成员并同步 OpenIM。
+- 被邀请人**已**开启验证：不拉进群，写入 `group_invitations`，并向双方私聊下发入群邀请卡片（CustomMessage，`businessKey=group_invite`）。已在群中或非好友会被跳过。
 
 **Body** `{ "userIds": ["uuid"] }`
 
+**Response `data`**
+```json
+{ "ok": true, "invitedCount": 1, "pendingCount": 2 }
+```
+
+- `invitedCount`：本次直接拉进群的人数
+- `pendingCount`：因对方开启验证而发送邀请卡片的人数
+
 ### POST `/api/v1/group-invitations/:token/accept`
 
-接受群邀请。
+被邀请人点击卡片「申请入群」：
+
+- 公开群（`joinMode=open`）：直接入群，`nextAction=joined`
+- 审核群（`joinMode=approval`）：提交入群申请，`nextAction=pending_approval`
+- 已在群中：`nextAction=already_member`
+
+**Response `data`**
+```json
+{ "nextAction": "joined", "group": { "...": "GroupInfo" } }
+```
 
 ### POST `/api/v1/groups/:id/join-requests`
 

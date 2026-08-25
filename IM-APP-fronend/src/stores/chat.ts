@@ -1007,6 +1007,7 @@ export const useChatStore = defineStore('chat', () => {
     if (message.type === 'video') return '[视频]'
     if (message.type === 'file') return '[文件]'
     if (message.type === 'card') return '[名片]'
+    if (message.type === 'groupInvite') return '[群邀请]'
     return message.content
   }
 

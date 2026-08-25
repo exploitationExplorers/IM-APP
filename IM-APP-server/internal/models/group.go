@@ -83,6 +83,19 @@ type InviteGroupMembersReq struct {
 	UserIDs []string `json:"userIds"`
 }
 
+/** 邀请入群结果：直拉人数 + 需对方验证（已发卡）人数 */
+type InviteGroupMembersResult struct {
+	InvitedCount   int `json:"invitedCount"`
+	PendingCount   int `json:"pendingCount"`
+	CardFailedCount int `json:"cardFailedCount,omitempty"`
+}
+
+/** 被邀请人点击「申请入群」后的下一步 */
+type ApplyGroupInvitationResult struct {
+	NextAction string     `json:"nextAction"` // joined | pending_approval | already_member
+	Group      *GroupInfo `json:"group,omitempty"`
+}
+
 type CreateGroupJoinReq struct {
 	Remark      string `json:"remark"`
 	InviteToken string `json:"inviteToken"`
