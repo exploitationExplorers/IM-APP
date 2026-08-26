@@ -35,7 +35,7 @@ export const useContactStore = defineStore('contact', () => {
   const recentFriendRequests = ref<FriendRequest[]>([])
   const groupsExpanded = ref(false)
   const pendingDesktopChat = ref<{
-    type: 'group'
+    type: 'private' | 'group'
     businessId: string
     title: string
     avatar: string
@@ -190,6 +190,17 @@ export const useContactStore = defineStore('contact', () => {
     })
   }
 
+  /** H5 PC 三栏：切到聊天 tab 并在右侧内嵌打开私聊 */
+  function openChatWithContactDesktop(contactId: string, nickname: string, avatar: string) {
+    pendingDesktopChat.value = {
+      type: 'private',
+      businessId: contactId,
+      title: nickname,
+      avatar,
+    }
+    uni.switchTab({ url: '/pages/chat/index' })
+  }
+
   function openChatWithGroup(groupId: string, groupName: string, avatar: string) {
     uni.navigateTo({
       url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId)}&title=${encodeURIComponent(groupName)}&avatar=${encodeURIComponent(avatar)}`,
@@ -263,6 +274,7 @@ export const useContactStore = defineStore('contact', () => {
     addFriend,
     goToContacts,
     openChatWithContact,
+    openChatWithContactDesktop,
     openChatWithGroup,
     openChatWithGroupDesktop,
     takePendingDesktopChat,

@@ -1,17 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import ImSwitch from '@/components/ImSwitch.vue'
-import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
-import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
-import { clearConversationHistory } from '@/api/im'
-import { fetchJoinRequests } from '@/api/group'
-import {
-  setConversationPin,
-  setConversationRecvOpt,
-} from '@/utils/openim'
-import type { GroupJoinMode } from '@/types'
+import { useContactStore } from '@/stores/contact'
+import { APP_CONFIG } from '@/config'
+import type { GroupMember } from '@/types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -21,17 +14,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
+  openFriend: [userId: string]
 }>()
 
 const groupStore = useGroupStore()
-const chatStore = useChatStore()
 const userStore = useUserStore()
+const contactStore = useContactStore()
 
 const loading = ref(false)
-const pendingJoinCount = ref(0)
-const recvOpt = ref<number>(MessageReceiveOptType.Normal)
-const pinned = ref(false)
-const showJoinModePicker = ref(false)
+const keyword = ref('')
 
 function sameUserId(a?: string, b?: string) {
   if (!a || !b) return false
@@ -42,6 +33,11 @@ function sameUserId(a?: string, b?: string) {
 function isOwnerRole(role?: string) {
   const r = (role || '').trim().toLowerCase()
   return r === 'owner' || r === '100'
+}
+
+function isAdminRole(role?: string) {
+  const r = (role || '').trim().toLowerCase()
+  return r === 'admin' || r === '60'
 }
 
 const groupDetail = computed(() => groupStore.currentGroup)
@@ -68,12 +64,30 @@ const isOwner = computed(() => {
 })
 
 const canManage = computed(() => isOwner.value || myRole.value === 'admin')
-const joinModeLabel = computed(() =>
-  groupDetail.value?.joinMode === 'approval' ? '私密群（申请入群）' : '公开群（扫码入群）',
+const groupName = computed(() => groupDetail.value?.name || '群聊')
+const groupAvatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
+const groupPublicId = computed(() => groupDetail.value?.id || props.groupId)
+const memberCount = computed(
+  () => memberList.value.length || groupDetail.value?.memberCount || 0,
 )
 
+const filteredMembers = computed(() => {
+  const text = keyword.value.trim().toLowerCase()
+  const list = [...memberList.value].sort((a, b) => {
+    const rank = (role?: string) => (isOwnerRole(role) ? 0 : isAdminRole(role) ? 1 : 2)
+    const d = rank(a.role) - rank(b.role)
+    if (d !== 0) return d
+    return displayName(a).localeCompare(displayName(b), 'zh')
+  })
+  if (!text) return list
+  return list.filter((m) => {
+    const hay = `${m.memberRemark || ''} ${m.groupNickname || ''} ${m.nickname || ''}`.toLowerCase()
+    return hay.includes(text)
+  })
+})
+
 function close() {
-  showJoinModePicker.value = false
+  keyword.value = ''
   emit('update:modelValue', false)
 }
 
@@ -83,8 +97,9 @@ async function loadMenuData() {
   try {
     if (!userStore.profile) await userStore.loadProfile()
     await groupStore.loadDetail(props.groupId)
-    await initConversationSettings()
-    await loadPendingJoinCount()
+    if (!contactStore.contacts.length) {
+      await contactStore.loadDirectory().catch(() => undefined)
+    }
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载群信息失败', icon: 'none' })
     close()
@@ -93,306 +108,361 @@ async function loadMenuData() {
   }
 }
 
-async function loadPendingJoinCount() {
-  if (!canManage.value) {
-    pendingJoinCount.value = 0
-    return
-  }
-  try {
-    const list = await fetchJoinRequests(props.groupId)
-    pendingJoinCount.value = list.length
-  } catch {
-    pendingJoinCount.value = 0
-  }
-}
-
-async function initConversationSettings() {
-  const cached = chatStore.conversations.find((c) => c.id === props.conversationId)
-  recvOpt.value = cached?.recvMsgOpt ?? MessageReceiveOptType.Normal
-  pinned.value = cached?.pinned ?? false
-}
-
 watch(
   () => props.modelValue,
   (open) => {
     if (open) {
-      showJoinModePicker.value = false
+      keyword.value = ''
       void loadMenuData()
     }
   },
 )
 
-function nav(url: string) {
-  close()
-  uni.navigateTo({ url })
-}
-
-function goToAdmin() {
-  nav(`/pages/group/admin?id=${encodeURIComponent(props.groupId)}`)
-}
-
-function goToJoinRequests() {
-  nav(`/pages/group/join-requests?id=${encodeURIComponent(props.groupId)}`)
-}
-
-function goToAnnouncement() {
-  nav(`/pages/group/announcement?id=${encodeURIComponent(props.groupId)}`)
-}
-
-function goToGroupQrcode() {
-  nav(`/pages/group/qrcode?id=${encodeURIComponent(props.groupId)}`)
-}
-
-function goToMyNickname() {
-  nav(`/pages/group/my-nickname?id=${encodeURIComponent(props.groupId)}`)
-}
-
-function goToMedia() {
-  nav(`/pages/group/media?id=${encodeURIComponent(props.groupId)}`)
-}
-
-function goToSearchHistory() {
-  nav(`/pages/group/search-history?id=${encodeURIComponent(props.groupId)}`)
-}
-
-function goToReport() {
-  nav(`/pages/group/report?id=${encodeURIComponent(props.groupId)}`)
-}
-
-async function onToggleRecv(v: boolean) {
-  if (!props.conversationId) {
-    uni.showToast({ title: '会话未就绪', icon: 'none' })
-    return
+function displayName(member: GroupMember) {
+  const role = (member.role || '').toLowerCase()
+  if (role === 'owner' || role === 'admin' || role === '100' || role === '60') {
+    return member.groupNickname || member.nickname || '成员'
   }
-  const opt = v ? MessageReceiveOptType.NotNotify : MessageReceiveOptType.Normal
-  try {
-    await setConversationRecvOpt(props.conversationId, opt)
-    recvOpt.value = opt
-    chatStore.patchConversation(props.conversationId, { recvMsgOpt: opt })
-  } catch (e) {
-    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
-  }
+  return member.memberRemark?.trim() || member.groupNickname || member.nickname || '成员'
 }
 
-async function onTogglePin(v: boolean) {
-  if (!props.conversationId) {
-    uni.showToast({ title: '会话未就绪', icon: 'none' })
-    return
-  }
-  try {
-    await setConversationPin(props.conversationId, v)
-    pinned.value = v
-    chatStore.patchConversation(props.conversationId, { pinned: v })
-  } catch (e) {
-    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
-  }
+function roleBadge(member: GroupMember) {
+  if (isOwnerRole(member.role)) return '群主'
+  if (isAdminRole(member.role)) return '管理员'
+  return ''
 }
 
-async function selectJoinMode(mode: GroupJoinMode) {
-  showJoinModePicker.value = false
-  if (groupDetail.value?.joinMode === mode) return
-  try {
-    await groupStore.updateSettings(props.groupId, { joinMode: mode })
-  } catch (e) {
-    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
+function memberAvatar(member: GroupMember) {
+  const me = userStore.profile
+  if (me && sameUserId(member.id, me.id)) {
+    return member.avatar || me.avatar || APP_CONFIG.defaultAvatarUrl
   }
+  return member.avatar || APP_CONFIG.defaultAvatarUrl
 }
 
-async function onClearHistory() {
-  const res = await uni.showModal({
-    title: '清除聊天记录',
-    content: '聊天记录将从你的所有设备中删除，不会影响其他群成员',
-    confirmText: '确认',
-    cancelText: '取消',
+function copyGroupId() {
+  const id = groupPublicId.value
+  if (!id) return
+  uni.setClipboardData({
+    data: id,
+    success: () => uni.showToast({ title: '已复制', icon: 'none' }),
   })
-  if (!res.confirm) return
-  try {
-    try {
-      await clearConversationHistory('group', props.groupId)
-    } catch (e) {
-      console.warn('服务端清除聊天记录失败，仅清除本端', e)
-    }
-    await chatStore.clearHistory(props.conversationId)
-    uni.showToast({ title: '已清除', icon: 'success' })
-    close()
-  } catch (e) {
-    uni.showToast({ title: (e as Error)?.message || '清除失败', icon: 'none' })
+}
+
+function goFullDetail() {
+  close()
+  uni.navigateTo({
+    url: `/pages/group/detail?id=${encodeURIComponent(props.groupId)}&code=group`,
+  })
+}
+
+function goInvite() {
+  if (!canManage.value) {
+    uni.showToast({ title: '仅群主或管理员可邀请', icon: 'none' })
+    return
   }
+  close()
+  uni.navigateTo({
+    url: `/pages/group/invite?id=${encodeURIComponent(props.groupId)}`,
+  })
+}
+
+function openMember(member: GroupMember) {
+  const me = userStore.profile
+  if (me && sameUserId(member.id, me.id)) return
+  close()
+  const isFriend = contactStore.contacts.some((c) => sameUserId(c.id, member.id))
+  if (isFriend) {
+    emit('openFriend', member.id)
+    return
+  }
+  uni.navigateTo({
+    url: `/pages/contacts/user-profile?id=${encodeURIComponent(member.id)}&groupId=${encodeURIComponent(props.groupId)}`,
+  })
 }
 </script>
 
 <template>
-  <view v-if="modelValue" class="group-menu-layer">
-    <view class="group-menu-backdrop" @click="close" />
+  <view v-if="modelValue" class="group-info-layer">
+    <view class="group-info-backdrop" @click="close" />
 
-    <view class="group-menu-panel" @click.stop>
-      <view v-if="loading" class="group-menu-loading">加载中…</view>
+    <!-- 对齐参考站：400×min-h-80vh 左侧浮层 shadow-modal -->
+    <view class="group-info-panel" @click.stop>
+      <view v-if="loading" class="group-info-loading">加载中…</view>
 
       <template v-else>
-        <view v-if="canManage" class="group-menu-section">
-          <view class="group-menu-item" @click="goToAdmin">
-            <text class="group-menu-label">群组管理</text>
-          </view>
-          <view class="group-menu-item" @click="goToJoinRequests">
-            <text class="group-menu-label">入群申请</text>
-            <text v-if="pendingJoinCount" class="group-menu-meta">{{ pendingJoinCount }}</text>
-          </view>
-          <view class="group-menu-item" @click="showJoinModePicker = !showJoinModePicker">
-            <text class="group-menu-label">入群方式</text>
-            <text class="group-menu-meta">{{ joinModeLabel }}</text>
-          </view>
-          <view v-if="showJoinModePicker" class="group-menu-sub">
-            <view class="group-menu-sub-item" @click="selectJoinMode('open')">公开群（扫码入群）</view>
-            <view class="group-menu-sub-item" @click="selectJoinMode('approval')">私密群（申请入群）</view>
+        <view class="group-info-head" @click="goFullDetail">
+          <image class="group-info-avatar" :src="groupAvatar" mode="aspectFill" />
+          <view class="group-info-name-row">
+            <text class="group-info-name">{{ groupName }}</text>
+            <text class="group-info-chevron">›</text>
           </view>
         </view>
 
-        <view class="group-menu-section">
-          <view class="group-menu-item" @click="goToAnnouncement">
-            <text class="group-menu-label">群公告</text>
-          </view>
-          <view class="group-menu-item" @click="goToGroupQrcode">
-            <text class="group-menu-label">群二维码</text>
-          </view>
-          <view class="group-menu-item" @click="goToMyNickname">
-            <text class="group-menu-label">我在本群的昵称</text>
+        <view class="group-info-id-row">
+          <text class="group-info-id-label">群聊ID</text>
+          <text class="group-info-id-value">{{ groupPublicId }}</text>
+          <view class="group-info-copy" @click.stop="copyGroupId">
+            <text>复制</text>
           </view>
         </view>
 
-        <view class="group-menu-section">
-          <view class="group-menu-item" @click="goToMedia">
-            <text class="group-menu-label">图片与视频</text>
-          </view>
-          <view class="group-menu-item" @click="goToSearchHistory">
-            <text class="group-menu-label">搜索聊天记录</text>
-          </view>
-          <view class="group-menu-item" @click="onClearHistory">
-            <text class="group-menu-label">清除聊天记录</text>
-          </view>
+        <view class="group-info-search">
+          <text class="group-info-search-icon">⌕</text>
+          <input
+            v-model="keyword"
+            class="group-info-search-input"
+            type="text"
+            placeholder="搜索"
+            confirm-type="search"
+          />
         </view>
 
-        <view class="group-menu-section">
-          <view class="group-menu-item group-menu-switch-row">
-            <text class="group-menu-label">消息免打扰</text>
-            <ImSwitch
-              :model-value="recvOpt === MessageReceiveOptType.NotNotify"
-              @change="onToggleRecv"
-            />
-          </view>
-          <view class="group-menu-item group-menu-switch-row">
-            <text class="group-menu-label">置顶聊天</text>
-            <ImSwitch :model-value="pinned" @change="onTogglePin" />
-          </view>
+        <view class="group-info-members-head">
+          <text class="group-info-members-title">群成员 ({{ memberCount }})</text>
+          <text v-if="canManage" class="group-info-add" @click="goInvite">新增</text>
         </view>
 
-        <view class="group-menu-section group-menu-section-last">
-          <view class="group-menu-item" @click="goToReport">
-            <text class="group-menu-label">检举</text>
+        <scroll-view scroll-y class="group-info-members">
+          <view
+            v-for="m in filteredMembers"
+            :key="m.id"
+            class="group-info-member"
+            @click="openMember(m)"
+          >
+            <image class="group-info-member-avatar" :src="memberAvatar(m)" mode="aspectFill" />
+            <text class="group-info-member-name">{{ displayName(m) }}</text>
+            <text v-if="roleBadge(m)" class="group-info-role">{{ roleBadge(m) }}</text>
           </view>
-        </view>
+          <view v-if="!filteredMembers.length" class="group-info-empty">
+            {{ keyword.trim() ? '无匹配成员' : '暂无成员' }}
+          </view>
+        </scroll-view>
       </template>
     </view>
   </view>
 </template>
 
 <style scoped lang="scss">
-.group-menu-layer {
+/* 参考站 PC：min-w/max-w-100(400) + min-h-80vh + p-4 + rounded-2xl + shadow-modal */
+.group-info-layer {
   position: absolute;
-  top: 0;
-  right: 0;
+  inset: 0;
   z-index: 80;
 }
 
-.group-menu-backdrop {
-  position: fixed;
+.group-info-backdrop {
+  position: absolute;
   inset: 0;
 }
 
-.group-menu-panel {
+.group-info-panel {
   position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  width: 280px;
-  max-height: calc(100vh - 120px);
-  overflow-y: auto;
+  top: 8px;
+  left: 8px;
+  right: auto;
+  width: 400px;
+  max-width: calc(100% - 16px);
+  min-height: min(80vh, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 16px;
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  box-shadow: 0 8px 36px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
 }
 
-.group-menu-loading {
-  padding: 20px 16px;
+.group-info-loading {
+  padding: 28px 0;
   text-align: center;
   color: #8a8f9c;
   font-size: 14px;
 }
 
-.group-menu-section {
-  border-bottom: 1px solid #ececec;
-}
-
-.group-menu-section-last {
-  border-bottom: none;
-}
-
-.group-menu-item {
-  min-height: 44px;
-  padding: 0 16px;
+.group-info-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
-.group-menu-item:active {
-  background: #f5f6f8;
+.group-info-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #f3f4f7;
+  flex-shrink: 0;
 }
 
-.group-menu-label {
+.group-info-name-row {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
-  line-height: 20px;
-  color: #212121;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.group-menu-meta {
-  flex-shrink: 0;
-  max-width: 140px;
-  font-size: 12px;
-  line-height: 18px;
-  color: #8a8f9c;
-  text-align: right;
+.group-info-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 24px;
+  color: #212121;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.group-menu-switch-row {
-  cursor: default;
+.group-info-chevron {
+  flex-shrink: 0;
+  font-size: 22px;
+  color: #b0b4bd;
+  line-height: 1;
 }
 
-.group-menu-switch-row:active {
-  background: transparent;
-}
-
-.group-menu-sub {
-  background: #f8f9fb;
-  border-top: 1px solid #ececec;
-}
-
-.group-menu-sub-item {
-  min-height: 40px;
-  padding: 0 16px 0 28px;
+.group-info-id-row {
+  margin-top: 8px;
   display: flex;
   align-items: center;
-  font-size: 13px;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 0;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.group-info-id-label {
+  flex-shrink: 0;
+  font-size: 15px;
   color: #212121;
+}
+
+.group-info-id-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: #626e8d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-info-copy {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: #3c83f6;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 32px;
+  text-align: center;
   cursor: pointer;
 }
 
-.group-menu-sub-item:active {
-  background: #eef0f4;
+.group-info-search {
+  margin-top: 4px;
+  height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #f3f4f7;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.group-info-search-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: #9aa0a6;
+}
+
+.group-info-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  font-size: 14px;
+  color: #212121;
+}
+
+.group-info-members-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0 8px;
+  flex-shrink: 0;
+}
+
+.group-info-members-title {
+  font-size: 14px;
+  color: #8a8f9c;
+}
+
+.group-info-add {
+  font-size: 14px;
+  color: #0a2fc2;
+  cursor: pointer;
+}
+
+.group-info-members {
+  flex: 1;
+  min-height: 0;
+}
+
+.group-info-member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 8px 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.group-info-member:hover {
+  background: #f3f4f7;
+}
+
+.group-info-member-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #f3f4f7;
+  flex-shrink: 0;
+}
+
+.group-info-member-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-info-role {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid #d8dbe2;
+  font-size: 12px;
+  line-height: 18px;
+  color: #555;
+}
+
+.group-info-empty {
+  padding: 24px 0;
+  text-align: center;
+  color: #8a8f9c;
+  font-size: 13px;
 }
 </style>

@@ -13,6 +13,7 @@ import ImConfirmDialogHost from '@/components/ImConfirmDialogHost.vue'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
 import { imConfirm } from '@/composables/useImConfirm'
 import ImDesktopGroupMenu from '@/components/desktop/ImDesktopGroupMenu.vue'
+import ImDesktopFriendDetail from '@/components/desktop/ImDesktopFriendDetail.vue'
 import { useChatMessageActions, type MemberMeta } from '@/composables/useChatMessageActions'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
@@ -57,6 +58,8 @@ const contactStore = useContactStore()
 const forwardStore = useForwardStore()
 const successVisible = ref(false)
 const showGroupMenu = ref(false)
+const showFriendDetail = ref(false)
+const friendDetailId = ref('')
 
 const statusBarHeight = getStatusBarHeight()
 
@@ -363,11 +366,66 @@ const actions = useChatMessageActions({
   isMine,
   visibleMessages: messages,
   conversationTitle: title,
+  peerDisplayName: title,
   memberMeta: memberMetaMap,
   onMuteChanged: () => {
     void refreshGroupMeta()
   },
 })
+
+const pinnedMessage = computed(
+  () => chatStore.conversations.find((c) => c.id === conversationId.value)?.pinnedMessage || null,
+)
+const dismissedPinId = ref('')
+const visiblePinnedBanner = computed(() => {
+  const pin = pinnedMessage.value
+  if (!pin?.clientMsgID) return null
+  if (dismissedPinId.value && dismissedPinId.value === pin.clientMsgID && pin.scope === 'shared') {
+    return null
+  }
+  return pin
+})
+
+watch(
+  () => pinnedMessage.value?.clientMsgID,
+  (id) => {
+    if (id && id !== dismissedPinId.value) dismissedPinId.value = ''
+  },
+)
+
+function jumpToPinnedMessage() {
+  const id = pinnedMessage.value?.clientMsgID
+  if (!id) return
+  scrollInto.value = ''
+  nextTick(() => {
+    scrollInto.value = `msg_${id}`
+  })
+}
+
+async function dismissPinnedBanner() {
+  const pin = pinnedMessage.value
+  if (!pin) return
+  if (pin.scope === 'self') {
+    try {
+      await chatStore.unpinChatMessage(conversationId.value, false)
+    } catch (e) {
+      uni.showToast({ title: (e as Error)?.message || '取消置顶失败', icon: 'none' })
+    }
+    return
+  }
+  // 共享置顶：有管理权限则真正取消；普通成员仅本端收起横幅
+  const canUnpinShared =
+    chatType.value === 'private' || myRole.value === 'owner' || myRole.value === 'admin'
+  if (canUnpinShared) {
+    try {
+      await chatStore.unpinChatMessage(conversationId.value, true)
+    } catch (e) {
+      uni.showToast({ title: (e as Error)?.message || '取消置顶失败', icon: 'none' })
+    }
+    return
+  }
+  dismissedPinId.value = pin.clientMsgID
+}
 
 /** onLoad 刚拉过群详情时 onShow 会紧跟着触发，跳过重复请求 */
 let groupMetaLoadedAt = 0
@@ -468,6 +526,7 @@ watch(
   () => props.conversationId,
   () => {
     showGroupMenu.value = false
+    showFriendDetail.value = false
   },
 )
 
@@ -1054,6 +1113,13 @@ function scheduleMuteExpiry() {
   }, delay)
 }
 
+function openFriendDetailModal(userId: string) {
+  if (!userId) return
+  friendDetailId.value = userId
+  showFriendDetail.value = true
+  showGroupMenu.value = false
+}
+
 async function goToProfile() {
   const id = await resolveBusinessTarget()
   if (!id) {
@@ -1061,9 +1127,19 @@ async function goToProfile() {
     return
   }
   if (chatType.value === 'private') {
+    if (props.embedded) {
+      openFriendDetailModal(id)
+      return
+    }
     uni.navigateTo({
       url: `/pages/contacts/friend-detail?id=${encodeURIComponent(id)}`,
     })
+    return
+  }
+  // H5 PC 三栏：点标题打开群信息小窗，不跳整页
+  if (props.embedded) {
+    businessId.value = id
+    showGroupMenu.value = true
     return
   }
   uni.navigateTo({
@@ -1100,6 +1176,10 @@ function resolveSenderBusinessId(message: ChatMessage): string {
 async function openProfileById(userId: string) {
   if (!userId) return
   if (chatType.value === 'private') {
+    if (props.embedded) {
+      openFriendDetailModal(userId)
+      return
+    }
     uni.navigateTo({ url: `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}` })
     return
   }
@@ -1112,7 +1192,11 @@ async function openProfileById(userId: string) {
     }
   }
   const isFriend = contactStore.contacts.some((c) => c.id === userId)
-  // 群内非好友资料页带 groupId，加好友时走群来源接口（受 allowMemberAddFriend 限制）
+  if (props.embedded && isFriend) {
+    openFriendDetailModal(userId)
+    return
+  }
+  // 群内非好友资料页带 groupId，加好友时走群来源接口（群主/管理员豁免禁止互加）
   const groupParam =
     chatType.value === 'group' && businessId.value
       ? `&groupId=${encodeURIComponent(businessId.value)}`
@@ -1679,25 +1763,42 @@ function pickFavorite() {
       :style="{ paddingTop: embedded ? '0px' : statusBarHeight + 'px' }"
     >
       <view v-if="!embedded" class="back-btn" @click="goBack">‹</view>
-      <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text>
+      <!-- <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text> -->
       <view class="header-title" @click="goToProfile">
         <text class="header-title-text">{{ title }}</text>
       </view>
       <view class="header-icon-wrap">
         <view class="header-icon" @click.stop="onHeaderMoreClick">⋯</view>
-        <ImDesktopGroupMenu
-          v-if="embedded && chatType === 'group' && businessId && conversationId"
-          v-model="showGroupMenu"
-          :group-id="businessId"
-          :conversation-id="conversationId"
-        />
       </view>
     </view>
+
+    <ImDesktopGroupMenu
+      v-if="embedded && chatType === 'group' && businessId && conversationId"
+      v-model="showGroupMenu"
+      :group-id="businessId"
+      :conversation-id="conversationId"
+      @open-friend="openFriendDetailModal"
+    />
+
+    <ImDesktopFriendDetail
+      v-if="embedded"
+      v-model="showFriendDetail"
+      :contact-id="friendDetailId"
+    />
 
     <view v-if="showAnnouncementBanner" class="announce-bar">
       <image class="announce-icon" src="/static/icons/icon-megaphone.svg" mode="aspectFit" />
       <text class="announce-text" @click="openAnnouncement">{{ announcementText }}</text>
       <text class="announce-dismiss" @click.stop="dismissAnnouncementBanner">不再提示</text>
+    </view>
+
+    <view v-if="visiblePinnedBanner" class="pin-bar" @click="jumpToPinnedMessage">
+      <view class="pin-bar-accent" />
+      <view class="pin-bar-body">
+        <text class="pin-bar-label">置顶消息</text>
+        <text class="pin-bar-preview">{{ visiblePinnedBanner.preview || '消息' }}</text>
+      </view>
+      <text class="pin-bar-close" @click.stop="dismissPinnedBanner">×</text>
     </view>
 
     <!-- 不开 scroll-with-animation：uni 的滚动动画是 transform 假动画 + 过渡结束才提交 scrollTop，
@@ -1905,6 +2006,7 @@ function pickFavorite() {
   flex-direction: column;
   background: #f5f5f5;
   overflow: hidden;
+  position: relative;
 }
 
 .room-embedded {
@@ -2011,6 +2113,64 @@ function pickFavorite() {
   flex-shrink: 0;
   font-size: 26rpx;
   color: #0a2fc2;
+}
+
+.pin-bar {
+  display: flex;
+  align-items: stretch;
+  min-height: 72rpx;
+  padding: 10rpx 20rpx 10rpx 0;
+  background: #f7f8fa;
+  border-bottom: 1rpx solid #ececec;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.pin-bar-accent {
+  width: 6rpx;
+  margin: 8rpx 0 8rpx 16rpx;
+  border-radius: 6rpx;
+  background: #0a2fc2;
+  flex-shrink: 0;
+}
+
+.pin-bar-body {
+  flex: 1;
+  min-width: 0;
+  margin: 0 16rpx;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2rpx;
+}
+
+.pin-bar-label {
+  font-size: 22rpx;
+  line-height: 28rpx;
+  color: #0a2fc2;
+  font-weight: 600;
+}
+
+.pin-bar-preview {
+  font-size: 26rpx;
+  line-height: 34rpx;
+  color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pin-bar-close {
+  flex-shrink: 0;
+  width: 48rpx;
+  height: 48rpx;
+  margin-top: 4rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36rpx;
+  line-height: 1;
+  color: #8a8f9c;
 }
 
 .msg-list {

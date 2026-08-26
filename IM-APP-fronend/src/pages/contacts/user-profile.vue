@@ -8,7 +8,7 @@ import type { UserInfo } from '@/types'
 
 const contactStore = useContactStore()
 const userId = ref('')
-/** 从群成员进入时带上，加好友走群来源接口（受群 allowMemberAddFriend 限制） */
+/** 从群成员进入时带上，加好友走群来源接口（群主/管理员豁免禁止互加） */
 const groupId = ref('')
 const user = ref<UserInfo | null>(null)
 const message = ref('你好，我想加你为好友')
@@ -38,7 +38,7 @@ async function onAddFriend() {
   if (!user.value) return
   try {
     if (groupId.value) {
-      // 群来源加好友走独立接口，受群设置 allowMemberAddFriend 约束
+      // 群来源加好友走独立接口（群主/管理员不受禁止互加开关限制）
       const res = await sendGroupFriendRequest(groupId.value, user.value.id, message.value)
       uni.showToast({
         title: res.status === 'accepted' ? '已添加好友' : '已发送好友申请',

@@ -1889,7 +1889,7 @@ components:
         ownerId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 群主的业务用户 ID。}
         memberCount: {type: integer, description: 当前有效群成员数量。}
         announcement: {type: string, description: 群公告，未设置时为空字符串。}
-        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。}
+        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。群主与管理员始终可加群内成员。}
         myRole: {type: string, enum: [owner, admin, member], description: 当前登录用户在群内的角色；owner=群主，admin=管理员，member=普通成员。}
         myNickname: {type: string, description: 当前登录用户的群昵称，未设置时为空字符串。}
         remark: {type: string, description: 当前用户为该群设置的备注，未设置时省略。}
@@ -1954,7 +1954,7 @@ components:
         name: {type: string, minLength: 1, maxLength: 100, description: 新群名称；不传表示不修改。}
         avatarFileId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 已上传且可用的新群头像文件 ID；不传表示不修改。}
         announcement: {type: string, maxLength: 2000, description: 新群公告；传空字符串表示清空。}
-        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。}
+        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。群主与管理员始终可加群内成员。}
         joinMode: {type: string, enum: [open, approval], description: 入群方式；open=直接加入，approval=需要审核。}
         allMuted: {type: boolean, description: 是否开启全员禁言。}
 

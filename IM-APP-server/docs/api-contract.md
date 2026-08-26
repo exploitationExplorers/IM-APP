@@ -445,7 +445,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 }
 ```
 
-`source=group` 时服务端校验该群 `allowMemberAddFriend`。
+`source=group` 时服务端校验双方均为有效群成员；群主/管理员始终可加，普通成员受该群 `allowMemberAddFriend` 约束。
 
 若对方 `requireFriendApproval=false`，服务端直接互加好友，不再进入待审核。
 

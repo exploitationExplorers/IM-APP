@@ -65,6 +65,17 @@ export interface ChatMessage {
   status?: 'sending' | 'sent' | 'failed'
 }
 
+/** 会话内置顶消息（写入 OpenIM conversation.ex，随账号云同步） */
+export interface ConversationPinnedMessage {
+  clientMsgID: string
+  preview: string
+  senderNickname: string
+  messageType: string
+  /** self=仅自己可见；shared=私聊双方 / 群全员同步 */
+  scope: 'self' | 'shared'
+  pinnedAt: number
+}
+
 export interface Conversation {
   id: string
   type: 'private' | 'group'
@@ -78,6 +89,8 @@ export interface Conversation {
   /** OpenIM ConversationItem.groupAtType：0 无 / 1 @我 / 2 @所有人 / 3 两者 / 4 有新公告 */
   groupAtType?: number
   pinned?: boolean
+  /** 聊天页顶部「置顶消息」横幅 */
+  pinnedMessage?: ConversationPinnedMessage | null
   /**
    * 会话级消息接收选项，来自 OpenIM ConversationItem.recvMsgOpt。
    * 0=正常提醒 1=不接收 2=接收但不提醒（免打扰）。前端用于决定是否播放提示音。

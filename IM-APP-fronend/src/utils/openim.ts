@@ -15,7 +15,7 @@ import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, reportSendFailure, type IMTokenResult } from '@/api/im'
 import { getToken } from '@/utils/request'
-import type { ChatMessage, Conversation, MessageType as AppMessageType } from '@/types'
+import type { ChatMessage, Conversation, ConversationPinnedMessage, MessageType as AppMessageType } from '@/types'
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
 import { formatIMNotification, imNotificationEventKey, notificationKindOf, GROUP_CREATED_WELCOME_TEXT } from '@/utils/im-notification'
 import { effectiveGroupAtType, GroupAtType, highlightTagsOf } from '@/utils/group-announcement'
@@ -1651,6 +1651,7 @@ export function toConversation(item: ConversationItem): Conversation {
     lastMessageAt: toISOTime(latestMsgSendTime),
     unreadCount,
     pinned: conversationBoolField(item, 'isPinned', 'IsPinned'),
+    pinnedMessage: pinnedMessageFromEx(conversationEx(item)),
     recvMsgOpt,
     peerUserId: userID || undefined,
     groupId: groupId || undefined,
@@ -2254,8 +2255,11 @@ function summarize(latestMsg: string | MessageItem | null | undefined): string {
       : ''
   }
   if (Number(message.contentType) === MessageType.CustomMessage) {
-    const invite = parseGroupInvitePayload(customMessageDataOf(message))
+    const dataStr = customMessageDataOf(message)
+    const invite = parseGroupInvitePayload(dataStr)
     if (invite) return '[群邀请]'
+    const pin = parseMessagePinPayload(dataStr)
+    if (pin) return pin.action === 'unpin' ? '' : '[置顶消息]'
   }
   const type = toAppMessageType(message.contentType)
   if (type === 'image') return '[图片]'
@@ -2341,18 +2345,132 @@ export function groupRemarkFromEx(ex: string | undefined): string {
   return typeof remark === 'string' ? remark.trim() : ''
 }
 
-/** 群备注仅自己可见：写进 OpenIM 会话 ex，随账号云同步，列表标题优先展示备注 */
-export async function setConversationGroupRemark(conversationID: string, remark: string): Promise<void> {
+function pinnedMessageFromEx(ex: string | undefined): ConversationPinnedMessage | null {
+  const raw = parseConversationEx(ex || '').pinnedMessage
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const obj = raw as Record<string, unknown>
+  const clientMsgID = String(obj.clientMsgID ?? obj.ClientMsgID ?? '').trim()
+  if (!clientMsgID) return null
+  const scope = obj.scope === 'shared' ? 'shared' : 'self'
+  return {
+    clientMsgID,
+    preview: String(obj.preview ?? obj.Preview ?? '').trim(),
+    senderNickname: String(obj.senderNickname ?? obj.SenderNickname ?? '').trim(),
+    messageType: String(obj.messageType ?? obj.MessageType ?? 'text').trim() || 'text',
+    scope,
+    pinnedAt: Number(obj.pinnedAt ?? obj.PinnedAt ?? 0) || Date.now(),
+  }
+}
+
+/** 解析置顶同步自定义消息（businessKey=message_pin） */
+export function parseMessagePinPayload(raw: unknown): {
+  action: 'pin' | 'unpin'
+  clientMsgID: string
+  preview: string
+  senderNickname: string
+  messageType: string
+} | null {
+  let obj: Record<string, unknown> | null = null
+  if (raw && typeof raw === 'object') {
+    obj = raw as Record<string, unknown>
+  } else if (typeof raw === 'string' && raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object') obj = parsed as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  if (!obj) return null
+  const key = String(obj.businessKey ?? obj.BusinessKey ?? '')
+  if (key !== 'message_pin') return null
+  const actionRaw = String(obj.action ?? obj.Action ?? 'pin').toLowerCase()
+  const action = actionRaw === 'unpin' ? 'unpin' : 'pin'
+  const clientMsgID = String(obj.clientMsgID ?? obj.ClientMsgID ?? '').trim()
+  if (action === 'pin' && !clientMsgID) return null
+  return {
+    action,
+    clientMsgID,
+    preview: String(obj.preview ?? obj.Preview ?? '').trim(),
+    senderNickname: String(obj.senderNickname ?? obj.SenderNickname ?? '').trim(),
+    messageType: String(obj.messageType ?? obj.MessageType ?? 'text').trim() || 'text',
+  }
+}
+
+/** 从 OpenIM 消息项解析置顶同步 payload */
+export function messagePinPayloadOf(item: MessageItem): ReturnType<typeof parseMessagePinPayload> {
+  return parseMessagePinPayload(customMessageDataOf(item))
+}
+
+async function mergeConversationEx(
+  conversationID: string,
+  mutator: (extra: Record<string, unknown>) => void,
+): Promise<void> {
   const list = await getConversationList().catch(() => [] as ConversationItem[])
   const current = list.find((item) => item.conversationID === conversationID)
   const extra = parseConversationEx(current ? conversationEx(current) : '')
-  const next = remark.trim()
-  if (next) extra.groupRemark = next
-  else delete extra.groupRemark
+  mutator(extra)
   await imCall('setConversation' as IMMethods, {
     conversationID,
     ex: Object.keys(extra).length ? JSON.stringify(extra) : '',
   })
+}
+
+/** 群备注仅自己可见：写进 OpenIM 会话 ex，随账号云同步，列表标题优先展示备注 */
+export async function setConversationGroupRemark(conversationID: string, remark: string): Promise<void> {
+  await mergeConversationEx(conversationID, (extra) => {
+    const next = remark.trim()
+    if (next) extra.groupRemark = next
+    else delete extra.groupRemark
+  })
+}
+
+/** 写入 / 清除本账号会话内的置顶消息（conversation.ex） */
+export async function setConversationPinnedMessage(
+  conversationID: string,
+  pinned: ConversationPinnedMessage | null,
+): Promise<void> {
+  await mergeConversationEx(conversationID, (extra) => {
+    if (pinned?.clientMsgID) extra.pinnedMessage = pinned
+    else delete extra.pinnedMessage
+  })
+}
+
+/** 向会话同步共享置顶（自定义消息，接收端静默应用，不进气泡列表） */
+export async function sendMessagePinSync(
+  target: IMTarget,
+  payload: {
+    action: 'pin' | 'unpin'
+    clientMsgID: string
+    preview: string
+    senderNickname: string
+    messageType: string
+  },
+): Promise<void> {
+  const data = JSON.stringify({
+    businessKey: 'message_pin',
+    action: payload.action,
+    clientMsgID: payload.clientMsgID,
+    preview: payload.preview,
+    senderNickname: payload.senderNickname,
+    messageType: payload.messageType,
+  })
+  const description = payload.action === 'unpin' ? '' : '置顶消息'
+  let message: MessageItem
+  try {
+    message = await imCall<MessageItem>(IMMethods.CreateCustomMessage, {
+      data,
+      description,
+      extension: '',
+    })
+  } catch {
+    message = await imCall<MessageItem>(IMMethods.CreateCustomMessage, {
+      Data: data,
+      Description: description,
+      Extension: '',
+    })
+  }
+  await sendCreatedMessage(target, message)
 }
 
 /** 清掉会话上的 @ / 新公告强提醒，对应参考站「不再提示」 */
