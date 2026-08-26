@@ -533,7 +533,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### POST `/api/v1/groups`
 
-创建群聊。
+创建群聊。新建群默认 `allowMemberAddFriend=false`（禁止群成员互加好友开关默认开启）。
 
 **Body**
 ```json
@@ -547,7 +547,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
   "name": "群名称",
   "ownerId": "uuid",
   "memberCount": 3,
-  "allowMemberAddFriend": true,
+  "allowMemberAddFriend": false,
   "conversationId": "uuid"
 }
 ```
@@ -600,15 +600,20 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### POST `/api/v1/groups/qrcode/resolve`
 
-只读解析群二维码，返回 `joined`、`joinMode` 和 `nextAction=enter|join|apply`。
+只读解析群二维码，返回 `joined`、`joinMode` 和 `nextAction=enter|join`。
+
+扫码路径视为群主私发邀请：未入群时一律 `nextAction=join`，**不受**群 `joinMode=approval`、也不受被扫码用户「邀请入群需验证」影响。
 
 **Body** `{ "token": "..." }`
 
 ### POST `/api/v1/groups/qrcode/join`
 
-用户确认后按二维码加入群：已是成员返回 `enter`；公开群直接加入并返回 `joined`；审核群创建/复用申请并返回 `pending_approval`。
+用户确认后按二维码加入群：
 
-**Body** `{ "token": "...", "remark": "申请说明" }`，也支持传完整 `payload`。
+- 已是成员：返回 `enter`，并补齐 OpenIM 成员同步（自愈业务库有人、IM 未入群的历史脏数据）
+- 未入群：直接写入成员并返回 `joined`（忽略 `joinMode`，以群主邀请方式同步 OpenIM）
+
+**Body** `{ "token": "...", "remark": "可选，扫码直入时忽略" }`，也支持传完整 `payload`。
 
 ### POST `/api/v1/groups/:id/join`
 

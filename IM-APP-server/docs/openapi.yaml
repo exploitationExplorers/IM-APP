@@ -1605,7 +1605,7 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/GroupQRCodeResolveEnvelope'}
     JoinGroupByQRCodeResponse:
-      description: 扫码入群或申请入群结果
+      description: 扫码入群结果（忽略 joinMode，不走申请）
       content:
         application/json:
           schema: {$ref: '#/components/schemas/JoinGroupByQRCodeEnvelope'}
@@ -1889,7 +1889,7 @@ components:
         ownerId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 群主的业务用户 ID。}
         memberCount: {type: integer, description: 当前有效群成员数量。}
         announcement: {type: string, description: 群公告，未设置时为空字符串。}
-        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。群主与管理员始终可加群内成员。}
+        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。群主与管理员始终可加群内成员。新建群默认 false（禁止互加默认开启）。}
         myRole: {type: string, enum: [owner, admin, member], description: 当前登录用户在群内的角色；owner=群主，admin=管理员，member=普通成员。}
         myNickname: {type: string, description: 当前登录用户的群昵称，未设置时为空字符串。}
         remark: {type: string, description: 当前用户为该群设置的备注，未设置时省略。}
@@ -1954,7 +1954,7 @@ components:
         name: {type: string, minLength: 1, maxLength: 100, description: 新群名称；不传表示不修改。}
         avatarFileId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 已上传且可用的新群头像文件 ID；不传表示不修改。}
         announcement: {type: string, maxLength: 2000, description: 新群公告；传空字符串表示清空。}
-        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。群主与管理员始终可加群内成员。}
+        allowMemberAddFriend: {type: boolean, description: 是否允许普通群成员互相添加好友。群主与管理员始终可加群内成员。新建群默认 false（禁止互加默认开启）。}
         joinMode: {type: string, enum: [open, approval], description: 入群方式；open=直接加入，approval=需要审核。}
         allMuted: {type: boolean, description: 是否开启全员禁言。}
 
@@ -2123,8 +2123,8 @@ components:
         group: {allOf: [{$ref: '#/components/schemas/GroupInfo'}], description: 二维码对应的群详情。}
         joined: {type: boolean, description: 当前用户是否已经是该群的有效成员。}
         memberId: {type: string, description: 当前用户的群成员记录 ID；尚未入群时不返回。}
-        joinMode: {type: string, enum: [open, approval], description: 该群的入群方式；open=直接加入，approval=需要审核。}
-        nextAction: {type: string, enum: [enter, join, apply], description: 前端下一步动作；enter=直接进入群聊，join=可直接入群，apply=需提交入群申请。}
+        joinMode: {type: string, enum: [open, approval], description: 该群的入群方式（信息展示）；扫码入群不受此字段拦截。}
+        nextAction: {type: string, enum: [enter, join], description: enter=已在群内可直接进入；join=确认后直接入群（扫码路径不返回 apply）。}
 
     GroupQRCodeResolveEnvelope:
       allOf:
@@ -2137,16 +2137,16 @@ components:
       type: object
       required: [action, group]
       properties:
-        action: {type: string, enum: [enter, joined, applied], description: 扫码结果；enter=原本已在群内，joined=已直接加入，applied=已提交审核申请。}
+        action: {type: string, enum: [enter, joined], description: 扫码结果；enter=原本已在群内（并补齐 OpenIM）；joined=已直接加入。}
         group: {allOf: [{$ref: '#/components/schemas/GroupInfo'}], description: 二维码对应的群详情。}
-        requestId: {type: string, format: uuid, description: action=applied 时生成的入群申请 ID，其他情况不返回。}
+        requestId: {type: string, format: uuid, description: 兼容字段；扫码直入路径不再返回申请 ID。}
 
     JoinGroupByQRCodeEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
           properties:
-            data: {allOf: [{$ref: '#/components/schemas/JoinGroupByQRCodeResult'}], description: 扫码入群或提交申请的执行结果。}
+            data: {allOf: [{$ref: '#/components/schemas/JoinGroupByQRCodeResult'}], description: 扫码直接入群的执行结果。}
 
     GroupReportResult:
       type: object

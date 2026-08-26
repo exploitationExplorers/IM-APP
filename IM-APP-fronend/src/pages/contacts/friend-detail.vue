@@ -53,6 +53,9 @@ const tagText = computed(() =>
   (contact.value?.tags || []).map((t) => t.name).join('、'),
 )
 const groups = computed(() => contact.value?.commonGroups || [])
+/** 对齐参考站：详情页最多展示 3 个，其余走「查看全部」 */
+const previewGroups = computed(() => groups.value.slice(0, 3))
+const showAllGroupsLink = computed(() => groups.value.length > 3)
 
 onLoad((query) => {
   if (props.embedded) return
@@ -176,6 +179,13 @@ async function onMessage() {
 function openGroup(g: GroupPreview) {
   uni.navigateTo({
     url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(g.id)}&title=${encodeURIComponent(g.name)}&avatar=${encodeURIComponent(g.avatar || APP_CONFIG.defaultGroupAvatarUrl)}`,
+  })
+}
+
+function goAllGroups() {
+  if (!contact.value || !groups.value.length) return
+  uni.navigateTo({
+    url: `/pages/contacts/friend-common-groups?id=${encodeURIComponent(contact.value.id)}`,
   })
 }
 
@@ -330,9 +340,10 @@ function onDelete() {
         <view v-if="groups.length" class="groups">
           <view class="groups-bar">
             <text class="groups-title">共同群组 ({{ groups.length }})</text>
+            <text v-if="showAllGroupsLink" class="groups-all" @click="goAllGroups">查看全部</text>
           </view>
           <view
-            v-for="g in groups"
+            v-for="g in previewGroups"
             :key="g.id"
             class="group-row"
             @click="openGroup(g)"
@@ -642,6 +653,7 @@ function onDelete() {
 .groups-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   min-height: 64rpx;
   padding: 16rpx 40rpx;
   background: #f3f4f7;
@@ -651,6 +663,12 @@ function onDelete() {
   font-size: 28rpx;
   font-weight: 700;
   line-height: 40rpx;
+  color: #212121;
+}
+
+.groups-all {
+  font-size: 24rpx;
+  line-height: 34rpx;
   color: #212121;
 }
 

@@ -32,7 +32,9 @@ const tagText = computed(() =>
   (contact.value?.tags || []).map((t) => t.name).join('、'),
 )
 const groups = computed(() => contact.value?.commonGroups || [])
+/** 对齐参考站：详情最多 3 个，其余走「查看全部」 */
 const previewGroups = computed(() => groups.value.slice(0, 3))
+const showAllGroupsLink = computed(() => groups.value.length > 3)
 
 function close() {
   showMore.value = false
@@ -110,7 +112,11 @@ function openGroup(g: GroupPreview) {
 
 function goAllGroups() {
   if (!contact.value || !groups.value.length) return
-  uni.showToast({ title: `共 ${groups.value.length} 个共同群组`, icon: 'none' })
+  const id = contact.value.id
+  close()
+  uni.navigateTo({
+    url: `/pages/contacts/friend-common-groups?id=${encodeURIComponent(id)}`,
+  })
 }
 
 function onBlock() {
@@ -248,8 +254,12 @@ function onDelete() {
               <view class="friend-hr" />
 
               <view class="friend-groups-bar">
-                <text class="friend-groups-title">共同群组 ({{ groups.length }})</text>
-                <text class="friend-groups-all" @click="goAllGroups">查看全部</text>
+              <text class="friend-groups-title">共同群组 ({{ groups.length }})</text>
+              <text
+                v-if="showAllGroupsLink"
+                class="friend-groups-all"
+                @click="goAllGroups"
+              >查看全部</text>
               </view>
               <view class="friend-groups-list">
                 <view

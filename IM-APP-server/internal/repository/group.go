@@ -190,7 +190,7 @@ func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs 
 	var groupID string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO groups(name, avatar, owner_id, conversation_id, allow_member_add_friend, max_members)
-		VALUES($1, '', $2::uuid, NULLIF($3,'')::uuid, true, $4)
+		VALUES($1, '', $2::uuid, NULLIF($3,'')::uuid, false, $4)
 		RETURNING id::text`, name, ownerID, convID, limits.DefaultGroupMaxMembers).Scan(&groupID)
 	if err != nil {
 		return models.GroupInfo{}, err
@@ -369,16 +369,24 @@ func (r *GroupRepo) Join(ctx context.Context, groupID, uid string) (models.Group
 }
 
 func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJoinMode bool, reason string) (models.GroupInfo, error) {
+	return r.addMemberWithOperator(ctx, groupID, uid, "", enforceJoinMode, reason)
+}
+
+// addMemberWithOperator 写入业务群成员并入队 OpenIM 同步。
+// operatorID 非空且 reason=invite 时，同步侧以该操作者邀请入群（绕过本人 JoinGroup 审核）。
+func (r *GroupRepo) addMemberWithOperator(
+	ctx context.Context, groupID, uid, operatorID string, enforceJoinMode bool, reason string,
+) (models.GroupInfo, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
 	defer tx.Rollback(ctx)
-	var convID, joinMode string
+	var convID, joinMode, ownerID string
 	var configuredMax int
 	err = tx.QueryRow(ctx, `
-		SELECT COALESCE(conversation_id::text,''), join_mode, COALESCE(max_members,200)
-		FROM groups WHERE id=$1 AND status='active' FOR UPDATE`, groupID).Scan(&convID, &joinMode, &configuredMax)
+		SELECT COALESCE(conversation_id::text,''), join_mode, COALESCE(max_members,200), owner_id::text
+		FROM groups WHERE id=$1 AND status='active' FOR UPDATE`, groupID).Scan(&convID, &joinMode, &configuredMax, &ownerID)
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
@@ -420,16 +428,57 @@ func (r *GroupRepo) addMember(ctx context.Context, groupID, uid string, enforceJ
 	if reason == "" {
 		reason = "join"
 	}
-	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, map[string]string{
+	payload := map[string]string{
 		"userId": uid,
 		"reason": reason,
-	}); err != nil {
+	}
+	if reason == "invite" {
+		op := strings.TrimSpace(operatorID)
+		if op == "" {
+			op = ownerID
+		}
+		if op != "" {
+			payload["operatorId"] = op
+		}
+	}
+	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, payload); err != nil {
 		return models.GroupInfo{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return models.GroupInfo{}, err
 	}
 	return r.GetByID(ctx, groupID, uid)
+}
+
+// enqueueOwnerInviteMember 业务库已有成员时补齐 OpenIM 成员关系（扫码 enter / 自愈）。
+func (r *GroupRepo) enqueueOwnerInviteMember(ctx context.Context, groupID, uid string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var ownerID string
+	if err := tx.QueryRow(ctx, `
+		SELECT owner_id::text FROM groups WHERE id=$1::uuid AND status='active'`, groupID).Scan(&ownerID); err != nil {
+		return err
+	}
+	var isMember bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)`,
+		groupID, uid).Scan(&isMember); err != nil {
+		return err
+	}
+	if !isMember {
+		return ErrForbidden
+	}
+	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, map[string]string{
+		"userId":     uid,
+		"reason":     "invite",
+		"operatorId": ownerID,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *GroupRepo) UpdateSettings(
@@ -1021,11 +1070,10 @@ func (r *GroupRepo) ResolveQRCode(ctx context.Context, uid, token string) (model
 	_ = r.DB.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)`,
 		groupID, uid).Scan(&joined)
+	// 扫码入群视为群主私发邀请：未入群一律 nextAction=join，不受 joinMode/本人加群验证影响。
 	nextAction := "join"
 	if joined {
 		nextAction = "enter"
-	} else if joinMode == "approval" {
-		nextAction = "apply"
 	}
 	return models.GroupQRCodeResolveResult{
 		Group: g, Joined: joined, JoinMode: joinMode, NextAction: nextAction,
@@ -1033,6 +1081,7 @@ func (r *GroupRepo) ResolveQRCode(ctx context.Context, uid, token string) (model
 }
 
 func (r *GroupRepo) JoinByQRCode(ctx context.Context, uid, token, remark string) (models.JoinGroupByQRCodeResult, error) {
+	_ = remark // 扫码直接入群，不再走申请备注
 	resolved, err := r.ResolveQRCode(ctx, uid, token)
 	if err != nil {
 		return models.JoinGroupByQRCodeResult{}, err
@@ -1046,56 +1095,16 @@ func (r *GroupRepo) JoinByQRCode(ctx context.Context, uid, token, remark string)
 		if err != nil {
 			return models.JoinGroupByQRCodeResult{}, err
 		}
+		// 业务库已在群但 OpenIM 可能缺失（历史扫码走 JoinGroup 失败），补齐同步。
+		_ = r.enqueueOwnerInviteMember(ctx, groupID, uid)
 		return models.JoinGroupByQRCodeResult{Action: "enter", Group: group}, nil
 	}
-	if resolved.JoinMode == "open" {
-		group, err := r.addMember(ctx, groupID, uid, true, "join")
-		if errors.Is(err, ErrApprovalRequired) {
-			request, requestErr := r.CreateJoinRequest(ctx, groupID, uid, remark)
-			if requestErr != nil {
-				return models.JoinGroupByQRCodeResult{}, requestErr
-			}
-			resolved.Group.JoinMode = "approval"
-			return models.JoinGroupByQRCodeResult{
-				Action: "pending_approval", Group: resolved.Group, RequestID: request.ID,
-			}, nil
-		}
-		if err != nil {
-			return models.JoinGroupByQRCodeResult{}, err
-		}
-		return models.JoinGroupByQRCodeResult{Action: "joined", Group: group}, nil
-	}
-	request, err := r.CreateJoinRequest(ctx, groupID, uid, remark)
-	if errors.Is(err, ErrAlreadyGroupMember) {
-		group, getErr := r.GetByID(ctx, groupID, uid)
-		if getErr != nil {
-			return models.JoinGroupByQRCodeResult{}, getErr
-		}
-		return models.JoinGroupByQRCodeResult{Action: "enter", Group: group}, nil
-	}
-	if errors.Is(err, ErrInvalidGroupOperation) {
-		// 解析后群已改回公开，按当前模式直接加入
-		group, joinErr := r.addMember(ctx, groupID, uid, true, "join")
-		if joinErr == nil {
-			return models.JoinGroupByQRCodeResult{Action: "joined", Group: group}, nil
-		}
-		if !errors.Is(joinErr, ErrApprovalRequired) {
-			return models.JoinGroupByQRCodeResult{}, joinErr
-		}
-		request, requestErr := r.CreateJoinRequest(ctx, groupID, uid, remark)
-		if requestErr != nil {
-			return models.JoinGroupByQRCodeResult{}, requestErr
-		}
-		return models.JoinGroupByQRCodeResult{
-			Action: "pending_approval", Group: resolved.Group, RequestID: request.ID,
-		}, nil
-	}
+	// 忽略 joinMode：二维码路径一律直接入群，并以群主身份同步 OpenIM。
+	group, err := r.addMemberWithOperator(ctx, groupID, uid, "", false, "invite")
 	if err != nil {
 		return models.JoinGroupByQRCodeResult{}, err
 	}
-	return models.JoinGroupByQRCodeResult{
-		Action: "pending_approval", Group: resolved.Group, RequestID: request.ID,
-	}, nil
+	return models.JoinGroupByQRCodeResult{Action: "joined", Group: group}, nil
 }
 
 func (r *GroupRepo) GetByIDPublic(ctx context.Context, groupID string) (models.GroupInfo, error) {
