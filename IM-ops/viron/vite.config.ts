@@ -36,6 +36,25 @@ export default defineConfig(({ mode }) => {
       // 避开同仓库 IM-APP-fronend 默认 5173
       port: 5273,
       proxy: {
+        // 前端 withBase() 会把请求打成 /opt/api、/opt/ws 等（与线上 nginx 子路径一致）；
+        // 本地后端仍挂在根路径 /api，因此这里要剥掉 /opt 再转发。
+        "/opt/api": {
+          target: apiTarget,
+          rewrite: (path) => path.replace(/^\/opt/, ""),
+        },
+        "/opt/healthz": {
+          target: apiTarget,
+          rewrite: (path) => path.replace(/^\/opt/, ""),
+        },
+        "/opt/mcp": {
+          target: apiTarget,
+          rewrite: (path) => path.replace(/^\/opt/, ""),
+        },
+        "/opt/ws": {
+          target: apiTarget,
+          ws: true,
+          rewrite: (path) => path.replace(/^\/opt/, ""),
+        },
         "/api": apiTarget,
         "/healthz": apiTarget,
         "/mcp": apiTarget,

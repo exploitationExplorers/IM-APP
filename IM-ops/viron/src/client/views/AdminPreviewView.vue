@@ -105,7 +105,8 @@ const displayUrl = computed(() => previewUrl.replace(/^https?:\/\//, ""));
   border: 1px solid var(--ink-100);
   border-radius: var(--radius-md);
   background: #0b1015;
-  overflow: auto;
+  overflow: hidden;
+  display: grid;
 }
 
 .admin-preview-frame {

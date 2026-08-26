@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { ExternalLink, RefreshCw, Smartphone } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { ExternalLink, Monitor, RefreshCw, Smartphone } from "@lucide/vue";
+import { computed, ref, watch } from "vue";
 import {
   H5_PREVIEW_DEFAULT_URL,
   H5_PREVIEW_DEVICE_PRESETS,
   type H5PreviewDevicePreset,
+  type H5PreviewMode,
 } from "../h5-preview-config";
 import PageHeader from "../components/PageHeader.vue";
 
 defineOptions({ name: "H5PreviewView" });
 
 const previewUrl = H5_PREVIEW_DEFAULT_URL;
+const previewMode = ref<H5PreviewMode>("mobile");
 const selectedDeviceId = ref(H5_PREVIEW_DEVICE_PRESETS[1]?.id ?? H5_PREVIEW_DEVICE_PRESETS[0]!.id);
 const frameKey = ref(0);
 
@@ -18,17 +20,40 @@ const selectedDevice = computed<H5PreviewDevicePreset>(() =>
   H5_PREVIEW_DEVICE_PRESETS.find((item) => item.id === selectedDeviceId.value) ?? H5_PREVIEW_DEVICE_PRESETS[0]!,
 );
 
+const isMobileMode = computed(() => previewMode.value === "mobile");
+
 function refreshPreview() {
   frameKey.value += 1;
 }
+
+watch(previewMode, () => {
+  frameKey.value += 1;
+});
 </script>
 
 <template>
   <div class="h5-preview-view">
-    <PageHeader :title="$t('H5 预览')">
+    <PageHeader :title="$t('客户端预览')">
       <template #actions>
-        <span class="h5-preview-view__target"><Smartphone :size="15" />{{ previewUrl }}</span>
-        <el-select v-model="selectedDeviceId" class="h5-preview-view__device-select" :aria-label="$t('预览设备')">
+        <el-radio-group v-model="previewMode" class="h5-preview-view__mode" :aria-label="$t('预览模式')">
+          <el-radio-button value="pc">
+            <span class="h5-preview-view__mode-label"><Monitor :size="14" />{{ $t("PC 端模式") }}</span>
+          </el-radio-button>
+          <el-radio-button value="mobile">
+            <span class="h5-preview-view__mode-label"><Smartphone :size="14" />{{ $t("移动端模式") }}</span>
+          </el-radio-button>
+        </el-radio-group>
+        <span class="h5-preview-view__target">
+          <Monitor v-if="!isMobileMode" :size="15" />
+          <Smartphone v-else :size="15" />
+          {{ previewUrl }}
+        </span>
+        <el-select
+          v-if="isMobileMode"
+          v-model="selectedDeviceId"
+          class="h5-preview-view__device-select"
+          :aria-label="$t('预览设备')"
+        >
           <el-option
             v-for="device in H5_PREVIEW_DEVICE_PRESETS"
             :key="device.id"
@@ -45,8 +70,9 @@ function refreshPreview() {
       </template>
     </PageHeader>
 
-    <div class="h5-preview-stage">
+    <div :class="isMobileMode ? 'h5-preview-stage h5-preview-stage--mobile' : 'h5-preview-stage h5-preview-stage--pc'">
       <div
+        v-if="isMobileMode"
         class="h5-preview-device"
         :style="{ width: `${selectedDevice.width}px`, height: `${selectedDevice.height}px` }"
         :aria-label="$t('{0} 预览框', [selectedDevice.label])"
@@ -57,13 +83,22 @@ function refreshPreview() {
           <span></span>
         </div>
         <iframe
-          :key="frameKey"
+          :key="`mobile-${frameKey}`"
           class="h5-preview-device__frame"
           :src="previewUrl"
-          :title="$t('H5 预览页面')"
+          :title="$t('移动端预览页面')"
           referrerpolicy="strict-origin-when-cross-origin"
         ></iframe>
       </div>
+
+      <iframe
+        v-else
+        :key="`pc-${frameKey}`"
+        class="h5-preview-pc-frame"
+        :src="previewUrl"
+        :title="$t('PC 端预览页面')"
+        referrerpolicy="strict-origin-when-cross-origin"
+      ></iframe>
     </div>
   </div>
 </template>
@@ -77,6 +112,18 @@ function refreshPreview() {
 }
 
 .h5-preview-view :deep(.page-header) { margin-block-end: 12px; }
+
+.h5-preview-view__mode :deep(.el-radio-button__inner) {
+  display: inline-flex;
+  align-items: center;
+  padding-inline: 12px;
+}
+
+.h5-preview-view__mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .h5-preview-view__target {
   min-height: 30px;
@@ -109,6 +156,7 @@ function refreshPreview() {
   display: grid;
   place-items: center;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .h5-preview-view__action:hover {
@@ -122,6 +170,10 @@ function refreshPreview() {
   padding: 12px;
   border: 1px solid var(--ink-100);
   border-radius: var(--radius-md);
+}
+
+/* 移动端：手机外框居中 */
+.h5-preview-stage--mobile {
   background:
     radial-gradient(circle at top, color-mix(in srgb, var(--teal-50) 56%, transparent), transparent 58%),
     linear-gradient(180deg, color-mix(in srgb, var(--ink-50) 48%, var(--surface)), var(--surface));
@@ -129,6 +181,13 @@ function refreshPreview() {
   display: flex;
   align-items: flex-start;
   justify-content: center;
+}
+
+/* PC 端：与后台管理预览相同，iframe 铺满 */
+.h5-preview-stage--pc {
+  background: #0b1015;
+  overflow: hidden;
+  display: grid;
 }
 
 .h5-preview-device {
@@ -171,9 +230,11 @@ function refreshPreview() {
   font-weight: 600;
 }
 
-.h5-preview-device__frame {
+.h5-preview-device__frame,
+.h5-preview-pc-frame {
   width: 100%;
   height: 100%;
+  min-height: 0;
   border: 0;
   background: white;
   display: block;

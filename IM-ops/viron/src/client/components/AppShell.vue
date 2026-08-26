@@ -62,7 +62,7 @@ const menuItems = [
   { key: "ssh", label: tr("SSH 工作台"), icon: TerminalSquare, routeName: "ssh", routeNames: ["ssh"], planned: false },
   { key: "database", label: tr("数据库工作台"), icon: Database, routeName: "database", routeNames: ["database"], planned: false },
   { key: "redis", label: tr("Redis 工作台"), icon: MemoryStick, routeName: "redis", routeNames: ["redis"], planned: false },
-  { key: "h5-preview", label: tr("H5 预览"), icon: Smartphone, routeName: "h5-preview", routeNames: ["h5-preview"], planned: false },
+  { key: "h5-preview", label: tr("客户端预览"), icon: Smartphone, routeName: "h5-preview", routeNames: ["h5-preview"], planned: false },
   { key: "admin-preview", label: tr("后台管理预览"), icon: Settings, routeName: "admin-preview", routeNames: ["admin-preview"], planned: false, managerOnly: true },
   { key: "knowledge", label: tr("知识库"), icon: BookOpen, routeName: "knowledge", routeNames: ["knowledge"], planned: false },
   { key: "audit", label: tr("操作审计"), icon: ClipboardList, routeName: "audit", routeNames: ["audit"], planned: false },

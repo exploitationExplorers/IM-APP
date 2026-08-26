@@ -8,6 +8,7 @@ import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
+import { previewFrameSrcDirectives } from "../shared/preview-embed.js";
 import type { AppConfig } from "./config.js";
 import { createSecretBox } from "./crypto.js";
 import type { EnvmanDatabase } from "./database.js";
@@ -107,7 +108,13 @@ export async function buildApp(options: BuildAppOptions) {
   });
   await app.register(helmet, {
     contentSecurityPolicy: options.config.nodeEnv === "production"
-      ? { directives: { "upgrade-insecure-requests": options.config.cookieSecure ? [] : null } }
+      ? {
+          directives: {
+            // 预览页用 iframe 嵌入 H5 / 管理后台；无 frame-src 时会回落到 default-src 'self'，跨子域会被浏览器直接拦截。
+            frameSrc: previewFrameSrcDirectives(),
+            "upgrade-insecure-requests": options.config.cookieSecure ? [] : null,
+          },
+        }
       : false,
     strictTransportSecurity: options.config.cookieSecure ? undefined : false,
   });

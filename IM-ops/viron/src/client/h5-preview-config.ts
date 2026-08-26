@@ -1,4 +1,9 @@
-export const H5_PREVIEW_DEFAULT_URL = "https://www.ke58.com";
+export { H5_PREVIEW_DEFAULT_URL } from "../shared/preview-embed";
+
+/** 与 IM-APP-fronend `DESKTOP_BREAKPOINT` 对齐：iframe 宽度 ≥ 该值走 PC 三栏布局 */
+export const H5_PREVIEW_DESKTOP_BREAKPOINT = 960;
+
+export type H5PreviewMode = "pc" | "mobile";
 
 export interface H5PreviewDevicePreset {
   id: string;
