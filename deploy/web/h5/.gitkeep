@@ -1,0 +1,2 @@
+# H5 构建产物放这里（IM-APP-fronend 的 dist/build/h5/*）
+# nginx 挂载为 /usr/share/nginx/html/h5

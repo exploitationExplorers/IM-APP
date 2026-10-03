@@ -1,7 +1,7 @@
 const env = (import.meta as ImportMeta & { env: Record<string, string> }).env
 
 /** H5 本地开发改走 Vite 代理（vite.config.ts server.proxy），浏览器同源请求，避免跨域预检 */
-let apiBaseUrl = env.VITE_API_BASE_URL || 'https://www.ke58.com/api/v1'
+let apiBaseUrl = env.VITE_API_BASE_URL || 'http://8.154.44.197/api/v1'
 // #ifdef H5
 if (import.meta.env.DEV) {
   apiBaseUrl = '/api/v1'

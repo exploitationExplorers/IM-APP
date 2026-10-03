@@ -18,8 +18,13 @@ const path = require('path')
 const { execFileSync, spawnSync } = require('child_process')
 const { URL } = require('url')
 
-/** 本机 DNS 常把 www.ke58.com 指到 CDN（证书不匹配）；发布必须打源站。可用 IM_APP_ORIGIN_IP 覆盖。 */
-const ORIGIN_PIN_IP = process.env.IM_APP_ORIGIN_IP || '8.210.72.157'
+/**
+ * 源站 IP 固定。旧服务器是 8.210.72.157（当时靠 DNS pin 绕过 CDN 证书问题）。
+ * 新服务器 8.154.44.197 纯 IP、无域名，ORIGIN_PIN_HOSTS 里的域名已作废 ——
+ * 域名一死，pin 逻辑就是空转（不会有请求命中那些 host），保留只为兼容。
+ * 可用 IM_APP_ORIGIN_IP 覆盖。
+ */
+const ORIGIN_PIN_IP = process.env.IM_APP_ORIGIN_IP || '8.154.44.197'
 const ORIGIN_PIN_HOSTS = new Set(['www.ke58.com', 'ke58.com'])
 
 const root = path.resolve(__dirname, '..')

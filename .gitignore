@@ -6,6 +6,9 @@
 # 管理后台本地环境配置（含数据库密码等敏感信息）
 IM-APP-admin/.env
 
+# 生产部署变量（含阿里云 AccessKey、webhook 密钥等，模板见 deploy/.env.example）
+deploy/.env
+
 # 管理后台打包产物（release 目录不上传）
 IM-APP-admin/release/
 .workbuddy

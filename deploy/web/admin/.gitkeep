@@ -1,0 +1,2 @@
+# 管理后台构建产物放这里（IM-APP-system 的 dist/*）
+# nginx 挂载为 /usr/share/nginx/html/admin

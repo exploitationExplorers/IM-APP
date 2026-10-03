@@ -44,7 +44,7 @@ export function healthUrlFromApiBase(apiBaseUrl: string): string {
     if (envBase.startsWith('http')) {
       return `${originOf(envBase)}/health`
     }
-    return 'https://www.ke58.com/health'
+    return 'http://8.154.44.197/health'
   }
   return `${originOf(apiBaseUrl)}/health`
 }
@@ -55,7 +55,7 @@ export function appProbeUrl(): string {
     return location.origin + '/'
   }
   // #endif
-  return 'https://www.ke58.com/'
+  return 'http://8.154.44.197/'
 }
 
 export function fileProbeUrl(defaultAvatarUrl: string): string {
@@ -63,7 +63,7 @@ export function fileProbeUrl(defaultAvatarUrl: string): string {
     const u = new URL(defaultAvatarUrl)
     return `${u.origin}/`
   } catch {
-    return 'https://www.ke58.com/minio/'
+    return 'http://8.154.44.197/minio/'
   }
 }
 
