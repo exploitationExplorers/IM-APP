@@ -301,9 +301,17 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 			return nil
 		}
 		if payload.Reason == "invite" {
-			return w.Client.InviteGroupMemberAs(ctx, operatorID, groupID, []string{memberID})
+			op := operatorID
+			if op == "" {
+				op = group.OwnerUserID
+			}
+			return w.Client.InviteGroupMemberAs(ctx, op, groupID, []string{memberID})
 		}
-		return w.Client.JoinGroup(ctx, memberID, groupID)
+		// 本人 JoinGroup 可能因 OpenIM 群验证变成「仅申请」；失败时回退群主邀请。
+		if err := w.Client.JoinGroup(ctx, memberID, groupID); err != nil {
+			return w.Client.InviteGroupMemberAs(ctx, group.OwnerUserID, groupID, []string{memberID})
+		}
+		return nil
 	case repository.IMEventGroupMemberLeft:
 		if _, exists := memberByID[memberID]; exists {
 			return nil

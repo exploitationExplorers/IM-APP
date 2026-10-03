@@ -171,8 +171,8 @@ export async function sendFriendRequest(toUserId: string, message: string): Prom
 
 /**
  * 从群成员资料发起好友申请。
- * 服务端校验双方均为该群有效成员且群开启 allowMemberAddFriend；
- * 群内关闭加好友只限制该来源，不影响公开 ID / 二维码加好友。
+ * 服务端校验双方均为该群有效成员；群主/管理员始终可加，
+ * 普通成员受 allowMemberAddFriend 约束。公开 ID / 二维码加好友不受影响。
  */
 export async function sendGroupFriendRequest(
   groupId: string,

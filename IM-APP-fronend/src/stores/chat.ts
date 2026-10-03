@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { IMEvents, OnlineState, SessionType } from 'openim-uniapp-polyfill'
+import { IMEvents, MessageType, OnlineState, SessionType } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
-import type { ChatMessage, Conversation } from '@/types'
+import type { ChatMessage, Conversation, ConversationPinnedMessage } from '@/types'
 import { recallMessage, resolveIMGroup, resolveIMGroupByIM, resolveIMPeer } from '@/api/im'
 import {
   businessUserIdFromIM,
@@ -38,6 +38,9 @@ import {
   resetConversationGroupAtType,
   seqOf,
   setConversationPin,
+  setConversationPinnedMessage,
+  sendMessagePinSync,
+  messagePinPayloadOf,
   invalidateIMLoginCache,
   waitForSync,
   isNotInGroupIMError,
@@ -324,6 +327,17 @@ export const useChatStore = defineStore('chat', () => {
     // 退出群与普通“删除会话”不同：OpenIM 异步退群完成前仍可能推送尾部消息，
     // 这些消息不能把已经退出的群重新插回会话列表。
     if (incomingConversationId && exitedGroupIds.has(incomingConversationId)) return
+
+    // 共享置顶同步：静默写入本端会话 ex，不进气泡、不响铃
+    if (Number(item.contentType) === MessageType.CustomMessage) {
+      const pin = messagePinPayloadOf(item)
+      if (pin && incomingConversationId) {
+        rememberRaw(item)
+        void applyIncomingMessagePin(incomingConversationId, pin)
+        return
+      }
+    }
+
     rememberRaw(item)
     const message = toChatMessage(item)
     if (!message.conversationId) return
@@ -349,6 +363,81 @@ export const useChatStore = defineStore('chat', () => {
       [message.conversationId]: [...list, message],
     }
     trimMessageWindow(message.conversationId)
+  }
+
+  async function applyIncomingMessagePin(
+    conversationId: string,
+    pin: {
+      action: 'pin' | 'unpin'
+      clientMsgID: string
+      preview: string
+      senderNickname: string
+      messageType: string
+    },
+  ) {
+    const next: ConversationPinnedMessage | null =
+      pin.action === 'unpin'
+        ? null
+        : {
+            clientMsgID: pin.clientMsgID,
+            preview: pin.preview,
+            senderNickname: pin.senderNickname,
+            messageType: pin.messageType,
+            scope: 'shared',
+            pinnedAt: Date.now(),
+          }
+    try {
+      await setConversationPinnedMessage(conversationId, next)
+    } catch {
+      /* 写 ex 失败时仍更新本地横幅 */
+    }
+    patchConversation(conversationId, { pinnedMessage: next })
+  }
+
+  /** 置顶 / 取消置顶某条消息；shared 时同步给会话对方或群成员 */
+  async function pinChatMessage(
+    conversationId: string,
+    message: ChatMessage,
+    scope: 'self' | 'shared',
+    displayNickname?: string,
+  ) {
+    const preview = quoteSummaryOf(message.type, message.content)
+    const pinned: ConversationPinnedMessage = {
+      clientMsgID: message.id,
+      preview,
+      senderNickname: (displayNickname || message.senderNickname || '').trim(),
+      messageType: message.type,
+      scope,
+      pinnedAt: Date.now(),
+    }
+    await setConversationPinnedMessage(conversationId, pinned)
+    patchConversation(conversationId, { pinnedMessage: pinned })
+    if (scope === 'shared') {
+      const conv = requireConversation(conversationId)
+      await sendMessagePinSync(targetOf(conv), {
+        action: 'pin',
+        clientMsgID: pinned.clientMsgID,
+        preview: pinned.preview,
+        senderNickname: pinned.senderNickname,
+        messageType: pinned.messageType,
+      })
+    }
+  }
+
+  async function unpinChatMessage(conversationId: string, syncShared = true) {
+    const prev = conversations.value.find((c) => c.id === conversationId)?.pinnedMessage
+    await setConversationPinnedMessage(conversationId, null)
+    patchConversation(conversationId, { pinnedMessage: null })
+    if (syncShared && prev?.scope === 'shared') {
+      const conv = requireConversation(conversationId)
+      await sendMessagePinSync(targetOf(conv), {
+        action: 'unpin',
+        clientMsgID: prev.clientMsgID,
+        preview: '',
+        senderNickname: '',
+        messageType: prev.messageType || 'text',
+      }).catch(() => undefined)
+    }
   }
 
   /** SDK 有时推单条，有时推数组；解析失败时不能让监听器抛错把后续消息吃掉 */
@@ -412,6 +501,14 @@ export const useChatStore = defineStore('chat', () => {
       prev.lastMessage && prevTime > nextTime
         ? { ...next, lastMessage: prev.lastMessage, lastMessageAt: prev.lastMessageAt }
         : next
+    // 本地刚写入的置顶横幅优先于 SDK 尚未带回 ex 的会话快照
+    const prevPinAt = prev.pinnedMessage?.pinnedAt || 0
+    const nextPinAt = next.pinnedMessage?.pinnedAt || 0
+    if (prev.pinnedMessage && prevPinAt >= nextPinAt) {
+      merged = { ...merged, pinnedMessage: prev.pinnedMessage }
+    } else if (!next.pinnedMessage && prev.pinnedMessage === null) {
+      merged = { ...merged, pinnedMessage: null }
+    }
     // SDK 同步偶发滞后：未读已为 0 时不应再展示 @ 强提醒；本地已清 @ 时也不被 SDK 推回
     if (merged.type === 'group') {
       const hasUnreadAnn = unreadAnnouncementState(announcementOwnerId(), merged.id) === true
@@ -732,7 +829,9 @@ export const useChatStore = defineStore('chat', () => {
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
     perfMarkEnd('chat:load-messages:sdk', `${messageList.length} msgs`)
     messageList.forEach(rememberRaw)
-    const mapped = messageList.map(toChatMessage)
+    const mapped = messageList
+      .filter((item) => !messagePinPayloadOf(item))
+      .map(toChatMessage)
     // App 历史接口偶发空结果时不要把房间里刚发出的消息整表冲掉
     if (!mapped.length && existing.length) {
       historyEnd.value = { ...historyEnd.value, [conversationId]: false }
@@ -790,7 +889,10 @@ export const useChatStore = defineStore('chat', () => {
     messageList.forEach(rememberRaw)
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: [...messageList.map(toChatMessage), ...list],
+      [conversationId]: [
+        ...messageList.filter((item) => !messagePinPayloadOf(item)).map(toChatMessage),
+        ...list,
+      ],
     }
     trimMessageWindow(conversationId)
     perfMarkEnd('chat:load-more-messages', `${messageList.length} msgs`)
@@ -1324,6 +1426,8 @@ export const useChatStore = defineStore('chat', () => {
     unsubscribeRealtime,
     patchConversation,
     togglePin,
+    pinChatMessage,
+    unpinChatMessage,
     hideConversationLocal,
     removeExitedGroupConversation,
     reappearConversation,

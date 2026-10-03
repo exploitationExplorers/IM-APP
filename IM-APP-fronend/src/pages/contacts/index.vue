@@ -7,7 +7,7 @@ import ImTabBar from '@/components/ImTabBar.vue'
 import ImDesktopSidebar from '@/components/desktop/ImDesktopSidebar.vue'
 import ImDesktopListResizer from '@/components/desktop/ImDesktopListResizer.vue'
 import ImDesktopGroupsPanel from '@/components/desktop/ImDesktopGroupsPanel.vue'
-import FriendDetail from '@/pages/contacts/friend-detail.vue'
+import ImDesktopFriendDetail from '@/components/desktop/ImDesktopFriendDetail.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { usePullRefresh } from '@/composables/usePullRefresh'
@@ -355,20 +355,22 @@ function onPanelGroupSelect(g: GroupPreview) {
     />
 
     <view v-if="isDesktop" class="im-desktop-room-column im-desktop-detail-column">
-      <FriendDetail
-        v-if="selectedContact && !showGroupsPanel"
-        :key="selectedContact.id"
-        embedded
-        :contact-id="selectedContact.id"
-        @close="selectedContact = null"
-      />
-      <view v-else-if="!showGroupsPanel" class="im-desktop-room-empty" />
+      <view v-if="!showGroupsPanel" class="im-desktop-room-empty">
+        {{ selectedContact ? '' : '选择一位好友查看资料' }}
+      </view>
 
       <ImDesktopGroupsPanel
         v-model="showGroupsPanel"
         @select="onPanelGroupSelect"
       />
     </view>
+
+    <ImDesktopFriendDetail
+      v-if="isDesktop && selectedContact"
+      :model-value="!!selectedContact"
+      :contact-id="selectedContact.id"
+      @update:model-value="(v) => { if (!v) selectedContact = null }"
+    />
 
     <ImTabBar v-if="!isDesktop" current="contacts" />
   </view>

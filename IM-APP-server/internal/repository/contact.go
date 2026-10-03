@@ -280,19 +280,24 @@ func (r *ContactRepo) AddFriendDirect(ctx context.Context, fromID, toID, message
 	return id, nil
 }
 
-// IsGroupAddFriendAllowed 检查从某群加好友是否被允许
+// IsGroupAddFriendAllowed 检查从某群加好友是否被允许。
+// 群主/管理员始终可加群内成员；普通成员受 allow_member_add_friend 开关约束。
 func (r *ContactRepo) IsGroupAddFriendAllowed(ctx context.Context, uid, toUserID, groupID string) (bool, error) {
 	var allow bool
+	var role string
 	err := r.DB.QueryRow(ctx, `
-		SELECT g.allow_member_add_friend
+		SELECT g.allow_member_add_friend, gm1.role
 		FROM groups g
 		JOIN group_members gm1 ON gm1.group_id=g.id AND gm1.user_id=$1
 		JOIN group_members gm2 ON gm2.group_id=g.id AND gm2.user_id=$2
 		JOIN users u1 ON u1.id=gm1.user_id AND COALESCE(u1.status,'active')='active'
 		JOIN users u2 ON u2.id=gm2.user_id AND COALESCE(u2.status,'active')='active'
-		WHERE g.id=$3::uuid AND COALESCE(g.status,'active')='active'`, uid, toUserID, groupID).Scan(&allow)
+		WHERE g.id=$3::uuid AND COALESCE(g.status,'active')='active'`, uid, toUserID, groupID).Scan(&allow, &role)
 	if err != nil {
 		return false, err
+	}
+	if role == "owner" || role == "admin" {
+		return true, nil
 	}
 	return allow, nil
 }

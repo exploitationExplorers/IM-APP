@@ -31,6 +31,8 @@ export function useChatMessageActions(opts: {
   memberMeta?: Ref<Record<string, MemberMeta>>
   /** 禁言/解禁成功后的回调（房间页用来刷新成员禁言状态） */
   onMuteChanged?: () => void
+  /** 私聊对方展示名，用于「为我和 xxx 置顶」文案 */
+  peerDisplayName?: Ref<string>
 }) {
   const chatStore = useChatStore()
   const forwardStore = useForwardStore()
@@ -121,7 +123,7 @@ export function useChatMessageActions(opts: {
     const canManage = canActOnTarget(message)
     const items: MessageMenuItem[] = []
 
-    // 参考站顺序：转发|引用 → 复制|收藏 → 检举|@TA → 禁言|删除 → 多选|空
+    // 参考站顺序：转发|引用 → 复制|收藏 → 置顶|检举 → @TA|禁言 → 删除|多选
     if (mine && canRevoke(message)) {
       items.push({ key: 'revoke', label: '撤回' })
     }
@@ -129,6 +131,12 @@ export function useChatMessageActions(opts: {
     if (message.type === 'text') items.push({ key: 'copy', label: '复制' })
     if (message.type === 'video') items.push({ key: 'save', label: '保存视频' })
     items.push({ key: 'favorite', label: '收藏' })
+    const pinnedId = chatStore.conversations.find((c) => c.id === opts.conversationId.value)?.pinnedMessage
+      ?.clientMsgID
+    items.push({
+      key: 'pin',
+      label: pinnedId && pinnedId === message.id ? '取消置顶' : '置顶',
+    })
     if (!mine && isGroup) {
       items.push({ key: 'report', label: '检举' }, { key: 'at', label: '@TA' })
     }
@@ -259,6 +267,59 @@ export function useChatMessageActions(opts: {
       uni.showToast({ title: '已收藏', icon: 'none' })
     } catch (e) {
       uni.showToast({ title: (e as Error).message || '收藏失败', icon: 'none' })
+    }
+  }
+
+  function choosePinScope(): Promise<'self' | 'shared' | null> {
+    const isGroup = opts.chatType.value === 'group'
+    const canShare = isGroup
+      ? opts.myRole.value === 'owner' || opts.myRole.value === 'admin'
+      : true
+    if (!canShare) return Promise.resolve('self')
+
+    const peerName = (
+      opts.peerDisplayName?.value ||
+      opts.conversationTitle?.value ||
+      '对方'
+    ).trim() || '对方'
+    const sharedLabel = isGroup ? '为全员置顶' : `为我和 ${peerName} 置顶`
+    return new Promise((resolve) => {
+      uni.showActionSheet({
+        itemList: [sharedLabel, '仅为我置顶'],
+        success: (res) => {
+          if (res.tapIndex === 0) resolve('shared')
+          else if (res.tapIndex === 1) resolve('self')
+          else resolve(null)
+        },
+        fail: () => resolve(null),
+      })
+    })
+  }
+
+  async function pinOrUnpinMessage(message: ChatMessage) {
+    const convId = opts.conversationId.value
+    const current = chatStore.conversations.find((c) => c.id === convId)?.pinnedMessage
+    if (current?.clientMsgID === message.id) {
+      try {
+        await chatStore.unpinChatMessage(convId, current.scope === 'shared')
+        uni.showToast({ title: '已取消置顶', icon: 'none' })
+      } catch (e) {
+        uni.showToast({ title: (e as Error).message || '取消置顶失败', icon: 'none' })
+      }
+      return
+    }
+    const scope = await choosePinScope()
+    if (!scope) return
+    try {
+      await chatStore.pinChatMessage(
+        convId,
+        message,
+        scope,
+        opts.nicknameOf(message) || message.senderNickname || '',
+      )
+      uni.showToast({ title: '已置顶', icon: 'none' })
+    } catch (e) {
+      uni.showToast({ title: (e as Error).message || '置顶失败', icon: 'none' })
     }
   }
 
@@ -451,6 +512,10 @@ export function useChatMessageActions(opts: {
     }
     if (key === 'favorite') {
       await favoriteMessage(message)
+      return
+    }
+    if (key === 'pin') {
+      await pinOrUnpinMessage(message)
       return
     }
     if (key === 'delete') {

@@ -75,12 +75,12 @@ func (s *UserService) GetPublicProfile(ctx context.Context, viewerID, userID, gr
 		return models.PublicProfile{}, ErrNotFound
 	}
 	pub := repository.ToPublicProfile(u)
-	// 从群成员资料进入时：非群主只能看到脱敏聊天号，避免凭完整 ID 互加好友
+	// 从群成员资料进入时：普通成员只能看到脱敏聊天号；群主/管理员可见完整 ID（可加任意成员）
 	if groupPublicID != "" && viewerID != "" && viewerID != userID && s.Groups != nil {
 		internalID, ierr := s.Groups.InternalIDByPublicID(ctx, groupPublicID)
 		if ierr == nil {
 			role, rerr := s.Groups.MemberRoleOf(ctx, internalID, viewerID)
-			if rerr == nil && role != "owner" {
+			if rerr == nil && role != "owner" && role != "admin" {
 				pub.PublicID = MaskPublicID(pub.PublicID)
 			}
 		}

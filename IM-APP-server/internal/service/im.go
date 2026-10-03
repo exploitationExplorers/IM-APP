@@ -902,12 +902,14 @@ func (s *IMService) ensureOpenIMGroup(ctx context.Context, requesterID, internal
 	}); err != nil {
 		return fmt.Errorf("ensure group member: %w", err)
 	}
-	if err := s.Client.JoinGroup(ctx, requesterIMID, imGroupID); err != nil {
-		log.Printf("OpenIM join member %s for group %s: %v", requesterID, internalID, err)
-		if inviteErr := s.Client.InviteGroupMember(ctx, imGroupID, []string{requesterIMID}); inviteErr == nil {
+	// 优先以群主邀请补齐成员，避免 JoinGroup 在「需验证」群上只建申请、实际未入群。
+	if err := s.Client.InviteGroupMemberAs(ctx, ownerID, imGroupID, []string{requesterIMID}); err != nil {
+		log.Printf("OpenIM invite member %s for group %s: %v", requesterID, internalID, err)
+		if joinErr := s.Client.JoinGroup(ctx, requesterIMID, imGroupID); joinErr == nil {
 			return nil
+		} else {
+			return fmt.Errorf("ensure OpenIM group membership: %w", err)
 		}
-		return fmt.Errorf("ensure OpenIM group membership: %w", err)
 	}
 	return nil
 }

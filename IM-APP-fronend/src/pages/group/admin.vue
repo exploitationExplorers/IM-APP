@@ -9,7 +9,8 @@ const groupStore = useGroupStore()
 const groupId = ref('')
 
 const detail = computed(() => groupStore.currentGroup)
-const forbidAddFriend = computed(() => !(detail.value?.allowMemberAddFriend ?? true))
+// 缺省按「禁止互加」开启（与建群默认 allowMemberAddFriend=false 一致）
+const forbidAddFriend = computed(() => !(detail.value?.allowMemberAddFriend ?? false))
 const allMuted = computed(() => !!detail.value?.allMuted)
 
 onLoad((query) => {

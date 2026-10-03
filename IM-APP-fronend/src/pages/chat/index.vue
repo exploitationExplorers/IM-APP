@@ -194,7 +194,7 @@ onShow(() => {
         matched ||
         ({
           id: conv.id,
-          type: 'group',
+          type: pending.type,
           title: conv.title || pending.title,
           avatar: conv.avatar || pending.avatar,
           lastMessage: conv.lastMessage || '',

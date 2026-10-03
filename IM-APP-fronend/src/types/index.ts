@@ -25,6 +25,7 @@ export type {
   CardPayload,
   GroupInvitePayload,
   Conversation,
+  ConversationPinnedMessage,
 } from './chat'
 
 export type {

@@ -171,6 +171,13 @@
       }
     },
     {
+      "path": "pages/contacts/friend-common-groups",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "共同群组"
+      }
+    },
+    {
       "path": "pages/contacts/friend-remark",
       "style": {
         "navigationStyle": "custom",
