@@ -24,13 +24,21 @@
 #   4. openim-api 对 openim-minio 只用 service_started，不用 service_healthy。
 #      minio 镜像里 curl 是否存在随版本变化，healthcheck 误报会连带整栈起不来。
 #
-# 三个必须同值的密钥（靠 --env-file ../.env 同源，不要各写一份）：
+# 两个必须同值的密钥（靠 --env-file 指向业务 .env 同源，不要各写一份）：
 #   OPENIM_SECRET           == 业务 .env 的 OPENIM_SECRET        (→ IMENV_SHARE_SECRET)
-#   OPENIM_WEBHOOK_SECRET   == 业务 .env 的 OPENIM_WEBHOOK_SECRET (→ IMENV_CALLBACK_URL 路径段)
+#   OPENIM_WEBHOOK_SECRET   == 后端 webhook 路由的 <secret> 路径段（见下方 webhook 说明）
 #
-# 启动（★ 必须带 --env-file，否则上面两个变量取不到，webhook 会静默失效）：
-#   cd /opt/im-app/deploy
-#   docker compose --env-file ../.env -f openim/docker-compose.yml up -d
+# ★★ webhook 用标准做法：挂载 webhooks.yml，不再用 IMENV_CALLBACK_URL。
+#   原因：原来的镜像 tag `v3.8.3-patch.16` 在 Docker Hub 上不存在（拉不到），
+#   改用官方 tag 后，那个自定义的 IMENV_CALLBACK_URL 环境变量不再被识别。
+#   官方机制是容器内 config/webhooks.yml 里的 `url:` 字段 + 各回调开关。
+#   配置步骤见操作手册「webhook 配置」一节；在配好之前，
+#   聊天本身正常，但「非好友/拉黑/禁言拦截、消息审核、撤回同步」这些业务逻辑不生效。
+#
+# 启动（★ 必须带 --env-file，否则 IMENV_SHARE_SECRET 取不到，后端调 OpenIM 全部 401）：
+#   注意 --env-file 是相对【当前工作目录】解析的，所以先 cd 到 deploy 再用 .env：
+#   cd /www/wwwroot/deploy
+#   docker compose --env-file .env -f openim/docker-compose.yml up -d
 # ───────────────────────────────────────────────────────────────────────────
 
 name: openim
@@ -43,6 +51,16 @@ services:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: openIM123
       MONGO_INITDB_DATABASE: openim_v3
+    # ★★ 必须调高文件描述符上限。
+    #   容器默认 nofile 很低（通常 1024/4096），MongoDB 连接一多就报
+    #   "Unable to create eventfd object ... TooManyFilesOpen" /
+    #   "Error accepting new connection ... errno: 24"，症状是容器 Up 但
+    #   healthcheck 一直 unhealthy，OpenIM 连不上库、聊天发不出去。
+    #   注意 /etc/security/limits.conf 对容器无效，只能在 compose 里声明。
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     ports:
       - "127.0.0.1:27017:27017"
     volumes:
@@ -69,7 +87,9 @@ services:
       retries: 5
 
   openim-etcd:
-    image: bitnami/etcd:3.5
+    # Bitnami 免费镜像 2025-09 从 Docker Hub 下架，改用官方过渡仓库 bitnamilegacy。
+    # 同一批镜像、同样的环境变量与非 root 用户行为，纯改名。★ 冻结不再更新。
+    image: bitnamilegacy/etcd:3.5
     container_name: openim-etcd
     environment:
       ALLOW_NONE_AUTHENTICATION: "yes"
@@ -82,6 +102,11 @@ services:
       ETCD_INITIAL_CLUSTER: s1=http://openim-etcd:2380
       ETCD_INITIAL_CLUSTER_TOKEN: tkn
       ETCD_INITIAL_CLUSTER_STATE: new
+    # 同 mongo：etcd/kafka 也是高连接数服务，默认 nofile 迟早会打满
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     ports:
       - "127.0.0.1:2379:2379"
     volumes:
@@ -94,7 +119,8 @@ services:
       retries: 10
 
   openim-kafka:
-    image: bitnami/kafka:3.6
+    # 同上：bitnami/* 已下架，改 bitnamilegacy/*（同一个镜像）
+    image: bitnamilegacy/kafka:3.6
     container_name: openim-kafka
     environment:
       KAFKA_CFG_NODE_ID: 0
@@ -106,6 +132,10 @@ services:
       # 用服务名广播，openim-server 容器才能通过服务名连上
       KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://openim-kafka:9092
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     ports:
       # ★ 宿主 19093，不是 9092：业务栈的 kafka 占了 9092
       - "127.0.0.1:19093:9092"
@@ -118,18 +148,26 @@ services:
       timeout: 10s
       retries: 10
 
+  # ★ 同业务栈：官方 minio/minio 已从 Docker Hub 下架，改用 Bitnami 版。
+  #   三个不能按官方版写的点：CMD 不能覆盖、非 root(1001) 所以卷挂
+  #   /bitnami/minio/data、端口凭证走 MINIO_* 环境变量。详见 deploy/docker-compose.yml 注释。
   openim-minio:
-    image: minio/minio:latest
+    image: bitnamilegacy/minio:latest
     container_name: openim-minio
-    command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_API_PORT_NUMBER: "9000"
+      MINIO_CONSOLE_PORT_NUMBER: "9001"
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     ports:
       - "127.0.0.1:9100:9000"
       - "127.0.0.1:9101:9001"
     volumes:
-      - openim_minio_data:/data
+      - openim_minio_data:/bitnami/minio/data
     restart: unless-stopped
     # nginx 的 /openim/ 要代理到这里，所以必须加入共享网络
     networks:
@@ -138,7 +176,10 @@ services:
 
   # OpenIM 核心：对外 API 10002，WS 网关 10001
   openim-api:
-    image: openim/openim-server:v3.8.3-patch.16
+    # 官方 tag。v3.8.3-patch.16 拉不到（Docker Hub 上不存在），
+    # 实测可拉的：v3.8.3-patch.15 > .14 > .12（按新到旧）。
+    # 换 tag 只改这一行，然后 docker compose ... up -d（会重建容器）。
+    image: openim/openim-server:v3.8.3-patch.15
     container_name: openim-api
     networks:
       - default
@@ -155,6 +196,11 @@ services:
       openim-minio:
         # ★ 见文件头说明 4：不用 service_healthy
         condition: service_started
+    # OpenIM 官方也建议调高；默认上限下长连接一多会报 too many open files
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     ports:
       - "127.0.0.1:10002:10002"   # API，业务后端 OPENIM_API_URL 指向它
       - "127.0.0.1:10001:10001"   # WS 网关，客户端 wsAddr 经 nginx 走这里
@@ -163,6 +209,18 @@ services:
       IMENV_MONGODB_ADDRESS: openim-mongodb:27017
       IMENV_MONGODB_USERNAME: root
       IMENV_MONGODB_PASSWORD: openIM123
+      # ★★ 必须显式写成 admin。
+      #   镜像里 config/mongodb.yml 的默认值是 `authSource: openim_v3`，
+      #   而 MONGO_INITDB_ROOT_USERNAME 是把 root 用户建在 admin 库里的；
+      #   MongoDB 只在 authSource 指定的库里查用户，于是必然认证失败：
+      #     "sasl conversation error: unable to authenticate using mechanism
+      #      \"SCRAM-SHA-1\": (AuthenticationFailed)"
+      #   症状：openim-api 日志疯狂刷 Fail to connect Mongo，
+      #        /internal/im/health 的 apiReachable=false，
+      #        nginx /openim-api/health 返回 502，聊天的消息全存不下去。
+      #   键名映射规则：config/mongodb.yml 的 camelCase 键直接全大写、
+      #   不加分隔符（同 IMENV_MINIO_INTERNALADDRESS / ACCESSKEYID）。
+      IMENV_MONGODB_AUTHSOURCE: admin
       IMENV_KAFKA_ADDRESS: openim-kafka:9092
       IMENV_DISCOVERY_ETCD_ADDRESS: openim-etcd:2379
       IMENV_REDIS_ADDRESS: openim-redis:6379
@@ -177,11 +235,8 @@ services:
       IMENV_MINIO_SECRETACCESSKEY: minioadmin123
       # 必须与业务 .env 的 OPENIM_SECRET 完全一致，否则 API 鉴权 401
       IMENV_SHARE_SECRET: ${OPENIM_SECRET:-openIM123}
-      # OpenIM 会在此 base 后拼接命令名（callbackBeforeSendSingleMsgCommand 等），
-      # 命中业务后端 /internal/openim/webhooks/:secret/<command> 路由。
-      # ★ 部署后必须按操作手册「webhook 实测」一节验证；若 OpenIM 版本行为不同
-      #   导致路径不匹配，备选方案是挂载 webhooks.yml（手册里有）。
-      IMENV_CALLBACK_URL: http://api:8080/internal/openim/webhooks/${OPENIM_WEBHOOK_SECRET:-}
+      # webhook 不再走环境变量（官方镜像不认 IMENV_CALLBACK_URL），
+      # 改为挂载容器内的 config/webhooks.yml，配置步骤见操作手册。
       IMENV_LOG_ISSTDOUT: "true"
       IMENV_LOG_REMAINLOGLEVEL: "4"
     restart: unless-stopped

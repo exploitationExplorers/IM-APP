@@ -64,7 +64,20 @@ COMMENT ON COLUMN forward_task_targets.task_id IS '转发任务ID';
 COMMENT ON COLUMN forward_task_targets.user_id IS '接收用户ID';
 COMMENT ON COLUMN forward_task_targets.status IS '状态：pending=待发送 / success=成功 / failed=失败 / skipped=跳过 / cancelled=已取消';
 COMMENT ON COLUMN forward_task_targets.attempts IS '尝试次数（<3 可重试）';
-COMMENT ON COLUMN forward_task_targets.message_id IS '发送成功后 OpenIM 消息ID';
+-- ★ message_id 是旧版遗留列，新库（由 server 的 021_forward_queue.sql 先建表）里没有它，
+-- 而本文件开头的 CREATE TABLE IF NOT EXISTS 在表已存在时是空操作。
+-- 所以这里必须做存在性判断：无条件 COMMENT 会报 42703
+-- （column "message_id" of relation "forward_task_targets" does not exist），
+-- 让 admin 每次启动都 log.Fatalf。新代码统一用 sent_server_msg_id，本列无人读写。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'forward_task_targets' AND column_name = 'message_id'
+    ) THEN
+        COMMENT ON COLUMN forward_task_targets.message_id IS '发送成功后 OpenIM 消息ID（旧版遗留；新代码用 sent_server_msg_id）';
+    END IF;
+END $$;
 COMMENT ON COLUMN forward_task_targets.fail_code IS '失败原因码';
 COMMENT ON COLUMN forward_task_targets.finished_at IS '完成时间';
 COMMENT ON COLUMN forward_task_targets.created_at IS '创建时间';

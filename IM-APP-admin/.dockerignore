@@ -1,0 +1,17 @@
+# ★ 关键：把 .env 挡在构建上下文外。
+# Dockerfile 的 builder 阶段有 `COPY . .`，若没有本文件，.env 里的真实密钥
+# （ADMIN_JWT_SECRET 等）会被拷进构建层，留在服务器的 build cache 里。
+# 最终镜像不含它，但没必要留这份副本。
+.env
+.env.*
+
+# 本地产物与临时文件
+.git
+.gitignore
+*.log
+bin/
+release/
+tmp/
+
+# 构建用不到（Go 只依赖 go.mod/go.sum/cmd/internal/migrations）
+docs/
