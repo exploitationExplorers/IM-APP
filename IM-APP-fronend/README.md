@@ -25,8 +25,8 @@ H5 走 `@openim/client-sdk`，不需要原生插件。App 端 `openim-uniapp-pol
 `.env`：
 
 ```
-VITE_API_BASE_URL=https://www.ke58.com/api/v1
-VITE_WS_BASE_URL=wss://www.ke58.com/openim-ws
+VITE_API_BASE_URL=http://8.154.44.197/api/v1
+VITE_WS_BASE_URL=ws://8.154.44.197/openim-ws
 ```
 
 改 `.env` 后需重启 `npm run dev:h5`。
