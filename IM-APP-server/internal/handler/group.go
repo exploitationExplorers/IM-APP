@@ -434,7 +434,11 @@ func (h *GroupHandler) RejectJoinRequest(c *gin.Context) {
 
 func (h *GroupHandler) RemoveMember(c *gin.Context) {
 	uid := middleware.UserID(c)
-	if err := h.Svc.RemoveMember(c.Request.Context(), c.Param("id"), uid, c.Param("userId")); err != nil {
+	// DELETE 带 body：前端 request.ts 对非 GET 一律把 data 放进 body，不走 query。
+	// body 可省略 —— 老客户端不带 body 时按「仅移除成员」处理，不清理消息。
+	var req models.RemoveGroupMemberReq
+	_ = bindBusinessJSON(c, &req)
+	if err := h.Svc.RemoveMember(c.Request.Context(), c.Param("id"), uid, c.Param("userId"), req.DeleteMessages); err != nil {
 		if errors.Is(err, repository.ErrForbidden) {
 			response.Fail(c, http.StatusForbidden, "无权限")
 			return
@@ -443,6 +447,22 @@ func (h *GroupHandler) RemoveMember(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
+}
+
+// MessagePurges 返回群内被「移除并删除消息」清理过的成员与水位时间。
+// 客户端进群时拉一次，隐藏这些成员在 purgedAt 之前发的消息（晚于它的照常显示，
+// 覆盖「被重新拉进群后新发的消息」这种情况）。
+func (h *GroupHandler) MessagePurges(c *gin.Context) {
+	items, err := h.Svc.MessagePurges(c.Request.Context(), c.Param("id"), middleware.UserID(c))
+	if err != nil {
+		if errors.Is(err, repository.ErrForbidden) {
+			response.Fail(c, http.StatusForbidden, "无权限")
+			return
+		}
+		response.Fail(c, http.StatusBadRequest, "操作失败")
+		return
+	}
+	response.OK(c, gin.H{"items": items})
 }
 
 func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {

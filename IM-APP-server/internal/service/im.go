@@ -37,7 +37,13 @@ var (
 	ErrIMUnsupportedMessage   = errors.New("message type cannot be recalled")
 	ErrIMRecallConflict       = errors.New("message recall is in progress")
 	ErrIMMessageNotFound      = errors.New("message not found")
-	ErrIMRecallUpstream       = errors.New("OpenIM message recall failed")
+	// ErrIMPeerNotFound 表示私聊对手方不在业务 users 表里（ResolvePeer 查不到）。
+	// 与 ErrIMMessageNotFound 分开，避免前端拿到一句笼统的「消息不存在」无从定位 ——
+	// 撤回 404 里这种情况的实际原因是「对方不是本业务库的用户」，跟消息本身无关。
+	ErrIMPeerNotFound = errors.New("recall peer not found in business users")
+	// ErrIMGroupNotFound 表示群不在业务 groups 表里，或传进来的 peerID 与群的 public_id 不一致。
+	ErrIMGroupNotFound  = errors.New("recall group not found in business groups")
+	ErrIMRecallUpstream = errors.New("OpenIM message recall failed")
 	// ErrIMInvalidReadStatusRequest 表示已读状态查询参数不合法。
 	ErrIMInvalidReadStatusRequest = errors.New("invalid message read status request")
 	// ErrIMNotGroupMember 表示调用者不是该群成员，无权查询已读状态。
@@ -697,8 +703,10 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 		result.PeerID = req.PeerID
 		peer, err := s.ResolvePeer(ctx, userID, req.PeerID)
 		if err != nil {
+			// 这里查不到的是「对方用户」，不是消息 —— 分开报，否则前端只看到
+			// 一句笼统的「消息不存在」，定位不到是对方账号不在业务库。
 			if errors.Is(err, repository.ErrIMTargetNotFound) {
-				return result, ErrIMMessageNotFound
+				return result, ErrIMPeerNotFound
 			}
 			return result, err
 		}
@@ -712,8 +720,10 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 			return result, ErrIMInvalidRecallRequest
 		}
 		internalID, publicID, err := s.Groups.LookupGroupIDs(ctx, req.PeerID)
+		// 查不到的是「群」，同样与消息无关：要么群不在业务库，要么传进来的
+		// peerID 不是该群的 public_id（前端应传数字群 ID，见 chat.ts 的 recall）。
 		if errors.Is(err, pgx.ErrNoRows) || publicID != req.PeerID {
-			return result, ErrIMMessageNotFound
+			return result, ErrIMGroupNotFound
 		}
 		if err != nil {
 			return result, err

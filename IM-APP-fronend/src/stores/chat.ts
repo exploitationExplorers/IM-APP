@@ -645,6 +645,9 @@ export const useChatStore = defineStore('chat', () => {
           throw e
         }
       }
+      // ★ 必须先对账再过滤：仍留在 exitedGroupIds 里的会话会被下面的 filter 直接筛掉，
+      //   那样就永远没机会做成员校验恢复了（见 reconcileExitedGroups）。
+      await reconcileExitedGroups(list)
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       conversations.value = sortConversations(
         list
@@ -983,6 +986,37 @@ export const useChatStore = defineStore('chat', () => {
     exitedGroupIds.delete(conversationId)
     writeExitedGroupIds(exitedGroupIds)
     unhideConversation(conversationId)
+  }
+
+  /**
+   * 修「被重新拉进群，但会话列表里看不到该群」。
+   *
+   * 退出/被移出群时会把会话 ID 写进 exitedGroupIds 并持久化，列表加载时据此直接筛掉；
+   * 唯一的解除入口 allowGroupConversation 只在「主动打开该会话」时才走到，
+   * 可这个会话已经被筛掉了、在列表里点不到 —— 死锁。从通讯录进群能恢复，
+   * 正是因为那条路不经过这个过滤（conversationOf 里的 allowGroupConversation）。
+   *
+   * 修法：每次拉会话列表时主动对账 —— 又出现在 OpenIM 列表里的群，说明多半被重新加回去了，
+   * 向后端确认成员身份后恢复显示；仍不是成员就保持隐藏（原设计意图不变）。
+   */
+  async function reconcileExitedGroups(list: ConversationItem[]): Promise<void> {
+    if (!exitedGroupIds.size) return
+    const candidates = list
+      .map((item) => toConversation(item))
+      .filter((conv) => conv.type === 'group' && exitedGroupIds.has(conv.id))
+    if (!candidates.length) return
+    await Promise.allSettled(
+      candidates.map(async (conv) => {
+        if (!conv.groupId) return
+        try {
+          // 后端成员校验；已不是成员会抛「群聊不存在或无权访问」，保持隐藏
+          await resolveIMGroupByIM(conv.groupId)
+          allowGroupConversation(conv.id)
+        } catch {
+          /* 仍不是成员，保持隐藏 */
+        }
+      }),
+    )
   }
 
   /** 退出/被移出群后永久隐藏会话；只有重新入群并通过后端成员校验才允许恢复。 */

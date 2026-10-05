@@ -6,6 +6,7 @@ import type {
   GroupMember,
   GroupMemberPage,
   GroupMemberMuteResult,
+  GroupMessagePurge,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
   GroupSettingsInput,
@@ -257,11 +258,30 @@ export async function unmuteGroupMember(
   })
 }
 
-export async function removeGroupMember(groupId: string, memberUserId: string): Promise<void> {
+/**
+ * 移出群成员。deleteMessages=true 时后端同时记一条消息清理水位，
+ * 群内所有客户端都会隐藏该成员的历史消息 —— 以前只在前端本地删，
+ * 结果只有执行操作的管理员看不到，别人照旧能看见。
+ */
+export async function removeGroupMember(
+  groupId: string,
+  memberUserId: string,
+  deleteMessages = false,
+): Promise<void> {
   await request<{ ok: boolean }>({
     url: `/groups/${groupId}/members/${memberUserId}`,
     method: 'DELETE',
+    data: { deleteMessages },
   })
+}
+
+/** 群内被「移除并删除消息」清理过的成员；进群时拉一次，用于隐藏其历史消息。 */
+export async function fetchGroupMessagePurges(groupId: string): Promise<GroupMessagePurge[]> {
+  const res = await request<{ items?: GroupMessagePurge[] }>({
+    url: `/groups/${groupId}/message-purges`,
+    method: 'GET',
+  })
+  return Array.isArray(res?.items) ? res.items : []
 }
 
 export async function inviteGroupMembers(

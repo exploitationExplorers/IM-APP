@@ -146,7 +146,10 @@ const routes: RouteRecordRaw[] = [
   { path: "/:pathMatch(.*)*", redirect: "/home" },
 ];
 
-const router = createRouter({ history: createWebHistory(), routes });
+// base 必须跟着 vite 的 base 走（= .env 的 VITE_PUBLIC_PATH）：
+// 线上挂在 /admin/ 下，不带 base 的话路由会按根解析，/admin/login 匹配不到任何路由，
+// 直接落进 /:pathMatch(.*)* 被重定向到 /home，表现为「一进后台就跳错页」。
+const router = createRouter({ history: createWebHistory(import.meta.env.BASE_URL), routes });
 
 router.beforeEach((to) => {
   const auth = useAuthStore();

@@ -19,13 +19,22 @@ const { execFileSync, spawnSync } = require('child_process')
 const { URL } = require('url')
 
 /**
- * 源站 IP 固定。旧服务器是 8.210.72.157（当时靠 DNS pin 绕过 CDN 证书问题）。
- * 新服务器 8.154.44.197 纯 IP、无域名，ORIGIN_PIN_HOSTS 里的域名已作废 ——
- * 域名一死，pin 逻辑就是空转（不会有请求命中那些 host），保留只为兼容。
- * 可用 IM_APP_ORIGIN_IP 覆盖。
+ * 源站 IP 固定。当前线上是 8.154.44.197，纯 IP、无域名 —— 请求本来就直连 IP，
+ * 所以 pin 逻辑默认空转（见 pinnedLookup），只在 IM_APP_ORIGIN_PIN_HOSTS 非空时生效。
+ *
+ * 留着这套机制，是为了哪天给源站前面挂 CDN / 域名时，能继续绕过「域名解析到 CDN
+ * 但证书在源站」的问题：把域名填进 IM_APP_ORIGIN_PIN_HOSTS（逗号分隔）即可，
+ * 例：IM_APP_ORIGIN_PIN_HOSTS=im.example.com
+ *
+ * 可用 IM_APP_ORIGIN_IP 覆盖源站 IP。
  */
 const ORIGIN_PIN_IP = process.env.IM_APP_ORIGIN_IP || '8.154.44.197'
-const ORIGIN_PIN_HOSTS = new Set(['www.ke58.com', 'ke58.com'])
+const ORIGIN_PIN_HOSTS = new Set(
+  String(process.env.IM_APP_ORIGIN_PIN_HOSTS || '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean),
+)
 
 const root = path.resolve(__dirname, '..')
 const manifestPath = path.join(root, 'src', 'manifest.json')
@@ -211,6 +220,10 @@ function hmac(key, data) {
 async function putObjectMinio({ endpoint, accessKey, secretKey, bucket, objectKey, body, region = 'us-east-1' }) {
   const target = new URL(endpoint)
   const host = target.host
+  // endpoint 可以挂在子路径上（线上是 http://8.154.44.197/minio，由宝塔 nginx 剥掉前缀）。
+  // 子路径只用于路由，不进签名 —— 签名算的是 nginx 剥前缀后 MinIO 实际收到的路径。
+  // nginx 侧必须 proxy_set_header Host $host，否则这里签的 host 和 MinIO 收到的对不上。
+  const basePath = target.pathname.replace(/\/+$/, '')
   const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '')
   const dateStamp = amzDate.slice(0, 8)
   const payloadHash = sha256Hex(body)
@@ -222,7 +235,7 @@ async function putObjectMinio({ endpoint, accessKey, secretKey, bucket, objectKe
   const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256Hex(canonicalRequest)].join('\n')
   const kSigning = hmac(hmac(hmac(hmac(`AWS4${secretKey}`, dateStamp), region), 's3'), 'aws4_request')
   const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex')
-  return requestBuffer(`${target.origin}${canonicalUri}`, {
+  return requestBuffer(`${target.origin}${basePath}${canonicalUri}`, {
     method: 'PUT',
     headers: {
       Host: host,
@@ -306,8 +319,10 @@ async function publishRelease(args, filePath, versionName, versionCode) {
     putRes = { ok: false, status: 0, error: err }
   }
   if (!putRes.ok) {
+    // 必须走 nginx 的 /minio 前缀：deploy/docker-compose.yml 把 MinIO 绑在 127.0.0.1:9000，
+    // 只回环，外网直连 :9000 连不上（改了会静默失败，只在预签名 PUT 失败时才暴露）。
     const minioEndpoint =
-      process.env.IM_APP_MINIO_ENDPOINT || `http://${ORIGIN_PIN_IP}:9000`
+      process.env.IM_APP_MINIO_ENDPOINT || `http://${ORIGIN_PIN_IP}/minio`
     const accessKey = serverEnv.MINIO_ACCESS_KEY
     const secretKey = serverEnv.MINIO_SECRET_KEY
     const bucket = serverEnv.MINIO_BUCKET || 'im-uploads'

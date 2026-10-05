@@ -237,6 +237,10 @@ func (h *IMHandler) RecallMessage(c *gin.Context) {
 			response.Fail(c, http.StatusBadRequest, "该消息类型不允许撤回")
 		case errors.Is(err, service.ErrIMRecallForbidden):
 			response.Fail(c, http.StatusForbidden, "无权撤回该消息")
+		case errors.Is(err, service.ErrIMPeerNotFound):
+			response.Fail(c, http.StatusNotFound, "对方用户不存在，无法撤回")
+		case errors.Is(err, service.ErrIMGroupNotFound):
+			response.Fail(c, http.StatusNotFound, "群不存在，无法撤回")
 		case errors.Is(err, service.ErrIMMessageNotFound):
 			response.Fail(c, http.StatusNotFound, "消息不存在或消息标识不匹配")
 		case errors.Is(err, service.ErrIMRecallExpired):

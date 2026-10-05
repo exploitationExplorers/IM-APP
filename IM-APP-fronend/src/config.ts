@@ -1,11 +1,15 @@
 const env = (import.meta as ImportMeta & { env: Record<string, string> }).env
 
-/** H5 本地开发改走 Vite 代理（vite.config.ts server.proxy），浏览器同源请求，避免跨域预检 */
+/**
+ * 分平台取值，两边都要能走通：
+ *  - H5：一律用同源相对路径。dev 由 vite.config.ts 的 server.proxy 转发，线上由前端服务器
+ *        nginx 反代到后端。H5 线上是 https://www.易可聊.com，绝不能写 http://8.154.44.197 ——
+ *        浏览器会判为混合内容直接拦掉（改 CORS 也救不了）。
+ *  - App 原生：没有 origin 概念，相对路径无意义，必须用 .env 里的绝对地址。
+ */
 let apiBaseUrl = env.VITE_API_BASE_URL || 'http://8.154.44.197/api/v1'
 // #ifdef H5
-if (import.meta.env.DEV) {
-  apiBaseUrl = '/api/v1'
-}
+apiBaseUrl = '/api/v1'
 // #endif
 
 export const APP_CONFIG = {

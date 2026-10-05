@@ -55,6 +55,7 @@ export type {
   JoinGroupByQRCodeResult,
   GroupMemberMuteResult,
   GroupAnnouncementHistoryItem,
+  GroupMessagePurge,
   GroupRole,
   GroupJoinMode,
 } from './group'

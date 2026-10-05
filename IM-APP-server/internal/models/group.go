@@ -47,16 +47,29 @@ type GroupMember struct {
 	MutedUntil    *time.Time `json:"mutedUntil"`
 }
 
+// GroupMessagePurge 记录「某成员在群内的消息被管理员清理过」。
+// 客户端据此隐藏该成员 PurgedAt 之前发的消息；晚于它的（重新入群后新发的）照常显示。
+type GroupMessagePurge struct {
+	UserID   string    `json:"userId"`
+	PurgedAt time.Time `json:"purgedAt"`
+}
+
+// RemoveGroupMemberReq 是移除群成员的请求体，DELETE 带 body（前端 request.ts 对非 GET
+// 一律把 data 放进 body，不走 query）。字段可选，老客户端不带 body 时按「仅移除」处理。
+type RemoveGroupMemberReq struct {
+	DeleteMessages bool `json:"deleteMessages"`
+}
+
 type CreateGroupReq struct {
 	Name      string   `json:"name"`
 	MemberIDs []string `json:"memberIds"`
 }
 
 type UpdateGroupSettingsReq struct {
-	GroupID              string    `json:"groupId"`
-	Name                 *string   `json:"name"`
-	AvatarFileID         *string   `json:"avatarFileId"`
-	Announcement         *string   `json:"announcement"`
+	GroupID      string  `json:"groupId"`
+	Name         *string `json:"name"`
+	AvatarFileID *string `json:"avatarFileId"`
+	Announcement *string `json:"announcement"`
 	// 与公告一并提交：新上传 fileId；保留的已有图片 URL。仅当 announcement 非 nil 时生效。
 	AnnouncementImageFileIDs *[]string `json:"announcementImageFileIds"`
 	KeepAnnouncementImages   *[]string `json:"keepAnnouncementImages"`
@@ -89,8 +102,8 @@ type InviteGroupMembersReq struct {
 
 /** 邀请入群结果：直拉人数 + 需对方验证（已发卡）人数 */
 type InviteGroupMembersResult struct {
-	InvitedCount   int `json:"invitedCount"`
-	PendingCount   int `json:"pendingCount"`
+	InvitedCount    int `json:"invitedCount"`
+	PendingCount    int `json:"pendingCount"`
 	CardFailedCount int `json:"cardFailedCount,omitempty"`
 }
 

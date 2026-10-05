@@ -640,10 +640,13 @@ func (r *GroupRepo) AnnouncementImagesOf(ctx context.Context, groupID string) ([
 }
 
 func (r *GroupRepo) Leave(ctx context.Context, groupID, uid string) error {
-	return r.removeMembership(ctx, groupID, uid, "quit", uid)
+	return r.removeMembership(ctx, groupID, uid, "quit", uid, false)
 }
 
-func (r *GroupRepo) removeMembership(ctx context.Context, groupID, memberID, reason, operatorID string) error {
+// removeMembership 移出成员。purgeMessages 为 true 时（「移除该成员并删除消息」）
+// 在同一个事务里记一条 group_message_purges，让所有客户端把该成员的历史消息隐藏掉 ——
+// 只靠前端本地删的话，只有执行操作的管理员看不到，别的成员照旧能看见。
+func (r *GroupRepo) removeMembership(ctx context.Context, groupID, memberID, reason, operatorID string, purgeMessages bool) error {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -667,6 +670,15 @@ func (r *GroupRepo) removeMembership(ctx context.Context, groupID, memberID, rea
 	}
 	if r.LegacyChatEnabled && convID != "" {
 		if _, err := tx.Exec(ctx, `DELETE FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`, convID, memberID); err != nil {
+			return err
+		}
+	}
+	if purgeMessages {
+		// 重复清理时把水位往后推：该成员被重新拉进群、又发了消息、再被「移除并删除」，
+		// 第二次要把重新入群后那段也盖住。DO NOTHING 会漏掉后一段。
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO group_message_purges (group_id, user_id) VALUES ($1::uuid, $2::uuid)
+			ON CONFLICT (group_id, user_id) DO UPDATE SET purged_at = NOW()`, groupID, memberID); err != nil {
 			return err
 		}
 	}
@@ -1595,7 +1607,7 @@ func (r *GroupRepo) RejectJoinRequest(ctx context.Context, groupID, uid, request
 	return nil
 }
 
-func (r *GroupRepo) RemoveMember(ctx context.Context, groupID, uid, targetID string) error {
+func (r *GroupRepo) RemoveMember(ctx context.Context, groupID, uid, targetID string, purgeMessages bool) error {
 	actorRole, err := r.memberRole(ctx, groupID, uid)
 	if err != nil {
 		return ErrForbidden
@@ -1613,7 +1625,34 @@ func (r *GroupRepo) RemoveMember(ctx context.Context, groupID, uid, targetID str
 	if actorRole == "admin" && targetRole == "admin" {
 		return ErrForbidden
 	}
-	return r.removeMembership(ctx, groupID, targetID, "kick", uid)
+	return r.removeMembership(ctx, groupID, targetID, "kick", uid, purgeMessages)
+}
+
+// MessagePurges 返回群内被「移除并删除消息」清理过的成员及其水位时间。
+// 客户端进群时拉一次，用来隐藏这些成员在 purged_at 之前发的消息。
+// 只对群成员开放 —— 非成员不暴露群内谁被清理过。
+func (r *GroupRepo) MessagePurges(ctx context.Context, groupID, uid string) ([]models.GroupMessagePurge, error) {
+	if _, err := r.memberRole(ctx, groupID, uid); err != nil {
+		return nil, ErrForbidden
+	}
+	rows, err := r.DB.Query(ctx, `
+		SELECT user_id::text, purged_at
+		FROM group_message_purges
+		WHERE group_id=$1::uuid
+		ORDER BY purged_at`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.GroupMessagePurge, 0, 8)
+	for rows.Next() {
+		var p models.GroupMessagePurge
+		if err := rows.Scan(&p.UserID, &p.PurgedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 func (r *GroupRepo) userSummary(ctx context.Context, uid string) (models.UserSummary, error) {
