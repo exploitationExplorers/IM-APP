@@ -80,7 +80,6 @@ async function onSave() {
       nicknameInitial: nicknameInitial.value,
       avatarUrl: avatar.value || undefined,
       qrDataUrl: qrUrl.value,
-      brandLogoUrl: '/static/auth/logo-full.png',
       caption: '扫码进群',
     })
 
@@ -124,7 +123,6 @@ async function onSave() {
       <view class="user-row">
         <image class="avatar" :src="avatar || APP_CONFIG.defaultGroupAvatarUrl" mode="aspectFill" />
         <text class="nickname">{{ groupName }}</text>
-        <image class="brand-logo" src="/static/auth/logo-full.png" mode="aspectFit" />
       </view>
 
       <view class="qr-wrap">
@@ -207,12 +205,6 @@ async function onSave() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.brand-logo {
-  width: 72rpx;
-  height: 72rpx;
-  flex-shrink: 0;
 }
 
 .qr-wrap {

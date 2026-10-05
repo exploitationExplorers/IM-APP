@@ -76,7 +76,6 @@ async function onSave() {
       nicknameInitial: nicknameInitial.value,
       avatarUrl: avatarUrl.value || undefined,
       qrDataUrl: qrImageUrl.value,
-      brandLogoUrl: '/static/auth/logo-full.png',
     })
 
     // #ifdef H5
@@ -130,7 +129,6 @@ async function onSave() {
           <text class="avatar-text">{{ nicknameInitial }}</text>
         </view>
         <text class="nickname">{{ nickname }}</text>
-        <image class="brand-logo" src="/static/auth/logo-full.png" mode="aspectFit" />
       </view>
 
       <view class="qr-wrap">
@@ -222,12 +220,6 @@ async function onSave() {
   font-size: 34rpx;
   font-weight: 600;
   color: #212121;
-}
-
-.brand-logo {
-  width: 72rpx;
-  height: 72rpx;
-  flex-shrink: 0;
 }
 
 .qr-wrap {
