@@ -67,6 +67,10 @@ function goEditBio() {
   uni.navigateTo({ url: '/pages/mine/edit-bio' })
 }
 
+function goEditChatId() {
+  uni.navigateTo({ url: '/pages/mine/edit-chat-id' })
+}
+
 function onCopyPublicId() {
   if (!publicId.value) {
     uni.showToast({ title: '暂无聊天号', icon: 'none' })
@@ -168,11 +172,12 @@ function onDeleteAccount() {
         <text class="label">电话号码</text>
         <text class="value">{{ phoneDisplay }}</text>
       </view>
-      <view class="cell cell-link">
+      <view class="cell cell-link" @click="goEditChatId">
         <text class="label">聊天号</text>
         <view class="cell-right">
           <text class="public-id">{{ publicId }}</text>
           <view class="copy-btn" @click.stop="onCopyPublicId">复制</view>
+          <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
         </view>
       </view>
       <view class="cell cell-link" @click="goQrcode">

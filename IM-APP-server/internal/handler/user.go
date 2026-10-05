@@ -48,6 +48,26 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	response.OK(c, toMeProfile(u))
 }
 
+type updatePublicIDReq struct {
+	PublicID string `json:"publicId"`
+}
+
+// UpdatePublicID PUT /me/public-id —— 把系统分配的聊天号换成自己想要的。
+// 一个账号只能改一次（users.public_id_changed_at 一旦写入就不再允许）。
+func (h *UserHandler) UpdatePublicID(c *gin.Context) {
+	var req updatePublicIDReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	u, err := h.Svc.UpdatePublicID(c.Request.Context(), middleware.UserID(c), req.PublicID)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, toMeProfile(u))
+}
+
 func (h *UserHandler) VerifyPassword(c *gin.Context) {
 	uid := middleware.UserID(c)
 	var req models.VerifyPasswordRequest

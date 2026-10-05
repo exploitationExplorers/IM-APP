@@ -239,6 +239,17 @@ services:
       # 改为挂载容器内的 config/webhooks.yml，配置步骤见操作手册。
       IMENV_LOG_ISSTDOUT: "true"
       IMENV_LOG_REMAINLOGLEVEL: "4"
+    # ★ 回调开关只能靠这个文件（官方镜像不认 IMENV_CALLBACK_URL）。
+    #   宿主机 openim/webhooks.yml 由 webhooks.yml.example 拷来、填上密钥再起；
+    #   该文件含密钥，已加进根 .gitignore，不要提交。
+    #
+    #   只挂这一个文件，别挂整个 config/ 目录 —— 那会把镜像自带的
+    #   mongodb.yml / minio.yml / kafka.yml 等一起遮掉，服务直接起不来。
+    #
+    #   没挂或开关是 false 时：im_message_audit 永远是空的 →
+    #   撤回全部 404「消息不存在或消息标识不匹配」，消息审核/发送记录也全是空的。
+    volumes:
+      - ./webhooks.yml:/openim-server/config/webhooks.yml
     restart: unless-stopped
 
 volumes:

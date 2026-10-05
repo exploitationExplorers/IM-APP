@@ -43,6 +43,19 @@ export async function updateProfile(input: UpdateProfileInput): Promise<UserInfo
   })
 }
 
+/**
+ * PUT /me/public-id：设置自己的聊天号。
+ * 一个账号只能改一次；格式（6-20 位、首位字母、只能字母数字）与唯一性都由服务端校验，
+ * 前端只做即时提示，别把规则在这边写死。
+ */
+export async function updateMyPublicId(publicId: string): Promise<UserInfo> {
+  return request<UserInfo>({
+    url: '/me/public-id',
+    method: 'PUT',
+    data: { publicId },
+  })
+}
+
 export async function fetchQrcode(): Promise<UserQrcodeResult> {
   return request<UserQrcodeResult>({ url: '/me/qrcode', method: 'GET' })
 }

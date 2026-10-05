@@ -9,6 +9,10 @@ IM-APP-admin/.env
 # 生产部署变量（含阿里云 AccessKey、webhook 密钥等，模板见 deploy/.env.example）
 deploy/.env
 
+# OpenIM 回调配置（url 里含 OPENIM_WEBHOOK_SECRET，模板见 deploy/openim/webhooks.yml.example）
+# ★ 缺失或开关为 false 会导致撤回全部 404、消息审核与发送记录为空
+deploy/openim/webhooks.yml
+
 # 管理后台打包产物（release 目录不上传）
 IM-APP-admin/release/
 .workbuddy

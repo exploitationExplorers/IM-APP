@@ -50,6 +50,7 @@ func main() {
 		"im_group_read_cursors":   {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
 		"group_member_limit_logs": {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
 		"group_message_purges":    {"group_id", "user_id", "purged_at"},
+		"users":                   {"id", "public_id", "public_id_changed_at"},
 		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
 		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
@@ -266,6 +267,7 @@ func main() {
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
+			auth.PUT("/me/public-id", userH.UpdatePublicID)
 			auth.POST("/me/password/verify", userH.VerifyPassword)
 			auth.PUT("/me/password", userH.ChangePassword)
 			auth.GET("/me/privacy-settings", userH.GetPrivacySettings)

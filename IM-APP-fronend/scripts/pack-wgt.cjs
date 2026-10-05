@@ -15,6 +15,7 @@ const fs = require('fs')
 const http = require('http')
 const https = require('https')
 const path = require('path')
+const zlib = require('zlib')
 const { execFileSync, spawnSync } = require('child_process')
 const { URL } = require('url')
 
@@ -117,26 +118,153 @@ function bumpPatch(versionName) {
   return parts.join('.')
 }
 
+// ── 最小 ZIP 写入器 ────────────────────────────────────────────────────────
+//
+// 为什么自己写、不再调外部命令：
+//   · Python：本机很可能只有微软商店的 python.exe 占位符（命令存在、跑起来没输出、
+//     什么也不做），脚本会以「打包失败」告终，而且看不出是环境问题。
+//   · Windows 自带的 tar(bsdtar)：打出来的条目名带 "./" 前缀，wgt 能装上但版本不生效。
+//   自己写条目名完全可控：正斜杠、无前缀、压缩包根目录就是 manifest.json。
+const CRC_TABLE = (() => {
+  const table = new Int32Array(256)
+  for (let n = 0; n < 256; n += 1) {
+    let c = n
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    table[n] = c
+  }
+  return table
+})()
+
+function crc32(buf) {
+  let c = -1
+  for (let i = 0; i < buf.length; i += 1) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)
+  return (c ^ -1) >>> 0
+}
+
+/** 递归收集文件，条目名用正斜杠、不带 ./ 前缀 */
+function collectFiles(dir, prefix = '') {
+  const out = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, entry.name)
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (entry.isDirectory()) out.push(...collectFiles(abs, name))
+    else if (entry.isFile()) out.push({ name, abs })
+  }
+  return out
+}
+
+function buildZip(srcDir) {
+  const parts = []
+  const centralParts = []
+  let offset = 0
+  let count = 0
+  for (const file of collectFiles(srcDir)) {
+    const raw = fs.readFileSync(file.abs)
+    const crc = crc32(raw)
+    const deflated = zlib.deflateRawSync(raw, { level: 9 })
+    // 压不小的（图片等已压缩的）原样存，免得白花 CPU 还变大
+    const useDeflate = deflated.length < raw.length
+    const body = useDeflate ? deflated : raw
+    const method = useDeflate ? 8 : 0
+    const nameBuf = Buffer.from(file.name, 'utf8')
+
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4) // version needed
+    local.writeUInt16LE(0x0800, 6) // 通用标志位：文件名是 UTF-8
+    local.writeUInt16LE(method, 8)
+    local.writeUInt16LE(0, 10) // 修改时间
+    local.writeUInt16LE(0x21, 12) // 修改日期（1980-01-01，固定值保证可复现）
+    local.writeUInt32LE(crc, 14)
+    local.writeUInt32LE(body.length, 18)
+    local.writeUInt32LE(raw.length, 22)
+    local.writeUInt16LE(nameBuf.length, 26)
+    local.writeUInt16LE(0, 28) // extra
+    parts.push(local, nameBuf, body)
+
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(0x02014b50, 0)
+    central.writeUInt16LE(20, 4) // version made by
+    central.writeUInt16LE(20, 6) // version needed
+    central.writeUInt16LE(0x0800, 8)
+    central.writeUInt16LE(method, 10)
+    central.writeUInt16LE(0, 12)
+    central.writeUInt16LE(0x21, 14)
+    central.writeUInt32LE(crc, 16)
+    central.writeUInt32LE(body.length, 20)
+    central.writeUInt32LE(raw.length, 24)
+    central.writeUInt16LE(nameBuf.length, 28)
+    central.writeUInt16LE(0, 30) // extra
+    central.writeUInt16LE(0, 32) // comment
+    central.writeUInt16LE(0, 34) // disk number
+    central.writeUInt16LE(0, 36) // internal attrs
+    central.writeUInt32LE(0, 38) // external attrs
+    central.writeUInt32LE(offset, 42)
+    centralParts.push(central, nameBuf)
+
+    offset += local.length + nameBuf.length + body.length
+    count += 1
+  }
+  const centralBuf = Buffer.concat(centralParts)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(0, 4)
+  end.writeUInt16LE(0, 6)
+  end.writeUInt16LE(count, 8)
+  end.writeUInt16LE(count, 10)
+  end.writeUInt32LE(centralBuf.length, 12)
+  end.writeUInt32LE(offset, 16)
+  end.writeUInt16LE(0, 20) // 注释长度
+  return Buffer.concat([...parts, centralBuf, end])
+}
+
+/** 把 srcDir 打成 .wgt（zip）：条目在根目录、无 ./ 前缀，manifest.json 直接可读 */
 function zipDir(srcDir, destFile) {
   fs.mkdirSync(path.dirname(destFile), { recursive: true })
-  const zipFile = destFile.replace(/\.wgt$/i, '.zip')
-  if (fs.existsSync(zipFile)) fs.unlinkSync(zipFile)
   if (fs.existsSync(destFile)) fs.unlinkSync(destFile)
-  const script =
-    'import os, sys, zipfile\nsrc, dst = sys.argv[1], sys.argv[2]\nwith zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:\n    for root, _, files in os.walk(src):\n        for name in files:\n            full = os.path.join(root, name)\n            rel = os.path.relpath(full, src).replace(os.sep, "/")\n            z.write(full, rel)\n'
-  const pyCmds = process.platform === 'win32' ? [['py', '-3'], ['python'], ['python3']] : [['python3'], ['python']]
-  let packed = false
-  for (const [cmd, ...prefix] of pyCmds) {
-    const result = spawnSync(cmd, [...prefix, '-c', script, srcDir, zipFile], { stdio: 'inherit' })
-    if (result.status === 0 && fs.existsSync(zipFile)) {
-      packed = true
+  fs.writeFileSync(destFile, buildZip(srcDir))
+}
+
+/**
+ * 从 zip 里取出某个条目的内容，找不到返回 null。
+ *
+ * 纯 Node 实现，不用 tar/unzip：从 Node 调 spawnSync('tar') 时，PATH 里排在前面的
+ * 可能是 Git Bash 自带的 GNU tar（不认 zip），而 Windows 的 System32\tar.exe（bsdtar）
+ * 才认 —— 同一段代码在不同终端里行为不同，很难查。自己读中央目录就没这问题。
+ */
+function readZipEntry(zipPath, entryName) {
+  const buf = fs.readFileSync(zipPath)
+  // 1) 从尾部向前找 EOCD（PK\x05\x06），后面最多跟 65535 字节注释
+  let eocd = -1
+  const lowest = Math.max(0, buf.length - 22 - 0xffff)
+  for (let i = buf.length - 22; i >= lowest; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i
       break
     }
   }
-  if (!packed) {
-    throw new Error('打包 wgt 失败：需要 Python 把资源打成根目录含 manifest.json 的 zip')
+  if (eocd < 0) return null
+  const count = buf.readUInt16LE(eocd + 10)
+  let p = buf.readUInt32LE(eocd + 16) // 中央目录起始偏移
+  for (let i = 0; i < count; i += 1) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) return null
+    const method = buf.readUInt16LE(p + 10)
+    const compSize = buf.readUInt32LE(p + 20)
+    const nameLen = buf.readUInt16LE(p + 28)
+    const extraLen = buf.readUInt16LE(p + 30)
+    const commentLen = buf.readUInt16LE(p + 32)
+    const localOffset = buf.readUInt32LE(p + 42)
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen)
+    if (name === entryName) {
+      // 2) 本地头里的 name/extra 长度可能与中央目录不同，必须按本地头算数据起点
+      if (buf.readUInt32LE(localOffset) !== 0x04034b50) return null
+      const start = localOffset + 30 + buf.readUInt16LE(localOffset + 26) + buf.readUInt16LE(localOffset + 28)
+      const data = buf.subarray(start, start + compSize)
+      return method === 8 ? zlib.inflateRawSync(data) : data
+    }
+    p += 46 + nameLen + extraLen + commentLen
   }
-  fs.renameSync(zipFile, destFile)
+  return null
 }
 
 function syncDistWidgetVersion(distDir, versionName, versionCode) {
@@ -147,18 +275,19 @@ function syncDistWidgetVersion(distDir, versionName, versionCode) {
 }
 
 function readPackedWidgetVersion(wgtPath) {
-  for (const entry of ['manifest.json', './manifest.json']) {
-    const extracted = spawnSync('tar', ['-xOf', wgtPath, entry], { encoding: 'utf8' })
-    if (extracted.status !== 0 || !extracted.stdout) continue
-    const json = JSON.parse(extracted.stdout)
-    const versionCode = Number.parseInt(String(json.version?.code || ''), 10)
-    const versionName = String(json.version?.name || '')
-    if (!versionName || !Number.isFinite(versionCode) || versionCode <= 0) {
-      throw new Error(`wgt 内 manifest.json 版本无效: ${entry}`)
-    }
-    return { versionName, versionCode, appid: String(json.id || '') }
+  // ★ 必须读包内的 manifest.json，不能拿 src/manifest.json 顶替：
+  //   这个校验就是为了拦住「发布记录写了新版本、包里面还是旧版本」那个历史坑。
+  const raw = readZipEntry(wgtPath, 'manifest.json')
+  if (!raw) {
+    throw new Error('wgt 根目录没有 manifest.json，热更新会安装成功但不会生效')
   }
-  throw new Error('wgt 根目录没有 manifest.json，热更新会安装成功但不会生效')
+  const json = JSON.parse(raw.toString('utf8'))
+  const versionCode = Number.parseInt(String(json.version?.code || ''), 10)
+  const versionName = String(json.version?.name || '')
+  if (!versionName || !Number.isFinite(versionCode) || versionCode <= 0) {
+    throw new Error('wgt 内 manifest.json 版本无效')
+  }
+  return { versionName, versionCode, appid: String(json.id || '') }
 }
 
 function resolveApiBase(raw) {

@@ -9,7 +9,7 @@ import {
   logoutCurrentDevice,
   refreshAuthToken,
 } from '@/api/auth'
-import { updateProfile } from '@/api/user'
+import { updateMyPublicId, updateProfile } from '@/api/user'
 import {
   clearToken,
   getRefreshToken,
@@ -94,6 +94,14 @@ export const useUserStore = defineStore('user', () => {
 
   async function saveProfile(input: UpdateProfileInput) {
     profile.value = applyLoginPhone(await updateProfile(input))
+  }
+
+  /**
+   * 设置聊天号。规则与「只能改一次」都由服务端把关 —— 这里不预判，
+   * 直接等后端返回，把它的提示语原样报给用户。
+   */
+  async function savePublicId(publicId: string) {
+    profile.value = applyLoginPhone(await updateMyPublicId(publicId))
   }
 
   async function tryRefreshToken() {
@@ -216,6 +224,7 @@ export const useUserStore = defineStore('user', () => {
     register,
     loadProfile,
     saveProfile,
+    savePublicId,
     tryRefreshToken,
     invalidateSession,
     logout,
