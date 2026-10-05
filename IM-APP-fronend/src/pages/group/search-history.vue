@@ -58,9 +58,14 @@ function timeOf(item: MessageItem) {
   return `${formatFavoriteDay(iso)} ${formatClock(iso)}`
 }
 
-function openRoom() {
+function openResult(item: MessageItem) {
+  const clientMsgId = item.clientMsgID
+  if (!clientMsgId) {
+    uni.showToast({ title: '无法定位该消息', icon: 'none' })
+    return
+  }
   uni.navigateTo({
-    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId.value)}`,
+    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId.value)}&clientMsgId=${encodeURIComponent(clientMsgId)}`,
   })
 }
 </script>
@@ -81,7 +86,7 @@ function openRoom() {
     </view>
 
     <view v-if="keyword.trim()" class="list">
-      <view v-for="item in results" :key="item.clientMsgID" class="row" @click="openRoom">
+      <view v-for="item in results" :key="item.clientMsgID" class="row" @click="openResult(item)">
         <image class="avatar" :src="item.senderFaceUrl" mode="aspectFill" />
         <view class="body">
           <view class="top">
