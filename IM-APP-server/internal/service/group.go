@@ -437,12 +437,23 @@ func (s *GroupService) RejectJoinRequest(ctx context.Context, groupID, uid, requ
 	return s.Groups.RejectJoinRequest(ctx, internalID, uid, requestID)
 }
 
-func (s *GroupService) RemoveMember(ctx context.Context, groupID, uid, targetID string) error {
+// RemoveMember 移出群成员。purgeMessages 为 true 时同时记录消息清理水位，
+// 让群内所有客户端隐藏该成员的历史消息（原来只在前端本地删，只有操作者看得到效果）。
+func (s *GroupService) RemoveMember(ctx context.Context, groupID, uid, targetID string, purgeMessages bool) error {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
 		return err
 	}
-	return s.Groups.RemoveMember(ctx, internalID, uid, targetID)
+	return s.Groups.RemoveMember(ctx, internalID, uid, targetID, purgeMessages)
+}
+
+// MessagePurges 返回群内被「移除并删除消息」清理过的成员列表。
+func (s *GroupService) MessagePurges(ctx context.Context, groupID, uid string) ([]models.GroupMessagePurge, error) {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Groups.MessagePurges(ctx, internalID, uid)
 }
 
 func (s *GroupService) UpdateMemberRole(ctx context.Context, groupID, operatorID, memberID, role string) error {

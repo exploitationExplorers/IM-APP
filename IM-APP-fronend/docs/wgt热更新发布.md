@@ -18,7 +18,7 @@
 
 1. **先合代码再打包**。不要在过期分支上单独发。把修复合进当前要发给客户的分支（一般是最新 `main`），再在那份代码上打 wgt。两个人同时发会抢 `versionCode`，后发的会报「该版本号已发布」。
 2. 本机在 `IM-APP-fronend/` 下已 `npm install`。
-3. `IM-APP-fronend/.env` 有 `VITE_API_BASE_URL=https://www.ke58.com/api/v1`。
+3. `IM-APP-fronend/.env` 有 `VITE_API_BASE_URL=http://8.154.44.197/api/v1`（新服务器纯 IP、无域名，永久 HTTP，不要写 https）。
 4. `IM-APP-server/.env` 里的 `IM_INTERNAL_API_KEY` 与**线上服务器** `.env` 一致（脚本用它调发布接口）。
 5. 本机有 **Python 3**（`py -3` 或 `python`）。Windows 自带的 `tar` 打出来的 zip 带 `./` 前缀，安装会成功但版本不生效。
 
@@ -71,7 +71,7 @@ wgt 校验通过: __UNI__EC9D1AE 1.0.3 (103)
 说明这个 `versionCode` 已经在线上。不要改数字硬发。拉最新 `src/manifest.json` 再执行带 `--build` 的命令，让脚本自动 +1。
 
 **命令报 `fetch failed` / 证书错误**  
-本机 DNS 可能把 `www.ke58.com` 指到 CDN。脚本已固定打源站 `8.210.72.157`，用仓库里当前的 `scripts/pack-wgt.cjs`，不要用旧脚本。源站 IP 变了就改环境变量 `IM_APP_ORIGIN_IP`。
+用仓库里当前的 `scripts/pack-wgt.cjs`，不要用旧脚本。源站 IP 固定为 `8.154.44.197`（见脚本的 `ORIGIN_PIN_IP`），源站 IP 变了就改环境变量 `IM_APP_ORIGIN_IP`。
 
 **命令报 `wgt 内是 1.0.x，不能按 … 发布`**  
 构建产物版本和 manifest 不一致，脚本在拦错误包。确认用的是带 `syncDistWidgetVersion` 的最新脚本，并且加了 `--build`。

@@ -467,8 +467,11 @@ export function useChatMessageActions(opts: {
     )
     if (!ok) return
     try {
-      await removeGroupMember(opts.businessId.value, userId)
+      // deleteMsgs 必须传给后端：服务端会记一条清理水位，群内所有客户端都隐藏该成员的历史消息。
+      // 只在本地删（以前的做法）只有操作者自己看不到，别人照旧能看见。
+      await removeGroupMember(opts.businessId.value, userId, deleteMsgs)
       if (deleteMsgs) {
+        // 本地立即删掉做即时反馈；服务端那份负责其他成员，收到成员变更通知后生效
         const theirs = opts.visibleMessages.value.filter((m) => m.senderId === message.senderId)
         await chatStore.removeLocalMany(
           opts.conversationId.value,

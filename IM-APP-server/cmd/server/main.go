@@ -49,6 +49,7 @@ func main() {
 		"im_message_recalls":      {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
 		"im_group_read_cursors":   {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
 		"group_member_limit_logs": {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
+		"group_message_purges":    {"group_id", "user_id", "purged_at"},
 		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
 		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
@@ -318,6 +319,7 @@ func main() {
 			auth.POST("/group-members/mute", groupH.MuteMember)
 			auth.POST("/group-members/unmute", groupH.UnmuteMember)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
+			auth.GET("/groups/:id/message-purges", groupH.MessagePurges)
 			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
 			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
 			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)

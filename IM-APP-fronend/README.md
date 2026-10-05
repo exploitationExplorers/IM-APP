@@ -29,6 +29,8 @@ VITE_API_BASE_URL=http://8.154.44.197/api/v1
 VITE_WS_BASE_URL=ws://8.154.44.197/openim-ws
 ```
 
+新服务器是纯 IP、无域名，所以是永久 HTTP，**不要写 https/wss**。`VITE_WS_BASE_URL` 实际未被引用，聊天用的 WS 地址由后端 `POST /api/v1/im/token` 的 `wsAddr` 字段下发。
+
 改 `.env` 后需重启 `npm run dev:h5`。
 
 ## 热更新（wgt）

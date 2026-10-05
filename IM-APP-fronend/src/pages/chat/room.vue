@@ -23,7 +23,12 @@ import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId, isNotI
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
-import { acceptGroupInvitation, fetchAllGroupMembers, fetchGroupDetail } from '@/api/group'
+import {
+  acceptGroupInvitation,
+  fetchAllGroupMembers,
+  fetchGroupDetail,
+  fetchGroupMessagePurges,
+} from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation, GroupInvitePayload, GroupMember } from '@/types'
 import { collapseRepeatedGroupNameNotices, isGroupUnavailableError, replaceOpenIMAdminLabel } from '@/utils/im-notification'
@@ -84,6 +89,8 @@ const denyReason = ref('')
 const myMutedUntil = ref<string | null>(null)
 /** 群成员角色 / 禁言元信息（业务用户 ID 索引），供长按菜单做权限与禁言项判断 */
 const memberMetaMap = ref<Record<string, MemberMeta>>({})
+/** 被「移除该成员并删除消息」清理过的成员：业务用户 ID → 水位时间(ms)，见 loadMessagePurges */
+const purgedMap = ref<Record<string, number>>({})
 /** 群成员完整列表，供输入 @ 提及面板使用 */
 const groupMembersForAt = ref<GroupMember[]>([])
 /** 输入 @ 后弹出的提及面板 */
@@ -141,9 +148,27 @@ function isVisibleMessage(m: ChatMessage): boolean {
   return !!m.content
 }
 
+/**
+ * 群内被管理员「移除并删除消息」清理过的成员，其水位之前发的消息对所有人都隐藏。
+ * 必须带 sendTime 判断：只按用户过滤会把「被重新拉进群后新发的消息」也一起藏掉。
+ * createdAt 就是 OpenIM 的 sendTime，和后端 purged_at 同源，可以直接比较。
+ */
+function isPurgedMessage(m: ChatMessage): boolean {
+  if (chatType.value !== 'group' || isMine(m)) return false
+  const uid = businessUserIdFromIM(m.senderId)
+  if (!uid) return false
+  const purgedAt = purgedMap.value[uid]
+  if (!purgedAt) return false
+  const sentAt = Date.parse(m.createdAt)
+  // 时间解析不出来时按「隐藏」处理，与管理员「删除消息」的意图一致
+  return !Number.isFinite(sentAt) || sentAt < purgedAt
+}
+
 const messages = computed(() =>
   collapseRepeatedGroupNameNotices(
-    (chatStore.messagesMap[conversationId.value] || []).filter(isVisibleMessage),
+    (chatStore.messagesMap[conversationId.value] || [])
+      .filter(isVisibleMessage)
+      .filter((m) => !isPurgedMessage(m)),
   ),
 )
 
@@ -940,6 +965,24 @@ async function loadGroupMembersMeta(groupId: string): Promise<void> {
   }
 }
 
+/**
+ * 拉「移除该成员并删除消息」的清理水位。和成员名单一样在 refreshGroupMeta 里刷新，
+ * 所以收到成员变更通知（含被踢）时其他成员也会跟着更新，把被清理成员的历史消息隐藏掉。
+ */
+async function loadMessagePurges(groupId: string): Promise<void> {
+  try {
+    const items = await fetchGroupMessagePurges(groupId)
+    const next: Record<string, number> = {}
+    for (const it of items) {
+      const ts = Date.parse(it.purgedAt)
+      if (it.userId && Number.isFinite(ts)) next[it.userId] = ts
+    }
+    purgedMap.value = next
+  } catch {
+    // 拉取失败不阻断聊天；下次进群/成员变更时会再拉
+  }
+}
+
 /** 业务 UUID → OpenIM userID（去连字符） */
 function openIMUserIdOf(businessUserId: string): string {
   return businessUserId.replace(/-/g, '').toLowerCase()
@@ -1082,6 +1125,9 @@ async function refreshGroupMeta(): Promise<boolean> {
   if (detailApplied) {
     groupMetaLoadedAt = Date.now()
     void loadGroupMembersMeta(gid)
+    // 和成员名单一起刷新：成员变更通知（含被踢）到达时上面那个 watcher 会调到这里，
+    // 所以其他成员的界面也能跟着把被清理成员的消息隐藏掉。
+    void loadMessagePurges(gid)
   }
   return detailApplied
 }

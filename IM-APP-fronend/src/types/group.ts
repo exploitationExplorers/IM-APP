@@ -95,6 +95,16 @@ export interface GroupMember {
   mutedUntil?: string | null
 }
 
+/**
+ * 「移除该成员并删除消息」的服务端留痕（GET /groups/:id/message-purges）。
+ * 客户端隐藏该成员 purgedAt 之前发的消息；晚于它的照常显示，
+ * 以覆盖「被重新拉进群后新发的消息」这种情况。
+ */
+export interface GroupMessagePurge {
+  userId: string
+  purgedAt: string
+}
+
 /** POST /group-members/mute、/group-members/unmute 的返回 */
 export interface GroupMemberMuteResult {
   groupId: string
