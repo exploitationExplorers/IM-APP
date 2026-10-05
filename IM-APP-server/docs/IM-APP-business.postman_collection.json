@@ -56,7 +56,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/me/privacy-settings",
-            "description": "requireFriendApproval 默认 false（加好友无需验证）；requireGroupApproval 默认 true。"
+            "description": "requireFriendApproval 默认 false（加好友无需验证）；requireGroupApproval 默认 false（邀请入群无需验证）。"
           },
           "response": []
         },
@@ -67,7 +67,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"requireFriendApproval\": false,\n  \"requireGroupApproval\": true\n}"
+              "raw": "{\n  \"requireFriendApproval\": false,\n  \"requireGroupApproval\": false\n}"
             },
             "url": "{{baseUrl}}/me/privacy-settings",
             "description": "修改当前用户隐私设置。"

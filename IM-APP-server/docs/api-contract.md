@@ -235,12 +235,12 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 ```json
 {
   "requireFriendApproval": false,
-  "requireGroupApproval": true
+  "requireGroupApproval": false
 }
 ```
 
 - `requireFriendApproval`：加我为好友需验证。**默认 `false`**（对齐参考站，关闭后对方加好友立即通过）。
-- `requireGroupApproval`：邀请我入群需验证。默认 `true`。
+- `requireGroupApproval`：邀请我入群需验证。**默认 `false`**（关闭后被邀请直接入群）。
 
 ### PUT `/api/v1/me/privacy-settings`
 

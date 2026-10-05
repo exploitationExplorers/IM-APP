@@ -204,7 +204,7 @@ func (s *UserService) GetPrivacySettings(ctx context.Context, uid string) (model
 	if s.Privacy == nil {
 		return models.PrivacySettings{
 			RequireFriendApproval: false,
-			RequireGroupApproval:  true,
+			RequireGroupApproval:  false,
 		}, nil
 	}
 	return s.Privacy.Get(ctx, uid)

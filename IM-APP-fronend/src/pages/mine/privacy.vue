@@ -3,9 +3,9 @@ import { ref, onMounted } from 'vue'
 import { fetchPrivacySettings, updatePrivacySettings } from '@/api/user'
 import type { PrivacySettings } from '@/types'
 
-/** 对齐参考站：加好友默认无需验证 */
+/** 加好友、邀请入群默认都无需验证 */
 const friendVerify = ref(false)
-const groupInviteVerify = ref(true)
+const groupInviteVerify = ref(false)
 const saving = ref(false)
 
 onMounted(async () => {

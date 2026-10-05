@@ -1249,12 +1249,12 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 			continue
 		}
 
-		// 未建隐私行时按默认 true（邀请入群需验证）
+		// 未建隐私行时按默认 false（邀请入群无需验证）
 		var needVerify bool
 		if err := tx.QueryRow(ctx, `
 			SELECT COALESCE(
 				(SELECT require_group_approval FROM privacy_settings WHERE user_id=$1::uuid),
-				TRUE
+				FALSE
 			)`, inviteeID).Scan(&needVerify); err != nil {
 			return models.InviteGroupMembersResult{}, nil, err
 		}
