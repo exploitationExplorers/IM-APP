@@ -902,6 +902,53 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
+  /**
+   * 搜索结果跳转：从当前列表往更早的历史翻，直到命中 clientMsgID。
+   * 命中后保留「目标及其之后的消息」，避免窗口裁剪把刚翻到的旧消息丢掉。
+   */
+  async function locateMessage(conversationId: string, clientMsgId: string): Promise<boolean> {
+    if (!conversationId || !clientMsgId) return false
+    const has = () => (messagesMap.value[conversationId] || []).some((m) => m.id === clientMsgId)
+    if (!messagesMap.value[conversationId]?.length) {
+      await loadMessages(conversationId)
+    }
+    if (has()) return true
+    const maxPages = 20
+    for (let i = 0; i < maxPages; i++) {
+      if (historyEnd.value[conversationId]) return false
+      const list = messagesMap.value[conversationId] || []
+      const anchor = list[0]?.id
+      if (!anchor) return false
+      const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE, anchor)
+      historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
+      if (!messageList.length) return false
+      messageList.forEach(rememberRaw)
+      const older = messageList.filter((item) => !messagePinPayloadOf(item)).map(toChatMessage)
+      const merged = [...older, ...list]
+      messagesMap.value = { ...messagesMap.value, [conversationId]: merged }
+      if (merged.some((m) => m.id === clientMsgId)) {
+        retainFromMessage(conversationId, clientMsgId)
+        return true
+      }
+      if (isEnd || merged.length > 500) return false
+    }
+    return false
+  }
+
+  function retainFromMessage(conversationId: string, clientMsgId: string) {
+    const list = messagesMap.value[conversationId] || []
+    const index = list.findIndex((m) => m.id === clientMsgId)
+    if (index <= 0) return
+    const removed = list.slice(0, index)
+    messagesMap.value = { ...messagesMap.value, [conversationId]: list.slice(index) }
+    const nextRaw = { ...rawMessages.value }
+    removed.forEach((m) => {
+      delete nextRaw[m.id]
+    })
+    rawMessages.value = nextRaw
+    historyEnd.value = { ...historyEnd.value, [conversationId]: false }
+  }
+
   /** 已读是副作用，标记失败不该挡住会话展示；未读数下次拉列表会自愈 */
   async function markAsRead(conversationId: string) {
     try {
@@ -1438,6 +1485,7 @@ export const useChatStore = defineStore('chat', () => {
     assertConversationAccessible,
     loadMessages,
     loadMoreMessages,
+    locateMessage,
     markAsRead,
     sendText,
     sendAtText,

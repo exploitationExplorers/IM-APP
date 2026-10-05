@@ -117,6 +117,7 @@ let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const inputRef = ref<{ $el?: HTMLElement } | HTMLTextAreaElement | null>(null)
 const scrollInto = ref('')
+const focusedMsgId = ref('')
 const showPlusPanel = ref(false)
 const showEmojiPanel = ref(false)
 const voiceMode = ref(false)
@@ -418,13 +419,21 @@ watch(
   },
 )
 
-function jumpToPinnedMessage() {
-  const id = pinnedMessage.value?.clientMsgID
-  if (!id) return
+function scrollToMessage(id: string) {
   scrollInto.value = ''
+  focusedMsgId.value = id
   nextTick(() => {
     scrollInto.value = `msg_${id}`
   })
+  setTimeout(() => {
+    if (focusedMsgId.value === id) focusedMsgId.value = ''
+  }, 1600)
+}
+
+function jumpToPinnedMessage() {
+  const id = pinnedMessage.value?.clientMsgID
+  if (!id) return
+  scrollToMessage(id)
 }
 
 async function dismissPinnedBanner() {
@@ -666,8 +675,20 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
       exitDissolvedRoom()
       return
     }
-    await nextTick()
-    scrollToBottom()
+    const focusId = String(query?.clientMsgId || '')
+    if (focusId) {
+      const found = await chatStore.locateMessage(conv.id, focusId)
+      await nextTick()
+      if (found) {
+        scrollToMessage(focusId)
+      } else {
+        uni.showToast({ title: '未找到该条聊天记录', icon: 'none' })
+        scrollToBottom()
+      }
+    } else {
+      await nextTick()
+      scrollToBottom()
+    }
   } catch (e) {
     console.error('[chat] 打开会话失败', e)
     uni.showToast({ title: (e as Error)?.message || '会话打开失败', icon: 'none', duration: 4000 })
@@ -1860,7 +1881,7 @@ function pickFavorite() {
         :id="`msg_${m.id}`"
         :key="m.id"
         class="msg-row"
-        :class="{ selecting: actions.selecting.value }"
+        :class="{ selecting: actions.selecting.value, focused: focusedMsgId === m.id }"
         @click="actions.selecting.value ? actions.toggleSelect(m) : undefined"
       >
         <view v-if="actions.selecting.value && m.type !== 'system'" class="msg-check" :class="{ on: actions.selectedIds.value.has(m.id) }">
@@ -2228,6 +2249,10 @@ function pickFavorite() {
 .msg-row {
   width: 100%;
   box-sizing: border-box;
+}
+
+.msg-row.focused {
+  background: rgba(10, 47, 194, 0.08);
 }
 
 /** 底部滚动锚点：不可见的 2rpx 垫底元素，滚到它 = 滚到列表真正的底部 */

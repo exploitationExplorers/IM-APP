@@ -174,6 +174,23 @@ func (r *IMAccessRepo) FindMessageAudit(ctx context.Context, conversationID, cli
 	return message, err
 }
 
+// FindMessageAuditByClientMsgID 不按会话 ID 过滤。撤回时算出的会话前缀和审计里记的不一致时，用它兜底。
+func (r *IMAccessRepo) FindMessageAuditByClientMsgID(ctx context.Context, clientMsgID string) (models.IMAuditedMessage, error) {
+	var message models.IMAuditedMessage
+	err := r.DB.QueryRow(ctx, `
+		SELECT client_msg_id, conversation_id, sender_im_id, content_type, seq, send_time
+		FROM im_message_audit
+		WHERE client_msg_id=$1 AND client_msg_id<>''
+		ORDER BY (send_time > 0) DESC, created_at DESC
+		LIMIT 1`, clientMsgID).Scan(
+		&message.ClientMsgID, &message.ConversationID, &message.SenderIMID,
+		&message.ContentType, &message.Seq, &message.SendTime)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return message, ErrIMMessageNotFound
+	}
+	return message, err
+}
+
 type IMMessageRecallReservation struct {
 	ID           int64
 	Status       string

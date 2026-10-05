@@ -655,6 +655,84 @@ func (c *Client) RevokeMessage(ctx context.Context, userID, conversationID strin
 	return false, err
 }
 
+// PulledMessage 是按 seq 从 OpenIM 拉到的一条消息，用来在审计缺失时核对 clientMsgID。
+type PulledMessage struct {
+	ClientMsgID string
+	SendID      string
+	SendTime    int64
+	ContentType int
+	Seq         int64
+}
+
+// PullMessageBySeq 按会话 seq 拉一条消息。seq 对不上该 clientMsgID 时返回 ErrConversationNotFound。
+func (c *Client) PullMessageBySeq(ctx context.Context, userID, conversationID, clientMsgID string, seq int64) (PulledMessage, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(conversationID) == "" || seq <= 0 {
+		return PulledMessage{}, errors.New("invalid pull message request")
+	}
+	var data struct {
+		Msgs map[string]json.RawMessage `json:"msgs"`
+	}
+	err := c.postWithAdmin(ctx, "/msg/pull_msg_by_seq", map[string]any{
+		"userID": userID,
+		"seqRanges": []map[string]any{{
+			"conversationID": conversationID,
+			"begin":          seq,
+			"end":            seq,
+			"num":            1,
+		}},
+		"order": 0,
+	}, &data)
+	if err != nil {
+		return PulledMessage{}, err
+	}
+	want := strings.TrimSpace(clientMsgID)
+	for _, raw := range data.Msgs {
+		var bucket struct {
+			Upper []struct {
+				ClientMsgID string `json:"clientMsgID"`
+				SendID      string `json:"sendID"`
+				SendTime    int64  `json:"sendTime"`
+				ContentType int    `json:"contentType"`
+				Seq         int64  `json:"seq"`
+			} `json:"Msgs"`
+			Lower []struct {
+				ClientMsgID string `json:"clientMsgID"`
+				SendID      string `json:"sendID"`
+				SendTime    int64  `json:"sendTime"`
+				ContentType int    `json:"contentType"`
+				Seq         int64  `json:"seq"`
+			} `json:"msgs"`
+		}
+		if json.Unmarshal(raw, &bucket) != nil {
+			continue
+		}
+		items := bucket.Upper
+		if len(items) == 0 {
+			items = bucket.Lower
+		}
+		for _, item := range items {
+			if want != "" && item.ClientMsgID != want {
+				continue
+			}
+			if item.ClientMsgID == "" || item.SendID == "" {
+				continue
+			}
+			got := PulledMessage{
+				ClientMsgID: item.ClientMsgID,
+				SendID:      item.SendID,
+				SendTime:    item.SendTime,
+				ContentType: item.ContentType,
+				Seq:         item.Seq,
+			}
+			if got.Seq <= 0 {
+				got.Seq = seq
+			}
+			return got, nil
+		}
+	}
+	return PulledMessage{}, ErrConversationNotFound
+}
+
 // ConversationSettings 对应 OpenIM 的 Conversation 对象。
 // 字段名与 OpenIM JSON 完全一致，可直接作为 set_conversations 的 conversation 体回写。
 // recvMsgOpt 取值：0 正常接收 / 1 免打扰（不接收）/ 2 仅在线接收。

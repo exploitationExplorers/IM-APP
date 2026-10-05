@@ -747,14 +747,13 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 		operatorRole = group.Role
 	}
 
-	message, err := s.Access.FindMessageAudit(ctx, conversationID, req.ClientMsgID)
+	message, conversationID, seq, err := s.loadRecallTarget(ctx, operatorIMID, conversationID, req.ClientMsgID, req.Seq)
 	if err != nil {
-		if errors.Is(err, repository.ErrIMMessageNotFound) {
-			return result, ErrIMMessageNotFound
-		}
 		return result, err
 	}
-	if message.ContentType <= 0 || message.ContentType >= 1000 || message.SenderIMID == s.Config.AdminUser {
+	req.Seq = seq
+	result.Seq = seq
+	if message.ContentType >= 1000 || message.SenderIMID == s.Config.AdminUser {
 		return result, ErrIMUnsupportedMessage
 	}
 	senderID, err := im.BusinessIDFromUserID(message.SenderIMID)
@@ -814,6 +813,89 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 	result.AlreadyRecalled = alreadyRecalled
 	result.RecalledAt = recalledAt
 	return result, nil
+}
+
+// loadRecallTarget 先按会话 ID 查审计；对不上再按 clientMsgID 查；审计没有时用 OpenIM 的 seq 核对。
+// 客户端带来的 seq 经常和 OpenIM 真实 seq 不一致，审计里有 seq 就以审计为准。
+func (s *IMService) loadRecallTarget(ctx context.Context, operatorIMID, conversationID, clientMsgID string, seq int64) (models.IMAuditedMessage, string, int64, error) {
+	message, err := s.Access.FindMessageAudit(ctx, conversationID, clientMsgID)
+	if err != nil && errors.Is(err, repository.ErrIMMessageNotFound) {
+		message, err = s.Access.FindMessageAuditByClientMsgID(ctx, clientMsgID)
+	}
+	if err != nil && !errors.Is(err, repository.ErrIMMessageNotFound) {
+		return models.IMAuditedMessage{}, conversationID, seq, err
+	}
+	if err == nil {
+		if message.ConversationID != "" {
+			conversationID = message.ConversationID
+		}
+		if message.Seq > 0 {
+			seq = message.Seq
+		}
+		if message.SendTime > 0 && message.SenderIMID != "" && message.ContentType > 0 {
+			return message, conversationID, seq, nil
+		}
+	}
+
+	pulled, pulledConv, perr := s.pullRecallMessage(ctx, operatorIMID, conversationID, clientMsgID, seq)
+	if perr != nil {
+		if err == nil && message.SenderIMID != "" && message.SendTime > 0 {
+			return message, conversationID, seq, nil
+		}
+		return models.IMAuditedMessage{}, conversationID, seq, ErrIMMessageNotFound
+	}
+	if pulledConv != "" {
+		conversationID = pulledConv
+	}
+	if pulled.Seq > 0 {
+		seq = pulled.Seq
+	}
+	if message.ClientMsgID == "" {
+		message.ClientMsgID = pulled.ClientMsgID
+	}
+	if message.SenderIMID == "" {
+		message.SenderIMID = pulled.SendID
+	}
+	if message.SendTime <= 0 {
+		message.SendTime = pulled.SendTime
+	}
+	if message.ContentType <= 0 {
+		message.ContentType = pulled.ContentType
+	}
+	if message.ConversationID == "" {
+		message.ConversationID = conversationID
+	}
+	if message.SenderIMID == "" || message.SendTime <= 0 {
+		return models.IMAuditedMessage{}, conversationID, seq, ErrIMMessageNotFound
+	}
+	return message, conversationID, seq, nil
+}
+
+func (s *IMService) pullRecallMessage(ctx context.Context, operatorIMID, conversationID, clientMsgID string, seq int64) (im.PulledMessage, string, error) {
+	pulled, err := s.Client.PullMessageBySeq(ctx, operatorIMID, conversationID, clientMsgID, seq)
+	if err == nil {
+		return pulled, conversationID, nil
+	}
+	alt := alternateGroupConversationID(conversationID)
+	if alt == "" {
+		return im.PulledMessage{}, conversationID, err
+	}
+	pulled, err = s.Client.PullMessageBySeq(ctx, operatorIMID, alt, clientMsgID, seq)
+	if err != nil {
+		return im.PulledMessage{}, conversationID, err
+	}
+	return pulled, alt, nil
+}
+
+func alternateGroupConversationID(conversationID string) string {
+	switch {
+	case strings.HasPrefix(conversationID, "sg_"):
+		return "g_" + strings.TrimPrefix(conversationID, "sg_")
+	case strings.HasPrefix(conversationID, "g_"):
+		return "sg_" + strings.TrimPrefix(conversationID, "g_")
+	default:
+		return ""
+	}
 }
 
 func validateRecallPermission(peerType string, ownMessage bool, operatorRole, senderRole, reason string, sendTime int64, now time.Time, window time.Duration) error {
