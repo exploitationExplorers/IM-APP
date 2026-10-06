@@ -456,17 +456,6 @@ func (s *GroupService) MessagePurges(ctx context.Context, groupID, uid string) (
 	return s.Groups.MessagePurges(ctx, internalID, uid)
 }
 
-// PurgeMemberMessages 只记「该成员在群内的消息已被清理」的水位，不改变成员关系。
-// 与 RemoveMember(..., purgeMessages=true) 的区别是目标**可以已经不在群里** ——
-// 炸群人员退群后，管理员仍要能一键清掉该成员发过的广告。
-func (s *GroupService) PurgeMemberMessages(ctx context.Context, groupID, uid, targetID string) (time.Time, error) {
-	internalID, err := s.internalGroupID(ctx, groupID)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return s.Groups.UpsertMessagePurge(ctx, internalID, uid, targetID)
-}
-
 func (s *GroupService) UpdateMemberRole(ctx context.Context, groupID, operatorID, memberID, role string) error {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {
