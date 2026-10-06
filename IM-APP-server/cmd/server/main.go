@@ -322,6 +322,8 @@ func main() {
 			auth.POST("/group-members/unmute", groupH.UnmuteMember)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
 			auth.GET("/groups/:id/message-purges", groupH.MessagePurges)
+			// 清理该成员在本群的全部消息（目标可以已退群）
+			auth.POST("/groups/:id/message-purges", groupH.PurgeMemberMessages)
 			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
 			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
 			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
@@ -360,6 +362,8 @@ func main() {
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
 			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
 			auth.POST("/im/messages/recall", imH.RecallMessage)
+			// 批量撤回：群主/管理员一次清理多条他人消息（多选撤回、清理刷屏广告）
+			auth.POST("/im/messages/recall-batch", imH.RecallMessages)
 			auth.POST("/im/message-send-failures", imH.ReportSendFailure)
 			auth.POST("/im/group-read-cursors/report", imH.ReportGroupReadCursor)
 			auth.GET("/im/group-read-state", imH.GroupReadState)

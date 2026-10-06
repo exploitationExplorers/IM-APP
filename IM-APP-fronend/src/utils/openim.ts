@@ -2224,6 +2224,51 @@ export async function findLocalMessage(
   }
 }
 
+/** 批量版 parseFindMessageResult：一次 findMessageList 里捞多个 clientMsgID */
+function parseFindMessageMap(res: unknown, wanted: Set<string>): Map<string, MessageItem> {
+  const out = new Map<string, MessageItem>()
+  const collect = (msg: unknown) => {
+    const parsed = coerceMessage(msg)
+    if (parsed?.clientMsgID && wanted.has(parsed.clientMsgID) && !out.has(parsed.clientMsgID)) {
+      out.set(parsed.clientMsgID, parsed)
+    }
+  }
+  const obj = unwrapRawMessage(res) || (res && typeof res === 'object' ? (res as Record<string, unknown>) : null)
+  if (!obj) return out
+  const items = obj.findResultItems ?? obj.FindResultItems
+  for (const group of Array.isArray(items) ? items : []) {
+    if (!group || typeof group !== 'object') continue
+    const rec = group as Record<string, unknown>
+    const rawList = rec.messageList ?? rec.MessageList
+    for (const msg of Array.isArray(rawList) ? rawList : []) collect(msg)
+  }
+  collect(obj)
+  return out
+}
+
+/**
+ * 批量查本地库，一次调用带全部 clientMsgID。
+ * 批量撤回要一次解析几十条 seq，逐条调 findMessageList 在 App 原生桥上会拖到秒级。
+ */
+async function findLocalMessages(
+  conversationID: string,
+  clientMsgIDs: string[],
+): Promise<Map<string, MessageItem>> {
+  const wanted = new Set(clientMsgIDs.filter(Boolean))
+  if (!conversationID || !wanted.size) return new Map()
+  const ids = [...wanted]
+  const tryCall = (params: unknown) => imCall<unknown>('findMessageList' as IMMethods, params)
+  try {
+    return parseFindMessageMap(await tryCall([{ conversationID, clientMsgIDList: ids }]), wanted)
+  } catch {
+    try {
+      return parseFindMessageMap(await tryCall({ conversationID, clientMsgIDList: ids }), wanted)
+    } catch {
+      return new Map()
+    }
+  }
+}
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
@@ -2256,6 +2301,63 @@ export async function resolveMessageSeq(
     if (hist) return hist
   }
   return { seq: 0 }
+}
+
+/** 批量 seq 解析的整体超时：解析不出来的条目交给调用方报「暂不可撤回」，不能一直挂着 */
+const BATCH_SEQ_RESOLVE_TIMEOUT_MS = 6_000
+
+/**
+ * 批量解析撤回要用的 seq（批量撤回一次几十条，逐条调 resolveMessageSeq 会拖垮）。
+ * 关键差别：resolveMessageSeq 每条都要走 [0,400,1000] 三轮、每轮两次 SDK 调用，100 条
+ * 最坏能到两分钟；这里每轮只发一次「批量本地库查找」和一次「拉历史」，用
+ * clientMsgID → seq 建表一次匹配掉所有剩余 id，最坏是 3 次历史调用而不是 3N 次。
+ */
+export async function resolveMessageSeqs(
+  conversationID: string,
+  clientMsgIDs: string[],
+  knownSeqs?: Record<string, number | undefined>,
+): Promise<{ seqs: Record<string, number>; missing: string[] }> {
+  const seqs: Record<string, number> = {}
+  const pending = new Set<string>()
+  for (const id of clientMsgIDs) {
+    if (!id || id in seqs || pending.has(id)) continue
+    const known = knownSeqs?.[id]
+    if (typeof known === 'number' && known > 0) seqs[id] = known
+    else pending.add(id)
+  }
+
+  const deadline = Date.now() + BATCH_SEQ_RESOLVE_TIMEOUT_MS
+  // App 原生桥写完本地库有延迟；H5 一次就够
+  const delays = isAppPlatform ? [0, 400, 1000] : [0]
+  for (const delay of delays) {
+    if (!pending.size || Date.now() > deadline) break
+    if (delay) await sleep(delay)
+    const wanted = [...pending]
+
+    const local = await findLocalMessages(conversationID, wanted)
+    for (const id of wanted) {
+      const seq = seqOf(local.get(id))
+      if (seq > 0) {
+        seqs[id] = seq
+        pending.delete(id)
+      }
+    }
+    if (!pending.size || Date.now() > deadline) break
+
+    const { messageList } = await getHistoryMessages(conversationID, Math.max(50, wanted.length)).catch(() => ({
+      messageList: [] as MessageItem[],
+    }))
+    const hist = new Map(messageList.map((m) => [m.clientMsgID, m]))
+    for (const id of [...pending]) {
+      const seq = seqOf(hist.get(id))
+      if (seq > 0) {
+        seqs[id] = seq
+        pending.delete(id)
+      }
+    }
+  }
+
+  return { seqs, missing: [...pending] }
 }
 
 function normalizeHistoryResult(res: unknown): { messageList: MessageItem[]; isEnd: boolean } {

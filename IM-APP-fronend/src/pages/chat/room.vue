@@ -397,6 +397,11 @@ const actions = useChatMessageActions({
   onMuteChanged: () => {
     void refreshGroupMeta()
   },
+  // 「清理该成员全部消息」成功后立刻写本地水位：等下次拉取的话，操作者自己
+  // 还看得到那些消息，会以为一键清理没生效。
+  onMessagesPurged: (userId, purgedAt) => {
+    purgedMap.value = { ...purgedMap.value, [userId]: purgedAt }
+  },
 })
 
 const pinnedMessage = computed(
@@ -1917,8 +1922,10 @@ function pickFavorite() {
       <ImMessageSelectBar
         :count="actions.selectedCount.value"
         :mode="actions.selectMode.value"
+        :revocable-count="actions.revocableCount.value"
         @cancel="actions.cancelSelect"
         @forward="actions.onSelectForward"
+        @recall="actions.onSelectRevoke"
         @remove="actions.onSelectDelete"
       />
     </view>
