@@ -3,8 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { IMEvents, MessageType, OnlineState, SessionType } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { ChatMessage, Conversation, ConversationPinnedMessage } from '@/types'
-import { recallMessage, recallMessages, resolveIMGroup, resolveIMGroupByIM, resolveIMPeer } from '@/api/im'
-import { purgeGroupMemberMessages } from '@/api/group'
+import { recallMessage, resolveIMGroup, resolveIMGroupByIM, resolveIMPeer } from '@/api/im'
 import {
   businessUserIdFromIM,
   ensureIMLogin,
@@ -36,7 +35,6 @@ import {
   conversationIdOf,
   imUserId,
   resolveMessageSeq,
-  resolveMessageSeqs,
   resetConversationGroupAtType,
   seqOf,
   setConversationPin,
@@ -1399,101 +1397,6 @@ export const useChatStore = defineStore('chat', () => {
     dropRevokedMessage(conversationId, messageId, tip)
   }
 
-  /** 批量撤回的分块大小：后端一次最多 100 条，多选不设限（加载窗口 200）时按块串行提交 */
-  const BATCH_RECALL_CHUNK = 100
-
-  /**
-   * 批量撤回：群主/管理员清理刷屏、广告用。与 recall() 的差别是会话与 peer 只解析一次，
-   * seq 先取 ChatMessage 自带的值、缺的走批量回落解析，不逐条重跑 resolveMessageSeq
-   * （后者在 App 平台每条最坏 1.4 秒）。成功项按已撤回落灰；逐条结果交给调用方，
-   * 失败原因必须如实提示 —— 不能报成「全部成功」。
-   */
-  async function recallMany(
-    conversationId: string,
-    targets: Array<{ id: string; seq?: number }>,
-    opts?: { peerId?: string; reason?: string },
-  ): Promise<{ succeeded: string[]; failed: Array<{ id: string; message: string }> }> {
-    const conv = await conversationOf(conversationId)
-    if (!conv) throw new Error('会话信息丢失，请返回聊天列表后重试')
-    const peerType = conv.type === 'group' ? ('group' as const) : ('c2c' as const)
-    let peerId = opts?.peerId || ''
-    if (!peerId) {
-      if (peerType === 'c2c') {
-        peerId = businessUserIdFromIM(conv.peerUserId || '')
-      } else if (conv.groupId) {
-        try {
-          peerId = (await resolveIMGroupByIM(conv.groupId)).businessGroupId
-        } catch {
-          // 反查失败留给接口报「群不存在」，不再额外提示
-        }
-      }
-    }
-    if (!peerId) throw new Error('缺少会话对方信息，无法撤回')
-
-    const known: Record<string, number | undefined> = {}
-    for (const target of targets) {
-      if (!target.id || target.id in known) continue
-      known[target.id] = target.seq && target.seq > 0 ? target.seq : seqOf(rawMessages.value[target.id]) || undefined
-    }
-    const ids = Object.keys(known)
-    if (!ids.length) return { succeeded: [], failed: [] }
-
-    const { seqs, missing } = await resolveMessageSeqs(conversationId, ids, known)
-    const failed: Array<{ id: string; message: string }> = missing.map((id) => ({
-      id,
-      message: '该消息暂不可撤回，请稍后重试',
-    }))
-    const succeeded: string[] = []
-
-    const items = Object.entries(seqs).map(([id, seq]) => ({ clientMsgId: id, seq }))
-    for (let i = 0; i < items.length; i += BATCH_RECALL_CHUNK) {
-      const chunk = items.slice(i, i + BATCH_RECALL_CHUNK)
-      try {
-        const res = await recallMessages({ peerType, peerId, reason: opts?.reason, messages: chunk })
-        succeeded.push(...(res?.succeeded || []))
-        for (const f of res?.failed || []) {
-          failed.push({ id: f.clientMsgId, message: f.message || '撤回失败' })
-        }
-      } catch (e) {
-        // 整块整体失败（群已停用、操作者已不在群等）：这一块的条目全部如实记失败
-        const message = (e as Error)?.message || '撤回失败'
-        for (const item of chunk) failed.push({ id: item.clientMsgId, message })
-      }
-    }
-
-    for (const id of succeeded) {
-      const original = (messagesMap.value[conversationId] || []).find((m) => m.id === id)
-      const tip =
-        original?.senderId === imUserId.value
-          ? '你撤回了一条消息'
-          : `你撤回了 ${original?.senderNickname || '成员'} 的一条消息`
-      dropRevokedMessage(conversationId, id, tip)
-    }
-    return { succeeded, failed }
-  }
-
-  /**
-   * 清理某成员在本群的全部消息：写服务端清理水位，水位之前的消息所有群成员一律隐藏。
-   * 目标可以已经退群（炸群人员发完广告就跑），所以不走 removeGroupMember。
-   * 返回水位时间（ms），调用方据此做本地乐观更新 —— 不更新的话操作者自己还看得到，
-   * 会以为「一键清理没生效」。
-   */
-  async function purgeMemberMessages(conversationId: string, targetUserId: string): Promise<number> {
-    const conv = await conversationOf(conversationId)
-    if (!conv) throw new Error('会话信息丢失，请返回聊天列表后重试')
-    if (conv.type !== 'group' || !conv.groupId) throw new Error('仅群聊支持清理成员消息')
-    let businessGroupId = ''
-    try {
-      businessGroupId = (await resolveIMGroupByIM(conv.groupId)).businessGroupId
-    } catch {
-      // 反查失败交给接口报「群不存在」
-    }
-    if (!businessGroupId) throw new Error('缺少群信息，无法清理')
-    const res = await purgeGroupMemberMessages(businessGroupId, targetUserId)
-    const purgedAt = Date.parse(res?.purgedAt || '')
-    return Number.isFinite(purgedAt) ? purgedAt : Date.now()
-  }
-
   async function sendQuote(conversationId: string, text: string, quoteMessageId: string, senderId: string) {
     const quote = rawMessages.value[quoteMessageId]
     if (!quote) throw new Error('原消息不存在')
@@ -1596,8 +1499,6 @@ export const useChatStore = defineStore('chat', () => {
     sendVoice,
     sendQuote,
     recall,
-    recallMany,
-    purgeMemberMessages,
     removeLocal,
     removeLocalMany,
     forwardToConversation,

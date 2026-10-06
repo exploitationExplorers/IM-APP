@@ -31,11 +31,6 @@ export function useChatMessageActions(opts: {
   memberMeta?: Ref<Record<string, MemberMeta>>
   /** 禁言/解禁成功后的回调（房间页用来刷新成员禁言状态） */
   onMuteChanged?: () => void
-  /**
-   * 「清理该成员全部消息」成功后的回调。房间页用它把清理水位乐观写进 purgedMap ——
-   * 不写的话操作者自己还看得到消息，会以为没生效。
-   */
-  onMessagesPurged?: (businessUserId: string, purgedAt: number) => void
   /** 私聊对方展示名，用于「为我和 xxx 置顶」文案 */
   peerDisplayName?: Ref<string>
 }) {
@@ -43,8 +38,6 @@ export function useChatMessageActions(opts: {
   const forwardStore = useForwardStore()
 
   const SENDER_LEFT_GROUP_TOAST = '该群友不在群聊'
-  /** 「清理该成员全部消息」时顺带即时撤回的条数上限，其余交给服务端清理水位 */
-  const PURGE_RECALL_LIMIT = 50
 
   function isMemberListLoaded(): boolean {
     const map = opts.memberMeta?.value
@@ -109,11 +102,6 @@ export function useChatMessageActions(opts: {
    * 撤回入口：自己的消息（非发送中）一律显示，超 2 分钟窗口由后端校验并 toast 提示；
    * 他人的消息仅群主/管理员显示，目标角色已加载时按权限矩阵收敛，
    * 没加载到也先显示，由后端最终判定（无权时返回明确报错）。
-   *
-   * 注意：**撤回他人消息不受 2 分钟窗口限制** —— 时间窗只对「自己的消息」生效
-   * （见后端 validateRecallPermission），所以清理炸群人员的历史广告不需要赶时间。
-   * 发送者已退群时 memberMetaOf 查不到（成员列表只含现役成员），这里按「先显示、
-   * 后端兜底」处理，正好覆盖「炸群人员发完就跑」的场景。
    */
   function canRevoke(message: ChatMessage) {
     if (message.status === 'sending') return false
@@ -136,10 +124,7 @@ export function useChatMessageActions(opts: {
     const items: MessageMenuItem[] = []
 
     // 参考站顺序：转发|引用 → 复制|收藏 → 置顶|检举 → @TA|禁言 → 删除|多选
-    // 撤回不再只给自己的消息：群主/管理员撤他人消息也走这里。以前只判 mine，
-    // 结果管理员对别人的广告只剩「删除」，而删除是纯本地操作（DeleteMessageFromLocalStorage），
-    // 别的群员照旧看得到 —— 这就是「删除了其他人还能看到」的根因。
-    if (canRevoke(message)) {
+    if (mine && canRevoke(message)) {
       items.push({ key: 'revoke', label: '撤回' })
     }
     items.push({ key: 'forward', label: '转发' }, { key: 'quote', label: '引用' })
@@ -169,9 +154,6 @@ export function useChatMessageActions(opts: {
     if (!mine && canManage) {
       items.push({ key: 'kick', label: '移除该成员', wide: true })
       items.push({ key: 'kickAndDelete', label: '移除该成员并删除消息', wide: true })
-      // 目标已经退群时上面两项都点不动（guardSenderInGroup 会拦），一键清理才是可用出口：
-      // 只写清理水位，不改成员关系，覆盖 TA 在本群的全部历史消息。
-      items.push({ key: 'purgeAll', label: '清理该成员全部消息', wide: true })
     }
     return items
   })
@@ -195,9 +177,6 @@ export function useChatMessageActions(opts: {
 
   function toggleSelect(message: ChatMessage) {
     if (!selecting.value) return
-    // 系统提示（进群/退群/改名等）不可转发也不能撤回，房间页的 @click 对所有行都会触发，
-    // 必须在这里挡掉 —— 勾选框不渲染并不等于选不中。
-    if (message.type === 'system') return
     const next = new Set(selectedIds.value)
     if (next.has(message.id)) {
       next.delete(message.id)
@@ -215,12 +194,8 @@ export function useChatMessageActions(opts: {
 
   function selectedMessages() {
     const ids = selectedIds.value
-    // 系统提示也过滤掉：批量转发/删除/撤回都不该把它带上
-    return opts.visibleMessages.value.filter((m) => ids.has(m.id) && m.type !== 'system')
+    return opts.visibleMessages.value.filter((m) => ids.has(m.id))
   }
-
-  /** 选中项里当前身份能撤回的条数（群主/管理员撤他人 + 自己的消息）；多选栏据此决定是否显示「撤回」 */
-  const revocableCount = computed(() => selectedMessages().filter((m) => canRevoke(m)).length)
 
   function goForward(messages: ChatMessage[]) {
     if (!messages.length) return
@@ -391,97 +366,6 @@ export function useChatMessageActions(opts: {
     } catch (e) {
       uni.showToast({ title: (e as Error).message || '撤回失败', icon: 'none' })
     }
-  }
-
-  /**
-   * 一键清理某成员在本群的全部消息（群主/管理员）。走服务端清理水位，覆盖 TA 在本群的
-   * **全部**历史（含未加载部分），与「移除该成员并删除消息」共用同一套水位；再对已加载的
-   * 最近若干条补一次批量撤回 —— 写水位本身不产生群通知，其他端要等下次拉水位才变化，
-   * 而撤回事件是即时推送的，不补这一步其他群员会以为「清理没生效」。
-   * 批量撤回失败不阻断，水位那份才是覆盖完整性的保证。
-   * 刻意不判 guardSenderInGroup：目标已退群正是这个入口要解决的情况。
-   */
-  async function purgeAllMessages(message: ChatMessage) {
-    const userId = businessUserIdFromIM(message.senderId)
-    if (!userId) {
-      uni.showToast({ title: '无法清理该用户的消息', icon: 'none' })
-      return
-    }
-    const ok = await confirm(
-      '将隐藏 TA 在本群的全部历史消息（含未加载部分），并同步给所有群成员。此操作不可恢复。',
-      '确定清理',
-    )
-    if (!ok) return
-    uni.showLoading({ title: '正在清理' })
-    try {
-      const purgedAt = await chatStore.purgeMemberMessages(opts.conversationId.value, userId)
-      // 本地立刻生效：不写水位的话操作者自己还看得到消息，会以为没生效
-      opts.onMessagesPurged?.(userId, purgedAt)
-      // 只补最近 PURGE_RECALL_LIMIT 条：撤回会在全群每个客户端插入一条「已撤回」提示，
-      // 成百条一起撤回既慢又会把聊天记录刷满墓碑。更早的交给水位，下次拉水位时消失。
-      const theirs = opts.visibleMessages.value
-        .filter((m) => m.senderId === message.senderId && m.type !== 'system')
-        .slice(-PURGE_RECALL_LIMIT)
-      if (theirs.length) {
-        try {
-          await chatStore.recallMany(
-            opts.conversationId.value,
-            theirs.map((m) => ({ id: m.id, seq: m.seq })),
-            { peerId: opts.businessId.value || undefined, reason: '管理员清理' },
-          )
-        } catch {
-          // 忽略：水位已生效，批量撤回只是让其他端立刻同步
-        }
-      }
-      uni.hideLoading()
-      uni.showToast({ title: '已清理该成员的消息', icon: 'none' })
-    } catch (e) {
-      uni.hideLoading()
-      uni.showToast({ title: (e as Error).message || '清理失败', icon: 'none' })
-    }
-  }
-
-  /**
-   * 多选批量撤回（群主/管理员）。原因整批只弹一次（后端撤他人消息要求必填）；
-   * 结果如实汇总 —— 失败条目的原因必须说出来，不能报成「全部成功」。
-   */
-  async function onSelectRevoke() {
-    const selected = selectedMessages().filter((m) => canRevoke(m))
-    if (!selected.length) return
-    let reason: string | undefined
-    if (selected.some((m) => !opts.isMine(m))) {
-      const input = await promptRevokeReason()
-      if (input === null) return
-      reason = input
-    }
-    uni.showLoading({ title: '正在撤回' })
-    let result: { succeeded: string[]; failed: Array<{ id: string; message: string }> }
-    try {
-      result = await chatStore.recallMany(
-        opts.conversationId.value,
-        selected.map((m) => ({ id: m.id, seq: m.seq })),
-        { peerId: opts.businessId.value || undefined, reason },
-      )
-    } catch (e) {
-      uni.hideLoading()
-      uni.showToast({ title: (e as Error).message || '撤回失败', icon: 'none' })
-      return
-    }
-    uni.hideLoading()
-    // 成功的从选中集里摘掉，失败项留着方便重试
-    const done = new Set(result.succeeded)
-    selectedIds.value = new Set([...selectedIds.value].filter((id) => !done.has(id)))
-    if (!result.failed.length) {
-      cancelSelect()
-      uni.showToast({ title: `已撤回 ${result.succeeded.length} 条消息`, icon: 'none' })
-      return
-    }
-    const reasons = [...new Set(result.failed.map((f) => f.message))].slice(0, 2).join('；')
-    uni.showToast({
-      title: `已撤回 ${result.succeeded.length} 条，${result.failed.length} 条失败：${reasons}`,
-      icon: 'none',
-      duration: 3000,
-    })
   }
 
   function startQuote(message: ChatMessage) {
@@ -671,10 +555,6 @@ export function useChatMessageActions(opts: {
     }
     if (key === 'kickAndDelete') {
       await kickUser(message, true)
-      return
-    }
-    if (key === 'purgeAll') {
-      await purgeAllMessages(message)
     }
   }
 
@@ -709,8 +589,6 @@ export function useChatMessageActions(opts: {
     selectMode,
     selectedIds,
     selectedCount,
-    revocableCount,
-    onSelectRevoke,
     quote,
     atList,
     atUser,

@@ -284,22 +284,6 @@ export async function fetchGroupMessagePurges(groupId: string): Promise<GroupMes
   return Array.isArray(res?.items) ? res.items : []
 }
 
-/**
- * 清理某成员在本群的全部消息：写入清理水位，水位之前该成员发的消息所有客户端一律隐藏。
- * 与「移除该成员并删除消息」共用同一套水位，区别是目标**可以已经退群**
- * （炸群人员发完广告就跑的场景），也不会改变成员关系。
- */
-export async function purgeGroupMemberMessages(
-  groupId: string,
-  userId: string,
-): Promise<{ ok: boolean; purgedAt: string }> {
-  return request<{ ok: boolean; purgedAt: string }>({
-    url: `/groups/${groupId}/message-purges`,
-    method: 'POST',
-    data: { userId },
-  })
-}
-
 export async function inviteGroupMembers(
   groupId: string,
   userIds: string[],

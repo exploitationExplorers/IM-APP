@@ -42,21 +42,6 @@ export interface MessageRecallResult {
   recalledAt: string
 }
 
-/** 批量撤回里单条失败的原因，message 为后端给的中文提示 */
-export interface RecallMessagesFailure {
-  clientMsgId: string
-  message: string
-}
-
-export interface RecallMessagesResult {
-  peerType: 'c2c' | 'group'
-  peerId: string
-  total: number
-  /** 撤回成功的 clientMsgId，含「本来就已撤回」的幂等命中 */
-  succeeded: string[]
-  failed: RecallMessagesFailure[]
-}
-
 export async function fetchIMToken(platformId = 5): Promise<IMTokenResult> {
   return request<IMTokenResult>({
     url: '/im/token',
@@ -131,25 +116,6 @@ export async function recallMessage(input: {
 }): Promise<MessageRecallResult> {
   return request<MessageRecallResult>({
     url: '/im/messages/recall',
-    method: 'POST',
-    data: input,
-  })
-}
-
-/**
- * 批量撤回同一会话下的多条消息（多选撤回、群主/管理员清理刷屏广告）。
- * 单条失败不中断整批：HTTP 200 时逐条结果在 succeeded / failed 里，
- * 只有整个会话的上下文不可用（群已停用、操作者已不在群）才整体抛错。
- * seq 由调用方在本地解析（OpenIM 只认 seq），见 chat.ts 的 recallMany。
- */
-export async function recallMessages(input: {
-  peerType: 'c2c' | 'group'
-  peerId: string
-  reason?: string
-  messages: Array<{ clientMsgId: string; seq: number }>
-}): Promise<RecallMessagesResult> {
-  return request<RecallMessagesResult>({
-    url: '/im/messages/recall-batch',
     method: 'POST',
     data: input,
   })
