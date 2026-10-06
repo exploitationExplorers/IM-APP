@@ -598,8 +598,9 @@ export function useChatMessageActions(opts: {
   }
 
   function onSelectRevoke() {
-    const others = selectedMessages().filter((message) => !opts.isMine(message))
-    void revokeMessages(others)
+    // 自己的消息也要能多选撤回，2 分钟限制由服务端判断。
+    // 别人的消息只有群主/管理员选得到，且没有时间窗。
+    void revokeMessages(selectedMessages())
   }
 
   async function forwardMessages(messages: ChatMessage[]) {
