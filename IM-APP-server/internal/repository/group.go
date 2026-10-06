@@ -1635,10 +1635,10 @@ func (r *GroupRepo) RemoveMember(ctx context.Context, groupID, uid, targetID str
 
 // UpsertMessagePurge 只写「该成员在群内的消息已被清理」的水位，与 removeMembership
 // 里那条写入同源（水位之前的消息所有客户端一律隐藏）。区别是这里**不要求目标当前
-// 是群成员** —— 炸群人员退群后，管理员仍要能一键清掉它发的广告，这是唯一缺口。
+// 是群成员** —— 炸群人员退群后，管理员仍要能一键清掉该成员发过的广告，这是唯一缺口。
 //
 // 刻意不删 group_members、不发群成员变更事件：目标可能早就不在群里，再发一次
-// 「成员离开」会把它重复踢一遍。
+// 「成员离开」等于把该成员重复踢一遍。
 func (r *GroupRepo) UpsertMessagePurge(ctx context.Context, groupID, operatorID, targetID string) (time.Time, error) {
 	if _, err := uuid.Parse(targetID); err != nil {
 		return time.Time{}, ErrInvalidGroupOperation
