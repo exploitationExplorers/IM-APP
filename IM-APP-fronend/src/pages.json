@@ -366,6 +366,13 @@
       }
     },
     {
+      "path": "pages/mine/edit-chat-id",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "设置聊天号"
+      }
+    },
+    {
       "path": "pages/mine/edit-bio",
       "style": {
         "navigationStyle": "custom",

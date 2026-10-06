@@ -60,6 +60,15 @@ export default defineConfig({
         target: 'http://8.154.44.197',
         changeOrigin: true,
       },
+      // OpenIM 的 WebSocket 网关。和 /api 同理：让浏览器只连 localhost，
+      // 真正的连接由 Vite（Node）发起 —— 这样本机开着系统代理/VPN 也不影响（代理一般不接管回环）。
+      // 配套：src/utils/openim.ts 的 devWsAddr() 在 H5 开发时把 SDK 的 wsAddr 改写成同源路径。
+      // ws: true 必须写，否则升级请求不会被转发，握手会一直 pending。
+      '/openim-ws': {
+        target: 'http://8.154.44.197',
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
 })

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 
 	"im-app-server/internal/models"
@@ -57,8 +59,65 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, nickname, a
 	return u, nil
 }
 
+// 聊天号格式（用户手动设置时校验）：6–20 位、首位必须是字母、其余只能是字母或数字。
+//
+// 系统自动分配的号固定 8 位（repository.randomPublicID），这里放宽到 6–20 是让用户
+// 有机会挑一个更好记的，对齐微信号的习惯。一律按小写处理：存小写、搜索也按小写比，
+// 免得用户存了 K7m2X9qp 之后自己搜 Km2x9qp 搜不到。
+var publicIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]{5,19}$`)
+
+// NormalizePublicID 归一化并校验用户填的聊天号，返回是否合法。
+func NormalizePublicID(raw string) (string, bool) {
+	id := strings.ToLower(strings.TrimSpace(raw))
+	return id, publicIDPattern.MatchString(id)
+}
+
+// UpdatePublicID 把系统分配的聊天号换成用户自己想要的，一个账号只能改一次。
+//
+// ★ 「改过没有」看的是 users.public_id_changed_at，注册时自动分配的随机号不算改过，
+//
+//	所以新用户拿到系统号之后仍有这一次机会。
+func (s *UserService) UpdatePublicID(ctx context.Context, uid, raw string) (models.User, error) {
+	publicID, ok := NormalizePublicID(raw)
+	if !ok {
+		return models.User{}, errors.New("聊天号需 6-20 位，以字母开头，只能用字母和数字")
+	}
+	used, err := s.Users.PublicIDChangeUsed(ctx, uid)
+	if err != nil {
+		return models.User{}, err
+	}
+	if used {
+		return models.User{}, errors.New("聊天号只能修改一次")
+	}
+	taken, err := s.Users.PublicIDTaken(ctx, publicID, uid)
+	if err != nil {
+		return models.User{}, err
+	}
+	if taken {
+		return models.User{}, errors.New("该聊天号已被使用")
+	}
+	if err := s.Users.UpdatePublicID(ctx, uid, publicID); err != nil {
+		// 上面查过一次，但并发下仍可能被别人抢先，统一翻译成同一句话
+		switch {
+		case errors.Is(err, repository.ErrPublicIDChangeUsed):
+			return models.User{}, errors.New("聊天号只能修改一次")
+		case errors.Is(err, repository.ErrPublicIDTaken):
+			return models.User{}, errors.New("该聊天号已被使用")
+		}
+		return models.User{}, err
+	}
+	u, err := s.Users.FindByID(ctx, uid)
+	if err != nil {
+		return models.User{}, err
+	}
+	u.PasswordHash = ""
+	return u, nil
+}
+
 func (s *UserService) SearchByPublicID(ctx context.Context, uid, publicID string) (*models.PublicProfile, error) {
-	u, err := s.Users.FindByPublicID(ctx, publicID)
+	// 聊天号一律按小写存储（见 NormalizePublicID），搜索也必须归一化 ——
+	// 否则用户照着名片输入 K7m2X9qp 会搜不到 k7m2x9qp。
+	u, err := s.Users.FindByPublicID(ctx, strings.ToLower(strings.TrimSpace(publicID)))
 	if err != nil {
 		return nil, nil
 	}

@@ -344,13 +344,40 @@ export function waitForSync(timeoutMs = 8000): Promise<void> {
   })
 }
 
+/**
+ * H5 开发时把 SDK 的 wsAddr 改写成同源的 /openim-ws，交给 Vite 代理转发。
+ *
+ * 为什么必须这么做：后端下发的 wsAddr 是 `ws://8.154.44.197/openim-ws` 这种绝对地址，
+ * 浏览器会**直连**它。本机开着系统代理/VPN 时，裸 IP + 明文 ws:// 是最容易被代理规则
+ * 拦掉的组合 —— 表现为控制台报「WebSocket connection failed」，而服务端访问日志里
+ * **压根没有这次请求**（对比同 token 的其它请求都是 101，就能确认请求没发出去）。
+ * 走 Vite 代理后浏览器只连 localhost（代理通常不接管回环），实际连接由 Node 发起。
+ *
+ * ★ 只改 H5 + dev：
+ *   - App 原生没有 origin 概念，必须用绝对地址
+ *   - 线上 H5 由自己的 nginx 代理 /openim-ws（见 deploy/baota/im-app.conf），也不该改
+ */
+function devWsAddr(raw: string): string {
+  // #ifdef H5
+  if (import.meta.env.DEV && typeof location !== 'undefined' && location.host) {
+    try {
+      const u = new URL(raw)
+      return `${u.protocol === 'wss:' ? 'wss' : 'ws'}://${location.host}${u.pathname}`
+    } catch {
+      return `ws://${location.host}/openim-ws`
+    }
+  }
+  // #endif
+  return raw
+}
+
 async function loginSdk(imToken: IMTokenResult): Promise<void> {
   const payload = {
     userID: imToken.userId,
     token: imToken.token,
     platformID: imToken.platform,
     apiAddr: imToken.apiAddr,
-    wsAddr: imToken.wsAddr,
+    wsAddr: devWsAddr(imToken.wsAddr),
     logLevel: H5_SDK_LOG_LEVEL,
   }
   let synced = waitForSync()
