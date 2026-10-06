@@ -2,8 +2,8 @@
     "name" : "IM",
     "appid" : "__UNI__EC9D1AE",
     "description" : "",
-    "versionName" : "1.0.49",
-    "versionCode" : "149",
+    "versionName" : "1.0.50",
+    "versionCode" : "150",
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
