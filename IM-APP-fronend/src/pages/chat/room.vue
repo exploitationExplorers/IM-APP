@@ -1794,17 +1794,19 @@ async function pickFile() {
   try {
     const files = await chooseLocalFiles(MAX_PICK_COUNT)
     let failed = 0
+    let failText = ''
     for (const file of files) {
       try {
         await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
         await nextTick()
         scrollToBottom()
-      } catch {
+      } catch (e) {
         failed++
+        failText = (e as Error).message || failText
       }
     }
     if (failed) {
-      uni.showToast({ title: `${failed} 个文件发送失败`, icon: 'none' })
+      uni.showToast({ title: failText || `${failed} 个文件发送失败`, icon: 'none' })
     }
   } catch (e) {
     const msg = (e as Error).message

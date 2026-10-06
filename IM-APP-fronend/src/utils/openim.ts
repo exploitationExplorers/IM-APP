@@ -1441,18 +1441,79 @@ export async function sendVoiceMessage(
   return sendCreatedMessage(target, message, { alreadyUploaded: true })
 }
 
+function fileContentType(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || ''
+  const table: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    pdf: 'application/pdf',
+    txt: 'text/plain',
+    mp4: 'video/mp4',
+    mp3: 'audio/mpeg',
+    zip: 'application/zip',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  }
+  return table[ext] || 'application/octet-stream'
+}
+
+/** 系统相册里的文件，uni.getFileInfo 经常读不到大小，再用 plus.io 量一次。 */
+function nativeFileSize(fullPath: string): Promise<number> {
+  return new Promise((resolve) => {
+    uni.getFileInfo({
+      filePath: fullPath,
+      success: (res) => {
+        const size = Number(res.size) || 0
+        if (size > 0) resolve(size)
+        else plusFileSize(fullPath).then(resolve)
+      },
+      fail: () => {
+        plusFileSize(fullPath).then(resolve)
+      },
+    })
+  })
+}
+
+function plusFileSize(fullPath: string): Promise<number> {
+  return new Promise((resolve) => {
+    try {
+      const io = plus?.io as { resolveLocalFileSystemURL?: Function } | undefined
+      if (!io?.resolveLocalFileSystemURL) {
+        resolve(0)
+        return
+      }
+      const url = /^(file|content):\/\//.test(fullPath) ? fullPath : `file://${fullPath}`
+      io.resolveLocalFileSystemURL(
+        url,
+        (entry: { file?: (ok: (file: { size?: number }) => void, bad: () => void) => void }) => {
+          if (!entry.file) {
+            resolve(0)
+            return
+          }
+          entry.file(
+            (file) => resolve(Number(file.size) || 0),
+            () => resolve(0),
+          )
+        },
+        () => resolve(0),
+      )
+    } catch {
+      resolve(0)
+    }
+  })
+}
+
 async function uploadFileFromPath(
   fullPath: string,
   fileName: string,
   contentType: string,
 ): Promise<{ url: string; size: number }> {
-  const size = await new Promise<number>((resolve) => {
-    uni.getFileInfo({
-      filePath: fullPath,
-      success: (res) => resolve(Number(res.size) || 0),
-      fail: () => resolve(0),
-    })
-  })
+  const size = await nativeFileSize(fullPath)
   if (size <= 0) throw new Error('文件无效')
   const res = await imCall<{ url: string }>(IMMethods.UploadFile, {
     name: fileName,
@@ -1496,39 +1557,105 @@ async function uploadFile(file: File): Promise<string> {
 }
 
 /**
- * 文件消息。app 端走原生插件读本地全路径；
- * web 端先传对象存储换 URL 再发。
+ * 文件消息。App 先上传换 URL 再发：原生 FullPath 发送会在自己上传时找不到相册文件，
+ * 气泡一直停在文件名并报发送失败。H5 同样先上传再发。
  */
 export async function sendFileMessage(
   target: IMTarget,
   filePath: string,
   fileName: string,
 ): Promise<MessageItem> {
-  let message: MessageItem
+  const safeName = fileName.trim() || '文件'
   if (isAppPlatform) {
     const fullPath = toNativeFullPath(filePath)
     try {
-      message = await imCall<MessageItem>(IMMethods.CreateFileMessageFromFullPath, fullPath, fileName)
-    } catch {
-      // 部分原生插件把参数收成对象，而不是 (path, name)
-      message = await imCall<MessageItem>(IMMethods.CreateFileMessageFromFullPath, {
-        filePath: fullPath,
-        fileName,
-      })
+      return await sendUploadedFileMessage(target, fullPath, safeName)
+    } catch (error) {
+      devWarn('[file][send] 上传后按 URL 发失败，改走原生 FullPath', (error as Error)?.message)
+      try {
+        return await sendFullPathFileMessage(target, fullPath, safeName)
+      } catch {
+        throw error
+      }
     }
-  } else {
-    const file = await pathToFile(filePath)
-    const url = await uploadFile(file)
-    message = await imCall<MessageItem>(IMMethods.CreateFileMessageByURL, {
-      filePath: '',
-      fileName: file.name || fileName,
-      uuid: IMSDK.uuid(),
-      sourceUrl: url,
-      fileSize: file.size,
-      fileType: file.type,
+  }
+  const file = await pathToFile(filePath)
+  const url = await uploadFile(file)
+  const message = await imCall<MessageItem>(IMMethods.CreateFileMessageByURL, {
+    filePath: '',
+    fileName: file.name || safeName,
+    uuid: IMSDK.uuid(),
+    sourceUrl: url,
+    fileSize: file.size,
+    fileType: file.type,
+  })
+  return sendCreatedMessage(target, ensureFileSourceUrl(message, url, safeName, file.size), {
+    alreadyUploaded: true,
+  })
+}
+
+async function sendUploadedFileMessage(
+  target: IMTarget,
+  fullPath: string,
+  fileName: string,
+): Promise<MessageItem> {
+  const contentType = fileContentType(fileName)
+  const uploaded = await uploadFileFromPath(fullPath, fileName, contentType)
+  const uuid = IMSDK.uuid()
+  const message = await imCall<MessageItem>(IMMethods.CreateFileMessageByURL, {
+    filePath: '',
+    FilePath: '',
+    fileName,
+    FileName: fileName,
+    uuid,
+    UUID: uuid,
+    sourceUrl: uploaded.url,
+    SourceUrl: uploaded.url,
+    fileSize: uploaded.size,
+    FileSize: uploaded.size,
+    fileType: contentType,
+    FileType: contentType,
+  })
+  return sendCreatedMessage(
+    target,
+    ensureFileSourceUrl(message, uploaded.url, fileName, uploaded.size),
+    { alreadyUploaded: true },
+  )
+}
+
+async function sendFullPathFileMessage(
+  target: IMTarget,
+  fullPath: string,
+  fileName: string,
+): Promise<MessageItem> {
+  let message: MessageItem
+  try {
+    message = await imCall<MessageItem>(IMMethods.CreateFileMessageFromFullPath, fullPath, fileName)
+  } catch {
+    message = await imCall<MessageItem>(IMMethods.CreateFileMessageFromFullPath, {
+      filePath: fullPath,
+      fileName,
     })
   }
-  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
+  return sendCreatedMessage(target, message)
+}
+
+function ensureFileSourceUrl(
+  message: MessageItem,
+  url: string,
+  fileName: string,
+  fileSize: number,
+): MessageItem {
+  if (fileSourceUrlOf(message)) return message
+  return {
+    ...message,
+    fileElem: {
+      ...(message.fileElem || {}),
+      fileName,
+      sourceUrl: url,
+      fileSize,
+    },
+  }
 }
 
 /** 图片 URL 直发（收藏的图片 / 已上传图片不再二次上传） */
@@ -1994,6 +2121,17 @@ function pickQuotedNickname(quoted: MessageItem): string {
   return pickString(obj, ['senderNickname', 'SenderNickname', 'senderNickName'])
 }
 
+/** App 原生桥文件字段可能是 fileElem.sourceUrl，也可能是 FileElem.SourceUrl。 */
+function fileSourceUrlOf(item: MessageItem): string {
+  const raw = item as MessageItem & { FileElem?: Record<string, unknown> }
+  const elem = (item.fileElem || raw.FileElem) as Record<string, unknown> | undefined
+  if (elem && typeof elem === 'object') {
+    const url = pickString(elem, ['sourceUrl', 'SourceUrl', 'url', 'Url'])
+    if (url) return url
+  }
+  return typeof item.content === 'string' && /^https?:\/\//i.test(item.content) ? item.content : ''
+}
+
 function extractContent(item: MessageItem): string {
   switch (Number(item.contentType)) {
     case MessageType.TextMessage:
@@ -2018,7 +2156,7 @@ function extractContent(item: MessageItem): string {
       })
     }
     case MessageType.FileMessage:
-      return item.fileElem?.sourceUrl || ''
+      return fileSourceUrlOf(item)
     case MessageType.VideoMessage: {
       const merged = parseVideoMeta(item)
       const fromJson = parseVideoMeta(item.content)
