@@ -222,35 +222,6 @@ func (h *IMHandler) ReportSendFailure(c *gin.Context) {
 	response.OK(c, gin.H{"ok": true})
 }
 
-// recallErrorStatus 撤回错误 → HTTP 状态码。文案统一取 service.RecallFailureMessage，
-// 单条与批量两个接口共用，避免两处漂移。
-func recallErrorStatus(err error) int {
-	switch {
-	case errors.Is(err, service.ErrIMInvalidRecallRequest),
-		errors.Is(err, service.ErrIMUnsupportedMessage):
-		return http.StatusBadRequest
-	case errors.Is(err, service.ErrIMRecallForbidden):
-		return http.StatusForbidden
-	case errors.Is(err, service.ErrIMPeerNotFound),
-		errors.Is(err, service.ErrIMGroupNotFound),
-		errors.Is(err, service.ErrIMMessageNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, service.ErrIMRecallExpired),
-		errors.Is(err, service.ErrIMRecallConflict):
-		return http.StatusConflict
-	case errors.Is(err, service.ErrIMUnavailable), errors.Is(err, im.ErrUnavailable):
-		return http.StatusServiceUnavailable
-	case errors.Is(err, service.ErrIMRecallUpstream):
-		return http.StatusBadGateway
-	default:
-		return http.StatusInternalServerError
-	}
-}
-
-func writeRecallError(c *gin.Context, err error) {
-	response.Fail(c, recallErrorStatus(err), service.RecallFailureMessage(err))
-}
-
 func (h *IMHandler) RecallMessage(c *gin.Context) {
 	var req models.RecallMessageRequest
 	if err := bindBusinessJSON(c, &req); err != nil {
@@ -259,23 +230,30 @@ func (h *IMHandler) RecallMessage(c *gin.Context) {
 	}
 	result, err := h.Service.RecallMessage(c.Request.Context(), middleware.UserID(c), req)
 	if err != nil {
-		writeRecallError(c, err)
-		return
-	}
-	response.OK(c, result)
-}
-
-// RecallMessages 批量撤回同一会话下的多条消息（群主/管理员清理刷屏、广告用）。
-// 单条失败不中断整批，逐条结果在结果的 succeeded / failed 里，HTTP 仍是 200。
-func (h *IMHandler) RecallMessages(c *gin.Context) {
-	var req models.RecallMessagesRequest
-	if err := bindBusinessJSON(c, &req); err != nil {
-		response.Fail(c, http.StatusBadRequest, "请求体格式错误")
-		return
-	}
-	result, err := h.Service.RecallMessages(c.Request.Context(), middleware.UserID(c), req)
-	if err != nil {
-		writeRecallError(c, err)
+		switch {
+		case errors.Is(err, service.ErrIMInvalidRecallRequest):
+			response.Fail(c, http.StatusBadRequest, "撤回参数错误")
+		case errors.Is(err, service.ErrIMUnsupportedMessage):
+			response.Fail(c, http.StatusBadRequest, "该消息类型不允许撤回")
+		case errors.Is(err, service.ErrIMRecallForbidden):
+			response.Fail(c, http.StatusForbidden, "无权撤回该消息")
+		case errors.Is(err, service.ErrIMPeerNotFound):
+			response.Fail(c, http.StatusNotFound, "对方用户不存在，无法撤回")
+		case errors.Is(err, service.ErrIMGroupNotFound):
+			response.Fail(c, http.StatusNotFound, "群不存在，无法撤回")
+		case errors.Is(err, service.ErrIMMessageNotFound):
+			response.Fail(c, http.StatusNotFound, "消息不存在或消息标识不匹配")
+		case errors.Is(err, service.ErrIMRecallExpired):
+			response.Fail(c, http.StatusConflict, "消息已超过撤回时间")
+		case errors.Is(err, service.ErrIMRecallConflict):
+			response.Fail(c, http.StatusConflict, "该消息正在撤回，请稍后重试")
+		case errors.Is(err, service.ErrIMUnavailable), errors.Is(err, im.ErrUnavailable):
+			response.Fail(c, http.StatusServiceUnavailable, "OpenIM 服务不可用")
+		case errors.Is(err, service.ErrIMRecallUpstream):
+			response.Fail(c, http.StatusBadGateway, "OpenIM 撤回失败")
+		default:
+			response.Fail(c, http.StatusInternalServerError, "消息撤回处理失败")
+		}
 		return
 	}
 	response.OK(c, result)
