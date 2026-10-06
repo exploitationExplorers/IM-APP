@@ -123,8 +123,9 @@ export function useChatMessageActions(opts: {
     const canManage = canActOnTarget(message)
     const items: MessageMenuItem[] = []
 
-    // 参考站顺序：转发|引用 → 复制|收藏 → 置顶|检举 → @TA|禁言 → 删除|多选
-    if (mine && canRevoke(message)) {
+    // 参考站顺序：转发|引用 → 复制|收藏 → 置顶|检举 → @TA|禁言 → 撤回|删除|多选
+    // 自己的消息谁都能撤，超 2 分钟由后端拒绝。别人的消息只有群主/管理员能撤，且没有时间窗。
+    if (canRevoke(message)) {
       items.push({ key: 'revoke', label: '撤回' })
     }
     items.push({ key: 'forward', label: '转发' }, { key: 'quote', label: '引用' })
@@ -351,21 +352,51 @@ export function useChatMessageActions(opts: {
     })
   }
 
-  async function revoke(message: ChatMessage) {
+  /** 群主/管理员可以撤回别人的消息，服务端不限时间。普通成员多选仍走本地删除。 */
+  const canRevokeOthers = computed(
+    () =>
+      opts.chatType.value === 'group' &&
+      (opts.myRole.value === 'owner' || opts.myRole.value === 'admin'),
+  )
+
+  async function revokeMessages(messages: ChatMessage[]) {
+    const targets = messages.filter((message) => canRevoke(message))
+    if (!targets.length) {
+      uni.showToast({ title: '没有可撤回的消息', icon: 'none' })
+      return
+    }
     let reason: string | undefined
-    if (!opts.isMine(message)) {
+    if (targets.some((message) => !opts.isMine(message))) {
       const input = await promptRevokeReason()
       if (input === null) return
       reason = input
     }
-    try {
-      await chatStore.recall(opts.conversationId.value, message.id, {
-        peerId: opts.businessId.value || undefined,
-        reason,
-      })
-    } catch (e) {
-      uni.showToast({ title: (e as Error).message || '撤回失败', icon: 'none' })
+    let failed = 0
+    for (const message of targets) {
+      try {
+        await chatStore.recall(opts.conversationId.value, message.id, {
+          peerId: opts.businessId.value || undefined,
+          reason: opts.isMine(message) ? undefined : reason,
+        })
+      } catch (e) {
+        failed += 1
+        if (targets.length === 1) {
+          uni.showToast({ title: (e as Error).message || '撤回失败', icon: 'none' })
+          return
+        }
+      }
     }
+    if (selecting.value) cancelSelect()
+    if (failed > 0) {
+      uni.showToast({
+        title: `已撤回 ${targets.length - failed} 条，${failed} 条失败`,
+        icon: 'none',
+      })
+    }
+  }
+
+  async function revoke(message: ChatMessage) {
+    await revokeMessages([message])
   }
 
   function startQuote(message: ChatMessage) {
@@ -566,6 +597,11 @@ export function useChatMessageActions(opts: {
     void deleteMessages(selectedMessages())
   }
 
+  function onSelectRevoke() {
+    const others = selectedMessages().filter((message) => !opts.isMine(message))
+    void revokeMessages(others)
+  }
+
   async function forwardMessages(messages: ChatMessage[]) {
     goForward(messages)
   }
@@ -598,8 +634,10 @@ export function useChatMessageActions(opts: {
     onMenuSelect,
     toggleSelect,
     cancelSelect,
+    canRevokeOthers,
     onSelectForward,
     onSelectDelete,
+    onSelectRevoke,
     forwardMessages,
     saveVideoMessage,
     clearQuote,

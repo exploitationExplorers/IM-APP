@@ -1917,9 +1917,11 @@ function pickFavorite() {
       <ImMessageSelectBar
         :count="actions.selectedCount.value"
         :mode="actions.selectMode.value"
+        :show-revoke="actions.canRevokeOthers.value"
         @cancel="actions.cancelSelect"
         @forward="actions.onSelectForward"
         @remove="actions.onSelectDelete"
+        @revoke="actions.onSelectRevoke"
       />
     </view>
     <view v-else class="composer safe-bottom">

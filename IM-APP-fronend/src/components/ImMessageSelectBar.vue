@@ -2,12 +2,15 @@
 defineProps<{
   count: number
   mode: 'forward' | 'multi'
+  /** 群主/管理员多选时可以撤回别人的消息，对全群生效 */
+  showRevoke?: boolean
 }>()
 
 const emit = defineEmits<{
   cancel: []
   forward: []
   remove: []
+  revoke: []
 }>()
 </script>
 
@@ -16,6 +19,14 @@ const emit = defineEmits<{
     <view class="btn ghost" @click="emit('cancel')">取消</view>
     <view class="btn primary" :class="{ disabled: count === 0 }" @click="emit('forward')">
       转发({{ count }})
+    </view>
+    <view
+      v-if="mode === 'multi' && showRevoke"
+      class="btn danger"
+      :class="{ disabled: count === 0 }"
+      @click="emit('revoke')"
+    >
+      撤回({{ count }})
     </view>
     <view
       v-if="mode === 'multi'"
