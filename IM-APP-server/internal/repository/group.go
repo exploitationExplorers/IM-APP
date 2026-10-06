@@ -1006,6 +1006,11 @@ var ErrGroupFull = errors.New("group member limit reached")
 
 var ErrGroupNotFound = errors.New("group not found")
 
+// ErrPurgeTargetNotFound 表示要清理消息的目标不在业务 users 表里。
+// group_message_purges.user_id 有 users 外键，OpenIM-only 的发送者写不进去，
+// 需要单独区分出来，前端提示改用多选撤回。
+var ErrPurgeTargetNotFound = errors.New("message purge target not found in business users")
+
 func (r *GroupRepo) EnsureQRCode(ctx context.Context, groupID, uid string) (models.GroupQRCodeResult, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -1626,6 +1631,52 @@ func (r *GroupRepo) RemoveMember(ctx context.Context, groupID, uid, targetID str
 		return ErrForbidden
 	}
 	return r.removeMembership(ctx, groupID, targetID, "kick", uid, purgeMessages)
+}
+
+// UpsertMessagePurge 只写「该成员在群内的消息已被清理」的水位，与 removeMembership
+// 里那条写入同源（水位之前的消息所有客户端一律隐藏）。区别是这里**不要求目标当前
+// 是群成员** —— 炸群人员退群后，管理员仍要能一键清掉该成员发过的广告，这是唯一缺口。
+//
+// 刻意不删 group_members、不发群成员变更事件：目标可能早就不在群里，再发一次
+// 「成员离开」等于把该成员重复踢一遍。
+func (r *GroupRepo) UpsertMessagePurge(ctx context.Context, groupID, operatorID, targetID string) (time.Time, error) {
+	if _, err := uuid.Parse(targetID); err != nil {
+		return time.Time{}, ErrInvalidGroupOperation
+	}
+	actorRole, err := r.memberRole(ctx, groupID, operatorID)
+	if err != nil {
+		return time.Time{}, ErrForbidden
+	}
+	if actorRole != "owner" && actorRole != "admin" {
+		return time.Time{}, ErrForbidden
+	}
+	// 目标还在群里时按管控矩阵收敛（与 RemoveMember 一致）；已退群的放行。
+	if targetRole, err := r.memberRole(ctx, groupID, targetID); err == nil {
+		if targetRole == "owner" {
+			return time.Time{}, ErrForbidden
+		}
+		if actorRole == "admin" && targetRole == "admin" {
+			return time.Time{}, ErrForbidden
+		}
+	}
+	// group_message_purges.user_id 有 users 外键，先确认目标在业务库，
+	// 否则会拿到一句没法定位的 FK 约束错误。
+	var exists bool
+	if err := r.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1::uuid)`, targetID).Scan(&exists); err != nil {
+		return time.Time{}, err
+	}
+	if !exists {
+		return time.Time{}, ErrPurgeTargetNotFound
+	}
+	// 重复清理把水位往后推：该成员被重新拉进群又发了消息，再清一次要盖住后一段。
+	var purgedAt time.Time
+	if err := r.DB.QueryRow(ctx, `
+		INSERT INTO group_message_purges (group_id, user_id) VALUES ($1::uuid, $2::uuid)
+		ON CONFLICT (group_id, user_id) DO UPDATE SET purged_at = NOW()
+		RETURNING purged_at`, groupID, targetID).Scan(&purgedAt); err != nil {
+		return time.Time{}, err
+	}
+	return purgedAt, nil
 }
 
 // MessagePurges 返回群内被「移除并删除消息」清理过的成员及其水位时间。

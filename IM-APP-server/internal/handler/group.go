@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"im-app-server/internal/middleware"
@@ -463,6 +464,37 @@ func (h *GroupHandler) MessagePurges(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": items})
+}
+
+// PurgeMemberMessages 记录「清理该成员在本群的全部消息」的水位：水位之前该成员发的
+// 消息所有客户端一律隐藏。与「移除该成员并删除消息」用的是同一套水位，区别是目标
+// 可以已经退群（炸群人员发完广告就跑的场景）。
+func (h *GroupHandler) PurgeMemberMessages(c *gin.Context) {
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	if err := bindBusinessJSON(c, &req); err != nil || strings.TrimSpace(req.UserID) == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	purgedAt, err := h.Svc.PurgeMemberMessages(
+		c.Request.Context(), c.Param("id"), middleware.UserID(c), strings.TrimSpace(req.UserID))
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, "无权清理该成员的消息")
+		case errors.Is(err, repository.ErrPurgeTargetNotFound):
+			response.Fail(c, http.StatusBadRequest, "该用户不在用户库，无法整体清理，请改用多选撤回")
+		case errors.Is(err, repository.ErrInvalidGroupOperation):
+			response.Fail(c, http.StatusBadRequest, "参数错误")
+		case errors.Is(err, repository.ErrGroupNotFound):
+			response.Fail(c, http.StatusNotFound, "群不存在")
+		default:
+			response.Fail(c, http.StatusInternalServerError, "清理失败")
+		}
+		return
+	}
+	response.OK(c, gin.H{"ok": true, "purgedAt": purgedAt})
 }
 
 func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {

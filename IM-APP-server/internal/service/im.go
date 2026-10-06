@@ -670,6 +670,162 @@ func (s *IMService) ReportSendFailure(ctx context.Context, userID string, req mo
 	})
 }
 
+// 批量撤回的规模与并发上限：一次最多 100 条（与客户端多选上限对齐），单批最多 4 条
+// 同时在途 —— 每条都要走一次 OpenIM revoke，串行太慢、全并发又容易压垮上游。
+const (
+	maxBatchRecallSize        = 100
+	maxBatchRecallConcurrency = 4
+	batchRecallTimeout        = 45 * time.Second
+)
+
+// recallContext 一次撤回请求内可复用的解析结果：peer / 群 / 会话 / 操作者角色对同一个
+// peer 恒定，批量撤回时不必每条消息重查一遍 —— resolveGroupConversationID 内含 1-2 次
+// OpenIM GetConversations HTTP 往返，批量 N 条时这才是真正拖慢请求的开销。
+type recallContext struct {
+	peerType        string
+	peerID          string // 归一化后的 peerID：c2c 为 UUID，group 为数字群号
+	conversationID  string
+	internalGroupID string
+	operatorIMID    string
+	// operatorRole 是操作者在本群的角色。ResolveGroup 与 MessageRecallRoles 都取
+	// group_members.role，同源，所以这里可以直接复用，不必每条再查一次库。
+	operatorRole string
+
+	roleMu          sync.Mutex
+	senderRoleCache map[string]string // 发送者业务 ID → 角色；一批里通常只有一个发送者
+}
+
+func newRecallContext(peerType, peerID string) *recallContext {
+	return &recallContext{peerType: peerType, peerID: peerID, senderRoleCache: map[string]string{}}
+}
+
+// normalizeRecallRequest 去空白并按单条接口的规则校验，保证批量与单条行为一致。
+func normalizeRecallRequest(req models.RecallMessageRequest) (models.RecallMessageRequest, error) {
+	req.PeerType = strings.TrimSpace(req.PeerType)
+	req.PeerID = strings.TrimSpace(req.PeerID)
+	req.ClientMsgID = strings.TrimSpace(req.ClientMsgID)
+	req.Reason = strings.TrimSpace(req.Reason)
+	if (req.PeerType != "c2c" && req.PeerType != "group") || req.PeerID == "" ||
+		req.ClientMsgID == "" || len(req.ClientMsgID) > 128 || req.Seq <= 0 || len([]rune(req.Reason)) > 500 {
+		return req, ErrIMInvalidRecallRequest
+	}
+	return req, nil
+}
+
+// RecallFailureMessage 撤回相关错误 → 面向用户的中文提示。单条接口的错误映射（handler）
+// 与批量接口的逐条失败信息共用这一份文案，避免两处漂移。
+func RecallFailureMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrIMInvalidRecallRequest):
+		return "撤回参数错误"
+	case errors.Is(err, ErrIMUnsupportedMessage):
+		return "该消息类型不允许撤回"
+	case errors.Is(err, ErrIMRecallForbidden):
+		return "无权撤回该消息"
+	case errors.Is(err, ErrIMPeerNotFound):
+		return "对方用户不存在，无法撤回"
+	case errors.Is(err, ErrIMGroupNotFound):
+		return "群不存在，无法撤回"
+	case errors.Is(err, ErrIMMessageNotFound):
+		return "消息不存在或消息标识不匹配"
+	case errors.Is(err, ErrIMRecallExpired):
+		return "消息已超过撤回时间"
+	case errors.Is(err, ErrIMRecallConflict):
+		return "该消息正在撤回，请稍后重试"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "撤回超时，请重试"
+	case errors.Is(err, ErrIMUnavailable), errors.Is(err, im.ErrUnavailable):
+		return "OpenIM 服务不可用"
+	case errors.Is(err, ErrIMRecallUpstream):
+		return "OpenIM 撤回失败"
+	default:
+		return "消息撤回处理失败"
+	}
+}
+
+// resolveRecallContext 解析并校验 peer/群/会话/操作者角色，供一条或多条撤回复用。
+func (s *IMService) resolveRecallContext(ctx context.Context, userID string, req models.RecallMessageRequest) (*recallContext, error) {
+	rc := newRecallContext(req.PeerType, req.PeerID)
+	operatorIMID, err := im.UserIDFromBusinessID(userID)
+	if err != nil {
+		return nil, ErrIMInvalidRecallRequest
+	}
+	rc.operatorIMID = operatorIMID
+	switch req.PeerType {
+	case "c2c":
+		parsedPeerID, err := uuid.Parse(req.PeerID)
+		if err != nil {
+			return nil, ErrIMInvalidRecallRequest
+		}
+		rc.peerID = parsedPeerID.String()
+		peer, err := s.ResolvePeer(ctx, userID, rc.peerID)
+		if err != nil {
+			// 这里查不到的是「对方用户」，不是消息 —— 分开报，否则前端只看到
+			// 一句笼统的「消息不存在」，定位不到是对方账号不在业务库。
+			if errors.Is(err, repository.ErrIMTargetNotFound) {
+				return nil, ErrIMPeerNotFound
+			}
+			return nil, err
+		}
+		if peer.DenyReason == "sender_inactive" {
+			return nil, ErrIMRecallForbidden
+		}
+		rc.conversationID = buildC2CConversationID(operatorIMID, peer.IMUserID)
+		rc.operatorRole = "member"
+	case "group":
+		if strings.IndexFunc(req.PeerID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+			return nil, ErrIMInvalidRecallRequest
+		}
+		internalID, publicID, err := s.Groups.LookupGroupIDs(ctx, req.PeerID)
+		// 查不到的是「群」，同样与消息无关：要么群不在业务库，要么传进来的
+		// peerID 不是该群的 public_id（前端应传数字群 ID，见 chat.ts 的 recall）。
+		if errors.Is(err, pgx.ErrNoRows) || publicID != req.PeerID {
+			return nil, ErrIMGroupNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		group, err := s.Access.ResolveGroup(ctx, userID, internalID)
+		if errors.Is(err, repository.ErrIMTargetNotFound) || group.DenyReason == "group_inactive" {
+			return nil, ErrIMRecallForbidden
+		}
+		if err != nil {
+			return nil, err
+		}
+		groupIMID, err := im.UserIDFromBusinessID(internalID)
+		if err != nil {
+			return nil, ErrIMMessageNotFound
+		}
+		conversationID, err := s.resolveGroupConversationID(ctx, operatorIMID, groupIMID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrIMRecallUpstream, err)
+		}
+		rc.conversationID = conversationID
+		rc.internalGroupID = internalID
+		rc.operatorRole = group.Role
+	}
+	return rc, nil
+}
+
+// recallRoles 取操作者/发送者在本群的角色。同一批里同一发送者只查一次库。
+func (s *IMService) recallRoles(ctx context.Context, rc *recallContext, userID, senderID string) (operatorRole, senderRole string, err error) {
+	rc.roleMu.Lock()
+	cached, ok := rc.senderRoleCache[senderID]
+	rc.roleMu.Unlock()
+	if ok {
+		return rc.operatorRole, cached, nil
+	}
+	operatorRole, senderRole, err = s.Groups.MessageRecallRoles(ctx, rc.internalGroupID, userID, senderID)
+	if err != nil {
+		return "", "", err
+	}
+	rc.roleMu.Lock()
+	rc.senderRoleCache[senderID] = senderRole
+	rc.roleMu.Unlock()
+	return operatorRole, senderRole, nil
+}
+
+// RecallMessage 撤回单条消息：解析一次上下文后交给 recallOne。
 func (s *IMService) RecallMessage(ctx context.Context, userID string, req models.RecallMessageRequest) (models.MessageRecallResult, error) {
 	result := models.MessageRecallResult{
 		PeerType: req.PeerType, PeerID: req.PeerID, ClientMsgID: req.ClientMsgID,
@@ -678,80 +834,30 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 	if s.Client == nil || !s.Client.Available() {
 		return result, ErrIMUnavailable
 	}
-	req.PeerType = strings.TrimSpace(req.PeerType)
-	req.PeerID = strings.TrimSpace(req.PeerID)
-	req.ClientMsgID = strings.TrimSpace(req.ClientMsgID)
-	req.Reason = strings.TrimSpace(req.Reason)
-	result.PeerType, result.PeerID, result.ClientMsgID = req.PeerType, req.PeerID, req.ClientMsgID
-	if (req.PeerType != "c2c" && req.PeerType != "group") || req.PeerID == "" ||
-		req.ClientMsgID == "" || len(req.ClientMsgID) > 128 || req.Seq <= 0 || len([]rune(req.Reason)) > 500 {
-		return result, ErrIMInvalidRecallRequest
-	}
-
-	operatorIMID, err := im.UserIDFromBusinessID(userID)
-	if err != nil {
-		return result, ErrIMInvalidRecallRequest
-	}
-	var conversationID, internalGroupID, operatorRole string
-	switch req.PeerType {
-	case "c2c":
-		parsedPeerID, err := uuid.Parse(req.PeerID)
-		if err != nil {
-			return result, ErrIMInvalidRecallRequest
-		}
-		req.PeerID = parsedPeerID.String()
-		result.PeerID = req.PeerID
-		peer, err := s.ResolvePeer(ctx, userID, req.PeerID)
-		if err != nil {
-			// 这里查不到的是「对方用户」，不是消息 —— 分开报，否则前端只看到
-			// 一句笼统的「消息不存在」，定位不到是对方账号不在业务库。
-			if errors.Is(err, repository.ErrIMTargetNotFound) {
-				return result, ErrIMPeerNotFound
-			}
-			return result, err
-		}
-		if peer.DenyReason == "sender_inactive" {
-			return result, ErrIMRecallForbidden
-		}
-		conversationID = buildC2CConversationID(operatorIMID, peer.IMUserID)
-		operatorRole = "member"
-	case "group":
-		if strings.IndexFunc(req.PeerID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-			return result, ErrIMInvalidRecallRequest
-		}
-		internalID, publicID, err := s.Groups.LookupGroupIDs(ctx, req.PeerID)
-		// 查不到的是「群」，同样与消息无关：要么群不在业务库，要么传进来的
-		// peerID 不是该群的 public_id（前端应传数字群 ID，见 chat.ts 的 recall）。
-		if errors.Is(err, pgx.ErrNoRows) || publicID != req.PeerID {
-			return result, ErrIMGroupNotFound
-		}
-		if err != nil {
-			return result, err
-		}
-		group, err := s.Access.ResolveGroup(ctx, userID, internalID)
-		if errors.Is(err, repository.ErrIMTargetNotFound) || group.DenyReason == "group_inactive" {
-			return result, ErrIMRecallForbidden
-		}
-		if err != nil {
-			return result, err
-		}
-		groupIMID, err := im.UserIDFromBusinessID(internalID)
-		if err != nil {
-			return result, ErrIMMessageNotFound
-		}
-		conversationID, err = s.resolveGroupConversationID(ctx, operatorIMID, groupIMID)
-		if err != nil {
-			return result, fmt.Errorf("%w: %v", ErrIMRecallUpstream, err)
-		}
-		internalGroupID = internalID
-		operatorRole = group.Role
-	}
-
-	message, conversationID, seq, err := s.loadRecallTarget(ctx, operatorIMID, conversationID, req.ClientMsgID, req.Seq)
+	normalized, err := normalizeRecallRequest(req)
 	if err != nil {
 		return result, err
 	}
-	req.Seq = seq
+	result.PeerType, result.PeerID, result.ClientMsgID = normalized.PeerType, normalized.PeerID, normalized.ClientMsgID
+	rc, err := s.resolveRecallContext(ctx, userID, normalized)
+	if err != nil {
+		return result, err
+	}
+	result.PeerID = rc.peerID
+	return s.recallOne(ctx, rc, userID, normalized.ClientMsgID, normalized.Seq, normalized.Reason)
+}
+
+// recallOne 撤回单条消息。rc 可在一批消息间复用；但 senderRole 必须逐条判定，不能
+// 在一批里固化成单值 —— 混选多个发送者时（群主可撤管理员、管理员不可）结论不同。
+func (s *IMService) recallOne(ctx context.Context, rc *recallContext, userID, clientMsgID string, seq int64, reason string) (models.MessageRecallResult, error) {
+	result := models.MessageRecallResult{
+		PeerType: rc.peerType, PeerID: rc.peerID, ClientMsgID: clientMsgID,
+		Seq: seq, Status: "recalled",
+	}
+	message, conversationID, seq, err := s.loadRecallTarget(ctx, rc.operatorIMID, rc.conversationID, clientMsgID, seq)
+	if err != nil {
+		return result, err
+	}
 	result.Seq = seq
 	if message.ContentType >= 1000 || message.SenderIMID == s.Config.AdminUser {
 		return result, ErrIMUnsupportedMessage
@@ -760,9 +866,9 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 	if err != nil {
 		return result, ErrIMUnsupportedMessage
 	}
-	senderRole := "member"
-	if req.PeerType == "group" {
-		operatorRole, senderRole, err = s.Groups.MessageRecallRoles(ctx, internalGroupID, userID, senderID)
+	operatorRole, senderRole := rc.operatorRole, "member"
+	if rc.peerType == "group" {
+		operatorRole, senderRole, err = s.recallRoles(ctx, rc, userID, senderID)
 		if err != nil {
 			if errors.Is(err, repository.ErrForbidden) {
 				return result, ErrIMRecallForbidden
@@ -774,13 +880,13 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 	if windowSeconds <= 0 {
 		windowSeconds = 120
 	}
-	if err := validateRecallPermission(req.PeerType, userID == senderID, operatorRole, senderRole,
-		req.Reason, message.SendTime, time.Now(), time.Duration(windowSeconds)*time.Second); err != nil {
+	if err := validateRecallPermission(rc.peerType, userID == senderID, operatorRole, senderRole,
+		reason, message.SendTime, time.Now(), time.Duration(windowSeconds)*time.Second); err != nil {
 		return result, err
 	}
 
-	reservation, err := s.Access.ReserveMessageRecall(ctx, conversationID, req.Seq, req.ClientMsgID,
-		req.PeerType, req.PeerID, message.SenderIMID, userID, operatorIMID, operatorRole, req.Reason)
+	reservation, err := s.Access.ReserveMessageRecall(ctx, conversationID, seq, clientMsgID,
+		rc.peerType, rc.peerID, message.SenderIMID, userID, rc.operatorIMID, operatorRole, reason)
 	if err != nil {
 		if errors.Is(err, repository.ErrIMRecallInProgress) {
 			return result, ErrIMRecallConflict
@@ -797,7 +903,7 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 		return result, nil
 	}
 
-	alreadyRecalled, err := s.Client.RevokeMessage(ctx, operatorIMID, conversationID, req.Seq)
+	alreadyRecalled, err := s.Client.RevokeMessage(ctx, rc.operatorIMID, conversationID, seq)
 	if err != nil {
 		_ = s.Access.FailMessageRecall(ctx, reservation.ID, err.Error())
 		var apiErr *im.APIError
@@ -812,6 +918,91 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 	}
 	result.AlreadyRecalled = alreadyRecalled
 	result.RecalledAt = recalledAt
+	return result, nil
+}
+
+// RecallMessages 批量撤回同一 peer 下的多条消息。单条失败不中断整批，逐条结果落在
+// Succeeded / Failed 里（HTTP 仍是 200）；只有整个 peer 的上下文解析失败（参数不合法、
+// 群不可用、操作者已不在群）才整体报错。
+func (s *IMService) RecallMessages(ctx context.Context, userID string, req models.RecallMessagesRequest) (models.RecallMessagesResult, error) {
+	req.PeerType = strings.TrimSpace(req.PeerType)
+	req.PeerID = strings.TrimSpace(req.PeerID)
+	req.Reason = strings.TrimSpace(req.Reason)
+	result := models.RecallMessagesResult{
+		PeerType:  req.PeerType,
+		PeerID:    req.PeerID,
+		Succeeded: []string{},
+		Failed:    []models.RecallMessageFailure{},
+	}
+	if s.Client == nil || !s.Client.Available() {
+		return result, ErrIMUnavailable
+	}
+	if (req.PeerType != "c2c" && req.PeerType != "group") || req.PeerID == "" || len(req.Messages) == 0 {
+		return result, ErrIMInvalidRecallRequest
+	}
+	if len(req.Messages) > maxBatchRecallSize {
+		return result, ErrIMInvalidRecallRequest
+	}
+
+	// 逐条按单条接口同样的规则归一化；批内重复的 clientMsgId 去重 —— 重复提交会撞
+	// ReserveMessageRecall 的 ErrIMRecallConflict。
+	items := make([]models.RecallMessageRequest, 0, len(req.Messages))
+	seen := make(map[string]struct{}, len(req.Messages))
+	for _, item := range req.Messages {
+		normalized, err := normalizeRecallRequest(models.RecallMessageRequest{
+			PeerType:    req.PeerType,
+			PeerID:      req.PeerID,
+			ClientMsgID: item.ClientMsgID,
+			Seq:         item.Seq,
+			Reason:      req.Reason,
+		})
+		if err != nil {
+			return result, err
+		}
+		if _, dup := seen[normalized.ClientMsgID]; dup {
+			continue
+		}
+		seen[normalized.ClientMsgID] = struct{}{}
+		items = append(items, normalized)
+	}
+	result.Total = len(items)
+	if result.Total == 0 {
+		return result, nil
+	}
+
+	rc, err := s.resolveRecallContext(ctx, userID, items[0])
+	if err != nil {
+		return result, err
+	}
+	result.PeerID = rc.peerID
+
+	batchCtx, cancel := context.WithTimeout(ctx, batchRecallTimeout)
+	defer cancel()
+
+	outcomes := make([]error, len(items))
+	sem := make(chan struct{}, maxBatchRecallConcurrency)
+	var wg sync.WaitGroup
+	for i := range items {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			_, outcomes[i] = s.recallOne(batchCtx, rc, userID, items[i].ClientMsgID, items[i].Seq, items[i].Reason)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range outcomes {
+		if err == nil {
+			result.Succeeded = append(result.Succeeded, items[i].ClientMsgID)
+			continue
+		}
+		result.Failed = append(result.Failed, models.RecallMessageFailure{
+			ClientMsgID: items[i].ClientMsgID,
+			Message:     RecallFailureMessage(err),
+		})
+	}
 	return result, nil
 }
 
