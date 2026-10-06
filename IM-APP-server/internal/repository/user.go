@@ -94,9 +94,10 @@ var (
 )
 
 // 聊天号字符集一律小写：避免「看着一样、搜不到」的坑，查询侧也按小写比较。
+// 系统发号对齐微信号 wxid_xxxxxxxxxx：chat_ + 14 位字母数字，例如 chat_ez1b8e1bc1dv12。
 const (
-	publicIDLen       = 8
-	publicIDLetters   = "abcdefghijklmnopqrstuvwxyz"
+	publicIDPrefix    = "chat_"
+	publicIDSuffixLen = 14
 	publicIDAlphanums = "abcdefghijklmnopqrstuvwxyz0123456789"
 )
 
@@ -123,34 +124,28 @@ func randomChar(charset string) (byte, error) {
 	}
 }
 
-// randomPublicID 生成 8 位聊天号，首位必须是字母 —— 对齐微信号的习惯，
-// 也免得整串数字看着像手机号。
+// randomPublicID 生成 chat_ 加 14 位随机小写字母数字。
 //
 // 用 crypto/rand 而不是 math/rand：聊天号可以被搜索，不能让人顺着随机种子猜出一批有效号。
 func randomPublicID() (string, error) {
-	out := make([]byte, publicIDLen)
-	first, err := randomChar(publicIDLetters)
-	if err != nil {
-		return "", err
-	}
-	out[0] = first
-	for i := 1; i < publicIDLen; i++ {
+	out := make([]byte, publicIDSuffixLen)
+	for i := 0; i < publicIDSuffixLen; i++ {
 		c, err := randomChar(publicIDAlphanums)
 		if err != nil {
 			return "", err
 		}
 		out[i] = c
 	}
-	return string(out), nil
+	return publicIDPrefix + string(out), nil
 }
 
 // NextPublicID 分配一个未被占用的随机聊天号。
 //
-// 老部署用的是 chat10001 这种「COUNT(*)+10000」递增号：能枚举、还能从号码推出注册顺序，
-// 现在改成随机。已在库里的老号不动（换号走用户在资料页的「改一次」）。
+// 老部署用的是 chat10001 这种「COUNT(*)+10000」递增号：能枚举、还能从号码推出注册顺序。
+// 已在库里的老号不动（换号走用户在资料页的「改一次」）。
 //
 // 唯一性最终由 users.public_id 的 UNIQUE 约束兜底；这里先查一次，
-// 把撞号概率压到 36^8 分之几，重试 8 次仍冲突就直接报错（正常永远走不到）。
+// 重试 8 次仍冲突就直接报错（正常永远走不到）。
 func (r *UserRepo) NextPublicID(ctx context.Context) (string, error) {
 	for attempt := 0; attempt < 8; attempt++ {
 		id, err := randomPublicID()

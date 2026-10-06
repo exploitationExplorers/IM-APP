@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"log"
 	"math/big"
 	"net/http"
@@ -22,6 +22,7 @@ import (
 	"im-app-server/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -503,10 +504,10 @@ func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID s
 	ipKey := "sms:ip:" + ip
 	if cnt, err := cli.Incr(ctx, ipKey).Result(); err == nil {
 		if cnt == 1 {
-		cli.Expire(ctx, ipKey, time.Hour)
+			cli.Expire(ctx, ipKey, time.Hour)
 		}
 		if cnt > 5 {
-		return false
+			return false
 		}
 	}
 
@@ -525,10 +526,10 @@ func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID s
 	dailyKey := "sms:daily:" + e164
 	if cnt, err := cli.Incr(ctx, dailyKey).Result(); err == nil {
 		if cnt == 1 {
-		cli.Expire(ctx, dailyKey, 24*time.Hour)
+			cli.Expire(ctx, dailyKey, 24*time.Hour)
 		}
 		if cnt > 10 {
-		return false
+			return false
 		}
 	}
 	return true
@@ -563,7 +564,7 @@ func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, passwor
 	if password != "" {
 		b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
-		return models.User{}, err
+			return models.User{}, err
 		}
 		hash = string(b)
 		passwordSet = true
@@ -575,15 +576,36 @@ func (h *AuthHandler) createUser(ctx context.Context, e164, countryCode, passwor
 	cc := "+" + dial
 	local := strings.TrimPrefix(strings.TrimPrefix(e164, "+"), dial)
 	nickname := "用户" + local[max(0, len(local)-4):]
+	users := &repository.UserRepo{DB: h.DB}
+	var lastErr error
+	for attempt := 0; attempt < 8; attempt++ {
+		publicID, err := users.NextPublicID(ctx)
+		if err != nil {
+			return models.User{}, err
+		}
+		u, err := h.insertRegisteredUser(ctx, local, cc, e164, hash, nickname, publicID, passwordSet)
+		if err == nil {
+			return u, nil
+		}
+		lastErr = err
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && strings.Contains(pgErr.ConstraintName, "public_id") {
+			continue
+		}
+		return models.User{}, err
+	}
+	if lastErr != nil {
+		return models.User{}, lastErr
+	}
+	return models.User{}, errors.New("分配聊天号失败")
+}
+
+func (h *AuthHandler) insertRegisteredUser(ctx context.Context, local, cc, e164, hash, nickname, publicID string, passwordSet bool) (models.User, error) {
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
 		return models.User{}, err
 	}
 	defer tx.Rollback(ctx)
-
-	var count int
-	_ = tx.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
-	publicID := fmt.Sprintf("chat%d", 10000+count+1)
 
 	var u models.User
 	err = tx.QueryRow(ctx, `
@@ -658,7 +680,7 @@ func digitsOnly(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		if r >= '0' && r <= '9' {
-		b.WriteRune(r)
+			b.WriteRune(r)
 		}
 	}
 	return b.String()

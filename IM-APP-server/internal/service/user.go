@@ -61,8 +61,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, nickname, a
 
 // 聊天号格式（用户手动设置时校验）：6–20 位、首位必须是字母、其余只能是字母或数字。
 //
-// 系统自动分配的号固定 8 位（repository.randomPublicID），这里放宽到 6–20 是让用户
-// 有机会挑一个更好记的，对齐微信号的习惯。一律按小写处理：存小写、搜索也按小写比，
+// 系统自动分配的号是 chat_ 加 14 位随机小写字母数字（repository.randomPublicID）。
+// 用户手动设置放宽到 6–20 位、首位字母、只能字母数字，让人挑一个更好记的。
+// 一律按小写处理：存小写、搜索也按小写比，
 // 免得用户存了 K7m2X9qp 之后自己搜 Km2x9qp 搜不到。
 var publicIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]{5,19}$`)
 

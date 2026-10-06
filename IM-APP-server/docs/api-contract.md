@@ -106,7 +106,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
     "id": "uuid",
     "phoneMasked": "139****0001",
     "countryCode": "+86",
-    "publicId": "chat10005",
+    "publicId": "chat_ez1b8e1bc1dv12",
     "nickname": "用户0001",
     "avatar": "",
     "bio": "",
@@ -115,6 +115,8 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
   }
 }
 ```
+
+`publicId` 由注册时分配：`chat_` 加 14 位随机小写字母和数字。已有的 `chat10001` 这类递增号保持不变。
 
 ### POST `/api/v1/auth/login`
 
@@ -282,7 +284,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
   "expiresAt": "2027-08-12T04:18:22Z",
   "user": {
     "id": "uuid",
-    "publicId": "chat10006",
+    "publicId": "chat_yq9tb0wjevwb22",
     "nickname": "用户0003",
     "avatar": ""
   }
