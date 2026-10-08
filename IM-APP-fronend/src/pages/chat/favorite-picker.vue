@@ -105,6 +105,18 @@ function previewText(item: FavoriteItem) {
   const text = (item.content || '').trim()
   if (!text) return '[空收藏]'
   if (item.type === 'voice') return '[语音]'
+  if (item.type === 'file') {
+    const name = text.startsWith('{')
+      ? (() => {
+          try {
+            return (JSON.parse(text) as { fileName?: string }).fileName || ''
+          } catch {
+            return ''
+          }
+        })()
+      : ''
+    if (name) return name
+  }
   if (item.type === 'file' || item.type === 'video') {
     const seg = text.split(/[\\/]/).filter(Boolean).pop() || ''
     try {

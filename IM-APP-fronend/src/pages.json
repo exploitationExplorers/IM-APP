@@ -6,6 +6,18 @@
     }
   },
   "pages": [
+    // #ifdef H5
+    {
+      "path": "pages/download/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "66聊天 - 共享体育动态的社交聊天APP",
+        "backgroundColor": "#1C41C7",
+        "backgroundColorTop": "#0C1B54",
+        "backgroundColorBottom": "#1C41C7"
+      }
+    },
+    // #endif
     {
       "path": "pages/chat/index",
       "style": {

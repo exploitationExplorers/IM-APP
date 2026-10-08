@@ -345,26 +345,34 @@ export function waitForSync(timeoutMs = 8000): Promise<void> {
 }
 
 /**
- * H5 开发时把 SDK 的 wsAddr 改写成同源的 /openim-ws，交给 Vite 代理转发。
+ * H5 把 SDK 的地址改到当前站点，App 保持服务端下发的绝对地址。
  *
- * 为什么必须这么做：后端下发的 wsAddr 是 `ws://8.154.44.197/openim-ws` 这种绝对地址，
- * 浏览器会**直连**它。本机开着系统代理/VPN 时，裸 IP + 明文 ws:// 是最容易被代理规则
- * 拦掉的组合 —— 表现为控制台报「WebSocket connection failed」，而服务端访问日志里
- * **压根没有这次请求**（对比同 token 的其它请求都是 101，就能确认请求没发出去）。
- * 走 Vite 代理后浏览器只连 localhost（代理通常不接管回环），实际连接由 Node 发起。
+ * 后端下发的是 `http://8.154.44.197/openim-api` 和 `ws://8.154.44.197/openim-ws`。
+ * 线上页面是 https，浏览器会直接拦掉这两种明文地址，SDK 连不上就反复 Login，
+ * 第二次被本地拒成 errCode=10102（login repeat）。这条错误不是 HTTP 失败，所以网络面板全是绿的。
+ * 网站 nginx 已经反代 /openim-api、/openim-ws，这里改成同源 https/wss 即可。
  *
- * ★ 只改 H5 + dev：
- *   - App 原生没有 origin 概念，必须用绝对地址
- *   - 线上 H5 由自己的 nginx 代理 /openim-ws（见 deploy/baota/im-app.conf），也不该改
+ * 开发环境只改 ws：Vite 只代理了 /openim-ws，api 仍直连服务端。
  */
-function devWsAddr(raw: string): string {
+function h5SdkAddr(raw: string, kind: 'api' | 'ws'): string {
   // #ifdef H5
-  if (import.meta.env.DEV && typeof location !== 'undefined' && location.host) {
-    try {
-      const u = new URL(raw)
-      return `${u.protocol === 'wss:' ? 'wss' : 'ws'}://${location.host}${u.pathname}`
-    } catch {
-      return `ws://${location.host}/openim-ws`
+  if (typeof location !== 'undefined' && location.host && raw) {
+    const securePage = location.protocol === 'https:'
+    const rewrite = kind === 'ws' ? securePage || import.meta.env.DEV : securePage
+    if (rewrite) {
+      try {
+        const u = new URL(raw)
+        if (kind === 'ws') {
+          const proto = securePage ? 'wss:' : 'ws:'
+          return `${proto}//${location.host}${u.pathname}${u.search}`
+        }
+        return `${location.origin}${u.pathname}${u.search}`
+      } catch {
+        if (kind === 'ws') {
+          const proto = securePage ? 'wss:' : 'ws:'
+          return `${proto}//${location.host}/openim-ws`
+        }
+      }
     }
   }
   // #endif
@@ -376,8 +384,8 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
     userID: imToken.userId,
     token: imToken.token,
     platformID: imToken.platform,
-    apiAddr: imToken.apiAddr,
-    wsAddr: devWsAddr(imToken.wsAddr),
+    apiAddr: h5SdkAddr(imToken.apiAddr, 'api'),
+    wsAddr: h5SdkAddr(imToken.wsAddr, 'ws'),
     logLevel: H5_SDK_LOG_LEVEL,
   }
   let synced = waitForSync()
@@ -389,16 +397,25 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
       if (msg.includes('10005') || msg.includes('10004')) {
         await new Promise((r) => setTimeout(r, 400))
         synced = waitForSync()
-        await imCall(IMMethods.Login, payload)
+        try {
+          await imCall(IMMethods.Login, payload)
+        } catch (again) {
+          if (!isLoginRepeat(again)) throw again
+        }
       } else {
         throw e
       }
     } else {
       const loggedUserId = await getSdkLoginUserId()
-      if (loggedUserId !== imToken.userId) {
+      // 空 userId 表示上一次 Login 还在进行。10102 的意思就是已经在登，这时再 Logout 会把进行中的登录打失败。
+      if (loggedUserId && loggedUserId !== imToken.userId) {
         await imCall(IMMethods.Logout).catch(() => undefined)
         synced = waitForSync()
-        await imCall(IMMethods.Login, payload)
+        try {
+          await imCall(IMMethods.Login, payload)
+        } catch (again) {
+          if (!isLoginRepeat(again)) throw again
+        }
       }
     }
   }
@@ -1579,11 +1596,11 @@ export async function sendFileMessage(
       }
     }
   }
-  const file = await pathToFile(filePath)
+  const file = await pathToFile(filePath, safeName)
   const url = await uploadFile(file)
   const message = await imCall<MessageItem>(IMMethods.CreateFileMessageByURL, {
     filePath: '',
-    fileName: file.name || safeName,
+    fileName: safeName,
     uuid: IMSDK.uuid(),
     sourceUrl: url,
     fileSize: file.size,
@@ -1709,10 +1726,11 @@ export async function chooseLocalFiles(
   return picked.map((f) => ({ path: f.path, name: f.name || '文件' }))
 }
 
-async function pathToFile(path: string): Promise<File> {
+async function pathToFile(path: string, fileName = ''): Promise<File> {
   const blob = await (await fetch(path)).blob()
   const ext = blob.type.split('/')[1] || 'bin'
-  return new File([blob], `${Date.now()}.${ext}`, { type: blob.type })
+  const name = fileName.trim() || `${Date.now()}.${ext}`
+  return new File([blob], name, { type: blob.type || 'application/octet-stream' })
 }
 
 function imageSizeOf(path: string): Promise<{ width: number; height: number }> {
@@ -2121,15 +2139,28 @@ function pickQuotedNickname(quoted: MessageItem): string {
   return pickString(obj, ['senderNickname', 'SenderNickname', 'senderNickName'])
 }
 
+function fileElemOf(item: MessageItem): Record<string, unknown> | undefined {
+  const raw = item as MessageItem & { FileElem?: Record<string, unknown> }
+  const elem = item.fileElem || raw.FileElem
+  return elem && typeof elem === 'object' ? (elem as Record<string, unknown>) : undefined
+}
+
 /** App 原生桥文件字段可能是 fileElem.sourceUrl，也可能是 FileElem.SourceUrl。 */
 function fileSourceUrlOf(item: MessageItem): string {
-  const raw = item as MessageItem & { FileElem?: Record<string, unknown> }
-  const elem = (item.fileElem || raw.FileElem) as Record<string, unknown> | undefined
-  if (elem && typeof elem === 'object') {
+  const elem = fileElemOf(item)
+  if (elem) {
     const url = pickString(elem, ['sourceUrl', 'SourceUrl', 'url', 'Url'])
     if (url) return url
   }
   return typeof item.content === 'string' && /^https?:\/\//i.test(item.content) ? item.content : ''
+}
+
+function fileDisplayNameOf(item: MessageItem, url: string): string {
+  const elem = fileElemOf(item)
+  const named = elem ? pickString(elem, ['fileName', 'FileName', 'name', 'Name']) : ''
+  if (named) return named
+  const seg = url.split('?')[0]?.split(/[\\/]/).filter(Boolean).pop() || ''
+  return seg || '文件'
 }
 
 function extractContent(item: MessageItem): string {
@@ -2155,8 +2186,11 @@ function extractContent(item: MessageItem): string {
         duration: fromElem.duration || fromJson.duration,
       })
     }
-    case MessageType.FileMessage:
-      return fileSourceUrlOf(item)
+    case MessageType.FileMessage: {
+      const url = fileSourceUrlOf(item)
+      const fileName = fileDisplayNameOf(item, url)
+      return url ? JSON.stringify({ url, fileName }) : fileName
+    }
     case MessageType.VideoMessage: {
       const merged = parseVideoMeta(item)
       const fromJson = parseVideoMeta(item.content)

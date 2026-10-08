@@ -7,7 +7,7 @@ let activeVoiceStopper: (() => void) | null = null
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -270,26 +270,15 @@ const voiceMeta = computed(() => {
   }
 })
 
-/** 文件消息 content：占位阶段是文件名，发送成功后是 URL，都取最后一段当文件名 */
+/** 占位阶段 content 是文件名；发送成功后是 { url, fileName }，旧消息只有 URL。 */
 const fileName = computed(() => {
   if (props.message.type !== 'file') return ''
-  const raw = props.message.content || ''
-  const seg = raw.split(/[\\/]/).filter(Boolean).pop() || '文件'
-  try {
-    return decodeURIComponent(seg)
-  } catch {
-    return seg
-  }
+  return parseFileContent(props.message.content).fileName || '文件'
 })
 
-function copyFileUrl() {
+function openFile() {
   if (props.message.type !== 'file') return
-  const url = props.message.content || ''
-  if (!url.startsWith('http')) return
-  uni.setClipboardData({
-    data: url,
-    success: () => uni.showToast({ title: '文件链接已复制', icon: 'none' }),
-  })
+  void openChatFile(props.message.content)
 }
 
 const timeText = computed(() => formatClock(props.message.createdAt))
@@ -582,7 +571,7 @@ function openLink(url: string) {
         v-else-if="message.type === 'file'"
         class="bubble file-bubble"
         :class="mine ? 'bubble-mine' : 'bubble-other'"
-        @click="copyFileUrl"
+        @click="openFile"
         @longpress="onLongPress"
         @contextmenu.prevent="onContextMenu"
       >

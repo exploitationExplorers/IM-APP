@@ -281,6 +281,137 @@ export function captureVideoPosterFromUrl(url: string): Promise<string> {
   return Promise.resolve('')
 }
 
+export interface FileMeta {
+  url: string
+  fileName: string
+}
+
+function fileNameFromUrl(url: string): string {
+  const path = url.split('?')[0]?.split('#')[0] || ''
+  const seg = path.split(/[\\/]/).filter(Boolean).pop() || ''
+  try {
+    return decodeURIComponent(seg)
+  } catch {
+    return seg
+  }
+}
+
+/** 新消息 content 是 { url, fileName }；旧消息只有 URL，文件名从地址尾巴取。 */
+export function parseFileContent(content: string): FileMeta {
+  const raw = (content || '').trim()
+  if (raw.startsWith('{')) {
+    try {
+      const obj = JSON.parse(raw) as { url?: string; fileName?: string }
+      const url = (obj.url || '').trim()
+      const fileName = (obj.fileName || '').trim() || fileNameFromUrl(url) || '文件'
+      return { url, fileName }
+    } catch {
+      /* 不是 JSON 就按纯地址处理 */
+    }
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    return { url: raw, fileName: fileNameFromUrl(raw) || '文件' }
+  }
+  return { url: '', fileName: raw || '文件' }
+}
+
+const IMAGE_FILE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
+
+function fileExt(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || ''
+  return ext === fileName.toLowerCase() ? '' : ext
+}
+
+function downloadRemoteFile(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    uni.downloadFile({
+      url,
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath) {
+          resolve(res.tempFilePath)
+          return
+        }
+        reject(new Error('文件下载失败'))
+      },
+      fail: (err) => reject(new Error(err.errMsg || '文件下载失败')),
+    })
+  })
+}
+
+/**
+ * 下载结果经常没有后缀，系统不知道用哪个应用打开。
+ * 拷到应用目录并带上原始文件名后再交给 openDocument。
+ */
+function persistNamedFile(tempPath: string, fileName: string): Promise<string> {
+  return new Promise((resolve) => {
+    const io = plus?.io as { resolveLocalFileSystemURL?: Function } | undefined
+    if (!io?.resolveLocalFileSystemURL) {
+      resolve(tempPath)
+      return
+    }
+    const safe = fileName.replace(/[\\/:*?"<>|]/g, '_').slice(-100) || 'file'
+    const src = /^(file|content):\/\//.test(tempPath) ? tempPath : tempPath
+    io.resolveLocalFileSystemURL(
+      src,
+      (entry: { copyTo?: Function }) => {
+        io.resolveLocalFileSystemURL?.(
+          '_doc/',
+          (dir: object) => {
+            if (!entry.copyTo) {
+              resolve(tempPath)
+              return
+            }
+            entry.copyTo(
+              dir,
+              `${Date.now()}_${safe}`,
+              (copied: { fullPath?: string; toLocalURL?: () => string }) => {
+                resolve(copied.fullPath || copied.toLocalURL?.() || tempPath)
+              },
+              () => resolve(tempPath),
+            )
+          },
+          () => resolve(tempPath),
+        )
+      },
+      () => resolve(tempPath),
+    )
+  })
+}
+
+/** App 下载后用系统应用打开；图片直接预览。H5 新开页面。 */
+export async function openChatFile(content: string): Promise<void> {
+  const { url, fileName } = parseFileContent(content)
+  if (!/^https?:\/\//i.test(url)) {
+    uni.showToast({ title: '文件还没发送完成', icon: 'none' })
+    return
+  }
+  if (IMAGE_FILE_EXTS.has(fileExt(fileName))) {
+    uni.previewImage({ urls: [url], current: url })
+    return
+  }
+  if (uni.getSystemInfoSync().uniPlatform === 'web') {
+    window.open(url, '_blank')
+    return
+  }
+  uni.showLoading({ title: '正在打开', mask: true })
+  try {
+    const temp = await downloadRemoteFile(url)
+    const local = await persistNamedFile(temp, fileName)
+    await new Promise<void>((resolve, reject) => {
+      uni.openDocument({
+        filePath: local,
+        showMenu: true,
+        success: () => resolve(),
+        fail: (err) => reject(new Error(err.errMsg || '无法打开该文件')),
+      })
+    })
+  } catch (error) {
+    uni.showToast({ title: (error as Error).message || '无法打开该文件', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
+}
+
 /** App：把远程视频下到临时路径，供 OpenIM getVideoCover 取帧。 */
 export function downloadRemoteVideoForCover(url: string): Promise<string> {
   if (!url) return Promise.resolve('')
