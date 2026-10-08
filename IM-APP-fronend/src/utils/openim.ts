@@ -379,6 +379,61 @@ function h5SdkAddr(raw: string, kind: 'api' | 'ws'): string {
   return raw
 }
 
+/**
+ * 图片/视频分片上传的签名地址是 http://8.154.44.197/openim/...。
+ * https 页面里浏览器会直接拦截这种明文请求，网络面板里只看到一串哈希名的红请求，接口本身没有 4xx。
+ * 改到当前站点的 /openim/，由网站 nginx 再带回 8.154.44.197（Host 仍是这个 IP，签名才对得上）。
+ * App 不走浏览器，不安装这个改写。
+ */
+function rewriteH5StorageUrl(raw: string): string {
+  // #ifdef H5
+  if (typeof location !== 'undefined' && location.host && raw) {
+    try {
+      const url = new URL(raw, location.href)
+      if ((url.protocol === 'http:' || url.protocol === 'ws:') && url.host !== location.host) {
+        const path = url.pathname
+        if (
+          path.startsWith('/openim/') ||
+          path.startsWith('/object/') ||
+          path.startsWith('/minio/') ||
+          path.startsWith('/openim-api/') ||
+          path.startsWith('/openim-ws')
+        ) {
+          const proto =
+            url.protocol === 'ws:' ? (location.protocol === 'https:' ? 'wss:' : 'ws:') : location.protocol
+          return `${proto}//${location.host}${url.pathname}${url.search}`
+        }
+      }
+    } catch {
+      return raw
+    }
+  }
+  // #endif
+  return raw
+}
+
+function installH5StorageProxy(): void {
+  // #ifdef H5
+  if (typeof window === 'undefined' || typeof window.fetch !== 'function') return
+  const host = window as Window & { __imH5StorageProxy?: boolean }
+  if (host.__imH5StorageProxy) return
+  host.__imH5StorageProxy = true
+  const rawFetch = window.fetch.bind(window)
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    if (typeof input === 'string' || input instanceof URL) {
+      return rawFetch(rewriteH5StorageUrl(String(input)), init)
+    }
+    if (typeof Request !== 'undefined' && input instanceof Request) {
+      const next = rewriteH5StorageUrl(input.url)
+      if (next !== input.url) return rawFetch(new Request(next, input), init)
+    }
+    return rawFetch(input, init)
+  }
+  // #endif
+}
+
+installH5StorageProxy()
+
 async function loginSdk(imToken: IMTokenResult): Promise<void> {
   const payload = {
     userID: imToken.userId,

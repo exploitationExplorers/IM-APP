@@ -7,7 +7,7 @@ let activeVoiceStopper: (() => void) | null = null
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -36,7 +36,7 @@ watch(
 function sanitizeDisplayUrl(url: string): string {
   const t = (url || '').trim()
   if (!t) return ''
-  if (isRemoteMediaUrl(t) || t.startsWith('blob:') || t.startsWith('/static/')) return t
+  if (isRemoteMediaUrl(t) || t.startsWith('blob:') || t.startsWith('/static/')) return playableMediaUrl(t)
   // H5 浏览器无法加载 App 本地路径
   if (isH5 && looksLikeLocalFilePath(t)) return ''
   return t
@@ -147,13 +147,7 @@ function previewImage() {
   if (props.message.type !== 'image') return
   const current = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
   const raw = props.previewUrls?.length ? props.previewUrls : [props.message.content]
-  const urls = raw
-    .map((url) => {
-      const t = (url || '').trim()
-      if (isRemoteMediaUrl(t) || t.startsWith('blob:')) return t
-      return toPlayableMediaUrl(t)
-    })
-    .filter(Boolean)
+  const urls = raw.map((url) => toPlayableMediaUrl((url || '').trim())).filter(Boolean)
   if (!current || !urls.length) return
   uni.previewImage({ urls, current })
 }
@@ -427,7 +421,7 @@ onUnmounted(() => {
 function toPlayableMediaUrl(path: string): string {
   if (!path) return ''
   if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:')) {
-    return path
+    return playableMediaUrl(path)
   }
   if (isH5) {
     // 浏览器禁止加载 file:// 与设备本地路径，返回空避免控制台报错
@@ -447,7 +441,7 @@ function toPlayableMediaUrl(path: string): string {
 const imageDisplaySrc = computed(() => {
   const raw = (props.message.content || '').trim()
   if (!raw) return ''
-  if (isRemoteMediaUrl(raw) || raw.startsWith('blob:')) return raw
+  if (isRemoteMediaUrl(raw) || raw.startsWith('blob:')) return toPlayableMediaUrl(raw)
   if (isH5) return ''
   return toPlayableMediaUrl(raw)
 })

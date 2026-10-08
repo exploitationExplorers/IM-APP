@@ -6,7 +6,7 @@ import type { MessageItem } from 'openim-uniapp-polyfill'
 import EmptyState from '@/components/EmptyState.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { collectHistoryMessages, resolveGroupConversationID } from '@/utils/openim'
-import { parseVideoMeta } from '@/utils/chatMedia'
+import { parseVideoMeta, playableMediaUrl } from '@/utils/chatMedia'
 
 type MediaTab = 'all' | 'image' | 'video' | 'file'
 
@@ -101,8 +101,10 @@ function toMedia(item: MessageItem): MediaItem | null {
 
 function onPreview(item: MediaItem) {
   if (item.kind === 'image') {
-    const urls = visible.value.filter((row) => row.kind === 'image').map((row) => row.url)
-    uni.previewImage({ current: item.url, urls })
+    const urls = visible.value
+      .filter((row) => row.kind === 'image')
+      .map((row) => playableMediaUrl(row.url))
+    uni.previewImage({ current: playableMediaUrl(item.url), urls })
     return
   }
   if (item.kind === 'video' && item.url) {
@@ -139,7 +141,7 @@ function onPreview(item: MediaItem) {
 
     <view v-if="tab !== 'file'" class="grid">
       <view v-for="item in visible" :key="item.id" class="cell" @click="onPreview(item)">
-        <image class="thumb" :src="item.thumb || item.url" mode="aspectFill" />
+        <image class="thumb" :src="playableMediaUrl(item.thumb || item.url)" mode="aspectFill" />
         <view v-if="item.kind === 'video'" class="play">▶</view>
       </view>
     </view>

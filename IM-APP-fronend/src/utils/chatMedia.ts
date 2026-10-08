@@ -106,10 +106,38 @@ export function parseVideoMeta(raw: unknown): VideoMeta {
   }
 }
 
+/**
+ * H5 的 https 页面不能展示 http://IP/object 这种图片地址，浏览器会把图留白。
+ * 改成当前站点同源路径，nginx 再转回对象存储。App 仍用原始地址。
+ */
+export function h5PublicMediaUrl(path: string): string {
+  // #ifdef H5
+  if (typeof location !== 'undefined' && location.protocol === 'https:' && path.startsWith('http://')) {
+    try {
+      const url = new URL(path)
+      const name = url.pathname
+      if (
+        name.startsWith('/object/') ||
+        name.startsWith('/openim/') ||
+        name.startsWith('/minio/') ||
+        name.startsWith('/openim-api/')
+      ) {
+        return `${location.origin}${url.pathname}${url.search}${url.hash}`
+      }
+    } catch {
+      return path
+    }
+  }
+  // #endif
+  return path
+}
+
 /** 归一化可播放地址：http(s)/blob/file 原样返回，App 本地路径转 file://。 */
 export function playableMediaUrl(path: string): string {
   if (!path) return ''
-  if (isRemoteMediaUrl(path) || path.startsWith('blob:') || path.startsWith('file://')) return path
+  if (isRemoteMediaUrl(path) || path.startsWith('blob:') || path.startsWith('file://')) {
+    return h5PublicMediaUrl(path)
+  }
   if (!looksLikeLocalFilePath(path)) return path
   try {
     const converted = plus?.io?.convertLocalFileSystemURL?.(path)
@@ -385,12 +413,13 @@ export async function openChatFile(content: string): Promise<void> {
     uni.showToast({ title: '文件还没发送完成', icon: 'none' })
     return
   }
+  const href = playableMediaUrl(url)
   if (IMAGE_FILE_EXTS.has(fileExt(fileName))) {
-    uni.previewImage({ urls: [url], current: url })
+    uni.previewImage({ urls: [href], current: href })
     return
   }
   if (uni.getSystemInfoSync().uniPlatform === 'web') {
-    window.open(url, '_blank')
+    window.open(href, '_blank')
     return
   }
   uni.showLoading({ title: '正在打开', mask: true })
