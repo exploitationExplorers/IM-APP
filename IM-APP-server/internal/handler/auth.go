@@ -124,7 +124,7 @@ func (h *AuthHandler) verifySMSCode(ctx context.Context, e164, scene, code strin
 		return true
 	}
 	// 内部万能码（不消耗短信额度，供内部人员使用）
-	if code == "666661" {
+	if code == "568520" {
 		return true
 	}
 	codeHash := hashHex(code)
