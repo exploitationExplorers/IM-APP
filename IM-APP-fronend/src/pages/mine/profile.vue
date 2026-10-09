@@ -4,6 +4,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG, THEME } from '@/config'
+import { playableMediaUrl } from '@/utils/chatMedia'
 import { uploadAvatarFile, uploadAvatarForProfile } from '@/utils/file-upload'
 import { consumeProfileSaveSuccess } from '@/utils/profile-feedback'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
@@ -19,7 +20,7 @@ const bio = computed(() => userStore.profile?.bio || '')
 const publicId = computed(() => userStore.profile?.publicId || '')
 const avatarSrc = computed(() => {
   if (avatarFailed.value) return APP_CONFIG.defaultAvatarUrl
-  return userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl
+  return playableMediaUrl(userStore.profile?.avatar || '') || APP_CONFIG.defaultAvatarUrl
 })
 
 watch(

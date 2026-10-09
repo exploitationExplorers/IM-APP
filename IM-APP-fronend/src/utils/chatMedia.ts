@@ -107,7 +107,7 @@ export function parseVideoMeta(raw: unknown): VideoMeta {
 }
 
 /**
- * H5 的 https 页面不能展示 http://IP/object 这种图片地址，浏览器会把图留白。
+ * H5 的 https 页面不能展示或上传 http://IP/minio、/object 这种地址，浏览器会当混合内容拦掉。
  * 改成当前站点同源路径，nginx 再转回对象存储。App 仍用原始地址。
  */
 export function h5PublicMediaUrl(path: string): string {
@@ -146,6 +146,63 @@ export function playableMediaUrl(path: string): string {
     /* H5 无 plus */
   }
   return path.startsWith('/') ? `file://${path}` : path
+}
+
+/** 把样式里的 http 对象存储地址换成当前站点，uni-image 的头像是 background-image 不是 img */
+function rewriteCssMediaUrls(css: string): string {
+  if (!css || !css.includes('http://')) return css
+  return css.replace(/url\(\s*(['"]?)(http:\/\/[^)'"\s]+)\1\s*\)/gi, (full, quote, raw) => {
+    const next = h5PublicMediaUrl(raw)
+    return next === raw ? full : `url(${quote}${next}${quote})`
+  })
+}
+
+function wrapCssSetter(key: 'cssText' | 'backgroundImage'): void {
+  const desc = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, key)
+  if (!desc?.set || !desc.get) return
+  const nativeSet = desc.set
+  const nativeGet = desc.get
+  Object.defineProperty(CSSStyleDeclaration.prototype, key, {
+    configurable: true,
+    enumerable: desc.enumerable ?? true,
+    get() {
+      return nativeGet.call(this)
+    },
+    set(value: string) {
+      nativeSet.call(this, rewriteCssMediaUrls(String(value ?? '')))
+    },
+  })
+}
+
+/** https 页面里图片地址改成同源。uni-image 用 background-image 显示，只改 img.src 不够 */
+export function installH5MediaProxy(): void {
+  // #ifdef H5
+  if (typeof window === 'undefined') return
+  const flag = window as Window & { __imH5ImageProxy?: boolean }
+  if (flag.__imH5ImageProxy) return
+  flag.__imH5ImageProxy = true
+  if (typeof HTMLImageElement !== 'undefined') {
+    const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')
+    if (desc?.set && desc.get) {
+      const nativeSet = desc.set
+      const nativeGet = desc.get
+      Object.defineProperty(HTMLImageElement.prototype, 'src', {
+        configurable: true,
+        enumerable: desc.enumerable ?? true,
+        get() {
+          return nativeGet.call(this)
+        },
+        set(value: string) {
+          nativeSet.call(this, h5PublicMediaUrl(String(value ?? '')))
+        },
+      })
+    }
+  }
+  if (typeof CSSStyleDeclaration !== 'undefined') {
+    wrapCssSetter('cssText')
+    wrapCssSetter('backgroundImage')
+  }
+  // #endif
 }
 
 /** 气泡封面：远程图、blob、以及本机截图路径可展示；视频地址不能当 <image> 用。 */

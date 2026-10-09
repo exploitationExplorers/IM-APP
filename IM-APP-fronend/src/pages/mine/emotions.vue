@@ -8,6 +8,7 @@ import {
   type StickerItem,
 } from '@/api/sticker'
 import ImNavBar from '@/components/ImNavBar.vue'
+import { playableMediaUrl } from '@/utils/chatMedia'
 import { uploadSticker } from '@/utils/file-upload'
 import { safeBack } from '@/utils/nav'
 
@@ -194,7 +195,7 @@ onShow(() => {
           class="emotion-item"
           @click="onEmotionClick(item)"
         >
-          <image class="emotion-img" :src="item.url" mode="aspectFill" />
+          <image class="emotion-img" :src="playableMediaUrl(item.url)" mode="aspectFill" />
           <view v-if="isEditMode" class="checkbox-wrap">
             <view class="checkbox" :class="{ checked: selectedIds.includes(item.id) }">
               <view v-if="selectedIds.includes(item.id)" class="check-mark"></view>

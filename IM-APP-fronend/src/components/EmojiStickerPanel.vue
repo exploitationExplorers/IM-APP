@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { createSticker, fetchStickers, type StickerItem } from '@/api/sticker'
+import { playableMediaUrl } from '@/utils/chatMedia'
 import { uploadSticker } from '@/utils/file-upload'
 
 const emit = defineEmits<{
@@ -137,7 +138,7 @@ function closePanel() {
           class="sticker-item"
           @click="onSelectSticker(item)"
         >
-          <image class="sticker-img" :src="item.url" mode="aspectFill" />
+          <image class="sticker-img" :src="playableMediaUrl(item.url)" mode="aspectFill" />
         </view>
         <view v-if="!loadingStickers && stickers.length === 0" class="sticker-hint" @click="goManageEmotions">
           <text class="hint-text">点击 + 添加表情</text>

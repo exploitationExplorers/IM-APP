@@ -1,5 +1,6 @@
 import { completeUpload, createUploadTask } from '@/api/file'
 import type { UploadPurpose } from '@/types'
+import { h5PublicMediaUrl } from '@/utils/chatMedia'
 
 interface ImageBytes {
   bytes: ArrayBuffer
@@ -183,7 +184,7 @@ async function postBytes(
   const body = new FormData()
   Object.entries(formData).forEach(([key, value]) => body.append(key, value))
   body.append('file', new Blob([bytes], { type: contentType }), fileName)
-  const res = await fetch(formUrl, { method: 'POST', body })
+  const res = await fetch(h5PublicMediaUrl(formUrl), { method: 'POST', body })
   if (!res.ok) throw new Error(`上传失败(${res.status})`)
 }
 

@@ -4,6 +4,7 @@ import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useTabBar } from '@/composables/useTabBar'
 import { APP_CONFIG } from '@/config'
+import { playableMediaUrl } from '@/utils/chatMedia'
 import ImTabBar from '@/components/ImTabBar.vue'
 import ImDesktopSidebar from '@/components/desktop/ImDesktopSidebar.vue'
 import { getStatusBarHeight } from '@/utils/status-bar'
@@ -18,7 +19,7 @@ const heroPadTop = `calc(144rpx + ${statusBarHeight}px)`
 
 const nickname = computed(() => userStore.profile?.nickname || '未登录')
 const avatarSrc = computed(
-  () => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl,
+  () => playableMediaUrl(userStore.profile?.avatar || '') || APP_CONFIG.defaultAvatarUrl,
 )
 
 const menus = [
