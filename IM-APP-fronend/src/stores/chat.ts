@@ -1196,9 +1196,23 @@ export const useChatStore = defineStore('chat', () => {
 
   function replaceMessage(conversationId: string, tempId: string, message: ChatMessage) {
     const list = messagesMap.value[conversationId] || []
+    // 自己发的消息有时先被 OnRecvNewMessage 插进列表，占位再换成同一条 clientMsgID，就会出现两条。
+    // 撤回按这个 id 命中，所以两条会一起撤掉。
+    let replaced = false
+    const next: ChatMessage[] = []
+    for (const m of list) {
+      if (m.id === message.id && m.id !== tempId) continue
+      if (m.id === tempId) {
+        next.push(message)
+        replaced = true
+        continue
+      }
+      next.push(m)
+    }
+    if (!replaced && !next.some((m) => m.id === message.id)) next.push(message)
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: list.map((m) => (m.id === tempId ? message : m)),
+      [conversationId]: next,
     }
   }
 

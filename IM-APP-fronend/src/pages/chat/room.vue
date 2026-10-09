@@ -2298,7 +2298,7 @@ function pickFavorite() {
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #f5f5f5;
+  background: #f0f1f4;
   overflow: hidden;
   position: relative;
 }
@@ -2471,6 +2471,12 @@ function pickFavorite() {
   flex: 1;
   height: 0;
   padding-bottom: 16rpx;
+  background: #f0f1f4;
+}
+
+.msg-list :deep(.uni-scroll-view),
+.msg-list :deep(.uni-scroll-view-content) {
+  background: #f0f1f4;
 }
 
 .jump-bottom {
