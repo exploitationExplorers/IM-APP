@@ -28,7 +28,10 @@ import (
 )
 
 const (
-	accessTokenTTL  = 2 * time.Hour
+	// accessTokenTTL 业务 access token 有效期。
+	// 客户端本来有自动续期（refresh 30 天），但续期依赖 /auth/token/refresh 成功：
+	// 只要那一步失败一次，用户就被登出。拉长到 24 小时可以显著降低对续期的依赖。
+	accessTokenTTL  = 24 * time.Hour
 	refreshTokenTTL = 30 * 24 * time.Hour
 	smsCodeTTL      = 10 * time.Minute
 	smsMaxAttempts  = 5
