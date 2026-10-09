@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"crypto/subtle"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -23,16 +22,12 @@ const maxOpenIMWebhookBodyBytes = 64 << 10
 
 // OpenIM contentType：与 SDK MessageType 对齐
 const (
-	openIMContentPicture = 102
-	openIMContentAtText  = 106
-	openIMContentCard    = 108
+	openIMContentAtText = 106
+	openIMContentCard   = 108
 )
 
 // OpenIM @所有人 占位 userID
 const openIMAtAllTag = "AtAllTag"
-
-// 普通成员群内发图：每分钟最多 10 张；群主/管理员不限
-const groupMemberImageLimitPerMin = 10
 
 type openIMWebhookMessage struct {
 	CallbackCommand string   `json:"callbackCommand"`
@@ -166,7 +161,7 @@ func (h *OpenIMWebhookHandler) BeforeGroup(c *gin.Context) {
 	if h.checkMessageRestriction(c, req, "group", senderID, groupID) {
 		return
 	}
-	if reason := h.checkGroupMessagePolicy(c.Request.Context(), req, group.Role, senderID, groupID); reason != "" {
+	if reason := h.checkGroupMessagePolicy(req, group.Role); reason != "" {
 		h.recordBeforeHookFailure(c.Request.Context(), req, "group", senderID, groupID, reason)
 		c.JSON(http.StatusOK, denyWebhook(reason))
 		return
@@ -174,21 +169,12 @@ func (h *OpenIMWebhookHandler) BeforeGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, allowWebhook())
 }
 
-// checkGroupMessagePolicy 群聊消息策略：禁名片、普通成员发图限流、仅管理员 @所有人
-func (h *OpenIMWebhookHandler) checkGroupMessagePolicy(
-	ctx context.Context, req openIMWebhookMessage, role, senderID, groupID string,
-) string {
+// checkGroupMessagePolicy 群聊消息策略：禁名片、仅管理员 @所有人
+func (h *OpenIMWebhookHandler) checkGroupMessagePolicy(req openIMWebhookMessage, role string) string {
 	isManager := role == "owner" || role == "admin"
 	switch req.ContentType {
 	case openIMContentCard:
 		return "群内不可分享个人名片"
-	case openIMContentPicture:
-		if isManager {
-			return ""
-		}
-		if h.Redis != nil && !h.Redis.AllowIP(ctx, fmt.Sprintf("groupimg:%s:%s", senderID, groupID), groupMemberImageLimitPerMin, time.Minute) {
-			return "普通成员每分钟最多发送10张图片"
-		}
 	case openIMContentAtText:
 		if containsAtAll(req.AtUserList) && !isManager {
 			return "仅群主或管理员可以@所有人"
