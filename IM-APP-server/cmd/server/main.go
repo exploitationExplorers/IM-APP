@@ -107,6 +107,8 @@ func main() {
 
 	groupRepo := &repository.GroupRepo{DB: pool, LegacyChatEnabled: cfg.LegacyChatEnabled}
 	groupRepo.GroupMemberHardLimit = cfg.GroupMemberHardLimit
+	groupRepo.GroupMemberMax = cfg.GroupMemberMax
+	groupRepo.DefaultGroupMaxMembers = cfg.DefaultGroupMaxMembers
 	groupReadCursorRepo := &repository.GroupReadCursorRepo{DB: pool}
 
 	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo}

@@ -19,6 +19,9 @@ type GroupRepo struct {
 	DB                   *pgxpool.Pool
 	LegacyChatEnabled    bool
 	GroupMemberHardLimit int
+	// 非 0 时覆盖管理后台发布的群成员上限，见 config.Config 上同名字段的说明
+	GroupMemberMax         int
+	DefaultGroupMaxMembers int
 }
 
 type publishedGroupLimits struct {
@@ -42,6 +45,14 @@ func (r *GroupRepo) publishedGroupLimits(ctx context.Context, q interface {
 		WHERE status='published' ORDER BY version DESC, id DESC LIMIT 1`).Scan(&raw)
 	if err == nil && raw != "" {
 		_ = json.Unmarshal([]byte(raw), &limits)
+	}
+	// 环境变量覆盖：管理后台没部署时用它把上限钉住。设了就以它为准，
+	// 后面的 clamp 仍然生效（不能超过技术硬上限）。
+	if r.GroupMemberMax > 0 {
+		limits.MaxGroupMembers = r.GroupMemberMax
+	}
+	if r.DefaultGroupMaxMembers > 0 {
+		limits.DefaultGroupMaxMembers = r.DefaultGroupMaxMembers
 	}
 	hard := r.hardGroupLimit()
 	if limits.MaxGroupMembers < 3 || limits.MaxGroupMembers > hard {

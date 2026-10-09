@@ -17,12 +17,21 @@ type Config struct {
 	IMInternalAPIKey     string
 	LegacyChatEnabled    bool
 	GroupMemberHardLimit int
-	SeedDemo             bool
-	Kafka                KafkaConfig
-	Forward              ForwardConfig
-	SMS                  SMSConfig
-	CORSAllowOrigins     []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
-	SMSRate              SMSRateConfig
+	// GroupMemberMax / DefaultGroupMaxMembers 非 0 时，覆盖「管理后台发布的」群成员上限。
+	//
+	// 群的实际上限 = min(groups.max_members, maxGroupMembers, GroupMemberHardLimit)。
+	// 正常情况下 maxGroupMembers / defaultGroupMaxMembers 由管理后台「系统限制」页
+	// 保存并发布（存在 app_config_versions，只认 status='published'）。
+	// 后台没部署、或不想走发布流程时，用这两个环境变量直接把上限钉住；
+	// 设了之后管理后台再改也不影响线上，想交回后台托管就把变量去掉。
+	GroupMemberMax         int
+	DefaultGroupMaxMembers int
+	SeedDemo               bool
+	Kafka                  KafkaConfig
+	Forward                ForwardConfig
+	SMS                    SMSConfig
+	CORSAllowOrigins       []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
+	SMSRate                SMSRateConfig
 }
 
 // SMSRateConfig 设备指纹 + 多维度验证码限流配置
@@ -86,15 +95,17 @@ func Load() Config {
 	loadDotEnv(".env")
 
 	return Config{
-		HTTPAddr:             getenv("HTTP_ADDR", ":8080"),
-		DatabaseURL:          getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
-		JWTSecret:            getenv("JWT_SECRET", "im-local-dev-secret-change-me"),
-		IMInternalAPIKey:     getenv("IM_INTERNAL_API_KEY", ""),
-		LegacyChatEnabled:    getenvBool("LEGACY_CHAT_ENABLED", false),
-		GroupMemberHardLimit: boundedPositiveInt("GROUP_MEMBER_HARD_LIMIT", 4000),
-		SeedDemo:             getenvBool("SEED_DEMO", false),
-		DevSMSCode:           getenv("DEV_SMS_CODE", ""),
-		RedisURL:             getenv("REDIS_URL", ""),
+		HTTPAddr:               getenv("HTTP_ADDR", ":8080"),
+		DatabaseURL:            getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
+		JWTSecret:              getenv("JWT_SECRET", "im-local-dev-secret-change-me"),
+		IMInternalAPIKey:       getenv("IM_INTERNAL_API_KEY", ""),
+		LegacyChatEnabled:      getenvBool("LEGACY_CHAT_ENABLED", false),
+		GroupMemberHardLimit:   boundedPositiveInt("GROUP_MEMBER_HARD_LIMIT", 4000),
+		GroupMemberMax:         optionalPositiveInt("GROUP_MEMBER_MAX"),
+		DefaultGroupMaxMembers: optionalPositiveInt("DEFAULT_GROUP_MAX_MEMBERS"),
+		SeedDemo:               getenvBool("SEED_DEMO", false),
+		DevSMSCode:             getenv("DEV_SMS_CODE", ""),
+		RedisURL:               getenv("REDIS_URL", ""),
 		MinIO: MinIOConfig{
 			Endpoint:   getenv("MINIO_ENDPOINT", ""),
 			AccessKey:  getenv("MINIO_ACCESS_KEY", "minioadmin"),
@@ -152,6 +163,16 @@ func boundedPositiveInt(key string, fallback int) int {
 	n := GetenvInt(key, fallback)
 	if n < 3 {
 		return fallback
+	}
+	return n
+}
+
+// optionalPositiveInt 未设置（或值不合法/小于 3）时返回 0，表示「不覆盖」。
+// 用于那些「设了才生效、不设就走别处的值」的开关型配置。
+func optionalPositiveInt(key string) int {
+	n := GetenvInt(key, 0)
+	if n < 3 {
+		return 0
 	}
 	return n
 }
