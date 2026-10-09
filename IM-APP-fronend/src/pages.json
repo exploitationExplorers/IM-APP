@@ -415,12 +415,14 @@
     {
       "path": "pages/mine/notifications",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "通知设置"
       }
     },
     {
       "path": "pages/mine/chat-settings",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "聊天设置"
       }
     },
@@ -455,6 +457,7 @@
     {
       "path": "pages/mine/privacy",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "隐私"
       }
     },

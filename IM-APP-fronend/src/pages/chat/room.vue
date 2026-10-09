@@ -22,6 +22,7 @@ import { useForwardStore } from '@/stores/forward'
 import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId, isNotInGroupIMError } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
+import { fetchContact } from '@/api/contact'
 import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
 import {
   acceptGroupInvitation,
@@ -117,6 +118,13 @@ let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const inputRef = ref<{ $el?: HTMLElement } | HTMLTextAreaElement | null>(null)
 const scrollInto = ref('')
+/** 用户停在底部时才自动贴底；往上翻历史时来新消息不再拽回去 */
+const stickToBottom = ref(true)
+let msgViewportHeight = 0
+let maxScrollTop = 0
+let ignoreScrollUntil = 0
+const scrollRetryTimers: ReturnType<typeof setTimeout>[] = []
+const friendRemarkMap = ref<Record<string, string>>({})
 const focusedMsgId = ref('')
 const showPlusPanel = ref(false)
 const showEmojiPanel = ref(false)
@@ -238,15 +246,22 @@ function fallbackAvatarOf(message: ChatMessage): string {
   return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
 }
 
+function friendRemarkOf(uid: string): string {
+  const live = contactStore.contacts.find((c) => c.id === uid)?.remark?.trim() || ''
+  return live || friendRemarkMap.value[uid] || ''
+}
+
 function nicknameOf(message: ChatMessage): string {
   if (chatType.value !== 'group' || message.senderId === myId.value) return ''
   const uid = businessUserIdFromIM(message.senderId)
   if (!uid) return message.senderNickname || ''
+  const friendRemark = friendRemarkOf(uid)
+  if (friendRemark) return friendRemark
   const mr = memberRemarkMap.value[uid]
   if (mr) return mr
   if (message.senderNickname) return message.senderNickname
   const contact = contactStore.contacts.find((c) => c.id === uid)
-  return contact?.remark?.trim() || contact?.nickname || ''
+  return contact?.nickname || ''
 }
 
 /**
@@ -473,9 +488,16 @@ onShow(() => {
     startGroupReadPolling()
   }
   if (chatType.value === 'private') refreshPrivateTitle()
-  if (!forwardStore.consumeSucceeded()) return
-  actions.cancelSelect()
-  successVisible.value = true
+  nextTick(() => measureMsgList())
+  if (forwardStore.consumeSucceeded()) {
+    actions.cancelSelect()
+    successVisible.value = true
+    return
+  }
+  // 转发页点返回/取消后，选择态和引用不能继续占着输入栏
+  if (actions.selecting.value && actions.selectMode.value === 'forward' && forwardStore.messageIds.length === 0) {
+    actions.cancelSelect()
+  }
 })
 
 onHide(() => {
@@ -486,6 +508,7 @@ onHide(() => {
 
 onUnload(() => {
   if (typeof window !== 'undefined') window.removeEventListener('paste', onWindowPaste)
+  clearScrollRetries()
   stopGroupReadPolling()
   if (groupReadReportTimer) clearTimeout(groupReadReportTimer)
   groupReadReportTimer = null
@@ -684,14 +707,15 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
       const found = await chatStore.locateMessage(conv.id, focusId)
       await nextTick()
       if (found) {
+        stickToBottom.value = false
         scrollToMessage(focusId)
       } else {
         uni.showToast({ title: '未找到该条聊天记录', icon: 'none' })
-        scrollToBottom()
+        scrollToBottom(true)
       }
     } else {
       await nextTick()
-      scrollToBottom()
+      scrollToBottom(true)
     }
   } catch (e) {
     console.error('[chat] 打开会话失败', e)
@@ -700,6 +724,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 }
 
 async function onScrollToUpper() {
+  stickToBottom.value = false
   if (!conversationId.value) return
   const anchor = messages.value[0]?.id
   const added = await chatStore.loadMoreMessages(conversationId.value)
@@ -730,30 +755,91 @@ function cleanupBrowserRecorder() {
   recorder = null
 }
 
+function clearScrollRetries() {
+  scrollRetryTimers.forEach((id) => clearTimeout(id))
+  scrollRetryTimers.length = 0
+}
+
+function measureMsgList() {
+  // H5 的 createSelectorQuery 在 onShow 时页面节点还是 null，exec 会读 parentElement 报错
+  if (typeof document !== 'undefined') {
+    const el = document.querySelector('.room .msg-list') as HTMLElement | null
+    const node = (el?.querySelector('.uni-scroll-view') as HTMLElement | null) || el
+    const height = node?.clientHeight || 0
+    if (height > 0) {
+      msgViewportHeight = height
+      return
+    }
+  }
+  try {
+    uni.createSelectorQuery()
+      .select('.msg-list')
+      .boundingClientRect((rect) => {
+        const box = (Array.isArray(rect) ? rect[0] : rect) as { height?: number } | null
+        if (box?.height && box.height > 0) msgViewportHeight = box.height
+      })
+      .exec()
+  } catch {
+    /* 页面还没挂上 */
+  }
+}
+
 function scrollToAnchorBottom() {
-  // 先清空再指向锚点：连续发送/连续收消息时值相同不会重复触发滚动，跨一帧重设才能每次都滚
+  // 先清空再指向锚点：连续发送/连续收消息时值相同不会重复触发滚动，跨一帧重设才能每次都滚。
+  // 滚完立刻清掉，否则输入框长高时 scroll-into-view 还指着底部，往上翻会被拽回去。
+  ignoreScrollUntil = Date.now() + 180
   scrollInto.value = ''
   nextTick(() => {
     scrollInto.value = 'bottom-anchor'
+    setTimeout(() => {
+      if (scrollInto.value === 'bottom-anchor') scrollInto.value = ''
+    }, 120)
   })
 }
 
-function scrollToBottom() {
+function scrollToBottom(force = false) {
+  if (!force && !stickToBottom.value) return
+  stickToBottom.value = true
+  clearScrollRetries()
   scrollToAnchorBottom()
   const last = messages.value[messages.value.length - 1]
   // 图片等消息在资源加载完成后才撑开高度（占位换真实 URL 还会二次加载），
-  // 分多个时段重贴底部；直设 scrollTop 是绝对定位，重复校准幂等无副作用
+  // 分多个时段重贴底部；用户中途往上翻则不再追
   if (last && last.type !== 'text' && last.type !== 'system') {
-    ;[150, 400, 900].forEach((delay) => setTimeout(scrollToAnchorBottom, delay))
+    for (const delay of [150, 400, 900]) {
+      scrollRetryTimers.push(setTimeout(() => {
+        if (stickToBottom.value) scrollToAnchorBottom()
+      }, delay))
+    }
   }
+}
+
+function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
+  if (Date.now() < ignoreScrollUntil) return
+  const top = Number(e.detail?.scrollTop || 0)
+  const height = Number(e.detail?.scrollHeight || 0)
+  if (msgViewportHeight <= 0) measureMsgList()
+  if (msgViewportHeight > 0 && height > 0) {
+    stickToBottom.value = height - top - msgViewportHeight < 160
+  } else if (top + 80 < maxScrollTop) {
+    stickToBottom.value = false
+  } else if (top >= maxScrollTop - 8) {
+    stickToBottom.value = true
+  }
+  if (top > maxScrollTop) maxScrollTop = top
+}
+
+function jumpToBottom() {
+  maxScrollTop = 0
+  scrollToBottom(true)
 }
 
 watch(
   () => messages.value[messages.value.length - 1]?.id,
   (id, prev) => {
-    if (id && id !== prev) {
-      nextTick(() => scrollToBottom())
-    }
+    if (!id || id === prev) return
+    if (!stickToBottom.value) return
+    nextTick(() => scrollToBottom())
   },
 )
 
@@ -785,7 +871,7 @@ async function onSend() {
       await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
     }
     await nextTick()
-    scrollToBottom()
+    scrollToBottom(true)
   } catch (e) {
     // 发送失败（如被对方拉黑、网络异常）：消息气泡已由 store 标为 failed（红色感叹号），
     // 用户点感叹号可重发，这里不弹 toast 打扰，避免出现 blocked 等原始错误提示。
@@ -794,7 +880,26 @@ async function onSend() {
       return
     }
     console.warn('[room] 发送失败', (e as Error)?.message)
+  } finally {
+    focusComposer()
   }
+}
+
+function focusComposer() {
+  if (!isH5ComposerPlatform()) return
+  const apply = () => {
+    const el = getComposerTextareaEl()
+    if (!el) return
+    el.focus()
+    const len = el.value.length
+    try {
+      el.setSelectionRange(len, len)
+    } catch {
+      /* 部分内嵌 textarea 不允许设置选区 */
+    }
+  }
+  nextTick(apply)
+  setTimeout(apply, 30)
 }
 
 function isH5ComposerPlatform(): boolean {
@@ -877,7 +982,7 @@ async function sendPastedImages(files: File[]) {
       await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
       sent = true
       await nextTick()
-      scrollToBottom()
+      scrollToBottom(true)
     } catch {
       failed++
     } finally {
@@ -892,6 +997,7 @@ async function sendPastedImages(files: File[]) {
 
 onUnmounted(() => {
   if (typeof window !== 'undefined') window.removeEventListener('paste', onWindowPaste)
+  clearScrollRetries()
 })
 
 /** 回车发送开启时：Shift+Enter 换行（uni-app send 模式会拦截 Enter） */
@@ -970,7 +1076,7 @@ async function doRetry(m: ChatMessage) {
     }
     await chatStore.removeLocal(conversationId.value, m.id).catch(() => undefined)
     await nextTick()
-    scrollToBottom()
+    scrollToBottom(true)
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '重发失败', icon: 'none' })
   }
@@ -1026,6 +1132,7 @@ async function loadGroupMembersMeta(groupId: string): Promise<void> {
     memberAvatarMap.value = avatars
     memberRemarkMap.value = remarks
     groupMembersForAt.value = members
+    void fillFriendRemarks(members.map((m) => m.id))
   } catch {
     // 成员列表失败不阻断聊天；管控项由后端兜底
   }
@@ -1054,8 +1161,30 @@ function openIMUserIdOf(businessUserId: string): string {
   return businessUserId.replace(/-/g, '').toLowerCase()
 }
 
+async function fillFriendRemarks(userIds: string[]) {
+  const missing = [...new Set(userIds.filter((id) => id && id !== myId.value && !contactStore.contacts.some((c) => c.id === id) && !friendRemarkMap.value[id]))]
+  if (!missing.length) return
+  const found: Record<string, string> = {}
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < missing.length) {
+      const id = missing[cursor]
+      cursor += 1
+      try {
+        const contact = await fetchContact(id)
+        const remark = contact.remark?.trim()
+        if (remark) found[id] = remark
+      } catch {
+        /* 不是好友就没有备注 */
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, missing.length) }, () => worker()))
+  if (Object.keys(found).length) friendRemarkMap.value = { ...friendRemarkMap.value, ...found }
+}
+
 function memberDisplayName(m: GroupMember): string {
-  return m.memberRemark?.trim() || m.groupNickname || m.nickname || '成员'
+  return friendRemarkOf(m.id) || m.memberRemark?.trim() || m.groupNickname || m.nickname || '成员'
 }
 
 const canAtAll = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
@@ -1660,7 +1789,7 @@ async function sendVoiceDraft() {
       imUserId.value || myId.value,
     )
     await nextTick()
-    scrollToBottom()
+    scrollToBottom(true)
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
   }
@@ -1694,7 +1823,7 @@ async function onStickerSelect(url: string) {
   try {
     await chatStore.sendImageUrl(conversationId.value, url, imUserId.value || myId.value)
     await nextTick()
-    scrollToBottom()
+    scrollToBottom(true)
   } catch (e) {
     uni.showToast({
       title: e instanceof Error ? e.message : '发送失败',
@@ -1779,7 +1908,7 @@ function pickImage() {
             try {
               await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
               await nextTick()
-              scrollToBottom()
+              scrollToBottom(true)
             } catch {
               failed++
             }
@@ -1804,7 +1933,7 @@ function pickCamera() {
         try {
           await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
           await nextTick()
-          scrollToBottom()
+          scrollToBottom(true)
         } catch (e) {
           uni.showToast({ title: (e as Error).message, icon: 'none' })
         }
@@ -1823,18 +1952,29 @@ function pickVideo() {
         maxDuration: 60,
         fail: (err) => chooseFailToast(err, '无法选择视频'),
         success: async (res) => {
+          const picked = res as { tempFilePath: string; tempFile?: File; duration?: number; thumbTempFilePath?: string }
+          let path = picked.tempFilePath
+          let ownedBlob = ''
+          if (typeof File !== 'undefined' && picked.tempFile instanceof File) {
+            ownedBlob = URL.createObjectURL(picked.tempFile)
+            path = ownedBlob
+          }
+          let sent = false
           try {
             await chatStore.sendVideo(
               conversationId.value,
-              res.tempFilePath,
+              path,
               imUserId.value || myId.value,
-              Number(res.duration || 0),
-              (res as { thumbTempFilePath?: string }).thumbTempFilePath || '',
+              Number(picked.duration || 0),
+              picked.thumbTempFilePath || '',
             )
+            sent = true
             await nextTick()
-            scrollToBottom()
+            scrollToBottom(true)
           } catch (e) {
             uni.showToast({ title: (e as Error).message || '视频发送失败', icon: 'none' })
+          } finally {
+            if (sent && ownedBlob) URL.revokeObjectURL(ownedBlob)
           }
         },
       })
@@ -1865,7 +2005,7 @@ async function pickFile() {
       try {
         await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
         await nextTick()
-        scrollToBottom()
+        scrollToBottom(true)
       } catch (e) {
         failed++
         failText = (e as Error).message || failText
@@ -1942,6 +2082,7 @@ function pickFavorite() {
       scroll-y
       class="msg-list"
       :scroll-into-view="scrollInto"
+      @scroll="onMsgScroll"
       @scrolltoupper="onScrollToUpper"
     >
       <view
@@ -1980,6 +2121,8 @@ function pickFavorite() {
            滚到垫底的锚点等于滚到真正的底部，保证最新消息完整可见 -->
       <view id="bottom-anchor" class="bottom-anchor"></view>
     </scroll-view>
+
+    <view v-if="!stickToBottom" class="jump-bottom" @click.stop="jumpToBottom">↓</view>
 
     <view v-if="actions.selecting.value" class="composer safe-bottom">
       <ImMessageSelectBar
@@ -2314,6 +2457,24 @@ function pickFavorite() {
   flex: 1;
   height: 0;
   padding-bottom: 16rpx;
+}
+
+.jump-bottom {
+  position: absolute;
+  right: 28rpx;
+  bottom: 168rpx;
+  z-index: 30;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36rpx;
+  line-height: 1;
+  color: #333;
 }
 
 .msg-row {

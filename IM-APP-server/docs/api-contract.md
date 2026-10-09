@@ -116,7 +116,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 }
 ```
 
-`publicId` 由注册时分配：`chat_` 加 14 位随机小写字母和数字。已有的 `chat10001` 这类递增号保持不变。
+`publicId` 由注册时分配：`chat_` 加 14 位随机小写字母和数字。已有的 `chat10001` 这类递增号保持不变。用户后来自己改的聊天号保留大小写（6–20 位、首位字母、其余字母或数字）；搜索和占用判断忽略大小写，`Abc` 与 `abc` 视为同一个号。
 
 ### POST `/api/v1/auth/login`
 

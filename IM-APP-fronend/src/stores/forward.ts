@@ -28,7 +28,14 @@ export const useForwardStore = defineStore('forward', () => {
 
   function start(conversationId: string, ids: string[]) {
     sourceConversationId.value = conversationId
-    messageIds.value = [...new Set(ids)]
+    const seen = new Set<string>()
+    const ordered: string[] = []
+    for (const id of ids) {
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      ordered.push(id)
+    }
+    messageIds.value = ordered
     lastTaskIds.value = []
   }
 

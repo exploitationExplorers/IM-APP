@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import ImNavBar from '@/components/ImNavBar.vue'
 import { useChatSettingsStore } from '@/stores/chatSettings'
+import { backToChatHome } from '@/utils/nav'
 
 const settingsStore = useChatSettingsStore()
 const enterToSend = computed(() => settingsStore.enterToSend)
@@ -39,6 +41,7 @@ function goEmotions() {
 
 <template>
   <view class="page">
+    <ImNavBar title="聊天设置" @back="backToChatHome" />
     <view class="cell">
       <text class="label">回车键送出消息</text>
       <switch :checked="enterToSend" color="#0A2FC2" @change="onEnterChange" style="transform:scale(0.6)" />

@@ -62,14 +62,13 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, nickname, a
 // 聊天号格式（用户手动设置时校验）：6–20 位、首位必须是字母、其余只能是字母或数字。
 //
 // 系统自动分配的号是 chat_ 加 14 位随机小写字母数字（repository.randomPublicID）。
-// 用户手动设置放宽到 6–20 位、首位字母、只能字母数字，让人挑一个更好记的。
-// 一律按小写处理：存小写、搜索也按小写比，
-// 免得用户存了 K7m2X9qp 之后自己搜 Km2x9qp 搜不到。
-var publicIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]{5,19}$`)
+// 用户手动设置放宽到 6–20 位、首位字母、只能字母数字，大小写按输入保留。
+// 占用和搜索按 lower(public_id) 比较，Abc 和 abc 是同一个号。
+var publicIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{5,19}$`)
 
-// NormalizePublicID 归一化并校验用户填的聊天号，返回是否合法。
+// NormalizePublicID 去掉首尾空白并校验用户填的聊天号，大小写原样返回。
 func NormalizePublicID(raw string) (string, bool) {
-	id := strings.ToLower(strings.TrimSpace(raw))
+	id := strings.TrimSpace(raw)
 	return id, publicIDPattern.MatchString(id)
 }
 
@@ -116,9 +115,8 @@ func (s *UserService) UpdatePublicID(ctx context.Context, uid, raw string) (mode
 }
 
 func (s *UserService) SearchByPublicID(ctx context.Context, uid, publicID string) (*models.PublicProfile, error) {
-	// 聊天号一律按小写存储（见 NormalizePublicID），搜索也必须归一化 ——
-	// 否则用户照着名片输入 K7m2X9qp 会搜不到 k7m2x9qp。
-	u, err := s.Users.FindByPublicID(ctx, strings.ToLower(strings.TrimSpace(publicID)))
+	// 库存的是用户输入的大小写，查找在 SQL 里按 lower 比较，这里只去空白。
+	u, err := s.Users.FindByPublicID(ctx, strings.TrimSpace(publicID))
 	if err != nil {
 		return nil, nil
 	}

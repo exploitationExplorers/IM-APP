@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <ImNavBar title="通知设置" @back="backToChatHome" />
     <view class="setting-item">
       <view class="setting-content">
         <text class="setting-title">消息免打扰</text>
@@ -51,7 +52,9 @@
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import ImNavBar from '@/components/ImNavBar.vue'
 import ImSwitch from '@/components/ImSwitch.vue'
+import { backToChatHome } from '@/utils/nav'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { requestNotificationPermission } from '@/utils/notification-permission'
 import { syncPushRegistration, unregisterPushRegistration } from '@/utils/push-register'

@@ -2,6 +2,9 @@ import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import type { ChatMessage, GroupRole } from '@/types'
 import type { MessageMenuItem } from '@/components/ImMessageActionMenu.vue'
 import { createFavorite } from '@/api/favorites'
+import { createSticker } from '@/api/sticker'
+import { playableMediaUrl } from '@/utils/chatMedia'
+import { uploadSticker } from '@/utils/file-upload'
 import { muteGroupMember, removeGroupMember, unmuteGroupMember } from '@/api/group'
 import { MUTE_OPTIONS } from '@/constants/mute'
 import { useChatStore } from '@/stores/chat'
@@ -67,6 +70,7 @@ export function useChatMessageActions(opts: {
   const menuMessage = ref<ChatMessage | null>(null)
   const selecting = ref(false)
   const selectMode = ref<'forward' | 'multi'>('multi')
+  const selectedOrder = ref<string[]>([])
   const selectedIds = ref<Set<string>>(new Set())
   const quote = ref<ChatMessage | null>(null)
   /** 头像长按 @TA 记下被 @ 的人（OpenIM userID + 群昵称），发送时走 AtText */
@@ -130,6 +134,7 @@ export function useChatMessageActions(opts: {
     }
     items.push({ key: 'forward', label: '转发' }, { key: 'quote', label: '引用' })
     if (message.type === 'text') items.push({ key: 'copy', label: '复制' })
+    if (message.type === 'image') items.push({ key: 'sticker', label: '加入表情包' })
     if (message.type === 'video') items.push({ key: 'save', label: '保存视频' })
     items.push({ key: 'favorite', label: '收藏' })
     const pinnedId = chatStore.conversations.find((c) => c.id === opts.conversationId.value)?.pinnedMessage
@@ -173,29 +178,36 @@ export function useChatMessageActions(opts: {
     selectMode.value = mode
     selecting.value = true
     selectedIds.value = new Set([message.id])
+    selectedOrder.value = [message.id]
     closeMenu()
   }
 
   function toggleSelect(message: ChatMessage) {
     if (!selecting.value) return
     const next = new Set(selectedIds.value)
+    const order = selectedOrder.value.filter((id) => id !== message.id)
     if (next.has(message.id)) {
       next.delete(message.id)
     } else {
       // iOS 一次最多转发 99 条：转发模式选满即止；多选模式不限制（批量删除不受影响）
       next.add(message.id)
+      order.push(message.id)
     }
     selectedIds.value = next
+    selectedOrder.value = order
   }
 
   function cancelSelect() {
+    const wasForward = selectMode.value === 'forward'
     selecting.value = false
     selectedIds.value = new Set()
+    selectedOrder.value = []
+    if (wasForward) quote.value = null
   }
 
   function selectedMessages() {
-    const ids = selectedIds.value
-    return opts.visibleMessages.value.filter((m) => ids.has(m.id))
+    const byId = new Map(opts.visibleMessages.value.map((m) => [m.id, m]))
+    return selectedOrder.value.map((id) => byId.get(id)).filter((m): m is ChatMessage => !!m)
   }
 
   function goForward(messages: ChatMessage[]) {
@@ -206,6 +218,69 @@ export function useChatMessageActions(opts: {
       messages.map((m) => m.id),
     )
     uni.navigateTo({ url: '/pages/chat/forward' })
+  }
+
+  function imageUrlOfMessage(message: ChatMessage): string {
+    const raw = (message.content || '').trim()
+    if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:') || raw.startsWith('/')) return raw
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      const keys = ['sourcePicture', 'bigPicture', 'snapshotPicture', 'SourcePicture', 'BigPicture', 'SnapshotPicture']
+      for (const key of keys) {
+        const pic = parsed[key]
+        if (!pic || typeof pic !== 'object') continue
+        const url = String((pic as { url?: string; URL?: string }).url || (pic as { URL?: string }).URL || '')
+        if (url) return url
+      }
+      const direct = String(parsed.url || parsed.URL || '')
+      if (direct) return direct
+    } catch {
+      /* 纯文本地址 */
+    }
+    return ''
+  }
+
+  function isAppPlatform(): boolean {
+    try {
+      return uni.getSystemInfoSync().uniPlatform === 'app'
+    } catch {
+      return false
+    }
+  }
+
+  function downloadToTemp(url: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      uni.downloadFile({
+        url,
+        success: (res) => {
+          if (res.statusCode === 200 && res.tempFilePath) {
+            resolve(res.tempFilePath)
+            return
+          }
+          reject(new Error('下载图片失败'))
+        },
+        fail: () => reject(new Error('下载图片失败')),
+      })
+    })
+  }
+
+  async function addImageSticker(message: ChatMessage) {
+    const url = imageUrlOfMessage(message)
+    if (!url) {
+      uni.showToast({ title: '图片还不能加入表情包', icon: 'none' })
+      return
+    }
+    uni.showLoading({ title: '添加中', mask: true })
+    try {
+      const source = isAppPlatform() ? await downloadToTemp(playableMediaUrl(url)) : playableMediaUrl(url)
+      const fileId = await uploadSticker(source)
+      await createSticker(fileId)
+      uni.hideLoading()
+      uni.showToast({ title: '已加入表情包', icon: 'success' })
+    } catch (e) {
+      uni.hideLoading()
+      uni.showToast({ title: (e as Error).message || '添加失败', icon: 'none' })
+    }
   }
 
   function copyText(message: ChatMessage) {
@@ -530,6 +605,10 @@ export function useChatMessageActions(opts: {
     }
     if (key === 'copy') {
       copyText(message)
+      return
+    }
+    if (key === 'sticker' && message.type === 'image') {
+      await addImageSticker(message)
       return
     }
     if (key === 'save' && message.type === 'video') {

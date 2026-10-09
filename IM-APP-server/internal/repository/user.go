@@ -46,7 +46,7 @@ func (r *UserRepo) FindByPublicID(ctx context.Context, publicID string) (models.
 	err := r.DB.QueryRow(ctx, `
 		SELECT id::text, phone, country_code, COALESCE(public_id,''), password_hash,
 			nickname, avatar, bio, COALESCE(status,'active'), created_at, COALESCE(password_set, false)
-		FROM users WHERE public_id=$1`, publicID,
+		FROM users WHERE lower(public_id)=lower($1)`, publicID,
 	).Scan(&u.ID, &u.Phone, &u.CountryCode, &u.PublicID, &u.PasswordHash,
 		&u.Nickname, &u.Avatar, &u.Bio, &u.Status, &u.CreatedAt, &u.PasswordSet)
 	return u, err
@@ -154,7 +154,7 @@ func (r *UserRepo) NextPublicID(ctx context.Context) (string, error) {
 		}
 		var taken bool
 		if err := r.DB.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM users WHERE public_id=$1)`, id).Scan(&taken); err != nil {
+			`SELECT EXISTS(SELECT 1 FROM users WHERE lower(public_id)=lower($1))`, id).Scan(&taken); err != nil {
 			return "", err
 		}
 		if !taken {
@@ -170,7 +170,7 @@ func (r *UserRepo) PublicIDTaken(ctx context.Context, publicID, excludeUID strin
 	var taken bool
 	err := r.DB.QueryRow(ctx, `
 		SELECT EXISTS(
-			SELECT 1 FROM users WHERE public_id=$1 AND ($2='' OR id<>$2::uuid)
+			SELECT 1 FROM users WHERE lower(public_id)=lower($1) AND ($2='' OR id<>$2::uuid)
 		)`, publicID, excludeUID).Scan(&taken)
 	return taken, err
 }

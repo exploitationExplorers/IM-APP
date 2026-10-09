@@ -2,7 +2,7 @@
 /**
  * 设置聊天号（对齐微信号的习惯：字母+数字、只能改一次）。
  *
- * 格式规则以服务端为准（service.NormalizePublicID）：6-20 位、首位字母、其余只能字母数字。
+ * 格式规则以服务端为准（service.NormalizePublicID）：6-20 位、首位字母、其余只能字母数字，大小写按输入保留。
  * 这里只做即时提示，不拦提交 —— 真按后端规则驳回时，把后端那句话原样报给用户，
  * 免得两边规则不一致时前端把合法输入挡住。
  */
@@ -18,7 +18,7 @@ const userStore = useUserStore()
 
 const CHAT_ID_MIN = 6
 const CHAT_ID_MAX = 20
-const CHAT_ID_RE = /^[a-z][a-z0-9]{5,19}$/
+const CHAT_ID_RE = /^[A-Za-z][A-Za-z0-9]{5,19}$/
 
 const chatId = ref('')
 const originalChatId = ref('')
@@ -26,10 +26,10 @@ const saving = ref(false)
 
 const chatIdCount = computed(() => chatId.value.length)
 /** 只提示、不拦：规则最终由服务端判定 */
-const looksValid = computed(() => CHAT_ID_RE.test(chatId.value.trim().toLowerCase()))
+const looksValid = computed(() => CHAT_ID_RE.test(chatId.value.trim()))
 const canSubmit = computed(() => {
-  const id = chatId.value.trim().toLowerCase()
-  return id.length > 0 && id !== originalChatId.value.trim().toLowerCase()
+  const id = chatId.value.trim()
+  return id.length > 0 && id !== originalChatId.value.trim()
 })
 
 onShow(() => {
@@ -47,8 +47,7 @@ function goBack() {
 
 function onChatIdInput(e: Event) {
   const detail = (e as unknown as { detail?: { value?: string } }).detail
-  // 统一小写：服务端存小写，这里跟着转，避免用户以为大小写有区别
-  chatId.value = (detail?.value || '').toLowerCase().slice(0, CHAT_ID_MAX)
+  chatId.value = (detail?.value || '').slice(0, CHAT_ID_MAX)
 }
 
 function clearChatId() {
@@ -56,7 +55,7 @@ function clearChatId() {
 }
 
 async function onConfirm() {
-  const id = chatId.value.trim().toLowerCase()
+  const id = chatId.value.trim()
   if (!id) {
     uni.showToast({ title: '请输入聊天号', icon: 'none' })
     return
@@ -110,6 +109,7 @@ async function onConfirm() {
 
       <view class="tips">
         <text class="tip-line">· 聊天号是别人搜索你时用的号码，好友看不到你的手机号</text>
+        <text class="tip-line">· 大小写会按输入保留，搜索时不区分大小写</text>
         <text class="tip-line">· 只能修改一次，改完就不能再改了，请谨慎设置</text>
       </view>
     </view>

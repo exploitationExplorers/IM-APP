@@ -1254,22 +1254,45 @@ async function createH5VideoSnapshot(videoFile: File): Promise<VideoSnapshotFile
     video.playsInline = true
     video.setAttribute('playsinline', 'true')
     video.setAttribute('webkit-playsinline', 'true')
-    video.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0'
+    // iOS 把 1px 隐藏视频的解码跳过，videoWidth 一直是 0，封面失败后整条视频发不出去
+    video.style.cssText = 'position:fixed;left:0;top:0;width:320px;height:180px;opacity:0.01;pointer-events:none;z-index:-1'
     video.onerror = () => finish(null)
     video.onloadedmetadata = () => {
-      const duration = Number.isFinite(video.duration) ? video.duration : 0
-      const target = videoSnapshotTime(duration)
-      if (target > 0.01) {
-        video.onseeked = capture
-        try {
-          video.currentTime = target
-        } catch {
-          video.onloadeddata = capture
+      const seekOrCapture = () => {
+        const duration = Number.isFinite(video.duration) ? video.duration : 0
+        const target = videoSnapshotTime(duration)
+        let done = false
+        const once = () => {
+          if (done) return
+          done = true
+          capture()
         }
-      } else if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        capture()
+        if (target > 0.01) {
+          const seekTimer = window.setTimeout(once, 1500)
+          video.onseeked = () => {
+            window.clearTimeout(seekTimer)
+            once()
+          }
+          try {
+            video.currentTime = target
+          } catch {
+            window.clearTimeout(seekTimer)
+            once()
+          }
+        } else if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          once()
+        } else {
+          video.onloadeddata = once
+        }
+      }
+      const played = video.play()
+      if (played && typeof played.then === 'function') {
+        played.then(() => {
+          video.pause()
+          seekOrCapture()
+        }).catch(() => seekOrCapture())
       } else {
-        video.onloadeddata = capture
+        seekOrCapture()
       }
     }
     timer = window.setTimeout(() => finish(null), 10000)
@@ -1281,6 +1304,35 @@ async function createH5VideoSnapshot(videoFile: File): Promise<VideoSnapshotFile
   // #ifndef H5
   return null
   // #endif
+}
+
+/** 浏览器解不出画面时仍给一张封面，避免视频因为缺封面整条发不出去 */
+function createFallbackVideoCover(): Promise<VideoSnapshotFile | null> {
+  if (typeof document === 'undefined') return Promise.resolve(null)
+  const canvas = document.createElement('canvas')
+  canvas.width = 320
+  canvas.height = 180
+  const context = canvas.getContext('2d')
+  if (!context) return Promise.resolve(null)
+  context.fillStyle = '#1c1c1c'
+  context.fillRect(0, 0, 320, 180)
+  return new Promise((resolve) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          resolve(null)
+          return
+        }
+        resolve({
+          file: new File([blob], `video_cover_${Date.now()}.jpg`, { type: 'image/jpeg' }),
+          width: 320,
+          height: 180,
+        })
+      },
+      'image/jpeg',
+      0.8,
+    )
+  })
 }
 
 function persistTempMedia(filePath: string): Promise<string> {
@@ -1407,7 +1459,12 @@ export async function sendVideoMessage(
     }
     return sendCreatedMessage(target, message, { timeoutMs: 180000 })
   }
-  const file = await pathToFile(filePath)
+  const rawFile = await pathToFile(filePath)
+  const file = rawFile.type.startsWith('video/')
+    ? rawFile
+    : new File([rawFile], rawFile.name && rawFile.name.includes('.') ? rawFile.name : `video_${Date.now()}.mp4`, {
+        type: 'video/mp4',
+      })
   let snapshotUrl = ''
   let snapshotSize = 0
   let snapshotWidth = 0
@@ -1439,12 +1496,23 @@ export async function sendVideoMessage(
       devWarn('[video][cover] H5 无法从所选视频提取画面')
     }
   }
+  if (!snapshotUrl) {
+    const fallback = await createFallbackVideoCover()
+    if (fallback) {
+      snapshotUrl = await uploadFile(fallback.file)
+      snapshotSize = fallback.file.size
+      snapshotWidth = fallback.width
+      snapshotHeight = fallback.height
+    }
+  }
   if (!snapshotUrl) throw new Error('无法生成视频封面，请确认浏览器支持该视频格式')
+  const rawType = file.type.toLowerCase()
+  const videoType = rawType.includes('webm') ? 'webm' : rawType.includes('ogg') ? 'ogg' : 'mp4'
   const url = await uploadFile(file)
   const message = await imCall<MessageItem>(IMMethods.CreateVideoMessageByURL, {
     videoPath: '',
     duration: seconds,
-    videoType: file.type || 'mp4',
+    videoType,
     snapshotPath: '',
     videoUUID: IMSDK.uuid(),
     videoUrl: url,

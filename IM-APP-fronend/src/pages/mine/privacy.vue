@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { fetchPrivacySettings, updatePrivacySettings } from '@/api/user'
+import ImNavBar from '@/components/ImNavBar.vue'
+import { backToChatHome } from '@/utils/nav'
 import type { PrivacySettings } from '@/types'
 
 /** 加好友、邀请入群默认都无需验证 */
@@ -73,6 +75,7 @@ function goBlacklist() {
 
 <template>
   <view class="page">
+    <ImNavBar title="隐私" @back="backToChatHome" />
     <view class="cell">
       <text class="label">加我为好友需验证</text>
       <switch :checked="friendVerify" color="#0A2FC2" @change="onFriendVerify" style="transform:scale(0.8)" />

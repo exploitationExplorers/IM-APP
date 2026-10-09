@@ -34,6 +34,7 @@ const statusBarHeight = getStatusBarHeight()
 <style scoped lang="scss">
 .im-nav {
   background: #fff;
+  flex-shrink: 0;
 }
 
 .im-nav-row {
@@ -45,17 +46,20 @@ const statusBarHeight = getStatusBarHeight()
 }
 
 .im-nav-back {
-  width: 72rpx;
-  height: 72rpx;
+  width: 88rpx;
+  height: 88rpx;
+  margin-left: -8rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .im-nav-back-icon {
   width: 44rpx;
   height: 44rpx;
+  pointer-events: none;
 }
 
 .im-nav-title {

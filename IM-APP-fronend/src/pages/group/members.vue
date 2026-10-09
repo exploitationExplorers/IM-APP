@@ -13,12 +13,14 @@ import ImNavBar from '@/components/ImNavBar.vue'
 import { APP_CONFIG } from '@/config'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { MUTE_OPTIONS } from '@/constants/mute'
+import { useContactStore } from '@/stores/contact'
 import { useUserStore } from '@/stores/user'
 import type { GroupInfo, GroupMember, GroupMemberMuteResult } from '@/types'
 
 useAuthGuard()
 
 const userStore = useUserStore()
+const contactStore = useContactStore()
 const groupId = ref('')
 const keyword = ref('')
 const members = ref<GroupMember[]>([])
@@ -35,7 +37,7 @@ const filteredMembers = computed(() => {
   const text = keyword.value.trim().toLowerCase()
   if (!text) return members.value
   return members.value.filter((member) => {
-    const displayName = `${member.memberRemark || ''} ${member.groupNickname || ''} ${member.nickname || ''}`
+    const displayName = `${friendRemark(member)} ${member.memberRemark || ''} ${member.groupNickname || ''} ${member.nickname || ''}`
     return displayName.toLowerCase().includes(text)
   })
 })
@@ -75,8 +77,14 @@ function goInvite() {
   })
 }
 
-/** 群主/管理员名字用群昵称，备注放到身份括号里；普通成员仍优先展示备注 */
+function friendRemark(member: GroupMember) {
+  return contactStore.contacts.find((c) => c.id === member.id)?.remark?.trim() || ''
+}
+
+/** 好友备注优先，和群聊里的名字保持一致 */
 function displayName(member: GroupMember) {
+  const remark = friendRemark(member)
+  if (remark) return remark
   const role = (member.role || '').toLowerCase()
   if (role === 'owner' || role === 'admin') {
     return member.groupNickname || member.nickname || '成员'

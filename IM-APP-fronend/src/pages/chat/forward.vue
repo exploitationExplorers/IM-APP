@@ -426,16 +426,34 @@ function pictureUrlOf(content: unknown): string {
   return /^https?:\/\//i.test(direct) ? direct : ''
 }
 
-/** 少量图片不进排队：直接用已有地址发出去，避免等后台轮询 */
-async function sendPicturesNow(
+function textOfSnapshot(content: unknown): string {
+  if (typeof content === 'string') return content.trim()
+  if (!content || typeof content !== 'object') return ''
+  const obj = content as Record<string, unknown>
+  const value = obj.content ?? obj.text ?? obj.Content
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+/** 少量文字/图片不进排队，按勾选顺序逐条发出，避免后台并发打乱顺序 */
+async function sendDirectNow(
   userIds: string[],
   groupTargets: ForwardTarget[],
   sources: Awaited<ReturnType<typeof buildSources>>,
 ) {
   await ensureIMLogin()
   const senderId = imUserId.value
-  const urls = sources.map((source) => pictureUrlOf(source.snapshot.content))
-  if (urls.some((url) => !url)) throw new Error('图片地址不存在，无法转发')
+  const payloads = sources.map((source) => {
+    if (source.snapshot.contentType === 102) {
+      const url = pictureUrlOf(source.snapshot.content)
+      return url ? { kind: 'image' as const, url } : null
+    }
+    if (source.snapshot.contentType === 101) {
+      const text = textOfSnapshot(source.snapshot.content)
+      return text ? { kind: 'text' as const, text } : null
+    }
+    return null
+  })
+  if (payloads.some((item) => !item)) throw new Error('有消息无法直接转发')
   const jobs: Array<{ type: 'private' | 'group'; businessId: string; conversationId?: string }> = [
     ...userIds.map((businessId) => ({ type: 'private' as const, businessId })),
   ]
@@ -458,8 +476,10 @@ async function sendPicturesNow(
         type: job.type,
         businessId: job.businessId,
       })
-      for (const url of urls) {
-        await chatStore.sendImageUrl(conv.id, url, senderId)
+      for (const item of payloads) {
+        if (!item) continue
+        if (item.kind === 'image') await chatStore.sendImageUrl(conv.id, item.url, senderId)
+        else await chatStore.sendText(conv.id, item.text, senderId)
       }
     }
   }
@@ -489,10 +509,10 @@ async function onSend() {
     const sources = await buildSources()
     const directUserIds = friendPlan?.kind === 'ids' ? friendPlan.userIds : []
     const directCount = directUserIds.length + aliveGroupTargets.length
-    const picturesOnly = sources.every((source) => source.snapshot.contentType === 102)
-    const sendNow = picturesOnly && friendPlan?.kind !== 'all_friends' && friendPlan?.kind !== 'generate' && directCount > 0 && directCount <= 12
+    const directable = sources.every((source) => source.snapshot.contentType === 101 || source.snapshot.contentType === 102)
+    const sendNow = directable && friendPlan?.kind !== 'all_friends' && friendPlan?.kind !== 'generate' && directCount > 0 && directCount <= 12
     if (sendNow) {
-      await sendPicturesNow(directUserIds, aliveGroupTargets, sources)
+      await sendDirectNow(directUserIds, aliveGroupTargets, sources)
     } else {
       const targetGroupIds = await resolveGroupTargetIds(aliveGroupTargets)
       await forwardStore.submitBatch(sources, friendPlan, targetGroupIds)
@@ -522,6 +542,7 @@ function forwardSubmitErrorMessage(e: unknown): string {
 }
 
 function goBack() {
+  forwardStore.clear()
   safeBack('/pages/chat/index')
 }
 </script>

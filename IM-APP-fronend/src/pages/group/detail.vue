@@ -14,7 +14,8 @@ import {
   setConversationRecvOpt,
   resolveGroupConversationID,
 } from '@/utils/openim'
-import { safeBack } from '@/utils/nav'
+import { useContactStore } from '@/stores/contact'
+import { backToChatHome, safeBack } from '@/utils/nav'
 import { APP_CONFIG } from '@/config'
 import { uploadAvatarForProfile } from '@/utils/file-upload'
 import type { GroupJoinMode } from '@/types'
@@ -24,6 +25,7 @@ const PREVIEW_MEMBER_LIMIT = 4
 const groupStore = useGroupStore()
 const chatStore = useChatStore()
 const userStore = useUserStore()
+const contactStore = useContactStore()
 const groupId = ref('')
 const showJoinMode = ref(false)
 const leaving = ref(false)
@@ -80,8 +82,11 @@ const convId = ref('')
 const recvOpt = ref<number>(MessageReceiveOptType.Normal)
 const pinned = ref(false)
 
-function getMemberDisplayName(member: { nickname?: string; groupNickname?: string }) {
-  return member.groupNickname || member.nickname || '成员'
+function getMemberDisplayName(member: { id?: string; nickname?: string; groupNickname?: string }) {
+  const remark = member.id
+    ? contactStore.contacts.find((c) => c.id === member.id)?.remark?.trim()
+    : ''
+  return remark || member.groupNickname || member.nickname || '成员'
 }
 
 function memberPreviewAvatar(avatar: string | undefined) {
@@ -171,7 +176,7 @@ async function onTogglePin(v: boolean) {
 }
 
 function goBack() {
-  safeBack('/pages/chat/index')
+  backToChatHome()
 }
 
 function goToMembers() {
@@ -394,8 +399,9 @@ async function onRemoveDissolved() {
         <text class="dissolved-delete-label">删除该群</text>
       </view>
     </view>
-    <scroll-view v-else scroll-y class="page" :show-scrollbar="false">
+    <template v-else>
     <ImNavBar title="群组详情" @back="goBack" />
+    <scroll-view scroll-y class="page" :show-scrollbar="false">
 
     <view class="card">
       <view class="member-row">
@@ -544,6 +550,7 @@ async function onRemoveDissolved() {
     </view>
 
     </scroll-view>
+    </template>
     <view v-if="showJoinMode" class="sheet-mask" @click="showJoinMode = false">
       <view class="sheet" @click.stop>
         <view class="sheet-item" @click="selectJoinMode('open')">公开群（扫码入群）</view>
@@ -558,6 +565,8 @@ async function onRemoveDissolved() {
 .page-wrap {
   height: 100vh;
   height: 100dvh;
+  display: flex;
+  flex-direction: column;
   background: #f3f4f7;
   overflow: hidden;
 }
@@ -613,7 +622,8 @@ async function onRemoveDissolved() {
 }
 
 .page {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   box-sizing: border-box;
   padding-bottom: calc(48rpx + env(safe-area-inset-bottom));
 }

@@ -7,6 +7,11 @@
  * 修复：栈内还有上一页时正常 navigateBack；否则 reLaunch 到兜底页（默认消息列表），
  * 保证任何入口都不会卡死在返回按钮上。
  */
+/** 设置页一键回到聊天首页，避免在子页面栈里逐层点返回。 */
+export function backToChatHome(): void {
+  uni.switchTab({ url: '/pages/chat/index' })
+}
+
 export function safeBack(fallbackUrl = '/pages/chat/index'): void {
   const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
   if (pages.length > 1) {

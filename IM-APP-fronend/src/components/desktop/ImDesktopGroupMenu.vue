@@ -119,6 +119,8 @@ watch(
 )
 
 function displayName(member: GroupMember) {
+  const remark = contactStore.contacts.find((c) => c.id === member.id)?.remark?.trim()
+  if (remark) return remark
   const role = (member.role || '').toLowerCase()
   if (role === 'owner' || role === 'admin' || role === '100' || role === '60') {
     return member.groupNickname || member.nickname || '成员'
