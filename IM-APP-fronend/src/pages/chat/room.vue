@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import ChatBubble from '@/components/ChatBubble.vue'
 import EmojiStickerPanel from '@/components/EmojiStickerPanel.vue'
@@ -485,6 +485,7 @@ onHide(() => {
 })
 
 onUnload(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('paste', onWindowPaste)
   stopGroupReadPolling()
   if (groupReadReportTimer) clearTimeout(groupReadReportTimer)
   groupReadReportTimer = null
@@ -570,6 +571,9 @@ onLoad(async (query) => {
 })
 
 onMounted(() => {
+  if (typeof window !== 'undefined' && isH5ComposerPlatform()) {
+    window.addEventListener('paste', onWindowPaste)
+  }
   if (!props.embedded || !props.conversationId) return
   void bootstrapRoom({
     conversationId: props.conversationId,
@@ -827,6 +831,68 @@ function onConfirmSend() {
   if (!enterToSend.value) return
   triggerSend()
 }
+
+function composerPasteTarget(target: EventTarget | null): boolean {
+  const el = target instanceof Element ? target : null
+  if (el?.closest('.composer-row .input-wrap')) return true
+  const composer = getComposerTextareaEl(target)
+  return !!composer && (target === composer || document.activeElement === composer)
+}
+
+function clipboardImageFiles(data: DataTransfer | null): File[] {
+  if (!data) return []
+  const files: File[] = []
+  for (const file of Array.from(data.files || [])) {
+    if (file.type.startsWith('image/')) files.push(file)
+  }
+  if (files.length || !data.items) return files
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+    const file = item.getAsFile()
+    if (file) files.push(file)
+  }
+  return files
+}
+
+/** H5/PC：输入框聚焦时粘贴图片，走和相册一样的发送 */
+function onWindowPaste(e: ClipboardEvent) {
+  if (!isH5ComposerPlatform() || composerBlocked.value || voiceMode.value) return
+  if (!composerPasteTarget(e.target)) return
+  const files = clipboardImageFiles(e.clipboardData).slice(0, MAX_PICK_COUNT)
+  if (!files.length) return
+  e.preventDefault()
+  void sendPastedImages(files)
+}
+
+async function sendPastedImages(files: File[]) {
+  if (!conversationId.value) {
+    uni.showToast({ title: '会话未就绪', icon: 'none' })
+    return
+  }
+  let failed = 0
+  for (const file of files) {
+    const path = URL.createObjectURL(file)
+    let sent = false
+    try {
+      await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
+      sent = true
+      await nextTick()
+      scrollToBottom()
+    } catch {
+      failed++
+    } finally {
+      // 失败气泡还指着这块本地图，重发要能再读到
+      if (sent) URL.revokeObjectURL(path)
+    }
+  }
+  if (failed) {
+    uni.showToast({ title: `${failed} 张图片发送失败`, icon: 'none' })
+  }
+}
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('paste', onWindowPaste)
+})
 
 /** 回车发送开启时：Shift+Enter 换行（uni-app send 模式会拦截 Enter） */
 function onComposerKeydown(e: KeyboardEvent) {

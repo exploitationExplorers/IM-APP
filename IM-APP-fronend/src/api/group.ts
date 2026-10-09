@@ -86,6 +86,15 @@ export async function joinGroup(groupId: string): Promise<GroupInfo> {
   return request<GroupInfo>({ url: `/groups/${groupId}/join`, method: 'POST' })
 }
 
+/** 需审核的群：提交入群申请。groupId 为群公开 ID */
+export async function createJoinRequest(groupId: string, remark = ''): Promise<GroupJoinRequestItem> {
+  return request<GroupJoinRequestItem>({
+    url: `/groups/${encodeURIComponent(groupId)}/join-requests`,
+    method: 'POST',
+    data: { remark },
+  })
+}
+
 /** ??????????? POST /groups/settings/update?groupId ???? */
 export async function updateGroupSettings(groupId: string, input: GroupSettingsInput) {
   return request<GroupInfo>({

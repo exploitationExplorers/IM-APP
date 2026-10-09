@@ -18,8 +18,8 @@ import { useDesktopLayout } from '@/composables/useDesktopLayout'
 import { useDesktopListResize } from '@/composables/useDesktopListResize'
 import type { Conversation } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
-import { openQrScanner } from '@/utils/qrcode'
 import { isDissolvedGroupConversationPreview, isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-notification'
+import { setConversationRecvOpt } from '@/utils/openim'
 
 useAuthGuard()
 useTabBar()
@@ -38,6 +38,18 @@ const selectedConv = ref<Conversation | null>(null)
 const filterLabel = computed(() => (filterKey.value === 'unread' ? '未读' : '全部'))
 
 const activeSwipeId = ref<string | null>(null)
+const convMenu = ref<{ item: Conversation; x: number; y: number } | null>(null)
+let convMenuOpenedAt = 0
+
+const convMenuStyle = computed(() => {
+  if (!convMenu.value) return {}
+  return { left: `${convMenu.value.x}px`, top: `${convMenu.value.y}px` }
+})
+
+const convMenuMuted = computed(() => {
+  const opt = convMenu.value?.item.recvMsgOpt
+  return opt === 1 || opt === 2
+})
 
 function onSwipeChange(item: Conversation, open: string) {
   activeSwipeId.value = open === 'right' ? item.id : null
@@ -139,9 +151,9 @@ function go(url: string) {
   uni.navigateTo({ url })
 }
 
-function goScan() {
+function goAddGroup() {
   showAddMenu.value = false
-  openQrScanner()
+  uni.navigateTo({ url: '/pages/contacts/add-group' })
 }
 
 function setFilter(key: 'all' | 'unread') {
@@ -153,6 +165,64 @@ function closeMenus() {
   showAddMenu.value = false
   showFilter.value = false
   activeSwipeId.value = null
+  convMenu.value = null
+}
+
+function onListScroll() {
+  if (convMenu.value) convMenu.value = null
+}
+
+function onConvMenu(payload: { item: Conversation; x: number; y: number }) {
+  showAddMenu.value = false
+  showFilter.value = false
+  const menuW = 168
+  const menuH = 196
+  let x = payload.x
+  let y = payload.y
+  if (typeof window !== 'undefined') {
+    x = Math.min(Math.max(8, x), window.innerWidth - menuW - 8)
+    y = Math.min(Math.max(8, y), window.innerHeight - menuH - 8)
+  }
+  convMenuOpenedAt = Date.now()
+  convMenu.value = { item: payload.item, x, y }
+}
+
+function takeMenuItem(): Conversation | null {
+  if (Date.now() - convMenuOpenedAt < 280) return null
+  const item = convMenu.value?.item || null
+  convMenu.value = null
+  return item
+}
+
+async function onMenuPin() {
+  const item = takeMenuItem()
+  if (!item) return
+  await onTogglePin(item)
+}
+
+async function onMenuMute() {
+  const item = takeMenuItem()
+  if (!item) return
+  const muted = item.recvMsgOpt === 1 || item.recvMsgOpt === 2
+  const opt = muted ? 0 : 2
+  try {
+    await setConversationRecvOpt(item.id, opt)
+    chatStore.patchConversation(item.id, { recvMsgOpt: opt })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '设置失败', icon: 'none' })
+  }
+}
+
+async function onMenuRead() {
+  const item = takeMenuItem()
+  if (!item) return
+  await chatStore.markAsRead(item.id)
+}
+
+async function onMenuDelete() {
+  const item = takeMenuItem()
+  if (!item) return
+  await onHideConversation(item)
 }
 
 function clearSelectedConv() {
@@ -271,7 +341,7 @@ watchEffect(() => {
               <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
               <text>添加朋友</text>
             </view>
-            <view class="popup-item" @click="goScan">
+            <view class="popup-item" @click="goAddGroup">
               <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
               <text>添加群聊</text>
             </view>
@@ -311,14 +381,17 @@ watchEffect(() => {
         refresher-default-style="black"
         :refresher-triggered="refreshing"
         @refresherrefresh="onRefresherRefresh"
+        @scroll="onListScroll"
       >
         <template v-if="isDesktop">
           <ConversationItem
             v-for="item in filtered"
             :key="item.id"
             :item="item"
+            context-menu
             :selected="selectedConv?.id === item.id"
             @click="openConversation"
+            @menu="onConvMenu"
           />
         </template>
         <uni-swipe-action v-else>
@@ -373,6 +446,23 @@ watchEffect(() => {
 
     <ImTabBar v-if="!isDesktop" current="chat" />
     <ImNotificationPermissionDialog />
+
+    <view
+      v-if="convMenu"
+      class="conv-menu"
+      :style="convMenuStyle"
+      @click.stop
+      @contextmenu.prevent.stop
+    >
+      <view class="conv-menu-item" @click="onMenuPin">
+        {{ convMenu.item.pinned ? '取消置顶' : '置顶' }}
+      </view>
+      <view class="conv-menu-item" @click="onMenuMute">
+        {{ convMenuMuted ? '取消免打扰' : '免打扰' }}
+      </view>
+      <view class="conv-menu-item" @click="onMenuRead">已读</view>
+      <view class="conv-menu-item" @click="onMenuDelete">删除</view>
+    </view>
   </view>
 </template>
 
@@ -536,5 +626,28 @@ watchEffect(() => {
 
 .swipe-btn.active {
   background: #e7e8ec;
+}
+
+.conv-menu {
+  position: fixed;
+  z-index: 80;
+  min-width: 148px;
+  padding: 6px 0;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+}
+
+.conv-menu-item {
+  padding: 12px 28px;
+  text-align: center;
+  font-size: 15px;
+  line-height: 22px;
+  color: #212121;
+  cursor: pointer;
+}
+
+.conv-menu-item:hover {
+  background: #f5f6f8;
 }
 </style>

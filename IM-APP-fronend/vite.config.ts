@@ -69,6 +69,25 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      // H5 开发时 fetch 会把 http://8.154.44.197/openim-api 等改到 localhost。
+      // 线上由 nginx 反代；这里没配就会 404。前缀不要写成 /openim，否则会吃掉 /openim-api、/openim-ws。
+      // changeOrigin 让 Host 仍是 8.154.44.197，MinIO 签名才对得上。不剥前缀，上游 nginx 自己剥。
+      '/openim-api': {
+        target: 'http://8.154.44.197',
+        changeOrigin: true,
+      },
+      '/openim/': {
+        target: 'http://8.154.44.197',
+        changeOrigin: true,
+      },
+      '/object/': {
+        target: 'http://8.154.44.197',
+        changeOrigin: true,
+      },
+      '/minio/': {
+        target: 'http://8.154.44.197',
+        changeOrigin: true,
+      },
     },
   },
 })

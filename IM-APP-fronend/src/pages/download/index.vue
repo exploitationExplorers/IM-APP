@@ -7,6 +7,7 @@ import type { AppReleaseCheckResult } from '@/types'
 import { getToken } from '@/utils/request'
 import headerBg from './assets/header-bg.png'
 import androidIcon from './assets/android.png'
+import appleIcon from './assets/apple.svg'
 import liteIcon from './assets/lite.svg'
 import warnIcon from './assets/warn.svg'
 import section1 from './assets/section-01.png'
@@ -20,10 +21,23 @@ import {
   type DownloadLang,
 } from './copy'
 
+type StoreOs = 'ios' | 'android'
+
 const lang = ref<DownloadLang>(detectDownloadLang())
 const langOpen = ref(false)
-const downloading = ref(false)
+const APP_DOWNLOAD_PAGE = 'https://www.xn--jprz53bj9s.com/app/'
 const versionText = ref('')
+const storeOs = ref<StoreOs>(detectStoreOs())
+const storeIcon = computed(() => (storeOs.value === 'ios' ? appleIcon : androidIcon))
+
+/** iPhone / iPad 用苹果图标，其余用安卓。iPadOS 13 以后的 UA 会伪装成 Mac。 */
+function detectStoreOs(): StoreOs {
+  if (typeof navigator === 'undefined') return 'android'
+  const ua = navigator.userAgent || ''
+  const iPadOs = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
+  if (/iPhone|iPad|iPod/i.test(ua) || iPadOs) return 'ios'
+  return 'android'
+}
 
 /** 壳版本低于 wgt 的 minNative 时，nativeVersion=0 读不到热更新版本名。 */
 const WGT_VERSION_PROBE = 1_000_000_000
@@ -71,12 +85,12 @@ function openLite() {
   uni.reLaunch({ url: '/pages/auth/sign-in' })
 }
 
-async function readPublishedAndroid(): Promise<AppReleaseCheckResult | null> {
+async function readPublished(platform: StoreOs): Promise<AppReleaseCheckResult | null> {
   const channel = APP_CONFIG.updateChannel
   const [installPackage, hotUpdate] = await Promise.all([
-    checkAppRelease({ platform: 'android', channel, nativeVersion: 0, wgtVersion: 0 }),
+    checkAppRelease({ platform, channel, nativeVersion: 0, wgtVersion: 0 }),
     checkAppRelease({
-      platform: 'android',
+      platform,
       channel,
       nativeVersion: WGT_VERSION_PROBE,
       wgtVersion: 0,
@@ -92,30 +106,15 @@ async function readPublishedAndroid(): Promise<AppReleaseCheckResult | null> {
 
 async function loadPackageVersion() {
   try {
-    await readPublishedAndroid()
+    await readPublished(storeOs.value)
   } catch {
     /* 版本号保持空白，避免用过期的 1.0.0 */
   }
 }
 
-async function onDownload() {
-  if (downloading.value) return
-  downloading.value = true
-  try {
-    const release = await readPublishedAndroid()
-    if (!release) {
-      uni.showToast({ title: copy.value.noPackage, icon: 'none' })
-      return
-    }
-    if (typeof window !== 'undefined') {
-      window.location.href = release.downloadUrl
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : copy.value.downloadFail
-    uni.showToast({ title: message || copy.value.downloadFail, icon: 'none' })
-  } finally {
-    downloading.value = false
-  }
+function onDownload() {
+  if (typeof window === 'undefined') return
+  window.location.href = APP_DOWNLOAD_PAGE
 }
 
 onLoad(() => {
@@ -162,8 +161,8 @@ onShow(() => {
           <text v-if="copy.share2">{{ copy.share2 }}</text>
         </view>
 
-        <view class="pill" :class="{ disabled: downloading }" @click.stop="onDownload">
-          <image class="pill-icon" :src="androidIcon" mode="aspectFit" />
+        <view class="pill" @click.stop="onDownload">
+          <image class="pill-icon" :src="storeIcon" mode="aspectFit" />
           <text class="pill-label">{{ copy.download }}</text>
           <text v-if="versionText" class="pill-version">{{ versionText }}</text>
         </view>

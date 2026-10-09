@@ -4,7 +4,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG, THEME } from '@/config'
-import { uploadAvatarForProfile } from '@/utils/file-upload'
+import { uploadAvatarFile, uploadAvatarForProfile } from '@/utils/file-upload'
 import { consumeProfileSaveSuccess } from '@/utils/profile-feedback'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
@@ -86,7 +86,38 @@ function onAvatarError() {
   avatarFailed.value = true
 }
 
-async function onChooseAvatar() {
+async function uploadPickedAvatar(pathOrFile: string | File) {
+  uni.showLoading({ title: '上传中…' })
+  try {
+    const fileId = pathOrFile instanceof File
+      ? await uploadAvatarFile(pathOrFile)
+      : await uploadAvatarForProfile(pathOrFile, undefined)
+    await userStore.saveProfile({
+      nickname: nickname.value || '我',
+      avatarFileId: fileId,
+      bio: bio.value || '',
+    })
+    showSaveSuccess()
+  } catch (e) {
+    uni.showToast({ title: (e as Error).message || '上传失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
+}
+
+function onChooseAvatar() {
+  // iOS Safari 不认 uni.chooseImage 临时路径，必须在点击里同步打开文件选择
+  if (typeof document !== 'undefined' && uni.getSystemInfoSync().uniPlatform === 'web') {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (file) void uploadPickedAvatar(file)
+    }
+    input.click()
+    return
+  }
   uni.chooseImage({
     count: 1,
     sizeType: ['compressed'],
@@ -98,20 +129,7 @@ async function onChooseAvatar() {
       const paths = anyRes.tempFilePaths
       const path = Array.isArray(paths) ? paths[0] : paths
       if (!path) return
-      uni.showLoading({ title: '上传中…' })
-      try {
-        const fileId = await uploadAvatarForProfile(path, undefined)
-        await userStore.saveProfile({
-          nickname: nickname.value || '我',
-          avatarFileId: fileId,
-          bio: bio.value || '',
-        })
-        showSaveSuccess()
-      } catch (e) {
-        uni.showToast({ title: (e as Error).message || '上传失败', icon: 'none' })
-      } finally {
-        uni.hideLoading()
-      }
+      void uploadPickedAvatar(path)
     },
   })
 }

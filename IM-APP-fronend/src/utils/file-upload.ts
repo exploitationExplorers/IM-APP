@@ -302,6 +302,56 @@ export async function uploadAvatarForProfile(
   return uploadViaTask('avatar', await loadImageBytes(localPath, remoteUrl))
 }
 
+/** H5：直接用用户选中的文件上传。iPhone 相册常是 HEIC，先压成 jpeg 再传。 */
+export async function uploadAvatarFile(file: File): Promise<string> {
+  const prepared = await prepareAvatarFile(file)
+  const bytes = await prepared.arrayBuffer()
+  const meta = withImageMeta(prepared.name || 'avatar.jpg', prepared.type || 'image/jpeg')
+  return uploadViaTask('avatar', {
+    bytes,
+    fileName: meta.fileName,
+    contentType: meta.contentType,
+    size: bytes.byteLength,
+  })
+}
+
+function isReadyAvatarType(type: string): boolean {
+  return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' || type === 'image/webp' || type === 'image/gif'
+}
+
+async function prepareAvatarFile(file: File): Promise<File> {
+  const type = (file.type || '').toLowerCase()
+  if (isReadyAvatarType(type) && file.size > 0 && file.size <= 1_500_000) return file
+  if (typeof document === 'undefined') return file
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error('无法读取这张图片，请换一张'))
+      el.src = url
+    })
+    const edge = 1280
+    let width = img.naturalWidth || img.width
+    let height = img.naturalHeight || img.height
+    if (!width || !height) throw new Error('无法读取这张图片，请换一张')
+    const scale = Math.min(1, edge / Math.max(width, height))
+    width = Math.max(1, Math.round(width * scale))
+    height = Math.max(1, Math.round(height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('无法读取这张图片，请换一张')
+    ctx.drawImage(img, 0, 0, width, height)
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86))
+    if (!blob) throw new Error('无法读取这张图片，请换一张')
+    return new File([blob], 'avatar.jpg', { type: 'image/jpeg' })
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 /** 上传举报截图并返回 fileId（创建任务 → multipart POST 直传 → 确认完成） */
 export async function uploadReportImage(localPath: string): Promise<string> {
   if (isAppPlatform()) {

@@ -11,7 +11,7 @@ import { useForwardStore } from '@/stores/forward'
 import type { ContactTagItem, Conversation, FriendForwardPlan } from '@/types'
 import { snapshotFromMessage, mergeVideoSnapshotFromChatContent, patchVideoSnapshotCover, videoSnapshotNeedsRemoteCover } from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
-import { businessUserIdFromIM, uploadLocalImageForForward, extractVideoCoverForForward } from '@/utils/openim'
+import { businessUserIdFromIM, ensureIMLogin, imUserId, uploadLocalImageForForward, extractVideoCoverForForward } from '@/utils/openim'
 import { captureVideoPosterFromUrl, parseVideoMeta } from '@/utils/chatMedia'
 import ImNavBar from '@/components/ImNavBar.vue'
 
@@ -412,6 +412,61 @@ async function resolveGroupTargetIds(groupTargets: ForwardTarget[]) {
   return [...new Set(ids)]
 }
 
+function pictureUrlOf(content: unknown): string {
+  if (!content || typeof content !== 'object') return ''
+  const obj = content as Record<string, unknown>
+  const keys = ['sourcePicture', 'bigPicture', 'snapshotPicture', 'SourcePicture', 'BigPicture', 'SnapshotPicture']
+  for (const key of keys) {
+    const pic = obj[key]
+    if (!pic || typeof pic !== 'object') continue
+    const url = String((pic as { url?: string; URL?: string }).url || (pic as { URL?: string }).URL || '')
+    if (/^https?:\/\//i.test(url)) return url
+  }
+  const direct = String(obj.url || obj.URL || '')
+  return /^https?:\/\//i.test(direct) ? direct : ''
+}
+
+/** 少量图片不进排队：直接用已有地址发出去，避免等后台轮询 */
+async function sendPicturesNow(
+  userIds: string[],
+  groupTargets: ForwardTarget[],
+  sources: Awaited<ReturnType<typeof buildSources>>,
+) {
+  await ensureIMLogin()
+  const senderId = imUserId.value
+  const urls = sources.map((source) => pictureUrlOf(source.snapshot.content))
+  if (urls.some((url) => !url)) throw new Error('图片地址不存在，无法转发')
+  const jobs: Array<{ type: 'private' | 'group'; businessId: string; conversationId?: string }> = [
+    ...userIds.map((businessId) => ({ type: 'private' as const, businessId })),
+  ]
+  for (const target of groupTargets) {
+    let businessId = target.businessGroupId || ''
+    if (!businessId) {
+      const conversation = chatStore.conversations.find((item) => item.id === target.conversationId)
+      if (!conversation?.groupId) throw new Error(`无法识别群聊「${target.name}」`)
+      businessId = (await resolveIMGroupByIM(conversation.groupId)).businessGroupId
+    }
+    jobs.push({ type: 'group', businessId, conversationId: target.conversationId })
+  }
+  let cursor = 0
+  const run = async () => {
+    while (cursor < jobs.length) {
+      const job = jobs[cursor]
+      cursor += 1
+      const conv = await chatStore.enterConversation({
+        conversationId: job.conversationId,
+        type: job.type,
+        businessId: job.businessId,
+      })
+      for (const url of urls) {
+        await chatStore.sendImageUrl(conv.id, url, senderId)
+      }
+    }
+  }
+  const workers = Math.min(4, jobs.length)
+  await Promise.all(Array.from({ length: workers }, () => run()))
+}
+
 async function onSend() {
   const { friendPlan, groupTargets } = collectPlan()
   const aliveGroupTargets = groupTargets.filter((item) => !isDissolvedGroupTarget(item))
@@ -432,12 +487,20 @@ async function onSend() {
   try {
     await afterNativeModal()
     const sources = await buildSources()
-    const targetGroupIds = await resolveGroupTargetIds(aliveGroupTargets)
-    await forwardStore.submitBatch(sources, friendPlan, targetGroupIds)
+    const directUserIds = friendPlan?.kind === 'ids' ? friendPlan.userIds : []
+    const directCount = directUserIds.length + aliveGroupTargets.length
+    const picturesOnly = sources.every((source) => source.snapshot.contentType === 102)
+    const sendNow = picturesOnly && friendPlan?.kind !== 'all_friends' && friendPlan?.kind !== 'generate' && directCount > 0 && directCount <= 12
+    if (sendNow) {
+      await sendPicturesNow(directUserIds, aliveGroupTargets, sources)
+    } else {
+      const targetGroupIds = await resolveGroupTargetIds(aliveGroupTargets)
+      await forwardStore.submitBatch(sources, friendPlan, targetGroupIds)
+    }
     forwardStore.markSucceeded()
     forwardStore.clear()
     uni.hideLoading()
-    uni.showToast({ title: '已加入队列', icon: 'success' })
+    uni.showToast({ title: sendNow ? '已转发' : '已加入队列', icon: 'success' })
     safeBack('/pages/chat/index')
   } catch (e) {
     uni.hideLoading()
@@ -509,9 +572,11 @@ function goBack() {
 <style scoped lang="scss">
 .page {
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: #fff;
+  overflow: hidden;
 }
 
 .send {
@@ -595,7 +660,7 @@ function goBack() {
 
 .list {
   flex: 1;
-  height: 0;
+  min-height: 0;
 }
 
 .row {

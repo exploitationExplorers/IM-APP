@@ -223,7 +223,7 @@ function openMember(member: GroupMember) {
           <text v-if="canManage" class="group-info-add" @click="goInvite">新增</text>
         </view>
 
-        <scroll-view scroll-y class="group-info-members">
+        <view class="group-info-members">
           <view
             v-for="m in filteredMembers"
             :key="m.id"
@@ -237,7 +237,7 @@ function openMember(member: GroupMember) {
           <view v-if="!filteredMembers.length" class="group-info-empty">
             {{ keyword.trim() ? '无匹配成员' : '暂无成员' }}
           </view>
-        </scroll-view>
+        </view>
       </template>
     </view>
   </view>
@@ -263,8 +263,9 @@ function openMember(member: GroupMember) {
   right: auto;
   width: 400px;
   max-width: calc(100% - 16px);
-  min-height: min(80vh, calc(100% - 16px));
+  height: min(80vh, calc(100% - 16px));
   max-height: calc(100% - 16px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -412,8 +413,21 @@ function openMember(member: GroupMember) {
 }
 
 .group-info-members {
+  display: block;
   flex: 1;
+  height: 0;
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+}
+
+.group-info-members::-webkit-scrollbar {
+  width: 6px;
+}
+
+.group-info-members::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 3px;
 }
 
 .group-info-member {

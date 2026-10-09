@@ -16,7 +16,6 @@ import { useDesktopLayout } from '@/composables/useDesktopLayout'
 import { useDesktopListResize } from '@/composables/useDesktopListResize'
 import type { Contact, ContactListSort, GroupPreview } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
-import { openQrScanner } from '@/utils/qrcode'
 import { notifyGroupUnavailable } from '@/utils/im-notification'
 import { readFriendRequestBadge } from '@/utils/friend-request-badge'
 import { getToken } from '@/utils/request'
@@ -133,10 +132,10 @@ function go(url: string) {
   uni.navigateTo({ url })
 }
 
-function goScan() {
+function goAddGroup() {
   showAddMenu.value = false
   showSort.value = false
-  openQrScanner()
+  uni.navigateTo({ url: '/pages/contacts/add-group' })
 }
 
 function openContact(c: Contact) {
@@ -216,7 +215,7 @@ function onPanelGroupSelect(g: GroupPreview) {
                 <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
                 <text>添加朋友</text>
               </view>
-              <view class="popup-item" @click="goScan">
+              <view class="popup-item" @click="goAddGroup">
                 <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
                 <text>添加群聊</text>
               </view>

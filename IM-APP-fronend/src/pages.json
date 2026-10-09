@@ -144,6 +144,13 @@
       }
     },
     {
+      "path": "pages/contacts/add-group",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "添加群聊"
+      }
+    },
+    {
       "path": "pages/contacts/scan",
       "style": {
         "navigationStyle": "custom",

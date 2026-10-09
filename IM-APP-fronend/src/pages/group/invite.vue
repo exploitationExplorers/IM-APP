@@ -252,12 +252,15 @@ async function onConfirm() {
 </template>
 
 <style scoped lang="scss">
+/* iOS Safari：scroll-view 用 height:0 会把列表高度算成 0，联络人有数字但不显示 */
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   background: #fff;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .confirm-btn {
@@ -285,6 +288,7 @@ async function onConfirm() {
   flex-wrap: wrap;
   gap: 16rpx;
   padding: 8rpx 40rpx 16rpx;
+  flex-shrink: 0;
 }
 
 .chip {
@@ -314,6 +318,7 @@ async function onConfirm() {
 
 .search-wrap {
   padding: 8rpx 40rpx 16rpx;
+  flex-shrink: 0;
 }
 
 .search-box {
@@ -348,6 +353,7 @@ async function onConfirm() {
   align-items: center;
   min-height: 48rpx;
   margin: 8rpx 40rpx 16rpx;
+  flex-shrink: 0;
 }
 
 .section-count {
@@ -410,7 +416,7 @@ async function onConfirm() {
 
 .list {
   flex: 1;
-  height: 0;
+  min-height: 0;
 }
 
 .row {

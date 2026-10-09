@@ -9,11 +9,78 @@ const props = defineProps<{
   item: Conversation
   /** H5 PC 三栏：当前选中会话高亮 */
   selected?: boolean
+  /** 电脑版：右键或按住弹出置顶/免打扰菜单 */
+  contextMenu?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'click', item: Conversation): void
+  (e: 'menu', payload: { item: Conversation; x: number; y: number }): void
 }>()
+
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+let suppressClick = false
+
+function pointOf(e: Event): { x: number; y: number } {
+  const ev = e as MouseEvent & { touches?: Array<{ clientX: number; clientY: number }>; changedTouches?: Array<{ clientX: number; clientY: number }> }
+  const touch = ev.changedTouches?.[0] || ev.touches?.[0]
+  if (touch) return { x: touch.clientX, y: touch.clientY }
+  if (typeof ev.clientX === 'number' && (ev.clientX || ev.clientY)) return { x: ev.clientX, y: ev.clientY }
+  const el = e.currentTarget instanceof Element ? e.currentTarget : null
+  if (el) {
+    const rect = el.getBoundingClientRect()
+    return { x: rect.left + rect.width * 0.62, y: rect.top + rect.height / 2 }
+  }
+  return { x: 80, y: 120 }
+}
+
+function openMenu(e: Event) {
+  if (!props.contextMenu) return
+  suppressClick = true
+  const point = pointOf(e)
+  emit('menu', { item: props.item, x: point.x, y: point.y })
+  setTimeout(() => {
+    suppressClick = false
+  }, 400)
+}
+
+function onContextMenu(e: Event) {
+  if (!props.contextMenu) return
+  e.preventDefault()
+  e.stopPropagation()
+  openMenu(e)
+}
+
+function cancelHold() {
+  if (!holdTimer) return
+  clearTimeout(holdTimer)
+  holdTimer = null
+}
+
+function onHoldStart(e: Event) {
+  if (!props.contextMenu) return
+  const mouse = e as MouseEvent
+  if (typeof mouse.button === 'number' && mouse.button !== 0) return
+  cancelHold()
+  const point = pointOf(e)
+  holdTimer = setTimeout(() => {
+    holdTimer = null
+    suppressClick = true
+    emit('menu', { item: props.item, x: point.x, y: point.y })
+    setTimeout(() => {
+      suppressClick = false
+    }, 400)
+  }, 450)
+}
+
+function onRowClick(e: Event) {
+  if (suppressClick) {
+    suppressClick = false
+    e.stopPropagation()
+    return
+  }
+  emit('click', props.item)
+}
 
 const chatStore = useChatStore()
 const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
@@ -38,7 +105,19 @@ const lastFailed = computed(() => {
 </script>
 
 <template>
-  <view class="conv" :class="{ selected }" @click="emit('click', item)">
+  <view
+    class="conv"
+    :class="{ selected, pinned: item.pinned, 'conv-menuable': contextMenu }"
+    @click="onRowClick"
+    @contextmenu="onContextMenu"
+    @mousedown="onHoldStart"
+    @mouseup="cancelHold"
+    @mouseleave="cancelHold"
+    @touchstart="onHoldStart"
+    @touchmove="cancelHold"
+    @touchend="cancelHold"
+    @touchcancel="cancelHold"
+  >
     <view class="avatar-wrap">
       <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
       <image v-if="item.pinned" class="pin-badge" src="/static/icons/icon-pin.svg" mode="aspectFit" />
@@ -74,6 +153,14 @@ const lastFailed = computed(() => {
 
 .conv.selected {
   background: #f0f1f4;
+}
+
+.conv.pinned:not(.selected) {
+  background: #f6f7fb;
+}
+
+.conv-menuable {
+  cursor: pointer;
 }
 
 .avatar-wrap {

@@ -689,24 +689,25 @@ function openLink(url: string) {
 }
 
 .msg-image {
-  width: 420rpx;
-  max-width: 100%;
+  width: 280rpx;
+  max-width: 56vw;
+  max-height: 360rpx;
   border-radius: 12rpx;
   display: block;
 }
 
 .image-placeholder {
-  width: 420rpx;
-  max-width: 100%;
-  min-height: 240rpx;
+  width: 280rpx;
+  max-width: 56vw;
+  min-height: 180rpx;
   background: #e8e8e8;
   border-radius: 12rpx;
 }
 
 .video-bubble {
   position: relative;
-  width: 420rpx;
-  max-width: 100%;
+  width: 280rpx;
+  max-width: 56vw;
   flex-shrink: 0;
   overflow: hidden;
 }
