@@ -360,6 +360,10 @@ export async function request<T>(options: RequestOptions, retried = false): Prom
   }
 
   if (statusCode === 401) {
+    // 登录、注册这些接口本身就不带登录态，401 是密码错误、封禁这类业务失败
+    if (options.auth === false) {
+      throw new Error(body?.message || `请求失败(${statusCode})`)
+    }
     handleAuthExpired()
     throw new Error('未登录或登录已过期')
   }
