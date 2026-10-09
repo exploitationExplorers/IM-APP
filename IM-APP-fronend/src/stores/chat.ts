@@ -111,6 +111,13 @@ export const useChatStore = defineStore('chat', () => {
   let onIncomingForDissolve: ((m: ChatMessage) => void) | null = null
   /** 退群 / 被踢 / OpenIM 无权限时通知当前房间退出 */
   let onGroupUnavailable: ((payload: { conversationId: string }) => void) | null = null
+  /**
+   * 当前打开的会话 ID，由 room.vue 登记。
+   *
+   * 桌面端（H5 三栏布局）room.vue 是内嵌组件而非页面，页面级 onShow/onHide 不会触发，
+   * 所以「回到前台补拉当前会话」这件事只能由 store 代劳——room.vue 在这里报备自己是谁。
+   */
+  let activeConversationId = ''
 
   /**
    * OpenIM hideConversation 在 H5 WASM 不可用；用本地隐藏列表兜底。
@@ -612,6 +619,11 @@ export const useChatStore = defineStore('chat', () => {
       ),
       // 私聊已读回执：对方进入会话标记已读后，把自己发过的消息翻成已读
       onIMEvent<C2CReadReceipt[]>(IMEvents.OnRecvC2CReadReceipt, ingestReadReceipts),
+      // 断线重连（含 SDK 自动重连）后补拉一次：断线期间漏掉的推送靠这一步找回。
+      // resyncAfterResume 自带 3 秒节流，重复触发只跑一次。
+      onIMEvent(IMEvents.OnConnectSuccess, () => {
+        void resyncAfterResume()
+      }),
       onUserStatusChanged((state) => {
         onlineStatus.value[state.userID] = state.status
       }),
@@ -665,6 +677,40 @@ export const useChatStore = defineStore('chat', () => {
     } finally {
       loading.value = false
       perfMarkEnd('chat:load-conversations')
+    }
+  }
+
+  // 补拉的重入与抖动保护：页面快速来回切换、以及重连事件连续触发时只跑一次。
+  let resyncing = false
+  let lastResyncAt = 0
+  const RESYNC_MIN_INTERVAL_MS = 3000
+
+  /**
+   * 回到前台 / 重新可见 / 断线重连后主动补拉一次会话列表。
+   *
+   * 为什么必须有：新消息只通过 OpenIM 推送（subscribeRealtime）进 UI，
+   * 全仓库没有轮询、也没有恢复时的补拉。App 切后台、浏览器标签被节流、
+   * 切 VPN、断网重连都会漏掉推送，而漏掉之后没有任何机制补回来——
+   * 那一端就永久停在旧数据上，表现为「手机和电脑互相看不到」。
+   *
+   * 只做「重新可见」这一个触发点，不做定时轮询（轮询会放大接口压力）。
+   */
+  async function resyncAfterResume() {
+    if (resyncing) return
+    const now = Date.now()
+    if (now - lastResyncAt < RESYNC_MIN_INTERVAL_MS) return
+    lastResyncAt = now
+    resyncing = true
+    try {
+      // loadConversations 内部已有 ensureIMLogin + subscribeRealtime + 10004/10005 重登重试
+      await loadConversations()
+      // 顺带把当前打开的会话补拉一次：内嵌的 room.vue 收不到页面级 onShow
+      const active = activeConversationId
+      if (active) await loadMessages(active).catch(() => undefined)
+    } catch {
+      // 补拉失败不影响正常使用，下次恢复可见还会再试
+    } finally {
+      resyncing = false
     }
   }
 
@@ -1216,14 +1262,19 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // 占位气泡 id 的自增序号：同一毫秒内连发多条时，只用 Date.now() 会撞 id，
+  // 那样 replaceMessage 会把两条一起替换掉。
+  let placeholderSeq = 0
+
   function placeholderOf(
     conversationId: string,
     senderId: string,
     type: ChatMessage['type'],
     content: string,
   ): ChatMessage {
+    placeholderSeq += 1
     return {
-      id: `local_${Date.now()}`,
+      id: `local_${Date.now()}_${placeholderSeq}`,
       conversationId,
       senderId,
       type,
@@ -1486,6 +1537,11 @@ export const useChatStore = defineStore('chat', () => {
     onGroupUnavailable = fn
   }
 
+  /** room.vue 进入/离开房间时登记，供 resyncAfterResume 补拉当前会话 */
+  function setActiveConversation(conversationId: string) {
+    activeConversationId = conversationId || ''
+  }
+
   return {
     conversations,
     messagesMap,
@@ -1495,6 +1551,7 @@ export const useChatStore = defineStore('chat', () => {
     onlineStatus,
     isPeerOnline,
     loadConversations,
+    resyncAfterResume,
     enterConversation,
     assertConversationAccessible,
     loadMessages,
@@ -1505,6 +1562,7 @@ export const useChatStore = defineStore('chat', () => {
     sendAtText,
     setOnIncomingForDissolve,
     setOnGroupUnavailable,
+    setActiveConversation,
     sendImage,
     sendCard,
     sendFile,
