@@ -858,6 +858,11 @@ async function sendCreatedMessage(
     target.sessionType === SessionType.Single
       ? ''
       : target.groupId || groupIdFromConversationId(target.conversationId)
+  // 安卓原生有时只读消息体上的 groupID，参数里有、消息上没有就会偶发拒发
+  if (isAppPlatform && groupID) {
+    if (!message.groupID) message.groupID = groupID
+    if (!message.sessionType) message.sessionType = target.sessionType
+  }
   const params = {
     recvID: target.sessionType === SessionType.Single ? target.recvId : '',
     groupID,
@@ -986,10 +991,13 @@ function sendOnAppNative(
       const parsed = coerceMessage(msg)
       if (parsed?.clientMsgID === clientMsgID && isCompleteSentMessage(parsed)) finish(true, parsed)
     })
-    const offFail = onIMEvent<{ clientMsgID?: string; errMsg?: string }>(IMEvents.SendMessageFailed, (err) => {
-      if (!err?.clientMsgID || err.clientMsgID === clientMsgID) {
-        finish(false, err, new Error(err?.errMsg || '发送失败'))
-      }
+    const offFail = onIMEvent<unknown>(IMEvents.SendMessageFailed, (err) => {
+      const failed = unwrapRawMessage(err)
+      const failedId = failed ? pickString(failed, ['clientMsgID', 'ClientMsgID', 'clientMsgId']) : ''
+      // 没有 id 的失败事件不能算到当前这条上，否则群里偶发会把其实发出去的消息标成失败
+      if (!failedId || failedId !== clientMsgID) return
+      const errMsg = pickString(failed, ['errMsg', 'ErrMsg', 'message', 'errDlt'])
+      finish(false, err, new Error(errMsg || '发送失败'))
     })
     const onNative = (res: NativeSendResult) => {
       let data = res?.data
@@ -2411,6 +2419,14 @@ function unwrapRawMessage(raw: unknown, depth = 0): Record<string, unknown> | nu
   return obj
 }
 
+/** App 原生桥用 Status，不归一化的话发送中会被当成已完成，或把别的失败当成这条没发出去 */
+function messageStatusOf(obj: Record<string, unknown>): number | undefined {
+  const raw = obj.status ?? obj.Status
+  if (raw === undefined || raw === null || raw === '') return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : undefined
+}
+
 function isMessageItem(value: unknown): value is MessageItem {
   return !!value && typeof value === 'object' && typeof (value as MessageItem).clientMsgID === 'string'
 }
@@ -2426,6 +2442,7 @@ function coerceMessage(raw: unknown): MessageItem | null {
     clientMsgID,
     seq: seqOf(obj),
     contentType: Number.isFinite(contentType) ? contentType : 0,
+    status: messageStatusOf(obj),
   }
   // OpenIM App 原生桥在部分版本中使用 PascalCase，统一成 Web SDK 的字段名，
   // 后续渲染、收藏和转发就不需要各自判断平台。

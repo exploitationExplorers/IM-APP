@@ -4,7 +4,9 @@ import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
 import { useContactStore } from '@/stores/contact'
 import { APP_CONFIG } from '@/config'
-import type { GroupMember } from '@/types'
+import { muteGroupMember, unmuteGroupMember } from '@/api/group'
+import { MUTE_OPTIONS } from '@/constants/mute'
+import type { GroupMember, GroupMemberMuteResult } from '@/types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -23,6 +25,7 @@ const contactStore = useContactStore()
 
 const loading = ref(false)
 const keyword = ref('')
+const muteBusy = ref(false)
 
 function sameUserId(a?: string, b?: string) {
   if (!a || !b) return false
@@ -169,6 +172,58 @@ function goInvite() {
   })
 }
 
+function canMute(member: GroupMember) {
+  const actorIsAdmin = isAdminRole(myRole.value)
+  if (!isOwner.value && !actorIsAdmin) return false
+  const me = userStore.profile
+  if (me && (sameUserId(member.id, me.id) || sameUserId(member.id, me.publicId))) return false
+  if (isOwnerRole(member.role)) return false
+  if (isOwner.value) return true
+  return !isAdminRole(member.role)
+}
+
+function applyMuteResult(result: GroupMemberMuteResult) {
+  groupStore.members = groupStore.members.map((m) =>
+    m.id === result.memberUserId
+      ? { ...m, isMuted: result.isMuted, mutedUntil: result.mutedUntil }
+      : m,
+  )
+}
+
+async function onMute(member: GroupMember) {
+  if (muteBusy.value || !canMute(member)) return
+  if (member.isMuted) {
+    muteBusy.value = true
+    try {
+      applyMuteResult(await unmuteGroupMember(props.groupId, member.id))
+      uni.showToast({ title: '已解除禁言', icon: 'none' })
+    } catch (e) {
+      uni.showToast({ title: (e as Error).message || '解除禁言失败', icon: 'none' })
+    } finally {
+      muteBusy.value = false
+    }
+    return
+  }
+  let tapIndex = -1
+  try {
+    const sheet = await uni.showActionSheet({ itemList: MUTE_OPTIONS.map((o) => o.label) })
+    tapIndex = sheet.tapIndex
+  } catch {
+    return
+  }
+  const option = MUTE_OPTIONS[tapIndex]
+  if (!option) return
+  muteBusy.value = true
+  try {
+    applyMuteResult(await muteGroupMember(props.groupId, member.id, option.seconds))
+    uni.showToast({ title: `已禁言${option.label}`, icon: 'none' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error).message || '禁言失败', icon: 'none' })
+  } finally {
+    muteBusy.value = false
+  }
+}
+
 function openMember(member: GroupMember) {
   const me = userStore.profile
   if (me && sameUserId(member.id, me.id)) return
@@ -235,6 +290,10 @@ function openMember(member: GroupMember) {
             <image class="group-info-member-avatar" :src="memberAvatar(m)" mode="aspectFill" />
             <text class="group-info-member-name">{{ displayName(m) }}</text>
             <text v-if="roleBadge(m)" class="group-info-role">{{ roleBadge(m) }}</text>
+            <text v-if="m.isMuted" class="group-info-role group-info-muted-tag">已禁言</text>
+            <view v-if="canMute(m)" class="group-info-mute" @click.stop="onMute(m)">
+              <text>{{ m.isMuted ? '解禁' : '禁言' }}</text>
+            </view>
           </view>
           <view v-if="!filteredMembers.length" class="group-info-empty">
             {{ keyword.trim() ? '无匹配成员' : '暂无成员' }}
@@ -473,6 +532,24 @@ function openMember(member: GroupMember) {
   font-size: 12px;
   line-height: 18px;
   color: #555;
+}
+
+.group-info-muted-tag {
+  color: #e54d42;
+  border-color: #ffccc7;
+  background: #fff1f0;
+}
+
+.group-info-mute {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: #fff1f0;
+  color: #e54d42;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
 }
 
 .group-info-empty {
