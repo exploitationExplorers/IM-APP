@@ -328,6 +328,11 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		}
 		return w.Client.QuitGroup(ctx, memberID, groupID)
 	case repository.IMEventGroupMemberRole:
+		// 先确保这个用户在 OpenIM 里存在。SetGroupMemberRole 的兜底要靠「邀请入群」
+		// 把人补上，而 OpenIM 里根本没有这个用户时，邀请也会失败。
+		if err := w.ensureSingleMemberRegistered(ctx, state.Members, payload.UserID); err != nil {
+			return err
+		}
 		member, exists := memberByID[memberID]
 		if !exists {
 			return nil
@@ -338,6 +343,9 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		}
 		return w.Client.SetGroupMemberRole(ctx, groupID, memberID, roleLevel)
 	case repository.IMEventGroupMemberMute:
+		if err := w.ensureSingleMemberRegistered(ctx, state.Members, payload.UserID); err != nil {
+			return err
+		}
 		member, exists := memberByID[memberID]
 		if !exists {
 			return nil

@@ -602,3 +602,100 @@ func TestInviteGroupMemberIgnoresDuplicateKey(t *testing.T) {
 		t.Fatalf("InviteGroupMemberAs() error = %v, want nil（重复键应被忽略）", err)
 	}
 }
+
+func TestIsUserNotInGroup(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			"OpenIM 真实形态：1001 ArgsError + user not in group",
+			&APIError{HTTPStatus: 500, ErrCode: 1001, ErrMsg: "ArgsError", ErrDlt: "user not in group"},
+			true,
+		},
+		{"英文在 errMsg", &APIError{ErrCode: 1001, ErrMsg: "user not in group"}, true},
+		{"中文 不在群", &APIError{ErrCode: 1001, ErrMsg: "该用户不在群中"}, true},
+		{"别的参数错误不该误判", &APIError{ErrCode: 1001, ErrMsg: "ArgsError", ErrDlt: "group not found"}, false},
+		{"重复键不是这一类", &APIError{ErrCode: 500, ErrMsg: openIMMongoDupKey}, false},
+		{"非 APIError", errors.New("dial tcp: connection refused"), false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isUserNotInGroup(tc.err); got != tc.want {
+				t.Fatalf("isUserNotInGroup(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSetGroupMemberRoleInvitesThenRetries 覆盖「业务库里是群成员、OpenIM 侧不在群里」
+// 的漂移：应当先补人再重试，而不是直接失败、让 outbox 重试 10 次变 dead。
+func TestSetGroupMemberRoleInvitesThenRetries(t *testing.T) {
+	var setInfoCalls, inviteCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/group/set_group_member_info":
+			if setInfoCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"errCode":1001,"errMsg":"ArgsError","errDlt":"user not in group"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{}}`))
+		case "/group/invite_user_to_group":
+			inviteCalls.Add(1)
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin",
+	}, server.Client())
+	if err := client.SetGroupMemberRole(context.Background(), "group-1", "user-1", 60); err != nil {
+		t.Fatalf("SetGroupMemberRole() error = %v, want nil（补人后重试应成功）", err)
+	}
+	if got := inviteCalls.Load(); got != 1 {
+		t.Fatalf("invite calls = %d, want 1", got)
+	}
+	if got := setInfoCalls.Load(); got != 2 {
+		t.Fatalf("set_group_member_info calls = %d, want 2（失败一次 + 重试一次）", got)
+	}
+}
+
+// TestSetGroupMemberRoleDoesNotRetryUnrelatedError 确保兜底不会在无关错误上乱补人。
+func TestSetGroupMemberRoleDoesNotRetryUnrelatedError(t *testing.T) {
+	var inviteCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/group/set_group_member_info":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"errCode":1001,"errMsg":"ArgsError","errDlt":"group not found"}`))
+		case "/group/invite_user_to_group":
+			inviteCalls.Add(1)
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin",
+	}, server.Client())
+	if err := client.SetGroupMemberRole(context.Background(), "group-1", "user-1", 60); err == nil {
+		t.Fatal("SetGroupMemberRole() error = nil, want error")
+	}
+	if got := inviteCalls.Load(); got != 0 {
+		t.Fatalf("invite calls = %d, want 0（无关错误不该补人）", got)
+	}
+}

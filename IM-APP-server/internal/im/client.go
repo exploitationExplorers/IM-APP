@@ -591,29 +591,35 @@ func (c *Client) QuitGroup(ctx context.Context, userID, groupID string) error {
 }
 
 func (c *Client) SetGroupMemberRole(ctx context.Context, groupID, userID string, roleLevel int) error {
-	return c.postWithAdmin(ctx, "/group/set_group_member_info", map[string]any{
-		"members": []map[string]any{{
-			"groupID": groupID, "userID": userID, "roleLevel": roleLevel,
-		}},
-	}, nil)
+	return c.withGroupMemberEnsured(ctx, groupID, userID, func() error {
+		return c.postWithAdmin(ctx, "/group/set_group_member_info", map[string]any{
+			"members": []map[string]any{{
+				"groupID": groupID, "userID": userID, "roleLevel": roleLevel,
+			}},
+		}, nil)
+	})
 }
 
 func (c *Client) SetGroupMemberNickname(ctx context.Context, groupID, userID, nickname string) error {
-	return c.postWithAdmin(ctx, "/group/set_group_member_info", map[string]any{
-		"members": []map[string]any{{
-			"groupID": groupID, "userID": userID, "nickName": nickname,
-		}},
-	}, nil)
+	return c.withGroupMemberEnsured(ctx, groupID, userID, func() error {
+		return c.postWithAdmin(ctx, "/group/set_group_member_info", map[string]any{
+			"members": []map[string]any{{
+				"groupID": groupID, "userID": userID, "nickName": nickname,
+			}},
+		}, nil)
+	})
 }
 
 func (c *Client) SetGroupMemberMute(ctx context.Context, groupID, userID string, mutedSeconds int64) error {
-	path := "/group/mute_group_member"
-	request := map[string]any{"groupID": groupID, "userID": userID, "mutedSeconds": mutedSeconds}
-	if mutedSeconds == 0 {
-		path = "/group/cancel_mute_group_member"
-		delete(request, "mutedSeconds")
-	}
-	return c.postWithAdmin(ctx, path, request, nil)
+	return c.withGroupMemberEnsured(ctx, groupID, userID, func() error {
+		path := "/group/mute_group_member"
+		request := map[string]any{"groupID": groupID, "userID": userID, "mutedSeconds": mutedSeconds}
+		if mutedSeconds == 0 {
+			path = "/group/cancel_mute_group_member"
+			delete(request, "mutedSeconds")
+		}
+		return c.postWithAdmin(ctx, path, request, nil)
+	})
 }
 
 func (c *Client) SetGroupMute(ctx context.Context, groupID string, muted bool) error {
@@ -1141,6 +1147,40 @@ func isDuplicateKeyError(message string) bool {
 	return strings.Contains(message, "duplicate key") ||
 		strings.Contains(message, "e11000") ||
 		strings.Contains(message, "dup key")
+}
+
+// isUserNotInGroup 判断是不是「该用户不在这个群里」。
+// OpenIM 的形态是 HTTP 500 + code=1001 ArgsError，detail 里带 "user not in group"。
+// 改群成员角色 / 禁言 / 改群昵称都要求成员已在群，人不在就直接被拒。
+func isUserNotInGroup(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	message := strings.ToLower(apiErr.ErrMsg + " " + apiErr.ErrDlt)
+	return strings.Contains(message, "not in group") || strings.Contains(message, "不在群")
+}
+
+// withGroupMemberEnsured 兜住「业务库里是群成员、但 OpenIM 侧不在群里」的漂移：
+// 原操作报 user not in group 时，先把人补进群，再重试一次。
+//
+// 为什么需要：改角色/禁言这类成员级事件走的是 group.created 之外的路径，
+// 不经过 EnsureGroupMembers。人不在群里时 OpenIM 直接拒绝 → 事件重试 10 次变 dead →
+// 于是「后台把某人设成管理员」这类变更永远同步不到 OpenIM，
+// 用户看到的现象是没有权限 / 没被禁言。
+//
+// 做成反应式（先试原操作，失败才补人）而不是每次都先拉一次成员列表：
+// 成员级事件里绝大多数情况下人本来就在群里，不该为此多付一次 API 往返。
+func (c *Client) withGroupMemberEnsured(ctx context.Context, groupID, userID string, op func() error) error {
+	err := op()
+	if err == nil || !isUserNotInGroup(err) {
+		return err
+	}
+	if inviteErr := c.InviteGroupMember(ctx, groupID, []string{userID}); inviteErr != nil {
+		// 补人这一步也失败了：返回原始错误，它更能说明问题卡在哪
+		return err
+	}
+	return op()
 }
 
 func ignoreAlreadyDesired(err error) error {
