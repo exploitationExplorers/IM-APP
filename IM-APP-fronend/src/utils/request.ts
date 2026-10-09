@@ -4,13 +4,122 @@ import { getDeviceId } from '@/utils/device'
 
 const TOKEN_KEY = 'im_token'
 const REFRESH_TOKEN_KEY = 'im_refresh_token'
+/** 网页多开：每个标签页一份登录态。退出登录时不能把整份删掉。 */
+export const AUTH_SLOTS_KEY = 'im_auth_slots'
+const TAB_ID_KEY = 'im_tab_id'
+const SLOT_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+interface AuthSlot {
+  access: string
+  refresh: string
+  at: number
+}
+
+/**
+ * 网页每个标签页一个 id，放在 sessionStorage 里。
+ * 刷新、谷歌回收后台标签后再打开，这个 id 还在；新开的标签页没有，就可以登另一个号。
+ * App 只有一个窗口，继续用原来的单钥匙。
+ */
+function currentTabId(): string {
+  // #ifdef H5
+  if (typeof sessionStorage === 'undefined') return ''
+  let id = sessionStorage.getItem(TAB_ID_KEY) || ''
+  if (!id) {
+    id = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    sessionStorage.setItem(TAB_ID_KEY, id)
+  }
+  return id
+  // #endif
+  return ''
+}
+
+function readSlots(): Record<string, AuthSlot> {
+  try {
+    const raw = uni.getStorageSync(AUTH_SLOTS_KEY)
+    const text = typeof raw === 'string' ? raw : ''
+    if (!text) return {}
+    const parsed: unknown = JSON.parse(text)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const slots: Record<string, AuthSlot> = {}
+    for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object') continue
+      const slot = value as Partial<AuthSlot>
+      if (typeof slot.access !== 'string' || typeof slot.refresh !== 'string') continue
+      slots[id] = { access: slot.access, refresh: slot.refresh, at: Number(slot.at) || 0 }
+    }
+    return slots
+  } catch {
+    return {}
+  }
+}
+
+function writeSlots(slots: Record<string, AuthSlot>) {
+  const now = Date.now()
+  const kept: Record<string, AuthSlot> = {}
+  for (const [id, slot] of Object.entries(slots)) {
+    if (slot.at && now - slot.at > SLOT_TTL_MS) continue
+    kept[id] = slot
+  }
+  if (!Object.keys(kept).length) {
+    uni.removeStorageSync(AUTH_SLOTS_KEY)
+    return
+  }
+  uni.setStorageSync(AUTH_SLOTS_KEY, JSON.stringify(kept))
+}
+
+function readLegacy(): AuthSlot | null {
+  const access = String(uni.getStorageSync(TOKEN_KEY) || '')
+  const refresh = String(uni.getStorageSync(REFRESH_TOKEN_KEY) || '')
+  if (!access && !refresh) return null
+  return { access, refresh, at: Date.now() }
+}
+
+function clearLegacy() {
+  uni.removeStorageSync(TOKEN_KEY)
+  uni.removeStorageSync(REFRESH_TOKEN_KEY)
+}
+
+/** 当前标签页的登录态。旧的单钥匙只让第一个还没分槽的标签页接走，避免两个号串了。 */
+function slotOfThisTab(): AuthSlot | null {
+  const tab = currentTabId()
+  if (!tab) return null
+  const slots = readSlots()
+  if (slots[tab]) return slots[tab]
+  const legacy = readLegacy()
+  if (!legacy || Object.keys(slots).length > 0) return null
+  slots[tab] = legacy
+  writeSlots(slots)
+  clearLegacy()
+  return slots[tab]
+}
+
+function updateSlot(patch: Partial<Pick<AuthSlot, 'access' | 'refresh'>>) {
+  const tab = currentTabId()
+  if (!tab) {
+    if (patch.access !== undefined) uni.setStorageSync(TOKEN_KEY, patch.access)
+    if (patch.refresh !== undefined) uni.setStorageSync(REFRESH_TOKEN_KEY, patch.refresh)
+    return
+  }
+  const slots = readSlots()
+  const prev = slots[tab] || { access: '', refresh: '', at: Date.now() }
+  slots[tab] = {
+    access: patch.access !== undefined ? patch.access : prev.access,
+    refresh: patch.refresh !== undefined ? patch.refresh : prev.refresh,
+    at: Date.now(),
+  }
+  writeSlots(slots)
+  clearLegacy()
+}
 
 export function getToken(): string {
-  return uni.getStorageSync(TOKEN_KEY) || ''
+  const slot = slotOfThisTab()
+  if (slot) return slot.access
+  if (currentTabId()) return ''
+  return String(uni.getStorageSync(TOKEN_KEY) || '')
 }
 
 export function setToken(token: string) {
-  uni.setStorageSync(TOKEN_KEY, token)
+  updateSlot({ access: token })
 }
 
 /**
@@ -18,25 +127,30 @@ export function setToken(token: string) {
  * 这里 异步落盘 + 主动回读校验，避免杀进程后 window bootstrap 拿到空 token。
  */
 export async function persistTokenAsync(token: string): Promise<void> {
-  uni.setStorageSync(TOKEN_KEY, token)
-  // App 端：uni.setStorage 是异步 IO，立即 await 让数据真正落盘
+  setToken(token)
+  // #ifndef H5
   if (typeof uni.setStorage === 'function') {
     await new Promise<void>((resolve) => {
       uni.setStorage({ key: TOKEN_KEY, data: token, success: () => resolve(), fail: () => resolve() })
     })
   }
+  // #endif
 }
 
 export function getRefreshToken(): string {
-  return uni.getStorageSync(REFRESH_TOKEN_KEY) || ''
+  const slot = slotOfThisTab()
+  if (slot) return slot.refresh
+  if (currentTabId()) return ''
+  return String(uni.getStorageSync(REFRESH_TOKEN_KEY) || '')
 }
 
 export function setRefreshToken(token: string) {
-  uni.setStorageSync(REFRESH_TOKEN_KEY, token)
+  updateSlot({ refresh: token })
 }
 
 export async function persistRefreshTokenAsync(token: string): Promise<void> {
-  uni.setStorageSync(REFRESH_TOKEN_KEY, token)
+  setRefreshToken(token)
+  // #ifndef H5
   if (typeof uni.setStorage === 'function') {
     await new Promise<void>((resolve) => {
       uni.setStorage({
@@ -47,9 +161,18 @@ export async function persistRefreshTokenAsync(token: string): Promise<void> {
       })
     })
   }
+  // #endif
 }
 
 export function clearToken() {
+  const tab = currentTabId()
+  if (tab) {
+    const slots = readSlots()
+    delete slots[tab]
+    writeSlots(slots)
+    clearLegacy()
+    return
+  }
   uni.removeStorageSync(TOKEN_KEY)
   uni.removeStorageSync(REFRESH_TOKEN_KEY)
 }

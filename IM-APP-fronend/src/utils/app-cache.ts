@@ -1,3 +1,5 @@
+import { AUTH_SLOTS_KEY } from '@/utils/request'
+
 const DEVICE_ID_KEY = 'im_device_id'
 
 function clearNativeWebCache() {
@@ -13,7 +15,7 @@ function clearNativeWebCache() {
 
 /** 设置页「清除缓存」：保留登录态与设备 ID */
 export function clearAppCache(): void {
-  const keep = new Set(['im_token', 'im_refresh_token', DEVICE_ID_KEY])
+  const keep = new Set(['im_token', 'im_refresh_token', AUTH_SLOTS_KEY, DEVICE_ID_KEY])
   const info = uni.getStorageInfoSync()
   for (const key of info.keys) {
     if (!keep.has(key)) {
@@ -23,9 +25,9 @@ export function clearAppCache(): void {
   clearNativeWebCache()
 }
 
-/** 退出登录：清业务缓存与原生 WebView 缓存，仅保留设备 ID */
+/** 退出登录：清本页业务缓存。其它标签页的登录态留在 im_auth_slots 里。 */
 export function clearSessionStorage(): void {
-  const keep = new Set([DEVICE_ID_KEY])
+  const keep = new Set([DEVICE_ID_KEY, AUTH_SLOTS_KEY])
   const info = uni.getStorageInfoSync()
   for (const key of info.keys) {
     if (!keep.has(key)) {

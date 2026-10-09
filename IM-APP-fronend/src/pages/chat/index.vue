@@ -55,6 +55,47 @@ function onSwipeChange(item: Conversation, open: string) {
   activeSwipeId.value = open === 'right' ? item.id : null
 }
 
+/**
+ * iOS 网页里 uni-swipe 的 click 会错位：点「移除」打到「置顶」，点「置顶」打到会话行。
+ * 触摸落点是准的，用 touchend 判定点击，并丢掉随后那次错位 click。
+ */
+let actionTouch: { x: number; y: number; at: number } | null = null
+let ignoreSwipeClickUntil = 0
+
+function touchPoint(e: Event): { x: number; y: number } | null {
+  const ev = e as TouchEvent
+  const t = ev.changedTouches?.[0] || ev.touches?.[0]
+  if (!t) return null
+  return { x: t.clientX, y: t.clientY }
+}
+
+function onActionTouchStart(e: Event) {
+  const point = touchPoint(e)
+  if (!point) return
+  actionTouch = { ...point, at: Date.now() }
+}
+
+function runSwipeAction(item: Conversation, action: 'pin' | 'remove') {
+  if (action === 'pin') void onTogglePin(item)
+  else void onHideConversation(item)
+}
+
+function onActionTouchEnd(e: Event, item: Conversation, action: 'pin' | 'remove') {
+  const point = touchPoint(e)
+  const start = actionTouch
+  actionTouch = null
+  if (!point || !start) return
+  const moved = Math.abs(point.x - start.x) > 40 || Math.abs(point.y - start.y) > 40
+  if (moved || Date.now() - start.at > 300) return
+  ignoreSwipeClickUntil = Date.now() + 500
+  runSwipeAction(item, action)
+}
+
+function onActionClick(item: Conversation, action: 'pin' | 'remove') {
+  if (Date.now() < ignoreSwipeClickUntil) return
+  runSwipeAction(item, action)
+}
+
 async function onTogglePin(item: Conversation) {
   activeSwipeId.value = null
   try {
@@ -83,6 +124,7 @@ async function onHideConversation(item: Conversation) {
 }
 
 function onSwipeItemClick(item: Conversation) {
+  if (Date.now() < ignoreSwipeClickUntil) return
   activeSwipeId.value = null
   openConversation(item)
 }
@@ -408,11 +450,18 @@ watchEffect(() => {
                 <view
                   class="swipe-btn swipe-btn-pin"
                   :class="{ active: item.pinned }"
-                  @click.stop="onTogglePin(item)"
+                  @touchstart.stop="onActionTouchStart"
+                  @touchend.stop.prevent="onActionTouchEnd($event, item, 'pin')"
+                  @click.stop="onActionClick(item, 'pin')"
                 >
                   <text>{{ item.pinned ? '取消置顶' : '置顶' }}</text>
                 </view>
-                <view class="swipe-btn swipe-btn-remove" @click.stop="onHideConversation(item)">
+                <view
+                  class="swipe-btn swipe-btn-remove"
+                  @touchstart.stop="onActionTouchStart"
+                  @touchend.stop.prevent="onActionTouchEnd($event, item, 'remove')"
+                  @click.stop="onActionClick(item, 'remove')"
+                >
                   <text>移除</text>
                 </view>
               </view>
@@ -608,11 +657,16 @@ watchEffect(() => {
 
 .swipe-btn {
   width: 140rpx;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 28rpx;
   color: #212121;
+}
+
+:deep(.button-group--right) {
+  z-index: 2;
 }
 
 .swipe-btn-pin {
