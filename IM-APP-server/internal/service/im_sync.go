@@ -226,7 +226,14 @@ func (w *IMSyncWorker) syncGroup(ctx context.Context, event repository.IMSyncEve
 		}
 		// 欢迎语由 OpenIM 群创建通知（contentType 1501）以系统消息展示；
 		// 不再用 imAdmin 发文本气泡，否则会出现「假用户」头像且点资料失败。
-		return w.Client.EnsureGroup(ctx, group)
+		if err := w.Client.EnsureGroup(ctx, group); err != nil {
+			return err
+		}
+		// EnsureGroup 对已存在的群直接返回、不补成员，所以成员要对账一次。
+		// 「群在 OpenIM 里但是成员不全」（清库重建、历史同步失败）靠这一步收敛；
+		// 对账入口 EnqueueReconciliation 正是给每个活跃群发 group.created，
+		// 所以重跑一次对账就能修全部存量群。
+		return w.Client.EnsureGroupMembers(ctx, groupID, groupMemberIDs(group))
 	case repository.IMEventGroupUpdated:
 		var updatePayload repository.IMGroupUpdatePayload
 		if err := json.Unmarshal(event.Payload, &updatePayload); err != nil {
@@ -383,6 +390,17 @@ func (w *IMSyncWorker) buildGroupFromState(state models.IMGroupSyncState) (im.Gr
 		}
 	}
 	return group, memberByID, nil
+}
+
+// groupMemberIDs 汇总该群在 OpenIM 侧应有的全部成员 ID（群主 + 管理员 + 普通成员）。
+// buildGroupFromState 把群主单独放在 OwnerUserID 里、不重复计入成员列表，
+// 所以这里要补上，否则「群主不在群里」这种漂移检查不出来。
+func groupMemberIDs(group im.Group) []string {
+	ids := make([]string, 0, len(group.MemberUserIDs)+len(group.AdminUserIDs)+1)
+	ids = append(ids, group.OwnerUserID)
+	ids = append(ids, group.AdminUserIDs...)
+	ids = append(ids, group.MemberUserIDs...)
+	return ids
 }
 
 func (w *IMSyncWorker) ensureGroupMembersRegistered(ctx context.Context, members []models.IMGroupSyncMember) error {

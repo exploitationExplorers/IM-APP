@@ -493,6 +493,9 @@ async function dismissPinnedBanner() {
 let groupMetaLoadedAt = 0
 
 onShow(() => {
+  // 回到前台的「补拉当前会话」由 chatStore.resyncAfterResume 统一负责
+  // （本组件在桌面端是内嵌的，收不到页面级 onShow，所以统一走 store 那条路径，
+  //  见下方 watch(conversationId, ...) 的报备）。这里不再重复拉一次。
 	if (chatType.value === 'group') {
     if (Date.now() - groupMetaLoadedAt > 2000) {
       void refreshGroupMeta()
@@ -587,6 +590,11 @@ function handleGroupUnavailable(payload: { conversationId: string }) {
   exitUnavailableGroupRoom()
 }
 chatStore.setOnGroupUnavailable(handleGroupUnavailable)
+
+// 把当前会话报备给 store。
+// 桌面端（H5 三栏布局）本组件是内嵌的、不是页面，页面级 onShow/onHide 不触发，
+// 「回到前台补拉当前会话」只能由 chatStore.resyncAfterResume 代劳。
+watch(conversationId, (id) => chatStore.setActiveConversation(id), { immediate: true })
 
 /** onShow 重拉群详情发现已解散（如 App 后台期间群被解散）时，同样提示并退出 */
 watch(groupDissolved, (dissolved) => {
@@ -988,6 +996,7 @@ async function sendPastedImages(files: File[]) {
     return
   }
   let failed = 0
+  let firstReason = ''
   for (const file of files) {
     const path = URL.createObjectURL(file)
     let sent = false
@@ -996,21 +1005,28 @@ async function sendPastedImages(files: File[]) {
       sent = true
       await nextTick()
       scrollToBottom(true)
-    } catch {
+    } catch (e) {
       failed++
+      if (!firstReason) firstReason = sendFailReason(e)
     } finally {
       // 失败气泡还指着这块本地图，重发要能再读到
       if (sent) URL.revokeObjectURL(path)
     }
   }
   if (failed) {
-    uni.showToast({ title: `${failed} 张图片发送失败`, icon: 'none' })
+    uni.showToast({
+      title: firstReason ? `${failed} 张图片发送失败：${firstReason}` : `${failed} 张图片发送失败`,
+      icon: 'none',
+    })
   }
 }
 
 onUnmounted(() => {
   if (typeof window !== 'undefined') window.removeEventListener('paste', onWindowPaste)
   clearScrollRetries()
+  // 用 onUnmounted 而不是页面级的 onUnload：桌面端内嵌时 onUnload 不会触发，
+  // 留下过期的 activeConversationId 会让补拉去拉一个已经关掉的会话。
+  chatStore.setActiveConversation('')
 })
 
 /** 回车发送开启时：Shift+Enter 换行（uni-app send 模式会拦截 Enter） */
@@ -1868,6 +1884,17 @@ function chooseFailToast(err: { errMsg?: string } | undefined, fallback: string)
   uni.showToast({ title: msg.replace(/^[^:]+:\s*/, '') || fallback, icon: 'none' })
 }
 
+/**
+ * 发送失败的可读原因。
+ * 服务端拒绝（非好友、被拉黑、被禁言、群不可用等）以及 OpenIM 的错误原文都在
+ * Error.message 里，之前多图发送的 catch 把它整个丢掉，只弹「N 张图片发送失败」，
+ * 用户和排查的人都看不到原因。
+ */
+function sendFailReason(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e ?? '')
+  return raw.trim() || '发送失败'
+}
+
 function requestAlbumAccess(): Promise<void> {
   return new Promise((resolve) => {
     // H5 / 小程序没有 HTML5+ 运行时，相册权限由浏览器或 uni.chooseImage 自行处理
@@ -1917,17 +1944,22 @@ function pickImage() {
         success: async (res) => {
           const paths = (res.tempFilePaths || []).slice(0, MAX_PICK_COUNT)
           let failed = 0
+          let firstReason = ''
           for (const path of paths) {
             try {
               await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
               await nextTick()
               scrollToBottom(true)
-            } catch {
+            } catch (e) {
               failed++
+              if (!firstReason) firstReason = sendFailReason(e)
             }
           }
           if (failed) {
-            uni.showToast({ title: `${failed} 张图片发送失败`, icon: 'none' })
+            uni.showToast({
+              title: firstReason ? `${failed} 张图片发送失败：${firstReason}` : `${failed} 张图片发送失败`,
+              icon: 'none',
+            })
           }
         },
       })

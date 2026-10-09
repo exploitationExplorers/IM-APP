@@ -504,6 +504,43 @@ func (c *Client) InviteGroupMemberAs(ctx context.Context, operatorUserID, groupI
 	return ignoreAlreadyDesired(err)
 }
 
+// EnsureGroupMembers 把业务侧的群成员补齐到 OpenIM。
+//
+// 为什么需要单独一个方法：EnsureGroup 在群已存在时会直接 return（有意为之——
+// 否则对账会伪造资料变更通知），所以对「群已存在但成员缺失」无能为力。
+// 清库重建、历史同步失败、成员漏加之后，OpenIM 的成员表就再也不会收敛，
+// 那些成员收不到群消息。这个方法补上这一环：拉现有成员，只邀请缺的。
+//
+// 重复邀请由 InviteGroupMemberAs 里的 ignoreAlreadyDesired 兜住
+// （OpenIM 3.8.3 返回 E11000 重复键，见 isDuplicateKeyError）。
+func (c *Client) EnsureGroupMembers(ctx context.Context, groupID string, memberUserIDs []string) error {
+	if strings.TrimSpace(groupID) == "" || len(memberUserIDs) == 0 {
+		return nil
+	}
+	current, err := c.ListGroupMemberIDs(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	present := make(map[string]struct{}, len(current))
+	for _, id := range current {
+		present[id] = struct{}{}
+	}
+	missing := make([]string, 0, len(memberUserIDs))
+	for _, id := range memberUserIDs {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		if _, ok := present[id]; ok {
+			continue
+		}
+		missing = append(missing, id)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return c.InviteGroupMember(ctx, groupID, missing)
+}
+
 func (c *Client) KickGroupMember(ctx context.Context, groupID string, userIDs []string) error {
 	return c.KickGroupMemberAs(ctx, "", groupID, userIDs)
 }
@@ -1089,6 +1126,23 @@ func ignoreNotFound(err error) error {
 	return err
 }
 
+// isDuplicateKeyError 判断是不是 Mongo 唯一键冲突（小写后的 message）。
+//
+// OpenIM 3.8.3 在「成员已经在群里」时返回的是 HTTP 500 + errCode=500，
+// errMsg 形如：
+//
+//	bulk write exception: write errors: [E11000 duplicate key error collection:
+//	openim_v3.group_member index: group_id_1_user_id_1 dup key: {...}] mongo insert many
+//
+// 它既不是 1004，也不含 already/repeat/已在群，所以必须单独识别。
+// 漏掉它的后果：invite_user_to_group 这类幂等重试被当成真失败上抛 →
+// im_sync_outbox 事件一路重试到 dead → 群成员在 OpenIM 侧永远收敛不了。
+func isDuplicateKeyError(message string) bool {
+	return strings.Contains(message, "duplicate key") ||
+		strings.Contains(message, "e11000") ||
+		strings.Contains(message, "dup key")
+}
+
 func ignoreAlreadyDesired(err error) error {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
@@ -1097,7 +1151,8 @@ func ignoreAlreadyDesired(err error) error {
 			strings.Contains(message, "already") ||
 			strings.Contains(message, "repeat") ||
 			strings.Contains(message, "已在群") ||
-			strings.Contains(message, "已经存在") {
+			strings.Contains(message, "已经存在") ||
+			isDuplicateKeyError(message) {
 			return nil
 		}
 	}

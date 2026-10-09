@@ -3,6 +3,7 @@ package im
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -12,6 +13,12 @@ import (
 	"im-app-server/internal/config"
 	"im-app-server/internal/models"
 )
+
+// openIMMongoDupKey 是 OpenIM 3.8.3 在「成员已经在群里」时 errMsg 的原文形态：
+// HTTP 500 + errCode=500，错误细节在 mongo 的 E11000 里，不含 already/repeat。
+const openIMMongoDupKey = "bulk write exception: write errors: [E11000 duplicate key error collection: " +
+	"openim_v3.group_member index: group_id_1_user_id_1 dup key: " +
+	"{ group_id: \"g1\", user_id: \"u1\" }] mongo insert many"
 
 func TestGetUserTokenUsesCachedAdminToken(t *testing.T) {
 	var adminCalls atomic.Int32
@@ -530,5 +537,68 @@ func TestListGroupMemberIDsPaginates(t *testing.T) {
 	}
 	if calls != 2 || !reflect.DeepEqual(got, []string{"u1", "u2"}) {
 		t.Fatalf("calls=%d members=%#v", calls, got)
+	}
+}
+
+func TestIgnoreAlreadyDesired(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool // true = 应被忽略（返回 nil）
+	}{
+		{
+			"mongo 重复键（OpenIM 3.8.3 成员已在群）",
+			&APIError{HTTPStatus: 500, ErrCode: 500, ErrMsg: openIMMongoDupKey},
+			true,
+		},
+		{
+			"重复键细节落在 errDlt",
+			&APIError{HTTPStatus: 500, ErrCode: 500, ErrMsg: "internal error", ErrDlt: openIMMongoDupKey},
+			true,
+		},
+		{"OpenIM 1004 资源不存在", &APIError{ErrCode: 1004, ErrMsg: "RecordNotFoundError"}, true},
+		{"英文 already", &APIError{ErrCode: 1001, ErrMsg: "user already in group"}, true},
+		{"中文 已在群", &APIError{ErrCode: 1001, ErrMsg: "该成员已在群中"}, true},
+		{"真失败：非好友不可聊", &APIError{ErrCode: 1001, ErrMsg: "chat is not allowed"}, false},
+		{"真失败：群已解散", &APIError{ErrCode: 1001, ErrMsg: "group dismissed"}, false},
+		{"非 APIError 不能被吞", errors.New("dial tcp: connection refused"), false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ignoreAlreadyDesired(tc.err) == nil
+			if got != tc.want {
+				t.Fatalf("ignoreAlreadyDesired(%v) 忽略=%v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestInviteGroupMemberIgnoresDuplicateKey 走完整 HTTP 链路，
+// 确保 500 + E11000 不会再让群成员同步事件失败（否则 outbox 会一路重试到 dead）。
+func TestInviteGroupMemberIgnoresDuplicateKey(t *testing.T) {
+	dupKeyBody, err := json.Marshal(map[string]any{"errCode": 500, "errMsg": openIMMongoDupKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token", "/auth/get_user_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/group/invite_user_to_group":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(dupKeyBody)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(config.OpenIMConfig{
+		APIURL: server.URL, Secret: "secret", AdminUser: "imAdmin",
+	}, server.Client())
+	if err := client.InviteGroupMemberAs(context.Background(), "owner-1", "group-1", []string{"user-1"}); err != nil {
+		t.Fatalf("InviteGroupMemberAs() error = %v, want nil（重复键应被忽略）", err)
 	}
 }

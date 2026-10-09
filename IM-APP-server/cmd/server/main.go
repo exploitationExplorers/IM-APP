@@ -202,12 +202,17 @@ func main() {
 	if cfg.LegacyChatEnabled {
 		r.GET("/ws", hub.HandleWS)
 	}
-	r.POST("/internal/openim/webhooks/:secret/callbackBeforeSendSingleMsgCommand", openIMWebhookH.BeforeSingle)
-	r.POST("/internal/openim/webhooks/:secret/callbackBeforeSendGroupMsgCommand", openIMWebhookH.BeforeGroup)
-	r.POST("/internal/openim/webhooks/:secret/callbackAfterSendSingleMsgCommand", openIMWebhookH.AfterMessage)
-	r.POST("/internal/openim/webhooks/:secret/callbackAfterSendGroupMsgCommand", openIMWebhookH.AfterMessage)
-	r.POST("/internal/openim/webhooks/:secret/callbackBeforeAfterMsgCommand", openIMWebhookH.AfterMessage)
-	r.POST("/internal/openim/webhooks/:secret/callbackAfterDismissGroupCommand", openIMWebhookH.AfterDismissGroup)
+	// webhook 回调：路径里的 secret 会被 SkipPaths 挡在访问日志外（避免密钥落盘），
+	// 所以这里单独挂一层脱敏日志，记耗时和异常状态码。见 middleware.WebhookLog。
+	webhooks := r.Group("/internal/openim/webhooks/:secret", middleware.WebhookLog())
+	{
+		webhooks.POST("/callbackBeforeSendSingleMsgCommand", openIMWebhookH.BeforeSingle)
+		webhooks.POST("/callbackBeforeSendGroupMsgCommand", openIMWebhookH.BeforeGroup)
+		webhooks.POST("/callbackAfterSendSingleMsgCommand", openIMWebhookH.AfterMessage)
+		webhooks.POST("/callbackAfterSendGroupMsgCommand", openIMWebhookH.AfterMessage)
+		webhooks.POST("/callbackBeforeAfterMsgCommand", openIMWebhookH.AfterMessage)
+		webhooks.POST("/callbackAfterDismissGroupCommand", openIMWebhookH.AfterDismissGroup)
+	}
 	internalIM := r.Group("/internal/im")
 	internalIM.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
 	{

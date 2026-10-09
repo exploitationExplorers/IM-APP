@@ -96,18 +96,32 @@ func (r *Redis) AllowSMS(ctx context.Context, phone string) (bool, error) {
 	return ok, nil
 }
 
+// incrWithTTLScript 原子地「自增 + 首次设置 TTL」。
+//
+// 之前三条限流器是 Incr 之后再单独发一条 Expire：两步非原子，而且 Expire 的
+// 返回值被丢弃。只要那一次 Expire 没生效（两条命令之间进程退出、Redis 抖动、
+// 连接被掐），这个 key 就永远不带 TTL，计数再也不会重置——对应的 IP / 指纹 /
+// 设备会被**永久**限流。合并成一次 Lua 往返即可，Redis 单线程执行没有中间态。
+var incrWithTTLScript = redis.NewScript(`
+local cnt = redis.call('INCR', KEYS[1])
+if cnt == 1 and tonumber(ARGV[1]) > 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return cnt
+`)
+
+func (r *Redis) incrWithTTL(ctx context.Context, key string, window time.Duration) (int64, error) {
+	return incrWithTTLScript.Run(ctx, r.Client, []string{key}, window.Milliseconds()).Int64()
+}
+
 // AllowIP 按 key（如客户端 IP）做固定窗口限流：window 时间内最多 limit 次，超限返回 false
 func (r *Redis) AllowIP(ctx context.Context, key string, limit int, window time.Duration) bool {
 	if !r.Available() {
 		return true // Redis 不可用时不做限制
 	}
-	k := "rl:" + key
-	cnt, err := r.Client.Incr(ctx, k).Result()
+	cnt, err := r.incrWithTTL(ctx, "rl:"+key, window)
 	if err != nil {
 		return true
-	}
-	if cnt == 1 {
-		r.Client.Expire(ctx, k, window)
 	}
 	return cnt <= int64(limit)
 }
@@ -117,13 +131,9 @@ func (r *Redis) AllowFingerprint(ctx context.Context, fp string, limit int, wind
 	if !r.Available() {
 		return true
 	}
-	k := "sms:fp:" + fp
-	cnt, err := r.Client.Incr(ctx, k).Result()
+	cnt, err := r.incrWithTTL(ctx, "sms:fp:"+fp, window)
 	if err != nil {
 		return true
-	}
-	if cnt == 1 {
-		r.Client.Expire(ctx, k, window)
 	}
 	return cnt <= int64(limit)
 }
@@ -134,13 +144,9 @@ func (r *Redis) AllowDeviceID(ctx context.Context, deviceID string, limit int, w
 	if !r.Available() || deviceID == "" {
 		return true
 	}
-	k := "sms:did:" + deviceID
-	cnt, err := r.Client.Incr(ctx, k).Result()
+	cnt, err := r.incrWithTTL(ctx, "sms:did:"+deviceID, window)
 	if err != nil {
 		return true
-	}
-	if cnt == 1 {
-		r.Client.Expire(ctx, k, window)
 	}
 	return cnt <= int64(limit)
 }
