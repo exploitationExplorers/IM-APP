@@ -800,7 +800,7 @@ function openLink(url: string) {
 .bubble {
   padding: 20rpx 24rpx;
   border-radius: 16rpx;
-  font-size: 28rpx;
+  font-size: 32rpx;
   line-height: 1.55;
   word-break: break-all;
   white-space: pre-wrap;
