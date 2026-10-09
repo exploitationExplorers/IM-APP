@@ -233,6 +233,11 @@ services:
       IMENV_MINIO_EXTERNALADDRESS: http://8.154.44.197/openim
       IMENV_MINIO_ACCESSKEYID: minioadmin
       IMENV_MINIO_SECRETACCESSKEY: minioadmin123
+      # ★ 桶 openim 必须公开读，否则聊天图片匿名取图 403。
+      #   镜像里 config/minio.yml 的 publicRead 默认 false，且没有别的开关能覆盖它；
+      #   2026-10-05 那次是手工设的，一删数据卷就丢，所以改成环境变量持久化。
+      #   映射规则同 IMENV_MINIO_INTERNALADDRESS：yaml 的 minio.publicRead → 全大写不加分隔符。
+      IMENV_MINIO_PUBLICREAD: "true"
       # 必须与业务 .env 的 OPENIM_SECRET 完全一致，否则 API 鉴权 401
       IMENV_SHARE_SECRET: ${OPENIM_SECRET:-openIM123}
       # webhook 不再走环境变量（官方镜像不认 IMENV_CALLBACK_URL），
