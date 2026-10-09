@@ -31,7 +31,7 @@ import {
   fetchGroupMessagePurges,
 } from '@/api/group'
 import { safeBack } from '@/utils/nav'
-import type { CardPayload, ChatMessage, Conversation, GroupInvitePayload, GroupMember } from '@/types'
+import type { CardPayload, ChatMessage, Conversation, GroupInvitePayload, GroupMember, GroupRole } from '@/types'
 import { collapseRepeatedGroupNameNotices, isGroupUnavailableError, replaceOpenIMAdminLabel } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
@@ -262,6 +262,19 @@ function nicknameOf(message: ChatMessage): string {
   if (message.senderNickname) return message.senderNickname
   const contact = contactStore.contacts.find((c) => c.id === uid)
   return contact?.nickname || ''
+}
+
+/**
+ * 气泡上的头衔：群主/管理员才挂徽章，普通成员与私聊返回 member（不显示）。
+ * 自己的消息也带上（自己是群主/管理员时同样露头衔），成员表按业务 ID 索引，
+ * 与昵称/备注走同一套 ID 映射。成员表没拉到时不显示徽章，不影响聊天。
+ */
+function roleOf(message: ChatMessage): GroupRole {
+  if (chatType.value !== 'group') return 'member'
+  if (message.senderId === myId.value) return myRole.value
+  const uid = businessUserIdFromIM(message.senderId)
+  if (!uid) return 'member'
+  return memberMetaMap.value[uid]?.role || 'member'
 }
 
 /**
@@ -2106,6 +2119,7 @@ function pickFavorite() {
           :avatar="avatarOf(m)"
           :fallback-avatar="fallbackAvatarOf(m)"
           :nickname="nicknameOf(m)"
+          :role="roleOf(m)"
           :preview-urls="imagePreviewUrls"
           :read-state="readStateOf(m)"
           @avatar-click="onAvatarClick(m)"

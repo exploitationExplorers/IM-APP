@@ -6,7 +6,7 @@ let activeVoiceStopper: (() => void) | null = null
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
-import type { CardPayload, ChatMessage, GroupInvitePayload, MessageQuote } from '@/types'
+import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
 import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
@@ -16,6 +16,8 @@ const props = defineProps<{
   avatar: string
   fallbackAvatar?: string
   nickname?: string
+  /** 群聊身份：群主/管理员在昵称旁挂头衔徽章；私聊与普通成员传 member 即不显示 */
+  role?: GroupRole
   /** 本会话全部图片消息的地址：预览时可左右滑动切换，缺省只预览本条 */
   previewUrls?: string[]
   /** 已读回执：私聊=对方已读，群聊=至少一名其他成员已读；两者共用单双勾样式。 */
@@ -49,6 +51,12 @@ function onAvatarError() {
 }
 
 const showNickname = computed(() => !props.mine && !!props.nickname)
+
+/** 头衔徽章文案：与群成员列表同一套说法（群主 / 管理员），普通成员不显示 */
+const roleBadgeText = computed(() => (props.role === 'owner' ? '群主' : props.role === 'admin' ? '管理员' : ''))
+
+/** 昵称行：有昵称或自己带头衔时才占位；自己的消息微信式不显示昵称，只在带了头衔时露出徽章 */
+const showNameRow = computed(() => showNickname.value || !!roleBadgeText.value)
 
 const emit = defineEmits<{
   avatarClick: []
@@ -446,6 +454,99 @@ const imageDisplaySrc = computed(() => {
   return toPlayableMediaUrl(raw)
 })
 
+/**
+ * 图片 / 视频封面的展示尺寸。
+ *
+ * 不能直接用 mode="widthFix" + CSS max-height：H5 下 uni-image 把 widthFix 渲染成
+ * background-size:100% 100%，外层高度由 JS 按原图比例算好，再被 max-height 截断，
+ * 于是图片纵向被压扁（竖图、长截图最明显；App 原生同样会被截断）。这里自己量出原图
+ * 尺寸，按比例缩进上限框，再用 scaleToFill 精确铺满这个等比例盒子，既不变形也不裁切。
+ */
+const MEDIA_BOX = { width: 280, height: 360 }
+/** 尺寸没量出来前的占位框（4:3，与图片占位一致） */
+const MEDIA_BOX_FALLBACK = { width: 280, height: 210 }
+
+/**
+ * rpx → px。内联 :style 里的 rpx 在 H5 不保证被转换（静态 CSS 才会转），
+ * 所以 JS 算出来的尺寸一律先转成 px 再绑，避免图片尺寸被浏览器当成非法值丢掉。
+ */
+function toPx(rpx: number): string {
+  return `${uni.upx2px(rpx)}px`
+}
+
+/** 自然尺寸缓存：滚出屏幕再滚回来不重复测量 */
+const naturalSizeCache = new Map<string, { width: number; height: number }>()
+const naturalSize = ref<{ width: number; height: number } | null>(null)
+/** 量尺寸失败（图片本身还能显示）：展示退化成 contain，避免用错比例把图裁掉 */
+const naturalSizeFailed = ref(false)
+
+/** 当前气泡要展示的媒体：图片消息是本体，视频消息是封面 */
+const mediaSrc = computed(() => {
+  if (props.message.type === 'image') return imageDisplaySrc.value
+  if (props.message.type === 'video') return videoPoster.value
+  return ''
+})
+
+/**
+ * 量原图尺寸。H5 的 getImageInfo 只是 new Image() 读 naturalWidth/Height，
+ * 不读像素、不要求 CORS，MinIO 直链也能拿到。
+ */
+function measureMediaSize(src: string) {
+  naturalSizeFailed.value = false
+  if (!src) {
+    naturalSize.value = null
+    return
+  }
+  const cached = naturalSizeCache.get(src)
+  if (cached) {
+    naturalSize.value = cached
+    return
+  }
+  naturalSize.value = null
+  uni.getImageInfo({
+    src,
+    success: (info) => {
+      const width = Number(info.width) || 0
+      const height = Number(info.height) || 0
+      if (!width || !height) return
+      // 缓存无上限会随会话长度一直涨，超量直接清空重来（量一次很便宜）
+      if (naturalSizeCache.size > 500) naturalSizeCache.clear()
+      const size = { width, height }
+      naturalSizeCache.set(src, size)
+      // 等待期间可能已经换到别的图，只认当前这条
+      if (mediaSrc.value === src) naturalSize.value = size
+    },
+    // 量不出来就守住占位框，图片本身照常展示
+    fail: () => {
+      if (mediaSrc.value === src) naturalSizeFailed.value = true
+    },
+  })
+}
+
+watch(mediaSrc, (src) => measureMediaSize(src), { immediate: true })
+
+/** 等比例缩进上限框后的展示尺寸（小图按旧行为放大到 280rpx 宽） */
+const mediaBoxStyle = computed(() => {
+  const size = naturalSize.value
+  if (!size) {
+    return { width: toPx(MEDIA_BOX_FALLBACK.width), height: toPx(MEDIA_BOX_FALLBACK.height) }
+  }
+  const scale = Math.min(MEDIA_BOX.width / size.width, MEDIA_BOX.height / size.height)
+  return {
+    width: toPx(Math.round(size.width * scale)),
+    height: toPx(Math.round(size.height * scale)),
+  }
+})
+
+/**
+ * 量到尺寸后用 scaleToFill 精确铺满等比例盒子（盒子比例＝原图比例，不会变形）；
+ * 还没量到时用 aspectFill 裁切撑满占位框（同样不变形）；量失败则退回 aspectFit 保证整图可见。
+ */
+const mediaMode = computed(() => {
+  if (naturalSize.value) return 'scaleToFill'
+  return naturalSizeFailed.value ? 'aspectFit' : 'aspectFill'
+})
+
 function openLink(url: string) {
   const href = url.startsWith('http') ? url : `https://${url}`
   // #ifdef H5
@@ -473,14 +574,23 @@ function openLink(url: string) {
       @error="onAvatarError"
     />
     <view class="content-wrap">
-      <text v-if="showNickname" class="nickname">{{ nickname }}</text>
+      <view v-if="showNameRow" class="name-row">
+        <text v-if="showNickname" class="nickname">{{ nickname }}</text>
+        <text v-if="roleBadgeText" class="role-badge" :class="`role-${role}`">{{ roleBadgeText }}</text>
+      </view>
       <view class="bubble-line">
         <!-- 发送失败：红色感叹号显示在气泡前面，点击重发 -->
         <view v-if="mine && message.status === 'failed'" class="retry-flag" @click.stop="onRetry">
           <text class="retry-icon">!</text>
         </view>
         <view v-if="message.type === 'image'" class="bubble image-bubble" @click="previewImage" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
-        <image v-if="imageDisplaySrc" class="msg-image" :src="imageDisplaySrc" mode="widthFix" />
+        <image
+          v-if="imageDisplaySrc"
+          class="msg-image"
+          :style="mediaBoxStyle"
+          :src="imageDisplaySrc"
+          :mode="mediaMode"
+        />
         <view v-else class="msg-image image-placeholder" />
       </view>
       <view
@@ -493,8 +603,9 @@ function openLink(url: string) {
         <image
           v-if="videoPoster"
           class="msg-image"
+          :style="mediaBoxStyle"
           :src="videoPoster"
-          mode="widthFix"
+          :mode="mediaMode"
           @error="onVideoPosterError"
         />
         <view v-else class="msg-image video-poster-placeholder" />
@@ -643,15 +754,40 @@ function openLink(url: string) {
   align-items: flex-end;
 }
 
-.nickname {
+/** 昵称行：昵称 + 群主/管理员头衔徽章（自己的消息右对齐，只露徽章） */
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  max-width: 100%;
   margin-bottom: 8rpx;
+}
+
+.nickname {
+  min-width: 0;
   font-size: 22rpx;
   line-height: 32rpx;
   color: #9aa3b5;
-  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/** 头衔徽章：沿用群成员列表的描边药丸，尺寸压到消息昵称档 */
+.role-badge {
+  flex-shrink: 0;
+  padding: 0 8rpx;
+  border: 2rpx solid #c5cad6;
+  border-radius: 6rpx;
+  font-size: 18rpx;
+  line-height: 26rpx;
+  color: #636e86;
+  white-space: nowrap;
+}
+
+.role-badge.role-admin {
+  border-color: #2b5cff;
+  color: #2b5cff;
 }
 
 /** 气泡行：感叹号（失败）在气泡前面，与气泡水平居中排列 */
@@ -704,16 +840,15 @@ function openLink(url: string) {
   border-radius: 12rpx;
 }
 
+/** 尺寸交给封面图自己撑（可能比 280rpx 窄，比如竖屏视频），播放键才居中对得上 */
 .video-bubble {
   position: relative;
-  width: 280rpx;
-  max-width: 56vw;
   flex-shrink: 0;
   overflow: hidden;
 }
 
 .video-poster-placeholder {
-  width: 100%;
+  width: 280rpx;
   min-height: 240rpx;
   background: #e8e8e8;
   border-radius: 12rpx;
