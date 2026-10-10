@@ -7,10 +7,21 @@ import { APP_CONFIG } from '@/config'
 import ImCountryPicker from '@/components/ImCountryPicker.vue'
 import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
 import { findCountryByDialCode, validatePhone } from '@/constants/countries'
+import { readLoginPassword, readLoginPhone, saveLoginPassword, clearLoginPassword } from '@/utils/login-phone'
 
 const userStore = useUserStore()
 
 onShow(() => {
+  const saved = readLoginPhone()
+  if (saved?.phone && !phone.value) {
+    phone.value = saved.phone
+    countryCode.value = saved.countryCode || countryCode.value
+  }
+  const savedPassword = readLoginPassword()
+  if (savedPassword && !password.value) {
+    password.value = savedPassword
+    rememberPassword.value = true
+  }
   if (userStore.isLoggedIn) {
     uni.switchTab({ url: '/pages/chat/index' })
   }
@@ -21,6 +32,7 @@ const phone = ref('')
 const password = ref('')
 const code = ref('')
 const showPassword = ref(false)
+const rememberPassword = ref(true)
 const loading = ref(false)
 const countdown = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
@@ -71,6 +83,8 @@ async function onLogin() {
         uni.showToast({ title: '请输入密码', icon: 'none' })
         return
       }
+      if (rememberPassword.value) saveLoginPassword(password.value)
+      else clearLoginPassword()
       await userStore.loginPassword(phone.value, password.value, countryCode.value)
     } else {
       if (!code.value) {
@@ -164,7 +178,15 @@ function goForgot() {
           </view>
         </view>
 
-        <view v-if="mode === 'password'" class="auth-forgot" @click="goForgot">忘记密码</view>
+        <view v-if="mode === 'password'" class="auth-extra">
+          <view class="auth-remember" @click="rememberPassword = !rememberPassword">
+            <view class="auth-remember-box" :class="{ on: rememberPassword }">
+              <text v-if="rememberPassword" class="auth-remember-tick">✓</text>
+            </view>
+            <text>记住号码密码</text>
+          </view>
+          <text class="auth-forgot" @click="goForgot">忘记密码</text>
+        </view>
 
         <view class="auth-spacer" />
 

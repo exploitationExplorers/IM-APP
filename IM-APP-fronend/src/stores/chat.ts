@@ -6,6 +6,7 @@ import type { ChatMessage, Conversation, ConversationPinnedMessage } from '@/typ
 import { recallMessage, resolveIMGroup, resolveIMGroupByIM, resolveIMPeer } from '@/api/im'
 import {
   businessUserIdFromIM,
+  sameBusinessUserId,
   ensureIMLogin,
   getConversationList,
   getHistoryMessages,
@@ -308,7 +309,9 @@ export const useChatStore = defineStore('chat', () => {
     if (next.type === 'private' && next.peerUserId) {
       const contactStore = useContactStore()
       const bizId = businessUserIdFromIM(next.peerUserId)
-      const contact = contactStore.contacts.find((c) => c.id === bizId)
+      const contact = contactStore.contacts.find(
+        (c) => c.id === bizId || sameBusinessUserId(c.id, next.peerUserId),
+      )
       const remark = contact?.remark?.trim()
       if (remark) next.title = remark
     }

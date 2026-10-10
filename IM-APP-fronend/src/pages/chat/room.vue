@@ -19,7 +19,7 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useForwardStore } from '@/stores/forward'
-import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId, isNotInGroupIMError } from '@/utils/openim'
+import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId, isNotInGroupIMError, sameBusinessUserId } from '@/utils/openim'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { fetchContact } from '@/api/contact'
@@ -247,7 +247,8 @@ function fallbackAvatarOf(message: ChatMessage): string {
 }
 
 function friendRemarkOf(uid: string): string {
-  const live = contactStore.contacts.find((c) => c.id === uid)?.remark?.trim() || ''
+  const live =
+    contactStore.contacts.find((c) => c.id === uid || sameBusinessUserId(c.id, uid))?.remark?.trim() || ''
   return live || friendRemarkMap.value[uid] || ''
 }
 
@@ -350,7 +351,9 @@ function systemTextOf(message: ChatMessage): string {
 
 function refreshPrivateTitle() {
   if (chatType.value !== 'private' || !businessId.value) return
-  const contact = contactStore.contacts.find((c) => c.id === businessId.value)
+  const contact = contactStore.contacts.find(
+    (c) => c.id === businessId.value || sameBusinessUserId(c.id, businessId.value),
+  )
   const remark = contact?.remark?.trim()
   if (remark) {
     title.value = remark
@@ -358,6 +361,13 @@ function refreshPrivateTitle() {
   }
   if (contact?.nickname) title.value = contact.nickname
 }
+
+watch(
+  () => contactStore.contacts.map((c) => `${c.id}:${c.remark || ''}`).join('|'),
+  () => {
+    if (chatType.value === 'private') refreshPrivateTitle()
+  },
+)
 
 const enterToSend = computed(() => settingsStore.enterToSend)
 const hasInput = computed(() => input.value.trim().length > 0)
@@ -1939,7 +1949,7 @@ function pickImage() {
       uni.chooseImage({
         count: MAX_PICK_COUNT,
         sourceType: ['album'],
-        sizeType: ['compressed', 'original'],
+        sizeType: ['original'],
         fail: (err) => chooseFailToast(err, '无法打开相册'),
         success: async (res) => {
           const paths = (res.tempFilePaths || []).slice(0, MAX_PICK_COUNT)
@@ -2330,7 +2340,7 @@ function pickFavorite() {
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #f0f1f4;
+  background: #e6e8ee;
   overflow: hidden;
   position: relative;
 }
@@ -2503,12 +2513,12 @@ function pickFavorite() {
   flex: 1;
   height: 0;
   padding-bottom: 16rpx;
-  background: #f0f1f4;
+  background: #e6e8ee;
 }
 
 .msg-list :deep(.uni-scroll-view),
 .msg-list :deep(.uni-scroll-view-content) {
-  background: #f0f1f4;
+  background: #e6e8ee;
 }
 
 .jump-bottom {

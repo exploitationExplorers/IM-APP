@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watchEffect } from 'vue'
+import { ref, computed, watch, watchEffect } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ConversationItem from '@/components/ConversationItem.vue'
@@ -34,6 +34,14 @@ const showAddMenu = ref(false)
 const showFilter = ref(false)
 const filterKey = ref<'all' | 'unread'>('all')
 const selectedConv = ref<Conversation | null>(null)
+
+watch(
+  () => chatStore.conversations.find((c) => c.id === selectedConv.value?.id)?.title,
+  (title) => {
+    if (!title || !selectedConv.value || selectedConv.value.title === title) return
+    selectedConv.value = { ...selectedConv.value, title }
+  },
+)
 
 const filterLabel = computed(() => (filterKey.value === 'unread' ? '未读' : '全部'))
 

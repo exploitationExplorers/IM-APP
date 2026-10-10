@@ -24,7 +24,6 @@ const contact = ref<Contact | null>(null)
 const loading = ref(false)
 const showMore = ref(false)
 
-const nickname = computed(() => contact.value?.nickname || '')
 const listName = computed(
   () => contact.value?.remark?.trim() || contact.value?.nickname || '',
 )
@@ -215,7 +214,7 @@ function onDelete() {
                 }"
               />
               <view class="friend-profile-meta">
-                <text class="friend-name">{{ nickname }}</text>
+                <text class="friend-name">{{ listName }}</text>
                 <view v-if="contact.isBlocked" class="friend-blocked-tag">
                   <text>已拉黑</text>
                 </view>

@@ -1,6 +1,9 @@
 import type { UserInfo } from '@/types'
 
 const LOGIN_PHONE_KEY = 'im_login_phone'
+const LOGIN_PASSWORD_KEY = 'im_login_password'
+
+export const LOGIN_REMEMBER_KEYS = [LOGIN_PHONE_KEY, LOGIN_PASSWORD_KEY] as const
 
 export type LoginPhone = {
   countryCode: string
@@ -34,6 +37,20 @@ export function readLoginPhone(): LoginPhone | null {
 
 export function clearLoginPhone() {
   uni.removeStorageSync(LOGIN_PHONE_KEY)
+}
+
+export function saveLoginPassword(password: string) {
+  if (!password) return
+  uni.setStorageSync(LOGIN_PASSWORD_KEY, password)
+}
+
+export function readLoginPassword(): string {
+  const raw = uni.getStorageSync(LOGIN_PASSWORD_KEY)
+  return typeof raw === 'string' ? raw : ''
+}
+
+export function clearLoginPassword() {
+  uni.removeStorageSync(LOGIN_PASSWORD_KEY)
 }
 
 export function applyLoginPhone(user: UserInfo): UserInfo {

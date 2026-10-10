@@ -123,7 +123,6 @@ export const useUserStore = defineStore('user', () => {
     token.value = ''
     refreshToken.value = ''
     profile.value = null
-    clearLoginPhone()
     clearToken()
     clearFriendRequestBadge()
     useContactStore().reset()
@@ -141,7 +140,6 @@ export const useUserStore = defineStore('user', () => {
     token.value = ''
     refreshToken.value = ''
     profile.value = null
-    clearLoginPhone()
     clearToken()
     clearFriendRequestBadge()
     clearSessionStorage()

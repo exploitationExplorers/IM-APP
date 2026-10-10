@@ -45,7 +45,6 @@ const convId = ref('')
 const recvOpt = ref<number>(MessageReceiveOptType.Normal)
 const pinned = ref(false)
 
-const nickname = computed(() => contact.value?.nickname || '')
 const listName = computed(
   () => contact.value?.remark?.trim() || contact.value?.nickname || '',
 )
@@ -305,7 +304,7 @@ function onDelete() {
               mode="aspectFill"
             />
             <view class="profile-meta">
-              <text class="name">{{ nickname }}</text>
+              <text class="name">{{ listName }}</text>
               <view v-if="contact.isBlocked" class="blocked-tag">
                 <text>已拉黑</text>
               </view>

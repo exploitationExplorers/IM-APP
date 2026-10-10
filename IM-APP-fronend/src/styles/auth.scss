@@ -189,11 +189,48 @@ $auth-gradient: linear-gradient(326deg, #2f9de2 6.61%, #1c41c7 35.26%, #0c1b54 9
   white-space: nowrap;
 }
 
+.auth-extra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8rpx 0 0;
+}
+
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  color: #fff;
+  font-size: 26rpx;
+  line-height: 1.4;
+}
+
+.auth-remember-box {
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 4rpx;
+  border: 2rpx solid rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.auth-remember-box.on {
+  background: #fff;
+  border-color: #fff;
+}
+
+.auth-remember-tick {
+  color: #1c41c7;
+  font-size: 22rpx;
+  line-height: 1;
+  font-weight: 700;
+}
+
 .auth-forgot {
-  align-self: flex-end;
   color: #fff;
   font-size: 28rpx;
-  margin: 8rpx 0 0;
   line-height: 1.4;
 }
 

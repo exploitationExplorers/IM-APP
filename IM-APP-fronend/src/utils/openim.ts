@@ -90,6 +90,30 @@ export function businessUserIdFromIM(openIMUserID: string): string {
   return `${normalized.slice(0, 8)}-${normalized.slice(8, 12)}-${normalized.slice(12, 16)}-${normalized.slice(16, 20)}-${normalized.slice(20)}`
 }
 
+/** 业务 UUID 和 OpenIM 的 32 位 id 看成同一个用户 */
+export function sameBusinessUserId(a?: string, b?: string): boolean {
+  if (!a || !b) return false
+  const left = businessUserIdFromIM(a) || a.replace(/-/g, '').toLowerCase()
+  const right = businessUserIdFromIM(b) || b.replace(/-/g, '').toLowerCase()
+  return left.replace(/-/g, '').toLowerCase() === right.replace(/-/g, '').toLowerCase()
+}
+
+/** 发给 OpenIM 的用户/群 id 不能带横线，带横线的账号会直接被拒发 */
+function toOpenIMID(id: string): string {
+  const normalized = id.trim().toLowerCase()
+  if (BUSINESS_UUID_RE.test(normalized)) return normalized.replace(/-/g, '')
+  return id.trim()
+}
+
+/** 单聊会话 id 是 si_对方_自己。会话上缺 userID 时从这里把接收人补回来 */
+function peerIdFromSingleConversation(conversationId: string, selfId: string): string {
+  if (!conversationId.startsWith('si_')) return ''
+  const parts = conversationId.slice(3).split('_').filter(Boolean)
+  if (parts.length < 2) return ''
+  const self = toOpenIMID(selfId)
+  return parts.map(toOpenIMID).find((id) => id && id !== self) || ''
+}
+
 let tokenExpireAt = 0
 let loginPromise: Promise<string> | null = null
 /** 退出登录时递增，作废进行中的 IM 登录，避免旧账号登录完成后把会话写回来 */
@@ -857,14 +881,19 @@ async function sendCreatedMessage(
   const groupID =
     target.sessionType === SessionType.Single
       ? ''
-      : target.groupId || groupIdFromConversationId(target.conversationId)
-  // 安卓原生有时只读消息体上的 groupID，参数里有、消息上没有就会偶发拒发
-  if (isAppPlatform && groupID) {
-    if (!message.groupID) message.groupID = groupID
-    if (!message.sessionType) message.sessionType = target.sessionType
+      : toOpenIMID(target.groupId || groupIdFromConversationId(target.conversationId))
+  let recvID = target.sessionType === SessionType.Single ? toOpenIMID(target.recvId) : ''
+  if (target.sessionType === SessionType.Single && !recvID) {
+    recvID = peerIdFromSingleConversation(target.conversationId, imUserId.value)
+  }
+  // 安卓原生有时只读消息体上的 id，参数里有、消息上没有就会把这部分人的消息拒掉
+  if (isAppPlatform) {
+    if (groupID && !message.groupID) message.groupID = groupID
+    if (recvID && !message.recvID) message.recvID = recvID
+    if ((groupID || recvID) && !message.sessionType) message.sessionType = target.sessionType
   }
   const params = {
-    recvID: target.sessionType === SessionType.Single ? target.recvId : '',
+    recvID,
     groupID,
     message,
     offlinePushInfo: {
@@ -2150,11 +2179,11 @@ function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
 function jsonPictureUrl(raw: unknown): string {
   if (raw && typeof raw === 'object') {
     const obj = raw as Record<string, unknown>
-    const pictures = [obj.snapshotPicture, obj.sourcePicture, obj.bigPicture]
+    const pictures = [obj.sourcePicture, obj.SourcePicture, obj.bigPicture, obj.BigPicture, obj.snapshotPicture, obj.SnapshotPicture]
     for (const picture of pictures) {
-      if (picture && typeof picture === 'object' && 'url' in picture) {
-        const url = (picture as { url?: unknown }).url
-        if (typeof url === 'string' && url) return url
+      if (picture && typeof picture === 'object') {
+        const url = pickString(picture as Record<string, unknown>, ['url', 'Url', 'URL'])
+        if (url) return url
       }
     }
     if (typeof obj.sourcePath === 'string' && obj.sourcePath) return obj.sourcePath
@@ -2168,12 +2197,29 @@ function jsonPictureUrl(raw: unknown): string {
   }
 }
 
-/** 图片地址：优先远程 URL；H5 绝不回退到 App 本地路径（浏览器会报 Not allowed to load local resource） */
+function pictureInfoUrl(elem: unknown, keys: string[]): string {
+  if (!elem || typeof elem !== 'object') return ''
+  const obj = elem as Record<string, unknown>
+  for (const key of keys) {
+    const picture = obj[key]
+    if (!picture || typeof picture !== 'object') continue
+    const url = pickString(picture as Record<string, unknown>, ['url', 'Url', 'URL'])
+    if (url) return url
+  }
+  return ''
+}
+
+/** 气泡和预览用原图。缩略图 snapshot 只有一两百像素，拉大以后就是马赛克。 */
 function pictureUrlOf(item: MessageItem): string {
+  const elem = item.pictureElem as unknown as Record<string, unknown> | undefined
+  const pascal = (item as unknown as Record<string, unknown>).PictureElem
   const candidates = [
-    item.pictureElem?.snapshotPicture?.url,
-    item.pictureElem?.sourcePicture?.url,
-    item.pictureElem?.bigPicture?.url,
+    pictureInfoUrl(elem, ['sourcePicture', 'SourcePicture']),
+    pictureInfoUrl(elem, ['bigPicture', 'BigPicture']),
+    pictureInfoUrl(pascal, ['sourcePicture', 'SourcePicture']),
+    pictureInfoUrl(pascal, ['bigPicture', 'BigPicture']),
+    pictureInfoUrl(elem, ['snapshotPicture', 'SnapshotPicture']),
+    pictureInfoUrl(pascal, ['snapshotPicture', 'SnapshotPicture']),
     jsonPictureUrl(item.content),
     item.pictureElem?.sourcePath,
     typeof item.content === 'string' ? item.content : '',
