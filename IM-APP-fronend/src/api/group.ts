@@ -68,14 +68,26 @@ function normalizeMemberList(raw: unknown[]): GroupMember[] {
   return raw.map(normalizeMember).filter((m): m is GroupMember => !!m)
 }
 
-/** ???????????? API? */
+/** 拉全量群成员；按 id 去重，避免分页游标异常时群主/管理员重复 */
 export async function fetchAllGroupMembers(groupId: string): Promise<GroupMember[]> {
   const all: GroupMember[] = []
+  const seen = new Set<string>()
   let cursor = ''
   for (;;) {
     const page = await fetchGroupMembers(groupId, { cursor, limit: 100 })
-    if (Array.isArray(page)) return page
-    all.push(...page.items)
+    if (Array.isArray(page)) {
+      for (const m of page) {
+        if (seen.has(m.id)) continue
+        seen.add(m.id)
+        all.push(m)
+      }
+      return all
+    }
+    for (const m of page.items) {
+      if (seen.has(m.id)) continue
+      seen.add(m.id)
+      all.push(m)
+    }
     if (!page.hasMore || !page.nextCursor) break
     cursor = page.nextCursor
   }
@@ -83,7 +95,19 @@ export async function fetchAllGroupMembers(groupId: string): Promise<GroupMember
 }
 
 export async function joinGroup(groupId: string): Promise<GroupInfo> {
-  return request<GroupInfo>({ url: `/groups/${groupId}/join`, method: 'POST' })
+  return request<GroupInfo>({
+    url: `/groups/${encodeURIComponent(groupId)}/join`,
+    method: 'POST',
+  })
+}
+
+/** 群主改群号（一生一次） */
+export async function updateGroupPublicId(groupId: string, publicId: string): Promise<GroupInfo> {
+  return request<GroupInfo>({
+    url: '/groups/public-id/update',
+    method: 'POST',
+    data: { groupId, publicId },
+  })
 }
 
 /** 需审核的群：提交入群申请。groupId 为群公开 ID */

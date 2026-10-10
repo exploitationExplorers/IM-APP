@@ -74,6 +74,11 @@ const canManage = computed(() => isOwner.value || myRole.value === 'admin')
 const canEditProfile = computed(
   () => groupDetail.value?.permissions?.canEditProfile ?? canManage.value,
 )
+/** 群主且尚未改过群号时可改一次 */
+const canEditGroupId = computed(
+  () => isOwner.value && !groupDetail.value?.publicIdChangeUsed,
+)
+const displayGroupId = computed(() => groupDetail.value?.id || groupId.value)
 const joinModeLabel = computed(() =>
   groupDetail.value?.joinMode === 'approval' ? '私密群（申请入群）' : '公开群（扫码入群）',
 )
@@ -83,9 +88,7 @@ const recvOpt = ref<number>(MessageReceiveOptType.Normal)
 const pinned = ref(false)
 
 function getMemberDisplayName(member: { id?: string; nickname?: string; groupNickname?: string }) {
-  const remark = member.id
-    ? contactStore.contacts.find((c) => c.id === member.id)?.remark?.trim()
-    : ''
+  const remark = member.id ? contactStore.remarkOf(member.id) : ''
   return remark || member.groupNickname || member.nickname || '成员'
 }
 
@@ -115,6 +118,8 @@ onShow(async () => {
   try {
     if (!userStore.profile) await userStore.loadProfile()
     await groupStore.loadDetail(groupId.value)
+    // 改号后详情里的 id 是新群号，同步到本页路由态
+    if (groupDetail.value?.id) groupId.value = groupDetail.value.id
     await initConversationSettings()
     await loadPendingJoinCount()
   } catch (e) {
@@ -204,6 +209,13 @@ function goToEditName() {
   })
 }
 
+function goToEditGroupId() {
+  if (!canEditGroupId.value) return
+  uni.navigateTo({
+    url: `/pages/group/edit-group-id?id=${encodeURIComponent(displayGroupId.value)}`,
+  })
+}
+
 function goToAnnouncement() {
   uni.navigateTo({
     url: `/pages/group/announcement?id=${encodeURIComponent(groupId.value)}`,
@@ -238,7 +250,7 @@ function goToMedia() {
 
 function goToSearchHistory() {
   uni.navigateTo({
-    url: `/pages/group/search-history?id=${encodeURIComponent(groupId.value)}`,
+    url: `/pages/group/search-history?id=${encodeURIComponent(groupId.value)}&title=${encodeURIComponent(group.value?.name || '群聊')}`,
   })
 }
 
@@ -250,7 +262,7 @@ function goToReport() {
 
 function copyGroupId() {
   uni.setClipboardData({
-    data: groupId.value,
+    data: displayGroupId.value,
     success: () => uni.showToast({ title: '已复制', icon: 'none' }),
   })
 }
@@ -471,11 +483,16 @@ async function onRemoveDissolved() {
         </view>
       </view>
 
-      <view class="info-row info-row-id">
-        <text class="label">群聊ID</text>
-        <view class="id-box">
-          <text class="value id-value">{{ groupId }}</text>
-          <view class="copy-btn" @click="copyGroupId">复制</view>
+      <view
+        class="info-row info-row-id"
+        :class="{ 'nav-row': canEditGroupId }"
+        @click="goToEditGroupId"
+      >
+        <text class="label">群号</text>
+        <view class="id-box" @click.stop>
+          <text class="value id-value">{{ displayGroupId }}</text>
+          <view class="copy-btn" @click.stop="copyGroupId">复制</view>
+          <text v-if="canEditGroupId" class="arrow">›</text>
         </view>
       </view>
 

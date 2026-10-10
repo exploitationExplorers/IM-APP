@@ -51,6 +51,7 @@ func main() {
 		"group_member_limit_logs": {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
 		"group_message_purges":    {"group_id", "user_id", "purged_at"},
 		"users":                   {"id", "public_id", "public_id_changed_at"},
+		"groups":                  {"id", "public_id", "public_id_changed_at"},
 		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
 		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
@@ -182,6 +183,12 @@ func main() {
 	stickerH := &handler.StickerHandler{Svc: stickerSvc}
 
 	r := gin.New()
+	// 信任本机 nginx / Docker 网段，才能从 X-Forwarded-For / X-Real-IP 取真实客户端 IP。
+	// 不信任时 ClientIP 恒为 127.0.0.1，短信 IP 限流会把全站用户当成同一人。
+	_ = r.SetTrustedProxies([]string{
+		"127.0.0.1", "::1",
+		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+	})
 	loggerConfig := gin.LoggerConfig{}
 	if cfg.OpenIM.WebhookSecret != "" {
 		base := "/internal/openim/webhooks/" + cfg.OpenIM.WebhookSecret
@@ -333,6 +340,7 @@ func main() {
 			auth.PUT("/groups/:id/remark", groupH.UpdateGroupRemark)
 			auth.PUT("/groups/:id/members/:userId/remark", groupH.UpdateMemberRemark)
 			auth.POST("/groups/settings/update", groupH.UpdateSettings)
+			auth.POST("/groups/public-id/update", groupH.UpdatePublicID)
 			auth.GET("/group-announcements", groupH.ListAnnouncementHistory)
 			auth.POST("/groups/reports", groupH.CreateReport)
 			auth.POST("/groups/:id/leave", groupH.Leave)

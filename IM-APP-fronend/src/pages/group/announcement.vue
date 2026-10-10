@@ -85,8 +85,18 @@ function addImages() {
     sizeType: ['compressed'],
     sourceType: ['album', 'camera'],
     success: (res) => {
-      const paths = Array.isArray(res.tempFilePaths) ? res.tempFilePaths : [res.tempFilePaths]
-      images.value = [...images.value, ...(paths.filter(Boolean) as string[])].slice(0, MAX_IMAGES)
+      const paths = (Array.isArray(res.tempFilePaths) ? res.tempFilePaths : [res.tempFilePaths]).filter(
+        Boolean,
+      ) as string[]
+      const seen = new Set(images.value)
+      const next = [...images.value]
+      for (const p of paths) {
+        if (seen.has(p)) continue
+        seen.add(p)
+        next.push(p)
+        if (next.length >= MAX_IMAGES) break
+      }
+      images.value = next
     },
   })
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"im-app-server/internal/middleware"
@@ -127,6 +128,29 @@ func (h *GroupHandler) Members(c *gin.Context) {
 		return
 	}
 	response.OK(c, page)
+}
+
+// UpdatePublicID POST /groups/public-id/update —— 群主改群号，一生一次。
+func (h *GroupHandler) UpdatePublicID(c *gin.Context) {
+	var req models.UpdateGroupPublicIDReq
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.GroupID) == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	g, err := h.Svc.UpdatePublicID(c.Request.Context(), middleware.UserID(c), req.GroupID, req.PublicID)
+	if err != nil {
+		if errors.Is(err, repository.ErrForbidden) {
+			response.Fail(c, http.StatusForbidden, "仅群主可修改群号")
+			return
+		}
+		if errors.Is(err, repository.ErrInvalidGroupOperation) {
+			response.Fail(c, http.StatusBadRequest, "群聊 ID 不正确")
+			return
+		}
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, g)
 }
 
 func (h *GroupHandler) Join(c *gin.Context) {

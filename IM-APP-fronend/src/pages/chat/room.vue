@@ -19,7 +19,17 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useForwardStore } from '@/stores/forward'
-import { businessUserIdFromIM, chooseLocalFiles, ensureIMLogin, imUserId, isNotInGroupIMError, sameBusinessUserId } from '@/utils/openim'
+import {
+  businessUserIdFromIM,
+  chooseLocalFiles,
+  ensureIMLogin,
+  friendlySendFailMessage,
+  imUserId,
+  isLikelyChatImage,
+  isNotInGroupIMError,
+  sameBusinessUserId,
+} from '@/utils/openim'
+import { requestAndroidAlbumPermission } from '@/utils/file-upload'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { fetchContact } from '@/api/contact'
@@ -32,7 +42,12 @@ import {
 } from '@/api/group'
 import { safeBack } from '@/utils/nav'
 import type { CardPayload, ChatMessage, Conversation, GroupInvitePayload, GroupMember, GroupRole } from '@/types'
-import { collapseRepeatedGroupNameNotices, isGroupUnavailableError, replaceOpenIMAdminLabel } from '@/utils/im-notification'
+import {
+  collapseRepeatedGroupNameNotices,
+  formatIMNotification,
+  isGroupUnavailableError,
+  replaceOpenIMAdminLabel,
+} from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
@@ -68,6 +83,9 @@ const showFriendDetail = ref(false)
 const friendDetailId = ref('')
 
 const statusBarHeight = getStatusBarHeight()
+/** iOS Safari 键盘弹起时 visualViewport 高度；空则用 CSS 100dvh */
+const vvHeightPx = ref(0)
+const keyboardOpen = ref(false)
 
 const conversationId = ref('')
 const title = ref('聊天')
@@ -247,9 +265,7 @@ function fallbackAvatarOf(message: ChatMessage): string {
 }
 
 function friendRemarkOf(uid: string): string {
-  const live =
-    contactStore.contacts.find((c) => c.id === uid || sameBusinessUserId(c.id, uid))?.remark?.trim() || ''
-  return live || friendRemarkMap.value[uid] || ''
+  return contactStore.remarkOf(uid) || friendRemarkMap.value[uid] || ''
 }
 
 function nicknameOf(message: ChatMessage): string {
@@ -261,8 +277,10 @@ function nicknameOf(message: ChatMessage): string {
   const mr = memberRemarkMap.value[uid]
   if (mr) return mr
   if (message.senderNickname) return message.senderNickname
-  const contact = contactStore.contacts.find((c) => c.id === uid)
-  return contact?.nickname || ''
+  const contact = contactStore.contacts.find(
+    (c) => c.id === uid || sameBusinessUserId(c.id, uid),
+  )
+  return contact?.remark?.trim() || contact?.nickname || ''
 }
 
 /**
@@ -346,27 +364,37 @@ watch(
 )
 
 function systemTextOf(message: ChatMessage): string {
+  // 有原始通知体时现场按好友备注重排「X 邀请 Y」，避免入库时备注索引未就绪
+  const raw = chatStore.getRawMessage(message.id)
+  if (raw && Number(raw.contentType) >= 1000) {
+    const text = formatIMNotification(raw, (userId) => {
+      const biz = businessUserIdFromIM(userId) || userId
+      return friendRemarkOf(biz) || contactStore.remarkOf(biz) || ''
+    })
+    if (text) return replaceOpenIMAdminLabel(text, groupOwnerName.value)
+  }
   return replaceOpenIMAdminLabel(message.content, groupOwnerName.value)
 }
 
 function refreshPrivateTitle() {
   if (chatType.value !== 'private' || !businessId.value) return
-  const contact = contactStore.contacts.find(
-    (c) => c.id === businessId.value || sameBusinessUserId(c.id, businessId.value),
-  )
-  const remark = contact?.remark?.trim()
+  const remark = contactStore.remarkOf(businessId.value)
   if (remark) {
     title.value = remark
     return
   }
+  const contact = contactStore.contacts.find(
+    (c) => c.id === businessId.value || sameBusinessUserId(c.id, businessId.value),
+  )
   if (contact?.nickname) title.value = contact.nickname
 }
 
 watch(
-  () => contactStore.contacts.map((c) => `${c.id}:${c.remark || ''}`).join('|'),
+  () => contactStore.remarkByUserId,
   () => {
     if (chatType.value === 'private') refreshPrivateTitle()
   },
+  { deep: true },
 )
 
 const enterToSend = computed(() => settingsStore.enterToSend)
@@ -624,9 +652,28 @@ onLoad(async (query) => {
   await bootstrapRoom(query as Record<string, string | undefined>)
 })
 
+function syncVisualViewport() {
+  if (typeof window === 'undefined') return
+  const vv = window.visualViewport
+  if (!vv) return
+  // 布局视口与可视视口差值大 → 键盘顶起来了；用 vv.height 撑满可编辑区域，消掉灰缝
+  const layoutH = window.innerHeight || 0
+  const offset = Math.max(0, vv.offsetTop || 0)
+  const visible = Math.max(0, Math.round(vv.height + offset))
+  const gap = layoutH - vv.height
+  keyboardOpen.value = gap > 80
+  vvHeightPx.value = keyboardOpen.value ? visible : 0
+}
+
 onMounted(() => {
   if (typeof window !== 'undefined' && isH5ComposerPlatform()) {
     window.addEventListener('paste', onWindowPaste)
+    const vv = window.visualViewport
+    if (vv) {
+      vv.addEventListener('resize', syncVisualViewport)
+      vv.addEventListener('scroll', syncVisualViewport)
+      syncVisualViewport()
+    }
   }
   if (!props.embedded || !props.conversationId) return
   void bootstrapRoom({
@@ -716,6 +763,14 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     myId.value = imUserId.value
     if (!myId.value) {
       throw new Error('当前 IM 用户 ID 未初始化，请重新登录')
+    }
+
+    if (chatType.value === 'private') {
+      void contactStore.ensureRemarkIndex().then(() => refreshPrivateTitle())
+      refreshPrivateTitle()
+    } else if (chatType.value === 'group') {
+      // 邀请人/被邀请人系统提示依赖备注索引
+      void contactStore.ensureRemarkIndex()
     }
 
     await Promise.all([loadTask, groupMetaTask])
@@ -904,13 +959,12 @@ async function onSend() {
     await nextTick()
     scrollToBottom(true)
   } catch (e) {
-    // 发送失败（如被对方拉黑、网络异常）：消息气泡已由 store 标为 failed（红色感叹号），
-    // 用户点感叹号可重发，这里不弹 toast 打扰，避免出现 blocked 等原始错误提示。
     if (isGroupUnavailableError((e as Error)?.message) || isNotInGroupIMError(e)) {
       exitUnavailableGroupRoom()
       return
     }
-    console.warn('[room] 发送失败', (e as Error)?.message)
+    // 非好友/拉黑/禁言等：气泡红叹号之外再给一句人话，和后台失败原因对齐
+    uni.showToast({ title: friendlySendFailMessage(e), icon: 'none', duration: 2500 })
   } finally {
     focusComposer()
   }
@@ -1032,7 +1086,14 @@ async function sendPastedImages(files: File[]) {
 }
 
 onUnmounted(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('paste', onWindowPaste)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('paste', onWindowPaste)
+    const vv = window.visualViewport
+    if (vv) {
+      vv.removeEventListener('resize', syncVisualViewport)
+      vv.removeEventListener('scroll', syncVisualViewport)
+    }
+  }
   clearScrollRetries()
   // 用 onUnmounted 而不是页面级的 onUnload：桌面端内嵌时 onUnload 不会触发，
   // 留下过期的 activeConversationId 会让补拉去拉一个已经关掉的会话。
@@ -1117,7 +1178,7 @@ async function doRetry(m: ChatMessage) {
     await nextTick()
     scrollToBottom(true)
   } catch (e) {
-    uni.showToast({ title: (e as Error)?.message || '重发失败', icon: 'none' })
+    uni.showToast({ title: friendlySendFailMessage(e), icon: 'none', duration: 2500 })
   }
 }
 
@@ -1419,6 +1480,15 @@ function openFriendDetailModal(userId: string) {
   friendDetailId.value = userId
   showFriendDetail.value = true
   showGroupMenu.value = false
+}
+
+function copyHeaderTitle() {
+  const name = String(title.value || '').trim()
+  if (!name) return
+  uni.setClipboardData({
+    data: name,
+    success: () => uni.showToast({ title: '已复制', icon: 'none' }),
+  })
 }
 
 async function goToProfile() {
@@ -1864,10 +1934,7 @@ async function onStickerSelect(url: string) {
     await nextTick()
     scrollToBottom(true)
   } catch (e) {
-    uni.showToast({
-      title: e instanceof Error ? e.message : '发送失败',
-      icon: 'none',
-    })
+    uni.showToast({ title: friendlySendFailMessage(e), icon: 'none', duration: 2500 })
   }
 }
 
@@ -1894,52 +1961,75 @@ function chooseFailToast(err: { errMsg?: string } | undefined, fallback: string)
   uni.showToast({ title: msg.replace(/^[^:]+:\s*/, '') || fallback, icon: 'none' })
 }
 
-/**
- * 发送失败的可读原因。
- * 服务端拒绝（非好友、被拉黑、被禁言、群不可用等）以及 OpenIM 的错误原文都在
- * Error.message 里，之前多图发送的 catch 把它整个丢掉，只弹「N 张图片发送失败」，
- * 用户和排查的人都看不到原因。
- */
+/** 多图/文件发送失败时拼进 toast，英文拒绝码翻成人话 */
 function sendFailReason(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e ?? '')
-  return raw.trim() || '发送失败'
+  return friendlySendFailMessage(e)
 }
 
 function requestAlbumAccess(): Promise<void> {
-  return new Promise((resolve) => {
-    // H5 / 小程序没有 HTML5+ 运行时，相册权限由浏览器或 uni.chooseImage 自行处理
-    let uniPlatform = ''
-    try {
-      uniPlatform = uni.getSystemInfoSync().uniPlatform || ''
-    } catch {
-      resolve()
-      return
-    }
-    if (uniPlatform !== 'app') {
-      resolve()
-      return
-    }
-    const os = String(uni.getSystemInfoSync().osName || uni.getSystemInfoSync().platform || '').toLowerCase()
-    const request = plus?.android?.requestPermissions
-    if (!os.includes('android') || typeof request !== 'function') {
-      resolve()
-      return
-    }
-    request(
-      [
-        'android.permission.READ_MEDIA_IMAGES',
-        'android.permission.READ_MEDIA_VIDEO',
-        'android.permission.READ_EXTERNAL_STORAGE',
-      ],
-      () => resolve(),
-      () => resolve(),
-    )
-  })
+  return requestAndroidAlbumPermission()
 }
 
 function afterPlusClosed(run: () => void) {
   showPlusPanel.value = false
   setTimeout(run, 120)
+}
+
+async function sendPickedImagePaths(paths: string[]) {
+  const list = paths.filter(Boolean).slice(0, MAX_PICK_COUNT)
+  let failed = 0
+  let firstReason = ''
+  for (const path of list) {
+    try {
+      await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
+      await nextTick()
+      scrollToBottom(true)
+    } catch (e) {
+      failed++
+      if (!firstReason) firstReason = sendFailReason(e)
+    }
+  }
+  if (failed) {
+    uni.showToast({
+      title: firstReason ? `${failed} 张图片发送失败：${firstReason}` : `${failed} 张图片发送失败`,
+      icon: 'none',
+    })
+  }
+}
+
+/** 华为等机型 uni.chooseImage 偶发失败时，改用 plus.gallery.pick */
+function pickImageViaPlusGallery(): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const gallery = plus?.gallery
+    if (!gallery?.pick) {
+      reject(new Error('无法打开相册'))
+      return
+    }
+    gallery.pick(
+      (res: string | { files?: string[] }) => {
+        if (typeof res === 'string') {
+          resolve(res ? [res] : [])
+          return
+        }
+        resolve((res?.files || []).filter(Boolean))
+      },
+      (err: { message?: string; code?: number }) => {
+        const msg = String(err?.message || '')
+        if (/cancel|用户取消|12/i.test(msg) || err?.code === 12) {
+          reject(new Error('cancel'))
+          return
+        }
+        reject(new Error(msg || '无法打开相册'))
+      },
+      {
+        filter: 'image',
+        multiple: true,
+        maximum: MAX_PICK_COUNT,
+        system: false,
+        filename: '_doc/gallery/',
+      },
+    )
+  })
 }
 
 /** 相册多选：一次最多 9 张，逐张发送保持顺序，单张失败不中断并汇总提示 */
@@ -1949,28 +2039,20 @@ function pickImage() {
       uni.chooseImage({
         count: MAX_PICK_COUNT,
         sourceType: ['album'],
-        sizeType: ['original'],
-        fail: (err) => chooseFailToast(err, '无法打开相册'),
-        success: async (res) => {
-          const paths = (res.tempFilePaths || []).slice(0, MAX_PICK_COUNT)
-          let failed = 0
-          let firstReason = ''
-          for (const path of paths) {
-            try {
-              await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
-              await nextTick()
-              scrollToBottom(true)
-            } catch (e) {
-              failed++
-              if (!firstReason) firstReason = sendFailReason(e)
-            }
-          }
-          if (failed) {
-            uni.showToast({
-              title: firstReason ? `${failed} 张图片发送失败：${firstReason}` : `${failed} 张图片发送失败`,
-              icon: 'none',
+        sizeType: ['compressed', 'original'],
+        fail: (err) => {
+          const msg = String(err?.errMsg || '')
+          if (/cancel/i.test(msg)) return
+          // 华为 Mate / Harmony：chooseImage 常直接失败，再试原生相册
+          void pickImageViaPlusGallery()
+            .then((paths) => sendPickedImagePaths(paths))
+            .catch((e) => {
+              if (String((e as Error)?.message || '') === 'cancel') return
+              chooseFailToast(err, '无法打开相册，请检查相册权限')
             })
-          }
+        },
+        success: async (res) => {
+          await sendPickedImagePaths(res.tempFilePaths || [])
         },
       })
     })
@@ -2049,7 +2131,7 @@ function pickCard() {
   })
 }
 
-/** 选本地文件发送：一次最多 9 个（app 端原生选择器仅支持单选），逐个发送保持顺序，单个失败不中断并汇总提示 */
+/** 选本地文件发送：图片按图片消息发（避免华为走「文件」选截图变成文件气泡） */
 async function pickFile() {
   showPlusPanel.value = false
   try {
@@ -2058,16 +2140,25 @@ async function pickFile() {
     let failText = ''
     for (const file of files) {
       try {
-        await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
+        const asImage = isLikelyChatImage(file.name) || isLikelyChatImage(file.path)
+        if (asImage) {
+          await chatStore.sendImage(conversationId.value, file.path, imUserId.value || myId.value)
+        } else {
+          await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
+        }
         await nextTick()
         scrollToBottom(true)
       } catch (e) {
         failed++
-        failText = (e as Error).message || failText
+        if (!failText) failText = friendlySendFailMessage(e)
       }
     }
     if (failed) {
-      uni.showToast({ title: failText || `${failed} 个文件发送失败`, icon: 'none' })
+      uni.showToast({
+        title: failText ? `${failed} 个文件发送失败：${failText}` : `${failed} 个文件发送失败`,
+        icon: 'none',
+        duration: 2500,
+      })
     }
   } catch (e) {
     const msg = (e as Error).message
@@ -2087,15 +2178,19 @@ function pickFavorite() {
 </script>
 
 <template>
-  <view class="room" :class="{ 'room-embedded': embedded }">
+  <view
+    class="room"
+    :class="{ 'room-embedded': embedded, 'room-keyboard': keyboardOpen }"
+    :style="vvHeightPx ? { height: vvHeightPx + 'px' } : undefined"
+  >
     <view
       class="chat-header"
       :style="{ paddingTop: embedded ? '0px' : statusBarHeight + 'px' }"
     >
       <view v-if="!embedded" class="back-btn" @click="goBack">‹</view>
       <!-- <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text> -->
-      <view class="header-title" @click="goToProfile">
-        <text class="header-title-text">{{ title }}</text>
+      <view class="header-title" @click="goToProfile" @longpress.stop="copyHeaderTitle">
+        <text class="header-title-text" selectable>{{ title }}</text>
       </view>
       <view class="header-icon-wrap">
         <view class="header-icon" @click.stop="onHeaderMoreClick">⋯</view>
@@ -2180,7 +2275,7 @@ function pickFavorite() {
 
     <view v-if="!stickToBottom" class="jump-bottom" @click.stop="jumpToBottom">↓</view>
 
-    <view v-if="actions.selecting.value" class="composer safe-bottom">
+    <view v-if="actions.selecting.value" class="composer" :class="{ 'safe-bottom': !keyboardOpen }">
       <ImMessageSelectBar
         :count="actions.selectedCount.value"
         :mode="actions.selectMode.value"
@@ -2191,7 +2286,7 @@ function pickFavorite() {
         @revoke="actions.onSelectRevoke"
       />
     </view>
-    <view v-else class="composer safe-bottom">
+    <view v-else class="composer" :class="{ 'safe-bottom': !keyboardOpen }">
       <ImQuoteBar
         v-if="actions.quote.value"
         :nickname="nicknameOf(actions.quote.value) || actions.quote.value.senderNickname || '我'"
@@ -2250,7 +2345,7 @@ function pickFavorite() {
             :show-confirm-bar="false"
             :disable-default-padding="true"
             :hold-keyboard="true"
-            :adjust-position="true"
+            :adjust-position="!isH5ComposerPlatform()"
             placeholder="输入消息"
             placeholder-style="color:#B0B0B0"
             :cursor-spacing="20"
@@ -2343,10 +2438,16 @@ function pickFavorite() {
   background: #e6e8ee;
   overflow: hidden;
   position: relative;
+  box-sizing: border-box;
 }
 
 .room-embedded {
   height: 100%;
+}
+
+/* 键盘弹起：高度已由 visualViewport 内联设定，禁止再叠 home indicator 空隙 */
+.room-keyboard {
+  transition: height 0.08s linear;
 }
 
 .chat-header {
@@ -2399,6 +2500,8 @@ function pickFavorite() {
   font-size: 38rpx;
   font-weight: 700;
   color: #111;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .header-icon-wrap {

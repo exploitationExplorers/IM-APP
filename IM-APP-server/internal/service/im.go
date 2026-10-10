@@ -716,13 +716,14 @@ func (s *IMService) RecallMessage(ctx context.Context, userID string, req models
 		conversationID = buildC2CConversationID(operatorIMID, peer.IMUserID)
 		operatorRole = "member"
 	case "group":
-		if strings.IndexFunc(req.PeerID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		peerID := strings.TrimSpace(req.PeerID)
+		if !isValidGroupPublicID(peerID) {
 			return result, ErrIMInvalidRecallRequest
 		}
-		internalID, publicID, err := s.Groups.LookupGroupIDs(ctx, req.PeerID)
+		internalID, publicID, err := s.Groups.LookupGroupIDs(ctx, peerID)
 		// 查不到的是「群」，同样与消息无关：要么群不在业务库，要么传进来的
-		// peerID 不是该群的 public_id（前端应传数字群 ID，见 chat.ts 的 recall）。
-		if errors.Is(err, pgx.ErrNoRows) || publicID != req.PeerID {
+		// peerID 不是该群的 public_id（前端应传业务群号，见 chat.ts 的 recall）。
+		if errors.Is(err, pgx.ErrNoRows) || !strings.EqualFold(publicID, peerID) {
 			return result, ErrIMGroupNotFound
 		}
 		if err != nil {

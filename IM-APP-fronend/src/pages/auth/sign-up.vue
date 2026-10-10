@@ -10,6 +10,10 @@ const userStore = useUserStore()
 const countryCode = ref(APP_CONFIG.defaultCountryCode)
 const phone = ref('')
 const code = ref('')
+const password = ref('')
+const passwordConfirm = ref('')
+const showPassword = ref(false)
+const showPasswordConfirm = ref(false)
 const loading = ref(false)
 const countdown = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
@@ -53,9 +57,17 @@ async function onRegister() {
     uni.showToast({ title: '请输入验证码', icon: 'none' })
     return
   }
+  if (!password.value || password.value.length < 6) {
+    uni.showToast({ title: '请设置至少 6 位密码', icon: 'none' })
+    return
+  }
+  if (password.value !== passwordConfirm.value) {
+    uni.showToast({ title: '两次输入的密码不一致', icon: 'none' })
+    return
+  }
   loading.value = true
   try {
-    await userStore.register(phone.value, code.value, '', countryCode.value)
+    await userStore.register(phone.value, code.value, password.value, countryCode.value)
     uni.redirectTo({ url: '/pages/auth/onboarding' })
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
@@ -115,6 +127,44 @@ function goPrivacy() {
             <text class="auth-sms-btn" @click="onSendCode">
               {{ countdown > 0 ? `${countdown}s` : '获取验证码' }}
             </text>
+          </view>
+        </view>
+
+        <view class="auth-row">
+          <view class="auth-input-box is-join">
+            <input
+              class="auth-input"
+              :password="!showPassword"
+              placeholder="设置登录密码（至少 6 位）"
+              placeholder-style="color:#636E86"
+              v-model="password"
+            />
+            <view class="auth-eye-btn" @click="showPassword = !showPassword">
+              <image
+                class="auth-eye-icon"
+                :src="showPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
+                mode="aspectFit"
+              />
+            </view>
+          </view>
+        </view>
+
+        <view class="auth-row">
+          <view class="auth-input-box is-join">
+            <input
+              class="auth-input"
+              :password="!showPasswordConfirm"
+              placeholder="再次确认密码"
+              placeholder-style="color:#636E86"
+              v-model="passwordConfirm"
+            />
+            <view class="auth-eye-btn" @click="showPasswordConfirm = !showPasswordConfirm">
+              <image
+                class="auth-eye-icon"
+                :src="showPasswordConfirm ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
+                mode="aspectFit"
+              />
+            </view>
           </view>
         </view>
 

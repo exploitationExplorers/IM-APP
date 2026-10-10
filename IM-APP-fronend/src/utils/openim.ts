@@ -15,6 +15,7 @@ import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
 import { fetchIMToken, resolveIMGroup, reportSendFailure, type IMTokenResult } from '@/api/im'
 import { getToken } from '@/utils/request'
+import { useContactStore } from '@/stores/contact'
 import type { ChatMessage, Conversation, ConversationPinnedMessage, MessageType as AppMessageType } from '@/types'
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
 import { formatIMNotification, imNotificationEventKey, notificationKindOf, GROUP_CREATED_WELCOME_TEXT } from '@/utils/im-notification'
@@ -106,7 +107,7 @@ function toOpenIMID(id: string): string {
 }
 
 /** 单聊会话 id 是 si_对方_自己。会话上缺 userID 时从这里把接收人补回来 */
-function peerIdFromSingleConversation(conversationId: string, selfId: string): string {
+export function peerIdFromSingleConversation(conversationId: string, selfId: string): string {
   if (!conversationId.startsWith('si_')) return ''
   const parts = conversationId.slice(3).split('_').filter(Boolean)
   if (parts.length < 2) return ''
@@ -128,6 +129,31 @@ let boundAccessToken = ''
  */
 let connected = false
 
+/** 断线后还在排队的发送，连上就立刻继续，不用干等满退避时间 */
+const reconnectWaiters = new Set<() => void>()
+
+function wakeReconnectWaiters() {
+  reconnectWaiters.forEach((fn) => fn())
+  reconnectWaiters.clear()
+}
+
+function waitToRetrySend(attempt: number, epoch: number): Promise<boolean> {
+  const ms = Math.min(8000, 2000 * 2 ** attempt)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reconnectWaiters.delete(wake)
+      resolve(ok && epoch === loginEpoch)
+    }
+    const wake = () => finish(true)
+    const timer = setTimeout(() => finish(true), ms)
+    if (!connected) reconnectWaiters.add(wake)
+  })
+}
+
 /**
  * 清空本地登录缓存，下次 ensureIMLogin 会强制重新登录。
  * 触发场景：被其它端踢下线、token 在服务端过期、或需要重新握手时。
@@ -146,6 +172,7 @@ export function invalidateIMLoginCache() {
 function invalidatePendingLogin() {
   loginEpoch += 1
   resetLoginCache()
+  wakeReconnectWaiters()
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -287,7 +314,39 @@ async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
   return raw as T
 }
 
+/**
+ * OpenIM 调用失败。code 用 SDK / 服务端数字码，重试只看码，不看文案。
+ * 本地等待回调超时没有 SDK 码，用 SEND_WAIT_TIMEOUT。
+ */
+class IMCallError extends Error {
+  readonly code: number
+
+  constructor(code: number, message: string) {
+    super(message)
+    this.name = 'IMCallError'
+    this.code = code
+  }
+}
+
+/** 本地发送等待超时，不是 OpenIM 的码 */
+const SEND_WAIT_TIMEOUT = -1
+
+/**
+ * 只重试传输层失败。白名单来自 OpenIM SDK：
+ * 10000 网络 / 长连接断开，10001 网络超时，10003 上下文超时，
+ * 10004 资源还没加载完，10005 SDK 把断连和本地库异常包在这个码里。
+ * 业务拒绝（5001、1002 无权限）不在里面，直接失败。
+ */
+const RETRYABLE_SEND_CODES = new Set<number>([10000, 10001, 10003, 10004, 10005, SEND_WAIT_TIMEOUT])
+
+/** 长连接没了，重试前要等 OnConnectSuccess，不能按「还连着」立刻再打 */
+const DISCONNECT_CODES = new Set<number>([10000])
+
+/** 服务端 DuplicateKeyError：同一条 clientMsgID 已经落库 */
+const DUPLICATE_SEND_CODE = 1003
+
 function toIMError(raw: unknown, method: IMMethods): Error {
+  if (raw instanceof IMCallError) return raw
   if (raw instanceof Error) return raw
   if (typeof raw === 'string') return new Error(`${raw}（${method}）`)
   const { errCode, errMsg, errDlt } = (raw || {}) as {
@@ -295,9 +354,10 @@ function toIMError(raw: unknown, method: IMMethods): Error {
     errMsg?: string
     errDlt?: string
   }
+  const code = typeof errCode === 'number' && Number.isFinite(errCode) ? errCode : 0
   const detail = `${method} errCode=${errCode ?? 'unknown'}`
   const hint = [errMsg, errDlt].filter(Boolean).join(': ')
-  return new Error(hint ? `${hint}（${detail}）` : `IM 调用失败（${detail}）`)
+  return new IMCallError(code, hint ? `${hint}（${detail}）` : `IM 调用失败（${detail}）`)
 }
 
 /** OpenIM 侧操作者不在群内（已退群 / 被踢 / 成员状态不同步） */
@@ -314,6 +374,56 @@ export function isNotInGroupIMError(err: unknown): boolean {
     /not in group/i.test(text) ||
     /op user not in group/i.test(text)
   )
+}
+
+/**
+ * 发送失败给用户看的文案。
+ * 服务端 webhook 拒绝原因是英文码（not_friend / blocked），后台能翻译，
+ * 客户端以前直接吞掉或弹原文，用户只看到红叹号。
+ */
+export function friendlySendFailMessage(err: unknown): string {
+  const text =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'object' && err
+        ? JSON.stringify(err)
+        : String(err || '')
+  const lower = text.toLowerCase()
+
+  if (/\bnot_friend\b/.test(lower) || /chat is not allowed/.test(lower)) {
+    return '对方还不是你的好友，无法发送消息'
+  }
+  if (/\bblocked\b/.test(lower)) {
+    return '对方已把你拉黑，无法发送消息'
+  }
+  if (/\bmember_muted\b/.test(lower)) {
+    return '你已被禁言，暂时无法发送消息'
+  }
+  if (/\bgroup_muted\b/.test(lower)) {
+    return '全员禁言中，暂时无法发送消息'
+  }
+  if (/\bgroup_inactive\b/.test(lower) || /group chat is not allowed/.test(lower)) {
+    return '该群聊不可用，无法发送消息'
+  }
+  if (/\bsender_inactive\b/.test(lower) || /\baccount_inactive\b/.test(lower)) {
+    return '账号状态异常，无法发送消息'
+  }
+  if (/(^|\s)self(\b|（|\()/.test(lower) || /\bself（/.test(text)) {
+    return '不能给自己发送消息'
+  }
+  if (/群内不可分享个人名片/.test(text)) return '群内不可分享个人名片'
+  if (/仅群主或管理员可以@所有人/.test(text)) return '仅群主或管理员可以@所有人'
+  if (err instanceof IMCallError && err.code === SEND_WAIT_TIMEOUT) {
+    return '发送超时，请检查网络后重试'
+  }
+  if (/发送超时|timeout/i.test(text)) return '发送超时，请检查网络后重试'
+  if (/\b10000\b|ws not connected|reconnect failed|network error/i.test(text)) {
+    return '网络异常，请稍后重试'
+  }
+  // 已是中文业务提示（去掉 errCode 尾巴）就直接用
+  const zh = text.replace(/（[^）]*errCode=[^）]*）/g, '').trim()
+  if (/[\u4e00-\u9fff]/.test(zh)) return zh
+  return '发送失败'
 }
 
 function isLoginRepeat(raw: unknown): boolean {
@@ -600,6 +710,7 @@ function setupConnectionWatchers() {
   // 连接成功：标记已可用，缓存复用路径恢复。
   onIMEvent(IMEvents.OnConnectSuccess, () => {
     connected = true
+    wakeReconnectWaiters()
   })
   // 被其它端踢下线：SDK 会自动 logout，本地缓存作废，下次必须重新登录。
   onIMEvent(IMEvents.OnKickedOffline, () => {
@@ -904,18 +1015,45 @@ async function sendCreatedMessage(
       iOSBadgeCount: true,
     },
   }
-  if (isAppPlatform) {
-    return sendOnAppNative(method, params, message.clientMsgID, options.timeoutMs)
+  // 视频单次就很久，少重试；文字/图片断线后同一条 clientMsgID 再发，避免连上之前就标失败
+  const perAttemptTimeout = options.timeoutMs ?? 20000
+  const attempts = (options.timeoutMs ?? 0) >= 60000 ? 2 : 4
+  const epoch = loginEpoch
+  let lastErr: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (epoch !== loginEpoch) break
+    try {
+      if (isAppPlatform) {
+        return await sendOnAppNative(method, params, message.clientMsgID, perAttemptTimeout, false)
+      }
+      const sent = await imCall<unknown>(method, params)
+      if (!isMessageItem(sent) || sent.status === MessageStatus.Failed) {
+        throw new Error('发送失败')
+      }
+      return sent
+    } catch (err) {
+      lastErr = err
+      const code = err instanceof IMCallError ? err.code : undefined
+      if (code === DUPLICATE_SEND_CODE) {
+        return { ...message, status: MessageStatus.Succeed }
+      }
+      if (code !== undefined && DISCONNECT_CODES.has(code)) connected = false
+      const canRetry =
+        attempt < attempts - 1 &&
+        epoch === loginEpoch &&
+        code !== undefined &&
+        RETRYABLE_SEND_CODES.has(code)
+      if (!canRetry) break
+      const keepGoing = await waitToRetrySend(attempt, epoch)
+      if (!keepGoing) break
+    }
   }
-  const sent = await imCall<unknown>(method, params).catch((err: unknown) => {
-    reportTargetSendFailure(target, message, 'send', 'send_failed', (err as Error)?.message)
-    throw err
-  })
-  if (!isMessageItem(sent) || sent.status === MessageStatus.Failed) {
-    reportTargetSendFailure(target, message, 'send', 'send_failed', '发送失败')
-    throw new Error('发送失败')
+  const failure = lastErr instanceof Error ? lastErr : new Error('发送失败')
+  if (epoch === loginEpoch) {
+    if (isAppPlatform) reportAppNativeSendFailure(params, message.clientMsgID, failure)
+    else reportTargetSendFailure(target, message, 'send', 'send_failed', failure.message)
   }
-  return sent
+  throw failure
 }
 
 /**
@@ -981,6 +1119,7 @@ function sendOnAppNative(
   params: unknown,
   clientMsgID: string,
   timeoutMs?: number,
+  reportFailure = true,
 ): Promise<MessageItem> {
   const sdk = nativeOpenIM()
   if (!sdk) throw new Error(APP_NATIVE_PLUGIN_MISSING)
@@ -1009,12 +1148,12 @@ function sendOnAppNative(
         }
       }
       const failure = err || new Error('发送失败')
-      reportAppNativeSendFailure(params, clientMsgID, failure)
+      if (reportFailure) reportAppNativeSendFailure(params, clientMsgID, failure)
       reject(failure)
     }
     const timer = setTimeout(() => {
       if (isVideo) devWarn('[video][send] TIMEOUT 未收到成功/失败回调', { clientMsgID, waitMs })
-      finish(false, undefined, new Error('发送超时'))
+      finish(false, undefined, new IMCallError(SEND_WAIT_TIMEOUT, '发送超时'))
     }, waitMs)
     const offOk = onIMEvent<MessageItem>(IMEvents.SendMessageSuccess, (msg) => {
       const parsed = coerceMessage(msg)
@@ -1024,9 +1163,10 @@ function sendOnAppNative(
       const failed = unwrapRawMessage(err)
       const failedId = failed ? pickString(failed, ['clientMsgID', 'ClientMsgID', 'clientMsgId']) : ''
       // 没有 id 的失败事件不能算到当前这条上，否则群里偶发会把其实发出去的消息标成失败
-      if (!failedId || failedId !== clientMsgID) return
+      if (!failed || !failedId || failedId !== clientMsgID) return
       const errMsg = pickString(failed, ['errMsg', 'ErrMsg', 'message', 'errDlt'])
-      finish(false, err, new Error(errMsg || '发送失败'))
+      const errCode = pickFiniteNumber(failed, ['errCode', 'ErrCode'])
+      finish(false, err, new IMCallError(errCode ?? 0, errMsg || '发送失败'))
     })
     const onNative = (res: NativeSendResult) => {
       let data = res?.data
@@ -1096,26 +1236,99 @@ export async function sendCardMessage(
  * 图片消息。app 端交给原生插件读本地全路径并自行上传；
  * web 端没有 createImageMessageFromFullPath，先把文件传到对象存储换 URL 再发。
  */
-export async function sendImageMessage(target: IMTarget, filePath: string): Promise<MessageItem> {
-  let message: MessageItem
-  if (isAppPlatform) {
-    message = await imCall<MessageItem>(
-      IMMethods.CreateImageMessageFromFullPath,
-      toNativeFullPath(filePath),
-    )
-  } else {
-    const file = await pathToFile(filePath)
-    const url = await uploadFile(file)
-    const size = await imageSizeOf(filePath)
-    const picture = { uuid: IMSDK.uuid(), type: file.type, size: file.size, url, ...size }
-    message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
+function ensurePictureSourceUrl(message: MessageItem, url: string): MessageItem {
+  if (!url || pictureUrlOf(message)) return message
+  const picture = {
+    uuid: IMSDK.uuid(),
+    type: 'image/jpeg',
+    size: 0,
+    width: 0,
+    height: 0,
+    url,
+  }
+  return {
+    ...message,
+    pictureElem: {
+      ...(message.pictureElem || {}),
       sourcePath: url,
       sourcePicture: picture,
       bigPicture: picture,
       snapshotPicture: picture,
-    })
+    },
   }
-  return sendCreatedMessage(target, message, { alreadyUploaded: !isAppPlatform })
+}
+
+/** 路径/文件名是否像聊天图片（含华为截图名被截断、HEIC） */
+export function isLikelyChatImage(pathOrName: string): boolean {
+  const s = String(pathOrName || '').trim()
+  if (!s) return false
+  const lower = s.toLowerCase()
+  if (/\.(png|jpe?g|gif|webp|bmp|heic|heif)(\?|#|$)/i.test(lower)) return true
+  // 华为截图：Screenshot_yyyyMMdd_HHmmss_包名… 扩展名偶发在 UI 里被截掉
+  if (/screenshot[_-]?\d{8}/i.test(lower)) return true
+  if (/(^|[\\/])img[_-]?\d{10,}/i.test(lower)) return true
+  return false
+}
+
+function compressLocalChatImage(localPath: string): Promise<string> {
+  return new Promise((resolve) => {
+    uni.compressImage({
+      src: localPath,
+      quality: 85,
+      success: (res) => resolve(res.tempFilePath || localPath),
+      fail: () => resolve(localPath),
+    })
+  })
+}
+
+/** App：FullPath 失败时压成 jpeg 再走 URL（华为 content URI / HEIC / 无后缀常见） */
+async function sendImageMessageViaUpload(target: IMTarget, filePath: string): Promise<MessageItem> {
+  const compressed = await compressLocalChatImage(filePath)
+  const fullPath = toNativeFullPath(compressed)
+  const uploaded = await uploadFileFromPath(fullPath, `img_${Date.now()}.jpg`, 'image/jpeg')
+  const size = await imageSizeOf(compressed).catch(() => ({ width: 0, height: 0 }))
+  const picture = {
+    uuid: IMSDK.uuid(),
+    type: 'image/jpeg',
+    size: uploaded.size,
+    url: uploaded.url,
+    ...size,
+  }
+  const message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
+    sourcePath: uploaded.url,
+    sourcePicture: picture,
+    bigPicture: picture,
+    snapshotPicture: picture,
+  })
+  return sendCreatedMessage(target, ensurePictureSourceUrl(message, uploaded.url), {
+    alreadyUploaded: true,
+  })
+}
+
+export async function sendImageMessage(target: IMTarget, filePath: string): Promise<MessageItem> {
+  let message: MessageItem
+  if (isAppPlatform) {
+    const fullPath = toNativeFullPath(filePath)
+    try {
+      message = await imCall<MessageItem>(IMMethods.CreateImageMessageFromFullPath, fullPath)
+      return sendCreatedMessage(target, message, { alreadyUploaded: false })
+    } catch (e) {
+      console.warn('[image] FullPath 失败，改走压缩上传', (e as Error)?.message || e)
+      return sendImageMessageViaUpload(target, fullPath || filePath)
+    }
+  }
+  const file = await pathToFile(filePath)
+  const url = await uploadFile(file)
+  const size = await imageSizeOf(filePath)
+  const picture = { uuid: IMSDK.uuid(), type: file.type, size: file.size, url, ...size }
+  message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
+    sourcePath: url,
+    sourcePicture: picture,
+    bigPicture: picture,
+    snapshotPicture: picture,
+  })
+  // Create 回包偶发缺 pictureElem.url，气泡会空白；强制写回已上传地址
+  return sendCreatedMessage(target, ensurePictureSourceUrl(message, url), { alreadyUploaded: true })
 }
 
 function videoDurationSeconds(duration: number): number {
@@ -1844,7 +2057,7 @@ export async function sendImageUrlMessage(target: IMTarget, url: string): Promis
     bigPicture: picture,
     snapshotPicture: picture,
   })
-  return sendCreatedMessage(target, message, { alreadyUploaded: true })
+  return sendCreatedMessage(target, ensurePictureSourceUrl(message, url), { alreadyUploaded: true })
 }
 
 /**
@@ -1971,9 +2184,14 @@ export function toConversation(item: ConversationItem): Conversation {
   const latestMsg = (raw.latestMsg ?? raw.LatestMsg) as ConversationItem['latestMsg']
   const latestMsgSendTime = Number(raw.latestMsgSendTime ?? raw.LatestMsgSendTime ?? 0)
   const recvMsgOpt = conversationNumericField(item, 'recvMsgOpt', 'RecvMsgOpt')
-  const userID = String(raw.userID ?? raw.UserID ?? '')
+  const conversationID = String(raw.conversationID ?? raw.ConversationID ?? item.conversationID)
+  let userID = String(raw.userID ?? raw.UserID ?? '')
+  // App 原生偶发不带 userID，备注覆盖和发消息都依赖 peer，从 si_ 会话 id 补回来
+  if (!isGroup && !userID) {
+    userID = peerIdFromSingleConversation(conversationID, imUserId.value)
+  }
   return {
-    id: String(raw.conversationID ?? raw.ConversationID ?? item.conversationID),
+    id: conversationID,
     type: isGroup ? 'group' : 'private',
     title: remark || showName,
     avatar:
@@ -2341,11 +2559,28 @@ function fileDisplayNameOf(item: MessageItem, url: string): string {
 }
 
 function extractContent(item: MessageItem): string {
+  const raw = item as MessageItem & Record<string, unknown>
+  const textElem = (raw.textElem ?? raw.TextElem) as
+    | { content?: string; Content?: string }
+    | undefined
+  const atElem = (raw.atTextElem ?? raw.AtTextElem) as
+    | { text?: string; Text?: string }
+    | undefined
   switch (Number(item.contentType)) {
     case MessageType.TextMessage:
-      return item.textElem?.content || jsonContentField(item.content, 'content')
+      return (
+        textElem?.content ||
+        textElem?.Content ||
+        item.textElem?.content ||
+        jsonContentField(item.content, 'content')
+      )
     case MessageType.AtTextMessage:
-      return item.atTextElem?.text || jsonContentField(item.content, 'text')
+      return (
+        atElem?.text ||
+        atElem?.Text ||
+        item.atTextElem?.text ||
+        jsonContentField(item.content, 'text')
+      )
     case MessageType.QuoteMessage: {
       const elem = normalizeQuoteElem(item)
       return elem?.text || item.quoteElem?.text || jsonContentField(item.content, 'text')
@@ -2418,13 +2653,47 @@ function extractContent(item: MessageItem): string {
       if (typeof item.content === 'string' && looksLikeImageUrl(item.content)) return item.content
       const pictureUrl = jsonPictureUrl(item.content)
       if (pictureUrl) return pictureUrl
-      return formatIMNotification(item)
+      return formatIMNotification(item, resolveNoticeDisplayName)
     }
   }
 }
 
+/** 系统通知展示名：优先好友备注（OpenIM id / 业务 UUID 都能对上） */
+function resolveNoticeDisplayName(userId: string): string {
+  if (!userId) return ''
+  try {
+    const store = useContactStore()
+    const biz = businessUserIdFromIM(userId) || userId
+    return store.remarkOf(biz) || store.remarkOf(userId) || ''
+  } catch {
+    return ''
+  }
+}
+
+/** 聊天记录搜索用的纯文本预览（兼容 App PascalCase 字段） */
+export function messageSearchPreview(item: MessageItem): string {
+  const t = Number(item.contentType)
+  if (
+    t !== MessageType.TextMessage &&
+    t !== MessageType.AtTextMessage &&
+    t !== MessageType.QuoteMessage
+  ) {
+    return ''
+  }
+  return extractContent(item) || ''
+}
+
 function groupIdFromConversationId(conversationId: string): string {
   return conversationId.startsWith('sg_') ? conversationId.slice(3) : ''
+}
+
+function pickFiniteNumber(obj: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = obj[key]
+    const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+    if (Number.isFinite(n)) return n
+  }
+  return undefined
 }
 
 function pickString(obj: Record<string, unknown>, keys: string[]): string {
@@ -2492,6 +2761,38 @@ function coerceMessage(raw: unknown): MessageItem | null {
   }
   // OpenIM App 原生桥在部分版本中使用 PascalCase，统一成 Web SDK 的字段名，
   // 后续渲染、收藏和转发就不需要各自判断平台。
+  const pictureElemRaw = obj.pictureElem ?? obj.PictureElem
+  if (pictureElemRaw) {
+    let pe: Record<string, unknown> | null = null
+    if (typeof pictureElemRaw === 'string') {
+      try {
+        const parsed = JSON.parse(pictureElemRaw) as Record<string, unknown>
+        if (parsed && typeof parsed === 'object') pe = parsed
+      } catch {
+        /* PictureElem 不是 JSON 时保持原样 */
+      }
+    } else if (typeof pictureElemRaw === 'object') {
+      pe = pictureElemRaw as Record<string, unknown>
+    }
+    if (pe) {
+      const pickPic = (keys: string[]) => {
+        for (const key of keys) {
+          const pic = pe![key]
+          if (!pic || typeof pic !== 'object') continue
+          const url = pickString(pic as Record<string, unknown>, ['url', 'Url', 'URL'])
+          if (!url) continue
+          return { ...(pic as Record<string, unknown>), url }
+        }
+        return undefined
+      }
+      item.pictureElem = {
+        sourcePath: pickString(pe, ['sourcePath', 'SourcePath']),
+        sourcePicture: pickPic(['sourcePicture', 'SourcePicture']),
+        bigPicture: pickPic(['bigPicture', 'BigPicture']),
+        snapshotPicture: pickPic(['snapshotPicture', 'SnapshotPicture']),
+      } as MessageItem['pictureElem']
+    }
+  }
   const videoElemRaw = obj.videoElem ?? obj.VideoElem
   if (videoElemRaw) {
     if (typeof videoElemRaw === 'string') {
@@ -2542,7 +2843,7 @@ function coerceMessage(raw: unknown): MessageItem | null {
       } as MessageItem['videoElem']
     }
   }
-  return item
+  return item as MessageItem
 }
 
 function parseFindMessageResult(res: unknown, clientMsgID: string): MessageItem | null {

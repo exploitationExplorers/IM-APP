@@ -50,6 +50,11 @@ function contactAvatar(url: string) {
   return url || APP_CONFIG.defaultAvatarUrl
 }
 
+/** 邀请进群优先显示好友备注，没有备注再回落昵称 */
+function contactDisplayName(c: Contact) {
+  return c.remark?.trim() || contactStore.remarkOf(c.id) || c.nickname || '联络人'
+}
+
 async function refreshContacts() {
   return contactStore.reloadContacts({
     keyword: keyword.value,
@@ -191,7 +196,7 @@ async function onConfirm() {
         @click.stop="removeSelected(c.id)"
       >
         <image class="chip-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-        <text class="chip-name">{{ c.nickname }}</text>
+        <text class="chip-name">{{ contactDisplayName(c) }}</text>
       </view>
     </view>
 
@@ -243,7 +248,7 @@ async function onConfirm() {
         @click="toggle(c)"
       >
         <image class="avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-        <text class="name">{{ c.nickname }}</text>
+        <text class="name">{{ contactDisplayName(c) }}</text>
         <view class="check" :class="{ on: isSelected(c.id) }" />
       </view>
       <view v-if="!candidates.length" class="empty">暂无可邀请的好友</view>

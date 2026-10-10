@@ -59,12 +59,17 @@ const myAvatar = computed(
 
 const memberPreview = computed(() => {
   const meName = userStore.profile?.nickname || '我'
-  const names = [meName, ...selectedContacts.value.map((c) => c.nickname)]
+  const names = [meName, ...selectedContacts.value.map((c) => contactDisplayName(c))]
   return names
 })
 
 function contactAvatar(url: string) {
   return url || APP_CONFIG.defaultAvatarUrl
+}
+
+/** 拉人进群优先显示好友备注，没有备注再回落昵称 */
+function contactDisplayName(c: Contact) {
+  return c.remark?.trim() || contactStore.remarkOf(c.id) || c.nickname || '联络人'
 }
 
 onShow(() => {
@@ -201,7 +206,7 @@ async function onCreate() {
           @click.stop="removeSelected(c.id)"
         >
           <image class="chip-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-          <text class="chip-name">{{ c.nickname }}</text>
+          <text class="chip-name">{{ contactDisplayName(c) }}</text>
         </view>
       </view>
 
@@ -250,7 +255,7 @@ async function onCreate() {
           @click="toggle(c)"
         >
           <image class="avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-          <text class="name">{{ c.nickname }}</text>
+          <text class="name">{{ contactDisplayName(c) }}</text>
           <view class="check" :class="{ on: isSelected(c.id) }" />
         </view>
       </scroll-view>
@@ -291,7 +296,7 @@ async function onCreate() {
           </view>
           <view v-for="c in selectedContacts" :key="c.id" class="member">
             <image class="member-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-            <text class="member-name">{{ c.nickname }}</text>
+            <text class="member-name">{{ contactDisplayName(c) }}</text>
           </view>
         </view>
       </scroll-view>

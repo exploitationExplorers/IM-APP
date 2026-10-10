@@ -71,8 +71,16 @@ function isOpenIMAdmin(user?: NoticeUser): boolean {
   return id === 'imAdmin' || nickname === 'imAdmin'
 }
 
-function nameOf(user?: NoticeUser, fallback = ''): string {
+/** 把 OpenIM userID / 业务 UUID 解析成展示名（如好友备注） */
+export type NoticeNameResolver = (userId: string) => string
+
+function nameOf(user?: NoticeUser, fallback = '', resolveName?: NoticeNameResolver): string {
   if (isOpenIMAdmin(user)) return fallback || '群主'
+  const id = user?.userID?.trim() || ''
+  if (id && resolveName) {
+    const remarked = resolveName(id)?.trim()
+    if (remarked) return remarked
+  }
   const nickname = user?.nickname?.trim()
   if (nickname) return nickname
   return fallback
@@ -85,9 +93,9 @@ export function replaceOpenIMAdminLabel(text: string, ownerName = '群主'): str
   return text.replace(/imAdmin/g, alias)
 }
 
-function namesOf(list?: NoticeUser[]): string {
+function namesOf(list?: NoticeUser[], resolveName?: NoticeNameResolver): string {
   if (!list?.length) return ''
-  return list.map((u) => nameOf(u, '成员')).join('、')
+  return list.map((u) => nameOf(u, '成员', resolveName)).join('、')
 }
 
 /**
@@ -201,49 +209,53 @@ export function collapseRepeatedGroupNameNotices(messages: ChatMessage[]): ChatM
  * 全体禁言示例：`chuxin2: [全体禁言]`
  * 解析不出可读文案时返回空，调用方应隐藏且不响铃。
  */
-export function formatIMNotification(item: MessageItem): string {
+export function formatIMNotification(item: MessageItem, resolveName?: NoticeNameResolver): string {
   if (!isIMNotification(item.contentType)) return ''
   if (isFriendConnectedNotice(item.contentType)) return FRIEND_CONNECTED_TEXT
   const detail = parseDetail(item)
-  const op = nameOf(detail.opUser, item.senderNickname || '')
+  const op = nameOf(detail.opUser, item.senderNickname || '', resolveName)
   switch (item.contentType as number) {
     case GroupNotice.GroupMuted:
       return op ? `${op}: [全体禁言]` : '[全体禁言]'
     case GroupNotice.GroupCancelMuted:
       return op ? `${op}: [取消全体禁言]` : '[取消全体禁言]'
     case GroupNotice.MemberMuted: {
-      const target = nameOf(detail.mutedUser, '成员')
+      const target = nameOf(detail.mutedUser, '成员', resolveName)
       return op ? `${op} 禁言了 ${target}` : `${target} 被禁言`
     }
     case GroupNotice.MemberCancelMuted: {
-      const target = nameOf(detail.mutedUser, '成员')
+      const target = nameOf(detail.mutedUser, '成员', resolveName)
       return op ? `${op} 取消了 ${target} 的禁言` : `${target} 被取消禁言`
     }
     case GroupNotice.MemberEnter: {
-      const who = nameOf(detail.entrantUser, namesOf(detail.memberList) || '成员')
+      const who = nameOf(
+        detail.entrantUser,
+        namesOf(detail.memberList, resolveName) || '成员',
+        resolveName,
+      )
       return `${who} 加入了群聊`
     }
     case GroupNotice.MemberQuit: {
-      const who = nameOf(detail.quitUser, '成员')
+      const who = nameOf(detail.quitUser, '成员', resolveName)
       return `${who} 退出了群聊`
     }
     case GroupNotice.MemberKicked: {
-      const targets = namesOf(detail.kickedUserList) || '成员'
+      const targets = namesOf(detail.kickedUserList, resolveName) || '成员'
       return op ? `${op}把${targets}移除群聊` : `${targets}被移除群聊`
     }
     case GroupNotice.MemberInvited: {
-      const targets = namesOf(detail.invitedUserList) || '成员'
+      const targets = namesOf(detail.invitedUserList, resolveName) || '成员'
       if (isOpenIMAdmin(detail.opUser)) {
         return `${targets} 加入了群聊`
       }
       return op ? `${op} 邀请 ${targets} 加入群聊` : `${targets} 加入了群聊`
     }
     case GroupNotice.MemberSetAdmin: {
-      const targets = namesOf(detail.groupMemberList || detail.memberList) || '成员'
+      const targets = namesOf(detail.groupMemberList || detail.memberList, resolveName) || '成员'
       return op ? `${op} 将 ${targets} 设为管理员` : `${targets} 成为管理员`
     }
     case GroupNotice.MemberSetOrdinary: {
-      const targets = namesOf(detail.groupMemberList || detail.memberList) || '成员'
+      const targets = namesOf(detail.groupMemberList || detail.memberList, resolveName) || '成员'
       return op ? `${op} 将 ${targets} 取消管理员` : `${targets} 被取消管理员`
     }
     case GroupNotice.NameSet:
@@ -253,7 +265,7 @@ export function formatIMNotification(item: MessageItem): string {
     case GroupNotice.Dismissed:
       return op ? `${op} 解散了群聊` : '群聊已解散'
     case GroupNotice.OwnerTransferred: {
-      const targets = namesOf(detail.groupMemberList || detail.memberList)
+      const targets = namesOf(detail.groupMemberList || detail.memberList, resolveName)
       return op ? `${op} 将群主转让给 ${targets || '新群主'}` : '群主已转让'
     }
     case GroupNotice.Created:

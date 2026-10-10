@@ -10,6 +10,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -156,14 +157,18 @@ func (h *AuthHandler) verifySMSCode(ctx context.Context, e164, scene, code strin
 
 // ---- 注册 ----
 
-// Register 手机号+验证码注册；密码可选，不设则仅验证码登录，之后在安全设置里设初始密码
+// Register 手机号+验证码+密码注册（密码必填，至少 6 位）。
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req models.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	if req.Password != "" && len(req.Password) < 6 {
+	if strings.TrimSpace(req.Password) == "" {
+		response.Fail(c, http.StatusBadRequest, "请设置登录密码")
+		return
+	}
+	if len(req.Password) < 6 {
 		response.Fail(c, http.StatusBadRequest, "密码至少 6 位")
 		return
 	}
@@ -470,69 +475,98 @@ func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID str
 	})
 }
 
-// smsRateAllow 多维度限流：黑名单 → 手机号1/min → 指纹 → DeviceID → IP5/h → IP农场 → 手机号10/day
+// smsRateAllow 多维度限流。
+// 只读检查（农场封禁 / 已有计数）放前面，避免「没发出短信却先占了 1/min 名额」。
 func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID string, suspicious bool) bool {
 	cli := h.Redis.Client
 	rc := h.Cfg.SMSRate
+	ipLimit := rc.IPHourlyLimit
+	if ipLimit <= 0 {
+		ipLimit = 60
+	}
 
-	// 0. 黑名单检查
-	if rc.BlacklistEnabled && h.Redis.IsBlacklisted(ctx, fp, deviceID) {
+	deny := func(reason string) bool {
+		log.Printf("sms rate deny reason=%s phone=%s ip=%s device=%s", reason, e164, ip, deviceID)
 		return false
 	}
 
-	// 1. 手机号 1/min
+	// 0. 黑名单
+	if rc.BlacklistEnabled && h.Redis.IsBlacklisted(ctx, fp, deviceID) {
+		return deny("blacklist")
+	}
+
+	// 1. 已封的 IP 农场（历史误杀也会落在这里，需运维清 sms:ip-farmed:*）
+	if rc.IPMaxFingerprints > 0 && h.Redis.IsIPFarmBlocked(ctx, ip) {
+		return deny("ip_farm_blocked")
+	}
+
 	minKey := "sms:rate:" + e164
+	dailyKey := "sms:daily:" + e164
+	ipKey := "sms:ip:" + ip
+
+	// 2. 只读：手机号 1/min 是否已占
+	if n, err := cli.Exists(ctx, minKey).Result(); err == nil && n > 0 {
+		return deny("phone_1_per_min")
+	}
+	// 3. 只读：手机号日限额、IP 小时限额（未发短信前不 Incr）
+	if raw, err := cli.Get(ctx, dailyKey).Result(); err == nil {
+		if cnt, _ := strconv.ParseInt(raw, 10, 64); cnt >= 10 {
+			return deny("phone_10_per_day")
+		}
+	}
+	if raw, err := cli.Get(ctx, ipKey).Result(); err == nil {
+		if cnt, _ := strconv.ParseInt(raw, 10, 64); cnt >= int64(ipLimit) {
+			return deny("ip_hourly_limit")
+		}
+	}
+
+	// 4. 手机号 1/min（真正占坑）
 	ok, err := cli.SetNX(ctx, minKey, "1", time.Minute).Result()
 	if err != nil || !ok {
-		return false
+		return deny("phone_1_per_min")
 	}
 
-	// 2. 设备指纹限流
+	// 5. 设备指纹
 	fpWin := time.Duration(rc.FingerprintWindow) * time.Second
 	fpLimit := rc.FingerprintLimit
 	if suspicious && fpLimit > 1 {
-		fpLimit = fpLimit / 2 // 可疑请求阈值收紧一半
+		fpLimit = fpLimit / 2
 	}
 	if !h.Redis.AllowFingerprint(ctx, fp, fpLimit, fpWin) {
-		return false
+		return deny("fingerprint")
 	}
 
-	// 3. 客户端 DeviceID 限流（DeviceID 非空时检查）
+	// 6. DeviceID
 	didWin := time.Duration(rc.DeviceIDWindow) * time.Second
 	if !h.Redis.AllowDeviceID(ctx, deviceID, rc.DeviceIDLimit, didWin) {
-		return false
+		return deny("device_id")
 	}
 
-	// 4. IP 5/hour
-	ipKey := "sms:ip:" + ip
+	// 7. IP 小时计数
 	if cnt, err := cli.Incr(ctx, ipKey).Result(); err == nil {
 		if cnt == 1 {
 			cli.Expire(ctx, ipKey, time.Hour)
 		}
-		if cnt > 5 {
-			return false
+		if cnt > int64(ipLimit) {
+			return deny("ip_hourly_limit")
 		}
 	}
 
-	// 5. IP 农场封禁检查
-	if h.Redis.IsIPFarmBlocked(ctx, ip) {
-		return false
+	// 8. IP 多设备农场（默认关闭；开启时同公网 IP 指纹过多会封 1 小时）
+	if rc.IPMaxFingerprints > 0 {
+		blockDur := time.Duration(rc.IPFarmBlockSeconds) * time.Second
+		if !h.Redis.CheckIPDeviceFarm(ctx, ip, fp, rc.IPMaxFingerprints, time.Hour, blockDur) {
+			return deny("ip_farm_trigger")
+		}
 	}
 
-	// 6. IP 多设备检测
-	blockDur := time.Duration(rc.IPFarmBlockSeconds) * time.Second
-	if !h.Redis.CheckIPDeviceFarm(ctx, ip, fp, rc.IPMaxFingerprints, time.Hour, blockDur) {
-		return false
-	}
-
-	// 7. 手机号 10/day
-	dailyKey := "sms:daily:" + e164
+	// 9. 手机号 10/day
 	if cnt, err := cli.Incr(ctx, dailyKey).Result(); err == nil {
 		if cnt == 1 {
 			cli.Expire(ctx, dailyKey, 24*time.Hour)
 		}
 		if cnt > 10 {
-			return false
+			return deny("phone_10_per_day")
 		}
 	}
 	return true

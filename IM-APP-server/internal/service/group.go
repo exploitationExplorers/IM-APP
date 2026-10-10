@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,12 +24,80 @@ type GroupService struct {
 	IM     *im.Client
 }
 
+// 群号：qun_ + 6–20 位字母数字（系统分配为 qun_ + 14 位小写随机）。遗留纯数字群号仍可查。
+var groupPublicIDPattern = regexp.MustCompile(`^qun_[A-Za-z0-9]{6,20}$`)
+
+func isLegacyNumericGroupID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidGroupPublicID(id string) bool {
+	return isLegacyNumericGroupID(id) || groupPublicIDPattern.MatchString(id)
+}
+
+// NormalizeGroupPublicID 校验用户自定义群号，大小写原样返回。
+func NormalizeGroupPublicID(raw string) (string, bool) {
+	id := strings.TrimSpace(raw)
+	return id, groupPublicIDPattern.MatchString(id)
+}
+
 func (s *GroupService) internalGroupID(ctx context.Context, publicID string) (string, error) {
 	publicID = strings.TrimSpace(publicID)
-	if publicID == "" || strings.IndexFunc(publicID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+	if !isValidGroupPublicID(publicID) {
 		return "", repository.ErrInvalidGroupOperation
 	}
 	return s.Groups.InternalIDByPublicID(ctx, publicID)
+}
+
+// UpdatePublicID 群主把系统分配的群号改成自定义 qun_xxx，每个群只能改一次。
+func (s *GroupService) UpdatePublicID(ctx context.Context, uid, groupPublicID, raw string) (models.GroupInfo, error) {
+	internalID, err := s.internalGroupID(ctx, groupPublicID)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	detail, err := s.Groups.GetByID(ctx, internalID, uid)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	if detail.MyRole != "owner" {
+		return models.GroupInfo{}, repository.ErrForbidden
+	}
+	newID, ok := NormalizeGroupPublicID(raw)
+	if !ok {
+		return models.GroupInfo{}, errors.New("群号需为 qun_ 开头，后接 6-20 位字母或数字")
+	}
+	used, err := s.Groups.GroupPublicIDChangeUsed(ctx, internalID)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	if used {
+		return models.GroupInfo{}, errors.New("群号只能修改一次")
+	}
+	taken, err := s.Groups.GroupPublicIDTaken(ctx, newID, internalID)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	if taken {
+		return models.GroupInfo{}, errors.New("该群号已被使用")
+	}
+	if err := s.Groups.UpdateGroupPublicID(ctx, internalID, newID); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrPublicIDChangeUsed):
+			return models.GroupInfo{}, errors.New("群号只能修改一次")
+		case errors.Is(err, repository.ErrPublicIDTaken):
+			return models.GroupInfo{}, errors.New("该群号已被使用")
+		}
+		return models.GroupInfo{}, err
+	}
+	return s.Groups.GetByID(ctx, internalID, uid)
 }
 
 func (s *GroupService) Create(ctx context.Context, uid, name string, memberIDs []string) (models.GroupInfo, error) {

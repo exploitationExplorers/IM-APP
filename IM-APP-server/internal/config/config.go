@@ -40,7 +40,8 @@ type SMSRateConfig struct {
 	FingerprintWindow  int  // 指纹限流窗口(秒)，默认 3600
 	DeviceIDLimit      int  // 每客户端 DeviceID 每小时上限，默认 8
 	DeviceIDWindow     int  // DeviceID 限流窗口(秒)，默认 3600
-	IPMaxFingerprints  int  // 同 IP 每小时最大不同指纹数，超出判定为设备农场，默认 3
+	IPHourlyLimit      int  // 同 IP 每小时短信上限，默认 60（运营商 NAT 下 5 太狠）
+	IPMaxFingerprints  int  // 同 IP 每小时最大不同指纹数，超出判定设备农场；0=关闭，默认 0
 	IPFarmBlockSeconds int  // 设备农场 IP 封禁时长(秒)，默认 3600
 	BlacklistEnabled   bool // 是否启用指纹/DeviceID 黑名单，默认 true
 }
@@ -152,7 +153,10 @@ func Load() Config {
 			FingerprintWindow:  GetenvInt("SMS_FP_WINDOW", 3600),
 			DeviceIDLimit:      GetenvInt("SMS_DEVICE_LIMIT", 8),
 			DeviceIDWindow:     GetenvInt("SMS_DEVICE_WINDOW", 3600),
-			IPMaxFingerprints:  GetenvInt("SMS_IP_MAX_FPS", 3),
+			IPHourlyLimit:      GetenvInt("SMS_IP_LIMIT", 60),
+			// 默认关闭「IP 农场」：国内运营商 CGNAT 下同公网 IP 会有大量真实用户，
+			// 旧默认 3 会把新手机首次注册误杀成「发送过于频繁」。
+			IPMaxFingerprints:  GetenvInt("SMS_IP_MAX_FPS", 0),
 			IPFarmBlockSeconds: GetenvInt("SMS_IP_FARM_BLOCK_SEC", 3600),
 			BlacklistEnabled:   getenvBool("SMS_BLACKLIST_ENABLED", true),
 		},

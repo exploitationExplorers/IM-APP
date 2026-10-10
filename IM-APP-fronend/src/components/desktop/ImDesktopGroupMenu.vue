@@ -122,7 +122,7 @@ watch(
 )
 
 function displayName(member: GroupMember) {
-  const remark = contactStore.contacts.find((c) => c.id === member.id)?.remark?.trim()
+  const remark = contactStore.remarkOf(member.id)
   if (remark) return remark
   const role = (member.role || '').toLowerCase()
   if (role === 'owner' || role === 'admin' || role === '100' || role === '60') {
@@ -224,17 +224,36 @@ async function onMute(member: GroupMember) {
   }
 }
 
-function openMember(member: GroupMember) {
+async function openMember(member: GroupMember) {
   const me = userStore.profile
   if (me && sameUserId(member.id, me.id)) return
   close()
+  if (!contactStore.contacts.length) {
+    try {
+      await contactStore.loadDirectory()
+    } catch {
+      /* ignore */
+    }
+  }
   const isFriend = contactStore.contacts.some((c) => sameUserId(c.id, member.id))
   if (isFriend) {
-    emit('openFriend', member.id)
+    // 好友直接开私聊，不必再点资料页「发消息」
+    contactStore.openChatWithContactDesktop(
+      member.id,
+      displayName(member),
+      member.avatar || APP_CONFIG.defaultAvatarUrl,
+    )
     return
   }
   uni.navigateTo({
     url: `/pages/contacts/user-profile?id=${encodeURIComponent(member.id)}&groupId=${encodeURIComponent(props.groupId)}`,
+  })
+}
+
+function goSearchHistory() {
+  close()
+  uni.navigateTo({
+    url: `/pages/group/search-history?id=${encodeURIComponent(props.groupId)}&title=${encodeURIComponent(groupName.value)}`,
   })
 }
 </script>
@@ -257,7 +276,7 @@ function openMember(member: GroupMember) {
         </view>
 
         <view class="group-info-id-row">
-          <text class="group-info-id-label">群聊ID</text>
+          <text class="group-info-id-label">群号</text>
           <text class="group-info-id-value">{{ groupPublicId }}</text>
           <view class="group-info-copy" @click.stop="copyGroupId">
             <text>复制</text>
@@ -270,9 +289,14 @@ function openMember(member: GroupMember) {
             v-model="keyword"
             class="group-info-search-input"
             type="text"
-            placeholder="搜索"
+            placeholder="搜索成员"
             confirm-type="search"
           />
+        </view>
+
+        <view class="group-info-history" @click="goSearchHistory">
+          <text class="group-info-history-label">搜索聊天记录</text>
+          <text class="group-info-chevron">›</text>
         </view>
 
         <view class="group-info-members-head">
@@ -450,6 +474,21 @@ function openMember(member: GroupMember) {
   flex: 1;
   min-width: 0;
   height: 36px;
+  font-size: 14px;
+  color: #212121;
+}
+
+.group-info-history {
+  margin-top: 8px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.group-info-history-label {
   font-size: 14px;
   color: #212121;
 }

@@ -40,11 +40,13 @@ async function onSubmit() {
   saving.value = true
   try {
     await updateContact(contactId.value, { remark: value })
-    await contactStore.reloadContacts({
+    // 先写备注索引，会话列表立刻能盖上；通讯录当前页再异步刷新
+    contactStore.patchContactRemark(contactId.value, value)
+    chatStore.applyContactRemarks()
+    void contactStore.reloadContacts({
       keyword: contactStore.contactKeyword,
       sort: contactStore.contactSort,
     })
-    chatStore.applyContactRemarks()
     uni.showToast({ title: '已保存', icon: 'success' })
     setTimeout(() => uni.navigateBack(), 300)
   } catch (e) {

@@ -1796,11 +1796,11 @@ components:
 
     RegisterRequest:
       type: object
-      required: [phone, code]
+      required: [phone, code, password]
       properties:
         phone: {type: string, description: 注册手机号，不含国家/地区区号。, example: '13800138000'}
         countryCode: {type: string, description: 国际电话区号；不传时服务端默认使用 +86。, example: '+86'}
-        password: {type: string, format: password, minLength: 6, description: 可选登录密码；不传或传空字符串时只支持验证码登录，之后可在安全设置中设置密码。必须使用 HTTPS 传输。}
+        password: {type: string, format: password, minLength: 6, description: 必填登录密码，至少 6 位。必须使用 HTTPS 传输。}
         code: {type: string, description: 注册场景的短信验证码。, example: '123456'}
         deviceId: {type: string, description: 客户端设备唯一标识，用于记录并管理刷新令牌会话；建议稳定传入。}
 

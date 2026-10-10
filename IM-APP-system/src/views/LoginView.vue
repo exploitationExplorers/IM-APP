@@ -29,8 +29,8 @@ const mfaLoading = shallowRef(false);
 const mfaChallengeToken = shallowRef("");
 
 const form = reactive<LoginForm>({
-  username: "admin",
-  password: "admin123",
+  username: "",
+  password: "",
 });
 
 const mfaForm = reactive<MfaForm>({ code: "" });
@@ -141,7 +141,7 @@ async function submitMfa(): Promise<void> {
           <el-form-item prop="username"
             ><el-input
               v-model="form.username"
-              placeholder="管理员账号：admin"
+              placeholder="请输入管理员账号"
               :prefix-icon="User"
               autocomplete="username"
           /></el-form-item>
@@ -150,7 +150,7 @@ async function submitMfa(): Promise<void> {
               v-model="form.password"
               type="password"
               show-password
-              placeholder="登录密码：admin123"
+              placeholder="请输入登录密码"
               :prefix-icon="Lock"
               autocomplete="current-password"
           /></el-form-item>
@@ -167,7 +167,6 @@ async function submitMfa(): Promise<void> {
             >登录</el-button
           >
         </div>
-        <p class="login-hint">演示账号：admin · 密码：admin123</p>
       </section>
     </section>
 
@@ -252,12 +251,6 @@ async function submitMfa(): Promise<void> {
 }
 .login-actions .el-button {
   width: 160px;
-}
-.login-hint {
-  margin: 18px 0 0;
-  color: #909399;
-  font-size: 12px;
-  text-align: center;
 }
 @media screen and (max-width: 1250px) {
   .login-left {

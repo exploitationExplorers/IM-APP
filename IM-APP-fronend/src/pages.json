@@ -301,6 +301,13 @@
       }
     },
     {
+      "path": "pages/group/edit-group-id",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "设置群号"
+      }
+    },
+    {
       "path": "pages/group/announcement",
       "style": {
         "navigationStyle": "custom",

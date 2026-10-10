@@ -31,8 +31,9 @@ async function openJoined(id: string, name: string, avatar: string) {
 
 async function onJoin() {
   const id = groupId.value.trim()
-  if (!/^\d+$/.test(id)) {
-    uni.showToast({ title: '请输入群ID', icon: 'none' })
+  // 新群号 qun_xxx；兼容极少数未迁移的纯数字号
+  if (!/^(qun_[A-Za-z0-9]{6,20}|\d+)$/.test(id)) {
+    uni.showToast({ title: '请输入正确的群号', icon: 'none' })
     return
   }
   if (submitting.value) return
@@ -78,14 +79,14 @@ async function onJoin() {
           class="search-input"
           v-model="groupId"
           type="text"
-          maxlength="12"
-          placeholder="输入群ID"
+          maxlength="28"
+          placeholder="输入群号，如 qun_xxxx"
           placeholder-class="search-ph"
           confirm-type="done"
           @confirm="onJoin"
         />
       </view>
-      <text class="hint">输入对方群聊资料里的群ID。右上角仍可扫群二维码。</text>
+      <text class="hint">输入对方群资料里的群号（qun_ 开头）。右上角仍可扫群二维码。</text>
     </view>
 
     <view class="footer">

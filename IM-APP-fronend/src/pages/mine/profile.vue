@@ -5,7 +5,11 @@ import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG, THEME } from '@/config'
 import { playableMediaUrl } from '@/utils/chatMedia'
-import { uploadAvatarFile, uploadAvatarForProfile } from '@/utils/file-upload'
+import {
+  requestAndroidAlbumPermission,
+  uploadAvatarFile,
+  uploadAvatarForProfile,
+} from '@/utils/file-upload'
 import { consumeProfileSaveSuccess } from '@/utils/profile-feedback'
 import ImSuccessToast from '@/components/ImSuccessToast.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
@@ -119,19 +123,30 @@ function onChooseAvatar() {
     input.click()
     return
   }
-  uni.chooseImage({
-    count: 1,
-    sizeType: ['compressed'],
-    sourceType: ['album', 'camera'],
-    success: async (res) => {
-      const anyRes = res as unknown as {
-        tempFilePaths?: string[] | string
-      }
-      const paths = anyRes.tempFilePaths
-      const path = Array.isArray(paths) ? paths[0] : paths
-      if (!path) return
-      void uploadPickedAvatar(path)
-    },
+  void requestAndroidAlbumPermission().then(() => {
+    uni.chooseImage({
+      count: 1,
+      // 华为等机型 compressed 可能空路径；original 再由 upload 侧 compressImage
+      sizeType: ['original', 'compressed'],
+      sourceType: ['album', 'camera'],
+      fail: (err) => {
+        const msg = String(err?.errMsg || '')
+        if (/cancel/i.test(msg)) return
+        uni.showToast({ title: msg.replace(/^[^:]+:\s*/, '') || '无法打开相册', icon: 'none' })
+      },
+      success: (res) => {
+        const anyRes = res as unknown as {
+          tempFilePaths?: string[] | string
+        }
+        const paths = anyRes.tempFilePaths
+        const path = Array.isArray(paths) ? paths[0] : paths
+        if (!path) {
+          uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
+          return
+        }
+        void uploadPickedAvatar(path)
+      },
+    })
   })
 }
 

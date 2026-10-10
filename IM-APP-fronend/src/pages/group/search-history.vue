@@ -3,11 +3,12 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { MessageType } from 'openim-uniapp-polyfill'
 import type { MessageItem } from 'openim-uniapp-polyfill'
-import { collectHistoryMessages, resolveGroupConversationID } from '@/utils/openim'
+import { collectHistoryMessages, messageSearchPreview, resolveGroupConversationID } from '@/utils/openim'
 import { formatFavoriteDay, formatClock } from '@/utils/format'
 import ImNavBar from '@/components/ImNavBar.vue'
 
 const groupId = ref('')
+const groupTitle = ref('')
 const keyword = ref('')
 const loading = ref(false)
 const messages = ref<MessageItem[]>([])
@@ -27,6 +28,7 @@ const results = computed(() => {
 
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
+  groupTitle.value = decodeURIComponent(String(query?.title || '群聊'))
   if (!groupId.value) return
   loading.value = true
   try {
@@ -44,12 +46,7 @@ function goBack() {
 }
 
 function previewOf(item: MessageItem) {
-  return (
-    item.textElem?.content ||
-    item.atTextElem?.text ||
-    item.quoteElem?.text ||
-    ''
-  )
+  return messageSearchPreview(item)
 }
 
 function timeOf(item: MessageItem) {
@@ -65,7 +62,7 @@ function openResult(item: MessageItem) {
     return
   }
   uni.navigateTo({
-    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId.value)}&clientMsgId=${encodeURIComponent(clientMsgId)}`,
+    url: `/pages/chat/room?type=group&targetId=${encodeURIComponent(groupId.value)}&title=${encodeURIComponent(groupTitle.value)}&clientMsgId=${encodeURIComponent(clientMsgId)}`,
   })
 }
 </script>
@@ -98,6 +95,7 @@ function openResult(item: MessageItem) {
       </view>
       <view v-if="!loading && !results.length" class="empty">未找到相关记录</view>
     </view>
+    <view v-else-if="loading" class="empty">加载中…</view>
   </view>
 </template>
 
@@ -123,17 +121,23 @@ function openResult(item: MessageItem) {
   font-size: 28rpx;
 }
 
+.list {
+  padding: 0 24rpx 40rpx;
+}
+
 .row {
   display: flex;
   gap: 20rpx;
-  padding: 20rpx 32rpx;
+  padding: 24rpx 0;
+  border-bottom: 1rpx solid #f0f0f0;
 }
 
 .avatar {
   width: 80rpx;
   height: 80rpx;
-  border-radius: 50%;
+  border-radius: 12rpx;
   background: #eee;
+  flex-shrink: 0;
 }
 
 .body {
@@ -145,32 +149,37 @@ function openResult(item: MessageItem) {
   display: flex;
   justify-content: space-between;
   gap: 16rpx;
+  margin-bottom: 8rpx;
 }
 
 .name {
   font-size: 28rpx;
-  color: #1d1d1d;
-}
-
-.time {
-  font-size: 22rpx;
-  color: #8a8f9c;
-}
-
-.preview {
-  display: block;
-  margin-top: 8rpx;
-  font-size: 26rpx;
-  color: #666;
+  color: #111;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.time {
+  font-size: 22rpx;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.preview {
+  font-size: 26rpx;
+  color: #666;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
 .empty {
   padding: 80rpx 0;
   text-align: center;
-  color: #8a8f9c;
+  color: #999;
   font-size: 28rpx;
 }
 </style>

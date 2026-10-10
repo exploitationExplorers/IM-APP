@@ -107,8 +107,9 @@ export function parseVideoMeta(raw: unknown): VideoMeta {
 }
 
 /**
- * H5 的 https 页面不能展示或上传 http://IP/minio、/object 这种地址，浏览器会当混合内容拦掉。
- * 改成当前站点同源路径，nginx 再转回对象存储。App 仍用原始地址。
+ * H5 的 https 页面不能展示或上传 http://IP/... 媒体，浏览器会当混合内容拦掉。
+ * 已知对象存储路径改成当前站点同源；其它 http 媒体也尽量改写到 pathname（由前端 nginx 反代）。
+ * App 仍用原始地址。
  */
 export function h5PublicMediaUrl(path: string): string {
   // #ifdef H5
@@ -116,12 +117,17 @@ export function h5PublicMediaUrl(path: string): string {
     try {
       const url = new URL(path)
       const name = url.pathname
-      if (
+      const known =
         name.startsWith('/object/') ||
         name.startsWith('/openim/') ||
         name.startsWith('/minio/') ||
         name.startsWith('/openim-api/')
-      ) {
+      // OpenIM 偶发直出 http://IP:9000/bucket/...，无白名单前缀时也走同源 pathname
+      const looksMedia =
+        known ||
+        /\.(jpe?g|png|gif|webp|bmp|mp4|mov|m4v|webm|aac|m4a|mp3)(\?|$)/i.test(name) ||
+        /\/(object|openim|minio|bucket|im-data)\b/i.test(name)
+      if (looksMedia) {
         return `${location.origin}${url.pathname}${url.search}${url.hash}`
       }
     } catch {

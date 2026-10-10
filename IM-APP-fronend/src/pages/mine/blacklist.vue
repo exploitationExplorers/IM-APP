@@ -3,8 +3,11 @@ import { ref, computed } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import { fetchBlacklist, unblockContact, type BlockedUser } from '@/api/contact'
+import { useChatStore } from '@/stores/chat'
 import { formatRelativeTime } from '@/utils/format'
 import { THEME } from '@/config'
+
+const chatStore = useChatStore()
 
 const list = ref<BlockedUser[]>([])
 const loading = ref(false)
@@ -41,9 +44,8 @@ function onUnblock(item: BlockedUser) {
       try {
         await unblockContact(item.id)
         list.value = list.value.filter((u) => u.id !== item.id)
+        chatStore.restoreConversationAfterUnblock(item.id)
         uni.showToast({ title: '已解除', icon: 'success' })
-        // 通知通讯录页面刷新（如有订阅）
-        // 简单做法：直接 reload 该用户的通讯录缓存
       } catch (e) {
         uni.showToast({ title: (e as Error).message || '解除失败', icon: 'none' })
       }

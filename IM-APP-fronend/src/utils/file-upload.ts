@@ -26,8 +26,71 @@ function guessContentType(fileName: string): string {
     png: 'image/png',
     webp: 'image/webp',
     gif: 'image/gif',
+    heic: 'image/heic',
+    heif: 'image/heif',
   }
   return map[ext] || 'application/octet-stream'
+}
+
+/** 华为/部分 Android 相册常给 HEIC 或 octet-stream，头像接口只收 image/* */
+function forceAvatarJpegMeta(fileName: string, contentType: string): { fileName: string; contentType: string } {
+  const type = (contentType || '').toLowerCase()
+  const lowerName = (fileName || '').toLowerCase()
+  const needsJpeg =
+    !type.startsWith('image/') ||
+    type.includes('heic') ||
+    type.includes('heif') ||
+    lowerName.endsWith('.heic') ||
+    lowerName.endsWith('.heif')
+  if (!needsJpeg && type.startsWith('image/')) {
+    return { fileName: fileName || 'avatar.jpg', contentType: type === 'image/jpg' ? 'image/jpeg' : type }
+  }
+  return { fileName: 'avatar.jpg', contentType: 'image/jpeg' }
+}
+
+function compressLocalImage(localPath: string): Promise<string> {
+  return new Promise((resolve) => {
+    uni.compressImage({
+      src: localPath,
+      quality: 80,
+      success: (res) => resolve(res.tempFilePath || localPath),
+      fail: () => resolve(localPath),
+    })
+  })
+}
+
+/** App 选图前申请相册读权限；拒绝时仍继续（系统可能再弹一次） */
+export function requestAndroidAlbumPermission(): Promise<void> {
+  return new Promise((resolve) => {
+    let uniPlatform = ''
+    try {
+      uniPlatform = uni.getSystemInfoSync().uniPlatform || ''
+    } catch {
+      resolve()
+      return
+    }
+    if (uniPlatform !== 'app') {
+      resolve()
+      return
+    }
+    const os = String(uni.getSystemInfoSync().osName || uni.getSystemInfoSync().platform || '').toLowerCase()
+    const request = plus?.android?.requestPermissions
+    if (!os.includes('android') || typeof request !== 'function') {
+      resolve()
+      return
+    }
+    request(
+      [
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VIDEO',
+        // Android 14+ / 华为部分机型：用户可选部分相册访问
+        'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+        'android.permission.READ_EXTERNAL_STORAGE',
+      ],
+      () => resolve(),
+      () => resolve(),
+    )
+  })
 }
 
 function getFileName(filePath: string, fallback = 'avatar.jpg'): string {
@@ -126,10 +189,10 @@ function withImageMeta(fileName: string, contentType: string): { fileName: strin
   const type = contentType && contentType !== 'application/octet-stream'
     ? contentType
     : guessContentType(fileName)
-  if (type !== 'application/octet-stream' && fileName.includes('.')) {
-    return { fileName, contentType: type }
+  if (type.startsWith('image/') && !type.includes('heic') && !type.includes('heif') && fileName.includes('.')) {
+    return { fileName, contentType: type === 'image/jpg' ? 'image/jpeg' : type }
   }
-  return { fileName: fileName.includes('.') ? fileName : 'avatar.jpg', contentType: 'image/jpeg' }
+  return forceAvatarJpegMeta(fileName, type)
 }
 
 async function loadImageBytes(localPath?: string, remoteUrl?: string): Promise<ImageBytes> {
@@ -298,7 +361,22 @@ export async function uploadAvatarForProfile(
   remoteUrl?: string,
 ): Promise<string> {
   if (isAppPlatform() && localPath) {
-    return uploadViaNativeFile('avatar', localPath)
+    // 华为等机型 HEIC / 无扩展名路径直传会被后端 image/* 校验拒绝，先压成 jpeg
+    const compressed = await compressLocalImage(localPath)
+    const meta = await getLocalFileMeta(compressed)
+    const jpegMeta = forceAvatarJpegMeta(meta.fileName, meta.contentType)
+    const init = await createUploadTask({
+      purpose: 'avatar',
+      fileName: jpegMeta.fileName,
+      contentType: jpegMeta.contentType,
+      size: meta.size,
+    })
+    const fileId = init.file.id
+    if (!fileId) throw new Error('创建上传任务失败')
+    if (!init.formUrl || !init.formData) throw new Error('当前环境不支持文件上传')
+    await postLocalFile(init.formUrl, compressed, init.formData)
+    const file = await completeUpload(fileId)
+    return file.id
   }
   return uploadViaTask('avatar', await loadImageBytes(localPath, remoteUrl))
 }

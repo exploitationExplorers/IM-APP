@@ -8,6 +8,7 @@ import {
   unblockContact,
 } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
+import { useChatStore } from '@/stores/chat'
 import type { Contact, GroupPreview } from '@/types'
 
 const props = defineProps<{
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const contactStore = useContactStore()
+const chatStore = useChatStore()
 const contact = ref<Contact | null>(null)
 const loading = ref(false)
 const showMore = ref(false)
@@ -135,10 +137,12 @@ function onBlock() {
         if (blocked) {
           await unblockContact(contact.value.id)
           contact.value.isBlocked = false
+          chatStore.restoreConversationAfterUnblock(contact.value.id)
           uni.showToast({ title: '已解除', icon: 'success' })
         } else {
           await blockContact(contact.value.id)
           contact.value.isBlocked = true
+          await chatStore.hideConversationForBlockedContact(contact.value.id)
           uni.showToast({ title: '已拉黑', icon: 'success' })
         }
         await contactStore.loadDirectory()

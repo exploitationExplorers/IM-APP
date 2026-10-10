@@ -78,7 +78,7 @@ function goInvite() {
 }
 
 function friendRemark(member: GroupMember) {
-  return contactStore.contacts.find((c) => c.id === member.id)?.remark?.trim() || ''
+  return contactStore.remarkOf(member.id)
 }
 
 /** 好友备注优先，和群聊里的名字保持一致 */
@@ -119,7 +119,24 @@ function canActOn(member: GroupMember) {
   return false
 }
 
-function openProfile(member: GroupMember) {
+async function openProfile(member: GroupMember) {
+  if (member.id === myId.value) return
+  if (!contactStore.contacts.length) {
+    try {
+      await contactStore.loadDirectory()
+    } catch {
+      /* 拉通讯录失败时按非好友打开资料 */
+    }
+  }
+  const isFriend = contactStore.contacts.some((c) => c.id === member.id)
+  if (isFriend) {
+    await contactStore.openChatWithContact(
+      member.id,
+      displayName(member),
+      member.avatar || APP_CONFIG.defaultAvatarUrl,
+    )
+    return
+  }
   uni.navigateTo({
     url: `/pages/contacts/user-profile?id=${encodeURIComponent(member.id)}&groupId=${encodeURIComponent(groupId.value)}`,
   })

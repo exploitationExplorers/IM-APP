@@ -3,9 +3,11 @@ import { ref, computed, watch } from 'vue'
 import { IMEvents, MessageType, OnlineState, SessionType } from 'openim-uniapp-polyfill'
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { ChatMessage, Conversation, ConversationPinnedMessage } from '@/types'
+import { fetchBlacklist } from '@/api/contact'
 import { recallMessage, resolveIMGroup, resolveIMGroupByIM, resolveIMPeer } from '@/api/im'
 import {
   businessUserIdFromIM,
+  peerIdFromSingleConversation,
   sameBusinessUserId,
   ensureIMLogin,
   getConversationList,
@@ -126,11 +128,20 @@ export const useChatStore = defineStore('chat', () => {
    */
   const HIDDEN_KEY_PREFIX = 'chat:hidden-conversations:'
   const EXITED_GROUP_KEY_PREFIX = 'chat:exited-group-conversations:'
+  /** 我拉黑的对方业务用户 key（去横线小写），用于会话列表永久剔除 */
+  const BLOCKED_PEER_KEY_PREFIX = 'chat:blocked-peers:'
   function hiddenStorageKey() {
     return `${HIDDEN_KEY_PREFIX}${imUserId.value || 'anon'}`
   }
   function exitedGroupStorageKey() {
     return `${EXITED_GROUP_KEY_PREFIX}${imUserId.value || 'anon'}`
+  }
+  function blockedPeerStorageKey() {
+    return `${BLOCKED_PEER_KEY_PREFIX}${imUserId.value || 'anon'}`
+  }
+  function normalizePeerKey(id: string) {
+    const biz = businessUserIdFromIM(id) || id
+    return biz.replace(/-/g, '').toLowerCase()
   }
   function normalizeHiddenIdList(raw: unknown): string[] {
     const fromArr = (arr: unknown[]) =>
@@ -165,6 +176,39 @@ export const useChatStore = defineStore('chat', () => {
   }
   const hiddenIds = readHiddenIds()
 
+  function readBlockedPeerKeys(): Set<string> {
+    try {
+      return new Set(normalizeHiddenIdList(uni.getStorageSync(blockedPeerStorageKey())))
+    } catch {
+      return new Set()
+    }
+  }
+  function writeBlockedPeerKeys(ids: Set<string>) {
+    try {
+      uni.setStorageSync(blockedPeerStorageKey(), Array.from(ids))
+    } catch {
+      /* 忽略 */
+    }
+  }
+  const blockedPeerKeys = readBlockedPeerKeys()
+
+  function isBlockedPeer(peerUserId?: string) {
+    if (!peerUserId) return false
+    return blockedPeerKeys.has(normalizePeerKey(peerUserId))
+  }
+
+  function markPeerBlocked(contactId: string) {
+    if (!contactId) return
+    blockedPeerKeys.add(normalizePeerKey(contactId))
+    writeBlockedPeerKeys(blockedPeerKeys)
+  }
+
+  function markPeerUnblocked(contactId: string) {
+    if (!contactId) return
+    blockedPeerKeys.delete(normalizePeerKey(contactId))
+    writeBlockedPeerKeys(blockedPeerKeys)
+  }
+
   function readExitedGroupIds(): Set<string> {
     try {
       return new Set(normalizeHiddenIdList(uni.getStorageSync(exitedGroupStorageKey())))
@@ -195,19 +239,73 @@ export const useChatStore = defineStore('chat', () => {
     stored.forEach((id) => exitedGroupIds.add(id))
   }
 
+  function syncBlockedPeerKeysFromStorage() {
+    const stored = readBlockedPeerKeys()
+    blockedPeerKeys.clear()
+    stored.forEach((id) => blockedPeerKeys.add(id))
+  }
+
   function unhideConversation(conversationId: string) {
     if (!conversationId || !hiddenIds.has(conversationId)) return
+    const conv = conversations.value.find((c) => c.id === conversationId)
+    const peer =
+      conv?.peerUserId || peerIdFromSingleConversation(conversationId, imUserId.value)
+    // 拉黑对象的会话即使本地曾隐藏，也不因进房/新消息自动取消隐藏
+    if (peer && isBlockedPeer(peer)) return
     hiddenIds.delete(conversationId)
     writeHiddenIds(hiddenIds)
+  }
+
+  function shouldShowConversation(conv: Conversation) {
+    if (hiddenIds.has(conv.id) || exitedGroupIds.has(conv.id)) return false
+    if (conv.type === 'private' && isBlockedPeer(conv.peerUserId)) return false
+    return true
+  }
+
+  /** 拉黑后立刻从聊天列表移除该私聊，并记入本地黑名单 peer 集合 */
+  async function hideConversationForBlockedContact(contactId: string) {
+    if (!contactId) return
+    markPeerBlocked(contactId)
+    const match = conversations.value.find(
+      (c) => c.type === 'private' && sameBusinessUserId(c.peerUserId || '', contactId),
+    )
+    if (match) {
+      await hideConversationLocal(match.id)
+      return
+    }
+    conversations.value = conversations.value.filter(
+      (c) => !(c.type === 'private' && sameBusinessUserId(c.peerUserId || '', contactId)),
+    )
+  }
+
+  /** 解除拉黑：允许会话再次出现（有新消息或主动打开时） */
+  function restoreConversationAfterUnblock(contactId: string) {
+    markPeerUnblocked(contactId)
+  }
+
+  /** 用服务端黑名单对齐本地，清掉已拉黑但仍留在列表里的会话 */
+  async function syncBlockedPeersFromServer() {
+    try {
+      const res = await fetchBlacklist({ limit: 500 })
+      blockedPeerKeys.clear()
+      for (const u of res.items || []) {
+        if (u?.id) blockedPeerKeys.add(normalizePeerKey(u.id))
+      }
+      writeBlockedPeerKeys(blockedPeerKeys)
+      if (conversations.value.length && blockedPeerKeys.size) {
+        conversations.value = conversations.value.filter(shouldShowConversation)
+      }
+    } catch {
+      /* 黑名单接口失败不挡会话列表 */
+    }
   }
 
   watch(imUserId, () => {
     syncHiddenIdsFromStorage()
     syncExitedGroupIdsFromStorage()
+    syncBlockedPeerKeysFromStorage()
     if (conversations.value.length) {
-      conversations.value = conversations.value.filter(
-        (c) => !hiddenIds.has(c.id) && !exitedGroupIds.has(c.id),
-      )
+      conversations.value = conversations.value.filter(shouldShowConversation)
     }
   })
 
@@ -306,14 +404,15 @@ export const useChatStore = defineStore('chat', () => {
     if (next.lastMessage) {
       next.lastMessage = replaceOpenIMAdminLabel(next.lastMessage)
     }
-    if (next.type === 'private' && next.peerUserId) {
-      const contactStore = useContactStore()
-      const bizId = businessUserIdFromIM(next.peerUserId)
-      const contact = contactStore.contacts.find(
-        (c) => c.id === bizId || sameBusinessUserId(c.id, next.peerUserId),
-      )
-      const remark = contact?.remark?.trim()
-      if (remark) next.title = remark
+    if (next.type === 'private') {
+      if (!next.peerUserId) {
+        const derived = peerIdFromSingleConversation(next.id, imUserId.value)
+        if (derived) next.peerUserId = derived
+      }
+      if (next.peerUserId) {
+        const remark = useContactStore().remarkOf(next.peerUserId)
+        if (remark) next.title = remark
+      }
     }
     return next
   }
@@ -324,11 +423,9 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   watch(
-    () =>
-      useContactStore()
-        .contacts.map((c) => `${c.id}:${c.remark || ''}`)
-        .join('|'),
+    () => useContactStore().remarkByUserId,
     () => applyContactRemarks(),
+    { deep: true },
   )
 
   function appendMessage(item: MessageItem) {
@@ -359,8 +456,13 @@ export const useChatStore = defineStore('chat', () => {
       onIncomingForDissolve?.(message)
     }
     // 已移除的会话：仅普通新消息才取消隐藏；解散/系统通知保持隐藏，避免 H5 刷新又刷回来
+    // 我拉黑的对方：会话保持消失，不因对方再发消息刷回列表
     if (hiddenIds.has(message.conversationId)) {
       if (message.notificationKind === 'dissolved' || isIMNotification(item.contentType)) {
+        return
+      }
+      const peer = item.sendID === imUserId.value ? item.recvID : item.sendID
+      if (isBlockedPeer(peer) || isBlockedPeer(businessUserIdFromIM(peer || ''))) {
         return
       }
       unhideConversation(message.conversationId)
@@ -492,7 +594,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!items.length) return
     const incoming = items
       .map((item) => decorateConversation(toConversation(item)))
-      .filter((conv) => !hiddenIds.has(conv.id) && !exitedGroupIds.has(conv.id))
+      .filter((conv) => shouldShowConversation(conv))
     if (!incoming.length) return
     const merged = [...conversations.value]
     incoming.forEach((conv) => {
@@ -500,7 +602,7 @@ export const useChatStore = defineStore('chat', () => {
       if (idx >= 0) merged[idx] = keepNewerPreview(merged[idx], conv)
       else merged.push(conv)
     })
-    conversations.value = sortConversations(merged)
+    conversations.value = sortConversations(merged.filter(shouldShowConversation))
   }
 
   /** SDK 会话预览偶发滞后时，不要把本地刚发出的 [图片] 盖回旧文本 */
@@ -644,6 +746,9 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await ensureIMLogin()
       syncHiddenIdsFromStorage()
+      syncBlockedPeerKeysFromStorage()
+      // 与服务端黑名单对齐，避免「已拉黑仍出现在聊天列表」
+      await syncBlockedPeersFromServer()
       subscribeRealtime()
       let list
       try {
@@ -654,6 +759,7 @@ export const useChatStore = defineStore('chat', () => {
           invalidateIMLoginCache()
           await ensureIMLogin()
           syncHiddenIdsFromStorage()
+          syncBlockedPeerKeysFromStorage()
           await waitForSync(5000)
           list = await getConversationList()
         } else {
@@ -666,17 +772,18 @@ export const useChatStore = defineStore('chat', () => {
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       conversations.value = sortConversations(
         list
-          .filter((item) => {
-            const id = (item as { conversationID?: string }).conversationID || ''
-            return !hiddenIds.has(id) && !exitedGroupIds.has(id)
-          })
           .map((item) => {
             const mapped = decorateConversation(toConversation(item))
             const prev = prevById.get(mapped.id)
             return prev ? keepNewerPreview(prev, mapped) : mapped
-          }),
+          })
+          .filter(shouldShowConversation),
       )
       refreshOnlineStatus().catch(() => undefined)
+      // 备注索引与通讯录分页解耦：拉全量备注后再盖一次会话标题
+      void useContactStore()
+        .ensureRemarkIndex()
+        .then(() => applyContactRemarks())
     } finally {
       loading.value = false
       perfMarkEnd('chat:load-conversations')
@@ -1198,7 +1305,9 @@ export const useChatStore = defineStore('chat', () => {
       const withCover =
         placeholder.type === 'video' && mapped.type === 'video'
           ? { ...mapped, content: mergeVideoContent(mapped.content, placeholder.content) }
-          : mapped
+          : placeholder.type === 'image' && mapped.type === 'image' && !mapped.content?.trim() && placeholder.content
+            ? { ...mapped, content: placeholder.content }
+            : mapped
       const isGroup = requireConversation(conversationId).type === 'group'
       const delivered = isGroup ? { ...withCover, trackGroupRead: true } : withCover
       replaceMessage(conversationId, placeholder.id, delivered)
@@ -1320,9 +1429,25 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendImage(conversationId: string, filePath: string, senderId: string) {
     const target = targetOf(requireConversation(conversationId))
+    // H5 本地临时路径不能进 <image>；先用 blob 占位，发送成功后再换成远程 URL
+    let preview = filePath
+    try {
+      if (
+        typeof window !== 'undefined' &&
+        uni.getSystemInfoSync().uniPlatform === 'web' &&
+        filePath &&
+        !/^https?:\/\//i.test(filePath) &&
+        !filePath.startsWith('blob:')
+      ) {
+        const blob = await fetch(filePath).then((r) => r.blob())
+        preview = URL.createObjectURL(blob)
+      }
+    } catch {
+      preview = filePath
+    }
     await sendWithPlaceholder(
       conversationId,
-      placeholderOf(conversationId, senderId, 'image', filePath),
+      placeholderOf(conversationId, senderId, 'image', preview),
       () => sendImageMessage(target, filePath),
     )
   }
@@ -1586,6 +1711,8 @@ export const useChatStore = defineStore('chat', () => {
     pinChatMessage,
     unpinChatMessage,
     hideConversationLocal,
+    hideConversationForBlockedContact,
+    restoreConversationAfterUnblock,
     removeExitedGroupConversation,
     reappearConversation,
     applyContactRemarks,

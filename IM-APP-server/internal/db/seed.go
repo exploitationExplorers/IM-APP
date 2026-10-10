@@ -114,8 +114,8 @@ func SeedDemo(ctx context.Context, pool *pgxpool.Pool) error {
 		VALUES($1::uuid, $2::uuid, 'text', $3)`, groupConv, peer2ID, msg3)
 
 	_, _ = pool.Exec(ctx, `
-		INSERT INTO groups(id, name, avatar, owner_id)
-		VALUES($1::uuid, $2, '', $3::uuid)`, groupConv, groupName, meID)
+		INSERT INTO groups(id, name, avatar, owner_id, public_id)
+		VALUES($1::uuid, $2, '', $3::uuid, $4)`, groupConv, groupName, meID, "qun_demogroup0001")
 
 	_, _ = pool.Exec(ctx, `
 		INSERT INTO group_members(group_id, user_id, role) VALUES

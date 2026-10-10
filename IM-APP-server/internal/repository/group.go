@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,7 +13,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	groupPublicIDPrefix    = "qun_"
+	groupPublicIDSuffixLen = 14
 )
 
 type GroupRepo struct {
@@ -123,14 +130,14 @@ func (r *GroupRepo) InternalIDByPublicID(ctx context.Context, publicID string) (
 	return internalID, err
 }
 
-// LookupGroupIDs accepts 纯数字群号、内部 UUID 或 OpenIM 无连字符群 ID。
+// LookupGroupIDs 接受群号（qun_xxx / 遗留数字）、内部 UUID 或 OpenIM 无连字符群 ID。
 func (r *GroupRepo) LookupGroupIDs(ctx context.Context, id string) (internalID, publicID string, err error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", "", pgx.ErrNoRows
 	}
 	err = r.DB.QueryRow(ctx, `
-		SELECT id::text, public_id FROM groups WHERE public_id=$1`, id,
+		SELECT id::text, public_id FROM groups WHERE lower(public_id)=lower($1)`, id,
 	).Scan(&internalID, &publicID)
 	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
 		return internalID, publicID, err
@@ -143,6 +150,73 @@ func (r *GroupRepo) LookupGroupIDs(ctx context.Context, id string) (internalID, 
 		SELECT id::text, public_id FROM groups WHERE replace(id::text,'-','')=$1`, normalized,
 	).Scan(&internalID, &publicID)
 	return internalID, publicID, err
+}
+
+func randomGroupPublicID() (string, error) {
+	out := make([]byte, groupPublicIDSuffixLen)
+	for i := 0; i < groupPublicIDSuffixLen; i++ {
+		c, err := randomChar(publicIDAlphanums)
+		if err != nil {
+			return "", err
+		}
+		out[i] = c
+	}
+	return groupPublicIDPrefix + string(out), nil
+}
+
+// NextGroupPublicID 分配未被占用的 qun_ + 14 位随机群号。
+func (r *GroupRepo) NextGroupPublicID(ctx context.Context) (string, error) {
+	for attempt := 0; attempt < 8; attempt++ {
+		id, err := randomGroupPublicID()
+		if err != nil {
+			return "", err
+		}
+		var taken bool
+		if err := r.DB.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM groups WHERE lower(public_id)=lower($1))`, id).Scan(&taken); err != nil {
+			return "", err
+		}
+		if !taken {
+			return id, nil
+		}
+	}
+	return "", errors.New("failed to allocate a unique group public id")
+}
+
+func (r *GroupRepo) GroupPublicIDTaken(ctx context.Context, publicID, excludeInternalID string) (bool, error) {
+	var taken bool
+	err := r.DB.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM groups
+			WHERE lower(public_id)=lower($1) AND ($2='' OR id<>$2::uuid)
+		)`, publicID, excludeInternalID).Scan(&taken)
+	return taken, err
+}
+
+func (r *GroupRepo) GroupPublicIDChangeUsed(ctx context.Context, internalID string) (bool, error) {
+	var used bool
+	err := r.DB.QueryRow(ctx, `
+		SELECT COALESCE(public_id_changed_at IS NOT NULL, false)
+		FROM groups WHERE id=$1::uuid`, internalID).Scan(&used)
+	return used, err
+}
+
+// UpdateGroupPublicID 群主改群号并标记已改过；并发二次提交 RowsAffected=0。
+func (r *GroupRepo) UpdateGroupPublicID(ctx context.Context, internalID, publicID string) error {
+	tag, err := r.DB.Exec(ctx, `
+		UPDATE groups SET public_id=$2, public_id_changed_at=NOW()
+		WHERE id=$1::uuid AND public_id_changed_at IS NULL`, internalID, publicID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrPublicIDTaken
+		}
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrPublicIDChangeUsed
+	}
+	return nil
 }
 
 // PublicIDByInternalID is the inverse of InternalIDByPublicID: given the
@@ -198,11 +272,15 @@ func (r *GroupRepo) Create(ctx context.Context, ownerID, name string, memberIDs 
 		}
 	}
 
+	publicID, err := r.NextGroupPublicID(ctx)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
 	var groupID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO groups(name, avatar, owner_id, conversation_id, allow_member_add_friend, max_members)
-		VALUES($1, '', $2::uuid, NULLIF($3,'')::uuid, false, $4)
-		RETURNING id::text`, name, ownerID, convID, limits.DefaultGroupMaxMembers).Scan(&groupID)
+		INSERT INTO groups(name, avatar, owner_id, conversation_id, allow_member_add_friend, max_members, public_id)
+		VALUES($1, '', $2::uuid, NULLIF($3,'')::uuid, false, $4, $5)
+		RETURNING id::text`, name, ownerID, convID, limits.DefaultGroupMaxMembers, publicID).Scan(&groupID)
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
@@ -274,14 +352,15 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 			COALESCE(g.conversation_id::text,''),
 			gm.role, COALESCE(gm.nickname,''), COALESCE(g.join_mode,'open'), COALESCE(g.all_muted, false),
 			CASE WHEN gm.muted_until > NOW() THEN gm.muted_until ELSE NULL END,
-		COALESCE((SELECT remark FROM group_remarks gr WHERE gr.user_id=$2::uuid AND gr.group_id=g.id),'')
+		COALESCE((SELECT remark FROM group_remarks gr WHERE gr.user_id=$2::uuid AND gr.group_id=g.id),''),
+		COALESCE(g.public_id_changed_at IS NOT NULL, false)
 		FROM groups g
 		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2::uuid
 		LEFT JOIN users owner ON owner.id=g.owner_id
 		WHERE g.id=$1::uuid AND COALESCE(g.status,'active')='active'`, groupID, uid).Scan(
 		&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.OwnerName, &g.MemberCount, &g.MaxMembers,
 		&g.Announcement, &g.AnnouncementImages, &allow, &g.ConversationID, &g.MyRole, &g.MyNickname,
-		&g.JoinMode, &g.AllMuted, &g.MutedUntil, &g.Remark)
+		&g.JoinMode, &g.AllMuted, &g.MutedUntil, &g.Remark, &g.PublicIDChangeUsed)
 	g.AllowMemberAddFriend = allow
 	if g.AnnouncementImages == nil {
 		g.AnnouncementImages = []string{}
@@ -309,6 +388,35 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 	return g, err
 }
 
+// memberRoleRank 与 ListMembers ORDER BY 一致：owner < admin < member。
+func memberRoleRank(role string) int {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "owner":
+		return 0
+	case "admin":
+		return 1
+	default:
+		return 2
+	}
+}
+
+// parseMemberListCursor 支持 "rank:userId"；旧客户端只传 userId 时按 member 档兜底。
+func parseMemberListCursor(cursor string) (rank int, userID string, ok bool) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return 0, "", false
+	}
+	if i := strings.IndexByte(cursor, ':'); i >= 0 {
+		r, err := strconv.Atoi(cursor[:i])
+		id := strings.TrimSpace(cursor[i+1:])
+		if err != nil || id == "" || r < 0 || r > 2 {
+			return 0, "", false
+		}
+		return r, id, true
+	}
+	return 2, cursor, true
+}
+
 func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid, cursor string, limit int) (models.GroupMemberPage, error) {
 	page := models.GroupMemberPage{Items: make([]models.GroupMember, 0)}
 	if limit <= 0 || limit > 200 {
@@ -323,6 +431,7 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid, cursor string
 	if !exists {
 		return page, ErrForbidden
 	}
+	const roleOrder = `CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END`
 	query := `
 		SELECT u.id::text, COALESCE(u.nickname,''), COALESCE(gm.nickname,''),
 			CASE WHEN COALESCE(gm.nickname,'')='' THEN COALESCE(u.nickname,'') ELSE gm.nickname END,
@@ -333,12 +442,16 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid, cursor string
 		WHERE gm.group_id=$1::uuid AND COALESCE(u.status,'active')='active'`
 	args := []interface{}{groupID}
 	argIdx := 2
-	if cursor != "" {
-		query += fmt.Sprintf(` AND u.id::text > $%d`, argIdx)
-		args = append(args, cursor)
-		argIdx++
+	// 排序是 (roleRank, id)，游标必须同序，否则翻页会反复捞出群主/管理员
+	if rank, userID, ok := parseMemberListCursor(cursor); ok {
+		query += fmt.Sprintf(
+			` AND ((%s) > $%d OR ((%s) = $%d AND u.id::text > $%d))`,
+			roleOrder, argIdx, roleOrder, argIdx, argIdx+1,
+		)
+		args = append(args, rank, userID)
+		argIdx += 2
 	}
-	query += fmt.Sprintf(` ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.id::text ASC LIMIT $%d`, argIdx)
+	query += fmt.Sprintf(` ORDER BY %s, u.id::text ASC LIMIT $%d`, roleOrder, argIdx)
 	args = append(args, limit+1)
 	rows, err := r.DB.Query(ctx, query, args...)
 	if err != nil {
@@ -360,7 +473,8 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid, cursor string
 	if len(items) > limit {
 		page.HasMore = true
 		page.Items = items[:limit]
-		page.NextCursor = page.Items[len(page.Items)-1].ID
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor = fmt.Sprintf("%d:%s", memberRoleRank(last.Role), last.ID)
 	} else {
 		page.Items = items
 	}

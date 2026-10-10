@@ -15,12 +15,21 @@ import { isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-noti
 import { writeFriendRequestBadge } from '@/utils/friend-request-badge'
 
 const PAGE_SIZE = 50
+/** 备注索引分页拉全量时用服务端上限，少打几轮 */
+const REMARK_INDEX_PAGE_SIZE = 100
+const REMARK_INDEX_MAX_PAGES = 50
 /** 冷启动时等 token 落盘；鉴权失败不重试 */
 const FRIEND_REQUEST_TOKEN_RETRY_MS = [0, 400, 1200]
 const FRIEND_REQUEST_NETWORK_RETRY_MS = [0, 1500]
 
 let friendRequestSyncInFlight: Promise<void> | null = null
+let remarkIndexInFlight: Promise<void> | null = null
 let groupsLoadErrorToastShown = false
+
+/** 业务 UUID / OpenIM 32 位 id 统一成无横线小写，方便对会话 peer */
+function normalizeUserKey(id: string): string {
+  return id.trim().toLowerCase().replace(/-/g, '')
+}
 
 export const useContactStore = defineStore('contact', () => {
   const contacts = ref<Contact[]>([])
@@ -34,6 +43,11 @@ export const useContactStore = defineStore('contact', () => {
   const pendingFriendRequests = ref<FriendRequest[]>([])
   const recentFriendRequests = ref<FriendRequest[]>([])
   const groupsExpanded = ref(false)
+  /**
+   * 备注索引与通讯录分页列表解耦。
+   * 列表只保留当前页，会话标题要用全量备注，否则超过一页的好友只能看到昵称。
+   */
+  const remarkByUserId = ref<Record<string, string>>({})
   const pendingDesktopChat = ref<{
     type: 'private' | 'group'
     businessId: string
@@ -43,6 +57,80 @@ export const useContactStore = defineStore('contact', () => {
 
   /** 待处理的收到申请数，对齐参考站通讯录 / 新的朋友角标 */
   const pendingFriendRequestCount = computed(() => pendingFriendRequests.value.length)
+
+  function mergeRemarks(items: Contact[]) {
+    if (!items.length) return
+    let changed = false
+    const next = { ...remarkByUserId.value }
+    for (const item of items) {
+      const key = normalizeUserKey(item.id)
+      if (!key) continue
+      const remark = item.remark?.trim() || ''
+      if (remark) {
+        if (next[key] !== remark) {
+          next[key] = remark
+          changed = true
+        }
+      } else if (next[key]) {
+        delete next[key]
+        changed = true
+      }
+    }
+    if (changed) remarkByUserId.value = next
+  }
+
+  /** 会话列表 / 聊天顶栏统一走这里，不依赖通讯录当前页有没有这个人 */
+  function remarkOf(userId?: string): string {
+    if (!userId) return ''
+    return remarkByUserId.value[normalizeUserKey(userId)] || ''
+  }
+
+  /** 改备注后立刻写进索引和当前列表，不必等整页 reload */
+  function patchContactRemark(contactId: string, remark: string) {
+    const key = normalizeUserKey(contactId)
+    if (!key) return
+    const value = remark.trim()
+    const next = { ...remarkByUserId.value }
+    if (value) next[key] = value
+    else delete next[key]
+    remarkByUserId.value = next
+    contacts.value = contacts.value.map((c) =>
+      normalizeUserKey(c.id) === key ? { ...c, remark: value } : c,
+    )
+  }
+
+  /** 翻页拉全量备注；通讯录 UI 仍用分页，互不覆盖 */
+  async function ensureRemarkIndex() {
+    if (!getToken()) return
+    if (remarkIndexInFlight) return remarkIndexInFlight
+    remarkIndexInFlight = (async () => {
+      const collected: Record<string, string> = {}
+      let cursor = ''
+      for (let pageNo = 0; pageNo < REMARK_INDEX_MAX_PAGES; pageNo += 1) {
+        const page = await fetchContacts({
+          keyword: '',
+          sort: 'recent',
+          cursor: cursor || undefined,
+          limit: REMARK_INDEX_PAGE_SIZE,
+        })
+        for (const item of page.items) {
+          const key = normalizeUserKey(item.id)
+          const remark = item.remark?.trim() || ''
+          if (key && remark) collected[key] = remark
+        }
+        if (!page.hasMore || !page.nextCursor) break
+        cursor = page.nextCursor
+      }
+      remarkByUserId.value = collected
+    })()
+      .catch((e) => {
+        if (import.meta.env.DEV) console.warn('[contact] 备注索引加载失败', e)
+      })
+      .finally(() => {
+        remarkIndexInFlight = null
+      })
+    return remarkIndexInFlight
+  }
 
   async function reloadContacts(opts?: { keyword?: string; sort?: ContactListSort }) {
     if (opts?.keyword !== undefined) contactKeyword.value = opts.keyword
@@ -58,6 +146,7 @@ export const useContactStore = defineStore('contact', () => {
       contactTotal.value = page.total
       contactCursor.value = page.nextCursor || ''
       contactHasMore.value = page.hasMore
+      mergeRemarks(page.items)
     } finally {
       contactsLoading.value = false
     }
@@ -78,6 +167,7 @@ export const useContactStore = defineStore('contact', () => {
       contactCursor.value = page.nextCursor || ''
       contactHasMore.value = page.hasMore
       contactTotal.value = page.total
+      mergeRemarks(page.items)
     } finally {
       contactsLoading.value = false
     }
@@ -100,6 +190,7 @@ export const useContactStore = defineStore('contact', () => {
 
   async function loadDirectory() {
     await Promise.all([reloadContacts(), loadGroups()])
+    void ensureRemarkIndex()
   }
 
   async function loadFriendRequests() {
@@ -244,6 +335,7 @@ export const useContactStore = defineStore('contact', () => {
     contactTotal.value = 0
     contactCursor.value = ''
     contactHasMore.value = false
+    remarkByUserId.value = {}
     groups.value = []
     pendingFriendRequests.value = []
     recentFriendRequests.value = []
@@ -258,11 +350,15 @@ export const useContactStore = defineStore('contact', () => {
     contactsLoading,
     contactKeyword,
     contactSort,
+    remarkByUserId,
     groups,
     pendingFriendRequests,
     recentFriendRequests,
     pendingFriendRequestCount,
     groupsExpanded,
+    remarkOf,
+    patchContactRemark,
+    ensureRemarkIndex,
     reloadContacts,
     loadMoreContacts,
     loadGroups,

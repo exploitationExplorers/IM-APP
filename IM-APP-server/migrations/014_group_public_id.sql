@@ -44,16 +44,6 @@ ALTER TABLE groups
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_public_id ON groups(public_id);
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-          FROM pg_constraint
-         WHERE conname = 'groups_public_id_numeric_check'
-           AND conrelid = 'groups'::regclass
-    ) THEN
-        ALTER TABLE groups
-            ADD CONSTRAINT groups_public_id_numeric_check
-            CHECK (public_id ~ '^[0-9]+$');
-    END IF;
-END $$;
+-- 不再恢复 groups_public_id_numeric_check：
+-- 本仓库迁移每次启动会全量重跑；046 已把群号改成 qun_ 并 DROP 该约束。
+-- 若这里继续 ADD 纯数字 CHECK，存量 qun_ 行会直接让 api 启动失败（SQLSTATE 23514）。

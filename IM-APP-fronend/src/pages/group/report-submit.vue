@@ -61,8 +61,18 @@ function addImages() {
     sizeType: ['compressed'],
     sourceType: ['album', 'camera'],
     success: (res) => {
-      const paths = Array.isArray(res.tempFilePaths) ? res.tempFilePaths : [res.tempFilePaths]
-      images.value = [...images.value, ...(paths.filter(Boolean) as string[])].slice(0, MAX_IMAGES)
+      const paths = (Array.isArray(res.tempFilePaths) ? res.tempFilePaths : [res.tempFilePaths]).filter(
+        Boolean,
+      ) as string[]
+      const seen = new Set(images.value)
+      const next = [...images.value]
+      for (const p of paths) {
+        if (seen.has(p)) continue
+        seen.add(p)
+        next.push(p)
+        if (next.length >= MAX_IMAGES) break
+      }
+      images.value = next
     },
   })
 }
@@ -131,7 +141,7 @@ async function onSubmit() {
     <view class="card">
       <view class="card-title">相关截图</view>
       <view class="images">
-        <view v-for="(img, i) in images" :key="img" class="thumb">
+        <view v-for="(img, i) in images" :key="`${i}-${img}`" class="thumb">
           <image :src="img" class="thumb-img" mode="aspectFill" @click="previewImage(i)" />
           <view class="thumb-del" @click.stop="removeImage(i)">×</view>
         </view>

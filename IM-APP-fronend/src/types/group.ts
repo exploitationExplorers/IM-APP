@@ -39,6 +39,8 @@ export interface GroupInfo {
   isMuted?: boolean
   mutedUntil?: string | null
   permissions?: GroupPermissions
+  /** 群主是否已用掉「改群号一次」 */
+  publicIdChangeUsed?: boolean
 }
 
 export interface GroupSettingsInput {

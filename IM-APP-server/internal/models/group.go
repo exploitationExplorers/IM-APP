@@ -24,6 +24,14 @@ type GroupInfo struct {
 	MutedUntil           *time.Time        `json:"mutedUntil,omitempty"`
 	Permissions          *GroupPermissions `json:"permissions,omitempty"`
 	Remark               string            `json:"remark,omitempty"`
+	// PublicIDChangeUsed 为 true 表示群主已用掉「改群号一次」的机会
+	PublicIDChangeUsed bool `json:"publicIdChangeUsed"`
+}
+
+// UpdateGroupPublicIDReq 群主修改群号（一生一次）
+type UpdateGroupPublicIDReq struct {
+	GroupID  string `json:"groupId"`
+	PublicID string `json:"publicId"`
 }
 
 type GroupPermissions struct {

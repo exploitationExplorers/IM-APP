@@ -39,6 +39,7 @@ export async function loginBySms(
   })
 }
 
+/** 手机号 + 验证码 + 密码注册 */
 export async function registerBySms(
   phone: string,
   code: string,

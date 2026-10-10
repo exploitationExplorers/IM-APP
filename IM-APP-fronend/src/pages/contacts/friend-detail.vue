@@ -213,10 +213,12 @@ function onBlock() {
         if (blocked) {
           await unblockContact(contact.value.id)
           contact.value.isBlocked = false
+          chatStore.restoreConversationAfterUnblock(contact.value.id)
           uni.showToast({ title: '已解除', icon: 'success' })
         } else {
           await blockContact(contact.value.id)
           contact.value.isBlocked = true
+          await chatStore.hideConversationForBlockedContact(contact.value.id)
           uni.showToast({ title: '已拉黑', icon: 'success' })
         }
         await contactStore.loadDirectory()

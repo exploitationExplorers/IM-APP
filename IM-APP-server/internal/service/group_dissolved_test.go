@@ -8,7 +8,7 @@ import (
 	"im-app-server/internal/repository"
 )
 
-// 已解散群接口与现有群接口一致：非数字 public_id 在访问 DB 前即被拒绝。
+// 已解散群接口：非法群号在访问 DB 前即被拒绝（合法形态为 qun_xxx 或遗留纯数字）。
 func TestDissolvedGroupRejectsInvalidPublicID(t *testing.T) {
 	svc := &GroupService{}
 	ctx := context.Background()
@@ -19,5 +19,8 @@ func TestDissolvedGroupRejectsInvalidPublicID(t *testing.T) {
 	}
 	if err := svc.RemoveDissolvedGroup(ctx, "abc", uid); !errors.Is(err, repository.ErrInvalidGroupOperation) {
 		t.Fatalf("RemoveDissolvedGroup('abc') error = %v, want ErrInvalidGroupOperation", err)
+	}
+	if _, err := svc.GetDissolvedInfo(ctx, "qun_"); !errors.Is(err, repository.ErrInvalidGroupOperation) {
+		t.Fatalf("GetDissolvedInfo('qun_') error = %v, want ErrInvalidGroupOperation", err)
 	}
 }

@@ -58,7 +58,8 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 发送短信验证码。`scene`: `register` | `login` | `reset`。
 
-限流：同一手机号 1 分钟 1 条、IP 每小时 5 条、号码每日 10 条，超限返回 `code=1`。
+限流：同一手机号 1 分钟 1 条、号码每日 10 条；同 IP 默认每小时 60 条。  
+「同 IP 多设备农场」默认**关闭**（`SMS_IP_MAX_FPS=0`），因运营商 CGNAT 下会误杀真实新用户；超限返回 `code=1`。
 
 **Body**
 ```json
@@ -83,7 +84,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### POST `/api/v1/auth/register`
 
-手机号 + 验证码注册。密码可选；不传则只支持验证码登录，之后在安全设置里设初始密码。若传密码则至少 6 位。
+手机号 + 验证码 + 密码注册。密码必填，至少 6 位。登录支持密码或验证码；找回密码用验证码重置。
 
 **Body**
 ```json
@@ -91,7 +92,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
   "countryCode": "+86",
   "phone": "13900000001",
   "code": "123456",
-  "password": "",
+  "password": "yourpassword",
   "deviceId": "test-device"
 }
 ```
@@ -111,7 +112,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
     "avatar": "",
     "bio": "",
     "status": "active",
-    "hasPassword": false
+    "hasPassword": true
   }
 }
 ```
@@ -575,19 +576,34 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 群详情（需为群成员）。
 
-群相关对外接口中的 `:id` 均为纯数字群号（例如 `100001`）。服务端会映射为内部 UUID；数据库关联和 OpenIM 对接仍使用原 UUID 映射，前端不再传群 UUID。
+群相关对外接口中的 `:id` / `groupId` 为业务群号：新建群为 `qun_` + 14 位随机小写字母数字（例如 `qun_ez1b8e1bc1dv12`）；历史纯数字群号已在迁移中批量换成同形态。服务端映射为内部 UUID；OpenIM 仍用 UUID 去连字符。
+
+群详情响应额外含 `publicIdChangeUsed`（群主是否已用掉「改群号一次」）。
 
 响应包含 `myRole`、`myNickname`、`joinMode`、`allMuted` 以及 `permissions`，前端据此展示群资料编辑、二维码、成员管理和举报入口。
+
+### POST `/api/v1/groups/public-id/update`
+
+群主修改群号，每个群只能改一次（系统分配的随机号不算已改过）。需 JWT。
+
+**Body** `{ "groupId": "qun_旧号", "publicId": "qun_新号" }`
+
+`publicId` 规则：必须以 `qun_` 开头，后接 6–20 位字母或数字；占用与查找忽略大小写。
+
+**Response `data`**：更新后的群详情（`id` 为新群号，`publicIdChangeUsed=true`）。
 
 ### GET `/api/v1/group-members`
 
 群成员列表（分页）。Query：`groupId`（必填）、`cursor`、`limit`（默认 100，最大 200）。
 
+列表按角色排序：群主 → 管理员 → 普通成员，同角色再按用户 ID。  
+`nextCursor` 格式为 `{roleRank}:{userId}`（`0=owner` / `1=admin` / `2=member`），与排序键一致；旧客户端只传 `userId` 时服务端按 member 档兜底。
+
 **Response `data`**
 ```json
 {
   "items": [{ "id": "uuid", "nickname": "成员", "role": "member" }],
-  "nextCursor": "uuid",
+  "nextCursor": "2:uuid",
   "hasMore": false
 }
 ```
@@ -924,7 +940,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### GET `/api/v1/im/groups/:businessGroupId`
 
-把纯数字业务群号、内部 UUID 或 OpenIM 群 ID 解析为稳定的 OpenIM groupID，响应里的 `businessGroupId` 始终是纯数字群号。校验群状态、成员资格、单人禁言及全员禁言。若 OpenIM 尚无该群（历史数据未同步），会按业务库补创建并把当前用户邀请进群后再返回；全量成员对账仍由 Outbox 负责。
+把业务群号（`qun_xxx` 或遗留数字）、内部 UUID 或 OpenIM 群 ID 解析为稳定的 OpenIM groupID，响应里的 `businessGroupId` 始终是业务群号。校验群状态、成员资格、单人禁言及全员禁言。若 OpenIM 尚无该群（历史数据未同步），会按业务库补创建并把当前用户邀请进群后再返回；全量成员对账仍由 Outbox 负责。
 
 ### GET `/api/v1/im/conversations/:peerType/:peerId`
 
