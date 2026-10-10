@@ -34,9 +34,30 @@ BEGIN
     END IF;
 END $$;
 
+-- 兼容历史数据：库里曾出现过 qun_xxx 形式的群号（既非空、也非纯数字）。
+-- 原来的回填条件只认 NULL 和空串，这类值会被整个漏掉，于是下面那条
+-- ADD CONSTRAINT 必然失败；而迁移一失败 api 就 log.Fatalf 退出，
+-- 表现就是「容器反复重启，启动日志不停刷 SQLSTATE 23514」。
+--
+-- 处理方式：先把这类历史值原样留档，再统一改成序列分配的数字群号，
+-- 让这个迁移真正自愈，而不是每换一个环境就再炸一次。
+-- 留档表是幂等的：重复启动时 ON CONFLICT 不会覆盖首次的快照。
+CREATE TABLE IF NOT EXISTS groups_public_id_backup (
+    group_id     UUID PRIMARY KEY,
+    name         TEXT,
+    public_id    VARCHAR(20),
+    backed_up_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO groups_public_id_backup(group_id, name, public_id)
+SELECT id, name, public_id
+  FROM groups
+ WHERE public_id IS NULL OR public_id = '' OR public_id !~ '^[0-9]+$'
+ON CONFLICT (group_id) DO NOTHING;
+
 UPDATE groups
    SET public_id = nextval('group_public_id_seq')::TEXT
- WHERE public_id IS NULL OR public_id = '';
+ WHERE public_id IS NULL OR public_id = '' OR public_id !~ '^[0-9]+$';
 
 ALTER TABLE groups
     ALTER COLUMN public_id SET DEFAULT nextval('group_public_id_seq'::regclass)::TEXT,
