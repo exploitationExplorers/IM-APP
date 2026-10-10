@@ -71,7 +71,8 @@ func (h *AuthHandler) SendSMS(c *gin.Context) {
 	// 计算服务端设备指纹
 	fp, suspicious := infra.ComputeFingerprint(c.Request)
 
-	// 限流：黑名单 → 手机号1/min → 指纹 → DeviceID → IP5/h → IP农场 → 手机号10/day
+	// 节流：黑名单 → 手机号最快发送间隔 → 指纹 → DeviceID → IP农场
+	// 阈值见 config.SMSRate，可用 SMS_* 环境变量覆盖
 	if h.Redis != nil && h.Redis.Available() {
 		if !h.smsRateAllow(ctx, e164, c.ClientIP(), fp, req.DeviceID, suspicious) {
 			response.Fail(c, http.StatusTooManyRequests, "发送过于频繁，请稍后再试")
@@ -471,8 +472,13 @@ func (h *AuthHandler) respondAuth(c *gin.Context, user models.User, deviceID str
 }
 
 // smsRateAllow 多维度限流：黑名单 → 手机号1/min → 指纹 → DeviceID → IP5/h → IP农场 → 手机号10/day
+// smsRateAllow 多维度验证码发送节流。
+// 各维度的阈值都走 config.SMSRate，运维可以用环境变量调，不必改代码；
+// 某一维配成 0 或负数即关闭该维度。
+//
+// 只做频率节流，不设次数配额：IP 每小时上限、手机号每日上限都已去掉，
+// 原因是共用出口 IP（NAT / 校园网 / 运营商大内网）的正常用户会被误伤。
 func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID string, suspicious bool) bool {
-	cli := h.Redis.Client
 	rc := h.Cfg.SMSRate
 
 	// 0. 黑名单检查
@@ -480,10 +486,8 @@ func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID s
 		return false
 	}
 
-	// 1. 手机号 1/min
-	minKey := "sms:rate:" + e164
-	ok, err := cli.SetNX(ctx, minKey, "1", time.Minute).Result()
-	if err != nil || !ok {
+	// 1. 手机号：同一号码若干秒内只能发一条（默认 60s）。这一维才是真正防重复刷的。
+	if !h.Redis.AllowKey(ctx, "sms:rate:"+e164, 1, time.Duration(rc.PhoneMinIntervalSeconds)*time.Second) {
 		return false
 	}
 
@@ -503,37 +507,15 @@ func (h *AuthHandler) smsRateAllow(ctx context.Context, e164, ip, fp, deviceID s
 		return false
 	}
 
-	// 4. IP 5/hour
-	ipKey := "sms:ip:" + ip
-	if cnt, err := cli.Incr(ctx, ipKey).Result(); err == nil {
-		if cnt == 1 {
-			cli.Expire(ctx, ipKey, time.Hour)
-		}
-		if cnt > 5 {
-			return false
-		}
-	}
-
-	// 5. IP 农场封禁检查
+	// 4. IP 农场封禁检查
 	if h.Redis.IsIPFarmBlocked(ctx, ip) {
 		return false
 	}
 
-	// 6. IP 多设备检测
+	// 5. IP 多设备检测
 	blockDur := time.Duration(rc.IPFarmBlockSeconds) * time.Second
 	if !h.Redis.CheckIPDeviceFarm(ctx, ip, fp, rc.IPMaxFingerprints, time.Hour, blockDur) {
 		return false
-	}
-
-	// 7. 手机号 10/day
-	dailyKey := "sms:daily:" + e164
-	if cnt, err := cli.Incr(ctx, dailyKey).Result(); err == nil {
-		if cnt == 1 {
-			cli.Expire(ctx, dailyKey, 24*time.Hour)
-		}
-		if cnt > 10 {
-			return false
-		}
 	}
 	return true
 }

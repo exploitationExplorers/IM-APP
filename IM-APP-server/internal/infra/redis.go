@@ -114,41 +114,44 @@ func (r *Redis) incrWithTTL(ctx context.Context, key string, window time.Duratio
 	return incrWithTTLScript.Run(ctx, r.Client, []string{key}, window.Milliseconds()).Int64()
 }
 
-// AllowIP 按 key（如客户端 IP）做固定窗口限流：window 时间内最多 limit 次，超限返回 false
-func (r *Redis) AllowIP(ctx context.Context, key string, limit int, window time.Duration) bool {
+// AllowKey 对任意 key 做固定窗口限流：window 时间内最多放行 limit 次，超限返回 false。
+//
+// 计数与 TTL 由 incrWithTTL 在同一个 Lua 脚本里原子写入，因此 key 必然带过期时间，
+// 不会退回成「有计数、无过期」的永久锁死状态。
+//
+// limit 或 window <= 0 视为该维度不限制——这也是运维关掉某一维度的开关，同时避免了
+// window<=0 时 PEXPIRE 不执行导致 key 永不过期的隐患。
+func (r *Redis) AllowKey(ctx context.Context, key string, limit int, window time.Duration) bool {
 	if !r.Available() {
 		return true // Redis 不可用时不做限制
 	}
-	cnt, err := r.incrWithTTL(ctx, "rl:"+key, window)
+	if limit <= 0 || window <= 0 {
+		return true
+	}
+	cnt, err := r.incrWithTTL(ctx, key, window)
 	if err != nil {
 		return true
 	}
 	return cnt <= int64(limit)
 }
 
+// AllowIP 按 key（如客户端 IP）做固定窗口限流：window 时间内最多 limit 次，超限返回 false
+func (r *Redis) AllowIP(ctx context.Context, key string, limit int, window time.Duration) bool {
+	return r.AllowKey(ctx, "rl:"+key, limit, window)
+}
+
 // AllowFingerprint 按设备指纹限流：window 内最多 limit 次，超限返回 false。
 func (r *Redis) AllowFingerprint(ctx context.Context, fp string, limit int, window time.Duration) bool {
-	if !r.Available() {
-		return true
-	}
-	cnt, err := r.incrWithTTL(ctx, "sms:fp:"+fp, window)
-	if err != nil {
-		return true
-	}
-	return cnt <= int64(limit)
+	return r.AllowKey(ctx, "sms:fp:"+fp, limit, window)
 }
 
 // AllowDeviceID 按客户端 DeviceID 限流：window 内最多 limit 次，超限返回 false。
 // DeviceID 为空时跳过检查（放行）。
 func (r *Redis) AllowDeviceID(ctx context.Context, deviceID string, limit int, window time.Duration) bool {
-	if !r.Available() || deviceID == "" {
+	if deviceID == "" {
 		return true
 	}
-	cnt, err := r.incrWithTTL(ctx, "sms:did:"+deviceID, window)
-	if err != nil {
-		return true
-	}
-	return cnt <= int64(limit)
+	return r.AllowKey(ctx, "sms:did:"+deviceID, limit, window)
 }
 
 // CheckIPDeviceFarm 检测同一 IP 下是否出现过多不同设备指纹（设备农场特征）。
