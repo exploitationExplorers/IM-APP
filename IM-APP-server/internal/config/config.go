@@ -35,15 +35,22 @@ type Config struct {
 }
 
 // SMSRateConfig 设备指纹 + 多维度验证码限流配置
+//
+// 取向是「节流」而不是「封禁」：真正防刷的是「同一手机号 N 秒只能发一条」，
+// 那一维卡住就挡住了重复刷；指纹 / DeviceID 只是兜底，阈值放宽即可，
+// 免得 NAT、校园网、运营商大内网下大量正常用户共用出口 IP 被误伤。
+//
+// 刻意不设次数配额（原来有「每 IP 5 次/小时」「每手机号 10 次/天」，已去掉）。
+// 任一维度配成 0 或负数即关闭该维度（见 infra.Redis.AllowKey）。
 type SMSRateConfig struct {
-	FingerprintLimit   int  // 每设备指纹每小时上限，默认 10
-	FingerprintWindow  int  // 指纹限流窗口(秒)，默认 3600
-	DeviceIDLimit      int  // 每客户端 DeviceID 每小时上限，默认 8
-	DeviceIDWindow     int  // DeviceID 限流窗口(秒)，默认 3600
-	IPHourlyLimit      int  // 同 IP 每小时短信上限，默认 60（运营商 NAT 下 5 太狠）
-	IPMaxFingerprints  int  // 同 IP 每小时最大不同指纹数，超出判定设备农场；0=关闭，默认 0
-	IPFarmBlockSeconds int  // 设备农场 IP 封禁时长(秒)，默认 3600
-	BlacklistEnabled   bool // 是否启用指纹/DeviceID 黑名单，默认 true
+	PhoneMinIntervalSeconds int  // 同一手机号两次发送的最小间隔(秒)，默认 60
+	FingerprintLimit        int  // 每设备指纹每小时上限，默认 30
+	FingerprintWindow       int  // 指纹限流窗口(秒)，默认 3600
+	DeviceIDLimit           int  // 每客户端 DeviceID 每小时上限，默认 20
+	DeviceIDWindow          int  // DeviceID 限流窗口(秒)，默认 3600
+	IPMaxFingerprints       int  // 同 IP 每小时最大不同指纹数，超出判定设备农场；0=关闭（CGNAT 下默认关）
+	IPFarmBlockSeconds      int  // 设备农场 IP 封禁时长(秒)，默认 600
+	BlacklistEnabled        bool // 是否启用指纹/DeviceID 黑名单，默认 true
 }
 
 type MinIOConfig struct {
@@ -149,15 +156,14 @@ func Load() Config {
 		},
 		CORSAllowOrigins: splitCSV(getenv("CORS_ALLOW_ORIGINS", "")),
 		SMSRate: SMSRateConfig{
-			FingerprintLimit:   GetenvInt("SMS_FP_LIMIT", 10),
-			FingerprintWindow:  GetenvInt("SMS_FP_WINDOW", 3600),
-			DeviceIDLimit:      GetenvInt("SMS_DEVICE_LIMIT", 8),
-			DeviceIDWindow:     GetenvInt("SMS_DEVICE_WINDOW", 3600),
-			IPHourlyLimit:      GetenvInt("SMS_IP_LIMIT", 60),
-			// 默认关闭「IP 农场」：国内运营商 CGNAT 下同公网 IP 会有大量真实用户，
-			// 旧默认 3 会把新手机首次注册误杀成「发送过于频繁」。
+			PhoneMinIntervalSeconds: GetenvInt("SMS_PHONE_MIN_INTERVAL", 60),
+			FingerprintLimit:        GetenvInt("SMS_FP_LIMIT", 30),
+			FingerprintWindow:       GetenvInt("SMS_FP_WINDOW", 3600),
+			DeviceIDLimit:           GetenvInt("SMS_DEVICE_LIMIT", 20),
+			DeviceIDWindow:          GetenvInt("SMS_DEVICE_WINDOW", 3600),
+			// 默认关闭「IP 农场」：运营商 CGNAT 下同公网 IP 会有大量真实用户，开大会误杀新用户。
 			IPMaxFingerprints:  GetenvInt("SMS_IP_MAX_FPS", 0),
-			IPFarmBlockSeconds: GetenvInt("SMS_IP_FARM_BLOCK_SEC", 3600),
+			IPFarmBlockSeconds: GetenvInt("SMS_IP_FARM_BLOCK_SEC", 600),
 			BlacklistEnabled:   getenvBool("SMS_BLACKLIST_ENABLED", true),
 		},
 	}
