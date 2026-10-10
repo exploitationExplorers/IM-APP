@@ -58,12 +58,26 @@ export async function resolveIMPeer(businessUserId: string): Promise<IMPeerTarge
   })
 }
 
-/** 业务群 ID → OpenIM 群 ID，同时返回禁言与成员身份 */
+/**
+ * 业务群 ID → OpenIM 群 ID，同时返回禁言与成员身份。
+ *
+ * 群详情页、媒体页、搜索页每次进入都会解析一次，同一个群连着开几个页面就是
+ * 连着几次同款请求。这里加与 resolveIMGroupByIM 同档的短 TTL 缓存。
+ */
+const imGroupCache = new Map<string, { data: IMGroupTarget; ts: number }>()
+const IM_GROUP_CACHE_MS = 30_000
+
 export async function resolveIMGroup(businessGroupId: string): Promise<IMGroupTarget> {
-  return request<IMGroupTarget>({
+  const cached = imGroupCache.get(businessGroupId)
+  if (cached && Date.now() - cached.ts < IM_GROUP_CACHE_MS) {
+    return cached.data
+  }
+  const data = await request<IMGroupTarget>({
     url: `/im/groups/${encodeURIComponent(businessGroupId)}`,
     method: 'GET',
   })
+  imGroupCache.set(businessGroupId, { data, ts: Date.now() })
+  return data
 }
 
 /** 进房链路会连续命中 enterConversation + resolveBusinessTarget，短 TTL 避免重复请求 */

@@ -2238,6 +2238,12 @@ export function toChatMessage(item: MessageItem): ChatMessage {
   ) {
     type = 'system'
   }
+  // 图片：除首选的原图地址外，把其余候选（缩略图等）一并带上，
+  // 原图对象缺失/上传失败时气泡可以降级重试，而不是留一个空白框。
+  const imageFallbacks =
+    type === 'image'
+      ? pictureRemoteCandidates(item).filter((u) => u !== content)
+      : []
   return {
     id: item.clientMsgID,
     conversationId: conversationIdOf(item),
@@ -2246,6 +2252,7 @@ export function toChatMessage(item: MessageItem): ChatMessage {
     senderNickname: item.senderNickname || undefined,
     type,
     content,
+    imageFallbacks: imageFallbacks.length ? imageFallbacks : undefined,
     createdAt: toISOTime(item.sendTime),
     systemEventKey: imNotificationEventKey(item) || undefined,
     notificationKind: notificationKind || undefined,
@@ -2427,11 +2434,11 @@ function pictureInfoUrl(elem: unknown, keys: string[]): string {
   return ''
 }
 
-/** 气泡和预览用原图。缩略图 snapshot 只有一两百像素，拉大以后就是马赛克。 */
-function pictureUrlOf(item: MessageItem): string {
+/** 图片消息的候选地址，按优先级原图 → 大图 → 缩略图 → 兜底排列并去重。 */
+function pictureCandidateList(item: MessageItem): string[] {
   const elem = item.pictureElem as unknown as Record<string, unknown> | undefined
   const pascal = (item as unknown as Record<string, unknown>).PictureElem
-  const candidates = [
+  const raw = [
     pictureInfoUrl(elem, ['sourcePicture', 'SourcePicture']),
     pictureInfoUrl(elem, ['bigPicture', 'BigPicture']),
     pictureInfoUrl(pascal, ['sourcePicture', 'SourcePicture']),
@@ -2441,14 +2448,38 @@ function pictureUrlOf(item: MessageItem): string {
     jsonPictureUrl(item.content),
     item.pictureElem?.sourcePath,
     typeof item.content === 'string' ? item.content : '',
-  ].filter((u): u is string => typeof u === 'string' && !!u.trim())
+  ]
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const candidate of raw) {
+    if (typeof candidate !== 'string') continue
+    const url = candidate.trim()
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+  }
+  return out
+}
 
-  const remote = candidates.find((u) => /^https?:\/\//i.test(u.trim()) || u.trim().startsWith('blob:'))
-  if (remote) return remote.trim()
+/**
+ * 可跨端访问（http(s)/blob）的图片候选地址。原图排第一，缩略图在后：
+ * 原图对象偶发缺失或上传失败时，前端可据此降级重试，而不是留一个空白框。
+ */
+export function pictureRemoteCandidates(item: MessageItem): string[] {
+  return pictureCandidateList(item).filter(
+    (u) => /^https?:\/\//i.test(u) || u.startsWith('blob:'),
+  )
+}
+
+/** 气泡和预览用原图。缩略图 snapshot 只有一两百像素，拉大以后就是马赛克。 */
+function pictureUrlOf(item: MessageItem): string {
+  const candidates = pictureCandidateList(item)
+  const remote = candidates.find((u) => /^https?:\/\//i.test(u) || u.startsWith('blob:'))
+  if (remote) return remote
   // H5：本地路径不可用；App：允许本地路径用于发送中预览
   if (uni.getSystemInfoSync().uniPlatform === 'web') return ''
   const local = candidates.find((u) => looksLikeImageUrl(u))
-  return (local || candidates[0] || '').trim()
+  return local || candidates[0] || ''
 }
 
 function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {

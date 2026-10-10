@@ -39,6 +39,11 @@ export interface ChatMessage {
   senderNickname?: string
   type: MessageType
   content: string
+  /**
+   * 图片消息的备用地址（缩略图等）。气泡加载 `content` 失败时按序降级重试，
+   * 避免原图对象缺失时整条消息只剩一个空白框。
+   */
+  imageFallbacks?: string[]
   createdAt: string
   /** 用于折叠 OpenIM 重试产生的连续重复系统通知；普通消息不设置。 */
   systemEventKey?: string

@@ -7,6 +7,8 @@ const REFRESH_TOKEN_KEY = 'im_refresh_token'
 /** 网页多开：每个标签页一份登录态。退出登录时不能把整份删掉。 */
 export const AUTH_SLOTS_KEY = 'im_auth_slots'
 const TAB_ID_KEY = 'im_tab_id'
+/** 最后一次成功建立登录态的标签页 id。sessionStorage 被清空后靠它把登录态续回来。 */
+export const ACTIVE_TAB_KEY = 'im_active_tab'
 const SLOT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 interface AuthSlot {
@@ -17,15 +19,25 @@ interface AuthSlot {
 
 /**
  * 网页每个标签页一个 id，放在 sessionStorage 里。
- * 刷新、谷歌回收后台标签后再打开，这个 id 还在；新开的标签页没有，就可以登另一个号。
- * App 只有一个窗口，继续用原来的单钥匙。
+ * 刷新、谷歌回收后台标签后再打开，这个 id 还在。
+ *
+ * sessionStorage 是「标签页进程级」的：关掉浏览器、手机端结束后台进程、
+ * 或从桌面图标重开，它都会被清空。此时若直接生成新 id，im_auth_slots 里的
+ * 登录态虽然还在 localStorage，却再也匹配不上，表现就是「每次都要重新登录」。
+ * 所以这里先复用上次活跃标签页的 id 把登录态续回来，确实没有可续的槽位
+ * 才生成新 id（全新登录）。
  */
 function currentTabId(): string {
   // #ifdef H5
   if (typeof sessionStorage === 'undefined') return ''
   let id = sessionStorage.getItem(TAB_ID_KEY) || ''
   if (!id) {
-    id = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    const resumed = String(uni.getStorageSync(ACTIVE_TAB_KEY) || '')
+    // 槽位还在才续，否则会一直指向一个已经退出登录的旧 id
+    id =
+      resumed && readSlots()[resumed]
+        ? resumed
+        : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
     sessionStorage.setItem(TAB_ID_KEY, id)
   }
   return id
@@ -109,6 +121,8 @@ function updateSlot(patch: Partial<Pick<AuthSlot, 'access' | 'refresh'>>) {
   }
   writeSlots(slots)
   clearLegacy()
+  // 只有真正拿到登录态的标签页才算「活跃」，重启后才有登录态可续
+  uni.setStorageSync(ACTIVE_TAB_KEY, tab)
 }
 
 export function getToken(): string {
@@ -171,6 +185,10 @@ export function clearToken() {
     delete slots[tab]
     writeSlots(slots)
     clearLegacy()
+    // 活跃指针指向被清掉的槽位时要一起撤销，否则下次开页会续到一个空会话
+    if (String(uni.getStorageSync(ACTIVE_TAB_KEY) || '') === tab) {
+      uni.removeStorageSync(ACTIVE_TAB_KEY)
+    }
     return
   }
   uni.removeStorageSync(TOKEN_KEY)

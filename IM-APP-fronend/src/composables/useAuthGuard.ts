@@ -13,18 +13,20 @@ const PUBLIC_PAGES = [
 export function useAuthGuard() {
   const userStore = useUserStore()
 
-  function checkAuth() {
+  async function checkAuth() {
     const pages = getCurrentPages()
     const current = pages[pages.length - 1]
     const route = current ? `/${current.route}` : ''
     if (PUBLIC_PAGES.includes(route)) return
+    // 冷启动时 storage 可能还没就绪，先等一次补救读取再判，避免误踢已登录用户
+    if (await userStore.restoreSessionIfNeeded()) return
     if (!userStore.isLoggedIn) {
       uni.reLaunch({ url: '/pages/auth/sign-in' })
     }
   }
 
   onShow(() => {
-    checkAuth()
+    void checkAuth()
   })
 }
 
@@ -39,13 +41,15 @@ function isH5DownloadEntry(): boolean {
   return entry
 }
 
-export function setupAppAuthGuard() {
+export async function setupAppAuthGuard() {
   const userStore = useUserStore()
   const pages = getCurrentPages()
   const current = pages[pages.length - 1]
   const route = current ? `/${current.route}` : ''
   if (!route && isH5DownloadEntry()) return
-  if (!PUBLIC_PAGES.includes(route) && !userStore.isLoggedIn) {
+  if (PUBLIC_PAGES.includes(route)) return
+  if (await userStore.restoreSessionIfNeeded()) return
+  if (!userStore.isLoggedIn) {
     uni.reLaunch({ url: '/pages/auth/sign-in' })
   }
 }

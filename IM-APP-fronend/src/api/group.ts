@@ -25,12 +25,21 @@ export async function fetchGroupDetail(groupId: string): Promise<GroupInfo> {
   return request<GroupInfo>({ url: '/groups/detail', method: 'GET', data: { groupId } })
 }
 
+/**
+ * 群成员单页条数，由前端决定（后端只按 limit 取数）。一页几百条会让后端一次查/
+ * 序列化一大坨、客户端一次解析一大坨，取 40 把单次请求的压力摊薄。
+ */
+export const GROUP_MEMBERS_PAGE_SIZE = 40
+
 /** ???????? cursor ????? cursor ???????? */
 export async function fetchGroupMembers(
   groupId: string,
   opts?: { cursor?: string; limit?: number },
 ): Promise<GroupMemberPage | GroupMember[]> {
-  const data: Record<string, string | number> = { groupId, limit: opts?.limit ?? 100 }
+  const data: Record<string, string | number> = {
+    groupId,
+    limit: opts?.limit ?? GROUP_MEMBERS_PAGE_SIZE,
+  }
   if (opts?.cursor) data.cursor = opts.cursor
   const result = await request<GroupMemberPage | GroupMember[] | unknown>({
     url: '/group-members',
@@ -74,7 +83,7 @@ export async function fetchAllGroupMembers(groupId: string): Promise<GroupMember
   const seen = new Set<string>()
   let cursor = ''
   for (;;) {
-    const page = await fetchGroupMembers(groupId, { cursor, limit: 100 })
+    const page = await fetchGroupMembers(groupId, { cursor, limit: GROUP_MEMBERS_PAGE_SIZE })
     if (Array.isArray(page)) {
       for (const m of page) {
         if (seen.has(m.id)) continue

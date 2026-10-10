@@ -41,7 +41,7 @@ onLaunch(() => {
 })
 
 onShow(() => {
-  setupAppAuthGuard()
+  void setupAppAuthGuard()
   void checkAndPromptAppUpdate()
   if (getToken()) {
     void useContactStore().loadFriendRequests().catch(() => undefined)

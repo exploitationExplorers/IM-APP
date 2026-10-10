@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { sendSmsCode } from '@/api/auth'
 import { APP_CONFIG } from '@/config'
 import ImCountryPicker from '@/components/ImCountryPicker.vue'
-import { findCountryByDialCode, validatePhone } from '@/constants/countries'
+import { useSmsCode } from '@/composables/useSmsCode'
+import { findCountryByDialCode } from '@/constants/countries'
 
 const userStore = useUserStore()
+const { countdown, send, checkPhone } = useSmsCode('register')
 const countryCode = ref(APP_CONFIG.defaultCountryCode)
 const phone = ref('')
 const code = ref('')
@@ -15,44 +16,13 @@ const passwordConfirm = ref('')
 const showPassword = ref(false)
 const showPasswordConfirm = ref(false)
 const loading = ref(false)
-const countdown = ref(0)
-let timer: ReturnType<typeof setInterval> | null = null
-
-function validatePhoneInput() {
-  if (!validatePhone(countryCode.value, phone.value)) {
-    const c = findCountryByDialCode(countryCode.value)
-    uni.showToast({ title: c.placeholder, icon: 'none' })
-    return false
-  }
-  return true
-}
-
-function startCountdown(seconds: number) {
-  countdown.value = seconds > 0 ? seconds : 60
-  if (timer) clearInterval(timer)
-  timer = setInterval(() => {
-    countdown.value -= 1
-    if (countdown.value <= 0 && timer) {
-      clearInterval(timer)
-      timer = null
-    }
-  }, 1000)
-}
 
 async function onSendCode() {
-  if (countdown.value > 0) return
-  if (!validatePhoneInput()) return
-  try {
-    const res = await sendSmsCode(phone.value, 'register', countryCode.value)
-    uni.showToast({ title: '验证码已发送', icon: 'none' })
-    startCountdown(res.retryAfterSec || 60)
-  } catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' })
-  }
+  await send(countryCode.value, phone.value)
 }
 
 async function onRegister() {
-  if (!validatePhoneInput()) return
+  if (!checkPhone(countryCode.value, phone.value)) return
   if (!code.value) {
     uni.showToast({ title: '请输入验证码', icon: 'none' })
     return

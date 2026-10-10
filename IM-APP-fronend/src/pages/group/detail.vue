@@ -101,6 +101,9 @@ onLoad((query) => {
   dissolved.value = String(query?.dissolved || '') === '1'
 })
 
+/** 已完成过首屏加载的群号；从子页面返回时不再全量重拉 */
+const loadedGroupId = ref('')
+
 onShow(async () => {
   if (!groupId.value) {
     uni.showToast({ title: '缺少群聊 ID', icon: 'none' })
@@ -115,13 +118,28 @@ onShow(async () => {
     }
     return
   }
+  const firstLoad = loadedGroupId.value !== groupId.value
   try {
     if (!userStore.profile) await userStore.loadProfile()
-    await groupStore.loadDetail(groupId.value)
+    if (!firstLoad) {
+      // 子页面（群成员 / 改群名 / 我在本群的昵称等）改动后自己会刷新 store，
+      // 这里只需补一次会话设置，不必再把详情和全量成员重拉一遍。
+      await initConversationSettings()
+      return
+    }
+    // 全量成员是按 100/页游标串行翻页的，群越大越慢。首屏只等「群资料」，
+    // 成员列表并行发起、到了再渲染，页面不用卡在它上面。
+    const membersReady = groupStore.loadMembers(groupId.value).catch(() => undefined)
+    // 会话设置（免打扰/置顶）与入群申请角标都只依赖 groupId，与群资料并行
+    const [, detail] = await Promise.all([
+      initConversationSettings(),
+      groupStore.loadGroupDetail(groupId.value),
+    ])
     // 改号后详情里的 id 是新群号，同步到本页路由态
-    if (groupDetail.value?.id) groupId.value = groupDetail.value.id
-    await initConversationSettings()
-    await loadPendingJoinCount()
+    if (detail?.id) groupId.value = detail.id
+    // 角标要看角色，而角色在详情缺 myRole 时会退回成员列表，等成员到齐再算
+    void membersReady.then(() => loadPendingJoinCount())
+    loadedGroupId.value = groupId.value
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载群聊详情失败', icon: 'none' })
   }
@@ -257,7 +275,7 @@ function goToMedia() {
 
 function goToSearchHistory() {
   uni.navigateTo({
-    url: `/pages/group/search-history?id=${encodeURIComponent(groupId.value)}&title=${encodeURIComponent(group.value?.name || '群聊')}`,
+    url: `/pages/group/search-history?id=${encodeURIComponent(groupId.value)}&title=${encodeURIComponent(groupName.value || '群聊')}`,
   })
 }
 
@@ -288,7 +306,8 @@ async function onChooseAvatar() {
       try {
         const fileId = await uploadAvatarForProfile(path, undefined)
         await groupStore.updateSettings(groupId.value, { avatarFileId: fileId })
-        await groupStore.loadDetail(groupId.value)
+        // 只刷新群资料，头像变更与成员列表无关，不必重拉全量成员
+        await groupStore.loadGroupDetail(groupId.value)
         uni.showToast({ title: '已更新', icon: 'success' })
       } catch (e) {
         uni.showToast({ title: (e as Error)?.message || '上传失败', icon: 'none' })
