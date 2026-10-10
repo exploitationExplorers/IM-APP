@@ -91,6 +91,18 @@ services:
       SMS_SIGN_NAME: ${SMS_SIGN_NAME:-}
       SMS_TEMPLATE_CODE: ${SMS_TEMPLATE_CODE:-}
       SMS_REGION_ID: ${SMS_REGION_ID:-cn-hangzhou}
+      # ── 验证码发送节流（手机号 / 设备指纹 / DeviceID / IP 农场）──
+      # 只做频率节流，不设次数配额：原来「每 IP 5 次/小时」「每手机号 10 次/天」
+      # 已去掉，免得 NAT、校园网、运营商大内网下共用出口 IP 的正常用户被误伤。
+      # 主力是「同一手机号 60 秒一条」；任一项配 0 即关闭该维度。
+      SMS_PHONE_MIN_INTERVAL: ${SMS_PHONE_MIN_INTERVAL:-60}
+      SMS_FP_LIMIT: ${SMS_FP_LIMIT:-30}
+      SMS_FP_WINDOW: ${SMS_FP_WINDOW:-3600}
+      SMS_DEVICE_LIMIT: ${SMS_DEVICE_LIMIT:-20}
+      SMS_DEVICE_WINDOW: ${SMS_DEVICE_WINDOW:-3600}
+      SMS_IP_MAX_FPS: ${SMS_IP_MAX_FPS:-10}
+      SMS_IP_FARM_BLOCK_SEC: ${SMS_IP_FARM_BLOCK_SEC:-600}
+      SMS_BLACKLIST_ENABLED: ${SMS_BLACKLIST_ENABLED:-true}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
