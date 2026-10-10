@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
-import { sendSmsCode } from '@/api/auth'
+// import { sendSmsCode } from '@/api/auth' // 验证码登录已隐藏
 import { APP_CONFIG } from '@/config'
 import ImCountryPicker from '@/components/ImCountryPicker.vue'
 import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
@@ -26,20 +26,22 @@ onShow(() => {
     uni.switchTab({ url: '/pages/chat/index' })
   }
 })
-const mode = ref<'password' | 'sms'>('password')
+
+// 仅保留密码登录；验证码登录 UI/逻辑已注释隐藏（注册、找回密码仍走验证码）
+// const mode = ref<'password' | 'sms'>('password')
 const countryCode = ref(APP_CONFIG.defaultCountryCode)
 const phone = ref('')
 const password = ref('')
-const code = ref('')
+// const code = ref('')
 const showPassword = ref(false)
 const rememberPassword = ref(true)
 const loading = ref(false)
-const countdown = ref(0)
-let timer: ReturnType<typeof setInterval> | null = null
+// const countdown = ref(0)
+// let timer: ReturnType<typeof setInterval> | null = null
 
-function switchMode(next: 'password' | 'sms') {
-  mode.value = next
-}
+// function switchMode(next: 'password' | 'sms') {
+//   mode.value = next
+// }
 
 function validatePhoneInput() {
   if (!validatePhone(countryCode.value, phone.value)) {
@@ -50,49 +52,42 @@ function validatePhoneInput() {
   return true
 }
 
-function startCountdown(seconds: number) {
-  countdown.value = seconds > 0 ? seconds : 60
-  if (timer) clearInterval(timer)
-  timer = setInterval(() => {
-    countdown.value -= 1
-    if (countdown.value <= 0 && timer) {
-      clearInterval(timer)
-      timer = null
-    }
-  }, 1000)
-}
+// function startCountdown(seconds: number) {
+//   countdown.value = seconds > 0 ? seconds : 60
+//   if (timer) clearInterval(timer)
+//   timer = setInterval(() => {
+//     countdown.value -= 1
+//     if (countdown.value <= 0 && timer) {
+//       clearInterval(timer)
+//       timer = null
+//     }
+//   }, 1000)
+// }
 
-async function onSendCode() {
-  if (countdown.value > 0) return
-  if (!validatePhoneInput()) return
-  try {
-    const res = await sendSmsCode(phone.value, 'login', countryCode.value)
-    uni.showToast({ title: '验证码已发送', icon: 'none' })
-    startCountdown(res.retryAfterSec || 60)
-  } catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' })
-  }
-}
+// async function onSendCode() {
+//   if (countdown.value > 0) return
+//   if (!validatePhoneInput()) return
+//   try {
+//     const res = await sendSmsCode(phone.value, 'login', countryCode.value)
+//     uni.showToast({ title: '验证码已发送', icon: 'none' })
+//     startCountdown(res.retryAfterSec || 60)
+//   } catch (e) {
+//     uni.showToast({ title: (e as Error).message, icon: 'none' })
+//   }
+// }
 
 async function onLogin() {
   if (!validatePhoneInput()) return
+  if (!password.value) {
+    uni.showToast({ title: '请输入密码', icon: 'none' })
+    return
+  }
   loading.value = true
   try {
-    if (mode.value === 'password') {
-      if (!password.value) {
-        uni.showToast({ title: '请输入密码', icon: 'none' })
-        return
-      }
-      if (rememberPassword.value) saveLoginPassword(password.value)
-      else clearLoginPassword()
-      await userStore.loginPassword(phone.value, password.value, countryCode.value)
-    } else {
-      if (!code.value) {
-        uni.showToast({ title: '请输入验证码', icon: 'none' })
-        return
-      }
-      await userStore.loginSms(phone.value, code.value, countryCode.value)
-    }
+    if (rememberPassword.value) saveLoginPassword(password.value)
+    else clearLoginPassword()
+    await userStore.loginPassword(phone.value, password.value, countryCode.value)
+    // if (mode.value === 'password') { ... } else { await userStore.loginSms(...) }
     uni.switchTab({ url: '/pages/chat/index' })
   } catch (e) {
     uni.showToast({ title: (e as Error).message, icon: 'none' })
@@ -117,6 +112,8 @@ function goForgot() {
 
       <view class="auth-form">
         <view class="auth-tabs">
+          <text class="auth-tab active">账号密码登录</text>
+          <!--
           <text
             class="auth-tab"
             :class="{ active: mode === 'password' }"
@@ -127,6 +124,7 @@ function goForgot() {
             :class="{ active: mode === 'sms' }"
             @click="switchMode('sms')"
           >验证码登录</text>
+          -->
         </view>
 
         <view class="auth-row">
@@ -143,7 +141,7 @@ function goForgot() {
           </view>
         </view>
 
-        <view v-if="mode === 'password'" class="auth-row">
+        <view class="auth-row">
           <view class="auth-input-box is-join">
             <input
               class="auth-input"
@@ -162,6 +160,7 @@ function goForgot() {
           </view>
         </view>
 
+        <!-- 验证码登录表单项已隐藏
         <view v-else class="auth-row">
           <view class="auth-input-box">
             <input
@@ -177,8 +176,9 @@ function goForgot() {
             </text>
           </view>
         </view>
+        -->
 
-        <view v-if="mode === 'password'" class="auth-extra">
+        <view class="auth-extra">
           <view class="auth-remember" @click="rememberPassword = !rememberPassword">
             <view class="auth-remember-box" :class="{ on: rememberPassword }">
               <text v-if="rememberPassword" class="auth-remember-tick">✓</text>

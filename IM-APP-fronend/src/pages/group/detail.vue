@@ -210,7 +210,14 @@ function goToEditName() {
 }
 
 function goToEditGroupId() {
-  if (!canEditGroupId.value) return
+  if (!isOwner.value) {
+    uni.showToast({ title: '仅群主可设置群号', icon: 'none' })
+    return
+  }
+  if (groupDetail.value?.publicIdChangeUsed) {
+    uni.showToast({ title: '群号只能修改一次', icon: 'none' })
+    return
+  }
   uni.navigateTo({
     url: `/pages/group/edit-group-id?id=${encodeURIComponent(displayGroupId.value)}`,
   })
@@ -489,9 +496,10 @@ async function onRemoveDissolved() {
         @click="goToEditGroupId"
       >
         <text class="label">群号</text>
-        <view class="id-box" @click.stop>
+        <view class="id-box">
           <text class="value id-value">{{ displayGroupId }}</text>
           <view class="copy-btn" @click.stop="copyGroupId">复制</view>
+          <text v-if="canEditGroupId" class="id-edit-hint">设置</text>
           <text v-if="canEditGroupId" class="arrow">›</text>
         </view>
       </view>
@@ -787,6 +795,12 @@ async function onRemoveDissolved() {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.id-edit-hint {
+  flex-shrink: 0;
+  font-size: 26rpx;
+  color: #1e88ff;
 }
 
 .leave-row {

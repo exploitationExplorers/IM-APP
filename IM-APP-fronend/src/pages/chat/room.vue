@@ -2497,7 +2497,7 @@ function pickFavorite() {
   text-overflow: ellipsis;
   white-space: nowrap;
   lines: 1;
-  font-size: 38rpx;
+  font-size: 34rpx;
   font-weight: 700;
   color: #111;
   user-select: text;
@@ -2694,7 +2694,7 @@ function pickFavorite() {
 }
 
 .sys-tip-text {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: #333333;
   text-align: center;
   line-height: 1.5;

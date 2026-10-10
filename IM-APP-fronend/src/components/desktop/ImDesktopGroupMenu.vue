@@ -145,12 +145,31 @@ function memberAvatar(member: GroupMember) {
   return member.avatar || APP_CONFIG.defaultAvatarUrl
 }
 
+const canEditGroupId = computed(
+  () => isOwner.value && !groupDetail.value?.publicIdChangeUsed,
+)
+
 function copyGroupId() {
   const id = groupPublicId.value
   if (!id) return
   uni.setClipboardData({
     data: id,
     success: () => uni.showToast({ title: '已复制', icon: 'none' }),
+  })
+}
+
+function goEditGroupId() {
+  if (!isOwner.value) {
+    uni.showToast({ title: '仅群主可设置群号', icon: 'none' })
+    return
+  }
+  if (groupDetail.value?.publicIdChangeUsed) {
+    uni.showToast({ title: '群号只能修改一次', icon: 'none' })
+    return
+  }
+  close()
+  uni.navigateTo({
+    url: `/pages/group/edit-group-id?id=${encodeURIComponent(groupPublicId.value)}`,
   })
 }
 
@@ -275,12 +294,14 @@ function goSearchHistory() {
           </view>
         </view>
 
-        <view class="group-info-id-row">
+        <view class="group-info-id-row" @click="canEditGroupId ? goEditGroupId() : undefined">
           <text class="group-info-id-label">群号</text>
           <text class="group-info-id-value">{{ groupPublicId }}</text>
           <view class="group-info-copy" @click.stop="copyGroupId">
             <text>复制</text>
           </view>
+          <text v-if="canEditGroupId" class="group-info-id-edit">设置</text>
+          <text v-if="canEditGroupId" class="group-info-chevron">›</text>
         </view>
 
         <view class="group-info-search">
@@ -420,6 +441,7 @@ function goSearchHistory() {
   padding: 8px 0;
   box-sizing: border-box;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .group-info-id-label {
@@ -450,6 +472,13 @@ function goSearchHistory() {
   line-height: 32px;
   text-align: center;
   cursor: pointer;
+}
+
+.group-info-id-edit {
+  flex-shrink: 0;
+  margin-left: 6px;
+  font-size: 13px;
+  color: #3c83f6;
 }
 
 .group-info-search {
