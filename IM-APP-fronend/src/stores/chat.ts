@@ -73,6 +73,8 @@ import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
 const PAGE_SIZE = 20
 /** 单会话内存中保留的最大消息条数，超出时裁剪最早的消息 */
 const MESSAGE_WINDOW_SIZE = 200
+/** 上滑翻历史时允许的最大条数（保留旧侧，避免 trim 掉刚 prepend 的消息） */
+const HISTORY_BROWSE_MAX = 400
 /** rawMessages 单会话最大缓存条数 */
 const RAW_MESSAGE_WINDOW_SIZE = 300
 
@@ -1066,6 +1068,11 @@ export const useChatStore = defineStore('chat', () => {
       perfMarkEnd('chat:load-more-messages', 'no-list')
       return false
     }
+    // 浏览中软上限：再翻只会继续涨 DOM；不裁最新侧，也不伪造成 historyEnd
+    if (list.length >= HISTORY_BROWSE_MAX) {
+      perfMarkEnd('chat:load-more-messages', 'browse-cap')
+      return false
+    }
     const { messageList, isEnd } = await getHistoryMessages(
       conversationId,
       PAGE_SIZE,
@@ -1077,15 +1084,19 @@ export const useChatStore = defineStore('chat', () => {
       return false
     }
     messageList.forEach(rememberRaw)
+    const older = messageList.filter((item) => !messagePinPayloadOf(item)).map(toChatMessage)
+    if (!older.length) {
+      perfMarkEnd('chat:load-more-messages', 'empty-mapped')
+      return false
+    }
+    // 禁止此处 trimMessageWindow：slice(-WINDOW) 会裁掉刚 prepend 的旧消息，
+    // 列表几乎不变却仍 return true → scroll-into-view 跳动（消息多了上滑卡）。
+    // 离开聊天室时由 trimConversationMemory 回收。
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: [
-        ...messageList.filter((item) => !messagePinPayloadOf(item)).map(toChatMessage),
-        ...list,
-      ],
+      [conversationId]: [...older, ...list],
     }
-    trimMessageWindow(conversationId)
-    perfMarkEnd('chat:load-more-messages', `${messageList.length} msgs`)
+    perfMarkEnd('chat:load-more-messages', `${older.length} msgs`)
     return true
   }
 

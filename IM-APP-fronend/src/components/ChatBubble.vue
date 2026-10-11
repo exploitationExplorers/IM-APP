@@ -1,13 +1,28 @@
 <script lang="ts">
 /** 模块级单例：同一时刻只允许一条语音在播，切到别的气泡先停掉前一条 */
 let activeVoiceStopper: (() => void) | null = null
+
+/** 跨气泡共享：原图尺寸缓存 + 测量限流，避免上滑时每条气泡各自打 getImageInfo */
+const naturalSizeCache = new Map<string, { width: number; height: number }>()
+const MEASURE_CONCURRENCY = 3
+const measureQueue: Array<() => void> = []
+let measureActive = 0
+
+function pumpMeasureQueue() {
+  while (measureActive < MEASURE_CONCURRENCY && measureQueue.length) {
+    const job = measureQueue.shift()
+    if (!job) return
+    measureActive += 1
+    job()
+  }
+}
 </script>
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, captureVideoPosterFromUrl, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -68,6 +83,8 @@ const emit = defineEmits<{
   groupInviteApply: [invite: GroupInvitePayload]
   retry: [message: ChatMessage]
   playVideo: [message: ChatMessage]
+  /** 点图片预览：由父级按需拼会话图片列表，避免每条气泡都绑 previewUrls */
+  previewImage: [message: ChatMessage]
 }>()
 
 /** 长按头像后短时间内吞掉 click，避免又跳进资料页 */
@@ -151,18 +168,19 @@ function onRetry() {
 }
 
 /**
- * 点按图片全屏预览（uni.previewImage：H5 内置查看器 / App 原生画廊）。
- * 传入会话内全部图片时可左右滑动切换；长按菜单不受影响。
+ * 点按图片：有 previewUrls 时本地预览（兼容旧用法）；否则交给父级按需拼会话列表。
  */
 function previewImage() {
   if (props.message.type !== 'image') return
-  const raw = props.previewUrls?.length ? props.previewUrls : [props.message.content]
-  const urls = raw.map((url) => toPlayableMediaUrl((url || '').trim())).filter(Boolean)
-  const shown = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
-  // 降级到备用地址时它不在会话图片列表里，传过去会让查看器错位，退回列表首张
-  const current = urls.includes(shown) ? shown : urls[0] || shown
-  if (!current || !urls.length) return
-  uni.previewImage({ urls, current })
+  if (props.previewUrls?.length) {
+    const urls = props.previewUrls.map((url) => toPlayableMediaUrl((url || '').trim())).filter(Boolean)
+    const shown = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
+    const current = urls.includes(shown) ? shown : urls[0] || shown
+    if (!current || !urls.length) return
+    uni.previewImage({ urls, current })
+    return
+  }
+  emit('previewImage', props.message)
 }
 
 const videoMeta = computed(() => {
@@ -198,16 +216,14 @@ watch(
 
 watch(
   [() => videoMeta.value.snapshotUrl, videoUrl, () => props.message.status],
-  async ([snapshot, url, status]) => {
+  ([snapshot, url, status]) => {
     fallbackPoster.value = ''
+    // 列表里禁止批量截帧：历史视频无封面时并发拉流会卡死上滑。
+    // 发送中本机封面、远程 snapshot 照常展示；其余用占位，点播放再进详情页。
     if (!url) return
     if (isRemoteMediaUrl(snapshot) || snapshot.startsWith('blob:')) return
-    if (status === 'sending' && isUsableVideoPoster(snapshot)) return
-    try {
-      // 仅 H5 用 Canvas 截帧。App 不在消息列表批量下载整段视频，避免与点击播放争抢网络。
-      fallbackPoster.value = await captureVideoPosterFromUrl(url)
-    } catch {
-      fallbackPoster.value = ''
+    if (status === 'sending' && isUsableVideoPoster(snapshot)) {
+      fallbackPoster.value = toPlayableMediaUrl(snapshot)
     }
   },
   { immediate: true },
@@ -215,11 +231,7 @@ watch(
 
 function onVideoPosterError() {
   videoPosterFailed.value = true
-  const url = videoUrl.value
-  if (!url || fallbackPoster.value) return
-  void captureVideoPosterFromUrl(url).then((poster) => {
-    if (poster) fallbackPoster.value = poster
-  })
+  // 不在列表里为失败封面拉整段视频截帧，避免滚动时打爆网络/主线程
 }
 
 function playVideo() {
@@ -512,8 +524,6 @@ function toPx(rpx: number): string {
   return `${uni.upx2px(rpx)}px`
 }
 
-/** 自然尺寸缓存：滚出屏幕再滚回来不重复测量 */
-const naturalSizeCache = new Map<string, { width: number; height: number }>()
 const naturalSize = ref<{ width: number; height: number } | null>(null)
 /** 量尺寸失败（图片本身还能显示）：展示退化成 contain，避免用错比例把图裁掉 */
 const naturalSizeFailed = ref(false)
@@ -527,7 +537,7 @@ const mediaSrc = computed(() => {
 
 /**
  * 量原图尺寸。H5 的 getImageInfo 只是 new Image() 读 naturalWidth/Height，
- * 不读像素、不要求 CORS，MinIO 直链也能拿到。
+ * 不读像素、不要求 CORS，MinIO 直链也能拿到。入队限流，避免列表同时打爆。
  */
 function measureMediaSize(src: string) {
   naturalSizeFailed.value = false
@@ -541,24 +551,29 @@ function measureMediaSize(src: string) {
     return
   }
   naturalSize.value = null
-  uni.getImageInfo({
-    src,
-    success: (info) => {
-      const width = Number(info.width) || 0
-      const height = Number(info.height) || 0
-      if (!width || !height) return
-      // 缓存无上限会随会话长度一直涨，超量直接清空重来（量一次很便宜）
-      if (naturalSizeCache.size > 500) naturalSizeCache.clear()
-      const size = { width, height }
-      naturalSizeCache.set(src, size)
-      // 等待期间可能已经换到别的图，只认当前这条
-      if (mediaSrc.value === src) naturalSize.value = size
-    },
-    // 量不出来就守住占位框，图片本身照常展示
-    fail: () => {
-      if (mediaSrc.value === src) naturalSizeFailed.value = true
-    },
+  measureQueue.push(() => {
+    uni.getImageInfo({
+      src,
+      success: (info) => {
+        const width = Number(info.width) || 0
+        const height = Number(info.height) || 0
+        if (width && height) {
+          if (naturalSizeCache.size > 500) naturalSizeCache.clear()
+          const size = { width, height }
+          naturalSizeCache.set(src, size)
+          if (mediaSrc.value === src) naturalSize.value = size
+        }
+      },
+      fail: () => {
+        if (mediaSrc.value === src) naturalSizeFailed.value = true
+      },
+      complete: () => {
+        measureActive -= 1
+        pumpMeasureQueue()
+      },
+    })
   })
+  pumpMeasureQueue()
 }
 
 watch(mediaSrc, (src) => measureMediaSize(src), { immediate: true })

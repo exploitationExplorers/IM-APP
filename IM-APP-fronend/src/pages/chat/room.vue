@@ -51,6 +51,7 @@ import {
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
+import { playableMediaUrl } from '@/utils/chatMedia'
 import {
   isAnnouncementDismissed,
   rememberDismissedAnnouncement,
@@ -209,25 +210,40 @@ watch(
   },
 )
 
-/** 图片预览列表：点开任意图片后可左右滑动查看本会话其它图片 */
-const imagePreviewUrls = computed(() =>
-  messages.value.filter((m) => m.type === 'image' && m.content).map((m) => m.content),
-)
+/** 按需拼会话图片预览列表（点开时才算，不绑到每条气泡 props） */
+function openImagePreview(message: ChatMessage) {
+  const urls = messages.value
+    .filter((m) => m.type === 'image' && m.content)
+    .map((m) => playableMediaUrl(m.content.trim()))
+    .filter(Boolean)
+  const current = playableMediaUrl((message.content || '').trim())
+  if (!current) return
+  const list = urls.length ? urls : [current]
+  uni.previewImage({
+    urls: list,
+    current: list.includes(current) ? current : list[0],
+  })
+}
 
 watch(
-  () =>
-    (chatStore.messagesMap[conversationId.value] || [])
-      .map((m) => m.systemEventKey)
-      .filter(
-        (key): key is string =>
-          !!key &&
-          (key.startsWith('group-member:') ||
-            key.startsWith('group-mute:') ||
-            key.startsWith('group-announce:')),
-      )
-      .join('|'),
-  (keys, prev) => {
-    if (!prev || keys === prev) return
+  () => {
+    const list = chatStore.messagesMap[conversationId.value] || []
+    // 只盯最新一条系统事件，避免 messages 每变一次就 map+join 全表
+    for (let i = list.length - 1; i >= 0; i--) {
+      const key = list[i]?.systemEventKey
+      if (
+        key &&
+        (key.startsWith('group-member:') ||
+          key.startsWith('group-mute:') ||
+          key.startsWith('group-announce:'))
+      ) {
+        return key
+      }
+    }
+    return ''
+  },
+  (key, prev) => {
+    if (!prev || !key || key === prev) return
     void refreshGroupMeta()
   },
 )
@@ -244,6 +260,13 @@ function isMine(message: ChatMessage): boolean {
   return false
 }
 
+/** 联系人 id → 资料，避免每条气泡 contacts.find 扫全表 */
+const contactById = computed(() => {
+  const map = new Map<string, (typeof contactStore.contacts)[number]>()
+  for (const c of contactStore.contacts) map.set(c.id, c)
+  return map
+})
+
 function avatarOf(message: ChatMessage): string {
   return message.senderAvatar || fallbackAvatarOf(message)
 }
@@ -259,7 +282,7 @@ function fallbackAvatarOf(message: ChatMessage): string {
   }
   const groupAvatar = chatType.value === 'group' ? memberAvatarMap.value[uid] : ''
   if (groupAvatar) return groupAvatar
-  const contact = contactStore.contacts.find((c) => c.id === uid)
+  const contact = contactById.value.get(uid)
   if (contact?.avatar) return contact.avatar
   return chatType.value === 'group' ? APP_CONFIG.defaultAvatarUrl : peerAvatar.value
 }
@@ -277,9 +300,7 @@ function nicknameOf(message: ChatMessage): string {
   const mr = memberRemarkMap.value[uid]
   if (mr) return mr
   if (message.senderNickname) return message.senderNickname
-  const contact = contactStore.contacts.find(
-    (c) => c.id === uid || sameBusinessUserId(c.id, uid),
-  )
+  const contact = contactById.value.get(uid)
   return contact?.remark?.trim() || contact?.nickname || ''
 }
 
@@ -355,7 +376,11 @@ function scheduleGroupReadReport(): void {
 }
 
 watch(
-  () => `${myId.value}|${messages.value.map((m) => `${m.id}:${m.status}:${m.seq || 0}`).join('|')}`,
+  () => {
+    if (chatType.value !== 'group') return ''
+    const last = messages.value[messages.value.length - 1]
+    return `${myId.value}|${messages.value.length}|${last?.id || ''}|${last?.status || ''}|${last?.seq || 0}`
+  },
   () => {
     if (chatType.value !== 'group') return
     scheduleGroupReadReport()
@@ -809,14 +834,20 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
   }
 }
 
+let loadingMore = false
 async function onScrollToUpper() {
   stickToBottom.value = false
-  if (!conversationId.value) return
-  const anchor = messages.value[0]?.id
-  const added = await chatStore.loadMoreMessages(conversationId.value)
-  if (!added || !anchor) return
-  await nextTick()
-  scrollInto.value = `msg_${anchor}`
+  if (!conversationId.value || loadingMore) return
+  loadingMore = true
+  try {
+    const anchor = messages.value[0]?.id
+    const added = await chatStore.loadMoreMessages(conversationId.value)
+    if (!added || !anchor) return
+    await nextTick()
+    scrollInto.value = `msg_${anchor}`
+  } finally {
+    loadingMore = false
+  }
 }
 
 function formatDuration(seconds: number) {
@@ -900,19 +931,31 @@ function scrollToBottom(force = false) {
   }
 }
 
+let scrollRaf = 0
+function scheduleScrollFrame(fn: () => void) {
+  const raf =
+    typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (cb: () => void) => setTimeout(cb, 16) as unknown as number
+  return raf(fn)
+}
 function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
   if (Date.now() < ignoreScrollUntil) return
   const top = Number(e.detail?.scrollTop || 0)
   const height = Number(e.detail?.scrollHeight || 0)
-  if (msgViewportHeight <= 0) measureMsgList()
-  if (msgViewportHeight > 0 && height > 0) {
-    stickToBottom.value = height - top - msgViewportHeight < 160
-  } else if (top + 80 < maxScrollTop) {
-    stickToBottom.value = false
-  } else if (top >= maxScrollTop - 8) {
-    stickToBottom.value = true
-  }
-  if (top > maxScrollTop) maxScrollTop = top
+  if (scrollRaf) return
+  scrollRaf = scheduleScrollFrame(() => {
+    scrollRaf = 0
+    if (msgViewportHeight <= 0) measureMsgList()
+    if (msgViewportHeight > 0 && height > 0) {
+      stickToBottom.value = height - top - msgViewportHeight < 160
+    } else if (top + 80 < maxScrollTop) {
+      stickToBottom.value = false
+    } else if (top >= maxScrollTop - 8) {
+      stickToBottom.value = true
+    }
+    if (top > maxScrollTop) maxScrollTop = top
+  })
 }
 
 function jumpToBottom() {
@@ -2234,7 +2277,6 @@ function pickFavorite() {
           :fallback-avatar="fallbackAvatarOf(m)"
           :nickname="nicknameOf(m)"
           :role="roleOf(m)"
-          :preview-urls="imagePreviewUrls"
           :read-state="readStateOf(m)"
           :text-selecting="actions.textSelectingId.value === m.id"
           @avatar-click="onAvatarClick(m)"
@@ -2244,6 +2286,7 @@ function pickFavorite() {
           @longpress="actions.openMenu(m)"
           @retry="onRetry(m)"
           @play-video="onPlayVideo"
+          @preview-image="openImagePreview"
         />
       </view>
       <!-- 底部锚点：scroll-into-view 只保证元素「顶部」进入视口，最后一条比视口高时会露出上半截；
@@ -2623,6 +2666,9 @@ function pickFavorite() {
 .msg-row {
   width: 100%;
   box-sizing: border-box;
+  /* H5/现代 WebView：离屏行跳过渲染，消息多时上滑明显更顺 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }
 
 .msg-row.focused {
