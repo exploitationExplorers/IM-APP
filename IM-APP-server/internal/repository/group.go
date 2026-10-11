@@ -625,7 +625,8 @@ func (r *GroupRepo) UpdateSettings(
 		SELECT gm.role, g.name, g.avatar, g.announcement, COALESCE(g.announcement_images, '{}'),
 		       g.allow_member_add_friend, g.join_mode, g.all_muted
 		FROM group_members gm JOIN groups g ON g.id=gm.group_id
-		WHERE gm.group_id=$1 AND gm.user_id=$2 AND g.status='active'`, groupID, uid).Scan(
+		WHERE gm.group_id=$1 AND gm.user_id=$2 AND g.status='active'
+		FOR UPDATE OF g`, groupID, uid).Scan(
 		&role, &currentName, &currentAvatar, &currentAnnouncement, &currentImages,
 		&currentAllow, &currentJoinMode, &currentAllMuted,
 	)
@@ -694,20 +695,29 @@ func (r *GroupRepo) UpdateSettings(
 		if images == nil {
 			images = []string{}
 		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO group_announcement_history(group_id, content, images, publisher_id)
-			VALUES($1::uuid, $2, $3, $4::uuid)`, groupID, content, images, uid); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM group_announcement_history
-			WHERE group_id=$1::uuid AND id NOT IN (
-				SELECT id FROM group_announcement_history
-				WHERE group_id=$1::uuid
-				ORDER BY created_at DESC
-				LIMIT 10
-			)`, groupID); err != nil {
-			return err
+		// 3 秒内同发布者同内容同图视为连点，跳过重复 INSERT（仍更新 groups / 同步 IM）
+		var dupID string
+		_ = tx.QueryRow(ctx, `
+			SELECT id::text FROM group_announcement_history
+			WHERE group_id=$1::uuid AND publisher_id=$2::uuid AND content=$3 AND images=$4
+			  AND created_at > NOW() - INTERVAL '3 seconds'
+			LIMIT 1`, groupID, uid, content, images).Scan(&dupID)
+		if dupID == "" {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO group_announcement_history(group_id, content, images, publisher_id)
+				VALUES($1::uuid, $2, $3, $4::uuid)`, groupID, content, images, uid); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `
+				DELETE FROM group_announcement_history
+				WHERE group_id=$1::uuid AND id NOT IN (
+					SELECT id FROM group_announcement_history
+					WHERE group_id=$1::uuid
+					ORDER BY created_at DESC
+					LIMIT 10
+				)`, groupID); err != nil {
+				return err
+			}
 		}
 	}
 	if r.LegacyChatEnabled && (name != nil || avatarURL != nil) {

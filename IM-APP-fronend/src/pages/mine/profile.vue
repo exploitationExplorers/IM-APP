@@ -91,12 +91,17 @@ function onAvatarError() {
   avatarFailed.value = true
 }
 
+function isBrowserFile(value: unknown): value is File {
+  // iOS App JSCore 无全局 File，裸写 instanceof File 会直接抛 Can't find variable: File
+  return typeof File !== 'undefined' && value instanceof File
+}
+
 async function uploadPickedAvatar(pathOrFile: string | File) {
   uni.showLoading({ title: '上传中…' })
   try {
-    const fileId = pathOrFile instanceof File
+    const fileId = isBrowserFile(pathOrFile)
       ? await uploadAvatarFile(pathOrFile)
-      : await uploadAvatarForProfile(pathOrFile, undefined)
+      : await uploadAvatarForProfile(String(pathOrFile), undefined)
     await userStore.saveProfile({
       nickname: nickname.value || '我',
       avatarFileId: fileId,

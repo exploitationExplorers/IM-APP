@@ -47,7 +47,7 @@ interface NoticeDetail {
   quitUser?: NoticeUser
   entrantUser?: NoticeUser
   mutedUser?: NoticeUser
-  group?: { groupID?: string; groupName?: string }
+  group?: { groupID?: string; groupName?: string; notification?: string }
   kickedUserList?: NoticeUser[]
   invitedUserList?: NoticeUser[]
   memberList?: NoticeUser[]
@@ -55,8 +55,15 @@ interface NoticeDetail {
 }
 
 function parseDetail(item: MessageItem): NoticeDetail {
-  const extra = item as MessageItem & { notificationElem?: { detail?: string } }
-  const raw = extra.notificationElem?.detail || item.content || ''
+  const extra = item as MessageItem & Record<string, unknown>
+  const elem = (extra.notificationElem || extra.NotificationElem) as
+    | Record<string, unknown>
+    | undefined
+  const fromElem =
+    (typeof elem?.detail === 'string' && elem.detail) ||
+    (typeof elem?.Detail === 'string' && elem.Detail) ||
+    ''
+  const raw = fromElem || (typeof item.content === 'string' ? item.content : '') || ''
   if (!raw || raw[0] !== '{') return {}
   try {
     return JSON.parse(raw) as NoticeDetail
@@ -114,7 +121,11 @@ export function imNotificationEventKey(item: MessageItem): string {
     return `group-mute:${item.groupID || ''}:${item.clientMsgID}`
   }
   if (isGroupAnnouncementNotice(item.contentType)) {
-    return `group-announce:${item.groupID || ''}`
+    // 带上公告正文（或消息 id），避免「第二次公告」与第一次共用同一 key → 房间不刷新横幅
+    const detail = parseDetail(item)
+    const text = (detail.group?.notification || '').trim()
+    const groupID = detail.group?.groupID || item.groupID || ''
+    return `group-announce:${groupID}:${text || item.clientMsgID || ''}`
   }
   if (item.contentType !== GroupNotice.NameSet) return ''
   const detail = parseDetail(item)
@@ -172,8 +183,8 @@ export function isGroupMuteNotice(contentType: number): boolean {
 }
 
 /**
- * 只折叠连续、签名相同的群改名通知。普通聊天消息会切断折叠；A→B→A 这类
- * 真实改名序列的签名也不同，不会被吞掉。
+ * 只折叠连续、签名相同的群改名 / 好友互通 / 群公告通知。
+ * 普通聊天消息会切断折叠；公告正文不同（key 含正文）不会误合并。
  * 同时折叠连续重复的「新群创建成功」系统提示（通知 + 历史 imAdmin 文本并存时）。
  */
 export function collapseRepeatedGroupNameNotices(messages: ChatMessage[]): ChatMessage[] {
@@ -191,7 +202,8 @@ export function collapseRepeatedGroupNameNotices(messages: ChatMessage[]): ChatM
     previousWelcome = false
     const key =
       message.systemEventKey?.startsWith('group-name:') ||
-      message.systemEventKey?.startsWith('friend-connected:')
+      message.systemEventKey?.startsWith('friend-connected:') ||
+      message.systemEventKey?.startsWith('group-announce:')
         ? message.systemEventKey
         : ''
     if (!key) {

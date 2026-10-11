@@ -228,16 +228,17 @@ function openImagePreview(message: ChatMessage) {
 watch(
   () => {
     const list = chatStore.messagesMap[conversationId.value] || []
-    // 只盯最新一条系统事件，避免 messages 每变一次就 map+join 全表
+    // 带上 message.id：第二条公告正文不同时 key 会变；同正文双推也能靠 id 触发横幅刷新
     for (let i = list.length - 1; i >= 0; i--) {
-      const key = list[i]?.systemEventKey
+      const m = list[i]
+      const key = m?.systemEventKey
       if (
         key &&
         (key.startsWith('group-member:') ||
           key.startsWith('group-mute:') ||
           key.startsWith('group-announce:'))
       ) {
-        return key
+        return `${key}:${m.id}`
       }
     }
     return ''

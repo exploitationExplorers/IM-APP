@@ -240,30 +240,13 @@ export function videoPosterUrlFromContent(content: string): string {
   return isUsableVideoPoster(poster) ? playableMediaUrl(poster) : ''
 }
 
-function downloadVideo(url: string): Promise<string> {
-  if (!/^https?:\/\//i.test(url)) return Promise.resolve(url)
-  return new Promise((resolve, reject) => {
-    uni.downloadFile({
-      url,
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath) {
-          resolve(res.tempFilePath)
-        } else {
-          reject(new Error('视频下载失败'))
-        }
-      },
-      fail: (err) => reject(new Error(err.errMsg || '视频下载失败')),
-    })
-  })
-}
-
 /** App 保存到系统相册；H5 使用浏览器下载，供同一长按菜单复用。 */
 export async function saveVideoToDevice(content: string): Promise<void> {
   const { url } = parseVideoMeta(content)
   if (!url) throw new Error('视频地址不存在')
 
   // #ifdef APP-PLUS
-  const filePath = await downloadVideo(url)
+  const filePath = /^https?:\/\//i.test(url) ? await downloadRemoteFile(url) : url
   await new Promise<void>((resolve, reject) => {
     uni.saveVideoToPhotosAlbum({
       filePath,
@@ -278,17 +261,83 @@ export async function saveVideoToDevice(content: string): Promise<void> {
   // #endif
 
   // #ifdef H5
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = `video_${Date.now()}.mp4`
-  anchor.rel = 'noopener'
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
+  if (typeof document !== 'undefined') {
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `video_${Date.now()}.mp4`
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  }
   return
   // #endif
 
   throw new Error('当前平台暂不支持保存视频')
+}
+
+/**
+ * 长按菜单「保存图片」。
+ * App：下载到本地后写入系统相册；H5：优先 blob 下载，CORS 失败再直链。
+ */
+export async function saveImageToDevice(url: string): Promise<void> {
+  const src = playableMediaUrl((url || '').trim())
+  if (!src) throw new Error('图片地址不存在')
+
+  // #ifdef APP-PLUS
+  const filePath = /^https?:\/\//i.test(src) ? await downloadRemoteFile(src) : src
+  await new Promise<void>((resolve, reject) => {
+    uni.saveImageToPhotosAlbum({
+      filePath,
+      success: () => resolve(),
+      fail: (err) => {
+        const denied = /auth|permission|deny|authorize/i.test(err.errMsg || '')
+        reject(new Error(denied ? '请在系统设置中允许相册权限' : err.errMsg || '保存图片失败'))
+      },
+    })
+  })
+  return
+  // #endif
+
+  // #ifdef H5
+  if (typeof document === 'undefined') {
+    throw new Error('当前平台暂不支持保存图片')
+  }
+  const clickDownload = (href: string, filename: string) => {
+    const anchor = document.createElement('a')
+    anchor.href = href
+    anchor.download = filename
+    anchor.rel = 'noopener'
+    anchor.target = '_blank'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  }
+  if (/^https?:\/\//i.test(src) || src.startsWith('blob:')) {
+    try {
+      const res = await fetch(src, { mode: 'cors', credentials: 'omit' })
+      if (!res.ok) throw new Error('图片下载失败')
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const ext = blob.type.includes('png')
+        ? 'png'
+        : blob.type.includes('webp')
+          ? 'webp'
+          : blob.type.includes('gif')
+            ? 'gif'
+            : 'jpg'
+      clickDownload(objectUrl, `image_${Date.now()}.${ext}`)
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000)
+      return
+    } catch {
+      /* 跨域时退回直链，浏览器可能直接打开预览 */
+    }
+  }
+  clickDownload(src, `image_${Date.now()}.jpg`)
+  return
+  // #endif
+
+  throw new Error('当前平台暂不支持保存图片')
 }
 
 function captureH5VideoPoster(url: string): Promise<string> {

@@ -549,7 +549,11 @@ async function prepareAvatarFile(file: File): Promise<File> {
     ctx.drawImage(img, 0, 0, width, height)
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86))
     if (!blob) throw new Error('无法读取这张图片，请换一张')
-    return new File([blob], 'avatar.jpg', { type: 'image/jpeg' })
+    // App WebView 可能没有 File 构造器；有则包一层，没有就带上 name/type 当 File 用
+    if (typeof File !== 'undefined') {
+      return new File([blob], 'avatar.jpg', { type: 'image/jpeg' })
+    }
+    return Object.assign(blob, { name: 'avatar.jpg', lastModified: Date.now() }) as File
   } finally {
     URL.revokeObjectURL(url)
   }

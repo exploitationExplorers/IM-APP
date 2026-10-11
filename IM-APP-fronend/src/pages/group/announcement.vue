@@ -115,7 +115,12 @@ function previewImage(list: string[], index: number) {
 }
 
 async function onSubmit() {
-  if (!canSubmit.value) return
+  // 先卡锁：不要只靠 canSubmit（disabled 下一帧才生效，连点会打出两条公告）
+  if (saving.value || !canEdit.value) return
+  if (announcement.value === original.value && !imagesChanged()) {
+    uni.showToast({ title: '内容未变化', icon: 'none' })
+    return
+  }
   if (announcement.value.length > ANNOUNCE_MAX) {
     uni.showToast({ title: `公告最多 ${ANNOUNCE_MAX} 个字`, icon: 'none' })
     return
@@ -161,6 +166,7 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
 
     <scroll-view scroll-y class="body" :show-scrollbar="false">
       <view v-if="canEdit" class="form">
+        <text class="section-label">编辑公告</text>
         <textarea
           class="textarea"
           v-model="announcement"
@@ -185,6 +191,7 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
         </view>
       </view>
       <view v-else class="content">
+        <text class="section-label">当前公告</text>
         <text class="announcement">{{ announcement || '暂无群公告' }}</text>
         <view v-if="images.length" class="images readonly">
           <view v-for="(img, i) in images" :key="`${img}-${i}`" class="thumb">
@@ -194,7 +201,7 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
       </view>
 
       <view class="history-head">
-        <text class="history-title">近期公告（最多 10 条）</text>
+        <text class="history-title">历史发布记录（最多 10 条）</text>
       </view>
       <view v-if="!history.length" class="history-empty">暂无历史公告</view>
       <view v-for="item in history" :key="item.id" class="history-card">
@@ -221,7 +228,7 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
     </scroll-view>
 
     <view v-if="canEdit" class="footer">
-      <button class="btn" :disabled="!canSubmit" @click="onSubmit">确认</button>
+      <view class="btn" :class="{ disabled: !canSubmit }" @click="onSubmit">确认</view>
     </view>
   </view>
 </template>
@@ -247,6 +254,13 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
   background: #fff;
   padding: 32rpx 28rpx;
   min-height: 240rpx;
+}
+
+.section-label {
+  display: block;
+  margin-bottom: 16rpx;
+  font-size: 26rpx;
+  color: #636e86;
 }
 
 .textarea {
@@ -402,13 +416,11 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
   color: #fff;
   font-size: 32rpx;
   font-weight: 600;
+  text-align: center;
 }
 
-.btn[disabled] {
+.btn.disabled {
   opacity: 0.45;
-}
-
-.btn::after {
-  border: none;
+  pointer-events: none;
 }
 </style>

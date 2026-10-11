@@ -2158,17 +2158,22 @@ function imageSizeOf(path: string): Promise<{ width: number; height: number }> {
  * 要靠它归位到某个会话。
  */
 export function conversationIdOf(message: MessageItem): string {
-  const fromSdk = (message as MessageItem & { conversationID?: string }).conversationID
+  const raw = message as MessageItem & Record<string, unknown>
+  const fromSdk = String(raw.conversationID ?? raw.ConversationID ?? '').trim()
   if (fromSdk) return fromSdk
-  if (message.sessionType === SessionType.Single) {
-    if (!message.sendID || !message.recvID) return ''
-    return `si_${[message.sendID, message.recvID].sort().join('_')}`
+  const sessionType = Number(raw.sessionType ?? raw.SessionType ?? 0)
+  const sendID = String(raw.sendID ?? raw.SendID ?? '').trim()
+  const recvID = String(raw.recvID ?? raw.RecvID ?? '').trim()
+  const groupID = String(raw.groupID ?? raw.GroupID ?? '').trim()
+  if (sessionType === SessionType.Single) {
+    if (!sendID || !recvID) return ''
+    return `si_${[sendID, recvID].sort().join('_')}`
   }
-  if (message.sessionType === SessionType.Notification) {
-    return `sn_${message.sendID}_${message.recvID}`
+  if (sessionType === SessionType.Notification) {
+    return `sn_${sendID}_${recvID}`
   }
-  if (!message.groupID) return ''
-  return `sg_${message.groupID}`
+  if (!groupID) return ''
+  return `sg_${groupID}`
 }
 
 export function targetOf(conversation: ConversationItem | Conversation): IMTarget {
@@ -2810,19 +2815,38 @@ function isMessageItem(value: unknown): value is MessageItem {
   return !!value && typeof value === 'object' && typeof (value as MessageItem).clientMsgID === 'string'
 }
 
-function coerceMessage(raw: unknown): MessageItem | null {
+/**
+ * App 原生桥推送常用 PascalCase；历史拉取已走本函数，实时 OnRecvNewMessage 也必须走，
+ * 否则 clientMsgID/conversationID 为空会被 appendMessage 静默丢弃，表现为「刷新才收到」。
+ */
+export function coerceMessage(raw: unknown): MessageItem | null {
   const obj = unwrapRawMessage(raw)
   if (!obj) return null
   const clientMsgID = pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
   if (!clientMsgID) return null
   const contentType = Number(obj.contentType ?? obj.ContentType ?? 0)
+  const sessionType = Number(obj.sessionType ?? obj.SessionType ?? 0)
+  const sendTime = Number(obj.sendTime ?? obj.SendTime ?? obj.createTime ?? obj.CreateTime ?? 0)
   const item = {
     ...(obj as unknown as MessageItem),
     clientMsgID,
     seq: seqOf(obj),
     contentType: Number.isFinite(contentType) ? contentType : 0,
     status: messageStatusOf(obj),
-  }
+    sendID: pickString(obj, ['sendID', 'SendID']) || (obj as MessageItem).sendID,
+    recvID: pickString(obj, ['recvID', 'RecvID']) || (obj as MessageItem).recvID,
+    groupID: pickString(obj, ['groupID', 'GroupID']) || (obj as MessageItem).groupID,
+    sessionType: Number.isFinite(sessionType) ? sessionType : (obj as MessageItem).sessionType,
+    sendTime: Number.isFinite(sendTime) && sendTime > 0 ? sendTime : (obj as MessageItem).sendTime,
+    senderFaceUrl:
+      pickString(obj, ['senderFaceUrl', 'SenderFaceUrl', 'senderFaceURL', 'SenderFaceURL']) ||
+      (obj as MessageItem).senderFaceUrl,
+    senderNickname:
+      pickString(obj, ['senderNickname', 'SenderNickname']) || (obj as MessageItem).senderNickname,
+    conversationID:
+      pickString(obj, ['conversationID', 'ConversationID']) ||
+      (obj as MessageItem & { conversationID?: string }).conversationID,
+  } as MessageItem & { conversationID?: string }
   // OpenIM App 原生桥在部分版本中使用 PascalCase，统一成 Web SDK 的字段名，
   // 后续渲染、收藏和转发就不需要各自判断平台。
   const pictureElemRaw = obj.pictureElem ?? obj.PictureElem

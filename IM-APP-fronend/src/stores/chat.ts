@@ -36,6 +36,7 @@ import {
   toChatMessage,
   toConversation,
   conversationIdOf,
+  coerceMessage,
   imUserId,
   resolveMessageSeq,
   resetConversationGroupAtType,
@@ -477,6 +478,23 @@ export const useChatStore = defineStore('chat', () => {
       [message.conversationId]: [...list, message],
     }
     trimMessageWindow(message.conversationId)
+    // 列表预览不能只等 OnConversationChanged：事件慢/丢时会话行会一直挂旧文案
+    const isSelf = item.sendID === imUserId.value
+    const viewing = !!activeConversationId && message.conversationId === activeConversationId
+    patchConversation(message.conversationId, {
+      lastMessage: previewOf(message),
+      lastMessageAt: message.createdAt,
+      ...(viewing || isSelf
+        ? { unreadCount: 0 }
+        : {
+            unreadCount:
+              (conversations.value.find((c) => c.id === message.conversationId)?.unreadCount || 0) +
+              (isIMNotification(item.contentType) ? 0 : 1),
+          }),
+    })
+    if (viewing) {
+      void markAsRead(message.conversationId)
+    }
   }
 
   async function applyIncomingMessagePin(
@@ -556,7 +574,11 @@ export const useChatStore = defineStore('chat', () => {
 
   /** SDK 有时推单条，有时推数组；解析失败时不能让监听器抛错把后续消息吃掉 */
   function ingestIncoming(raw: MessageItem | MessageItem[] | null) {
-    const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+    const source = Array.isArray(raw) ? raw : raw ? [raw] : []
+    // App PascalCase 必须先归一，否则 clientMsgID/会话 id 为空会被静默丢弃
+    const list = source
+      .map((item) => coerceMessage(item) || item)
+      .filter((item): item is MessageItem => !!item?.clientMsgID)
     if (!list.length) return
     list.forEach(appendMessage)
     // 收到消息后统一尝试提示音：一批消息只响一次
@@ -615,6 +637,17 @@ export const useChatStore = defineStore('chat', () => {
       prev.lastMessage && prevTime > nextTime
         ? { ...next, lastMessage: prev.lastMessage, lastMessageAt: prev.lastMessageAt }
         : next
+    // 正在看的会话：SDK 推回未读也不要盖掉本地已清的红点
+    if (activeConversationId && merged.id === activeConversationId) {
+      merged = { ...merged, unreadCount: 0 }
+    } else if (!(prev.unreadCount || 0) && (merged.unreadCount || 0) > 0) {
+      // 本地刚 markAsRead 后 SDK 偶发带回旧 unread，不要把红点弹回来
+      const prevAt = prevTime
+      const nextAt = nextTime
+      if (prevAt >= nextAt) {
+        merged = { ...merged, unreadCount: 0 }
+      }
+    }
     // 本地刚写入的置顶横幅优先于 SDK 尚未带回 ex 的会话快照
     const prevPinAt = prev.pinnedMessage?.pinnedAt || 0
     const nextPinAt = next.pinnedMessage?.pinnedAt || 0
@@ -1157,14 +1190,24 @@ export const useChatStore = defineStore('chat', () => {
     const conv = conversations.value.find((c) => c.id === conversationId)
     if (!conv) return
     conv.unreadCount = 0
-    // 对齐微信：进入群聊并标记已读后，会话列表不再保留 [有人@我]
+    // 进房即视为看过公告提醒，避免会话行 [有新公告] 一直挂着
+    if (conv.type === 'group') {
+      writeUnreadAnnouncement(announcementOwnerId(), conversationId, false)
+    }
+    // 对齐微信：进入群聊并标记已读后，会话列表不再保留 [有人@我] / [有新公告]
     if (conv.type === 'group' && isAtMeType(conv.groupAtType)) {
-      const hasUnreadAnn = unreadAnnouncementState(announcementOwnerId(), conversationId) === true
       patchConversation(conversationId, {
         groupAtType: GroupAtType.AtNormal,
-        highlightTags: highlightTagsOf(GroupAtType.AtNormal, hasUnreadAnn),
+        highlightTags: highlightTagsOf(GroupAtType.AtNormal, false),
       })
       await resetConversationGroupAtType(conversationId).catch(() => undefined)
+    } else if (conv.type === 'group') {
+      patchConversation(conversationId, {
+        highlightTags: highlightTagsOf(
+          effectiveGroupAtType(conv.groupAtType, 0),
+          false,
+        ),
+      })
     }
   }
 

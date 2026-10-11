@@ -3,14 +3,13 @@ import type { ChatMessage, GroupRole } from '@/types'
 import type { MessageMenuItem } from '@/components/ImMessageActionMenu.vue'
 import { createFavorite } from '@/api/favorites'
 import { createSticker } from '@/api/sticker'
-import { playableMediaUrl } from '@/utils/chatMedia'
+import { playableMediaUrl, saveImageToDevice, saveVideoToDevice } from '@/utils/chatMedia'
 import { uploadSticker } from '@/utils/file-upload'
 import { muteGroupMember, removeGroupMember, unmuteGroupMember } from '@/api/group'
 import { MUTE_OPTIONS } from '@/constants/mute'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
 import { rememberConversationTitle } from '@/utils/favoriteMeta'
-import { saveVideoToDevice } from '@/utils/chatMedia'
 import { businessUserIdFromIM } from '@/utils/openim'
 
 /** 群成员的发言管控元信息（房间页从群成员接口构建，业务用户 ID 索引） */
@@ -138,7 +137,10 @@ export function useChatMessageActions(opts: {
     if (message.type === 'text') {
       items.push({ key: 'copy', label: '复制' }, { key: 'selectText', label: '选择文字' })
     }
-    if (message.type === 'image') items.push({ key: 'sticker', label: '加入表情包' })
+    // H5 / App 同一菜单：图片给「保存图片」，视频给「保存视频」
+    if (message.type === 'image') {
+      items.push({ key: 'save', label: '保存图片' }, { key: 'sticker', label: '加入表情包' })
+    }
     if (message.type === 'video') items.push({ key: 'save', label: '保存视频' })
     items.push({ key: 'favorite', label: '收藏' })
     const pinnedId = chatStore.conversations.find((c) => c.id === opts.conversationId.value)?.pinnedMessage
@@ -231,21 +233,38 @@ export function useChatMessageActions(opts: {
   }
 
   function imageUrlOfMessage(message: ChatMessage): string {
-    const raw = (message.content || '').trim()
-    if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:') || raw.startsWith('/')) return raw
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>
-      const keys = ['sourcePicture', 'bigPicture', 'snapshotPicture', 'SourcePicture', 'BigPicture', 'SnapshotPicture']
-      for (const key of keys) {
-        const pic = parsed[key]
-        if (!pic || typeof pic !== 'object') continue
-        const url = String((pic as { url?: string; URL?: string }).url || (pic as { URL?: string }).URL || '')
-        if (url) return url
+    const pick = (raw: string) => {
+      const text = (raw || '').trim()
+      if (/^https?:\/\//i.test(text) || text.startsWith('blob:') || text.startsWith('/')) return text
+      if (!text || text[0] !== '{') return ''
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>
+        const keys = [
+          'sourcePicture',
+          'bigPicture',
+          'snapshotPicture',
+          'SourcePicture',
+          'BigPicture',
+          'SnapshotPicture',
+        ]
+        for (const key of keys) {
+          const pic = parsed[key]
+          if (!pic || typeof pic !== 'object') continue
+          const url = String(
+            (pic as { url?: string; URL?: string }).url || (pic as { URL?: string }).URL || '',
+          )
+          if (url) return url
+        }
+        return String(parsed.url || parsed.URL || '')
+      } catch {
+        return ''
       }
-      const direct = String(parsed.url || parsed.URL || '')
-      if (direct) return direct
-    } catch {
-      /* 纯文本地址 */
+    }
+    const primary = pick(message.content || '')
+    if (primary) return primary
+    for (const fallback of message.imageFallbacks || []) {
+      const url = pick(fallback)
+      if (url) return url
     }
     return ''
   }
@@ -626,15 +645,27 @@ export function useChatMessageActions(opts: {
       await addImageSticker(message)
       return
     }
-    if (key === 'save' && message.type === 'video') {
+    if (key === 'save' && (message.type === 'video' || message.type === 'image')) {
       uni.showLoading({ title: '正在保存' })
       try {
-        await saveVideoToDevice(message.content)
+        if (message.type === 'video') {
+          await saveVideoToDevice(message.content)
+        } else {
+          const url = imageUrlOfMessage(message)
+          if (!url) throw new Error('图片地址不存在')
+          await saveImageToDevice(url)
+        }
         uni.hideLoading()
-        uni.showToast({ title: '已保存到相册', icon: 'success' })
+        uni.showToast({
+          title: isAppPlatform() ? '已保存到相册' : '已开始下载',
+          icon: 'success',
+        })
       } catch (e) {
         uni.hideLoading()
-        uni.showToast({ title: (e as Error).message || '保存视频失败', icon: 'none' })
+        uni.showToast({
+          title: (e as Error).message || (message.type === 'video' ? '保存视频失败' : '保存图片失败'),
+          icon: 'none',
+        })
       }
       return
     }
