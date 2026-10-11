@@ -17,10 +17,25 @@ export const useGroupStore = defineStore('group', () => {
   const currentGroup = ref<GroupInfo | null>(null)
   const members = ref<GroupMember[]>([])
 
-  async function loadDetail(groupId: string) {
+  /** 只拉群资料：详情页首屏靠它出画面，不必等全量成员翻页 */
+  async function loadGroupDetail(groupId: string) {
     currentGroup.value = await fetchGroupDetail(groupId)
-    members.value = await fetchAllGroupMembers(groupId)
     return currentGroup.value
+  }
+
+  /** 全量成员按 100/页游标串行翻页，群越大越慢，页面应尽量不阻塞在它上面 */
+  async function loadMembers(groupId: string) {
+    members.value = await fetchAllGroupMembers(groupId)
+    return members.value
+  }
+
+  /** 群资料 + 全量成员。两者无依赖，并行拉取，别再串行等 */
+  async function loadDetail(groupId: string) {
+    const [detail] = await Promise.all([
+      loadGroupDetail(groupId),
+      loadMembers(groupId),
+    ])
+    return detail
   }
 
   async function create(name: string, memberIds: string[]) {
@@ -71,6 +86,8 @@ export const useGroupStore = defineStore('group', () => {
     currentGroup,
     members,
     loadDetail,
+    loadGroupDetail,
+    loadMembers,
     create,
     join,
     updateSettings,

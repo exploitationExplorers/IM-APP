@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import {
+  GROUP_MEMBERS_PAGE_SIZE,
   fetchGroupDetail,
-  fetchAllGroupMembers,
+  fetchGroupMembers,
   muteGroupMember,
   removeGroupMember,
   unmuteGroupMember,
@@ -42,6 +43,117 @@ const filteredMembers = computed(() => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// 滚动分页：一次只拉一页，滚到底再拉下一页。搜索是本地过滤，只能命中已加载的部分，
+// 所以一旦开始搜索就把剩余页补齐，避免「成员明明在群里却搜不到」。
+// ---------------------------------------------------------------------------
+
+const loadingMore = ref(false)
+const loadingAll = ref(false)
+const hasMore = ref(false)
+const nextCursor = ref('')
+/** 后端返回数组（无分页能力）时视为一次给全 */
+const paged = ref(true)
+const loadedOnce = ref(false)
+/** 从「新增成员」返回时要刷新，从成员资料返回时不要（否则丢失滚动位置） */
+let refreshOnReturn = false
+
+function appendMembers(list: GroupMember[]) {
+  const seen = new Set(members.value.map((m) => m.id))
+  const fresh = list.filter((m) => {
+    if (seen.has(m.id)) return false
+    seen.add(m.id)
+    return true
+  })
+  if (fresh.length) members.value = [...members.value, ...fresh]
+}
+
+async function loadFirstPage() {
+  loading.value = true
+  try {
+    const page = await fetchGroupMembers(groupId.value, { limit: GROUP_MEMBERS_PAGE_SIZE })
+    if (Array.isArray(page)) {
+      paged.value = false
+      hasMore.value = false
+      nextCursor.value = ''
+      members.value = page
+    } else {
+      paged.value = true
+      members.value = page.items
+      hasMore.value = page.hasMore
+      nextCursor.value = page.nextCursor || ''
+    }
+    loadedOnce.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 滚到底拉下一页；搜索补齐时也复用它 */
+async function loadMorePage(): Promise<boolean> {
+  if (!paged.value || !hasMore.value || loadingMore.value) return false
+  loadingMore.value = true
+  try {
+    const before = members.value.length
+    const page = await fetchGroupMembers(groupId.value, {
+      cursor: nextCursor.value,
+      limit: GROUP_MEMBERS_PAGE_SIZE,
+    })
+    if (Array.isArray(page)) {
+      appendMembers(page)
+      hasMore.value = false
+      nextCursor.value = ''
+      return false
+    }
+    appendMembers(page.items)
+    hasMore.value = page.hasMore
+    nextCursor.value = page.nextCursor || ''
+    // 游标没前进 / 这一页全是重复成员时再翻下去也拿不到新数据，收尾避免死循环
+    if (hasMore.value && (!nextCursor.value || members.value.length === before)) {
+      hasMore.value = false
+    }
+    return hasMore.value
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+async function onReachBottom() {
+  if (keyword.value.trim() || !hasMore.value) return
+  try {
+    await loadMorePage()
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '加载更多失败', icon: 'none' })
+  }
+}
+
+/** 搜索需要全量成员才能保证结果完整，这里把剩余页补齐 */
+async function loadAllRemaining() {
+  if (!paged.value || !hasMore.value || loadingAll.value) return
+  loadingAll.value = true
+  try {
+    while (hasMore.value) {
+      const more = await loadMorePage()
+      if (!more) break
+    }
+  } catch {
+    // 补齐失败就让搜索只覆盖已加载部分，不再打扰用户
+  } finally {
+    loadingAll.value = false
+  }
+}
+
+watch(keyword, (value) => {
+  if (value.trim()) void loadAllRemaining()
+})
+
+/** 未搜索时用群资料里的总人数，搜索时用命中数 */
+const memberCountLabel = computed(() =>
+  keyword.value.trim()
+    ? filteredMembers.value.length
+    : group.value?.memberCount || members.value.length,
+)
+
 onLoad((query) => {
   groupId.value = String(query?.id || '')
 })
@@ -51,18 +163,18 @@ onShow(async () => {
     uni.showToast({ title: '缺少群聊 ID', icon: 'none' })
     return
   }
-  loading.value = true
+  const needReload = !loadedOnce.value || refreshOnReturn
+  if (!needReload) return
+  refreshOnReturn = false
   try {
-    const [detail, list] = await Promise.all([
-      fetchGroupDetail(groupId.value),
-      fetchAllGroupMembers(groupId.value),
+    await Promise.all([
+      fetchGroupDetail(groupId.value).then((detail) => {
+        group.value = detail
+      }),
+      loadFirstPage(),
     ])
-    group.value = detail
-    members.value = list
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载群成员失败', icon: 'none' })
-  } finally {
-    loading.value = false
   }
 })
 
@@ -72,6 +184,8 @@ function goBack() {
 
 function goInvite() {
   if (!canManage.value) return
+  // 邀请会改变成员列表，返回时刷新；看成员资料不会，所以不置位
+  refreshOnReturn = true
   uni.navigateTo({
     url: `/pages/group/invite?id=${encodeURIComponent(groupId.value)}`,
   })
@@ -219,10 +333,10 @@ async function onRemove(member: GroupMember) {
     <AppSearchBar v-model="keyword" placeholder="搜索" />
 
     <view class="section-head">
-      <text class="section-title">群成员 ({{ filteredMembers.length }})</text>
+      <text class="section-title">群成员 ({{ memberCountLabel }})</text>
     </view>
 
-    <scroll-view scroll-y class="list">
+    <scroll-view scroll-y class="list" :lower-threshold="80" @scrolltolower="onReachBottom">
       <text v-if="loading" class="loading">加载中...</text>
       <view
         v-for="member in filteredMembers"
@@ -259,7 +373,12 @@ async function onRemove(member: GroupMember) {
           </view>
         </view>
       </view>
-      <text v-if="!loading && !filteredMembers.length" class="empty">暂无成员</text>
+      <text v-if="loadingAll" class="loading">正在加载全部成员以便搜索...</text>
+      <text v-else-if="loadingMore" class="loading">加载更多...</text>
+      <text v-else-if="!loading && hasMore && !keyword.trim()" class="loading">上滑加载更多</text>
+      <text v-if="!loading && !filteredMembers.length" class="empty">
+        {{ keyword.trim() ? (loadingAll || hasMore ? '正在搜索全部成员...' : '未找到相关成员') : '暂无成员' }}
+      </text>
     </scroll-view>
   </view>
 </template>
@@ -294,6 +413,8 @@ async function onRemove(member: GroupMember) {
 
 .list {
   flex: 1;
+  /* height: 0 让 flex 高度说了算，scroll-view 才会真正滚动、scrolltolower 才会触发 */
+  height: 0;
   padding: 0 0 28rpx;
 }
 

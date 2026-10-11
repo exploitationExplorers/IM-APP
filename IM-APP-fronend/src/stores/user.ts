@@ -38,6 +38,54 @@ export const useUserStore = defineStore('user', () => {
 
   const isLoggedIn = computed(() => !!token.value)
 
+  /** 冷启动补救读取进行中的 promise，多个守卫并发时共用一次，避免重复读 storage */
+  let restorePromise: Promise<boolean> | null = null
+
+  /** 拿到 token 后的统一收尾：拉起 IM 会话并补拉用户资料 */
+  function applyRestoredToken(stored: string) {
+    token.value = stored
+    const storedRefresh = getRefreshToken()
+    if (storedRefresh) refreshToken.value = storedRefresh
+    startIMSession()
+    loadProfile().catch(() => undefined)
+  }
+
+  /**
+   * 冷启动时 uni.getStorageSync 有初始化竞态，第一次读可能返回空
+   * （见 bootstrap 里的说明）。storage 里明明有 token 却被判成未登录，
+   * 就会被 auth guard 踢去登录页 —— 表现就是「重启后非得重新登录」。
+   *
+   * 这里按递增间隔补救读取几次；读到就恢复登录态。返回是否已登录。
+   * 已登录时同步 resolve，不产生任何等待。
+   */
+  function restoreSessionIfNeeded(): Promise<boolean> {
+    if (token.value) return Promise.resolve(true)
+    // #ifdef H5
+    // H5 的 localStorage 同步读写不存在竞态，不需要补救读取
+    return Promise.resolve(false)
+    // #endif
+    // 已有在飞的补救读取就复用它，避免多个守卫各读一轮
+    if (restorePromise === null) {
+      const delays = [120, 400, 900]
+      const task = (async () => {
+        for (const ms of delays) {
+          await new Promise((r) => setTimeout(r, ms))
+          if (token.value) return true
+          const stored = getToken()
+          if (!stored) continue
+          applyRestoredToken(stored)
+          return true
+        }
+        return !!token.value
+      })().catch(() => false)
+      restorePromise = task
+      void task.finally(() => {
+        restorePromise = null
+      })
+    }
+    return restorePromise ?? Promise.resolve(false)
+  }
+
   async function afterLogin(res: AuthResult, phone: string, countryCode?: string) {
     useChatStore().reset()
     useContactStore().reset()
@@ -227,5 +275,6 @@ export const useUserStore = defineStore('user', () => {
     invalidateSession,
     logout,
     bootstrap,
+    restoreSessionIfNeeded,
   }
 })

@@ -272,7 +272,7 @@ async function openMember(member: GroupMember) {
 function goSearchHistory() {
   close()
   uni.navigateTo({
-    url: `/pages/group/search-history?id=${encodeURIComponent(props.groupId)}&title=${encodeURIComponent(groupName.value)}`,
+    url: `/pages/group/search-history?id=${encodeURIComponent(props.groupId)}&title=${encodeURIComponent(groupName.value || '群聊')}`,
   })
 }
 </script>

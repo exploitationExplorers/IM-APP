@@ -1,4 +1,4 @@
-import { AUTH_SLOTS_KEY } from '@/utils/request'
+import { ACTIVE_TAB_KEY, AUTH_SLOTS_KEY } from '@/utils/request'
 import { LOGIN_REMEMBER_KEYS } from '@/utils/login-phone'
 
 const DEVICE_ID_KEY = 'im_device_id'
@@ -16,7 +16,14 @@ function clearNativeWebCache() {
 
 /** 设置页「清除缓存」：保留登录态与设备 ID */
 export function clearAppCache(): void {
-  const keep = new Set(['im_token', 'im_refresh_token', AUTH_SLOTS_KEY, DEVICE_ID_KEY, ...LOGIN_REMEMBER_KEYS])
+  const keep = new Set([
+    'im_token',
+    'im_refresh_token',
+    AUTH_SLOTS_KEY,
+    ACTIVE_TAB_KEY,
+    DEVICE_ID_KEY,
+    ...LOGIN_REMEMBER_KEYS,
+  ])
   const info = uni.getStorageInfoSync()
   for (const key of info.keys) {
     if (!keep.has(key)) {

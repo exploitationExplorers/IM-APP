@@ -1,51 +1,27 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { resetPassword, sendSmsCode } from '@/api/auth'
+import { resetPassword } from '@/api/auth'
 import { APP_CONFIG } from '@/config'
 import ImCountryPicker from '@/components/ImCountryPicker.vue'
-import { findCountryByDialCode, validatePhone } from '@/constants/countries'
+import { useSmsCode } from '@/composables/useSmsCode'
+import { findCountryByDialCode } from '@/constants/countries'
+import { clearLoginPassword, saveLoginPhone } from '@/utils/login-phone'
 
 const step = ref<1 | 2>(1)
+const { countdown, send, checkPhone } = useSmsCode('reset')
 const countryCode = ref(APP_CONFIG.defaultCountryCode)
 const phone = ref('')
 const code = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const loading = ref(false)
-const countdown = ref(0)
-let timer: ReturnType<typeof setInterval> | null = null
 
 function validatePhoneInput() {
-  if (!validatePhone(countryCode.value, phone.value)) {
-    const c = findCountryByDialCode(countryCode.value)
-    uni.showToast({ title: c.placeholder, icon: 'none' })
-    return false
-  }
-  return true
-}
-
-function startCountdown(seconds: number) {
-  countdown.value = seconds > 0 ? seconds : 60
-  if (timer) clearInterval(timer)
-  timer = setInterval(() => {
-    countdown.value -= 1
-    if (countdown.value <= 0 && timer) {
-      clearInterval(timer)
-      timer = null
-    }
-  }, 1000)
+  return checkPhone(countryCode.value, phone.value)
 }
 
 async function onSendCode() {
-  if (countdown.value > 0) return
-  if (!validatePhoneInput()) return
-  try {
-    const res = await sendSmsCode(phone.value, 'reset', countryCode.value)
-    uni.showToast({ title: '验证码已发送', icon: 'none' })
-    startCountdown(res.retryAfterSec || 60)
-  } catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' })
-  }
+  await send(countryCode.value, phone.value)
 }
 
 function onNext() {
@@ -65,12 +41,22 @@ async function onSubmit() {
   loading.value = true
   try {
     await resetPassword(phone.value, code.value, password.value, countryCode.value)
+    // 旧密码已作废：清掉「记住密码」里存的那份，否则登录页会把老密码自动填回去。
+    // 手机号留着，重置完直接登录不用再输一遍。
+    clearLoginPassword()
+    saveLoginPhone(countryCode.value, phone.value)
     uni.showToast({ title: '密码已重置', icon: 'success' })
     setTimeout(() => {
       uni.redirectTo({ url: '/pages/auth/sign-in' })
     }, 500)
   } catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' })
+    const message = (e as Error).message || '重置失败'
+    uni.showToast({ title: message, icon: 'none' })
+    // 第二步没有重发验证码的入口，验证码过期/填错时用户只能卡在这里，退回第一步
+    if (message.includes('验证码')) {
+      code.value = ''
+      step.value = 1
+    }
   } finally {
     loading.value = false
   }
@@ -94,6 +80,7 @@ function goBack() {
 
       <image class="auth-logo is-forgot" src="/static/logo/logo.png" mode="heightFix" />
       <view class="auth-title">{{ step === 1 ? '忘记密码' : '设置新密码' }}</view>
+      <view v-if="step === 2" class="forgot-hint">验证码已发送至 {{ countryCode }} {{ phone }}</view>
 
       <view class="auth-form">
         <template v-if="step === 1">
@@ -166,5 +153,12 @@ function goBack() {
 
 .auth-logo.is-forgot {
   margin-top: 48rpx;
+}
+
+.forgot-hint {
+  margin-top: 16rpx;
+  text-align: center;
+  font-size: 26rpx;
+  color: #636e86;
 }
 </style>

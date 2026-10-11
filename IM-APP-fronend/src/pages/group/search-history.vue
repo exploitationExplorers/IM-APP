@@ -26,9 +26,19 @@ const results = computed(() => {
   })
 })
 
+/** 群名可能含字面量 '%'，decodeURIComponent 会抛 URIError，这里做一次兜底 */
+function safeDecode(value: string, fallback: string) {
+  const raw = value || fallback
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
-  groupTitle.value = decodeURIComponent(String(query?.title || '群聊'))
+  groupTitle.value = safeDecode(String(query?.title || ''), '群聊')
   if (!groupId.value) return
   loading.value = true
   try {

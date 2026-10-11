@@ -153,9 +153,11 @@ function onRetry() {
  */
 function previewImage() {
   if (props.message.type !== 'image') return
-  const current = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
   const raw = props.previewUrls?.length ? props.previewUrls : [props.message.content]
   const urls = raw.map((url) => toPlayableMediaUrl((url || '').trim())).filter(Boolean)
+  const shown = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
+  // 降级到备用地址时它不在会话图片列表里，传过去会让查看器错位，退回列表首张
+  const current = urls.includes(shown) ? shown : urls[0] || shown
   if (!current || !urls.length) return
   uni.previewImage({ urls, current })
 }
@@ -445,14 +447,46 @@ function toPlayableMediaUrl(path: string): string {
   return path.startsWith('/') ? `file://${path}` : path
 }
 
+/**
+ * 图片气泡的候选地址，按优先级排列（原图 → 缩略图 …）。
+ * H5 只用远程 URL；App 在没有远程地址时退回本地路径，供发送中预览。
+ */
+const imageSrcCandidates = computed(() => {
+  if (props.message.type !== 'image') return []
+  const list: string[] = []
+  const push = (value: string) => {
+    const url = value.trim()
+    if (!url || !(isRemoteMediaUrl(url) || url.startsWith('blob:'))) return
+    if (!list.includes(url)) list.push(url)
+  }
+  push(props.message.content || '')
+  for (const url of props.message.imageFallbacks || []) push(url)
+  if (list.length) return list
+  const raw = (props.message.content || '').trim()
+  return !isH5 && raw ? [raw] : []
+})
+
+/**
+ * 原图对象缺失或上传失败时，<image> 只会留一个空白框。
+ * 这里记下降级到第几个候选，加载失败就顺次重试缩略图等备用地址。
+ */
+const imageFallbackIndex = ref(0)
+watch(imageSrcCandidates, () => {
+  imageFallbackIndex.value = 0
+})
+
 /** 图片气泡展示地址：H5 只用远程 URL */
 const imageDisplaySrc = computed(() => {
-  const raw = (props.message.content || '').trim()
-  if (!raw) return ''
-  if (isRemoteMediaUrl(raw) || raw.startsWith('blob:')) return toPlayableMediaUrl(raw)
-  if (isH5) return ''
-  return toPlayableMediaUrl(raw)
+  const list = imageSrcCandidates.value
+  const raw = list[imageFallbackIndex.value] || list[0] || ''
+  return raw ? toPlayableMediaUrl(raw) : ''
 })
+
+function onImageError() {
+  if (imageFallbackIndex.value + 1 < imageSrcCandidates.value.length) {
+    imageFallbackIndex.value += 1
+  }
+}
 
 /**
  * 图片 / 视频封面的展示尺寸。
@@ -590,6 +624,7 @@ function openLink(url: string) {
           :style="mediaBoxStyle"
           :src="imageDisplaySrc"
           :mode="mediaMode"
+          @error="onImageError"
         />
         <view v-else class="msg-image image-placeholder" />
       </view>
