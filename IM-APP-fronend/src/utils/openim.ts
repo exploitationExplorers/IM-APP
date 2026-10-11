@@ -350,8 +350,19 @@ const RETRYABLE_SEND_CODES = new Set<number>([10000, 10001, 10003, 10004, 10005,
 /** 长连接没了，重试前要等 OnConnectSuccess，不能按「还连着」立刻再打 */
 const DISCONNECT_CODES = new Set<number>([10000])
 
-/** 服务端 DuplicateKeyError：同一条 clientMsgID 已经落库 */
-const DUPLICATE_SEND_CODE = 1003
+/**
+ * 同一条 clientMsgID 不可再 send：
+ * - 10204：SDK MsgRepeatError「Only failed messages can be resent」（首发其实已成功/仍在发送时重试会撞这个）
+ * - 1003：部分服务端 DuplicateKey / 历史码
+ * 命中应视为已发出，不能上报「发送失败」。
+ */
+const DUPLICATE_SEND_CODES = new Set<number>([10204, 1003])
+
+function isDuplicateSendError(err: unknown): boolean {
+  if (err instanceof IMCallError && DUPLICATE_SEND_CODES.has(err.code)) return true
+  const text = err instanceof Error ? err.message : String(err || '')
+  return /\b10204\b/.test(text) || /Only failed messages can be resent/i.test(text)
+}
 
 function toIMError(raw: unknown, method: IMMethods): Error {
   if (raw instanceof IMCallError) return raw
@@ -1067,7 +1078,8 @@ async function sendCreatedMessage(
     } catch (err) {
       lastErr = err
       const code = err instanceof IMCallError ? err.code : undefined
-      if (code === DUPLICATE_SEND_CODE) {
+      // 超时/断线后同一条重试，SDK 常回 10204：对面其实已收到，按成功处理
+      if (isDuplicateSendError(err)) {
         return { ...message, status: MessageStatus.Succeed }
       }
       if (code !== undefined && DISCONNECT_CODES.has(code)) connected = false

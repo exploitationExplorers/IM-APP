@@ -286,21 +286,33 @@ export const useChatStore = defineStore('chat', () => {
     markPeerUnblocked(contactId)
   }
 
-  /** 用服务端黑名单对齐本地，清掉已拉黑但仍留在列表里的会话 */
+  /**
+   * 用服务端黑名单对齐本地 peer 集合，供会话列表过滤（不是黑名单页滚动加载）。
+   * 服务端 limit 上限就是 100；传 500 会被压回 100，还会让人误以为一次拉半千。
+   * 并发去重：进聊天页 + 登录后常会同时触发 loadConversations，避免打两遍。
+   */
+  let blockedSyncInFlight: Promise<void> | null = null
   async function syncBlockedPeersFromServer() {
-    try {
-      const res = await fetchBlacklist({ limit: 500 })
-      blockedPeerKeys.clear()
-      for (const u of res.items || []) {
-        if (u?.id) blockedPeerKeys.add(normalizePeerKey(u.id))
+    if (blockedSyncInFlight) return blockedSyncInFlight
+    blockedSyncInFlight = (async () => {
+      try {
+        // 后端 ListBlockedUsers：limit>100 一律按 100
+        const res = await fetchBlacklist({ limit: 100 })
+        blockedPeerKeys.clear()
+        for (const u of res.items || []) {
+          if (u?.id) blockedPeerKeys.add(normalizePeerKey(u.id))
+        }
+        writeBlockedPeerKeys(blockedPeerKeys)
+        if (conversations.value.length && blockedPeerKeys.size) {
+          conversations.value = conversations.value.filter(shouldShowConversation)
+        }
+      } catch {
+        /* 黑名单接口失败不挡会话列表 */
       }
-      writeBlockedPeerKeys(blockedPeerKeys)
-      if (conversations.value.length && blockedPeerKeys.size) {
-        conversations.value = conversations.value.filter(shouldShowConversation)
-      }
-    } catch {
-      /* 黑名单接口失败不挡会话列表 */
-    }
+    })().finally(() => {
+      blockedSyncInFlight = null
+    })
+    return blockedSyncInFlight
   }
 
   watch(imUserId, () => {
@@ -787,12 +799,12 @@ export const useChatStore = defineStore('chat', () => {
       await ensureIMLogin()
       syncHiddenIdsFromStorage()
       syncBlockedPeerKeysFromStorage()
-      // 与服务端黑名单对齐，避免「已拉黑仍出现在聊天列表」
-      await syncBlockedPeersFromServer()
+      // 黑名单对齐与拉会话并行：别串行等 blocked 再 getConversationList（图里那条常拖慢进首页）
+      const blockedSync = syncBlockedPeersFromServer()
       subscribeRealtime()
       let list
       try {
-        list = await getConversationList()
+        ;[list] = await Promise.all([getConversationList(), blockedSync])
       } catch (e) {
         const msg = (e as Error)?.message || ''
         if (msg.includes('10004') || msg.includes('10005')) {
@@ -801,7 +813,8 @@ export const useChatStore = defineStore('chat', () => {
           syncHiddenIdsFromStorage()
           syncBlockedPeerKeysFromStorage()
           await waitForSync(5000)
-          list = await getConversationList()
+          const retryBlocked = syncBlockedPeersFromServer()
+          ;[list] = await Promise.all([getConversationList(), retryBlocked])
         } else {
           throw e
         }
