@@ -729,6 +729,11 @@ export const useChatStore = defineStore('chat', () => {
       onIMEvent(IMEvents.OnConnectSuccess, () => {
         void resyncAfterResume()
       }),
+      // 离线消息补偿写完本地库后才算齐；OnConnectSuccess 早于同步结束，
+      // 且离线条往往不再逐条 OnRecvNewMessage，必须在 Finish 后强制重拉 UI。
+      onIMEvent(IMEvents.OnSyncServerFinish, () => {
+        void refreshAfterServerSync()
+      }),
       onUserStatusChanged((state) => {
         onlineStatus.value[state.userID] = state.status
       }),
@@ -794,6 +799,9 @@ export const useChatStore = defineStore('chat', () => {
   let resyncing = false
   let lastResyncAt = 0
   const RESYNC_MIN_INTERVAL_MS = 3000
+  /** 同步完成刷新不与 resync 共用节流，否则 ConnectSuccess 刚跑完会吞掉 Finish */
+  let syncRefreshing = false
+  let pendingSyncRefresh = false
 
   /**
    * 回到前台 / 重新可见 / 断线重连后主动补拉一次会话列表。
@@ -821,6 +829,29 @@ export const useChatStore = defineStore('chat', () => {
       // 补拉失败不影响正常使用，下次恢复可见还会再试
     } finally {
       resyncing = false
+    }
+  }
+
+  /**
+   * 服务端同步结束后从本地库重拉会话 / 当前房间。
+   * 不走 resyncAfterResume 的 3s 节流：ConnectSuccess 往往早于 Finish，
+   * 若被节流吞掉，离线期间的消息会永远停在旧快照上。
+   */
+  async function refreshAfterServerSync() {
+    if (syncRefreshing) {
+      pendingSyncRefresh = true
+      return
+    }
+    syncRefreshing = true
+    try {
+      do {
+        pendingSyncRefresh = false
+        await loadConversations().catch(() => undefined)
+        const active = activeConversationId
+        if (active) await loadMessages(active).catch(() => undefined)
+      } while (pendingSyncRefresh)
+    } finally {
+      syncRefreshing = false
     }
   }
 

@@ -129,6 +129,13 @@ let boundAccessToken = ''
  */
 let connected = false
 
+/**
+ * 服务端数据是否已同步完成本轮。
+ * Login / 重连后 SDK 会异步拉会话与离线消息；未完成时读本地库会缺消息。
+ * 由 OnSyncServerStart/Finish/Failed 维护，供 waitForSync 短路与 UI 刷新判断。
+ */
+let serverSyncReady = false
+
 /** 断线后还在排队的发送，连上就立刻继续，不用干等满退避时间 */
 const reconnectWaiters = new Set<() => void>()
 
@@ -162,6 +169,7 @@ function resetLoginCache() {
   imUserId.value = ''
   tokenExpireAt = 0
   connected = false
+  serverSyncReady = false
   boundAccessToken = ''
 }
 
@@ -459,9 +467,11 @@ function rememberLogin(imToken: IMTokenResult): string {
 
 /**
  * 登录成功只代表连上了，SDK 还要异步从服务端拉会话与消息。
- * 这期间查历史会拿到空列表，所以要等同步结束；超时兜底，避免同步事件丢失时卡死。
+ * 这期间查历史会拿到空 / 旧列表，所以要等同步结束；超时兜底，避免同步事件丢失时卡死。
+ * 若本进程已收到过 OnSyncServerFinish 且仍保持连接，直接放行。
  */
-export function waitForSync(timeoutMs = 8000): Promise<void> {
+export function waitForSync(timeoutMs = 15000): Promise<void> {
+  if (serverSyncReady && connected) return Promise.resolve()
   return new Promise((resolve) => {
     let settled = false
     const finish = () => {
@@ -470,10 +480,18 @@ export function waitForSync(timeoutMs = 8000): Promise<void> {
       clearTimeout(timer)
       offFinish()
       offFailed()
+      offStart()
       resolve()
     }
     const timer = setTimeout(finish, timeoutMs)
-    const offFinish = onIMEvent(IMEvents.OnSyncServerFinish, finish)
+    const offStart = onIMEvent(IMEvents.OnSyncServerStart, () => {
+      serverSyncReady = false
+    })
+    const offFinish = onIMEvent(IMEvents.OnSyncServerFinish, () => {
+      serverSyncReady = true
+      finish()
+    })
+    // 失败也放行：上层仍可读本地库，后续重连 / OnSyncServerFinish 会再补拉
     const offFailed = onIMEvent(IMEvents.OnSyncServerFailed, finish)
   })
 }
@@ -634,6 +652,12 @@ async function doLogin(): Promise<string> {
   if (status === LoginStatus.Logged) {
     const loggedUserId = await getSdkLoginUserId()
     if (loggedUserId === imToken.userId) {
+      // H5 WASM 刷新后常直接 Logged，本地库仍是离线前快照。
+      // 必须等本轮同步结束，否则随后拉会话/历史会漏掉离线消息。
+      await waitForSync(15000)
+      if (epoch !== loginEpoch) {
+        throw new Error('已退出登录')
+      }
       return rememberLogin(imToken)
     }
     await imCall(IMMethods.Logout).catch(() => undefined)
@@ -712,6 +736,16 @@ function setupConnectionWatchers() {
     connected = true
     wakeReconnectWaiters()
   })
+  // 同步生命周期：供 waitForSync 短路；UI 层另听 Finish 强制重拉。
+  onIMEvent(IMEvents.OnSyncServerStart, () => {
+    serverSyncReady = false
+  })
+  onIMEvent(IMEvents.OnSyncServerFinish, () => {
+    serverSyncReady = true
+  })
+  onIMEvent(IMEvents.OnSyncServerFailed, () => {
+    serverSyncReady = false
+  })
   // 被其它端踢下线：SDK 会自动 logout，本地缓存作废，下次必须重新登录。
   onIMEvent(IMEvents.OnKickedOffline, () => {
     invalidatePendingLogin()
@@ -730,14 +764,13 @@ export async function initOpenIM(): Promise<void> {
 }
 
 export async function logoutOpenIM(): Promise<void> {
-  const hadIMSession = !!(imUserId.value || connected)
   invalidatePendingLogin()
-  if (hadIMSession) {
-    try {
-      await withTimeout(forceSdkLogout(), 1500)
-    } catch {
-      // 本地必须清掉，避免下一个账号读到上一个号的会话库
-    }
+  // 刷新后内存会话为空，但 H5 WASM 仍可能是 Logged；必须 Logout，
+  // 否则下次 doLogin 走 Logged 捷径、本地库不触发完整同步。
+  try {
+    await withTimeout(forceSdkLogout(), 3000)
+  } catch {
+    // 本地必须清掉，避免下一个账号读到上一个号的会话库
   }
   resetLoginCache()
 }
