@@ -307,6 +307,11 @@ function onDelete() {
             />
             <view class="profile-meta">
               <text class="name">{{ listName }}</text>
+              <!-- 有备注时主名是备注，下面补一行原昵称，避免「备注完看不到原来名字」 -->
+              <text
+                v-if="contact.remark && contact.nickname && contact.remark.trim() !== contact.nickname.trim()"
+                class="origin-name"
+              >昵称：{{ contact.nickname }}</text>
               <view v-if="contact.isBlocked" class="blocked-tag">
                 <text>已拉黑</text>
               </view>
@@ -526,9 +531,9 @@ function onDelete() {
 
 .profile {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 32rpx;
-  padding: 0 48rpx 16rpx;
+  padding: 0 48rpx 28rpx;
   flex-shrink: 0;
   margin-top: -40rpx;
 }
@@ -546,7 +551,12 @@ function onDelete() {
 .profile-meta {
   flex: 1;
   min-width: 0;
-  padding-bottom: 8rpx;
+  /* 头像上探约 40rpx，文字对齐头像在白底上的视觉中线，避免两行名把整块压下去 */
+  padding-top: 36rpx;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 104rpx;
 }
 
 .name {
@@ -554,6 +564,16 @@ function onDelete() {
   font-weight: 700;
   line-height: 48rpx;
   color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.origin-name {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  line-height: 34rpx;
+  color: #9aa3b5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

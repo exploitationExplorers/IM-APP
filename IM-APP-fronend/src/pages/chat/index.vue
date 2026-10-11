@@ -11,6 +11,7 @@ import ImDesktopListResizer from '@/components/desktop/ImDesktopListResizer.vue'
 import ChatRoom from '@/pages/chat/room.vue'
 import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
+import { useGroupStore } from '@/stores/group'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { usePullRefresh } from '@/composables/usePullRefresh'
 import { useTabBar } from '@/composables/useTabBar'
@@ -20,6 +21,7 @@ import type { Conversation } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { isDissolvedGroupConversationPreview, isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-notification'
 import { setConversationRecvOpt } from '@/utils/openim'
+import { resolveIMGroupByIM } from '@/api/im'
 
 useAuthGuard()
 useTabBar()
@@ -29,6 +31,7 @@ const { listWidth, isResizing, onResizeStart } = useDesktopListResize(isDesktop)
 const statusBarHeight = getStatusBarHeight()
 const chatStore = useChatStore()
 const contactStore = useContactStore()
+const groupStore = useGroupStore()
 const keyword = ref('')
 const showAddMenu = ref(false)
 const showFilter = ref(false)
@@ -118,6 +121,48 @@ async function onTogglePin(item: Conversation) {
 
 async function onHideConversation(item: Conversation) {
   activeSwipeId.value = null
+  // 群聊：删除会话同时退出，否则通讯录「群组」里还会挂着，客户会觉得删了还在
+  if (item.type === 'group') {
+    const res = await uni.showModal({
+      title: '删除群聊',
+      content: '删除后将退出该群，并不再出现在群组列表。群主请先转让或解散。确定继续吗？',
+      confirmText: '删除',
+      cancelText: '取消',
+    })
+    if (!res.confirm) return
+    try {
+      // 会话上的 groupId 是 OpenIM ID，退群接口要业务群 ID
+      const imGroupId = item.groupId || ''
+      const mapped = imGroupId
+        ? await resolveIMGroupByIM(imGroupId).catch(() => null)
+        : null
+      const businessGroupId = mapped?.businessGroupId || ''
+      if (!businessGroupId) {
+        await chatStore.hideConversationLocal(item.id)
+        if (selectedConv.value?.id === item.id) selectedConv.value = null
+        uni.showToast({ title: '已删除会话', icon: 'none' })
+        return
+      }
+      await groupStore.leave(businessGroupId)
+      await chatStore.removeExitedGroupConversation(item.id)
+      if (selectedConv.value?.id === item.id) selectedConv.value = null
+    } catch (e) {
+      const msg = (e as Error)?.message || '删除失败'
+      // 群主 leave 会被拒：只藏会话，并提示去解散/转让
+      if (/无权限|群主|owner|转让|解散|Forbidden/i.test(msg)) {
+        try {
+          await chatStore.hideConversationLocal(item.id)
+          if (selectedConv.value?.id === item.id) selectedConv.value = null
+          uni.showToast({ title: '已删除会话；群主需转让或解散后才会离开群组', icon: 'none' })
+        } catch (hideErr) {
+          uni.showToast({ title: (hideErr as Error)?.message || msg, icon: 'none' })
+        }
+        return
+      }
+      uni.showToast({ title: msg, icon: 'none' })
+    }
+    return
+  }
   try {
     await chatStore.hideConversationLocal(item.id)
     if (selectedConv.value?.id === item.id) {

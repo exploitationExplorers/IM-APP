@@ -164,8 +164,9 @@ export function useChatMessageActions(opts: {
     }
 
     if (!mine && canManage) {
-      items.push({ key: 'kick', label: '移除该成员', wide: true })
-      items.push({ key: 'kickAndDelete', label: '移除该成员并删除消息', wide: true })
+      // 清消息放前面：踢卖料/广告时默认一眼看到「并删除消息」
+      items.push({ key: 'kickAndDelete', label: '移除并删除其消息', wide: true })
+      items.push({ key: 'kick', label: '仅移除该成员', wide: true })
     }
     return items
   })

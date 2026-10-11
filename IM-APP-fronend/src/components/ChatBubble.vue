@@ -85,7 +85,27 @@ const emit = defineEmits<{
   playVideo: [message: ChatMessage]
   /** 点图片预览：由父级按需拼会话图片列表，避免每条气泡都绑 previewUrls */
   previewImage: [message: ChatMessage]
+  /** 点击引用块：跳转到被引用的原消息 */
+  quoteClick: [clientMsgId: string]
 }>()
+
+function onQuoteClick() {
+  const id = (props.message.quote?.clientMsgId || '').trim()
+  if (!id) {
+    uni.showToast({ title: '无法定位原消息', icon: 'none' })
+    return
+  }
+  emit('quoteClick', id)
+}
+
+function copyNickname() {
+  const name = (props.nickname || '').trim()
+  if (!name) return
+  uni.setClipboardData({
+    data: name,
+    success: () => uni.showToast({ title: '已复制昵称', icon: 'none' }),
+  })
+}
 
 /** 长按头像后短时间内吞掉 click，避免又跳进资料页 */
 let avatarLongpressLockUntil = 0
@@ -628,7 +648,12 @@ function openLink(url: string) {
     />
     <view class="content-wrap">
       <view v-if="showNameRow" class="name-row">
-        <text v-if="showNickname" class="nickname">{{ nickname }}</text>
+        <text
+          v-if="showNickname"
+          class="nickname"
+          selectable
+          @longpress.stop="copyNickname"
+        >{{ nickname }}</text>
         <text v-if="roleBadgeText" class="role-badge" :class="`role-${role}`">{{ roleBadgeText }}</text>
       </view>
       <view class="bubble-line">
@@ -749,7 +774,12 @@ function openLink(url: string) {
         @longpress="onLongPress"
         @contextmenu="onContextMenu"
       >
-        <view v-if="message.quote" class="quote-box" :class="mine ? 'quote-mine' : 'quote-other'">
+        <view
+          v-if="message.quote"
+          class="quote-box"
+          :class="mine ? 'quote-mine' : 'quote-other'"
+          @click.stop="onQuoteClick"
+        >
           <image
             class="quote-thumb"
             :src="quoteThumbSrc(message.quote)"
@@ -1202,6 +1232,7 @@ function openLink(url: string) {
   border-radius: 8rpx;
   border-left: 8rpx solid #0a2fc2;
   box-sizing: border-box;
+  cursor: pointer;
 }
 
 .quote-other {

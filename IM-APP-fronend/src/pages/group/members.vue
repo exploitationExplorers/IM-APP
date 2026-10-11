@@ -208,6 +208,15 @@ function displayName(member: GroupMember) {
   return member.memberRemark?.trim() || member.groupNickname || member.nickname || '成员'
 }
 
+function copyName(member: GroupMember) {
+  const name = displayName(member).trim()
+  if (!name) return
+  uni.setClipboardData({
+    data: name,
+    success: () => uni.showToast({ title: '已复制昵称', icon: 'none' }),
+  })
+}
+
 /** 群主/管理员徽章：有成员备注时在身份后括号展示，如 群主(产品负责人) */
 function roleBadgeText(member: GroupMember) {
   const role = (member.role || '').toLowerCase()
@@ -300,24 +309,39 @@ async function onUnmute(member: GroupMember) {
   }
 }
 
-async function onRemove(member: GroupMember) {
+/** 管理入口：禁言/移除集中到「管理」，避免窄屏挤掉「移除」 */
+async function onManageMember(member: GroupMember) {
   if (busy.value || !canActOn(member)) return
-  const res = await uni.showModal({
-    title: '移除成员',
-    content: `确定将 ${displayName(member)} 移出群聊？`,
-    confirmText: '移除',
-    cancelText: '取消',
-  })
-  if (!res.confirm) return
-  busy.value = true
+  const labels = member.isMuted
+    ? ['解除禁言', '移除并删除其消息', '仅移除成员']
+    : ['禁言', '移除并删除其消息', '仅移除成员']
+  let tapIndex = -1
   try {
-    await removeGroupMember(groupId.value, member.id)
-    members.value = members.value.filter((item) => item.id !== member.id)
-    uni.showToast({ title: '已移除', icon: 'success' })
-  } catch (e) {
-    uni.showToast({ title: (e as Error)?.message || '移除失败', icon: 'none' })
-  } finally {
-    busy.value = false
+    const sheet = await uni.showActionSheet({ itemList: labels })
+    tapIndex = sheet.tapIndex
+  } catch {
+    return
+  }
+  if (tapIndex === 0) {
+    if (member.isMuted) void onUnmute(member)
+    else void onMute(member)
+    return
+  }
+  if (tapIndex === 1 || tapIndex === 2) {
+    const deleteMessages = tapIndex === 1
+    busy.value = true
+    try {
+      await removeGroupMember(groupId.value, member.id, deleteMessages)
+      members.value = members.value.filter((item) => item.id !== member.id)
+      uni.showToast({
+        title: deleteMessages ? '已移除并清除其消息' : '已移除',
+        icon: 'success',
+      })
+    } catch (e) {
+      uni.showToast({ title: (e as Error)?.message || '移除失败', icon: 'none' })
+    } finally {
+      busy.value = false
+    }
   }
 }
 </script>
@@ -345,32 +369,32 @@ async function onRemove(member: GroupMember) {
         @click="openProfile(member)"
       >
         <image class="avatar" :src="memberAvatar(member)" mode="aspectFill" />
-        <text class="name">{{ displayName(member) }}</text>
-        <view
-          v-if="(member.role || '').toLowerCase() === 'owner'"
-          class="badge badge-owner"
-        >
-          <text class="badge-text">{{ roleBadgeText(member) }}</text>
-        </view>
-        <view
-          v-else-if="(member.role || '').toLowerCase() === 'admin'"
-          class="badge badge-admin"
-        >
-          <text class="badge-text">{{ roleBadgeText(member) }}</text>
-        </view>
-        <view v-else-if="member.isMuted" class="badge badge-muted">
-          <text class="badge-text">已禁言</text>
-        </view>
-        <view v-if="canActOn(member)" class="actions">
-          <view class="btn-mute" @click.stop="onMute(member)">
-            <text class="btn-text">禁言</text>
+        <view class="meta">
+          <view class="name-line">
+            <text class="name" selectable @longpress.stop="copyName(member)">{{ displayName(member) }}</text>
+            <view
+              v-if="(member.role || '').toLowerCase() === 'owner'"
+              class="badge badge-owner"
+            >
+              <text class="badge-text">{{ roleBadgeText(member) }}</text>
+            </view>
+            <view
+              v-else-if="(member.role || '').toLowerCase() === 'admin'"
+              class="badge badge-admin"
+            >
+              <text class="badge-text">{{ roleBadgeText(member) }}</text>
+            </view>
+            <view v-else-if="member.isMuted" class="badge badge-muted">
+              <text class="badge-text">已禁言</text>
+            </view>
           </view>
-          <view v-if="member.isMuted" class="btn-unmute" @click.stop="onUnmute(member)">
-            <text class="btn-text">解禁</text>
-          </view>
-          <view class="btn-remove" @click.stop="onRemove(member)">
-            <text class="btn-text">移除</text>
-          </view>
+          <text
+            v-if="friendRemark(member) && member.nickname && friendRemark(member) !== member.nickname"
+            class="origin-name"
+          >昵称：{{ member.nickname }}</text>
+        </view>
+        <view v-if="canActOn(member)" class="btn-manage" @click.stop="onManageMember(member)">
+          <text class="btn-text">管理</text>
         </view>
       </view>
       <text v-if="loadingAll" class="loading">正在加载全部成员以便搜索...</text>
@@ -421,8 +445,8 @@ async function onRemove(member: GroupMember) {
 .member-row {
   display: flex;
   align-items: center;
-  gap: 32rpx;
-  padding: 16rpx 40rpx;
+  gap: 24rpx;
+  padding: 20rpx 40rpx;
   box-sizing: border-box;
 }
 
@@ -434,11 +458,33 @@ async function onRemove(member: GroupMember) {
   flex-shrink: 0;
 }
 
-.name {
+.meta {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.name-line {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.name {
   min-width: 0;
   font-size: 32rpx;
   color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.origin-name {
+  font-size: 24rpx;
+  color: #9aa3b5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -488,43 +534,24 @@ async function onRemove(member: GroupMember) {
   color: $uni-color-primary;
 }
 
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  flex-shrink: 0;
-}
-
-.btn-mute,
-.btn-unmute,
-.btn-remove {
+.btn-manage {
   height: 64rpx;
-  min-width: 104rpx;
-  padding: 0 20rpx;
+  min-width: 112rpx;
+  padding: 0 24rpx;
   border-radius: 8rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
+  flex-shrink: 0;
+  background: #eef1f8;
 }
 
 .btn-text {
   font-size: 28rpx;
   font-weight: 600;
-  color: #fff;
+  color: #0a2fc2;
   line-height: 1;
-}
-
-.btn-mute {
-  background: #fbc02d;
-}
-
-.btn-unmute {
-  background: #4caf50;
-}
-
-.btn-remove {
-  background: #dc2828;
 }
 
 .empty,

@@ -32,7 +32,6 @@ import {
 import { pickLocalImages, requestAndroidAlbumPermission } from '@/utils/file-upload'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
-import { fetchContact } from '@/api/contact'
 import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
 import {
   acceptGroupInvitation,
@@ -198,6 +197,21 @@ const messages = computed(() =>
       .filter((m) => !isPurgedMessage(m)),
   ),
 )
+
+/** 贴底时只挂载尾部气泡，大幅减轻「消息多就卡死」；上滑翻历史再展开全量窗口 */
+const RENDER_TAIL = 48
+const browsingHistory = ref(false)
+const renderMessages = computed(() => {
+  const all = messages.value
+  if (!browsingHistory.value && stickToBottom.value && all.length > RENDER_TAIL) {
+    return all.slice(-RENDER_TAIL)
+  }
+  return all
+})
+
+watch(stickToBottom, (atBottom) => {
+  if (atBottom) browsingHistory.value = false
+})
 
 let roomFirstMessagesMarked = false
 watch(
@@ -522,6 +536,27 @@ function scrollToMessage(id: string) {
   }, 1600)
 }
 
+/** 点击引用块：翻历史定位并滚到原消息（与搜索跳转共用 locateMessage） */
+async function onQuoteClick(clientMsgId: string) {
+  if (!conversationId.value || !clientMsgId) return
+  stickToBottom.value = false
+  browsingHistory.value = true
+  uni.showLoading({ title: '定位中…', mask: true })
+  try {
+    const found = await chatStore.locateMessage(conversationId.value, clientMsgId)
+    await nextTick()
+    if (found) {
+      scrollToMessage(clientMsgId)
+    } else {
+      uni.showToast({ title: '未找到该条消息', icon: 'none' })
+    }
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '定位失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
+}
+
 function jumpToPinnedMessage() {
   const id = pinnedMessage.value?.clientMsgID
   if (!id) return
@@ -816,6 +851,8 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     }
     const focusId = String(query?.clientMsgId || '')
     if (focusId) {
+      browsingHistory.value = true
+      stickToBottom.value = false
       const found = await chatStore.locateMessage(conv.id, focusId)
       await nextTick()
       if (found) {
@@ -838,6 +875,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 let loadingMore = false
 async function onScrollToUpper() {
   stickToBottom.value = false
+  browsingHistory.value = true
   if (!conversationId.value || loadingMore) return
   loadingMore = true
   try {
@@ -1088,14 +1126,24 @@ function clipboardImageFiles(data: DataTransfer | null): File[] {
   return files
 }
 
-/** H5/PC：输入框聚焦时粘贴图片，走和相册一样的发送 */
+/** H5/PC：粘贴图片先确认，避免「粘贴完自己就发出去」 */
 function onWindowPaste(e: ClipboardEvent) {
   if (!isH5ComposerPlatform() || composerBlocked.value || voiceMode.value) return
   if (!composerPasteTarget(e.target)) return
   const files = clipboardImageFiles(e.clipboardData).slice(0, MAX_PICK_COUNT)
   if (!files.length) return
   e.preventDefault()
-  void sendPastedImages(files)
+  const tip = files.length === 1 ? '发送这张图片？' : `发送这 ${files.length} 张图片？`
+  void uni
+    .showModal({
+      title: '发送图片',
+      content: tip,
+      confirmText: '发送',
+      cancelText: '取消',
+    })
+    .then((res) => {
+      if (res.confirm) void sendPastedImages(files)
+    })
 }
 
 async function sendPastedImages(files: File[]) {
@@ -1305,26 +1353,25 @@ function openIMUserIdOf(businessUserId: string): string {
   return businessUserId.replace(/-/g, '').toLowerCase()
 }
 
+/**
+ * 群成员备注只从好友索引取，绝不对非好友打 GET /contacts/:id。
+ * 旧逻辑对「不在通讯录当前页」的成员逐个 fetchContact，群内非好友会刷一堆 404「好友不存在」。
+ */
 async function fillFriendRemarks(userIds: string[]) {
-  const missing = [...new Set(userIds.filter((id) => id && id !== myId.value && !contactStore.contacts.some((c) => c.id === id) && !friendRemarkMap.value[id]))]
-  if (!missing.length) return
-  const found: Record<string, string> = {}
-  let cursor = 0
-  const worker = async () => {
-    while (cursor < missing.length) {
-      const id = missing[cursor]
-      cursor += 1
-      try {
-        const contact = await fetchContact(id)
-        const remark = contact.remark?.trim()
-        if (remark) found[id] = remark
-      } catch {
-        /* 不是好友就没有备注 */
-      }
-    }
+  try {
+    await contactStore.ensureFriendIndex()
+  } catch {
+    /* 索引失败不阻断聊天；气泡仍有群昵称/昵称 */
   }
-  await Promise.all(Array.from({ length: Math.min(4, missing.length) }, () => worker()))
-  if (Object.keys(found).length) friendRemarkMap.value = { ...friendRemarkMap.value, ...found }
+  const found: Record<string, string> = {}
+  for (const id of new Set(userIds)) {
+    if (!id || id === myId.value) continue
+    const remark = contactStore.remarkOf(id)?.trim()
+    if (remark) found[id] = remark
+  }
+  if (Object.keys(found).length) {
+    friendRemarkMap.value = { ...friendRemarkMap.value, ...found }
+  }
 }
 
 function memberDisplayName(m: GroupMember): string {
@@ -2080,23 +2127,18 @@ function pickImage() {
   })
 }
 
-/** 相机拍照即发 */
+/** 相机拍照即发（与相册同一套 pickLocalImages，含权限/路径兜底） */
 function pickCamera() {
   afterPlusClosed(() => {
-    uni.chooseImage({
-      count: 1,
-      sourceType: ['camera'],
-      fail: (err) => chooseFailToast(err, '无法打开相机'),
-      success: async (res) => {
-        try {
-          await chatStore.sendImage(conversationId.value, res.tempFilePaths[0], imUserId.value || myId.value)
-          await nextTick()
-          scrollToBottom(true)
-        } catch (e) {
-          uni.showToast({ title: (e as Error).message, icon: 'none' })
-        }
-      },
-    })
+    void pickLocalImages({ count: 1, sourceType: ['camera'] })
+      .then((paths) => sendPickedImagePaths(paths))
+      .catch((e) => {
+        if (String((e as Error)?.message || '') === 'cancel') return
+        uni.showToast({
+          title: (e as Error)?.message || '无法打开相机',
+          icon: 'none',
+        })
+      })
   })
 }
 
@@ -2257,7 +2299,7 @@ function pickFavorite() {
       @scrolltoupper="onScrollToUpper"
     >
       <view
-        v-for="m in messages"
+        v-for="m in renderMessages"
         :id="`msg_${m.id}`"
         :key="m.id"
         class="msg-row"
@@ -2288,6 +2330,7 @@ function pickFavorite() {
           @retry="onRetry(m)"
           @play-video="onPlayVideo"
           @preview-image="openImagePreview"
+          @quote-click="onQuoteClick"
         />
       </view>
       <!-- 底部锚点：scroll-into-view 只保证元素「顶部」进入视口，最后一条比视口高时会露出上半截；

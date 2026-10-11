@@ -1350,10 +1350,23 @@ export async function sendImageMessage(target: IMTarget, filePath: string): Prom
       return sendImageMessageViaUpload(target, fullPath || filePath)
     }
   }
-  const file = await pathToFile(filePath)
+  // H5：HEIC / 超大图先压 jpeg，避免 iPhone 粘贴/相册偶发发不出
+  const { prepareImageFile } = await import('@/utils/file-upload')
+  let file = await pathToFile(filePath)
+  try {
+    file = await prepareImageFile(file, { fileName: `img_${Date.now()}.jpg`, maxBytes: 2_000_000 })
+  } catch (e) {
+    console.warn('[image] H5 预处理失败，尝试原图', (e as Error)?.message || e)
+  }
   const url = await uploadFile(file)
   const size = await imageSizeOf(filePath)
-  const picture = { uuid: IMSDK.uuid(), type: file.type, size: file.size, url, ...size }
+  const picture = {
+    uuid: IMSDK.uuid(),
+    type: file.type || 'image/jpeg',
+    size: file.size,
+    url,
+    ...size,
+  }
   message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
     sourcePath: url,
     sourcePicture: picture,
@@ -2525,10 +2538,15 @@ function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {
   if (!quoted) return undefined
   const type = resolveQuotedAppType(quoted)
   const rawContent = extractContent(quoted)
+  const rawQuoted = quoted as MessageItem & Record<string, unknown>
+  const clientMsgId = String(
+    quoted.clientMsgID || rawQuoted.ClientMsgID || rawQuoted.clientMsgId || '',
+  ).trim()
   return {
     senderNickname: quoted.senderNickname || pickQuotedNickname(quoted) || '',
     thumbUrl: quoteThumbOf(type, rawContent, quoted.senderFaceUrl || undefined) || undefined,
     content: quoteSummaryOf(type, rawContent),
+    clientMsgId: clientMsgId || undefined,
   }
 }
 

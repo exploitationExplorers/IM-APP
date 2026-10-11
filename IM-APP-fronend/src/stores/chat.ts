@@ -1685,6 +1685,7 @@ export const useChatStore = defineStore('chat', () => {
       senderNickname: quoted.senderNickname || '',
       thumbUrl: quoteThumbOf(quoted.type, quoted.content, quoted.senderAvatar) || undefined,
       content: quoteSummaryOf(quoted.type, quoted.content),
+      clientMsgId: quoteMessageId || quoted.id || undefined,
     }
     await sendWithPlaceholder(conversationId, placeholder, () => sendQuoteMessage(target, text, quote))
   }

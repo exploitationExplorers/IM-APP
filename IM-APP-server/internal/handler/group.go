@@ -231,6 +231,10 @@ func (h *GroupHandler) ListAnnouncementHistory(c *gin.Context) {
 func (h *GroupHandler) Leave(c *gin.Context) {
 	uid := middleware.UserID(c)
 	if err := h.Svc.Leave(c.Request.Context(), c.Param("id"), uid); err != nil {
+		if errors.Is(err, repository.ErrForbidden) {
+			response.Fail(c, http.StatusForbidden, "群主不能退出，请先转让或解散")
+			return
+		}
 		response.Fail(c, http.StatusInternalServerError, "操作失败")
 		return
 	}

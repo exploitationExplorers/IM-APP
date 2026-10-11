@@ -92,6 +92,15 @@ function getMemberDisplayName(member: { id?: string; nickname?: string; groupNic
   return remark || member.groupNickname || member.nickname || '成员'
 }
 
+function copyMemberName(member: { id?: string; nickname?: string; groupNickname?: string }) {
+  const name = getMemberDisplayName(member).trim()
+  if (!name) return
+  uni.setClipboardData({
+    data: name,
+    success: () => uni.showToast({ title: '已复制昵称', icon: 'none' }),
+  })
+}
+
 function memberPreviewAvatar(avatar: string | undefined) {
   return avatar || APP_CONFIG.defaultAvatarUrl
 }
@@ -391,7 +400,17 @@ async function onDismiss() {
   if (!res.confirm) return
   leaving.value = true
   try {
+    // 解散前先拿会话 ID，成功后清掉聊天列表，避免「群没了会话还在」
+    let conversationId = convId.value
+    if (!conversationId) {
+      conversationId = await resolveGroupConversationID(groupId.value).catch(() => '')
+    }
     await groupStore.dismiss(groupId.value)
+    if (conversationId) {
+      await chatStore.removeExitedGroupConversation(conversationId)
+    } else {
+      await chatStore.loadConversations().catch(() => undefined)
+    }
     uni.reLaunch({ url: '/pages/chat/index' })
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '解散失败', icon: 'none' })
@@ -478,7 +497,7 @@ async function onRemoveDissolved() {
           @click.stop="openPreviewMember(member)"
         >
           <image class="member-avatar" :src="memberPreviewAvatar(member.avatar)" mode="aspectFill" />
-          <text class="member-name">{{ getMemberDisplayName(member) }}</text>
+          <text class="member-name" selectable @longpress.stop="copyMemberName(member)">{{ getMemberDisplayName(member) }}</text>
         </view>
         <view class="member-item" @click.stop="goToMembers">
           <image

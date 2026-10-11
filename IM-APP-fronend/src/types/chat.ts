@@ -27,6 +27,8 @@ export interface MessageQuote {
    */
   thumbUrl?: string
   content: string
+  /** 被引用原消息 clientMsgID，点击引用块时定位跳转 */
+  clientMsgId?: string
 }
 
 export interface ChatMessage {

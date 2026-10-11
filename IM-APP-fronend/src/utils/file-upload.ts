@@ -518,13 +518,23 @@ export async function uploadAvatarFile(file: File): Promise<string> {
   })
 }
 
-function isReadyAvatarType(type: string): boolean {
+function isReadyImageType(type: string): boolean {
   return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' || type === 'image/webp' || type === 'image/gif'
 }
 
-async function prepareAvatarFile(file: File): Promise<File> {
+/**
+ * H5：HEIC / 超大图 / 空 type 压成 jpeg，聊天发图与换头像共用。
+ * App 无 document 时原样返回（走原生压缩路径）。
+ */
+export async function prepareImageFile(
+  file: File,
+  opts?: { maxBytes?: number; edge?: number; fileName?: string },
+): Promise<File> {
+  const maxBytes = opts?.maxBytes ?? 1_500_000
+  const edge = opts?.edge ?? 1280
+  const fileName = opts?.fileName || 'image.jpg'
   const type = (file.type || '').toLowerCase()
-  if (isReadyAvatarType(type) && file.size > 0 && file.size <= 1_500_000) return file
+  if (isReadyImageType(type) && file.size > 0 && file.size <= maxBytes) return file
   if (typeof document === 'undefined') return file
   const url = URL.createObjectURL(file)
   try {
@@ -534,7 +544,6 @@ async function prepareAvatarFile(file: File): Promise<File> {
       el.onerror = () => reject(new Error('无法读取这张图片，请换一张'))
       el.src = url
     })
-    const edge = 1280
     let width = img.naturalWidth || img.width
     let height = img.naturalHeight || img.height
     if (!width || !height) throw new Error('无法读取这张图片，请换一张')
@@ -549,14 +558,17 @@ async function prepareAvatarFile(file: File): Promise<File> {
     ctx.drawImage(img, 0, 0, width, height)
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86))
     if (!blob) throw new Error('无法读取这张图片，请换一张')
-    // App WebView 可能没有 File 构造器；有则包一层，没有就带上 name/type 当 File 用
     if (typeof File !== 'undefined') {
-      return new File([blob], 'avatar.jpg', { type: 'image/jpeg' })
+      return new File([blob], fileName, { type: 'image/jpeg' })
     }
-    return Object.assign(blob, { name: 'avatar.jpg', lastModified: Date.now() }) as File
+    return Object.assign(blob, { name: fileName, lastModified: Date.now() }) as File
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+async function prepareAvatarFile(file: File): Promise<File> {
+  return prepareImageFile(file, { fileName: 'avatar.jpg' })
 }
 
 /** 上传举报截图并返回 fileId（创建任务 → multipart POST 直传 → 确认完成） */

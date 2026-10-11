@@ -3,10 +3,17 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { MessageType } from 'openim-uniapp-polyfill'
 import type { MessageItem } from 'openim-uniapp-polyfill'
-import { collectHistoryMessages, messageSearchPreview, resolveGroupConversationID } from '@/utils/openim'
+import {
+  businessUserIdFromIM,
+  collectHistoryMessages,
+  messageSearchPreview,
+  resolveGroupConversationID,
+} from '@/utils/openim'
 import { formatFavoriteDay, formatClock } from '@/utils/format'
 import ImNavBar from '@/components/ImNavBar.vue'
+import { useContactStore } from '@/stores/contact'
 
+const contactStore = useContactStore()
 const groupId = ref('')
 const groupTitle = ref('')
 const keyword = ref('')
@@ -42,6 +49,7 @@ onLoad(async (query) => {
   if (!groupId.value) return
   loading.value = true
   try {
+    await contactStore.ensureRemarkIndex().catch(() => undefined)
     const conversationId = await resolveGroupConversationID(groupId.value)
     messages.value = await collectHistoryMessages(conversationId)
   } catch (e) {
@@ -50,6 +58,12 @@ onLoad(async (query) => {
     loading.value = false
   }
 })
+
+/** 与群聊气泡一致：好友备注优先，否则用 SDK 昵称 */
+function displayNameOf(item: MessageItem) {
+  const uid = businessUserIdFromIM(item.sendID || '') || item.sendID || ''
+  return contactStore.remarkOf(uid) || item.senderNickname || '成员'
+}
 
 function goBack() {
   uni.navigateBack()
@@ -97,7 +111,7 @@ function openResult(item: MessageItem) {
         <image class="avatar" :src="item.senderFaceUrl" mode="aspectFill" />
         <view class="body">
           <view class="top">
-            <text class="name">{{ item.senderNickname || '成员' }}</text>
+            <text class="name">{{ displayNameOf(item) }}</text>
             <text class="time">{{ timeOf(item) }}</text>
           </view>
           <text class="preview">{{ previewOf(item) }}</text>

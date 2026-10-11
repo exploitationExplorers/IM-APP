@@ -219,6 +219,10 @@ function onDelete() {
               />
               <view class="friend-profile-meta">
                 <text class="friend-name">{{ listName }}</text>
+                <text
+                  v-if="contact.remark && contact.nickname && contact.remark.trim() !== contact.nickname.trim()"
+                  class="friend-origin-name"
+                >昵称：{{ contact.nickname }}</text>
                 <view v-if="contact.isBlocked" class="friend-blocked-tag">
                   <text>已拉黑</text>
                 </view>
@@ -500,6 +504,17 @@ function onDelete() {
   font-weight: 400;
   line-height: 24px;
   color: #212121;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-origin-name {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #9aa3b5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
