@@ -38,15 +38,19 @@ npm run pack:wgt -- --build --publish --min-native=100 --changelog=这里写客�
 2. 执行 `uni build -p app-plus`
 3. 把构建产物里的版本写成和新 `versionCode` 一致（这一步必须有，否则又会出现「安装成功但关于页还是旧版本」）
 4. 打成 `unpackage/release/im-xxx.wgt`（根目录就是 `manifest.json`，不要套一层文件夹）
-5. 上传到线上并写入发布记录
+5. 上传到线上并**同时写入 android + ios 两条发布记录**（同一份 wgt；企业签 iOS 也能热更新）
 
 看到类似输出即成功：
 
 ```text
 已提升版本: 1.0.3 (103)
 wgt 校验通过: __UNI__EC9D1AE 1.0.3 (103)
-已发布 wgt 1.0.3 (103)
+已发布 android wgt 1.0.3 (103)
+已发布 ios wgt 1.0.3 (103)
 ```
+
+> 企业签 / 不上架的 iOS **可以**走 wgt，和安卓同一套检查更新代码。只有上架 App Store 才受苹果审核限制。  
+> `--min-native` 必须 ≤ 客户手里那只 IPA/APK 壳的 `versionCode`；iOS 壳若比 100 旧，把数字改小或问客户关于页/打包时的壳版本。
 
 `changelog` 会出现在客户手机的更新弹窗里，写人话，不要写分支名。
 
@@ -100,6 +104,9 @@ npm run pack:wgt -- --build --publish --min-native=100 --force --changelog=必�
 
 # 正式渠道（客户正式包才用；测试 APK 默认 test）
 npm run pack:wgt -- --build --publish --channel=prod --min-native=100 --changelog=…
+
+# 只发一端（一般不用；默认已是 android,ios）
+npm run pack:wgt -- --build --publish --platform=ios --min-native=100 --changelog=…
 ```
 
-换新 APK 之后：把文档和命令里的 `--min-native=100` 改成新壳的 `versionCode`。
+换新 APK / IPA 之后：把文档和命令里的 `--min-native=100` 改成新壳的 `versionCode`。

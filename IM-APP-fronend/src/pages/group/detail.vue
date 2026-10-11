@@ -208,6 +208,31 @@ function goToMembers() {
   })
 }
 
+/** 预览头像：好友直接私聊，非好友进公开资料；点自己则进完整成员列表 */
+async function openPreviewMember(member: { id: string; nickname?: string; groupNickname?: string; avatar?: string }) {
+  const me = userStore.profile
+  if (me && (sameUserId(member.id, me.id) || sameUserId(member.id, me.publicId))) {
+    goToMembers()
+    return
+  }
+  try {
+    await contactStore.ensureFriendIndex()
+  } catch {
+    /* 按非好友处理 */
+  }
+  if (contactStore.isFriend(member.id)) {
+    contactStore.openChatWithContact(
+      member.id,
+      getMemberDisplayName(member),
+      memberPreviewAvatar(member.avatar),
+    )
+    return
+  }
+  uni.navigateTo({
+    url: `/pages/contacts/user-profile?id=${encodeURIComponent(member.id)}&groupId=${encodeURIComponent(groupId.value)}`,
+  })
+}
+
 function goToAdmin() {
   uni.navigateTo({
     url: `/pages/group/admin?id=${encodeURIComponent(groupId.value)}`,
@@ -447,7 +472,7 @@ async function onRemoveDissolved() {
           v-for="member in previewMembers"
           :key="member.id"
           class="member-item"
-          @click="goToMembers"
+          @click.stop="openPreviewMember(member)"
         >
           <image class="member-avatar" :src="memberPreviewAvatar(member.avatar)" mode="aspectFill" />
           <text class="member-name">{{ getMemberDisplayName(member) }}</text>

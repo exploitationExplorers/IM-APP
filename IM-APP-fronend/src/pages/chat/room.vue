@@ -1555,15 +1555,33 @@ async function openProfileById(userId: string) {
     return
   }
 
-  if (!contactStore.contacts.length) {
-    try {
-      await contactStore.loadDirectory()
-    } catch {
-      // 通讯录拉失败时按非好友打开资料页
-    }
+  try {
+    await contactStore.ensureFriendIndex()
+  } catch {
+    // 通讯录拉失败时按非好友打开资料页
   }
-  const isFriend = contactStore.contacts.some((c) => c.id === userId)
-  if (props.embedded && isFriend) {
+  const friend = contactStore.isFriend(userId)
+  // 群里点好友头像：直接私聊
+  if (friend && chatType.value === 'group') {
+    const member = groupMembersForAt.value.find((m) => sameBusinessUserId(m.id, userId))
+    const title =
+      contactStore.remarkOf(userId) ||
+      member?.memberRemark?.trim() ||
+      member?.groupNickname ||
+      member?.nickname ||
+      '好友'
+    const avatar =
+      memberAvatarMap.value[userId] ||
+      member?.avatar ||
+      APP_CONFIG.defaultAvatarUrl
+    if (props.embedded) {
+      contactStore.openChatWithContactDesktop(userId, title, avatar)
+    } else {
+      contactStore.openChatWithContact(userId, title, avatar)
+    }
+    return
+  }
+  if (props.embedded && friend) {
     openFriendDetailModal(userId)
     return
   }
@@ -1572,7 +1590,7 @@ async function openProfileById(userId: string) {
     chatType.value === 'group' && businessId.value
       ? `&groupId=${encodeURIComponent(businessId.value)}`
       : ''
-  const path = isFriend
+  const path = friend
     ? `/pages/contacts/friend-detail?id=${encodeURIComponent(userId)}`
     : `/pages/contacts/user-profile?id=${encodeURIComponent(userId)}${groupParam}`
   uni.navigateTo({ url: path })

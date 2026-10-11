@@ -247,15 +247,12 @@ async function openMember(member: GroupMember) {
   const me = userStore.profile
   if (me && sameUserId(member.id, me.id)) return
   close()
-  if (!contactStore.contacts.length) {
-    try {
-      await contactStore.loadDirectory()
-    } catch {
-      /* ignore */
-    }
+  try {
+    await contactStore.ensureFriendIndex()
+  } catch {
+    /* ignore */
   }
-  const isFriend = contactStore.contacts.some((c) => sameUserId(c.id, member.id))
-  if (isFriend) {
+  if (contactStore.isFriend(member.id)) {
     // 好友直接开私聊，不必再点资料页「发消息」
     contactStore.openChatWithContactDesktop(
       member.id,

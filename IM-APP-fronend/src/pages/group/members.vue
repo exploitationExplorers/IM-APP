@@ -235,16 +235,14 @@ function canActOn(member: GroupMember) {
 
 async function openProfile(member: GroupMember) {
   if (member.id === myId.value) return
-  if (!contactStore.contacts.length) {
-    try {
-      await contactStore.loadDirectory()
-    } catch {
-      /* 拉通讯录失败时按非好友打开资料 */
-    }
+  try {
+    await contactStore.ensureFriendIndex()
+  } catch {
+    /* 索引失败时按非好友打开资料 */
   }
-  const isFriend = contactStore.contacts.some((c) => c.id === member.id)
-  if (isFriend) {
-    await contactStore.openChatWithContact(
+  // 已是好友：直接进私聊，不必再绕资料页点「发消息」
+  if (contactStore.isFriend(member.id)) {
+    contactStore.openChatWithContact(
       member.id,
       displayName(member),
       member.avatar || APP_CONFIG.defaultAvatarUrl,

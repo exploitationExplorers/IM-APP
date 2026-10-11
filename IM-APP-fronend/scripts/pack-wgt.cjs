@@ -61,7 +61,8 @@ function parseArgs(argv) {
     minNative: '',
     changelog: '',
     channel: 'test',
-    platform: 'android',
+    // wgt 默认双端：安卓/iOS（企业签）共用同一资源包；整包再按单端发
+    platform: 'android,ios',
     file: '',
     api: '',
     key: '',
@@ -85,6 +86,20 @@ function parseArgs(argv) {
     }
   }
   return args
+}
+
+/** 支持 --platform=android / ios / android,ios / all */
+function resolvePlatforms(raw, packageType) {
+  const text = String(raw || '').trim().toLowerCase()
+  if (!text || text === 'all' || text === 'both') {
+    return packageType === 'wgt' ? ['android', 'ios'] : ['android']
+  }
+  const list = text.split(/[,+\s]+/).map((p) => p.trim()).filter(Boolean)
+  const allowed = new Set(['android', 'ios'])
+  for (const p of list) {
+    if (!allowed.has(p)) throw new Error(`--platform 只支持 android / ios，收到: ${p}`)
+  }
+  return [...new Set(list)]
 }
 
 function loadDotEnv(filePath) {
@@ -407,7 +422,7 @@ async function apiJson(origin, key, method, pathname, body) {
   return parsed.data
 }
 
-async function publishRelease(args, filePath, versionName, versionCode) {
+async function publishReleaseForPlatform(args, platform, filePath, versionName, versionCode) {
   const frontendEnv = loadDotEnv(path.join(root, '.env'))
   const serverEnv = loadDotEnv(path.join(root, '..', 'IM-APP-server', '.env'))
   const origin = resolveApiBase(
@@ -428,11 +443,11 @@ async function publishRelease(args, filePath, versionName, versionCode) {
     }
     console.log(`wgt 校验通过: ${packed.appid} ${packed.versionName} (${packed.versionCode})`)
   }
-  console.log(`正在发布到 ${origin}`)
+  console.log(`正在发布到 ${origin}（${platform}）`)
 
   const fileName = path.basename(filePath)
   const upload = await apiJson(origin, key, 'POST', '/admin/app-releases/uploads', {
-    platform: args.platform,
+    platform,
     packageType: args.packageType,
     fileName,
   })
@@ -473,7 +488,7 @@ async function publishRelease(args, filePath, versionName, versionCode) {
   }
 
   const payload = {
-    platform: args.platform,
+    platform,
     channel: args.channel,
     versionName,
     versionCode,
@@ -489,8 +504,17 @@ async function publishRelease(args, filePath, versionName, versionCode) {
     }
   }
   const published = await apiJson(origin, key, 'POST', '/admin/app-releases', payload)
-  console.log(`已发布 ${published.packageType} ${published.versionName} (${published.versionCode})`)
+  console.log(
+    `已发布 ${platform} ${published.packageType} ${published.versionName} (${published.versionCode})`,
+  )
   console.log(published.downloadUrl)
+}
+
+async function publishRelease(args, filePath, versionName, versionCode) {
+  const platforms = resolvePlatforms(args.platform, args.packageType)
+  for (const platform of platforms) {
+    await publishReleaseForPlatform(args, platform, filePath, versionName, versionCode)
+  }
 }
 
 async function main() {

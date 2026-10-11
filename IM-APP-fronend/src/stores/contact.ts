@@ -48,6 +48,11 @@ export const useContactStore = defineStore('contact', () => {
    * 列表只保留当前页，会话标题要用全量备注，否则超过一页的好友只能看到昵称。
    */
   const remarkByUserId = ref<Record<string, string>>({})
+  /**
+   * 全量好友 id 集合（无横线小写）。
+   * 通讯录 `contacts` 只是当前页，群成员点好友开聊不能只靠那一页判断。
+   */
+  const friendKeySet = ref<Record<string, true>>({})
   const pendingDesktopChat = ref<{
     type: 'private' | 'group'
     businessId: string
@@ -85,6 +90,28 @@ export const useContactStore = defineStore('contact', () => {
     return remarkByUserId.value[normalizeUserKey(userId)] || ''
   }
 
+  function markFriendKeys(items: Contact[]) {
+    if (!items.length) return
+    let changed = false
+    const next = { ...friendKeySet.value }
+    for (const item of items) {
+      const key = normalizeUserKey(item.id)
+      if (!key || next[key]) continue
+      next[key] = true
+      changed = true
+    }
+    if (changed) friendKeySet.value = next
+  }
+
+  /** 是否已是好友；兼容业务 UUID 与无横线 id，不依赖通讯录当前页 */
+  function isFriend(userId?: string): boolean {
+    if (!userId) return false
+    const key = normalizeUserKey(userId)
+    if (!key) return false
+    if (friendKeySet.value[key]) return true
+    return contacts.value.some((c) => normalizeUserKey(c.id) === key)
+  }
+
   /** 改备注后立刻写进索引和当前列表，不必等整页 reload */
   function patchContactRemark(contactId: string, remark: string) {
     const key = normalizeUserKey(contactId)
@@ -99,12 +126,13 @@ export const useContactStore = defineStore('contact', () => {
     )
   }
 
-  /** 翻页拉全量备注；通讯录 UI 仍用分页，互不覆盖 */
+  /** 翻页拉全量备注 + 好友 id；通讯录 UI 仍用分页，互不覆盖 */
   async function ensureRemarkIndex() {
     if (!getToken()) return
     if (remarkIndexInFlight) return remarkIndexInFlight
     remarkIndexInFlight = (async () => {
       const collected: Record<string, string> = {}
+      const friendKeys: Record<string, true> = {}
       let cursor = ''
       for (let pageNo = 0; pageNo < REMARK_INDEX_MAX_PAGES; pageNo += 1) {
         const page = await fetchContacts({
@@ -115,13 +143,16 @@ export const useContactStore = defineStore('contact', () => {
         })
         for (const item of page.items) {
           const key = normalizeUserKey(item.id)
+          if (!key) continue
+          friendKeys[key] = true
           const remark = item.remark?.trim() || ''
-          if (key && remark) collected[key] = remark
+          if (remark) collected[key] = remark
         }
         if (!page.hasMore || !page.nextCursor) break
         cursor = page.nextCursor
       }
       remarkByUserId.value = collected
+      friendKeySet.value = friendKeys
     })()
       .catch((e) => {
         if (import.meta.env.DEV) console.warn('[contact] 备注索引加载失败', e)
@@ -130,6 +161,11 @@ export const useContactStore = defineStore('contact', () => {
         remarkIndexInFlight = null
       })
     return remarkIndexInFlight
+  }
+
+  /** 群成员点好友开聊前调用：保证全量好友索引就绪 */
+  async function ensureFriendIndex() {
+    await ensureRemarkIndex()
   }
 
   async function reloadContacts(opts?: { keyword?: string; sort?: ContactListSort }) {
@@ -147,6 +183,7 @@ export const useContactStore = defineStore('contact', () => {
       contactCursor.value = page.nextCursor || ''
       contactHasMore.value = page.hasMore
       mergeRemarks(page.items)
+      markFriendKeys(page.items)
     } finally {
       contactsLoading.value = false
     }
@@ -168,6 +205,7 @@ export const useContactStore = defineStore('contact', () => {
       contactHasMore.value = page.hasMore
       contactTotal.value = page.total
       mergeRemarks(page.items)
+      markFriendKeys(page.items)
     } finally {
       contactsLoading.value = false
     }
@@ -336,6 +374,7 @@ export const useContactStore = defineStore('contact', () => {
     contactCursor.value = ''
     contactHasMore.value = false
     remarkByUserId.value = {}
+    friendKeySet.value = {}
     groups.value = []
     pendingFriendRequests.value = []
     recentFriendRequests.value = []
@@ -357,8 +396,10 @@ export const useContactStore = defineStore('contact', () => {
     pendingFriendRequestCount,
     groupsExpanded,
     remarkOf,
+    isFriend,
     patchContactRemark,
     ensureRemarkIndex,
+    ensureFriendIndex,
     reloadContacts,
     loadMoreContacts,
     loadGroups,

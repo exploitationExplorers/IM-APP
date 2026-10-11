@@ -20,7 +20,7 @@ onLoad((query) => {
 })
 
 onMounted(async () => {
-  await contactStore.loadDirectory()
+  await contactStore.ensureFriendIndex().catch(() => contactStore.loadDirectory())
   if (!userId.value) return
   loading.value = true
   try {
@@ -32,7 +32,7 @@ onMounted(async () => {
   }
 })
 
-const isFriend = () => contactStore.contacts.some((c) => c.id === userId.value)
+const isFriend = () => contactStore.isFriend(userId.value)
 
 async function onAddFriend() {
   if (!user.value) return
