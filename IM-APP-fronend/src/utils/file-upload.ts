@@ -93,6 +93,130 @@ export function requestAndroidAlbumPermission(): Promise<void> {
   })
 }
 
+function isPickCancelError(err: unknown): boolean {
+  const msg = String((err as { errMsg?: string; message?: string })?.errMsg
+    || (err as Error)?.message
+    || err
+    || '')
+  return /cancel|用户取消|12/i.test(msg) || (err as { code?: number })?.code === 12
+}
+
+/** plus.gallery.pick：华为上 uni.chooseImage 常挂，系统选择器更稳 */
+function pickViaPlusGallery(opts: {
+  count: number
+  system: boolean
+}): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const gallery = plus?.gallery
+    if (!gallery?.pick) {
+      reject(new Error('无法打开相册'))
+      return
+    }
+    const multiple = opts.count > 1
+    gallery.pick(
+      (res: string | { files?: string[] }) => {
+        if (typeof res === 'string') {
+          resolve(res ? [res] : [])
+          return
+        }
+        resolve((res?.files || []).filter(Boolean).slice(0, opts.count))
+      },
+      (err: { message?: string; code?: number }) => {
+        if (isPickCancelError(err)) {
+          reject(new Error('cancel'))
+          return
+        }
+        reject(new Error(String(err?.message || '无法打开相册')))
+      },
+      {
+        filter: 'image',
+        multiple,
+        maximum: opts.count,
+        system: opts.system,
+        filename: '_doc/gallery/',
+      },
+    )
+  })
+}
+
+function chooseImagePaths(opts: {
+  count: number
+  sourceType: Array<'album' | 'camera'>
+  sizeType: Array<'original' | 'compressed'>
+}): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    uni.chooseImage({
+      count: opts.count,
+      sourceType: opts.sourceType,
+      sizeType: opts.sizeType,
+      success: (res) => {
+        const anyRes = res as unknown as { tempFilePaths?: string[] | string }
+        const raw = anyRes.tempFilePaths
+        const paths = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(Boolean)
+        resolve(paths.slice(0, opts.count))
+      },
+      fail: (err) => reject(err),
+    })
+  })
+}
+
+/**
+ * 统一选图：权限 → chooseImage →（空路径/失败）plus.gallery system:true → system:false。
+ * 华为 Mate / Harmony 上 chooseImage 常 fail 或 success 空路径，必须有 gallery 兜底。
+ */
+export async function pickLocalImages(opts?: {
+  count?: number
+  sourceType?: Array<'album' | 'camera'>
+}): Promise<string[]> {
+  const count = Math.max(1, Math.min(9, opts?.count ?? 1))
+  const sourceType = opts?.sourceType?.length ? opts.sourceType : (['album'] as Array<'album' | 'camera'>)
+  await requestAndroidAlbumPermission()
+
+  let paths: string[] = []
+  let chooseErr: unknown
+  try {
+    // original 优先：华为 compressed 经常空路径
+    paths = await chooseImagePaths({
+      count,
+      sourceType,
+      sizeType: ['original', 'compressed'],
+    })
+  } catch (e) {
+    if (isPickCancelError(e)) throw new Error('cancel')
+    chooseErr = e
+  }
+
+  if (paths.length) return paths
+
+  if (!isAppPlatform() || typeof plus === 'undefined') {
+    if (chooseErr) {
+      const msg = String((chooseErr as { errMsg?: string })?.errMsg || (chooseErr as Error)?.message || '')
+      throw new Error(msg.replace(/^[^:]+:\s*/, '') || '无法打开相册，请检查相册权限')
+    }
+    throw new Error('未获取到图片，请重试')
+  }
+
+  // 纯相机失败不再二次弹相册，避免误触
+  if (!sourceType.includes('album')) {
+    throw new Error('无法打开相机')
+  }
+
+  try {
+    paths = await pickViaPlusGallery({ count, system: true })
+    if (paths.length) return paths
+  } catch (e) {
+    if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
+  }
+  try {
+    paths = await pickViaPlusGallery({ count, system: false })
+    if (paths.length) return paths
+  } catch (e) {
+    if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
+    throw e instanceof Error ? e : new Error('无法打开相册，请检查相册权限')
+  }
+  throw new Error('未获取到图片，请重试')
+}
+
 function getFileName(filePath: string, fallback = 'avatar.jpg'): string {
   const idx = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
   const name = idx >= 0 ? filePath.slice(idx + 1) : filePath

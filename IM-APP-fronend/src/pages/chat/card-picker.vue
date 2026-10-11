@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
@@ -41,16 +41,19 @@ onLoad(async (query) => {
   }
 })
 
-const filtered = computed(() => {
-  const text = keyword.value.trim().toLowerCase()
-  if (!text) return contactStore.contacts
-  return contactStore.contacts.filter((c) =>
-    `${c.nickname} ${c.remark || ''}`.toLowerCase().includes(text),
-  )
+/** 走服务端 keyword（含备注），不靠本地当前页过滤 */
+const filtered = computed(() => contactStore.contacts)
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(keyword, (value) => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void contactStore.reloadContacts({ keyword: value, sort: 'recent' }).catch(() => undefined)
+  }, 300)
 })
 
 function displayName(contact: Contact) {
-  return contact.remark?.trim() || contact.nickname
+  return contact.remark?.trim() || contactStore.remarkOf(contact.id) || contact.nickname
 }
 
 async function onPick(contact: Contact) {

@@ -22,6 +22,8 @@ const props = defineProps<{
   previewUrls?: string[]
   /** 已读回执：私聊=对方已读，群聊=至少一名其他成员已读；两者共用单双勾样式。 */
   readState?: 'read' | 'unread'
+  /** 选择文字模式：关掉气泡长按菜单，交给系统选区局部复制 */
+  textSelecting?: boolean
 }>()
 
 /** 头像加载失败（死链/空对象）时切换到业务侧兜底头像，避免一直显示灰色占位 */
@@ -139,6 +141,7 @@ function onApplyGroupInvite() {
 }
 
 function onLongPress() {
+  if (props.textSelecting) return
   emit('longpress')
 }
 
@@ -230,6 +233,7 @@ function playVideo() {
 }
 
 function onContextMenu(event: Event) {
+  if (props.textSelecting) return
   event.preventDefault()
   emit('longpress')
 }
@@ -723,7 +727,13 @@ function openLink(url: string) {
           </view>
         </view>
       </view>
-      <view v-else class="bubble" :class="mine ? 'bubble-mine' : 'bubble-other'" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
+      <view
+        v-else
+        class="bubble"
+        :class="[mine ? 'bubble-mine' : 'bubble-other', { 'bubble-text-selecting': textSelecting }]"
+        @longpress="onLongPress"
+        @contextmenu="onContextMenu"
+      >
         <view v-if="message.quote" class="quote-box" :class="mine ? 'quote-mine' : 'quote-other'">
           <image
             class="quote-thumb"
@@ -738,6 +748,8 @@ function openLink(url: string) {
         <text
           v-for="(p, idx) in parts"
           :key="idx"
+          :selectable="!!textSelecting || p.type === 'text'"
+          :user-select="!!textSelecting || p.type === 'text'"
           :class="p.type === 'link' ? 'link' : 'text'"
           @click="p.type === 'link' ? openLink(p.value) : undefined"
         >{{ p.value }}</text>
@@ -839,6 +851,16 @@ function openLink(url: string) {
   line-height: 1.5;
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+.bubble .text,
+.bubble .link {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.bubble-text-selecting {
+  outline: 2rpx solid rgba(43, 92, 255, 0.45);
 }
 
 .bubble-other {

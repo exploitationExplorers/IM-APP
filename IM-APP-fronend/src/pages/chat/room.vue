@@ -29,7 +29,7 @@ import {
   isNotInGroupIMError,
   sameBusinessUserId,
 } from '@/utils/openim'
-import { requestAndroidAlbumPermission } from '@/utils/file-upload'
+import { pickLocalImages, requestAndroidAlbumPermission } from '@/utils/file-upload'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { fetchContact } from '@/api/contact'
@@ -1957,6 +1957,7 @@ async function onStickerSelect(url: string) {
 }
 
 function onPlus() {
+  actions.clearTextSelecting()
   showPlusPanel.value = !showPlusPanel.value
   if (showPlusPanel.value) {
     showEmojiPanel.value = false
@@ -1990,11 +1991,16 @@ function requestAlbumAccess(): Promise<void> {
 
 function afterPlusClosed(run: () => void) {
   showPlusPanel.value = false
-  setTimeout(run, 120)
+  // 华为等机：加号面板收起动画未完就调选图会被挡住
+  setTimeout(run, 320)
 }
 
 async function sendPickedImagePaths(paths: string[]) {
   const list = paths.filter(Boolean).slice(0, MAX_PICK_COUNT)
+  if (!list.length) {
+    uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
+    return
+  }
   let failed = 0
   let firstReason = ''
   for (const path of list) {
@@ -2015,65 +2021,18 @@ async function sendPickedImagePaths(paths: string[]) {
   }
 }
 
-/** 华为等机型 uni.chooseImage 偶发失败时，改用 plus.gallery.pick */
-function pickImageViaPlusGallery(): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    const gallery = plus?.gallery
-    if (!gallery?.pick) {
-      reject(new Error('无法打开相册'))
-      return
-    }
-    gallery.pick(
-      (res: string | { files?: string[] }) => {
-        if (typeof res === 'string') {
-          resolve(res ? [res] : [])
-          return
-        }
-        resolve((res?.files || []).filter(Boolean))
-      },
-      (err: { message?: string; code?: number }) => {
-        const msg = String(err?.message || '')
-        if (/cancel|用户取消|12/i.test(msg) || err?.code === 12) {
-          reject(new Error('cancel'))
-          return
-        }
-        reject(new Error(msg || '无法打开相册'))
-      },
-      {
-        filter: 'image',
-        multiple: true,
-        maximum: MAX_PICK_COUNT,
-        system: false,
-        filename: '_doc/gallery/',
-      },
-    )
-  })
-}
-
-/** 相册多选：一次最多 9 张，逐张发送保持顺序，单张失败不中断并汇总提示 */
+/** 相册多选：一次最多 9 张；华为走 pickLocalImages 的 gallery 兜底 */
 function pickImage() {
   afterPlusClosed(() => {
-    void requestAlbumAccess().then(() => {
-      uni.chooseImage({
-        count: MAX_PICK_COUNT,
-        sourceType: ['album'],
-        sizeType: ['compressed', 'original'],
-        fail: (err) => {
-          const msg = String(err?.errMsg || '')
-          if (/cancel/i.test(msg)) return
-          // 华为 Mate / Harmony：chooseImage 常直接失败，再试原生相册
-          void pickImageViaPlusGallery()
-            .then((paths) => sendPickedImagePaths(paths))
-            .catch((e) => {
-              if (String((e as Error)?.message || '') === 'cancel') return
-              chooseFailToast(err, '无法打开相册，请检查相册权限')
-            })
-        },
-        success: async (res) => {
-          await sendPickedImagePaths(res.tempFilePaths || [])
-        },
+    void pickLocalImages({ count: MAX_PICK_COUNT, sourceType: ['album'] })
+      .then((paths) => sendPickedImagePaths(paths))
+      .catch((e) => {
+        if (String((e as Error)?.message || '') === 'cancel') return
+        uni.showToast({
+          title: (e as Error)?.message || '无法打开相册，请检查相册权限',
+          icon: 'none',
+        })
       })
-    })
   })
 }
 
@@ -2277,6 +2236,7 @@ function pickFavorite() {
           :role="roleOf(m)"
           :preview-urls="imagePreviewUrls"
           :read-state="readStateOf(m)"
+          :text-selecting="actions.textSelectingId.value === m.id"
           @avatar-click="onAvatarClick(m)"
           @avatar-longpress="onAvatarLongpress(m)"
           @card-view="onViewCard"

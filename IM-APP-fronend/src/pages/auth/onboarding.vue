@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG } from '@/config'
-import { uploadAvatarForProfile } from '@/utils/file-upload'
+import { pickLocalImages, uploadAvatarForProfile } from '@/utils/file-upload'
 
 useAuthGuard()
 const userStore = useUserStore()
@@ -32,22 +32,20 @@ function onNicknameInput(e: Event) {
 }
 
 function chooseAvatar() {
-  uni.chooseImage({
-    count: 1,
-    sizeType: ['compressed'],
-    sourceType: ['album', 'camera'],
-    success: (res) => {
-      const anyRes = res as unknown as {
-        tempFilePaths?: string[] | string
-        tempFiles?: Array<{ path?: string; size?: number }>
+  void pickLocalImages({ count: 1, sourceType: ['album', 'camera'] })
+    .then((paths) => {
+      const path = paths[0]
+      if (!path) {
+        uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
+        return
       }
-      const paths = anyRes.tempFilePaths
-      const path = Array.isArray(paths) ? paths[0] : paths
-      if (!path) return
       avatarPath.value = path
       avatarPreview.value = path
-    },
-  })
+    })
+    .catch((e) => {
+      if (String((e as Error)?.message || '') === 'cancel') return
+      uni.showToast({ title: (e as Error)?.message || '无法打开相册', icon: 'none' })
+    })
 }
 
 async function submitProfile() {

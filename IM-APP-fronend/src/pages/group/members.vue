@@ -172,6 +172,8 @@ onShow(async () => {
         group.value = detail
       }),
       loadFirstPage(),
+      // 备注索引：按好友备注搜成员依赖它，否则冷进页 remarkOf 为空
+      contactStore.ensureFriendIndex().catch(() => undefined),
     ])
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载群成员失败', icon: 'none' })

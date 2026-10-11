@@ -6,7 +6,7 @@ import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG, THEME } from '@/config'
 import { playableMediaUrl } from '@/utils/chatMedia'
 import {
-  requestAndroidAlbumPermission,
+  pickLocalImages,
   uploadAvatarFile,
   uploadAvatarForProfile,
 } from '@/utils/file-upload'
@@ -123,31 +123,19 @@ function onChooseAvatar() {
     input.click()
     return
   }
-  void requestAndroidAlbumPermission().then(() => {
-    uni.chooseImage({
-      count: 1,
-      // 华为等机型 compressed 可能空路径；original 再由 upload 侧 compressImage
-      sizeType: ['original', 'compressed'],
-      sourceType: ['album', 'camera'],
-      fail: (err) => {
-        const msg = String(err?.errMsg || '')
-        if (/cancel/i.test(msg)) return
-        uni.showToast({ title: msg.replace(/^[^:]+:\s*/, '') || '无法打开相册', icon: 'none' })
-      },
-      success: (res) => {
-        const anyRes = res as unknown as {
-          tempFilePaths?: string[] | string
-        }
-        const paths = anyRes.tempFilePaths
-        const path = Array.isArray(paths) ? paths[0] : paths
-        if (!path) {
-          uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
-          return
-        }
-        void uploadPickedAvatar(path)
-      },
+  void pickLocalImages({ count: 1, sourceType: ['album', 'camera'] })
+    .then((paths) => {
+      const path = paths[0]
+      if (!path) {
+        uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
+        return
+      }
+      void uploadPickedAvatar(path)
     })
-  })
+    .catch((e) => {
+      if (String((e as Error)?.message || '') === 'cancel') return
+      uni.showToast({ title: (e as Error)?.message || '无法打开相册', icon: 'none' })
+    })
 }
 
 function onDeleteAccount() {

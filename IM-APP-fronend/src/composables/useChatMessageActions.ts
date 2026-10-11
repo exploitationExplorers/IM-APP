@@ -39,6 +39,8 @@ export function useChatMessageActions(opts: {
 }) {
   const chatStore = useChatStore()
   const forwardStore = useForwardStore()
+  /** 气泡「选择文字」模式：关掉长按菜单，交给系统拖动手柄局部复制 */
+  const textSelectingId = ref('')
 
   const SENDER_LEFT_GROUP_TOAST = '该群友不在群聊'
 
@@ -133,7 +135,9 @@ export function useChatMessageActions(opts: {
       items.push({ key: 'revoke', label: '撤回' })
     }
     items.push({ key: 'forward', label: '转发' }, { key: 'quote', label: '引用' })
-    if (message.type === 'text') items.push({ key: 'copy', label: '复制' })
+    if (message.type === 'text') {
+      items.push({ key: 'copy', label: '复制' }, { key: 'selectText', label: '选择文字' })
+    }
     if (message.type === 'image') items.push({ key: 'sticker', label: '加入表情包' })
     if (message.type === 'video') items.push({ key: 'save', label: '保存视频' })
     items.push({ key: 'favorite', label: '收藏' })
@@ -168,8 +172,14 @@ export function useChatMessageActions(opts: {
     menuMessage.value = null
   }
 
+  function clearTextSelecting() {
+    textSelectingId.value = ''
+  }
+
   function openMenu(message: ChatMessage, event?: { touches?: Array<{ clientX: number; clientY: number }> }) {
     if (selecting.value || message.type === 'system') return
+    if (textSelectingId.value && textSelectingId.value === message.id) return
+    clearTextSelecting()
     void event
     menuMessage.value = message
   }
@@ -607,6 +617,11 @@ export function useChatMessageActions(opts: {
       copyText(message)
       return
     }
+    if (key === 'selectText') {
+      textSelectingId.value = message.id
+      uni.showToast({ title: '按住文字拖动选择后复制', icon: 'none' })
+      return
+    }
     if (key === 'sticker' && message.type === 'image') {
       await addImageSticker(message)
       return
@@ -709,6 +724,8 @@ export function useChatMessageActions(opts: {
     atList,
     atUser,
     atAll,
+    textSelectingId,
+    clearTextSelecting,
     openMenu,
     closeMenu,
     onMenuSelect,

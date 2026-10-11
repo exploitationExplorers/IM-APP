@@ -84,7 +84,8 @@ const filteredMembers = computed(() => {
   })
   if (!text) return list
   return list.filter((m) => {
-    const hay = `${m.memberRemark || ''} ${m.groupNickname || ''} ${m.nickname || ''}`.toLowerCase()
+    const remark = contactStore.remarkOf(m.id)
+    const hay = `${remark} ${m.memberRemark || ''} ${m.groupNickname || ''} ${m.nickname || ''}`.toLowerCase()
     return hay.includes(text)
   })
 })
@@ -100,9 +101,9 @@ async function loadMenuData() {
   try {
     if (!userStore.profile) await userStore.loadProfile()
     await groupStore.loadDetail(props.groupId)
-    if (!contactStore.contacts.length) {
-      await contactStore.loadDirectory().catch(() => undefined)
-    }
+    await contactStore.ensureFriendIndex().catch(() =>
+      contactStore.loadDirectory().catch(() => undefined),
+    )
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载群信息失败', icon: 'none' })
     close()

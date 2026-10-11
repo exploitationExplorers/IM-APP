@@ -143,8 +143,10 @@ const filtered = computed(() => {
     list = list.filter((c) => c.unreadCount > 0)
   }
   if (!keyword.value.trim()) return list
-  const k = keyword.value.trim()
-  return list.filter((c) => c.title.includes(k) || c.lastMessage.includes(k))
+  const k = keyword.value.trim().toLowerCase()
+  return list.filter(
+    (c) => c.title.toLowerCase().includes(k) || c.lastMessage.toLowerCase().includes(k),
+  )
 })
 
 async function reloadConversations() {

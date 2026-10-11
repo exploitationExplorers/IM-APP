@@ -17,7 +17,7 @@ import {
 import { useContactStore } from '@/stores/contact'
 import { backToChatHome, safeBack } from '@/utils/nav'
 import { APP_CONFIG } from '@/config'
-import { uploadAvatarForProfile } from '@/utils/file-upload'
+import { pickLocalImages, uploadAvatarForProfile } from '@/utils/file-upload'
 import type { GroupJoinMode } from '@/types'
 
 const PREVIEW_MEMBER_LIMIT = 4
@@ -319,28 +319,31 @@ function copyGroupId() {
 
 async function onChooseAvatar() {
   if (!canEditProfile.value) return
-  uni.chooseImage({
-    count: 1,
-    sizeType: ['compressed'],
-    sourceType: ['album', 'camera'],
-    success: async (res) => {
-      const paths = res.tempFilePaths
-      const path = Array.isArray(paths) ? paths[0] : paths
-      if (!path) return
-      uni.showLoading({ title: '上传中…', mask: true })
-      try {
-        const fileId = await uploadAvatarForProfile(path, undefined)
-        await groupStore.updateSettings(groupId.value, { avatarFileId: fileId })
-        // 只刷新群资料，头像变更与成员列表无关，不必重拉全量成员
-        await groupStore.loadGroupDetail(groupId.value)
-        uni.showToast({ title: '已更新', icon: 'success' })
-      } catch (e) {
-        uni.showToast({ title: (e as Error)?.message || '上传失败', icon: 'none' })
-      } finally {
-        uni.hideLoading()
-      }
-    },
-  })
+  let path = ''
+  try {
+    const paths = await pickLocalImages({ count: 1, sourceType: ['album', 'camera'] })
+    path = paths[0] || ''
+  } catch (e) {
+    if (String((e as Error)?.message || '') === 'cancel') return
+    uni.showToast({ title: (e as Error)?.message || '无法打开相册', icon: 'none' })
+    return
+  }
+  if (!path) {
+    uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
+    return
+  }
+  uni.showLoading({ title: '上传中…', mask: true })
+  try {
+    const fileId = await uploadAvatarForProfile(path, undefined)
+    await groupStore.updateSettings(groupId.value, { avatarFileId: fileId })
+    // 只刷新群资料，头像变更与成员列表无关，不必重拉全量成员
+    await groupStore.loadGroupDetail(groupId.value)
+    uni.showToast({ title: '已更新', icon: 'success' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '上传失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
 }
 
 async function selectJoinMode(mode: GroupJoinMode) {
