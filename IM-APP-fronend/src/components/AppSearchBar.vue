@@ -8,6 +8,7 @@ const emit = defineEmits<{
   (e: 'update:modelValue', v: string): void
   (e: 'confirm', v: string): void
   (e: 'click'): void
+  (e: 'clear'): void
 }>()
 
 function onInput(e: Event) {
@@ -18,6 +19,11 @@ function onInput(e: Event) {
 function onConfirm(e: Event) {
   const value = (e as unknown as { detail: { value: string } }).detail?.value ?? ''
   emit('confirm', value)
+}
+
+function onClear() {
+  emit('update:modelValue', '')
+  emit('clear')
 }
 </script>
 
@@ -34,6 +40,13 @@ function onConfirm(e: Event) {
       @input="onInput"
       @confirm="onConfirm"
     />
+    <view
+      v-if="modelValue"
+      class="clear-btn"
+      @click.stop="onClear"
+    >
+      <text class="clear-x">×</text>
+    </view>
   </view>
 </template>
 
@@ -45,7 +58,7 @@ function onConfirm(e: Event) {
   background: #f3f4f7;
   border-radius: 8rpx;
   height: 72rpx;
-  padding: 0 32rpx;
+  padding: 0 24rpx 0 32rpx;
   margin: 16rpx 40rpx;
 }
 
@@ -64,9 +77,28 @@ function onConfirm(e: Event) {
   color: #212121;
   height: 72rpx;
   line-height: 72rpx;
+  min-width: 0;
 }
 
 .search-placeholder {
   color: #626e8d;
+}
+
+.clear-btn {
+  flex-shrink: 0;
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 50%;
+  background: #c4c7cf;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clear-x {
+  color: #fff;
+  font-size: 28rpx;
+  line-height: 1;
+  margin-top: -2rpx;
 }
 </style>

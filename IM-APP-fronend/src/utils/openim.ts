@@ -2784,6 +2784,71 @@ export function messageSearchPreview(item: MessageItem): string {
   return extractContent(item) || ''
 }
 
+/** 会话列表关键词搜索：命中的会话 + 一条预览文案 */
+export interface LocalMessageSearchHit {
+  conversationID: string
+  messageCount: number
+  preview: string
+}
+
+/**
+ * 搜本机已同步的聊天记录。conversationID 空 = 全局搜所有会话。
+ * App 原生桥结果字段可能是 PascalCase，这里统一归一。
+ */
+export async function searchLocalMessages(params: {
+  keyword: string
+  conversationID?: string
+  count?: number
+}): Promise<LocalMessageSearchHit[]> {
+  const keyword = params.keyword.trim()
+  if (!keyword) return []
+  const payload = {
+    conversationID: params.conversationID || '',
+    keywordList: [keyword],
+    keywordListMatchType: 0,
+    senderUserIDList: [] as string[],
+    messageTypeList: [
+      MessageType.TextMessage,
+      MessageType.AtTextMessage,
+      MessageType.QuoteMessage,
+    ],
+    searchTimePosition: 0,
+    searchTimePeriod: 0,
+    pageIndex: 1,
+    count: params.count ?? 100,
+  }
+  try {
+    const res = await imCall<unknown>(IMMethods.SearchLocalMessages, payload)
+    return normalizeLocalMessageSearchResult(res)
+  } catch {
+    // H5 / 旧基座偶发无此方法：回退为空，调用方仍可用标题/摘要过滤
+    return []
+  }
+}
+
+function normalizeLocalMessageSearchResult(res: unknown): LocalMessageSearchHit[] {
+  if (!res || typeof res !== 'object') return []
+  const obj = res as Record<string, unknown>
+  const items = obj.searchResultItems ?? obj.SearchResultItems
+  if (!Array.isArray(items)) return []
+  const hits: LocalMessageSearchHit[] = []
+  for (const raw of items) {
+    if (!raw || typeof raw !== 'object') continue
+    const item = raw as Record<string, unknown>
+    const conversationID = String(item.conversationID ?? item.ConversationID ?? '')
+    if (!conversationID) continue
+    const messageCount = Number(item.messageCount ?? item.MessageCount ?? 0)
+    const messageList = item.messageList ?? item.MessageList
+    let preview = ''
+    if (Array.isArray(messageList) && messageList.length) {
+      const first = coerceMessage(messageList[0])
+      if (first) preview = messageSearchPreview(first)
+    }
+    hits.push({ conversationID, messageCount, preview })
+  }
+  return hits
+}
+
 function groupIdFromConversationId(conversationId: string): string {
   return conversationId.startsWith('sg_') ? conversationId.slice(3) : ''
 }

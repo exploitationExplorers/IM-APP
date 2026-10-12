@@ -309,39 +309,32 @@ async function onUnmute(member: GroupMember) {
   }
 }
 
-/** 管理入口：禁言/移除集中到「管理」，避免窄屏挤掉「移除」 */
-async function onManageMember(member: GroupMember) {
+/** 移除入口：可选是否清该成员历史消息（禁言已有独立按钮） */
+async function onRemoveMember(member: GroupMember) {
   if (busy.value || !canActOn(member)) return
-  const labels = member.isMuted
-    ? ['解除禁言', '移除并删除其消息', '仅移除成员']
-    : ['禁言', '移除并删除其消息', '仅移除成员']
   let tapIndex = -1
   try {
-    const sheet = await uni.showActionSheet({ itemList: labels })
+    const sheet = await uni.showActionSheet({
+      itemList: ['移除并删除其消息', '仅移除成员'],
+    })
     tapIndex = sheet.tapIndex
   } catch {
     return
   }
-  if (tapIndex === 0) {
-    if (member.isMuted) void onUnmute(member)
-    else void onMute(member)
-    return
-  }
-  if (tapIndex === 1 || tapIndex === 2) {
-    const deleteMessages = tapIndex === 1
-    busy.value = true
-    try {
-      await removeGroupMember(groupId.value, member.id, deleteMessages)
-      members.value = members.value.filter((item) => item.id !== member.id)
-      uni.showToast({
-        title: deleteMessages ? '已移除并清除其消息' : '已移除',
-        icon: 'success',
-      })
-    } catch (e) {
-      uni.showToast({ title: (e as Error)?.message || '移除失败', icon: 'none' })
-    } finally {
-      busy.value = false
-    }
+  if (tapIndex !== 0 && tapIndex !== 1) return
+  const deleteMessages = tapIndex === 0
+  busy.value = true
+  try {
+    await removeGroupMember(groupId.value, member.id, deleteMessages)
+    members.value = members.value.filter((item) => item.id !== member.id)
+    uni.showToast({
+      title: deleteMessages ? '已移除并清除其消息' : '已移除',
+      icon: 'success',
+    })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '移除失败', icon: 'none' })
+  } finally {
+    busy.value = false
   }
 }
 </script>
@@ -393,8 +386,13 @@ async function onManageMember(member: GroupMember) {
             class="origin-name"
           >昵称：{{ member.nickname }}</text>
         </view>
-        <view v-if="canActOn(member)" class="btn-manage" @click.stop="onManageMember(member)">
-          <text class="btn-text">管理</text>
+        <view v-if="canActOn(member)" class="btn-actions">
+          <view class="btn-mute" @click.stop="member.isMuted ? onUnmute(member) : onMute(member)">
+            <text class="btn-text">{{ member.isMuted ? '解禁' : '禁言' }}</text>
+          </view>
+          <view class="btn-remove" @click.stop="onRemoveMember(member)">
+            <text class="btn-text">移除</text>
+          </view>
         </view>
       </view>
       <text v-if="loadingAll" class="loading">正在加载全部成员以便搜索...</text>
@@ -534,23 +532,44 @@ async function onManageMember(member: GroupMember) {
   color: $uni-color-primary;
 }
 
-.btn-manage {
+.btn-actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
+.btn-mute,
+.btn-remove {
   height: 64rpx;
-  min-width: 112rpx;
-  padding: 0 24rpx;
+  min-width: 96rpx;
+  padding: 0 20rpx;
   border-radius: 8rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  flex-shrink: 0;
-  background: #eef1f8;
+}
+
+.btn-mute {
+  background: #fff1f0;
+}
+
+.btn-mute .btn-text {
+  color: #e54d42;
+}
+
+.btn-remove {
+  background: #f3f4f7;
+}
+
+.btn-remove .btn-text {
+  color: #636e86;
 }
 
 .btn-text {
-  font-size: 28rpx;
+  font-size: 26rpx;
   font-weight: 600;
-  color: #0a2fc2;
   line-height: 1;
 }
 

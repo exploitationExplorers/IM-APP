@@ -108,7 +108,8 @@ export function useChatMessageActions(opts: {
   }
 
   /**
-   * 撤回入口：自己的消息（非发送中）一律显示，超 2 分钟窗口由后端校验并 toast 提示；
+   * 撤回入口：自己的消息（非发送中）一律显示；
+   * 群聊自己撤不限时，私聊超窗口由后端拒绝并 toast；
    * 他人的消息仅群主/管理员显示，目标角色已加载时按权限矩阵收敛，
    * 没加载到也先显示，由后端最终判定（无权时返回明确报错）。
    */
@@ -133,7 +134,7 @@ export function useChatMessageActions(opts: {
     const items: MessageMenuItem[] = []
 
     // 参考站顺序：转发|引用 → 复制|收藏 → 置顶|检举 → @TA|禁言 → 撤回|删除|多选
-    // 自己的消息谁都能撤，超 2 分钟由后端拒绝。别人的消息只有群主/管理员能撤，且没有时间窗。
+    // 群聊自己撤不限时；私聊超窗口由后端拒绝。别人的消息只有群主/管理员能撤。
     if (canRevoke(message)) {
       items.push({ key: 'revoke', label: '撤回' })
     }
@@ -184,22 +185,51 @@ export function useChatMessageActions(opts: {
     textSelectingId.value = ''
   }
 
+  function pointFrom(x?: unknown, y?: unknown): { x: number; y: number } | null {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    const px = Number(x)
+    const py = Number(y)
+    // 0,0 基本是无效锚点，交给菜单默认居中
+    if (px <= 0 && py <= 0) return null
+    return { x: px, y: py }
+  }
+
+  /**
+   * uni-app longpress 的 touches 经常只有 pageX/pageY（没有 clientX），
+   * 旧逻辑只读 clientX → 拿不到坐标 → 菜单掉到屏幕正中间。
+   */
   function resolveMenuPoint(event?: unknown): { x: number; y: number } | null {
     if (!event || typeof event !== 'object') return null
     const ev = event as Record<string, unknown>
     const touches = (ev.touches || ev.changedTouches) as
-      | Array<{ clientX?: number; clientY?: number }>
+      | Array<{
+          clientX?: number
+          clientY?: number
+          pageX?: number
+          pageY?: number
+          screenX?: number
+          screenY?: number
+        }>
       | undefined
     const touch = touches?.[0]
-    if (touch && Number.isFinite(touch.clientX) && Number.isFinite(touch.clientY)) {
-      return { x: touch.clientX as number, y: touch.clientY as number }
+    if (touch) {
+      const fromClient = pointFrom(touch.clientX, touch.clientY)
+      if (fromClient) return fromClient
+      const fromPage = pointFrom(touch.pageX, touch.pageY)
+      if (fromPage) return fromPage
+      const fromScreen = pointFrom(touch.screenX, touch.screenY)
+      if (fromScreen) return fromScreen
     }
-    if (Number.isFinite(ev.clientX) && Number.isFinite(ev.clientY)) {
-      return { x: ev.clientX as number, y: ev.clientY as number }
-    }
-    const detail = ev.detail as { x?: number; y?: number } | undefined
-    if (detail && Number.isFinite(detail.x) && Number.isFinite(detail.y)) {
-      return { x: detail.x as number, y: detail.y as number }
+    const fromEv = pointFrom(ev.clientX, ev.clientY)
+    if (fromEv) return fromEv
+    const fromPageEv = pointFrom(ev.pageX, ev.pageY)
+    if (fromPageEv) return fromPageEv
+    const detail = ev.detail as { x?: number; y?: number; clientX?: number; clientY?: number } | undefined
+    if (detail) {
+      const fromDetailClient = pointFrom(detail.clientX, detail.clientY)
+      if (fromDetailClient) return fromDetailClient
+      const fromDetail = pointFrom(detail.x, detail.y)
+      if (fromDetail) return fromDetail
     }
     return null
   }

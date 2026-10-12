@@ -984,12 +984,19 @@ function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number }
   scrollRaf = scheduleScrollFrame(() => {
     scrollRaf = 0
     if (msgViewportHeight <= 0) measureMsgList()
+    // 翻历史时只认「距底部足够近」才贴底；勿用 maxScrollTop 启发式——
+    // 新消息拉长内容时 top 不变也会被误判成贴底，从而跳到最新。
     if (msgViewportHeight > 0 && height > 0) {
-      stickToBottom.value = height - top - msgViewportHeight < 160
+      const distance = height - top - msgViewportHeight
+      if (distance < 160) {
+        stickToBottom.value = true
+      } else {
+        stickToBottom.value = false
+        browsingHistory.value = true
+      }
     } else if (top + 80 < maxScrollTop) {
       stickToBottom.value = false
-    } else if (top >= maxScrollTop - 8) {
-      stickToBottom.value = true
+      browsingHistory.value = true
     }
     if (top > maxScrollTop) maxScrollTop = top
   })
@@ -997,6 +1004,7 @@ function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number }
 
 function jumpToBottom() {
   maxScrollTop = 0
+  browsingHistory.value = false
   scrollToBottom(true)
 }
 
@@ -1004,7 +1012,8 @@ watch(
   () => messages.value[messages.value.length - 1]?.id,
   (id, prev) => {
     if (!id || id === prev) return
-    if (!stickToBottom.value) return
+    // 正在上翻看历史/资料时，新消息绝不能强行滚到底
+    if (browsingHistory.value || !stickToBottom.value) return
     nextTick(() => scrollToBottom())
   },
 )
@@ -1400,15 +1409,19 @@ function publicAtNameOf(message: ChatMessage): string {
 }
 
 const canAtAll = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
+/** @ 面板拉成员中：App 上进群后立刻打 @ 时名单常还没到，先显示加载而不是「无匹配」 */
+const atMentionLoading = ref(false)
 
 const atMentionMembers = computed<AtMentionMember[]>(() => {
   const me = myId.value
-  const meIm = (imUserId.value || '').toLowerCase()
+  const meIm = (imUserId.value || myId.value || '').toLowerCase().replace(/-/g, '')
   return groupMembersForAt.value
     .filter((m) => {
       if (!m.id) return false
-      if (me && m.id === me) return false
-      if (meIm && openIMUserIdOf(m.id) === meIm) return false
+      // myId 在房间里是 OpenIM id（无横线），成员 id 是业务 UUID——不能直接 ===
+      const mid = openIMUserIdOf(m.id)
+      if (meIm && mid === meIm) return false
+      if (me && (m.id === me || sameBusinessUserId(m.id, me) || mid === openIMUserIdOf(me))) return false
       return true
     })
     .map((m) => ({
@@ -1423,6 +1436,7 @@ const atMentionMembers = computed<AtMentionMember[]>(() => {
 
 /** 输入框末尾是否处于「刚打了 @」的提及态。
  * 匹配：行首或空白后的 `@关键字`（关键字不含空白与 @）。
+ * App 中文输入法偶发插入全角 ＠，统一成半角再匹配。
  */
 function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
   // App 端 @input 有时早于 v-model 落库，优先用事件值
@@ -1434,7 +1448,8 @@ function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
     closeAtMention()
     return
   }
-  const text = input.value
+  const text = input.value.replace(/\uFF20/g, '@')
+  if (text !== input.value) input.value = text
   const match = /(^|[\s\n])@([^\s@]*)$/.exec(text)
   if (!match) {
     closeAtMention()
@@ -1446,9 +1461,12 @@ function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
   atMentionVisible.value = true
   showPlusPanel.value = false
   showEmojiPanel.value = false
-  // 成员列表尚未就绪时补拉一次，避免面板空白
+  // 成员名单没到就 await 拉；只 fire-and-forget 时 App 上会一直显示「无匹配成员」
   if (!groupMembersForAt.value.length && businessId.value) {
-    void loadGroupMembersMeta(businessId.value)
+    atMentionLoading.value = true
+    void loadGroupMembersMeta(businessId.value).finally(() => {
+      atMentionLoading.value = false
+    })
   }
 }
 
@@ -1534,6 +1552,7 @@ async function refreshGroupMeta(): Promise<boolean> {
   }
   if (detailApplied) {
     groupMetaLoadedAt = Date.now()
+    // App 进群后立刻打 @ 依赖这份名单；并行拉，失败不挡进房
     void loadGroupMembersMeta(gid)
     // 和成员名单一起刷新：成员变更通知（含被踢）到达时上面那个 watcher 会调到这里，
     // 所以其他成员的界面也能跟着把被清理成员的消息隐藏掉。
@@ -2345,8 +2364,10 @@ function pickFavorite() {
           :role="roleOf(m)"
           :read-state="readStateOf(m)"
           :text-selecting="actions.textSelectingId.value === m.id"
+          :selecting="actions.selecting.value"
           @avatar-click="onAvatarClick(m)"
           @avatar-longpress="onAvatarLongpress(m)"
+          @select-click="actions.toggleSelect(m)"
           @card-view="onViewCard"
           @group-invite-apply="onGroupInviteApply"
           @longpress="(e) => actions.openMenu(m, e)"
@@ -2397,6 +2418,7 @@ function pickFavorite() {
         :can-at-all="canAtAll"
         :keyword="atMentionKeyword"
         :members="atMentionMembers"
+        :loading="atMentionLoading"
         @close="closeAtMention"
         @select-all="onAtMentionSelectAll"
         @select="onAtMentionSelect"

@@ -42,7 +42,10 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     if (hydrated) return
     hydrated = true
     const raw = uni.getStorageSync(STORAGE_KEY)
-    const parsed = safeParse<ChatSettingsState>(typeof raw === 'string' ? raw : null)
+    // App 端 getStorageSync 有时直接吐对象（已反序列化），不能只认 string
+    let parsed: ChatSettingsState | null = null
+    if (typeof raw === 'string') parsed = safeParse<ChatSettingsState>(raw)
+    else if (raw && typeof raw === 'object') parsed = raw as ChatSettingsState
     if (!parsed) return
     if (typeof parsed.enterToSend === 'boolean') enterToSend.value = parsed.enterToSend
     if (typeof parsed.noDisturb === 'boolean') noDisturb.value = parsed.noDisturb

@@ -22,6 +22,7 @@ import { getStatusBarHeight } from '@/utils/status-bar'
 import { isDissolvedGroupConversationPreview, isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-notification'
 import { setConversationRecvOpt } from '@/utils/openim'
 import { resolveIMGroupByIM } from '@/api/im'
+import { searchLocalMessages } from '@/utils/openim'
 
 useAuthGuard()
 useTabBar()
@@ -33,6 +34,10 @@ const chatStore = useChatStore()
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
 const keyword = ref('')
+/** 关键词命中历史消息的会话 id → 预览文案（标题/摘要未命中时用来顶上列表） */
+const messageHitPreview = ref<Map<string, string>>(new Map())
+let messageSearchSeq = 0
+let messageSearchTimer: ReturnType<typeof setTimeout> | null = null
 const showAddMenu = ref(false)
 const showFilter = ref(false)
 const filterKey = ref<'all' | 'unread'>('all')
@@ -182,6 +187,43 @@ function onSwipeItemClick(item: Conversation) {
   openConversation(item)
 }
 
+function truncateSearchPreview(text: string, max = 48): string {
+  const t = text.replace(/\s+/g, ' ').trim()
+  if (!t) return ''
+  return t.length > max ? `${t.slice(0, max)}…` : t
+}
+
+async function runMessageSearch(raw: string) {
+  const k = raw.trim()
+  const seq = ++messageSearchSeq
+  if (!k) {
+    messageHitPreview.value = new Map()
+    return
+  }
+  const hits = await searchLocalMessages({ keyword: k, count: 100 })
+  if (seq !== messageSearchSeq) return
+  const map = new Map<string, string>()
+  for (const hit of hits) {
+    if (!hit.conversationID) continue
+    map.set(hit.conversationID, truncateSearchPreview(hit.preview))
+  }
+  messageHitPreview.value = map
+}
+
+watch(keyword, (value) => {
+  if (messageSearchTimer) clearTimeout(messageSearchTimer)
+  const k = value.trim()
+  if (!k) {
+    messageSearchSeq += 1
+    messageHitPreview.value = new Map()
+    return
+  }
+  // 输入法组字中会频繁触发，短防抖后再打本地库
+  messageSearchTimer = setTimeout(() => {
+    void runMessageSearch(k)
+  }, 280)
+})
+
 const filtered = computed(() => {
   let list = chatStore.conversations
   if (filterKey.value === 'unread') {
@@ -189,9 +231,25 @@ const filtered = computed(() => {
   }
   if (!keyword.value.trim()) return list
   const k = keyword.value.trim().toLowerCase()
-  return list.filter(
-    (c) => c.title.toLowerCase().includes(k) || c.lastMessage.toLowerCase().includes(k),
-  )
+  return list
+    .filter(
+      (c) =>
+        c.title.toLowerCase().includes(k) ||
+        c.lastMessage.toLowerCase().includes(k) ||
+        messageHitPreview.value.has(c.id),
+    )
+    .map((c) => {
+      // 标题/摘要没命中、靠历史消息命中时，用命中片段替换摘要，避免仍显示无关最后一条
+      if (
+        messageHitPreview.value.has(c.id) &&
+        !c.title.toLowerCase().includes(k) &&
+        !c.lastMessage.toLowerCase().includes(k)
+      ) {
+        const preview = messageHitPreview.value.get(c.id) || ''
+        return preview ? { ...c, lastMessage: preview } : c
+      }
+      return c
+    })
 })
 
 async function reloadConversations() {
@@ -440,21 +498,23 @@ watchEffect(() => {
         class="header"
         :style="isDesktop ? undefined : { paddingTop: statusBarHeight + 'px' }"
       >
-        <text class="title">聊天</text>
-        <view class="add-wrap" @click.stop="onAdd">
-          <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
-          <view v-if="showAddMenu" class="popup-menu">
-            <view class="popup-item" @click="go('/pages/contacts/add-friend')">
-              <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
-              <text>添加朋友</text>
-            </view>
-            <view class="popup-item" @click="goAddGroup">
-              <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
-              <text>添加群聊</text>
-            </view>
-            <view class="popup-item" @click="go('/pages/group/create')">
-              <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
-              <text>创建群聊</text>
+        <view class="header-row">
+          <text class="title">聊天</text>
+          <view class="add-wrap" @click.stop="onAdd">
+            <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
+            <view v-if="showAddMenu" class="popup-menu">
+              <view class="popup-item" @click="go('/pages/contacts/add-friend')">
+                <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
+                <text>添加朋友</text>
+              </view>
+              <view class="popup-item" @click="goAddGroup">
+                <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
+                <text>添加群聊</text>
+              </view>
+              <view class="popup-item" @click="go('/pages/group/create')">
+                <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
+                <text>创建群聊</text>
+              </view>
             </view>
           </view>
         </view>
@@ -533,7 +593,7 @@ watchEffect(() => {
             </template>
           </ImSwipeActionItem>
         </uni-swipe-action>
-        <view v-if="!filtered.length" class="empty">无聊天消息</view>
+        <view v-if="!filtered.length" class="empty">{{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}</view>
       </scroll-view>
     </view>
 
@@ -603,6 +663,10 @@ watchEffect(() => {
 }
 
 .header {
+  background: #fff;
+}
+
+.header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;

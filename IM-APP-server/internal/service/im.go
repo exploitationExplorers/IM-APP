@@ -904,6 +904,10 @@ func validateRecallPermission(peerType string, ownMessage bool, operatorRole, se
 		return ErrIMMessageNotFound
 	}
 	if ownMessage {
+		// 群聊：自己撤自己不限时（业务要求随时可撤）；私聊仍受 window 约束。
+		if peerType == "group" {
+			return nil
+		}
 		sentAt := time.UnixMilli(sendTime)
 		if sentAt.After(now.Add(5*time.Minute)) || now.Sub(sentAt) > window {
 			return ErrIMRecallExpired
@@ -913,7 +917,7 @@ func validateRecallPermission(peerType string, ownMessage bool, operatorRole, se
 	if peerType != "group" || strings.TrimSpace(reason) == "" {
 		return ErrIMRecallForbidden
 	}
-	// 群主、管理员撤回别人的消息不看时间窗。上面的 window 只约束自己撤自己。
+	// 群主、管理员撤回别人的消息不看时间窗。
 	// 已退群的发送者在 MessageRecallRoles 里按 member 处理，管理员同样可以撤。
 	if operatorRole == "owner" && senderRole != "owner" {
 		return nil

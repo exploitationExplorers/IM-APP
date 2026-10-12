@@ -43,10 +43,18 @@
 
 name: openim
 
+# 限制容器 json-file 日志体积。openim-api 曾因 stdout 日志涨到 92G 撑满磁盘。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   openim-mongodb:
     image: mongo:6.0
     container_name: openim-mongodb
+    logging: *default-logging
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: openIM123
@@ -75,6 +83,7 @@ services:
   openim-redis:
     image: redis:7-alpine
     container_name: openim-redis
+    logging: *default-logging
     ports:
       - "127.0.0.1:6380:6379"
     volumes:
@@ -91,6 +100,7 @@ services:
     # 同一批镜像、同样的环境变量与非 root 用户行为，纯改名。★ 冻结不再更新。
     image: bitnamilegacy/etcd:3.5
     container_name: openim-etcd
+    logging: *default-logging
     environment:
       ALLOW_NONE_AUTHENTICATION: "yes"
       ETCD_NAME: s1
@@ -122,6 +132,7 @@ services:
     # 同上：bitnami/* 已下架，改 bitnamilegacy/*（同一个镜像）
     image: bitnamilegacy/kafka:3.6
     container_name: openim-kafka
+    logging: *default-logging
     environment:
       KAFKA_CFG_NODE_ID: 0
       KAFKA_CFG_PROCESS_ROLES: controller,broker
@@ -154,6 +165,7 @@ services:
   openim-minio:
     image: bitnamilegacy/minio:latest
     container_name: openim-minio
+    logging: *default-logging
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
@@ -181,6 +193,7 @@ services:
     # 换 tag 只改这一行，然后 docker compose ... up -d（会重建容器）。
     image: openim/openim-server:v3.8.3-patch.15
     container_name: openim-api
+    logging: *default-logging
     networks:
       - default
       - im-app-openim-net

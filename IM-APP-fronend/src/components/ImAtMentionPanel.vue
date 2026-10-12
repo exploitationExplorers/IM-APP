@@ -24,6 +24,8 @@ const props = defineProps<{
   canAtAll: boolean
   keyword: string
   members: AtMentionMember[]
+  /** 成员名单还在拉取（App 上打 @ 时常撞上） */
+  loading?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -71,7 +73,10 @@ const filtered = computed(() => {
         />
         <text class="at-name">{{ m.name }}</text>
       </view>
-      <view v-if="!filtered.length" class="at-empty">
+      <view v-if="loading && !filtered.length" class="at-empty">
+        <text class="at-empty-text">成员加载中…</text>
+      </view>
+      <view v-else-if="!filtered.length" class="at-empty">
         <text class="at-empty-text">无匹配成员</text>
       </view>
     </scroll-view>

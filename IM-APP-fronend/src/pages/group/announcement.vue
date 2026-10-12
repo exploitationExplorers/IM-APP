@@ -24,6 +24,18 @@ const history = ref<GroupAnnouncementHistoryItem[]>([])
 
 const count = computed(() => announcement.value.length)
 
+/** 历史第一条常与「当前公告」相同，列表里再画一遍会像重复 */
+const historyDisplay = computed(() => {
+  const list = history.value
+  if (!list.length) return list
+  const cur = announcement.value.trim()
+  const curImgs = images.value.filter((u) => isRemoteUrl(u)).join('|')
+  const first = list[0]
+  const firstImgs = (Array.isArray(first.images) ? first.images : []).filter(Boolean).join('|')
+  if (first.content?.trim() === cur && firstImgs === curImgs) return list.slice(1)
+  return list
+})
+
 function imagesChanged() {
   if (images.value.length !== originalImages.value.length) return true
   return images.value.some((url, i) => url !== originalImages.value[i])
@@ -201,8 +213,8 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
       <view class="history-head">
         <text class="history-title">历史发布记录（最多 10 条）</text>
       </view>
-      <view v-if="!history.length" class="history-empty">暂无历史公告</view>
-      <view v-for="item in history" :key="item.id" class="history-card">
+      <view v-if="!historyDisplay.length" class="history-empty">暂无历史公告</view>
+      <view v-for="item in historyDisplay" :key="item.id" class="history-card">
         <view class="history-meta">
           <text class="history-author">{{ item.publisherName || '管理员' }}</text>
           <text class="history-time">{{ historyTime(item) }}</text>

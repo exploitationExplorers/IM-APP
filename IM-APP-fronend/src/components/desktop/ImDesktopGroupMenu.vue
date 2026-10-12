@@ -4,7 +4,7 @@ import { useGroupStore } from '@/stores/group'
 import { useUserStore } from '@/stores/user'
 import { useContactStore } from '@/stores/contact'
 import { APP_CONFIG } from '@/config'
-import { muteGroupMember, unmuteGroupMember } from '@/api/group'
+import { muteGroupMember, removeGroupMember, unmuteGroupMember } from '@/api/group'
 import { MUTE_OPTIONS } from '@/constants/mute'
 import type { GroupMember, GroupMemberMuteResult } from '@/types'
 
@@ -26,6 +26,7 @@ const contactStore = useContactStore()
 const loading = ref(false)
 const keyword = ref('')
 const muteBusy = ref(false)
+const removeBusy = ref(false)
 
 function sameUserId(a?: string, b?: string) {
   if (!a || !b) return false
@@ -244,6 +245,35 @@ async function onMute(member: GroupMember) {
   }
 }
 
+/** 禁言旁「移除」：可选是否清该成员历史消息 */
+async function onRemove(member: GroupMember) {
+  if (removeBusy.value || !canMute(member)) return
+  let tapIndex = -1
+  try {
+    const sheet = await uni.showActionSheet({
+      itemList: ['移除并删除其消息', '仅移除该成员'],
+    })
+    tapIndex = sheet.tapIndex
+  } catch {
+    return
+  }
+  if (tapIndex !== 0 && tapIndex !== 1) return
+  const deleteMessages = tapIndex === 0
+  removeBusy.value = true
+  try {
+    await removeGroupMember(props.groupId, member.id, deleteMessages)
+    groupStore.members = groupStore.members.filter((m) => m.id !== member.id)
+    uni.showToast({
+      title: deleteMessages ? '已移除并清除其消息' : '已移除',
+      icon: 'none',
+    })
+  } catch (e) {
+    uni.showToast({ title: (e as Error).message || '移除失败', icon: 'none' })
+  } finally {
+    removeBusy.value = false
+  }
+}
+
 async function openMember(member: GroupMember) {
   const me = userStore.profile
   if (me && sameUserId(member.id, me.id)) return
@@ -271,6 +301,13 @@ function goSearchHistory() {
   close()
   uni.navigateTo({
     url: `/pages/group/search-history?id=${encodeURIComponent(props.groupId)}&title=${encodeURIComponent(groupName.value || '群聊')}`,
+  })
+}
+
+function goAnnouncement() {
+  close()
+  uni.navigateTo({
+    url: `/pages/group/announcement?id=${encodeURIComponent(props.groupId)}`,
   })
 }
 </script>
@@ -318,6 +355,11 @@ function goSearchHistory() {
           <text class="group-info-chevron">›</text>
         </view>
 
+        <view class="group-info-history" @click="goAnnouncement">
+          <text class="group-info-history-label">群公告</text>
+          <text class="group-info-chevron">›</text>
+        </view>
+
         <view class="group-info-members-head">
           <text class="group-info-members-title">群成员 ({{ memberCount }})</text>
           <text v-if="canManage" class="group-info-add" @click="goInvite">新增</text>
@@ -334,8 +376,13 @@ function goSearchHistory() {
             <text class="group-info-member-name">{{ displayName(m) }}</text>
             <text v-if="roleBadge(m)" class="group-info-role">{{ roleBadge(m) }}</text>
             <text v-if="m.isMuted" class="group-info-role group-info-muted-tag">已禁言</text>
-            <view v-if="canMute(m)" class="group-info-mute" @click.stop="onMute(m)">
-              <text>{{ m.isMuted ? '解禁' : '禁言' }}</text>
+            <view v-if="canMute(m)" class="group-info-actions">
+              <view class="group-info-mute" @click.stop="onMute(m)">
+                <text>{{ m.isMuted ? '解禁' : '禁言' }}</text>
+              </view>
+              <view class="group-info-remove" @click.stop="onRemove(m)">
+                <text>移除</text>
+              </view>
             </view>
           </view>
           <view v-if="!filteredMembers.length" class="group-info-empty">
@@ -606,16 +653,32 @@ function goSearchHistory() {
   background: #fff1f0;
 }
 
-.group-info-mute {
+.group-info-actions {
   margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-info-mute,
+.group-info-remove {
   flex-shrink: 0;
   padding: 4px 12px;
   border-radius: 6px;
-  background: #fff1f0;
-  color: #e54d42;
   font-size: 13px;
   line-height: 20px;
   cursor: pointer;
+}
+
+.group-info-mute {
+  background: #fff1f0;
+  color: #e54d42;
+}
+
+.group-info-remove {
+  background: #f3f4f7;
+  color: #636e86;
 }
 
 .group-info-empty {

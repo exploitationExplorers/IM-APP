@@ -20,10 +20,19 @@
 
 name: im-app
 
+# 容器 stdout 日志上限：避免再出现 openim-api 单文件 90G+ 撑爆磁盘。
+# 已有容器需 recreate 后才生效；daemon.json 的 log-opts 同样建议配上。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: im-app-postgres
+    logging: *default-logging
     environment:
       POSTGRES_USER: im
       POSTGRES_PASSWORD: im123456
@@ -49,6 +58,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: im-app-redis
+    logging: *default-logging
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
@@ -73,6 +83,7 @@ services:
   minio:
     image: bitnamilegacy/minio:latest
     container_name: im-app-minio
+    logging: *default-logging
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
@@ -100,6 +111,7 @@ services:
   kafka:
     image: apache/kafka:4.3.1
     container_name: im-app-kafka
+    logging: *default-logging
     ports:
       - "127.0.0.1:9092:9092"
     environment:
@@ -128,6 +140,7 @@ services:
   api:
     build: ../IM-APP-server
     container_name: im-app-api
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -227,6 +240,7 @@ services:
   admin:
     build: ../IM-APP-admin
     container_name: im-admin
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy

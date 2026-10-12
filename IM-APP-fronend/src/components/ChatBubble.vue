@@ -39,6 +39,8 @@ const props = defineProps<{
   readState?: 'read' | 'unread'
   /** 选择文字模式：关掉气泡长按菜单，交给系统选区局部复制 */
   textSelecting?: boolean
+  /** 多选转发中：点图片应切换勾选，禁止进全屏预览（否则预览一关选择态就丢） */
+  selecting?: boolean
 }>()
 
 /** 头像加载失败（死链/空对象）时切换到业务侧兜底头像，避免一直显示灰色占位 */
@@ -85,6 +87,8 @@ const emit = defineEmits<{
   playVideo: [message: ChatMessage]
   /** 点图片预览：由父级按需拼会话图片列表，避免每条气泡都绑 previewUrls */
   previewImage: [message: ChatMessage]
+  /** 多选态点击媒体：外层 toggleSelect（uni-app 子节点 click 常不冒泡） */
+  selectClick: []
   /** 点击引用块：跳转到被引用的原消息 */
   quoteClick: [clientMsgId: string]
 }>()
@@ -188,9 +192,13 @@ function onRetry() {
 }
 
 /**
- * 点按图片：有 previewUrls 时本地预览（兼容旧用法）；否则交给父级按需拼会话列表。
+ * 点按图片：多选只通知外层勾选；否则预览。
  */
-function previewImage() {
+function onImageBubbleClick() {
+  if (props.selecting) {
+    emit('selectClick')
+    return
+  }
   if (props.message.type !== 'image') return
   if (props.previewUrls?.length) {
     const urls = props.previewUrls.map((url) => toPlayableMediaUrl((url || '').trim())).filter(Boolean)
@@ -201,6 +209,15 @@ function previewImage() {
     return
   }
   emit('previewImage', props.message)
+}
+
+/** 多选时点视频 = 勾选，不进播放 */
+function onVideoClick() {
+  if (props.selecting) {
+    emit('selectClick')
+    return
+  }
+  playVideo()
 }
 
 const videoMeta = computed(() => {
@@ -661,7 +678,13 @@ function openLink(url: string) {
         <view v-if="mine && message.status === 'failed'" class="retry-flag" @click.stop="onRetry">
           <text class="retry-icon">!</text>
         </view>
-        <view v-if="message.type === 'image'" class="bubble image-bubble" @click="previewImage" @longpress="onLongPress" @contextmenu.prevent="onContextMenu">
+        <view
+          v-if="message.type === 'image'"
+          class="bubble image-bubble"
+          @click="onImageBubbleClick"
+          @longpress="onLongPress"
+          @contextmenu.prevent="onContextMenu"
+        >
         <image
           v-if="imageDisplaySrc"
           class="msg-image"
@@ -675,7 +698,7 @@ function openLink(url: string) {
       <view
         v-else-if="message.type === 'video'"
         class="bubble image-bubble video-bubble"
-        @click="playVideo"
+        @click="onVideoClick"
         @longpress="onLongPress"
         @contextmenu.prevent="onContextMenu"
       >
@@ -1293,40 +1316,40 @@ function openLink(url: string) {
   margin-top: 8rpx;
 }
 
-/** 未读单钩浅灰；已读双钩略深一档，与微信观感一致 */
+/** 未读单钩浅灰；已读双钩用更明显的蓝，电脑端也看得清 */
 .read-flag {
   position: relative;
-  width: 24rpx;
-  height: 14rpx;
+  width: 32rpx;
+  height: 18rpx;
   flex-shrink: 0;
-  color: #b3bac6;
+  color: #c0c6d0;
 }
 
 .read-flag.read {
-  color: #7f8896;
+  color: #2b7cff;
 }
 
 /** CSS 画的钩形（border-left + border-bottom 旋转 -45°），顶点朝下、底边贴容器底部 */
 .tick {
   position: absolute;
   bottom: 1rpx;
-  border-left: 3rpx solid currentColor;
-  border-bottom: 3rpx solid currentColor;
+  border-left: 4rpx solid currentColor;
+  border-bottom: 4rpx solid currentColor;
   box-sizing: border-box;
   transform: rotate(-45deg);
 }
 
 .tick.first {
   left: 0;
-  width: 15rpx;
-  height: 8rpx;
+  width: 18rpx;
+  height: 10rpx;
 }
 
 /** 双钩的第二钩：起点落在第一钩的臂上，两钩交叉连贯（微信式 ✓✓） */
 .tick.second {
-  left: 8rpx;
-  width: 12rpx;
-  height: 7rpx;
+  left: 10rpx;
+  width: 16rpx;
+  height: 10rpx;
 }
 
 /** 发送失败感叹号：红色圆形 + 白感叹号，点击重发 */
