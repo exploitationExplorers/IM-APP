@@ -6,6 +6,7 @@ import { fetchAnnouncementHistory } from '@/api/group'
 import { useGroupStore } from '@/stores/group'
 import type { GroupAnnouncementHistoryItem } from '@/types'
 import { uploadReportImage } from '@/utils/file-upload'
+import { previewImagesWithSave } from '@/utils/chatMedia'
 import { formatRelativeTime } from '@/utils/format'
 
 const ANNOUNCE_MAX = 500
@@ -108,10 +109,7 @@ function removeImage(index: number) {
 
 function previewImage(list: string[], index: number) {
   if (!list.length) return
-  uni.previewImage({
-    current: list[index],
-    urls: list,
-  })
+  void previewImagesWithSave(list, list[index])
 }
 
 async function onSubmit() {

@@ -265,10 +265,9 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
-  /** 拉黑后立刻从聊天列表移除该私聊，并记入本地黑名单 peer 集合 */
-  async function hideConversationForBlockedContact(contactId: string) {
+  /** 按业务好友 ID 把对应私聊从列表隐藏（拉黑 / 删好友共用） */
+  async function hidePrivateConversationByContactId(contactId: string) {
     if (!contactId) return
-    markPeerBlocked(contactId)
     const match = conversations.value.find(
       (c) => c.type === 'private' && sameBusinessUserId(c.peerUserId || '', contactId),
     )
@@ -279,6 +278,18 @@ export const useChatStore = defineStore('chat', () => {
     conversations.value = conversations.value.filter(
       (c) => !(c.type === 'private' && sameBusinessUserId(c.peerUserId || '', contactId)),
     )
+  }
+
+  /** 拉黑后立刻从聊天列表移除该私聊，并记入本地黑名单 peer 集合 */
+  async function hideConversationForBlockedContact(contactId: string) {
+    if (!contactId) return
+    markPeerBlocked(contactId)
+    await hidePrivateConversationByContactId(contactId)
+  }
+
+  /** 删除好友后会话仍会留在 OpenIM 列表；本地立刻隐藏，避免「删了人聊天还在」 */
+  async function hideConversationForDeletedContact(contactId: string) {
+    await hidePrivateConversationByContactId(contactId)
   }
 
   /** 解除拉黑：允许会话再次出现（有新消息或主动打开时） */
@@ -1510,7 +1521,6 @@ export const useChatStore = defineStore('chat', () => {
     atUsers: Array<{ atUserID: string; groupNickname: string }>,
   ) {
     const target = targetOf(requireConversation(conversationId))
-    const isAtAll = atUsers.some((a) => a.atUserID === 'AtAllTag')
     await sendWithPlaceholder(
       conversationId,
       placeholderOf(conversationId, senderId, 'text', content),
@@ -1520,7 +1530,6 @@ export const useChatStore = defineStore('chat', () => {
           content,
           atUsers.map((a) => a.atUserID),
           atUsers,
-          isAtAll,
         ),
     )
   }
@@ -1811,6 +1820,7 @@ export const useChatStore = defineStore('chat', () => {
     unpinChatMessage,
     hideConversationLocal,
     hideConversationForBlockedContact,
+    hideConversationForDeletedContact,
     restoreConversationAfterUnblock,
     removeExitedGroupConversation,
     reappearConversation,

@@ -22,7 +22,7 @@ function pumpMeasureQueue() {
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -78,7 +78,7 @@ const showNameRow = computed(() => showNickname.value || !!roleBadgeText.value)
 const emit = defineEmits<{
   avatarClick: []
   avatarLongpress: []
-  longpress: []
+  longpress: [event?: Event]
   cardView: [card: CardPayload]
   groupInviteApply: [invite: GroupInvitePayload]
   retry: [message: ChatMessage]
@@ -177,9 +177,9 @@ function onApplyGroupInvite() {
   if (groupInviteMeta.value) emit('groupInviteApply', groupInviteMeta.value)
 }
 
-function onLongPress() {
+function onLongPress(event?: Event) {
   if (props.textSelecting) return
-  emit('longpress')
+  emit('longpress', event)
 }
 
 /** 发送失败：点击感叹号触发重发 */
@@ -197,7 +197,7 @@ function previewImage() {
     const shown = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
     const current = urls.includes(shown) ? shown : urls[0] || shown
     if (!current || !urls.length) return
-    uni.previewImage({ urls, current })
+    void previewImagesWithSave(urls, current)
     return
   }
   emit('previewImage', props.message)
@@ -267,7 +267,7 @@ function playVideo() {
 function onContextMenu(event: Event) {
   if (props.textSelecting) return
   event.preventDefault()
-  emit('longpress')
+  emit('longpress', event)
 }
 
 /** 引用摘要展示：历史消息若误存了 URL/本地路径，这里再收敛成「图片」等 */

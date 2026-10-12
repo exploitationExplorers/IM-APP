@@ -14,7 +14,7 @@ apiBaseUrl = '/api/v1'
 
 export const APP_CONFIG = {
   appName: 'Chat',
-  displayName: '66快捷版',
+  displayName: '易可聊',
   version: 'v1.0.0',
   apiBaseUrl,
   /** 热更新渠道，打包测试 APK 保持 test，正式包再改为 prod */

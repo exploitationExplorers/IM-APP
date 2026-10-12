@@ -8,7 +8,7 @@ import {
   type StickerItem,
 } from '@/api/sticker'
 import ImNavBar from '@/components/ImNavBar.vue'
-import { playableMediaUrl } from '@/utils/chatMedia'
+import { playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
 import { uploadSticker } from '@/utils/file-upload'
 import { safeBack } from '@/utils/nav'
 
@@ -130,10 +130,10 @@ function onEmotionClick(item: StickerItem) {
     }
     return
   }
-  uni.previewImage({
-    urls: emotions.value.map((e) => e.url),
-    current: item.url,
-  })
+  void previewImagesWithSave(
+    emotions.value.map((e) => e.url),
+    item.url,
+  )
 }
 
 function onDelete() {

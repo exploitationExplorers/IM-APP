@@ -50,7 +50,7 @@ import {
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
-import { playableMediaUrl } from '@/utils/chatMedia'
+import { playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
 import {
   isAnnouncementDismissed,
   rememberDismissedAnnouncement,
@@ -233,10 +233,7 @@ function openImagePreview(message: ChatMessage) {
   const current = playableMediaUrl((message.content || '').trim())
   if (!current) return
   const list = urls.length ? urls : [current]
-  uni.previewImage({
-    urls: list,
-    current: list.includes(current) ? current : list[0],
-  })
+  void previewImagesWithSave(list, list.includes(current) ? current : list[0])
 }
 
 watch(
@@ -495,6 +492,7 @@ const actions = useChatMessageActions({
   myRole,
   input,
   nicknameOf,
+  publicAtNameOf,
   isMine,
   visibleMessages: messages,
   conversationTitle: title,
@@ -1015,7 +1013,11 @@ async function onSend() {
   if (composerBlocked.value) return
   const text = input.value.trim()
   if (!text) return
+  // 发送前先快照：失败要回填输入；atList 无论成败都清空，避免残留劫持后续普通消息
+  const pendingAt = [...actions.atList.value]
+  const hadQuote = !!actions.quote.value
   input.value = ''
+  actions.atList.value = []
   showPlusPanel.value = false
   closeAtMention()
   try {
@@ -1027,20 +1029,23 @@ async function onSend() {
         imUserId.value || myId.value,
       )
       actions.clearQuote()
-    } else if (actions.atList.value.length > 0) {
+    } else if (pendingAt.length > 0) {
       await chatStore.sendAtText(
         conversationId.value,
         text,
         imUserId.value || myId.value,
-        actions.atList.value,
+        pendingAt,
       )
-      actions.atList.value = []
     } else {
       await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
     }
     await nextTick()
     scrollToBottom(true)
   } catch (e) {
+    input.value = text
+    if (hadQuote && !actions.quote.value) {
+      /* quote 已清则不再恢复，避免重复引用 */
+    }
     if (isGroupUnavailableError((e as Error)?.message) || isNotInGroupIMError(e)) {
       exitUnavailableGroupRoom()
       return
@@ -1374,8 +1379,24 @@ async function fillFriendRemarks(userIds: string[]) {
   }
 }
 
+/** 本地 UI（气泡/列表）可优先好友备注；会同步出去的 @ 正文绝不能用备注。 */
 function memberDisplayName(m: GroupMember): string {
   return friendRemarkOf(m.id) || m.memberRemark?.trim() || m.groupNickname || m.nickname || '成员'
+}
+
+/** @ 提及写入消息体的公开名：群昵称 > 用户昵称，不含好友备注 */
+function memberPublicAtName(m: GroupMember): string {
+  return (m.groupNickname || m.nickname || '成员').trim() || '成员'
+}
+
+/** 从消息解析 @ 用公开名：不能走 nicknameOf（会优先好友备注） */
+function publicAtNameOf(message: ChatMessage): string {
+  const uid = businessUserIdFromIM(message.senderId)
+  if (uid) {
+    const member = groupMembersForAt.value.find((m) => sameBusinessUserId(m.id, uid))
+    if (member) return memberPublicAtName(member)
+  }
+  return (message.senderNickname || '用户').trim() || '用户'
 }
 
 const canAtAll = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
@@ -1393,7 +1414,9 @@ const atMentionMembers = computed<AtMentionMember[]>(() => {
     .map((m) => ({
       id: m.id,
       imUserId: openIMUserIdOf(m.id),
+      // 面板可显示备注名；真正写入 atList / 正文用 publicName，避免对方看到我的备注
       name: memberDisplayName(m),
+      publicName: memberPublicAtName(m),
       avatar: m.avatar || APP_CONFIG.defaultAvatarUrl,
     }))
 })
@@ -1453,7 +1476,8 @@ function applyAtMention(name: string, imUserId: string) {
 }
 
 function onAtMentionSelect(member: AtMentionMember) {
-  applyAtMention(member.name, member.imUserId)
+  // 正文必须用公开名，否则对方会在消息里看到我给 TA 的备注
+  applyAtMention(member.publicName || member.name, member.imUserId)
 }
 
 function onAtMentionSelectAll() {
@@ -1736,8 +1760,7 @@ function confirmAtFromSheet() {
     actions.notifySenderLeftGroup()
     return
   }
-  const displayName = nicknameOf(message) || message.senderNickname || ''
-  actions.atUser(message, displayName)
+  actions.atUser(message, publicAtNameOf(message))
 }
 
 /** 名片消息点「查看」：直接进对应好友详情页 */
@@ -2326,7 +2349,7 @@ function pickFavorite() {
           @avatar-longpress="onAvatarLongpress(m)"
           @card-view="onViewCard"
           @group-invite-apply="onGroupInviteApply"
-          @longpress="actions.openMenu(m)"
+          @longpress="(e) => actions.openMenu(m, e)"
           @retry="onRetry(m)"
           @play-video="onPlayVideo"
           @preview-image="openImagePreview"
@@ -2476,6 +2499,8 @@ function pickFavorite() {
     <ImMessageActionMenu
       v-if="actions.menuVisible.value"
       :items="actions.menuItems.value"
+      :x="actions.menuPosition.value?.x"
+      :y="actions.menuPosition.value?.y"
       @select="actions.onMenuSelect"
       @close="actions.closeMenu"
     />

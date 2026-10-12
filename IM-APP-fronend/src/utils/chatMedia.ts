@@ -240,19 +240,82 @@ export function videoPosterUrlFromContent(content: string): string {
   return isUsableVideoPoster(poster) ? playableMediaUrl(poster) : ''
 }
 
+function isAppPlatform(): boolean {
+  try {
+    return uni.getSystemInfoSync().uniPlatform === 'app'
+  } catch {
+    return false
+  }
+}
+
+function isAndroidApp(): boolean {
+  if (!isAppPlatform()) return false
+  const os = `${uni.getSystemInfoSync().osName || ''} ${uni.getSystemInfoSync().platform || ''}`.toLowerCase()
+  return os.includes('android')
+}
+
+/** 华为等机型 previewImage 内置「保存图像」常因未申请写相册权限失败；保存前先要权限。 */
+export function requestAndroidSaveAlbumPermission(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!isAndroidApp()) {
+      resolve()
+      return
+    }
+    const request = plus?.android?.requestPermissions
+    if (typeof request !== 'function') {
+      resolve()
+      return
+    }
+    request(
+      [
+        'android.permission.WRITE_EXTERNAL_STORAGE',
+        'android.permission.READ_EXTERNAL_STORAGE',
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VIDEO',
+        'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+      ],
+      () => resolve(),
+      () => resolve(),
+    )
+  })
+}
+
+function saveLocalImageViaGallery(filePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const gallery = plus?.gallery as { save?: Function } | undefined
+    if (typeof gallery?.save !== 'function') {
+      reject(new Error('保存图片失败'))
+      return
+    }
+    gallery.save(
+      filePath,
+      () => resolve(),
+      (err: { message?: string } | string) => {
+        const msg = typeof err === 'string' ? err : err?.message || '保存图片失败'
+        reject(new Error(msg))
+      },
+    )
+  })
+}
+
+function isAlbumPermissionError(msg: string): boolean {
+  return /auth|permission|deny|authorize|no permission|权限/i.test(msg || '')
+}
+
 /** App 保存到系统相册；H5 使用浏览器下载，供同一长按菜单复用。 */
 export async function saveVideoToDevice(content: string): Promise<void> {
   const { url } = parseVideoMeta(content)
   if (!url) throw new Error('视频地址不存在')
 
   // #ifdef APP-PLUS
+  await requestAndroidSaveAlbumPermission()
   const filePath = /^https?:\/\//i.test(url) ? await downloadRemoteFile(url) : url
   await new Promise<void>((resolve, reject) => {
     uni.saveVideoToPhotosAlbum({
       filePath,
       success: () => resolve(),
       fail: (err) => {
-        const denied = /auth|permission|deny|authorize/i.test(err.errMsg || '')
+        const denied = isAlbumPermissionError(err.errMsg || '')
         reject(new Error(denied ? '请在系统设置中允许相册权限' : err.errMsg || '保存视频失败'))
       },
     })
@@ -278,24 +341,33 @@ export async function saveVideoToDevice(content: string): Promise<void> {
 
 /**
  * 长按菜单「保存图片」。
- * App：下载到本地后写入系统相册；H5：优先 blob 下载，CORS 失败再直链。
+ * App：先申请写相册权限 → 下载到本地 → saveImageToPhotosAlbum，华为失败再走 plus.gallery.save。
+ * H5：优先 blob 下载，CORS 失败再直链。
  */
 export async function saveImageToDevice(url: string): Promise<void> {
   const src = playableMediaUrl((url || '').trim())
   if (!src) throw new Error('图片地址不存在')
 
   // #ifdef APP-PLUS
+  await requestAndroidSaveAlbumPermission()
   const filePath = /^https?:\/\//i.test(src) ? await downloadRemoteFile(src) : src
-  await new Promise<void>((resolve, reject) => {
-    uni.saveImageToPhotosAlbum({
-      filePath,
-      success: () => resolve(),
-      fail: (err) => {
-        const denied = /auth|permission|deny|authorize/i.test(err.errMsg || '')
-        reject(new Error(denied ? '请在系统设置中允许相册权限' : err.errMsg || '保存图片失败'))
-      },
+  try {
+    await new Promise<void>((resolve, reject) => {
+      uni.saveImageToPhotosAlbum({
+        filePath,
+        success: () => resolve(),
+        fail: (err) => reject(new Error(err.errMsg || '保存图片失败')),
+      })
     })
-  })
+  } catch (err) {
+    const msg = (err as Error)?.message || ''
+    try {
+      await saveLocalImageViaGallery(filePath)
+    } catch (fallbackErr) {
+      const denied = isAlbumPermissionError(msg) || isAlbumPermissionError((fallbackErr as Error)?.message || '')
+      throw new Error(denied ? '请在系统设置中允许相册权限' : msg || '保存图片失败')
+    }
+  }
   return
   // #endif
 
@@ -338,6 +410,53 @@ export async function saveImageToDevice(url: string): Promise<void> {
   // #endif
 
   throw new Error('当前平台暂不支持保存图片')
+}
+
+/**
+ * 统一图片预览：接管长按「保存」，避免华为上 previewImage 内置「保存图像到相册失败」。
+ * App 用 longPressActions；H5 仍走系统预览。
+ */
+export async function previewImagesWithSave(urls: string[], current?: string): Promise<void> {
+  const list = urls.map((u) => playableMediaUrl((u || '').trim())).filter(Boolean)
+  if (!list.length) return
+  const cur = playableMediaUrl((current || '').trim())
+  const currentUrl = cur && list.includes(cur) ? cur : list[0]
+
+  if (isAppPlatform()) {
+    await requestAndroidSaveAlbumPermission()
+    uni.previewImage({
+      urls: list,
+      current: currentUrl,
+      // App 端接管长按菜单，走带权限/华为兜底的保存逻辑
+      longPressActions: {
+        itemList: ['保存图片'],
+        success: (data: { tapIndex?: number; index?: number }) => {
+          const idx = typeof data.index === 'number' ? data.index : list.indexOf(currentUrl)
+          const url = list[idx] || list[0]
+          if (data.tapIndex !== 0 || !url) return
+          void saveImageToDevice(url)
+            .then(() => {
+              uni.showToast({ title: '已保存到相册', icon: 'success' })
+            })
+            .catch((e: unknown) => {
+              uni.showToast({
+                title: e instanceof Error ? e.message : '保存图片失败',
+                icon: 'none',
+              })
+            })
+        },
+        fail: () => {
+          /* 用户取消菜单 */
+        },
+      },
+    } as UniApp.PreviewImageOptions)
+    return
+  }
+
+  uni.previewImage({
+    urls: list,
+    current: currentUrl,
+  })
 }
 
 function captureH5VideoPoster(url: string): Promise<string> {
@@ -527,7 +646,7 @@ export async function openChatFile(content: string): Promise<void> {
   }
   const href = playableMediaUrl(url)
   if (IMAGE_FILE_EXTS.has(fileExt(fileName))) {
-    uni.previewImage({ urls: [href], current: href })
+    void previewImagesWithSave([href], href)
     return
   }
   if (uni.getSystemInfoSync().uniPlatform === 'web') {

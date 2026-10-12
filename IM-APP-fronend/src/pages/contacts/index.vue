@@ -8,6 +8,7 @@ import ImDesktopSidebar from '@/components/desktop/ImDesktopSidebar.vue'
 import ImDesktopListResizer from '@/components/desktop/ImDesktopListResizer.vue'
 import ImDesktopGroupsPanel from '@/components/desktop/ImDesktopGroupsPanel.vue'
 import ImDesktopFriendDetail from '@/components/desktop/ImDesktopFriendDetail.vue'
+import ImDesktopNewFriends from '@/components/desktop/ImDesktopNewFriends.vue'
 import { useContactStore } from '@/stores/contact'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { usePullRefresh } from '@/composables/usePullRefresh'
@@ -26,6 +27,7 @@ const { isDesktop } = useDesktopLayout()
 const { listWidth, isResizing, onResizeStart } = useDesktopListResize(isDesktop)
 
 const selectedContact = ref<Contact | null>(null)
+const showNewFriendsModal = ref(false)
 
 const statusBarHeight = getStatusBarHeight()
 const contactStore = useContactStore()
@@ -129,6 +131,10 @@ function onScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } })
 function go(url: string) {
   showAddMenu.value = false
   showSort.value = false
+  if (isDesktop.value && url.startsWith('/pages/contacts/new-friends')) {
+    showNewFriendsModal.value = true
+    return
+  }
   uni.navigateTo({ url })
 }
 
@@ -370,6 +376,8 @@ function onPanelGroupSelect(g: GroupPreview) {
       :contact-id="selectedContact.id"
       @update:model-value="(v) => { if (!v) selectedContact = null }"
     />
+
+    <ImDesktopNewFriends v-model="showNewFriendsModal" />
 
     <ImTabBar v-if="!isDesktop" current="contacts" />
   </view>

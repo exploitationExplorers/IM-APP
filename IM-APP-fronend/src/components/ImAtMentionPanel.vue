@@ -11,7 +11,10 @@ export interface AtMentionMember {
   id: string
   /** OpenIM userID，发 AtText 用 */
   imUserId: string
+  /** 面板展示名（可含好友备注，仅本地可见） */
   name: string
+  /** 写入 @ 正文 / atUsersInfo 的公开名（群昵称或用户昵称，不含好友备注） */
+  publicName?: string
   avatar: string
 }
 

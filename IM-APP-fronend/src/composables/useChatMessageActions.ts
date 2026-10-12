@@ -26,6 +26,8 @@ export function useChatMessageActions(opts: {
   myRole: Ref<'owner' | 'admin' | 'member'>
   input: Ref<string>
   nicknameOf: (message: ChatMessage) => string
+  /** @ 写入消息体的公开名（不含好友备注）；缺省回退 senderNickname */
+  publicAtNameOf?: (message: ChatMessage) => string
   isMine: (message: ChatMessage) => boolean
   visibleMessages: ComputedRef<ChatMessage[]>
   conversationTitle?: Ref<string>
@@ -69,6 +71,8 @@ export function useChatMessageActions(opts: {
   }
 
   const menuMessage = ref<ChatMessage | null>(null)
+  /** 菜单锚点：右键/长按坐标；缺省由组件居中 */
+  const menuPosition = ref<{ x: number; y: number } | null>(null)
   const selecting = ref(false)
   const selectMode = ref<'forward' | 'multi'>('multi')
   const selectedOrder = ref<string[]>([])
@@ -173,17 +177,38 @@ export function useChatMessageActions(opts: {
 
   function closeMenu() {
     menuMessage.value = null
+    menuPosition.value = null
   }
 
   function clearTextSelecting() {
     textSelectingId.value = ''
   }
 
-  function openMenu(message: ChatMessage, event?: { touches?: Array<{ clientX: number; clientY: number }> }) {
+  function resolveMenuPoint(event?: unknown): { x: number; y: number } | null {
+    if (!event || typeof event !== 'object') return null
+    const ev = event as Record<string, unknown>
+    const touches = (ev.touches || ev.changedTouches) as
+      | Array<{ clientX?: number; clientY?: number }>
+      | undefined
+    const touch = touches?.[0]
+    if (touch && Number.isFinite(touch.clientX) && Number.isFinite(touch.clientY)) {
+      return { x: touch.clientX as number, y: touch.clientY as number }
+    }
+    if (Number.isFinite(ev.clientX) && Number.isFinite(ev.clientY)) {
+      return { x: ev.clientX as number, y: ev.clientY as number }
+    }
+    const detail = ev.detail as { x?: number; y?: number } | undefined
+    if (detail && Number.isFinite(detail.x) && Number.isFinite(detail.y)) {
+      return { x: detail.x as number, y: detail.y as number }
+    }
+    return null
+  }
+
+  function openMenu(message: ChatMessage, event?: unknown) {
     if (selecting.value || message.type === 'system') return
     if (textSelectingId.value && textSelectingId.value === message.id) return
     clearTextSelecting()
-    void event
+    menuPosition.value = resolveMenuPoint(event)
     menuMessage.value = message
   }
 
@@ -513,13 +538,18 @@ export function useChatMessageActions(opts: {
   }
 
   /**
-   * 写入输入框的是「@昵称」，按钮文案 @TA 只是动作名。
-   * displayName 优先用气泡已展示的昵称，避免 maps 未就绪时落到字面量 TA。
+   * 写入输入框 / atUsersInfo 的必须是公开群昵称或用户昵称，不能用好友备注（备注仅自己可见）。
+   * displayName 由调用方传入公开名；缺省走 publicAtNameOf / senderNickname。
    */
   function atUser(message: ChatMessage, displayName?: string) {
     if (!guardSenderInGroup(message)) return
     const name =
-      (displayName || opts.nicknameOf(message) || message.senderNickname || '').trim() || '用户'
+      (
+        displayName ||
+        opts.publicAtNameOf?.(message) ||
+        message.senderNickname ||
+        ''
+      ).trim() || '用户'
     const token = `@${name} `
     if (!opts.input.value.includes(token)) {
       opts.input.value = `${token}${opts.input.value}`
@@ -695,7 +725,7 @@ export function useChatMessageActions(opts: {
       return
     }
     if (key === 'at') {
-      atUser(message, opts.nicknameOf(message) || message.senderNickname || undefined)
+      atUser(message)
       return
     }
     if (key === 'mute') {
@@ -748,6 +778,7 @@ export function useChatMessageActions(opts: {
   return {
     menuVisible,
     menuItems,
+    menuPosition,
     selecting,
     selectMode,
     selectedIds,

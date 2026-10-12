@@ -58,6 +58,8 @@ export const useContactStore = defineStore('contact', () => {
     businessId: string
     title: string
     avatar: string
+    /** 同会话重复点开会话时也触发 watch（已在聊天 tab 时 onShow 不重跑） */
+    token: number
   } | null>(null)
 
   /** 待处理的收到申请数，对齐参考站通讯录 / 新的朋友角标 */
@@ -319,13 +321,16 @@ export const useContactStore = defineStore('contact', () => {
     })
   }
 
-  /** H5 PC 三栏：切到聊天 tab 并在右侧内嵌打开私聊 */
+  /** H5 PC 三栏：切到聊天 tab 并在右侧内嵌打开私聊。
+   * 已在聊天 tab 时 switchTab 不一定触发 onShow，靠 pendingDesktopChat 的 watch 消费。
+   */
   function openChatWithContactDesktop(contactId: string, nickname: string, avatar: string) {
     pendingDesktopChat.value = {
       type: 'private',
       businessId: contactId,
       title: nickname,
       avatar,
+      token: Date.now(),
     }
     uni.switchTab({ url: '/pages/chat/index' })
   }
@@ -354,6 +359,7 @@ export const useContactStore = defineStore('contact', () => {
       businessId: groupId,
       title: groupName,
       avatar,
+      token: Date.now(),
     }
     uni.switchTab({ url: '/pages/chat/index' })
   }
@@ -414,6 +420,7 @@ export const useContactStore = defineStore('contact', () => {
     openChatWithContactDesktop,
     openChatWithGroup,
     openChatWithGroupDesktop,
+    pendingDesktopChat,
     takePendingDesktopChat,
     toggleGroupsExpanded,
     reset,

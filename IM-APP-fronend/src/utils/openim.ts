@@ -958,13 +958,13 @@ export async function sendAtTextMessage(
   text: string,
   atUserIDList: string[],
   atUsersInfo: Array<{ atUserID: string; groupNickname: string }>,
-  isAtAll = false,
 ): Promise<MessageItem> {
+  // CreateTextAtMessage 官方参数只有 text / atUserIDList / atUsersInfo（及可选 quote）。
+  // 不要传 isAtAll：App 原生桥会拒未知字段，表现为 @ 后发送失败。
   const message = await imCall<MessageItem>(IMMethods.CreateTextAtMessage, {
     text,
     atUserIDList,
     atUsersInfo,
-    isAtAll,
   })
   return sendCreatedMessage(target, message)
 }
@@ -2273,7 +2273,9 @@ export function toConversation(item: ConversationItem): Conversation {
   }
 }
 
-export function toChatMessage(item: MessageItem): ChatMessage {
+export function toChatMessage(rawItem: MessageItem): ChatMessage {
+  // 历史/实时推送都可能带 PascalCase；统一先归一再取 pictureElem，避免群图空白
+  const item = coerceMessage(rawItem) || rawItem
   const notificationKind = notificationKindOf(item.contentType)
   const inviteFromCustom =
     Number(item.contentType) === MessageType.CustomMessage

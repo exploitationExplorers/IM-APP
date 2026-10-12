@@ -6,7 +6,7 @@ import type { MessageItem } from 'openim-uniapp-polyfill'
 import EmptyState from '@/components/EmptyState.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { collectHistoryMessages, resolveGroupConversationID } from '@/utils/openim'
-import { parseVideoMeta, playableMediaUrl } from '@/utils/chatMedia'
+import { parseVideoMeta, playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
 
 type MediaTab = 'all' | 'image' | 'video' | 'file'
 
@@ -104,7 +104,7 @@ function onPreview(item: MediaItem) {
     const urls = visible.value
       .filter((row) => row.kind === 'image')
       .map((row) => playableMediaUrl(row.url))
-    uni.previewImage({ current: playableMediaUrl(item.url), urls })
+    void previewImagesWithSave(urls, playableMediaUrl(item.url))
     return
   }
   if (item.kind === 'video' && item.url) {

@@ -133,6 +133,13 @@ interface PlusNative {
       errorCallback?: (err: unknown) => void,
     ) => void
   }
+  gallery?: {
+    save?: (
+      path: string,
+      success?: () => void,
+      fail?: (err: { message?: string } | string) => void,
+    ) => void
+  }
 }
 
 declare const plus: PlusNative | undefined

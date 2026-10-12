@@ -342,58 +342,68 @@ function pickDesktopConversation(list: Conversation[]): Conversation | null {
   return list.find((c) => !isDissolvedGroupConversation(c)) ?? null
 }
 
-/** 通讯录 PC 内联群列表点进：切到聊天 tab 后打开对应群聊 */
-onShow(() => {
+/** 消费「桌面端待打开会话」：onShow 与 watch 共用，避免已在聊天 tab 时 switchTab 不触发 onShow */
+async function consumePendingDesktopChat() {
   if (!isDesktop.value) return
   const pending = contactStore.takePendingDesktopChat()
   if (!pending) return
-  void (async () => {
-    try {
-      if (!chatStore.conversations.length) {
-        await chatStore.loadConversations()
-      }
-      const conv = await chatStore.enterConversation({
+  try {
+    if (!chatStore.conversations.length) {
+      await chatStore.loadConversations()
+    }
+    const conv = await chatStore.enterConversation({
+      type: pending.type,
+      businessId: pending.businessId,
+    })
+    const matched = chatStore.conversations.find((c) => c.id === conv.id)
+    const candidate: Conversation =
+      matched ||
+      ({
+        id: conv.id,
         type: pending.type,
-        businessId: pending.businessId,
-      })
-      const matched = chatStore.conversations.find((c) => c.id === conv.id)
-      const candidate: Conversation =
-        matched ||
-        ({
-          id: conv.id,
-          type: pending.type,
-          title: conv.title || pending.title,
-          avatar: conv.avatar || pending.avatar,
-          lastMessage: conv.lastMessage || '',
-          lastMessageAt: conv.lastMessageAt || '',
-          unreadCount: conv.unreadCount || 0,
-          pinned: false,
-        } as Conversation)
-      if (isDissolvedGroupConversation(candidate)) {
-        notifyGroupUnavailable(true)
-        return
-      }
-      try {
-        await chatStore.assertConversationAccessible(candidate)
-      } catch (e) {
-        const msg = (e as Error)?.message || ''
-        if (isGroupUnavailableError(msg)) {
-          notifyGroupUnavailable(true)
-          return
-        }
-        throw e
-      }
-      selectedConv.value = candidate
+        title: conv.title || pending.title,
+        avatar: conv.avatar || pending.avatar,
+        lastMessage: conv.lastMessage || '',
+        lastMessageAt: conv.lastMessageAt || '',
+        unreadCount: conv.unreadCount || 0,
+        pinned: false,
+      } as Conversation)
+    if (isDissolvedGroupConversation(candidate)) {
+      notifyGroupUnavailable(true)
+      return
+    }
+    try {
+      await chatStore.assertConversationAccessible(candidate)
     } catch (e) {
       const msg = (e as Error)?.message || ''
       if (isGroupUnavailableError(msg)) {
         notifyGroupUnavailable(true)
         return
       }
-      uni.showToast({ title: msg || '打开群聊失败', icon: 'none' })
+      throw e
     }
-  })()
+    selectedConv.value = candidate
+  } catch (e) {
+    const msg = (e as Error)?.message || ''
+    if (isGroupUnavailableError(msg)) {
+      notifyGroupUnavailable(true)
+      return
+    }
+    uni.showToast({ title: msg || '打开会话失败', icon: 'none' })
+  }
+}
+
+onShow(() => {
+  void consumePendingDesktopChat()
 })
+
+watch(
+  () => contactStore.pendingDesktopChat?.token,
+  (token) => {
+    if (!token || !isDesktop.value) return
+    void consumePendingDesktopChat()
+  },
+)
 
 /** PC 宽屏：默认选中第一条可用会话，跳过已解散群聊 */
 watchEffect(() => {

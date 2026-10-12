@@ -6,10 +6,13 @@ import {
   deleteContact,
   fetchContact,
   unblockContact,
+  updateContact,
 } from '@/api/contact'
 import { useContactStore } from '@/stores/contact'
 import { useChatStore } from '@/stores/chat'
 import type { Contact, GroupPreview } from '@/types'
+
+const REMARK_MAX = 50
 
 const props = defineProps<{
   modelValue: boolean
@@ -25,6 +28,9 @@ const chatStore = useChatStore()
 const contact = ref<Contact | null>(null)
 const loading = ref(false)
 const showMore = ref(false)
+const showRemarkEditor = ref(false)
+const remarkDraft = ref('')
+const remarkSaving = ref(false)
 
 const listName = computed(
   () => contact.value?.remark?.trim() || contact.value?.nickname || '',
@@ -39,6 +45,7 @@ const showAllGroupsLink = computed(() => groups.value.length > 3)
 
 function close() {
   showMore.value = false
+  showRemarkEditor.value = false
   emit('update:modelValue', false)
 }
 
@@ -60,6 +67,7 @@ watch(
   ([open]) => {
     if (open) {
       showMore.value = false
+      showRemarkEditor.value = false
       contact.value = null
       void loadDetail()
     }
@@ -69,9 +77,42 @@ watch(
 
 function goRemark() {
   if (!contact.value) return
-  close()
-  uni.navigateTo({
-    url: `/pages/contacts/friend-remark?id=${contact.value.id}&remark=${encodeURIComponent(contact.value.remark || '')}&nickname=${encodeURIComponent(contact.value.nickname)}`,
+  remarkDraft.value = contact.value.remark || ''
+  showRemarkEditor.value = true
+}
+
+async function saveRemark() {
+  if (!contact.value || remarkSaving.value) return
+  const value = remarkDraft.value.trim()
+  if (value.length > REMARK_MAX) {
+    uni.showToast({ title: `备注名最多 ${REMARK_MAX} 个字`, icon: 'none' })
+    return
+  }
+  remarkSaving.value = true
+  try {
+    await updateContact(contact.value.id, { remark: value })
+    contact.value.remark = value
+    contactStore.patchContactRemark(contact.value.id, value)
+    chatStore.applyContactRemarks()
+    void contactStore.reloadContacts({
+      keyword: contactStore.contactKeyword,
+      sort: contactStore.contactSort,
+    })
+    showRemarkEditor.value = false
+    uni.showToast({ title: '已保存', icon: 'success' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error).message || '保存失败', icon: 'none' })
+  } finally {
+    remarkSaving.value = false
+  }
+}
+
+function copyText(text: string, label = '已复制') {
+  const value = (text || '').trim()
+  if (!value) return
+  uni.setClipboardData({
+    data: value,
+    success: () => uni.showToast({ title: label, icon: 'none' }),
   })
 }
 
@@ -164,7 +205,9 @@ function onDelete() {
     success: async (res) => {
       if (!res.confirm || !contact.value) return
       try {
-        await deleteContact(contact.value.id)
+        const id = contact.value.id
+        await deleteContact(id)
+        await chatStore.hideConversationForDeletedContact(id)
         await contactStore.loadDirectory()
         uni.showToast({ title: '已删除', icon: 'success' })
         close()
@@ -218,10 +261,11 @@ function onDelete() {
                 }"
               />
               <view class="friend-profile-meta">
-                <text class="friend-name">{{ listName }}</text>
+                <text class="friend-name selectable" @dblclick.stop="copyText(listName)">{{ listName }}</text>
                 <text
                   v-if="contact.remark && contact.nickname && contact.remark.trim() !== contact.nickname.trim()"
-                  class="friend-origin-name"
+                  class="friend-origin-name selectable"
+                  @dblclick.stop="copyText(contact.nickname, '已复制昵称')"
                 >昵称：{{ contact.nickname }}</text>
                 <view v-if="contact.isBlocked" class="friend-blocked-tag">
                   <text>已拉黑</text>
@@ -236,7 +280,11 @@ function onDelete() {
             <view class="friend-row" @click="goRemark">
               <text class="friend-label">备注</text>
               <view class="friend-row-right">
-                <text v-if="contact.remark" class="friend-value">{{ contact.remark }}</text>
+                <text
+                  v-if="contact.remark"
+                  class="friend-value selectable"
+                  @dblclick.stop="copyText(contact.remark, '已复制备注')"
+                >{{ contact.remark }}</text>
                 <image class="friend-chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
               </view>
             </view>
@@ -296,6 +344,36 @@ function onDelete() {
                 <text class="friend-msg-text">消息</text>
               </view>
             </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 桌面备注编辑：小弹层，不再跳全屏页 -->
+      <view
+        v-if="showRemarkEditor"
+        class="remark-layer"
+        @click.stop="showRemarkEditor = false"
+      >
+        <view class="remark-card" @click.stop>
+          <text class="remark-title">备注名</text>
+          <textarea
+            class="remark-input"
+            v-model="remarkDraft"
+            :maxlength="REMARK_MAX"
+            :placeholder="contact?.nickname || '请输入备注名'"
+            auto-height
+          />
+          <view class="remark-meta">
+            <text class="remark-hint">最多 {{ REMARK_MAX }} 个字</text>
+            <text class="remark-count">{{ remarkDraft.length }}/{{ REMARK_MAX }}</text>
+          </view>
+          <view class="remark-actions">
+            <view class="remark-btn ghost" @click="showRemarkEditor = false">取消</view>
+            <view
+              class="remark-btn primary"
+              :class="{ disabled: remarkSaving }"
+              @click="saveRemark"
+            >确认</view>
           </view>
         </view>
       </view>
@@ -711,5 +789,91 @@ function onDelete() {
   font-size: 14px;
   font-weight: 600;
   color: #fff;
+}
+
+.selectable {
+  user-select: text;
+  cursor: text;
+}
+
+.remark-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.remark-card {
+  width: 100%;
+  max-width: 320px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 18px 16px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+.remark-title {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: #212121;
+  margin-bottom: 12px;
+}
+
+.remark-input {
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px solid #e1e3ea;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #212121;
+  box-sizing: border-box;
+}
+
+.remark-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8e8d92;
+}
+
+.remark-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.remark-btn {
+  flex: 1;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.remark-btn.ghost {
+  background: #f3f4f7;
+  color: #212121;
+}
+
+.remark-btn.primary {
+  background: #0a2fc2;
+  color: #fff;
+}
+
+.remark-btn.disabled {
+  opacity: 0.6;
+  pointer-events: none;
 }
 </style>

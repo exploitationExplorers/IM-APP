@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 export interface MessageMenuItem {
   key: string
@@ -11,6 +11,9 @@ export interface MessageMenuItem {
 
 const props = defineProps<{
   items: MessageMenuItem[]
+  /** 长按/右键锚点；缺省居中（兼容旧调用） */
+  x?: number | null
+  y?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -18,8 +21,57 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const gridItems = computed(() => props.items.filter((item) => !item.wide))
+const gridItems = computed(() => props.items.filter((item) => !item.spacer))
 const wideItems = computed(() => props.items.filter((item) => item.wide))
+const menuRef = ref<HTMLElement | null>(null)
+const anchoredStyle = ref<Record<string, string>>({})
+
+const hasAnchor = computed(
+  () => Number.isFinite(props.x) && Number.isFinite(props.y) && (props.x as number) > 0 && (props.y as number) > 0,
+)
+
+function clamp(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n))
+}
+
+function updatePosition() {
+  if (!hasAnchor.value) {
+    anchoredStyle.value = {}
+    return
+  }
+  const sys = uni.getSystemInfoSync()
+  const vw = sys.windowWidth || 375
+  const vh = sys.windowHeight || 667
+  const el = menuRef.value as unknown as { offsetWidth?: number; offsetHeight?: number } | null
+  const mw = el?.offsetWidth || 260
+  const mh = el?.offsetHeight || 220
+  const pad = 8
+  // 默认出现在手指/鼠标下方偏右；贴边时夹紧
+  let left = (props.x as number) - mw / 2
+  let top = (props.y as number) + 12
+  left = clamp(left, pad, vw - mw - pad)
+  if (top + mh + pad > vh) {
+    top = clamp((props.y as number) - mh - 12, pad, vh - mh - pad)
+  } else {
+    top = clamp(top, pad, vh - mh - pad)
+  }
+  anchoredStyle.value = {
+    left: `${left}px`,
+    top: `${top}px`,
+    transform: 'none',
+  }
+}
+
+onMounted(() => {
+  void nextTick(() => updatePosition())
+})
+
+watch(
+  () => [props.x, props.y, props.items.length] as const,
+  () => {
+    void nextTick(() => updatePosition())
+  },
+)
 
 function onCellClick(item: MessageMenuItem) {
   if (item.spacer) return
@@ -29,8 +81,13 @@ function onCellClick(item: MessageMenuItem) {
 
 <template>
   <view class="mask" @click="emit('close')" @touchmove.stop.prevent>
-    <view class="menu-wrap" @click.stop>
-      <view class="menu-grid">
+    <view
+      class="menu-wrap"
+      :class="{ anchored: hasAnchor }"
+      :style="anchoredStyle"
+      @click.stop
+    >
+      <view ref="menuRef" class="menu-grid">
         <view
           v-for="item in gridItems"
           :key="item.key"
@@ -80,6 +137,10 @@ function onCellClick(item: MessageMenuItem) {
     0 2px 8px rgba(15, 23, 42, 0.08);
 }
 
+.menu-wrap.anchored {
+  /* left/top 由内联 style 控制 */
+}
+
 .menu-grid {
   display: flex;
   flex-wrap: wrap;
@@ -121,13 +182,10 @@ function onCellClick(item: MessageMenuItem) {
   pointer-events: none;
 }
 
-.menu-wide .cell.wide {
+.cell.wide {
   width: 100%;
   border-right: none;
-  border-bottom: 1px solid #ececec;
-}
-
-.menu-wide .cell.wide:last-child {
-  border-bottom: none;
+  min-height: 48px;
+  font-weight: 600;
 }
 </style>

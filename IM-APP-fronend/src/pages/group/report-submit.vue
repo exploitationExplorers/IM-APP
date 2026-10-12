@@ -4,6 +4,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { createGroupReport, type GroupReportReason } from '@/api/report'
 import { uploadReportImage } from '@/utils/file-upload'
+import { previewImagesWithSave } from '@/utils/chatMedia'
 import { safeBack } from '@/utils/nav'
 
 const MIN_LEN = 5
@@ -82,10 +83,7 @@ function removeImage(index: number) {
 }
 
 function previewImage(index: number) {
-  uni.previewImage({
-    current: images.value[index],
-    urls: images.value,
-  })
+  void previewImagesWithSave(images.value, images.value[index])
 }
 
 async function onSubmit() {

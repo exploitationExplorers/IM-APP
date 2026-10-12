@@ -154,16 +154,22 @@ function goTags() {
   uni.navigateTo({ url: `/pages/contacts/friend-tags?id=${contact.value.id}` })
 }
 
+function copyText(text: string, label = '已复制') {
+  const value = (text || '').trim()
+  if (!value) return
+  uni.setClipboardData({
+    data: value,
+    success: () => uni.showToast({ title: label, icon: 'none' }),
+  })
+}
+
 function onCopyPublicId() {
   const id = contact.value?.publicId
   if (!id) {
     uni.showToast({ title: '暂无聊天号', icon: 'none' })
     return
   }
-  uni.setClipboardData({
-    data: id,
-    success: () => uni.showToast({ title: '已复制', icon: 'none' }),
-  })
+  copyText(id)
 }
 
 async function onMessage() {
@@ -240,7 +246,9 @@ function onDelete() {
     success: async (res) => {
       if (!res.confirm || !contact.value) return
       try {
-        await deleteContact(contact.value.id)
+        const id = contact.value.id
+        await deleteContact(id)
+        await chatStore.hideConversationForDeletedContact(id)
         await contactStore.loadDirectory()
         uni.showToast({ title: '已删除', icon: 'success' })
         if (props.embedded) {
@@ -306,11 +314,12 @@ function onDelete() {
               mode="aspectFill"
             />
             <view class="profile-meta">
-              <text class="name">{{ listName }}</text>
+              <text class="name selectable" @dblclick.stop="copyText(listName)">{{ listName }}</text>
               <!-- 有备注时主名是备注，下面补一行原昵称，避免「备注完看不到原来名字」 -->
               <text
                 v-if="contact.remark && contact.nickname && contact.remark.trim() !== contact.nickname.trim()"
-                class="origin-name"
+                class="origin-name selectable"
+                @dblclick.stop="copyText(contact.nickname, '已复制昵称')"
               >昵称：{{ contact.nickname }}</text>
               <view v-if="contact.isBlocked" class="blocked-tag">
                 <text>已拉黑</text>
@@ -323,7 +332,11 @@ function onDelete() {
           <view class="row" @click="goRemark">
             <text class="label">备注</text>
             <view class="row-right">
-              <text v-if="contact.remark" class="value">{{ contact.remark }}</text>
+              <text
+                v-if="contact.remark"
+                class="value selectable"
+                @dblclick.stop="copyText(contact.remark, '已复制备注')"
+              >{{ contact.remark }}</text>
               <image class="chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
             </view>
           </view>
@@ -577,6 +590,11 @@ function onDelete() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.selectable {
+  user-select: text;
+  cursor: text;
 }
 
 .blocked-tag {
