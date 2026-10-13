@@ -62,6 +62,16 @@ async function refreshContacts() {
   })
 }
 
+/** 通讯录一页 50 人，邀请页继续把后面的页拉上来 */
+async function loadContactsForPicker() {
+  await refreshContacts()
+  let guard = 0
+  while (contactStore.contactHasMore && guard < 40) {
+    guard += 1
+    await contactStore.loadMoreContacts()
+  }
+}
+
 onLoad(async (query) => {
   groupId.value = String(query?.id || '')
   if (!groupId.value) {
@@ -71,7 +81,7 @@ onLoad(async (query) => {
   try {
     const [members] = await Promise.all([
       fetchAllGroupMembers(groupId.value),
-      refreshContacts(),
+      loadContactsForPicker(),
     ])
     memberIds.value = new Set(members.map((m) => m.id))
   } catch (e) {
@@ -82,7 +92,8 @@ onLoad(async (query) => {
 watch(keyword, () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
-    void refreshContacts()
+    if (keyword.value.trim()) void refreshContacts()
+    else void loadContactsForPicker()
   }, 300)
 })
 

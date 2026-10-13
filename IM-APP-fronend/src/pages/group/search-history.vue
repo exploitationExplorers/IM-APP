@@ -72,13 +72,15 @@ async function runSearch(raw: string) {
   }
 }
 
-watch(keyword, (value) => {
+watch([keyword, conversationId], () => {
   if (searchTimer) clearTimeout(searchTimer)
-  const text = value.trim()
-  if (!text) {
-    searchSeq += 1
-    results.value = []
-    loading.value = false
+  const text = keyword.value.trim()
+  if (!text || !conversationId.value) {
+    if (!text) {
+      searchSeq += 1
+      results.value = []
+      loading.value = false
+    }
     return
   }
   searchTimer = setTimeout(() => {

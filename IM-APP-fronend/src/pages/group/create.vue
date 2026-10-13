@@ -72,14 +72,29 @@ function contactDisplayName(c: Contact) {
   return c.remark?.trim() || contactStore.remarkOf(c.id) || c.nickname || '联络人'
 }
 
+/** 通讯录接口一页 50 人；建群页把后续页拉上来，否则选不满一个资料群 */
+async function loadContactsForPicker() {
+  await refreshContacts()
+  let guard = 0
+  while (contactStore.contactHasMore && guard < 40) {
+    guard += 1
+    await contactStore.loadMoreContacts()
+  }
+}
+
 onShow(() => {
-  void Promise.all([refreshContacts(), contactStore.loadGroups(), userStore.loadProfile().catch(() => undefined)])
+  void Promise.all([
+    loadContactsForPicker(),
+    contactStore.loadGroups(),
+    userStore.loadProfile().catch(() => undefined),
+  ])
 })
 
 watch(keyword, () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
-    void refreshContacts()
+    if (keyword.value.trim()) void refreshContacts()
+    else void loadContactsForPicker()
   }, 300)
 })
 

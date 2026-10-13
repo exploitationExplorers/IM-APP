@@ -1021,6 +1021,7 @@ function scrollToAnchorBottom() {
  * 与 onMsgScroll 互抢，出现「↓」按钮、大块空白、消息列表乱跳。
  */
 function scrollToBottom(force = false) {
+  if (userHoldingList) return
   if (!force && !stickToBottom.value) return
   stickToBottom.value = true
   browsingHistory.value = false
@@ -1028,20 +1029,30 @@ function scrollToBottom(force = false) {
   const last = messages.value[messages.value.length - 1]
   const media =
     !!last && last.type !== 'text' && last.type !== 'system'
-  // 进房 force：少拍几次；媒体：等撑高；纯文字：一帧足够
-  const delays = force ? [80, 280, 640] : media ? [180, 480] : [60]
-  const lastDelay = delays[delays.length - 1] || 60
-  ignoreScrollUntil = Date.now() + lastDelay + 240
+  // 只补一拍等图片撑高；再密会和手指对拉
+  const delays = force || media ? [220] : []
+  ignoreScrollUntil = Date.now() + (delays[0] || 0) + 280
   scrollToAnchorBottom()
   for (const delay of delays) {
     scrollRetryTimers.push(
       setTimeout(() => {
-        if (!stickToBottom.value) return
-        ignoreScrollUntil = Date.now() + 240
+        if (userHoldingList || !stickToBottom.value) return
+        ignoreScrollUntil = Date.now() + 280
         scrollToAnchorBottom()
       }, delay),
     )
   }
+}
+
+/** 手指按在消息列表上：立刻停掉贴底重试，避免和滑动对拉（iOS 会弹、点 ↓ 也会抖） */
+let userHoldingList = false
+function onMsgListTouchStart() {
+  userHoldingList = true
+  clearScrollRetries()
+  ignoreScrollUntil = 0
+}
+function onMsgListTouchEnd() {
+  userHoldingList = false
 }
 
 let scrollRaf = 0
@@ -1053,27 +1064,31 @@ function scheduleScrollFrame(fn: () => void) {
   return raf(fn)
 }
 function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
-  // ignoreScrollUntil 覆盖整段程序化贴底重试，避免中间态误判成上翻（RENDER_TAIL 展开会乱跳）
-  if (Date.now() < ignoreScrollUntil) return
   const top = Number(e.detail?.scrollTop || 0)
   const height = Number(e.detail?.scrollHeight || 0)
+  // 手指拖动时不受贴底窗口影响，并松开 scroll-top 绑定，否则 iOS 会按大值弹回去
+  if (userHoldingList) {
+    if (msgScrollTop.value > 1_000_000) releaseScrollTopBinding(top)
+    ignoreScrollUntil = 0
+  } else if (Date.now() < ignoreScrollUntil) {
+    return
+  }
   if (scrollRaf) return
   scrollRaf = scheduleScrollFrame(() => {
     scrollRaf = 0
-    if (Date.now() < ignoreScrollUntil) return
+    if (!userHoldingList && Date.now() < ignoreScrollUntil) return
     if (msgViewportHeight <= 0) measureMsgList()
-    // 滞回宜窄：上滑超过约一指距离就进入翻历史，绝不能在「半离开」时强行贴底拽回（iOS 会表现为完全滑不动）
     if (msgViewportHeight > 0 && height > 0) {
       const distance = height - top - msgViewportHeight
       if (distance < 80) {
         stickToBottom.value = true
       } else if (distance > 120) {
-        if (stickToBottom.value) releaseScrollTopBinding(top)
+        if (stickToBottom.value || msgScrollTop.value > 1_000_000) releaseScrollTopBinding(top)
         stickToBottom.value = false
         browsingHistory.value = true
       }
     } else if (top + 80 < maxScrollTop) {
-      if (stickToBottom.value) releaseScrollTopBinding(top)
+      if (stickToBottom.value || msgScrollTop.value > 1_000_000) releaseScrollTopBinding(top)
       stickToBottom.value = false
       browsingHistory.value = true
     }
@@ -1082,9 +1097,13 @@ function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number }
 }
 
 function jumpToBottom() {
+  userHoldingList = false
   maxScrollTop = 0
   browsingHistory.value = false
-  scrollToBottom(true)
+  stickToBottom.value = true
+  clearScrollRetries()
+  ignoreScrollUntil = Date.now() + 360
+  scrollToAnchorBottom()
 }
 
 watch(
@@ -1104,7 +1123,7 @@ async function onSend() {
   // 发送前先快照：失败要回填输入；atList 无论成败都清空，避免残留劫持后续普通消息
   const pendingAt = [...actions.atList.value]
   const hadQuote = !!actions.quote.value
-  input.value = ''
+  clearComposerDraft()
   actions.atList.value = []
   showPlusPanel.value = false
   closeAtMention()
@@ -1570,9 +1589,27 @@ const atMentionMembers = computed<AtMentionMember[]>(() => {
  * 匹配：行首或空白后的 `@关键字`（关键字不含空白与 @）。
  * App 中文输入法偶发插入全角 ＠，统一成半角再匹配。
  */
+/** 发送后短时间内丢掉输入框回写，避免回车已发出但编辑框还留着原文 */
+let ignoreComposerEchoUntil = 0
+
+function clearComposerDraft() {
+  input.value = ''
+  ignoreComposerEchoUntil = Date.now() + 500
+  const el = getComposerTextareaEl()
+  if (el) el.value = ''
+}
+
 function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
   // App 端 @input 有时早于 v-model 落库，优先用事件值
   const detail = e && 'detail' in e ? e.detail : undefined
+  if (Date.now() < ignoreComposerEchoUntil) {
+    if (detail && typeof detail.value === 'string' && detail.value) {
+      input.value = ''
+      const el = getComposerTextareaEl()
+      if (el) el.value = ''
+    }
+    return
+  }
   if (detail && typeof detail.value === 'string') {
     input.value = detail.value
   }
@@ -2475,6 +2512,9 @@ function pickFavorite() {
       :scroll-into-view="scrollInto"
       @scroll="onMsgScroll"
       @scrolltoupper="onScrollToUpper"
+      @touchstart="onMsgListTouchStart"
+      @touchend="onMsgListTouchEnd"
+      @touchcancel="onMsgListTouchEnd"
     >
       <view
         v-for="m in renderMessages"

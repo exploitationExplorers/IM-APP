@@ -2888,11 +2888,8 @@ export async function searchLocalMessages(params: {
     keywordList: [keyword],
     keywordListMatchType: 0,
     senderUserIDList: [] as string[],
-    messageTypeList: [
-      MessageType.TextMessage,
-      MessageType.AtTextMessage,
-      MessageType.QuoteMessage,
-    ],
+    // 空列表 = 全部类型。只传文本类型时，App 上部分群消息类型对不上，搜索会一直空
+    messageTypeList: [] as number[],
     searchTimePosition: 0,
     searchTimePeriod: 0,
     pageIndex: 1,
