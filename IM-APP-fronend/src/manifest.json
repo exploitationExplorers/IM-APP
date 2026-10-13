@@ -2,8 +2,8 @@
     "name" : "易可聊",
     "appid" : "__UNI__EC9D1AE",
     "description" : "",
-    "versionName" : "1.0.80",
-    "versionCode" : "180",
+    "versionName" : "1.0.81",
+    "versionCode" : "181",
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
