@@ -1120,14 +1120,9 @@ watch(
   },
 )
 
-function composerText(): string {
-  const fromDom = getComposerTextareaEl()?.value || ''
-  return (fromDom || input.value).trim()
-}
-
 async function onSend() {
   if (composerBlocked.value) return
-  const text = composerText()
+  const text = input.value.trim()
   if (!text) return
   // 发送前先快照：失败要回填输入；atList 无论成败都清空，避免残留劫持后续普通消息
   const pendingAt = [...actions.atList.value]
@@ -2642,7 +2637,7 @@ function pickFavorite() {
           <text class="emoji" @click="onEmoji">☺</text>
         </view>
         <view class="tool" @click="onPlus">＋</view>
-        <view v-if="hasInput" class="send-btn" @touchend.stop.prevent="triggerSend" @click.stop="triggerSend">传送</view>
+        <view v-if="hasInput" class="send-btn" @tap.stop="onSend">传送</view>
       </view>
       </template>
 
