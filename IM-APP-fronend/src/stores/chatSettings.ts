@@ -28,6 +28,41 @@ function safeParse<T>(raw: string | null): T | null {
   }
 }
 
+function readStoredSettings(): ChatSettingsState | null {
+  try {
+    const raw = uni.getStorageSync(STORAGE_KEY)
+    // App 端 getStorageSync 有时直接吐对象（已反序列化），不能只认 string
+    if (typeof raw === 'string') return safeParse<ChatSettingsState>(raw)
+    if (raw && typeof raw === 'object') return raw as ChatSettingsState
+  } catch {
+    /* storage 偶发不可用 */
+  }
+  return null
+}
+
+function applyParsed(
+  parsed: ChatSettingsState,
+  target: {
+    enterToSend: { value: boolean }
+    noDisturb: { value: boolean }
+    message: { value: boolean }
+    voice: { value: boolean }
+    sound: { value: boolean }
+    vibration: { value: boolean }
+    notificationPermissionAsked: { value: boolean }
+  },
+) {
+  if (typeof parsed.enterToSend === 'boolean') target.enterToSend.value = parsed.enterToSend
+  if (typeof parsed.noDisturb === 'boolean') target.noDisturb.value = parsed.noDisturb
+  if (typeof parsed.message === 'boolean') target.message.value = parsed.message
+  if (typeof parsed.voice === 'boolean') target.voice.value = parsed.voice
+  if (typeof parsed.sound === 'boolean') target.sound.value = parsed.sound
+  if (typeof parsed.vibration === 'boolean') target.vibration.value = parsed.vibration
+  if (typeof parsed.notificationPermissionAsked === 'boolean') {
+    target.notificationPermissionAsked.value = parsed.notificationPermissionAsked
+  }
+}
+
 export const useChatSettingsStore = defineStore('chatSettings', () => {
   const enterToSend = ref(false)
   const noDisturb = ref(false)
@@ -37,25 +72,38 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
   const vibration = ref(false)
   const notificationPermissionAsked = ref(false)
 
-  let hydrated = false
-  function hydrate() {
-    if (hydrated) return
-    hydrated = true
-    const raw = uni.getStorageSync(STORAGE_KEY)
-    // App 端 getStorageSync 有时直接吐对象（已反序列化），不能只认 string
-    let parsed: ChatSettingsState | null = null
-    if (typeof raw === 'string') parsed = safeParse<ChatSettingsState>(raw)
-    else if (raw && typeof raw === 'object') parsed = raw as ChatSettingsState
-    if (!parsed) return
-    if (typeof parsed.enterToSend === 'boolean') enterToSend.value = parsed.enterToSend
-    if (typeof parsed.noDisturb === 'boolean') noDisturb.value = parsed.noDisturb
-    if (typeof parsed.message === 'boolean') message.value = parsed.message
-    if (typeof parsed.voice === 'boolean') voice.value = parsed.voice
-    if (typeof parsed.sound === 'boolean') sound.value = parsed.sound
-    if (typeof parsed.vibration === 'boolean') vibration.value = parsed.vibration
-    if (typeof parsed.notificationPermissionAsked === 'boolean') {
-      notificationPermissionAsked.value = parsed.notificationPermissionAsked
+  function hydrate(_force = false) {
+    const parsed = readStoredSettings()
+    if (!parsed) {
+      try {
+        const backup = uni.getStorageSync(`${STORAGE_KEY}_json`)
+        const fromBackup =
+          typeof backup === 'string' ? safeParse<ChatSettingsState>(backup) : null
+        if (fromBackup) {
+          applyParsed(fromBackup, {
+            enterToSend,
+            noDisturb,
+            message,
+            voice,
+            sound,
+            vibration,
+            notificationPermissionAsked,
+          })
+        }
+      } catch {
+        /* ignore */
+      }
+      return
     }
+    applyParsed(parsed, {
+      enterToSend,
+      noDisturb,
+      message,
+      voice,
+      sound,
+      vibration,
+      notificationPermissionAsked,
+    })
   }
 
   function persist() {
@@ -68,7 +116,17 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
       vibration: vibration.value,
       notificationPermissionAsked: notificationPermissionAsked.value,
     }
-    uni.setStorageSync(STORAGE_KEY, JSON.stringify(payload))
+    try {
+      // 存对象：App/H5 都稳；再补一份 JSON 字符串给只认 string 的环境
+      uni.setStorageSync(STORAGE_KEY, payload)
+      try {
+        uni.setStorageSync(`${STORAGE_KEY}_json`, JSON.stringify(payload))
+      } catch {
+        /* 备份失败不影响主存储 */
+      }
+    } catch (e) {
+      console.warn('[chatSettings] persist failed', e)
+    }
   }
 
   function setEnterToSend(v: boolean) {
@@ -106,7 +164,37 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     persist()
   }
 
-  hydrate()
+  // 启动：主 key → json 备份
+  const primary = readStoredSettings()
+  if (primary) {
+    applyParsed(primary, {
+      enterToSend,
+      noDisturb,
+      message,
+      voice,
+      sound,
+      vibration,
+      notificationPermissionAsked,
+    })
+  } else {
+    try {
+      const backup = uni.getStorageSync(`${STORAGE_KEY}_json`)
+      const parsed = typeof backup === 'string' ? safeParse<ChatSettingsState>(backup) : null
+      if (parsed) {
+        applyParsed(parsed, {
+          enterToSend,
+          noDisturb,
+          message,
+          voice,
+          sound,
+          vibration,
+          notificationPermissionAsked,
+        })
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   return {
     enterToSend,

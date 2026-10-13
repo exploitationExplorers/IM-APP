@@ -186,6 +186,8 @@ export async function pickLocalImages(opts?: {
     chooseErr = e
   }
 
+  // 已有路径（含华为 content://）直接返回，由 sendImageMessage 压图/拷到 _doc；
+  // 这里再弹 gallery 会让用户选两次。
   if (paths.length) return paths
 
   if (!isAppPlatform() || typeof plus === 'undefined') {
@@ -201,14 +203,15 @@ export async function pickLocalImages(opts?: {
     throw new Error('无法打开相机')
   }
 
+  // chooseImage 空路径时：优先 system:false 落到 _doc（华为 system:true 常给 content://）
   try {
-    paths = await pickViaPlusGallery({ count, system: true })
+    paths = await pickViaPlusGallery({ count, system: false })
     if (paths.length) return paths
   } catch (e) {
     if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
   }
   try {
-    paths = await pickViaPlusGallery({ count, system: false })
+    paths = await pickViaPlusGallery({ count, system: true })
     if (paths.length) return paths
   } catch (e) {
     if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')

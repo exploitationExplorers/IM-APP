@@ -1326,12 +1326,88 @@ function compressLocalChatImage(localPath: string): Promise<string> {
   })
 }
 
+function toAppFileUrlForIo(path: string): string {
+  if (/^(file|content|http|https|blob):/i.test(path)) return path
+  try {
+    const converted = plus?.io?.convertLocalFileSystemURL?.(path)
+    if (converted) return converted
+  } catch {
+    /* ignore */
+  }
+  return path.startsWith('/') ? `file://${path}` : path
+}
+
+/** 华为相册常给 content://，OpenIM FullPath/Upload 读不到；拷到 _doc 再发 */
+function copyAppImageToDoc(srcPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const io = plus?.io as {
+      resolveLocalFileSystemURL?: (
+        url: string,
+        ok: (entry: {
+          copyTo: (
+            parent: unknown,
+            newName: string,
+            success: (e: { fullPath?: string; toLocalURL?: () => string }) => void,
+            fail: (err: unknown) => void,
+          ) => void
+        }) => void,
+        bad: (err: unknown) => void,
+      ) => void
+    }
+    if (!io?.resolveLocalFileSystemURL) {
+      reject(new Error('无法读取图片'))
+      return
+    }
+    const destName = `chat_img_${Date.now()}.jpg`
+    io.resolveLocalFileSystemURL(
+      toAppFileUrlForIo(srcPath),
+      (entry) => {
+        io.resolveLocalFileSystemURL!(
+          '_doc/',
+          (dir) => {
+            entry.copyTo(
+              dir,
+              destName,
+              (copied) => {
+                const local =
+                  (typeof copied.toLocalURL === 'function' ? copied.toLocalURL() : '') ||
+                  copied.fullPath ||
+                  `_doc/${destName}`
+                resolve(local)
+              },
+              reject,
+            )
+          },
+          reject,
+        )
+      },
+      reject,
+    )
+  })
+}
+
+/**
+ * App 发图前把路径收成原生可读文件。
+ * 华为 / Harmony：content://、无后缀截图先压 jpeg，压不动再 copy 到 _doc。
+ */
+async function prepareAppChatImagePath(filePath: string): Promise<string> {
+  const compressed = await compressLocalChatImage(filePath)
+  if (compressed && !/^content:/i.test(compressed)) return compressed
+  if (!/^content:/i.test(filePath) && compressed) return compressed
+  try {
+    return await copyAppImageToDoc(filePath)
+  } catch (e) {
+    console.warn('[image] copyTo _doc 失败', (e as Error)?.message || e)
+    return compressed || filePath
+  }
+}
+
 /** App：FullPath 失败时压成 jpeg 再走 URL（华为 content URI / HEIC / 无后缀常见） */
 async function sendImageMessageViaUpload(target: IMTarget, filePath: string): Promise<MessageItem> {
-  const compressed = await compressLocalChatImage(filePath)
-  const fullPath = toNativeFullPath(compressed)
+  const prepared = await prepareAppChatImagePath(filePath)
+  const fullPath = toNativeFullPath(prepared)
   const uploaded = await uploadFileFromPath(fullPath, `img_${Date.now()}.jpg`, 'image/jpeg')
-  const size = await imageSizeOf(compressed).catch(() => ({ width: 0, height: 0 }))
+  const size = await imageSizeOf(prepared).catch(() => ({ width: 0, height: 0 }))
   const picture = {
     uuid: IMSDK.uuid(),
     type: 'image/jpeg',
@@ -1353,13 +1429,15 @@ async function sendImageMessageViaUpload(target: IMTarget, filePath: string): Pr
 export async function sendImageMessage(target: IMTarget, filePath: string): Promise<MessageItem> {
   let message: MessageItem
   if (isAppPlatform) {
-    const fullPath = toNativeFullPath(filePath)
+    // 先物化成可读本地文件，再 FullPath；华为 content:// 直接 FullPath 必挂
+    const prepared = await prepareAppChatImagePath(filePath)
+    const fullPath = toNativeFullPath(prepared)
     try {
       message = await imCall<MessageItem>(IMMethods.CreateImageMessageFromFullPath, fullPath)
       return sendCreatedMessage(target, message, { alreadyUploaded: false })
     } catch (e) {
       console.warn('[image] FullPath 失败，改走压缩上传', (e as Error)?.message || e)
-      return sendImageMessageViaUpload(target, fullPath || filePath)
+      return sendImageMessageViaUpload(target, fullPath || prepared || filePath)
     }
   }
   // H5：HEIC / 超大图先压 jpeg，避免 iPhone 粘贴/相册偶发发不出

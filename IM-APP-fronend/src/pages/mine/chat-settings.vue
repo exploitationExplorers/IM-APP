@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { onShow } from '@dcloudio/uni-app'
 import ImNavBar from '@/components/ImNavBar.vue'
+import ImSwitch from '@/components/ImSwitch.vue'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { backToChatHome } from '@/utils/nav'
 
 const settingsStore = useChatSettingsStore()
-const enterToSend = computed(() => settingsStore.enterToSend)
+const { enterToSend } = storeToRefs(settingsStore)
 
-function onEnterChange(e: Event) {
-  const v = (e as unknown as { detail: { value: boolean } }).detail.value
-  settingsStore.setEnterToSend(!!v)
+onShow(() => {
+  // 进页再对齐一次磁盘，避免「设了过一会开关自己关掉」
+  settingsStore.hydrate(true)
+})
+
+function onEnterChange(value: boolean) {
+  settingsStore.setEnterToSend(!!value)
 }
 
 function onClear() {
@@ -24,17 +30,13 @@ function onClear() {
   })
 }
 
-function goPlaceholder(title: string) {
-  uni.showToast({ title: `${title}开发中`, icon: 'none' })
-}
-
 function goMassAssistant() {
   uni.navigateTo({ url: '/pages/mine/mass-assistant' })
 }
 
 function goEmotions() {
   uni.navigateTo({
-    url: '/pages/mine/emotions'
+    url: '/pages/mine/emotions',
   })
 }
 </script>
@@ -44,7 +46,8 @@ function goEmotions() {
     <ImNavBar title="聊天设置" @back="backToChatHome" />
     <view class="cell">
       <text class="label">回车键送出消息</text>
-      <switch :checked="enterToSend" color="#0A2FC2" @change="onEnterChange" style="transform:scale(0.6)" />
+      <!-- 不用原生 switch：部分端会在 checked 绑定时误发 change，把已开状态冲成关 -->
+      <ImSwitch :model-value="enterToSend" @change="onEnterChange" />
     </view>
     <view class="cell" @click="goMassAssistant">
       <text class="label">群发助手</text>
@@ -71,7 +74,6 @@ function goEmotions() {
   align-items: center;
   justify-content: space-between;
   padding: 20rpx 32rpx;
-  // min-height: 96rpx;
   box-sizing: border-box;
 }
 

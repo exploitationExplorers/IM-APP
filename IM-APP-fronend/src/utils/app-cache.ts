@@ -4,6 +4,7 @@ import { LOGIN_REMEMBER_KEYS } from '@/utils/login-phone'
 const DEVICE_ID_KEY = 'im_device_id'
 /** 聊天偏好（回车发送等）：登出/清缓存都保留，否则每次登录都要重开开关 */
 const CHAT_SETTINGS_KEY = 'im_chat_settings_v1'
+const CHAT_SETTINGS_JSON_KEY = 'im_chat_settings_v1_json'
 
 function clearNativeWebCache() {
   // #ifdef APP-PLUS
@@ -25,6 +26,7 @@ export function clearAppCache(): void {
     ACTIVE_TAB_KEY,
     DEVICE_ID_KEY,
     CHAT_SETTINGS_KEY,
+    CHAT_SETTINGS_JSON_KEY,
     ...LOGIN_REMEMBER_KEYS,
   ])
   const info = uni.getStorageInfoSync()
@@ -38,7 +40,13 @@ export function clearAppCache(): void {
 
 /** 退出登录：清本页业务缓存。其它标签页的登录态留在 im_auth_slots 里。 */
 export function clearSessionStorage(): void {
-  const keep = new Set([DEVICE_ID_KEY, AUTH_SLOTS_KEY, CHAT_SETTINGS_KEY, ...LOGIN_REMEMBER_KEYS])
+  const keep = new Set([
+    DEVICE_ID_KEY,
+    AUTH_SLOTS_KEY,
+    CHAT_SETTINGS_KEY,
+    CHAT_SETTINGS_JSON_KEY,
+    ...LOGIN_REMEMBER_KEYS,
+  ])
   const info = uni.getStorageInfoSync()
   for (const key of info.keys) {
     if (!keep.has(key)) {

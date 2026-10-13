@@ -2,6 +2,7 @@
 import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
+import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useContactStore } from '@/stores/contact'
 import { setupAppAuthGuard } from '@/composables/useAuthGuard'
 import { checkAndPromptAppUpdate } from '@/composables/useAppUpdate'
@@ -33,7 +34,9 @@ onLaunch(() => {
   // 所以显式监听 visibilitychange。App 端仍由下面的 onShow 覆盖。
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && getToken()) {
+      if (document.visibilityState !== 'visible') return
+      useChatSettingsStore().hydrate(true)
+      if (getToken()) {
         void useChatStore().resyncAfterResume()
       }
     })
@@ -43,6 +46,8 @@ onLaunch(() => {
 onShow(() => {
   void setupAppAuthGuard()
   void checkAndPromptAppUpdate()
+  // 回前台对齐聊天偏好（回车发送等），避免内存态被冲掉后开关自己变回去
+  useChatSettingsStore().hydrate(true)
   if (getToken()) {
     void useContactStore().loadFriendRequests().catch(() => undefined)
     // 回到前台补拉：漏掉推送时靠这一步自愈（内部有 3 秒节流）

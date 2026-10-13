@@ -138,6 +138,9 @@ let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const inputRef = ref<{ $el?: HTMLElement } | HTMLTextAreaElement | null>(null)
 const scrollInto = ref('')
+/** H5 scroll-view：scroll-into-view 桌面端常滚不到底，再绑 scroll-top 双保险 */
+const msgScrollTop = ref(0)
+let msgScrollTopNonce = 0
 /** 用户停在底部时才自动贴底；往上翻历史时来新消息不再拽回去 */
 const stickToBottom = ref(true)
 let msgViewportHeight = 0
@@ -438,8 +441,14 @@ watch(
 
 const enterToSend = computed(() => settingsStore.enterToSend)
 const hasInput = computed(() => input.value.trim().length > 0)
-/** 关闭回车发送时用 return（非 done），H5 才允许 Enter 自然换行 */
-const composerConfirmType = computed(() => (enterToSend.value ? 'send' : 'return'))
+/**
+ * App 软键盘：开回车发送用 send。
+ * H5/PC：一律 return，避免 uni confirm-type=send 吞掉 Shift+Enter；发送改由 keydown 处理。
+ */
+const composerConfirmType = computed(() => {
+  if (isH5ComposerPlatform()) return 'return'
+  return enterToSend.value ? 'send' : 'return'
+})
 
 /** 被禁言（单人 / 全员）时隐藏输入区，换成居中提示条 */
 const composerBlocked = computed(() => chatType.value === 'group' && !canChat.value)
@@ -729,6 +738,8 @@ function syncVisualViewport() {
 onMounted(() => {
   if (typeof window !== 'undefined' && isH5ComposerPlatform()) {
     window.addEventListener('paste', onWindowPaste)
+    // 捕获阶段处理 Enter：uni-textarea 的 @keydown 会丢 shiftKey，导致 Shift+Enter 被当成发送
+    window.addEventListener('keydown', onComposerKeydown, true)
     const vv = window.visualViewport
     if (vv) {
       vv.addEventListener('resize', syncVisualViewport)
@@ -864,12 +875,18 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
         scrollToBottom(true)
       }
     } else {
+      browsingHistory.value = false
+      stickToBottom.value = true
       await nextTick()
       scrollToBottom(true)
     }
-    // 电脑端切换会话后直接进入可输入态，不用再点一次输入框
+    // 电脑端切换会话后直接进入可输入态，不用再点一次输入框；
+    // 聚焦会改输入区高度，延后再贴一次底，避免最新消息被挡住。
     if (props.embedded) {
       focusComposer()
+      setTimeout(() => {
+        if (stickToBottom.value) scrollToBottom(true)
+      }, 220)
     }
   } catch (e) {
     console.error('[chat] 打开会话失败', e)
@@ -945,13 +962,39 @@ function measureMsgList() {
   }
 }
 
+/** H5：直接写原生 scrollTop，比 uni scroll-into-view 更稳（桌面内嵌尤其） */
+function scrollMsgListDomToBottom(): boolean {
+  if (typeof document === 'undefined') return false
+  const root = document.querySelector('.room .msg-list') as HTMLElement | null
+  if (!root) return false
+  const node =
+    (root.querySelector('.uni-scroll-view') as HTMLElement | null) ||
+    (root.querySelector('.uni-scroll-view-content')?.parentElement as HTMLElement | null) ||
+    root
+  if (!node) return false
+  const top = Math.max(0, node.scrollHeight - node.clientHeight)
+  node.scrollTop = top
+  return true
+}
+
+function bumpMsgScrollTop() {
+  // uni-app：scroll-top 同值不触发，来回拨一次
+  msgScrollTopNonce = (msgScrollTopNonce + 1) % 2
+  msgScrollTop.value = msgScrollTopNonce
+  nextTick(() => {
+    msgScrollTop.value = 10_000_000 + msgScrollTopNonce
+  })
+}
+
 function scrollToAnchorBottom() {
   // 先清空再指向锚点：连续发送/连续收消息时值相同不会重复触发滚动，跨一帧重设才能每次都滚。
   // 滚完立刻清掉，否则输入框长高时 scroll-into-view 还指着底部，往上翻会被拽回去。
-  ignoreScrollUntil = Date.now() + 180
+  ignoreScrollUntil = Date.now() + 480
   scrollInto.value = ''
+  bumpMsgScrollTop()
   nextTick(() => {
     scrollInto.value = 'bottom-anchor'
+    scrollMsgListDomToBottom()
     setTimeout(() => {
       if (scrollInto.value === 'bottom-anchor') scrollInto.value = ''
     }, 120)
@@ -961,17 +1004,16 @@ function scrollToAnchorBottom() {
 function scrollToBottom(force = false) {
   if (!force && !stickToBottom.value) return
   stickToBottom.value = true
+  browsingHistory.value = false
   clearScrollRetries()
   scrollToAnchorBottom()
-  const last = messages.value[messages.value.length - 1]
-  // 图片等消息在资源加载完成后才撑开高度（占位换真实 URL 还会二次加载），
-  // 分多个时段重贴底部；用户中途往上翻则不再追
-  if (last && last.type !== 'text' && last.type !== 'system') {
-    for (const delay of [150, 400, 900]) {
-      scrollRetryTimers.push(setTimeout(() => {
+  // 文字会话进房、聚焦输入、气泡撑高都会晚于首帧；统一多拍几次贴底
+  for (const delay of [50, 160, 360, 700, 1200]) {
+    scrollRetryTimers.push(
+      setTimeout(() => {
         if (stickToBottom.value) scrollToAnchorBottom()
-      }, delay))
-    }
+      }, delay),
+    )
   }
 }
 
@@ -1129,8 +1171,26 @@ function triggerSend() {
 }
 
 function onConfirmSend() {
+  // H5 已在 keydown 处理；此处只服务 App 软键盘「发送」
+  if (isH5ComposerPlatform()) return
   if (!enterToSend.value) return
   triggerSend()
+}
+
+/** 输入框触到 max-height 后，把光标行滚进可视区（粘贴/换行常见） */
+function scrollComposerCaretIntoView(preferred?: EventTarget | null) {
+  if (!isH5ComposerPlatform()) return
+  const el = getComposerTextareaEl(preferred)
+  if (!el) return
+  const run = () => {
+    try {
+      el.scrollTop = el.scrollHeight
+    } catch {
+      /* ignore */
+    }
+  }
+  nextTick(run)
+  requestAnimationFrame(run)
 }
 
 function composerPasteTarget(target: EventTarget | null): boolean {
@@ -1209,6 +1269,7 @@ async function sendPastedImages(files: File[]) {
 onUnmounted(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('paste', onWindowPaste)
+    window.removeEventListener('keydown', onComposerKeydown, true)
     const vv = window.visualViewport
     if (vv) {
       vv.removeEventListener('resize', syncVisualViewport)
@@ -1221,24 +1282,50 @@ onUnmounted(() => {
   chatStore.setActiveConversation('')
 })
 
-/** 回车发送开启时：Shift+Enter 换行（uni-app send 模式会拦截 Enter） */
+/**
+ * H5/PC 回车：开「回车发送」时 Enter 发送、Shift+Enter 换行；
+ * 关时 Enter 自然换行，并滚到输入框最后一排。
+ * 挂在 window 捕获阶段：组件 @keydown 读不到真实 shiftKey。
+ */
 function onComposerKeydown(e: KeyboardEvent) {
-  if (!enterToSend.value || e.key !== 'Enter' || !e.shiftKey) return
   if (!isH5ComposerPlatform()) return
-  e.preventDefault()
-  e.stopPropagation()
-  const el = getComposerTextareaEl(e.target)
-  if (!el) return
-  const start = el.selectionStart ?? input.value.length
-  const end = el.selectionEnd ?? start
-  const val = input.value
-  input.value = `${val.slice(0, start)}\n${val.slice(end)}`
-  void nextTick(() => {
-    const pos = start + 1
-    el.selectionStart = pos
-    el.selectionEnd = pos
-    el.focus()
-  })
+  if (e.key !== 'Enter') return
+  if (e.isComposing || e.keyCode === 229) return
+  if (!composerPasteTarget(e.target)) return
+
+  if (enterToSend.value) {
+    if (e.shiftKey) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      const el = getComposerTextareaEl(e.target)
+      if (!el) return
+      // DOM 与 v-model 偶发不同步（自动化 fill / IME），以 textarea 实值为准
+      const val = el.value || input.value
+      const start = el.selectionStart ?? val.length
+      const end = el.selectionEnd ?? start
+      input.value = `${val.slice(0, start)}\n${val.slice(end)}`
+      void nextTick(() => {
+        const pos = start + 1
+        try {
+          el.selectionStart = pos
+          el.selectionEnd = pos
+        } catch {
+          /* ignore */
+        }
+        el.focus()
+        scrollComposerCaretIntoView(el)
+      })
+      return
+    }
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    // 发送前把 DOM 值刷回 v-model，避免 Enter 时 input 仍是空串
+    const el = getComposerTextareaEl(e.target)
+    if (el && el.value !== input.value) input.value = el.value
+    triggerSend()
+    return
+  }
+  nextTick(() => scrollComposerCaretIntoView(e.target))
 }
 
 /** 重发：先二次确认，再按原类型重新发送 */
@@ -1459,6 +1546,9 @@ function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
   if (detail && typeof detail.value === 'string') {
     input.value = detail.value
   }
+  // 粘贴/换行后输入框触到 max-height，需主动滚到光标行
+  const pasteTarget = e && 'target' in e ? (e as Event).target : null
+  scrollComposerCaretIntoView(pasteTarget)
   if (chatType.value !== 'group' || composerBlocked.value) {
     closeAtMention()
     return
@@ -2351,6 +2441,7 @@ function pickFavorite() {
     <scroll-view
       scroll-y
       class="msg-list"
+      :scroll-top="msgScrollTop"
       :scroll-into-view="scrollInto"
       @scroll="onMsgScroll"
       @scrolltoupper="onScrollToUpper"
@@ -2477,7 +2568,6 @@ function pickFavorite() {
             :cursor-spacing="20"
             @input="syncAtMentionFromInput"
             @confirm="onConfirmSend"
-            @keydown="onComposerKeydown"
             @blur="composerFocusFlag = false"
           />
           <text class="emoji" @click="onEmoji">☺</text>
@@ -2949,6 +3039,8 @@ function pickFavorite() {
   font-size: 16px !important;
   line-height: 24px !important;
   min-height: 24px !important;
+  max-height: 144px !important;
+  overflow-y: auto !important;
   padding: 0 !important;
 }
 
