@@ -203,12 +203,12 @@ const messages = computed(() =>
   ),
 )
 
-/** 贴底时只挂载尾部气泡，大幅减轻「消息多就卡死」；上滑翻历史再展开全量窗口 */
+/** 平时只挂载尾部气泡。窗口只在「滑到顶」或「点 ↓」时切换，不能跟着贴底状态变，否则一滑就跳 */
 const RENDER_TAIL = 48
 const browsingHistory = ref(false)
 const renderMessages = computed(() => {
   const all = messages.value
-  if (!browsingHistory.value && stickToBottom.value && all.length > RENDER_TAIL) {
+  if (!browsingHistory.value && all.length > RENDER_TAIL) {
     return all.slice(-RENDER_TAIL)
   }
   return all
@@ -891,9 +891,10 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 }
 
 let loadingMore = false
+let lastListScrollTop = 0
 async function onScrollToUpper() {
-  // 贴底或刚点过「↓」时，列表变高会误触发到顶，不能因此把历史整页展开再弹回去
-  if (stickToBottom.value || Date.now() < ignoreScrollUntil) return
+  // 贴底过程、或其实还没滑到顶，都会误触到顶。这时展开全量会把当前窗口抬走
+  if (Date.now() < ignoreScrollUntil || lastListScrollTop > 48) return
   const anchor = renderMessages.value[0]?.id
   stickToBottom.value = false
   const expanding = !browsingHistory.value && messages.value.length > RENDER_TAIL
@@ -1030,7 +1031,6 @@ function scrollToBottom(force = false) {
   if (userHoldingList) return
   if (!force && !stickToBottom.value) return
   stickToBottom.value = true
-  browsingHistory.value = false
   clearScrollRetries()
   const last = messages.value[messages.value.length - 1]
   const media =
@@ -1072,6 +1072,7 @@ function scheduleScrollFrame(fn: () => void) {
 function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
   const top = Number(e.detail?.scrollTop || 0)
   const height = Number(e.detail?.scrollHeight || 0)
+  lastListScrollTop = top
   // 手指拖动时取消贴底锁。不要在 scroll 回调里改 scroll-top，否则会和手势对拉。
   if (userHoldingList) {
     ignoreScrollUntil = 0
@@ -2926,6 +2927,8 @@ function pickFavorite() {
 .msg-list :deep(.uni-scroll-view),
 .msg-list :deep(.uni-scroll-view-content) {
   background: #e6e8ee;
+  /* 上方气泡高度变化时不要自动改滚动位置，否则手指滑到哪，窗口就弹到哪 */
+  overflow-anchor: none;
 }
 
 .jump-bottom {
@@ -2949,9 +2952,6 @@ function pickFavorite() {
 .msg-row {
   width: 100%;
   box-sizing: border-box;
-  /* H5/现代 WebView：离屏行跳过渲染，消息多时上滑明显更顺 */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 72px;
 }
 
 .msg-row.focused {
