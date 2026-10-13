@@ -962,9 +962,9 @@ function measureMsgList() {
   }
 }
 
-/** H5：直接写原生 scrollTop，比 uni scroll-into-view 更稳（桌面内嵌尤其） */
+/** 仅真正的 H5/Web：App WebView 里改 DOM scrollTop 会和原生 scroll-view 抢手势（iOS 尤其上滑被拽回） */
 function scrollMsgListDomToBottom(): boolean {
-  if (typeof document === 'undefined') return false
+  if (!isH5ComposerPlatform() || typeof document === 'undefined') return false
   const root = document.querySelector('.room .msg-list') as HTMLElement | null
   if (!root) return false
   const node =
@@ -986,18 +986,32 @@ function bumpMsgScrollTop() {
   })
 }
 
+/** 用户上滑离开底部时，把 scroll-top 绑回真实位置，避免 iOS 仍按「贴底大值」回弹 */
+function releaseScrollTopBinding(currentTop: number) {
+  const top = Math.max(0, Math.floor(currentTop))
+  if (Math.abs(msgScrollTop.value - top) < 1) {
+    msgScrollTop.value = top + (msgScrollTopNonce ? 0.01 : -0.01)
+  }
+  nextTick(() => {
+    msgScrollTop.value = top
+  })
+}
+
 function scrollToAnchorBottom() {
   // 先清空再指向锚点：连续发送/连续收消息时值相同不会重复触发滚动，跨一帧重设才能每次都滚。
   // 滚完立刻清掉，否则输入框长高时 scroll-into-view 还指着底部，往上翻会被拽回去。
   scrollInto.value = ''
   nextTick(() => {
     scrollInto.value = 'bottom-anchor'
-    // H5 优先写原生 scrollTop；App 无 DOM 时再靠 scroll-top / scroll-into-view
-    const domOk = scrollMsgListDomToBottom()
-    if (!domOk) bumpMsgScrollTop()
+    if (isH5ComposerPlatform()) {
+      scrollMsgListDomToBottom()
+    } else {
+      // App：只用 scroll-into-view + scroll-top，不要写 WebView DOM
+      bumpMsgScrollTop()
+    }
     setTimeout(() => {
       if (scrollInto.value === 'bottom-anchor') scrollInto.value = ''
-      scrollMsgListDomToBottom()
+      if (isH5ComposerPlatform()) scrollMsgListDomToBottom()
     }, 80)
   })
 }
@@ -1048,19 +1062,18 @@ function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number }
     scrollRaf = 0
     if (Date.now() < ignoreScrollUntil) return
     if (msgViewportHeight <= 0) measureMsgList()
-    // 滞回：近底贴底；贴底意图下内容被图片微撑高则补滚；明显离开才进翻历史
+    // 滞回宜窄：上滑超过约一指距离就进入翻历史，绝不能在「半离开」时强行贴底拽回（iOS 会表现为完全滑不动）
     if (msgViewportHeight > 0 && height > 0) {
       const distance = height - top - msgViewportHeight
-      if (distance < 100) {
+      if (distance < 80) {
         stickToBottom.value = true
-      } else if (stickToBottom.value && !browsingHistory.value && distance < 220) {
-        ignoreScrollUntil = Date.now() + 180
-        if (!scrollMsgListDomToBottom()) nextTick(() => scrollToAnchorBottom())
-      } else if (distance > 260) {
+      } else if (distance > 120) {
+        if (stickToBottom.value) releaseScrollTopBinding(top)
         stickToBottom.value = false
         browsingHistory.value = true
       }
-    } else if (top + 120 < maxScrollTop) {
+    } else if (top + 80 < maxScrollTop) {
+      if (stickToBottom.value) releaseScrollTopBinding(top)
       stickToBottom.value = false
       browsingHistory.value = true
     }
