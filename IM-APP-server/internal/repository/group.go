@@ -20,6 +20,8 @@ import (
 const (
 	groupPublicIDPrefix    = "qun_"
 	groupPublicIDSuffixLen = 14
+	// 新建群写入 groups.max_members 的默认值，也是没发布系统限制时的平台上限。
+	defaultGroupMemberCap = 2000
 )
 
 type GroupRepo struct {
@@ -46,7 +48,7 @@ func (r *GroupRepo) hardGroupLimit() int {
 func (r *GroupRepo) publishedGroupLimits(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }) publishedGroupLimits {
-	limits := publishedGroupLimits{MaxGroupMembers: 500, DefaultGroupMaxMembers: 200}
+	limits := publishedGroupLimits{MaxGroupMembers: defaultGroupMemberCap, DefaultGroupMaxMembers: defaultGroupMemberCap}
 	var raw string
 	err := q.QueryRow(ctx, `SELECT data_json FROM app_config_versions
 		WHERE status='published' ORDER BY version DESC, id DESC LIMIT 1`).Scan(&raw)
@@ -66,7 +68,7 @@ func (r *GroupRepo) publishedGroupLimits(ctx context.Context, q interface {
 		limits.MaxGroupMembers = hard
 	}
 	if limits.DefaultGroupMaxMembers < 3 {
-		limits.DefaultGroupMaxMembers = 200
+		limits.DefaultGroupMaxMembers = defaultGroupMemberCap
 		if limits.DefaultGroupMaxMembers > limits.MaxGroupMembers {
 			limits.DefaultGroupMaxMembers = limits.MaxGroupMembers
 		}
@@ -99,7 +101,7 @@ func (r *GroupRepo) UpdateMemberLimitByAdmin(ctx context.Context, groupID, admin
 	}
 	defer tx.Rollback(ctx)
 	var oldLimit, memberCount int
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(max_members,200),
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(max_members,2000),
 		(SELECT COUNT(*) FROM group_members WHERE group_id=g.id)
 		FROM groups g WHERE id=$1::uuid FOR UPDATE`, groupID).Scan(&oldLimit, &memberCount); err != nil {
 		return err
@@ -346,7 +348,7 @@ func (r *GroupRepo) GetByID(ctx context.Context, groupID, uid string) (models.Gr
 	err := r.DB.QueryRow(ctx, `
 		SELECT g.public_id, g.name, COALESCE(g.avatar,''), g.owner_id::text, COALESCE(owner.nickname,''),
 			(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id),
-			COALESCE(g.max_members,200),
+			COALESCE(g.max_members,2000),
 			COALESCE(g.announcement,''), COALESCE(g.announcement_images, '{}'),
 			COALESCE(g.allow_member_add_friend, true),
 			COALESCE(g.conversation_id::text,''),
@@ -510,7 +512,7 @@ func (r *GroupRepo) addMemberWithOperator(
 	var convID, joinMode, ownerID string
 	var configuredMax int
 	err = tx.QueryRow(ctx, `
-		SELECT COALESCE(conversation_id::text,''), join_mode, COALESCE(max_members,200), owner_id::text
+		SELECT COALESCE(conversation_id::text,''), join_mode, COALESCE(max_members,2000), owner_id::text
 		FROM groups WHERE id=$1 AND status='active' FOR UPDATE`, groupID).Scan(&convID, &joinMode, &configuredMax, &ownerID)
 	if err != nil {
 		return models.GroupInfo{}, err
@@ -1349,7 +1351,7 @@ func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, user
 	var configuredMax, memberCount int
 	if err := tx.QueryRow(ctx, `
 		SELECT COALESCE(g.conversation_id::text,''), g.status, g.public_id,
-		       g.name, COALESCE(g.avatar,''), COALESCE(g.max_members,200),
+		       g.name, COALESCE(g.avatar,''), COALESCE(g.max_members,2000),
 		       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id)
 		FROM groups g WHERE g.id=$1::uuid FOR UPDATE`, groupID).Scan(
 		&convID, &status, &publicID, &groupName, &groupAvatar, &configuredMax, &memberCount); err != nil {

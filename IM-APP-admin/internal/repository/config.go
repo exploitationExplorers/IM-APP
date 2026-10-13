@@ -138,7 +138,7 @@ func (r *OpsRepo) SetReportReasonStatus(ctx context.Context, id, status string) 
 const cfgKeySystemLimits = "system.limits"
 
 func defaultLimits() *models.SystemLimits {
-	return &models.SystemLimits{MaxFileSizeMB: 20, MaxGroupMembers: 500, DefaultGroupMaxMembers: 200, RecallWindowSec: 120, MaxForwardTargets: 10000, MaxNicknameLen: 32}
+	return &models.SystemLimits{MaxFileSizeMB: 20, MaxGroupMembers: 2000, DefaultGroupMaxMembers: 2000, RecallWindowSec: 120, MaxForwardTargets: 10000, MaxNicknameLen: 32}
 }
 
 func (r *OpsRepo) GetSystemLimits(ctx context.Context) (*models.SystemLimits, error) {
@@ -163,7 +163,7 @@ func (r *OpsRepo) SaveSystemLimits(ctx context.Context, l *models.SystemLimits, 
 func (r *OpsRepo) GroupLimitImpact(ctx context.Context, limit int) (models.GroupLimitImpact, error) {
 	var result models.GroupLimitImpact
 	err := r.DB.QueryRow(ctx, `SELECT
-		COUNT(*) FILTER (WHERE COALESCE(g.max_members,200)>$1),
+		COUNT(*) FILTER (WHERE COALESCE(g.max_members,2000)>$1),
 		COUNT(*) FILTER (WHERE (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id)>$1)
 		FROM groups g WHERE COALESCE(g.status,'active')='active'`, limit).Scan(
 		&result.ConfiguredAboveLimit, &result.CurrentlyOverLimit)

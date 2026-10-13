@@ -83,7 +83,7 @@ func (r *DataRepo) GetGroupDetail(ctx context.Context, groupID string) (*models.
 		       COALESCE(g.status,'active'), COALESCE(g.all_muted,false), g.created_at,
 		       COALESCE(g.join_mode,'open'), COALESCE(g.allow_member_add_friend,true),
 		       COALESCE(g.announcement,''),
-		       COALESCE(g.max_members,200),
+		       COALESCE(g.max_members,2000),
 		       g.dissolved_at, COALESCE(g.dissolved_by_admin_id::text,''), COALESCE(g.dissolve_reason,'')
 		FROM groups g LEFT JOIN users ou ON ou.id=g.owner_id WHERE g.id=$1::uuid`, groupID,
 	).Scan(&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.OwnerName, &g.MemberCount, &g.Status,

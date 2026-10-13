@@ -116,7 +116,7 @@ ON CONFLICT (id) DO NOTHING;
 
 -- ---------- 5. 版本快照表（007；created_by 引用真实 admin） ----------
 INSERT INTO app_config_versions (version, data_json, status, published_at, created_by, created_at) VALUES
-(1, '{"maxFileSizeMb":20,"maxGroupMembers":200,"recallWindowSec":120,"maxForwardTargets":10000,"maxNicknameLen":32}', 'published', NOW() - interval '2 days', (SELECT id FROM admin_users ORDER BY created_at LIMIT 1), NOW() - interval '2 days'),
+(1, '{"maxFileSizeMb":20,"maxGroupMembers":2000,"defaultGroupMaxMembers":2000,"recallWindowSec":120,"maxForwardTargets":10000,"maxNicknameLen":32}', 'published', NOW() - interval '2 days', (SELECT id FROM admin_users ORDER BY created_at LIMIT 1), NOW() - interval '2 days'),
 (2, '{"maxFileSizeMb":30,"maxGroupMembers":300,"recallWindowSec":180,"maxForwardTargets":20000,"maxNicknameLen":16}', 'draft',     NULL, (SELECT id FROM admin_users ORDER BY created_at LIMIT 1), NOW() - interval '1 day');
 
 INSERT INTO sensitive_word_versions (version, total, status, published_at, created_by, created_at) VALUES

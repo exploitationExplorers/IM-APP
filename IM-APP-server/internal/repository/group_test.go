@@ -40,11 +40,11 @@ func TestPublishedGroupLimitsEnvOverride(t *testing.T) {
 		wantDefaultMax int
 	}{
 		{
-			name:           "没有已发布配置时用兜底 500/200",
+			name:           "没有已发布配置时用兜底 2000/2000",
 			repo:           GroupRepo{GroupMemberHardLimit: 4000},
 			row:            fakeRow{err: pgx.ErrNoRows},
-			wantMax:        500,
-			wantDefaultMax: 200,
+			wantMax:        2000,
+			wantDefaultMax: 2000,
 		},
 		{
 			name:           "已发布配置说了算",
@@ -65,7 +65,7 @@ func TestPublishedGroupLimitsEnvOverride(t *testing.T) {
 			repo:           GroupRepo{GroupMemberHardLimit: 1500, GroupMemberMax: 2000},
 			row:            fakeRow{raw: `{}`},
 			wantMax:        1500,
-			wantDefaultMax: 200,
+			wantDefaultMax: 1500,
 		},
 		{
 			name:           "default 不能超过 max",

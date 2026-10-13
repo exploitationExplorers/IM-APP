@@ -140,7 +140,7 @@ ON CONFLICT (id) DO NOTHING;
 
 -- ---------- 8. 系统限制 / 转发规则配置（admin 007，app_configs） ----------
 INSERT INTO app_configs (key, value, description, updated_by, updated_at) VALUES
-('system.limits', '{"maxFileSizeMb":20,"maxGroupMembers":200,"recallWindowSec":120,"maxForwardTargets":10000,"maxNicknameLen":32}', '系统限制配置',
+('system.limits', '{"maxFileSizeMb":20,"maxGroupMembers":2000,"defaultGroupMaxMembers":2000,"recallWindowSec":120,"maxForwardTargets":10000,"maxNicknameLen":32}', '系统限制配置',
  (SELECT id FROM admin_users ORDER BY created_at LIMIT 1), NOW() - interval '1 day'),
 ('forward.settings', '{"defaultDailyLimit":100,"defaultHourlyLimit":20,"defaultSingleTargets":10000,"maxSingleTargets":100000}', '全局转发规则',
  (SELECT id FROM admin_users ORDER BY created_at LIMIT 1), NOW() - interval '1 day')
