@@ -1750,9 +1750,13 @@ export const useChatStore = defineStore('chat', () => {
     return rawMessages.value[messageId]
   }
 
+  /** 一键清掉所有会话未读（含群 @ 提醒），仅处理仍有未读的会话 */
   async function markAllAsRead() {
-    await Promise.all(conversations.value.map((c) => markAsRead(c.id)))
-    conversations.value = conversations.value.map((c) => ({ ...c, unreadCount: 0 }))
+    const targets = conversations.value.filter(
+      (c) => (c.unreadCount || 0) > 0 || isAtMeType(c.groupAtType),
+    )
+    if (!targets.length) return
+    await Promise.all(targets.map((c) => markAsRead(c.id)))
   }
 
   function reset() {

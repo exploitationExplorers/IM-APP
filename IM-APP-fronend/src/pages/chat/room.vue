@@ -64,6 +64,8 @@ const props = withDefaults(
     type?: 'private' | 'group'
     title?: string
     avatar?: string
+    /** 桌面端从会话列表关键词搜索跳入时定位到该消息 */
+    clientMsgId?: string
   }>(),
   { embedded: false },
 )
@@ -740,6 +742,7 @@ onMounted(() => {
     type: props.type,
     title: props.title,
     avatar: props.avatar,
+    clientMsgId: props.clientMsgId,
   })
 })
 
@@ -847,7 +850,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
       exitDissolvedRoom()
       return
     }
-    const focusId = String(query?.clientMsgId || '')
+    const focusId = String(query?.clientMsgId || props.clientMsgId || '')
     if (focusId) {
       browsingHistory.value = true
       stickToBottom.value = false
@@ -863,6 +866,10 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     } else {
       await nextTick()
       scrollToBottom(true)
+    }
+    // 电脑端切换会话后直接进入可输入态，不用再点一次输入框
+    if (props.embedded) {
+      focusComposer()
     }
   } catch (e) {
     console.error('[chat] 打开会话失败', e)
@@ -1066,9 +1073,15 @@ async function onSend() {
   }
 }
 
+/** uni-app textarea 的 focus 属性：切会话时先 false 再 true 才能重新抢焦点 */
+const composerFocusFlag = ref(false)
+
 function focusComposer() {
   if (!isH5ComposerPlatform()) return
+  if (composerBlocked.value || voiceMode.value) return
+  composerFocusFlag.value = false
   const apply = () => {
+    composerFocusFlag.value = true
     const el = getComposerTextareaEl()
     if (!el) return
     el.focus()
@@ -1080,7 +1093,9 @@ function focusComposer() {
     }
   }
   nextTick(apply)
-  setTimeout(apply, 30)
+  // 消息列表/群资料异步渲染后还要再抢一次，否则会落在文档 body 上
+  setTimeout(apply, 40)
+  setTimeout(apply, 160)
 }
 
 function isH5ComposerPlatform(): boolean {
@@ -2449,6 +2464,7 @@ function pickFavorite() {
             ref="inputRef"
             class="input"
             v-model="input"
+            :focus="composerFocusFlag"
             :maxlength="-1"
             :auto-height="true"
             :confirm-type="composerConfirmType"
@@ -2462,6 +2478,7 @@ function pickFavorite() {
             @input="syncAtMentionFromInput"
             @confirm="onConfirmSend"
             @keydown="onComposerKeydown"
+            @blur="composerFocusFlag = false"
           />
           <text class="emoji" @click="onEmoji">☺</text>
         </view>

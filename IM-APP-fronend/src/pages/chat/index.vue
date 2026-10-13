@@ -34,14 +34,16 @@ const chatStore = useChatStore()
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
 const keyword = ref('')
-/** 关键词命中历史消息的会话 id → 预览文案（标题/摘要未命中时用来顶上列表） */
-const messageHitPreview = ref<Map<string, string>>(new Map())
+/** 关键词命中历史消息的会话 id → 预览 + 可定位消息 id */
+const messageHitMeta = ref<Map<string, { preview: string; clientMsgId: string }>>(new Map())
 let messageSearchSeq = 0
 let messageSearchTimer: ReturnType<typeof setTimeout> | null = null
 const showAddMenu = ref(false)
 const showFilter = ref(false)
 const filterKey = ref<'all' | 'unread'>('all')
 const selectedConv = ref<Conversation | null>(null)
+/** 桌面端打开会话时定位到搜索命中的消息 */
+const selectedClientMsgId = ref('')
 
 watch(
   () => chatStore.conversations.find((c) => c.id === selectedConv.value?.id)?.title,
@@ -197,17 +199,20 @@ async function runMessageSearch(raw: string) {
   const k = raw.trim()
   const seq = ++messageSearchSeq
   if (!k) {
-    messageHitPreview.value = new Map()
+    messageHitMeta.value = new Map()
     return
   }
   const hits = await searchLocalMessages({ keyword: k, count: 100 })
   if (seq !== messageSearchSeq) return
-  const map = new Map<string, string>()
+  const map = new Map<string, { preview: string; clientMsgId: string }>()
   for (const hit of hits) {
     if (!hit.conversationID) continue
-    map.set(hit.conversationID, truncateSearchPreview(hit.preview))
+    map.set(hit.conversationID, {
+      preview: truncateSearchPreview(hit.preview),
+      clientMsgId: hit.clientMsgID || '',
+    })
   }
-  messageHitPreview.value = map
+  messageHitMeta.value = map
 }
 
 watch(keyword, (value) => {
@@ -215,7 +220,7 @@ watch(keyword, (value) => {
   const k = value.trim()
   if (!k) {
     messageSearchSeq += 1
-    messageHitPreview.value = new Map()
+    messageHitMeta.value = new Map()
     return
   }
   // 输入法组字中会频繁触发，短防抖后再打本地库
@@ -236,17 +241,17 @@ const filtered = computed(() => {
       (c) =>
         c.title.toLowerCase().includes(k) ||
         c.lastMessage.toLowerCase().includes(k) ||
-        messageHitPreview.value.has(c.id),
+        messageHitMeta.value.has(c.id),
     )
     .map((c) => {
       // 标题/摘要没命中、靠历史消息命中时，用命中片段替换摘要，避免仍显示无关最后一条
+      const hit = messageHitMeta.value.get(c.id)
       if (
-        messageHitPreview.value.has(c.id) &&
+        hit &&
         !c.title.toLowerCase().includes(k) &&
         !c.lastMessage.toLowerCase().includes(k)
       ) {
-        const preview = messageHitPreview.value.get(c.id) || ''
-        return preview ? { ...c, lastMessage: preview } : c
+        return hit.preview ? { ...c, lastMessage: hit.preview } : c
       }
       return c
     })
@@ -270,6 +275,10 @@ const { refreshing, onRefresherRefresh } = usePullRefresh(reloadConversations)
 async function openConversation(item: Conversation) {
   showAddMenu.value = false
   showFilter.value = false
+  const hitMsgId =
+    keyword.value.trim() && messageHitMeta.value.has(item.id)
+      ? messageHitMeta.value.get(item.id)?.clientMsgId || ''
+      : ''
   if (isDesktop.value) {
     if (isDissolvedGroupConversation(item)) {
       notifyGroupUnavailable(true)
@@ -288,12 +297,31 @@ async function openConversation(item: Conversation) {
         return
       }
     }
+    selectedClientMsgId.value = hitMsgId
     selectedConv.value = item
     return
   }
+  const locate = hitMsgId
+    ? `&clientMsgId=${encodeURIComponent(hitMsgId)}`
+    : ''
   uni.navigateTo({
-    url: `/pages/chat/room?conversationId=${encodeURIComponent(item.id)}&type=${item.type}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}`,
+    url: `/pages/chat/room?conversationId=${encodeURIComponent(item.id)}&type=${item.type}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}${locate}`,
   })
+}
+
+async function onMarkAllRead() {
+  showFilter.value = false
+  showAddMenu.value = false
+  if (!chatStore.totalUnread) {
+    uni.showToast({ title: '没有未读消息', icon: 'none' })
+    return
+  }
+  try {
+    await chatStore.markAllAsRead()
+    uni.showToast({ title: '已全部标为已读', icon: 'none' })
+  } catch (e) {
+    uni.showToast({ title: (e as Error)?.message || '操作失败', icon: 'none' })
+  }
 }
 
 function onAdd() {
@@ -382,6 +410,7 @@ async function onMenuDelete() {
 
 function clearSelectedConv() {
   selectedConv.value = null
+  selectedClientMsgId.value = ''
 }
 
 /** PC 宽屏：已解散群聊不允许进入右侧聊天区（对齐参考站「这个聊天已不存在」） */
@@ -503,6 +532,13 @@ watchEffect(() => {
           <view class="add-wrap" @click.stop="onAdd">
             <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
             <view v-if="showAddMenu" class="popup-menu">
+              <view
+                v-if="chatStore.totalUnread > 0"
+                class="popup-item"
+                @click="onMarkAllRead"
+              >
+                <text>全部已读</text>
+              </view>
               <view class="popup-item" @click="go('/pages/contacts/add-friend')">
                 <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
                 <text>添加朋友</text>
@@ -520,9 +556,14 @@ watchEffect(() => {
         </view>
       </view>
 
-      <AppSearchBar v-model="keyword" />
+      <AppSearchBar v-model="keyword" placeholder="搜索聊天 / 关键词" />
 
-      <view v-if="!isDesktop" class="filter-row">
+      <view class="filter-row">
+        <view
+          v-if="chatStore.totalUnread > 0"
+          class="mark-all"
+          @click.stop="onMarkAllRead"
+        >全部已读</view>
         <view class="filter-wrap" @click.stop="showFilter = !showFilter">
           <text class="filter">{{ filterLabel }}</text>
           <view class="filter-caret" />
@@ -606,12 +647,13 @@ watchEffect(() => {
     <view v-if="isDesktop" class="im-desktop-room-column">
       <ChatRoom
         v-if="selectedConv"
-        :key="selectedConv.id"
+        :key="selectedConv.id + (selectedClientMsgId ? `:${selectedClientMsgId}` : '')"
         embedded
         :conversation-id="selectedConv.id"
         :type="selectedConv.type"
         :title="selectedConv.title"
         :avatar="selectedConv.avatar"
+        :client-msg-id="selectedClientMsgId || undefined"
         @close="clearSelectedConv"
         @dissolved="clearSelectedConv"
       />
@@ -737,8 +779,17 @@ watchEffect(() => {
 
 .filter-row {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 24rpx;
   padding: 0 40rpx 8rpx;
+}
+
+.mark-all {
+  margin-right: auto;
+  color: #0a2fc2;
+  font-size: 24rpx;
+  line-height: 40rpx;
 }
 
 .filter-wrap {

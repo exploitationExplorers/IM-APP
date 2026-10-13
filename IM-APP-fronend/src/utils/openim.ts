@@ -2784,11 +2784,14 @@ export function messageSearchPreview(item: MessageItem): string {
   return extractContent(item) || ''
 }
 
-/** 会话列表关键词搜索：命中的会话 + 一条预览文案 */
+/** 会话列表 / 群内关键词搜索：命中会话 + 预览 + 可定位的消息 id */
 export interface LocalMessageSearchHit {
   conversationID: string
   messageCount: number
   preview: string
+  clientMsgID: string
+  /** 指定会话内搜索时返回的命中消息列表（已按时间新→旧） */
+  messages: MessageItem[]
 }
 
 /**
@@ -2839,12 +2842,21 @@ function normalizeLocalMessageSearchResult(res: unknown): LocalMessageSearchHit[
     if (!conversationID) continue
     const messageCount = Number(item.messageCount ?? item.MessageCount ?? 0)
     const messageList = item.messageList ?? item.MessageList
-    let preview = ''
-    if (Array.isArray(messageList) && messageList.length) {
-      const first = coerceMessage(messageList[0])
-      if (first) preview = messageSearchPreview(first)
+    const messages: MessageItem[] = []
+    if (Array.isArray(messageList)) {
+      for (const m of messageList) {
+        const coerced = coerceMessage(m)
+        if (coerced) messages.push(coerced)
+      }
     }
-    hits.push({ conversationID, messageCount, preview })
+    const first = messages[0]
+    hits.push({
+      conversationID,
+      messageCount,
+      preview: first ? messageSearchPreview(first) : '',
+      clientMsgID: first?.clientMsgID || '',
+      messages,
+    })
   }
   return hits
 }

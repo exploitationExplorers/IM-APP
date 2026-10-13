@@ -1,37 +1,27 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { MessageType } from 'openim-uniapp-polyfill'
 import type { MessageItem } from 'openim-uniapp-polyfill'
 import {
   businessUserIdFromIM,
-  collectHistoryMessages,
   messageSearchPreview,
   resolveGroupConversationID,
+  searchLocalMessages,
 } from '@/utils/openim'
 import { formatFavoriteDay, formatClock } from '@/utils/format'
 import ImNavBar from '@/components/ImNavBar.vue'
+import AppSearchBar from '@/components/AppSearchBar.vue'
 import { useContactStore } from '@/stores/contact'
 
 const contactStore = useContactStore()
 const groupId = ref('')
 const groupTitle = ref('')
+const conversationId = ref('')
 const keyword = ref('')
 const loading = ref(false)
-const messages = ref<MessageItem[]>([])
-
-const results = computed(() => {
-  const text = keyword.value.trim().toLowerCase()
-  if (!text) return []
-  return messages.value.filter((item) => {
-    const isText =
-      item.contentType === MessageType.TextMessage ||
-      item.contentType === MessageType.AtTextMessage ||
-      item.contentType === MessageType.QuoteMessage
-    if (!isText) return false
-    return previewOf(item).toLowerCase().includes(text)
-  })
-})
+const results = ref<MessageItem[]>([])
+let searchSeq = 0
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 群名可能含字面量 '%'，decodeURIComponent 会抛 URIError，这里做一次兜底 */
 function safeDecode(value: string, fallback: string) {
@@ -47,16 +37,53 @@ onLoad(async (query) => {
   groupId.value = String(query?.id || '')
   groupTitle.value = safeDecode(String(query?.title || ''), '群聊')
   if (!groupId.value) return
-  loading.value = true
   try {
     await contactStore.ensureRemarkIndex().catch(() => undefined)
-    const conversationId = await resolveGroupConversationID(groupId.value)
-    messages.value = await collectHistoryMessages(conversationId)
+    conversationId.value = await resolveGroupConversationID(groupId.value)
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载失败', icon: 'none' })
-  } finally {
-    loading.value = false
   }
+})
+
+async function runSearch(raw: string) {
+  const text = raw.trim()
+  const seq = ++searchSeq
+  if (!text || !conversationId.value) {
+    results.value = []
+    loading.value = false
+    return
+  }
+  loading.value = true
+  try {
+    const hits = await searchLocalMessages({
+      keyword: text,
+      conversationID: conversationId.value,
+      count: 100,
+    })
+    if (seq !== searchSeq) return
+    // 指定会话搜索时 SDK 通常只返回一项，messages 里是命中列表
+    results.value = hits.flatMap((h) => h.messages)
+  } catch (e) {
+    if (seq !== searchSeq) return
+    results.value = []
+    uni.showToast({ title: (e as Error)?.message || '搜索失败', icon: 'none' })
+  } finally {
+    if (seq === searchSeq) loading.value = false
+  }
+}
+
+watch(keyword, (value) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  const text = value.trim()
+  if (!text) {
+    searchSeq += 1
+    results.value = []
+    loading.value = false
+    return
+  }
+  searchTimer = setTimeout(() => {
+    void runSearch(text)
+  }, 280)
 })
 
 /** 与群聊气泡一致：好友备注优先，否则用 SDK 昵称 */
@@ -95,16 +122,7 @@ function openResult(item: MessageItem) {
   <view class="page">
     <ImNavBar title="搜索聊天记录" @back="goBack" />
 
-    <view class="search-wrap">
-      <view class="search-box">
-        <input
-          class="search-input"
-          v-model="keyword"
-          placeholder="请输入关键词"
-          confirm-type="search"
-        />
-      </view>
-    </view>
+    <AppSearchBar v-model="keyword" placeholder="请输入关键词" />
 
     <view v-if="keyword.trim()" class="list">
       <view v-for="item in results" :key="item.clientMsgID" class="row" @click="openResult(item)">
@@ -117,9 +135,9 @@ function openResult(item: MessageItem) {
           <text class="preview">{{ previewOf(item) }}</text>
         </view>
       </view>
-      <view v-if="!loading && !results.length" class="empty">未找到相关记录</view>
+      <view v-if="loading" class="empty">搜索中…</view>
+      <view v-else-if="!results.length" class="empty">未找到相关记录</view>
     </view>
-    <view v-else-if="loading" class="empty">加载中…</view>
   </view>
 </template>
 
@@ -129,22 +147,6 @@ function openResult(item: MessageItem) {
   background: #fff;
 }
 
-.search-wrap {
-  padding: 8rpx 24rpx 16rpx;
-}
-
-.search-box {
-  height: 72rpx;
-  border-radius: 8rpx;
-  background: #f3f4f7;
-  padding: 0 24rpx;
-}
-
-.search-input {
-  height: 72rpx;
-  font-size: 28rpx;
-}
-
 .list {
   padding: 0 24rpx 40rpx;
 }
@@ -152,8 +154,8 @@ function openResult(item: MessageItem) {
 .row {
   display: flex;
   gap: 20rpx;
-  padding: 24rpx 0;
-  border-bottom: 1rpx solid #f0f0f0;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #f0f1f4;
 }
 
 .avatar {
@@ -178,7 +180,7 @@ function openResult(item: MessageItem) {
 
 .name {
   font-size: 28rpx;
-  color: #111;
+  color: #212121;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -187,23 +189,24 @@ function openResult(item: MessageItem) {
 
 .time {
   font-size: 22rpx;
-  color: #999;
+  color: #9aa0ad;
   flex-shrink: 0;
 }
 
 .preview {
   font-size: 26rpx;
-  color: #666;
+  color: #636e86;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  word-break: break-all;
 }
 
 .empty {
-  padding: 80rpx 0;
   text-align: center;
-  color: #999;
-  font-size: 28rpx;
+  color: #9aa0ad;
+  font-size: 26rpx;
+  padding: 80rpx 0;
 }
 </style>
