@@ -1028,7 +1028,8 @@ function scrollToAnchorBottom() {
  * 与 onMsgScroll 互抢，出现「↓」按钮、大块空白、消息列表乱跳。
  */
 function scrollToBottom(force = false) {
-  if (userHoldingList) return
+  // 自己发消息必须贴底。手指标志在 iOS / 部分安卓上可能停在 true，不能因此把发送结果留在屏幕外
+  if (userHoldingList && !force) return
   if (!force && !stickToBottom.value) return
   stickToBottom.value = true
   clearScrollRetries()
@@ -1119,14 +1120,20 @@ watch(
   },
 )
 
+function composerText(): string {
+  const fromDom = getComposerTextareaEl()?.value || ''
+  return (fromDom || input.value).trim()
+}
+
 async function onSend() {
   if (composerBlocked.value) return
-  const text = input.value.trim()
+  const text = composerText()
   if (!text) return
   // 发送前先快照：失败要回填输入；atList 无论成败都清空，避免残留劫持后续普通消息
   const pendingAt = [...actions.atList.value]
   const hadQuote = !!actions.quote.value
-  clearComposerDraft()
+  input.value = ''
+  userHoldingList = false
   actions.atList.value = []
   showPlusPanel.value = false
   closeAtMention()
@@ -1222,10 +1229,15 @@ function triggerSend() {
   void onSend()
 }
 
-function onConfirmSend() {
+function onConfirmSend(e?: { detail?: { value?: string } }) {
   // H5 已在 keydown 处理；此处只服务 App 软键盘「发送」
   if (isH5ComposerPlatform()) return
   if (!enterToSend.value) return
+  // 部分机型点键盘发送时，v-model 已经空了，字还在事件里
+  const fromEvent = e?.detail?.value
+  if (typeof fromEvent === 'string' && fromEvent.trim() && !input.value.trim()) {
+    input.value = fromEvent
+  }
   triggerSend()
 }
 
@@ -1592,38 +1604,9 @@ const atMentionMembers = computed<AtMentionMember[]>(() => {
  * 匹配：行首或空白后的 `@关键字`（关键字不含空白与 @）。
  * App 中文输入法偶发插入全角 ＠，统一成半角再匹配。
  */
-/** 发送后短时间内丢掉输入框回写，避免回车已发出但编辑框还留着原文 */
-let ignoreComposerEchoUntil = 0
-
-function clearComposerDraft() {
-  ignoreComposerEchoUntil = Date.now() + 600
-  input.value = ''
-  const el = getComposerTextareaEl()
-  if (el) el.value = ''
-  // App 原生 textarea 经常吞掉「直接写成空串」，先改成一个空格再清掉，原生层才会跟着变
-  nextTick(() => {
-    if (Date.now() >= ignoreComposerEchoUntil) return
-    input.value = ' '
-    nextTick(() => {
-      if (Date.now() >= ignoreComposerEchoUntil) return
-      input.value = ''
-      const node = getComposerTextareaEl()
-      if (node) node.value = ''
-    })
-  })
-}
-
 function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
   // App 端 @input 有时早于 v-model 落库，优先用事件值
   const detail = e && 'detail' in e ? e.detail : undefined
-  if (Date.now() < ignoreComposerEchoUntil) {
-    if (detail && typeof detail.value === 'string' && detail.value) {
-      input.value = ''
-      const el = getComposerTextareaEl()
-      if (el) el.value = ''
-    }
-    return
-  }
   if (detail && typeof detail.value === 'string') {
     input.value = detail.value
   }
@@ -2659,7 +2642,7 @@ function pickFavorite() {
           <text class="emoji" @click="onEmoji">☺</text>
         </view>
         <view class="tool" @click="onPlus">＋</view>
-        <view v-if="hasInput" class="send-btn" @click="onSend">传送</view>
+        <view v-if="hasInput" class="send-btn" @touchend.stop.prevent="triggerSend" @click.stop="triggerSend">传送</view>
       </view>
       </template>
 
