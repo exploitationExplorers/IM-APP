@@ -55,21 +55,12 @@ function contactDisplayName(c: Contact) {
   return c.remark?.trim() || contactStore.remarkOf(c.id) || c.nickname || '联络人'
 }
 
-async function refreshContacts() {
-  return contactStore.reloadContacts({
+/** 邀请页把通讯录后续页拉完，避免停在第一页 50 人 */
+function loadContactsForPicker() {
+  return contactStore.loadAllContacts({
     keyword: keyword.value,
     sort: listSort.value,
   })
-}
-
-/** 通讯录一页 50 人，邀请页继续把后面的页拉上来 */
-async function loadContactsForPicker() {
-  await refreshContacts()
-  let guard = 0
-  while (contactStore.contactHasMore && guard < 40) {
-    guard += 1
-    await contactStore.loadMoreContacts()
-  }
 }
 
 onLoad(async (query) => {
@@ -92,8 +83,7 @@ onLoad(async (query) => {
 watch(keyword, () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
-    if (keyword.value.trim()) void refreshContacts()
-    else void loadContactsForPicker()
+    void loadContactsForPicker()
   }, 300)
 })
 
@@ -149,7 +139,7 @@ function toggleAll() {
 function setSort(key: 'recent' | 'name' | 'chat') {
   sortKey.value = key
   showSort.value = false
-  void refreshContacts()
+  void loadContactsForPicker()
 }
 
 async function onConfirm() {

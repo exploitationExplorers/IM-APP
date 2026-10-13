@@ -36,13 +36,6 @@ const sortLabel = computed(() => {
 
 const listSort = computed<ContactListSort>(() => (sortKey.value === 'name' ? 'name' : 'recent'))
 
-function refreshContacts() {
-  return contactStore.reloadContacts({
-    keyword: keyword.value,
-    sort: listSort.value,
-  })
-}
-
 const filteredContacts = computed(() => contacts.value)
 
 const selectedContacts = computed(() => [...selectedById.value.values()])
@@ -72,14 +65,12 @@ function contactDisplayName(c: Contact) {
   return c.remark?.trim() || contactStore.remarkOf(c.id) || c.nickname || '联络人'
 }
 
-/** 通讯录接口一页 50 人；建群页把后续页拉上来，否则选不满一个资料群 */
-async function loadContactsForPicker() {
-  await refreshContacts()
-  let guard = 0
-  while (contactStore.contactHasMore && guard < 40) {
-    guard += 1
-    await contactStore.loadMoreContacts()
-  }
+/** 通讯录一页最多 100 人；建群要把后面的页拉完，否则选人停在 50 */
+function loadContactsForPicker() {
+  return contactStore.loadAllContacts({
+    keyword: keyword.value,
+    sort: listSort.value,
+  })
 }
 
 onShow(() => {
@@ -93,8 +84,7 @@ onShow(() => {
 watch(keyword, () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
-    if (keyword.value.trim()) void refreshContacts()
-    else void loadContactsForPicker()
+    void loadContactsForPicker()
   }, 300)
 })
 
@@ -136,7 +126,7 @@ function removeSelected(id: string) {
 function setSort(key: 'recent' | 'name' | 'chat') {
   sortKey.value = key
   showSort.value = false
-  void refreshContacts()
+  void loadContactsForPicker()
 }
 
 function onConfirmSelect() {

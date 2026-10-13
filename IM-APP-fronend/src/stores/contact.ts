@@ -170,15 +170,16 @@ export const useContactStore = defineStore('contact', () => {
     await ensureRemarkIndex()
   }
 
-  async function reloadContacts(opts?: { keyword?: string; sort?: ContactListSort }) {
+  async function reloadContacts(opts?: { keyword?: string; sort?: ContactListSort; limit?: number }) {
     if (opts?.keyword !== undefined) contactKeyword.value = opts.keyword
     if (opts?.sort) contactSort.value = opts.sort
+    const limit = opts?.limit && opts.limit > 0 ? opts.limit : PAGE_SIZE
     contactsLoading.value = true
     try {
       const page = await fetchContacts({
         keyword: contactKeyword.value,
         sort: contactSort.value,
-        limit: PAGE_SIZE,
+        limit,
       })
       contacts.value = page.items
       contactTotal.value = page.total
@@ -191,7 +192,7 @@ export const useContactStore = defineStore('contact', () => {
     }
   }
 
-  async function loadMoreContacts() {
+  async function loadMoreContacts(limit = PAGE_SIZE) {
     if (!contactHasMore.value || contactsLoading.value || !contactCursor.value) return
     contactsLoading.value = true
     try {
@@ -199,7 +200,7 @@ export const useContactStore = defineStore('contact', () => {
         keyword: contactKeyword.value,
         sort: contactSort.value,
         cursor: contactCursor.value,
-        limit: PAGE_SIZE,
+        limit,
       })
       const seen = new Set(contacts.value.map((c) => c.id))
       contacts.value = contacts.value.concat(page.items.filter((c) => !seen.has(c.id)))
@@ -210,6 +211,18 @@ export const useContactStore = defineStore('contact', () => {
       markFriendKeys(page.items)
     } finally {
       contactsLoading.value = false
+    }
+  }
+
+  /** 建群/邀请不能停在第一页。接口单页最多 100，这里把后续页拉完 */
+  async function loadAllContacts(opts?: { keyword?: string; sort?: ContactListSort }) {
+    const limit = 100
+    await reloadContacts({ ...opts, limit })
+    for (let i = 0; i < 40; i += 1) {
+      if (!contactHasMore.value) return
+      const before = contacts.value.length
+      await loadMoreContacts(limit)
+      if (contacts.value.length === before) return
     }
   }
 
@@ -408,6 +421,7 @@ export const useContactStore = defineStore('contact', () => {
     ensureFriendIndex,
     reloadContacts,
     loadMoreContacts,
+    loadAllContacts,
     loadGroups,
     loadAll,
     loadDirectory,
