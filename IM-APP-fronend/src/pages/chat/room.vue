@@ -214,10 +214,6 @@ const renderMessages = computed(() => {
   return all
 })
 
-watch(stickToBottom, (atBottom) => {
-  if (atBottom) browsingHistory.value = false
-})
-
 let roomFirstMessagesMarked = false
 watch(
   () => messages.value.length,
@@ -896,19 +892,38 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 
 let loadingMore = false
 async function onScrollToUpper() {
+  // 贴底或刚点过「↓」时，列表变高会误触发到顶，不能因此把历史整页展开再弹回去
+  if (stickToBottom.value || Date.now() < ignoreScrollUntil) return
+  const anchor = renderMessages.value[0]?.id
   stickToBottom.value = false
+  const expanding = !browsingHistory.value && messages.value.length > RENDER_TAIL
   browsingHistory.value = true
+  if (expanding && anchor) {
+    await nextTick()
+    pinScrollToMessage(anchor)
+  }
   if (!conversationId.value || loadingMore) return
   loadingMore = true
   try {
-    const anchor = messages.value[0]?.id
     const added = await chatStore.loadMoreMessages(conversationId.value)
     if (!added || !anchor) return
     await nextTick()
-    scrollInto.value = `msg_${anchor}`
+    pinScrollToMessage(anchor)
   } finally {
     loadingMore = false
   }
+}
+
+/** 把某条消息顶对齐，避免上翻时整表换窗口把视口甩走；用完即清，免得之后被拽回 */
+function pinScrollToMessage(id: string) {
+  const viewId = `msg_${id}`
+  scrollInto.value = ''
+  nextTick(() => {
+    scrollInto.value = viewId
+    setTimeout(() => {
+      if (scrollInto.value === viewId) scrollInto.value = ''
+    }, 80)
+  })
 }
 
 function formatDuration(seconds: number) {
@@ -986,17 +1001,6 @@ function bumpMsgScrollTop() {
   })
 }
 
-/** 用户上滑离开底部时，把 scroll-top 绑回真实位置，避免 iOS 仍按「贴底大值」回弹 */
-function releaseScrollTopBinding(currentTop: number) {
-  const top = Math.max(0, Math.floor(currentTop))
-  if (Math.abs(msgScrollTop.value - top) < 1) {
-    msgScrollTop.value = top + (msgScrollTopNonce ? 0.01 : -0.01)
-  }
-  nextTick(() => {
-    msgScrollTop.value = top
-  })
-}
-
 function scrollToAnchorBottom() {
   // 先清空再指向锚点：连续发送/连续收消息时值相同不会重复触发滚动，跨一帧重设才能每次都滚。
   // 滚完立刻清掉，否则输入框长高时 scroll-into-view 还指着底部，往上翻会被拽回去。
@@ -1005,13 +1009,15 @@ function scrollToAnchorBottom() {
     scrollInto.value = 'bottom-anchor'
     if (isH5ComposerPlatform()) {
       scrollMsgListDomToBottom()
-    } else {
-      // App：只用 scroll-into-view + scroll-top，不要写 WebView DOM
       bumpMsgScrollTop()
     }
     setTimeout(() => {
       if (scrollInto.value === 'bottom-anchor') scrollInto.value = ''
-      if (isH5ComposerPlatform()) scrollMsgListDomToBottom()
+      if (!isH5ComposerPlatform()) return
+      scrollMsgListDomToBottom()
+      // 贴底落地后把 scroll-top 收成真实位置。留着千万级大值时，每次重绘都会把列表拽回底部。
+      const root = document.querySelector('.room .msg-list .uni-scroll-view') as HTMLElement | null
+      if (root && root.scrollTop > 0) msgScrollTop.value = root.scrollTop
     }, 80)
   })
 }
@@ -1066,9 +1072,8 @@ function scheduleScrollFrame(fn: () => void) {
 function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
   const top = Number(e.detail?.scrollTop || 0)
   const height = Number(e.detail?.scrollHeight || 0)
-  // 手指拖动时不受贴底窗口影响，并松开 scroll-top 绑定，否则 iOS 会按大值弹回去
+  // 手指拖动时取消贴底锁。不要在 scroll 回调里改 scroll-top，否则会和手势对拉。
   if (userHoldingList) {
-    if (msgScrollTop.value > 1_000_000) releaseScrollTopBinding(top)
     ignoreScrollUntil = 0
   } else if (Date.now() < ignoreScrollUntil) {
     return
@@ -1083,14 +1088,10 @@ function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number }
       if (distance < 80) {
         stickToBottom.value = true
       } else if (distance > 120) {
-        if (stickToBottom.value || msgScrollTop.value > 1_000_000) releaseScrollTopBinding(top)
         stickToBottom.value = false
-        browsingHistory.value = true
       }
     } else if (top + 80 < maxScrollTop) {
-      if (stickToBottom.value || msgScrollTop.value > 1_000_000) releaseScrollTopBinding(top)
       stickToBottom.value = false
-      browsingHistory.value = true
     }
     if (top > maxScrollTop) maxScrollTop = top
   })
@@ -1099,11 +1100,12 @@ function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number }
 function jumpToBottom() {
   userHoldingList = false
   maxScrollTop = 0
+  clearScrollRetries()
+  // 先收成尾部再滚，避免「展开全量 / 收成 48 条」和滚动绑在同一帧里对弹
   browsingHistory.value = false
   stickToBottom.value = true
-  clearScrollRetries()
-  ignoreScrollUntil = Date.now() + 360
-  scrollToAnchorBottom()
+  ignoreScrollUntil = Date.now() + 480
+  nextTick(() => scrollToAnchorBottom())
 }
 
 watch(
@@ -1593,10 +1595,21 @@ const atMentionMembers = computed<AtMentionMember[]>(() => {
 let ignoreComposerEchoUntil = 0
 
 function clearComposerDraft() {
+  ignoreComposerEchoUntil = Date.now() + 600
   input.value = ''
-  ignoreComposerEchoUntil = Date.now() + 500
   const el = getComposerTextareaEl()
   if (el) el.value = ''
+  // App 原生 textarea 经常吞掉「直接写成空串」，先改成一个空格再清掉，原生层才会跟着变
+  nextTick(() => {
+    if (Date.now() >= ignoreComposerEchoUntil) return
+    input.value = ' '
+    nextTick(() => {
+      if (Date.now() >= ignoreComposerEchoUntil) return
+      input.value = ''
+      const node = getComposerTextareaEl()
+      if (node) node.value = ''
+    })
+  })
 }
 
 function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
@@ -2508,7 +2521,9 @@ function pickFavorite() {
     <scroll-view
       scroll-y
       class="msg-list"
+      <!-- #ifdef H5 -->
       :scroll-top="msgScrollTop"
+      <!-- #endif -->
       :scroll-into-view="scrollInto"
       @scroll="onMsgScroll"
       @scrolltoupper="onScrollToUpper"
