@@ -989,29 +989,42 @@ function bumpMsgScrollTop() {
 function scrollToAnchorBottom() {
   // 先清空再指向锚点：连续发送/连续收消息时值相同不会重复触发滚动，跨一帧重设才能每次都滚。
   // 滚完立刻清掉，否则输入框长高时 scroll-into-view 还指着底部，往上翻会被拽回去。
-  ignoreScrollUntil = Date.now() + 480
   scrollInto.value = ''
-  bumpMsgScrollTop()
   nextTick(() => {
     scrollInto.value = 'bottom-anchor'
-    scrollMsgListDomToBottom()
+    // H5 优先写原生 scrollTop；App 无 DOM 时再靠 scroll-top / scroll-into-view
+    const domOk = scrollMsgListDomToBottom()
+    if (!domOk) bumpMsgScrollTop()
     setTimeout(() => {
       if (scrollInto.value === 'bottom-anchor') scrollInto.value = ''
-    }, 120)
+      scrollMsgListDomToBottom()
+    }, 80)
   })
 }
 
+/**
+ * 贴底。重试要克制：过密的 scroll-into-view / scroll-top 会在图片撑高时
+ * 与 onMsgScroll 互抢，出现「↓」按钮、大块空白、消息列表乱跳。
+ */
 function scrollToBottom(force = false) {
   if (!force && !stickToBottom.value) return
   stickToBottom.value = true
   browsingHistory.value = false
   clearScrollRetries()
+  const last = messages.value[messages.value.length - 1]
+  const media =
+    !!last && last.type !== 'text' && last.type !== 'system'
+  // 进房 force：少拍几次；媒体：等撑高；纯文字：一帧足够
+  const delays = force ? [80, 280, 640] : media ? [180, 480] : [60]
+  const lastDelay = delays[delays.length - 1] || 60
+  ignoreScrollUntil = Date.now() + lastDelay + 240
   scrollToAnchorBottom()
-  // 文字会话进房、聚焦输入、气泡撑高都会晚于首帧；统一多拍几次贴底
-  for (const delay of [50, 160, 360, 700, 1200]) {
+  for (const delay of delays) {
     scrollRetryTimers.push(
       setTimeout(() => {
-        if (stickToBottom.value) scrollToAnchorBottom()
+        if (!stickToBottom.value) return
+        ignoreScrollUntil = Date.now() + 240
+        scrollToAnchorBottom()
       }, delay),
     )
   }
@@ -1026,24 +1039,28 @@ function scheduleScrollFrame(fn: () => void) {
   return raf(fn)
 }
 function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
+  // ignoreScrollUntil 覆盖整段程序化贴底重试，避免中间态误判成上翻（RENDER_TAIL 展开会乱跳）
   if (Date.now() < ignoreScrollUntil) return
   const top = Number(e.detail?.scrollTop || 0)
   const height = Number(e.detail?.scrollHeight || 0)
   if (scrollRaf) return
   scrollRaf = scheduleScrollFrame(() => {
     scrollRaf = 0
+    if (Date.now() < ignoreScrollUntil) return
     if (msgViewportHeight <= 0) measureMsgList()
-    // 翻历史时只认「距底部足够近」才贴底；勿用 maxScrollTop 启发式——
-    // 新消息拉长内容时 top 不变也会被误判成贴底，从而跳到最新。
+    // 滞回：近底贴底；贴底意图下内容被图片微撑高则补滚；明显离开才进翻历史
     if (msgViewportHeight > 0 && height > 0) {
       const distance = height - top - msgViewportHeight
-      if (distance < 160) {
+      if (distance < 100) {
         stickToBottom.value = true
-      } else {
+      } else if (stickToBottom.value && !browsingHistory.value && distance < 220) {
+        ignoreScrollUntil = Date.now() + 180
+        if (!scrollMsgListDomToBottom()) nextTick(() => scrollToAnchorBottom())
+      } else if (distance > 260) {
         stickToBottom.value = false
         browsingHistory.value = true
       }
-    } else if (top + 80 < maxScrollTop) {
+    } else if (top + 120 < maxScrollTop) {
       stickToBottom.value = false
       browsingHistory.value = true
     }
