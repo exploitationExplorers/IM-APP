@@ -138,6 +138,88 @@ export function h5PublicMediaUrl(path: string): string {
   return path
 }
 
+/**
+ * 把 App 本地相对路径（_doc/...、_www/...、_downloads/...）转成 AVPlayer 能打开的绝对 file:// 路径。
+ * 兼容不同 uni 基座：优先 convertToAbsURL，回退 convertLocalFileSystemURL；
+ * 两者都缺失时按 _doc/_www/_downloads 拼应用沙盒绝对路径兜底。
+ */
+export function toAbsFileUrl(p: string): string {
+  if (!p) return p
+  if (p.startsWith('file://') || p.startsWith('cdvfile://')) return p
+  const io = (typeof plus !== 'undefined' && plus.io) as
+    | { convertToAbsURL?: (u: string) => string; convertLocalFileSystemURL?: (u: string) => string }
+    | undefined
+  const convert = io?.convertToAbsURL || io?.convertLocalFileSystemURL
+  if (typeof convert === 'function') {
+    try {
+      const abs = convert(p)
+      if (abs) return abs.startsWith('file://') ? abs : `file://${abs}`
+    } catch {
+      /* ignore */
+    }
+  }
+  if (p.startsWith('_doc/') || p.startsWith('_www/') || p.startsWith('_downloads/')) {
+    const root = p.slice(0, p.indexOf('/') + 1)
+    const base = io?.convertToAbsURL?.(root) || io?.convertLocalFileSystemURL?.(root)
+    if (base) {
+      const absRoot = base.startsWith('file://') ? base : `file://${base}`
+      const tail = p.slice(root.length)
+      return `${absRoot.replace(/\/$/, '')}/${tail}`
+    }
+  }
+  return p
+}
+
+/**
+ * 异步把 App 本地相对路径（_doc/...、_www/...、_downloads/...）解析成 AVPlayer 能打开的绝对 file:// 路径。
+ * 优先同步接口（标准 HBuilder 基座 convertLocalFileSystemURL / convertToAbsURL）；
+ * 自定义基座常缺这两个方法，回退到 plus.io.resolveLocalFileSystemURL —— 该接口在本地文件读写链路里已验证可用，
+ * 其返回的 FileEntry.toURL() 即绝对 file://。playVoice 本就 await ensurePlayableAudioPath，故此处可异步。
+ */
+async function resolveAbsAudioPath(rel: string): Promise<string> {
+  const clean = (rel || '').trim()
+  if (!clean || clean.startsWith('file://') || isRemoteMediaUrl(clean) || clean.startsWith('blob:')) {
+    return clean
+  }
+  const io = plus?.io as
+    | {
+        convertToAbsURL?: (u: string) => string
+        convertLocalFileSystemURL?: (u: string) => string
+        resolveLocalFileSystemURL?: Function
+      }
+    | undefined
+
+  const syncConvert = io?.convertToAbsURL || io?.convertLocalFileSystemURL
+  if (typeof syncConvert === 'function') {
+    try {
+      const abs = syncConvert(clean)
+      if (abs) return abs.startsWith('file://') ? abs : `file://${abs}`
+    } catch {
+      /* 旧基座转换异常，走异步兜底 */
+    }
+  }
+
+  if (typeof io?.resolveLocalFileSystemURL === 'function') {
+    try {
+      const abs = await new Promise<string>((resolve, reject) => {
+        io!.resolveLocalFileSystemURL!(
+          clean,
+          (entry: { toURL?: () => string; toLocalURL?: () => string; fullPath?: string }) => {
+            const u = entry.toURL?.() || entry.toLocalURL?.() || entry.fullPath || ''
+            if (u) resolve(u.startsWith('file://') || isRemoteMediaUrl(u) ? u : `file://${u}`)
+            else reject(new Error('无法解析语音路径'))
+          },
+          (err: unknown) => reject(new Error(typeof err === 'string' ? err : JSON.stringify(err))),
+        )
+      })
+      if (abs) return abs
+    } catch {
+      /* 落到原值 */
+    }
+  }
+  return clean
+}
+
 /** 归一化可播放地址：http(s)/blob/file 原样返回，App 本地路径转 file://。 */
 export function playableMediaUrl(path: string): string {
   if (!path) return ''
@@ -146,8 +228,7 @@ export function playableMediaUrl(path: string): string {
   }
   if (!looksLikeLocalFilePath(path)) return path
   try {
-    const converted = plus?.io?.convertLocalFileSystemURL?.(path)
-    if (converted) return converted.startsWith('file://') ? converted : `file://${converted}`
+    return toAbsFileUrl(path)
   } catch {
     /* H5 无 plus */
   }
@@ -598,8 +679,6 @@ function downloadRemoteFile(url: string): Promise<string> {
 }
 
 const AUDIO_EXT_RE = /\.(aac|m4a|mp3|wav|caf|amr)(\?|#|$)/i
-/** iOS AVPlayer 官方表：m4a/aac/mp3/wav/caf；amr/ogg/webm 播不了 */
-const IOS_AUDIO_EXTS = new Set(['aac', 'm4a', 'mp3', 'wav', 'caf'])
 
 type PlusFileReader = {
   onloadend: ((e: { target?: { result?: unknown } }) => void) | null
@@ -608,37 +687,7 @@ type PlusFileReader = {
 }
 type PlusIo = {
   resolveLocalFileSystemURL?: Function
-  convertLocalFileSystemURL?: (path: string) => string
   FileReader?: new () => PlusFileReader
-}
-
-/** 统一成本地可给 AVPlayer / plus.audio 用的路径（尽量带 file://） */
-export function toNativeAudioSrc(path: string): string {
-  const raw = (path || '').trim()
-  if (!raw) return ''
-  if (isRemoteMediaUrl(raw) || raw.startsWith('blob:')) return playableMediaUrl(raw)
-  try {
-    const io = plus?.io as unknown as PlusIo | undefined
-    const converted = io?.convertLocalFileSystemURL?.(raw)
-    if (converted) return converted.startsWith('file://') ? converted : `file://${converted}`
-  } catch {
-    /* ignore */
-  }
-  if (raw.startsWith('file://')) return raw
-  return raw.startsWith('/') ? `file://${raw}` : raw
-}
-
-function audioFsCandidates(path: string): string[] {
-  const raw = (path || '').trim()
-  if (!raw) return []
-  const out: string[] = []
-  const push = (p: string) => {
-    if (p && !out.includes(p)) out.push(p)
-  }
-  push(raw)
-  push(toNativeAudioSrc(raw))
-  if (raw.startsWith('file://')) push(raw.slice('file://'.length))
-  return out
 }
 
 /** 读文件头若干字节；读不到返回 null（不影响后续按后缀兜底） */
@@ -650,43 +699,76 @@ function readFileHead(path: string, size = 16): Promise<Uint8Array | null> {
       resolve(null)
       return
     }
-    const candidates = audioFsCandidates(path)
-    let idx = 0
-    const tryNext = () => {
-      if (idx >= candidates.length) {
-        resolve(null)
-        return
-      }
-      const cur = candidates[idx++]
-      io.resolveLocalFileSystemURL!(
-        cur,
-        (entry: { file?: Function }) => {
-          if (!entry.file) {
-            tryNext()
-            return
-          }
-          entry.file(
-            (file: { slice?: (start: number, end: number) => unknown }) => {
-              const reader = new Reader()
-              reader.onloadend = (e) => {
-                const result = String(e.target?.result || '')
-                const base64 = result.slice(result.indexOf(',') + 1)
-                try {
-                  resolve(base64 ? new Uint8Array(uni.base64ToArrayBuffer(base64)).slice(0, size) : null)
-                } catch {
-                  resolve(null)
-                }
+    io.resolveLocalFileSystemURL(
+      path,
+      (entry: { file?: Function }) => {
+        if (!entry.file) {
+          resolve(null)
+          return
+        }
+        entry.file(
+          (file: { slice?: (start: number, end: number) => unknown }) => {
+            const reader = new Reader()
+            reader.onloadend = (e) => {
+              const result = String(e.target?.result || '')
+              const base64 = result.slice(result.indexOf(',') + 1)
+              try {
+                resolve(base64 ? new Uint8Array(uni.base64ToArrayBuffer(base64)).slice(0, size) : null)
+              } catch {
+                resolve(null)
               }
-              reader.onerror = () => tryNext()
-              reader.readAsDataURL(typeof file.slice === 'function' ? file.slice(0, size) : file)
-            },
-            () => tryNext(),
-          )
-        },
-        () => tryNext(),
-      )
+            }
+            reader.onerror = () => resolve(null)
+            reader.readAsDataURL(typeof file.slice === 'function' ? file.slice(0, size) : file)
+          },
+          () => resolve(null),
+        )
+      },
+      () => resolve(null),
+    )
+  })
+}
+
+/** 确认本地语音文件存在（带超时）：不存在直接报明确错误，避免 AVPlayer 拿到无效路径静默失败 */
+function fileExistsForPlay(absPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const io = plus?.io as unknown as { resolveLocalFileSystemURL?: Function } | undefined
+    if (!io?.resolveLocalFileSystemURL) {
+      resolve(true)
+      return
     }
-    tryNext()
+    let done = false
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true
+        resolve(true)
+      }
+    }, 2500)
+    try {
+      io.resolveLocalFileSystemURL(
+        absPath,
+        () => {
+          if (!done) {
+            done = true
+            clearTimeout(timer)
+            resolve(true)
+          }
+        },
+        () => {
+          if (!done) {
+            done = true
+            clearTimeout(timer)
+            resolve(false)
+          }
+        },
+      )
+    } catch {
+      if (!done) {
+        done = true
+        clearTimeout(timer)
+        resolve(true)
+      }
+    }
   })
 }
 
@@ -697,11 +779,9 @@ function readFileHead(path: string, size = 16): Promise<Uint8Array | null> {
 function sniffAudioExt(h: Uint8Array): string {
   if (h.length < 4) return ''
   const ascii = (start: number, end: number) => String.fromCharCode(...Array.from(h.slice(start, end)))
-  // ADTS-AAC 必须先于通用 MPEG 帧头判断，否则会被误判成 mp3
   if (h[0] === 0xff && (h[1] & 0xf6) === 0xf0) return 'aac'
   if (ascii(4, 8) === 'ftyp') return 'm4a'
-  if (ascii(0, 3) === 'ID3') return 'mp3'
-  if (h[0] === 0xff && (h[1] & 0xe0) === 0xe0 && (h[1] & 0x06) === 0x02) return 'mp3'
+  if (ascii(0, 3) === 'ID3' || (h[0] === 0xff && (h[1] & 0xe0) === 0xe0)) return 'mp3'
   if (ascii(0, 4) === 'RIFF') return 'wav'
   if (ascii(0, 4) === 'caff') return 'caf'
   if (ascii(0, 5) === '#!AMR') return 'amr'
@@ -720,55 +800,83 @@ function isIOSApp(): boolean {
 
 const playableAudioCache = new Map<string, string>()
 
-async function toNamedPlayableAudio(localPath: string): Promise<string> {
+async function toNamedPlayableAudio(localPath: string, srcHint = ''): Promise<string> {
   const head = await readFileHead(localPath)
   const ext = head ? sniffAudioExt(head) : ''
-  if ((ext === 'webm' || ext === 'ogg' || ext === 'amr') && isIOSApp()) {
-    throw new Error('该语音格式 iOS 暂不支持播放')
+  if ((ext === 'webm' || ext === 'ogg') && isIOSApp()) {
+    throw new Error('该语音为网页端录制的格式，iOS 暂不支持播放')
   }
-  // 嗅探失败时：iOS 默认按 aac（安卓 recorder format:aac 多是 ADTS），绝不能默认 m4a
-  const namedExt = ext || (isIOSApp() ? 'aac' : AUDIO_EXT_RE.test(localPath) ? '' : 'm4a')
-  if (!namedExt) return toNativeAudioSrc(localPath)
-  if (new RegExp(`\\.${namedExt}(\\?|#|$)`, 'i').test(localPath)) return toNativeAudioSrc(localPath)
-  const named = await persistNamedFile(localPath, `voice_${Date.now()}.${namedExt}`)
-  return toNativeAudioSrc(named)
+  if (!ext) {
+    if (AUDIO_EXT_RE.test(localPath)) return localPath
+    // 读不到文件头时按来源地址后缀兜底；语音几乎都是 aac/m4a，缺省 .aac。
+    // ⚠️ 切勿盲给 .m4a：裸 ADTS-AAC 被当 MP4 容器解析会 MediaError「格式不对」（iOS/安卓都中招）。
+    const m = srcHint.match(/\.(aac|m4a|mp3|wav|caf|amr)(\?|#|$)/i)
+    const fallbackExt = (m && m[1] ? m[1] : 'aac').toLowerCase()
+    return persistNamedFile(localPath, `voice_${Date.now()}.${fallbackExt}`)
+  }
+  if (new RegExp(`\\.${ext}(\\?|#|$)`, 'i').test(localPath)) return localPath
+  return persistNamedFile(localPath, `voice_${Date.now()}.${ext}`)
 }
 
 /**
- * App 上远程语音先下载到本地，再按文件头补真实后缀。
- * iOS 无后缀 / 后缀与内容不符都会 MediaError（官方表见 createInnerAudioContext）。
+ * App 上远程语音先完整下载到本地，再按文件头/来源后缀补真实封装后交给 InnerAudio；
+ * 同一条语音只落地一次。H5 仍走原 URL。
+ *
+ * 为什么 iOS 也走「下载到本地」而不是「直接给 AVPlayer 远程 URL」：
+ * - 业务 App 与 IM 服务端全链路 HTTP（API 即 http://…），原生壳 ATS 已放行 http，故 ATS 不是主因；
+ * - 但 OpenIM / MinIO 返回的 object 地址对 AVPlayer「远程流式」支持差：裸 ADTS-AAC 无容器、
+ *   Range/Content-Type 不稳，iOS 直接 onError「播放失败」。安卓端此前就是「完整下载后播」才正常，
+ *   因此 iOS 统一成同一路径：下载 → file:// 本地播放（无远程流式、按文件头选对解析器）。
  */
 export async function ensurePlayableAudioPath(url: string): Promise<string> {
-  const src = playableMediaUrl((url || '').trim())
+  const original = (url || '').trim()
+  const src = playableMediaUrl(original)
   if (!src) return ''
   if (!isAppPlatform()) return src
 
-  const cached = playableAudioCache.get(src)
+  // 网页端 MediaRecorder 录的 webm/ogg/opus：iOS 与多数安卓基座都无法用系统播放器解码，提前给友好提示
+  if (/\.(webm|ogg|opus)(\?|#|$)/i.test(src)) {
+    const msg = isIOSApp()
+      ? '该语音为网页端录制的格式，iOS 暂不支持播放'
+      : '该语音格式暂不支持播放'
+    throw new Error(msg)
+  }
+
+  const cached = playableAudioCache.get(original)
   if (cached) return cached
 
   let local = src
   if (isRemoteMediaUrl(src)) {
-    local = await downloadRemoteFile(src)
+    try {
+      local = await downloadRemoteFile(src)
+    } catch {
+      // 下载失败保留远程地址最后一搏（AVPlayer 可能仍失败，但不再抛错阻断）
+      local = src
+    }
+  } else if (
+    looksLikeLocalFilePath(original) ||
+    original.startsWith('_doc') ||
+    original.startsWith('_www') ||
+    original.startsWith('_downloads')
+  ) {
+    // App 本地语音（多为 OpenIM 下载缓存）：转绝对路径并确认文件存在，避免 iOS AVPlayer 拿到相对路径静默失败。
+    const abs = await resolveAbsAudioPath(original)
+    const ok = await fileExistsForPlay(abs)
+    if (!ok) throw new Error('语音文件已过期，请让对方重新发送')
+    local = abs
   }
-  const playable = await toNamedPlayableAudio(local)
-  if (playableAudioCache.size > 200) playableAudioCache.clear()
-  playableAudioCache.set(src, playable)
-  return playable
-}
 
-/** InnerAudio 失败时换后缀再落地一版（aac↔m4a↔mp3），专治 iOS MediaError */
-export async function remapPlayableAudioExt(localSrc: string, tried: string[]): Promise<string | null> {
-  if (!isAppPlatform() || !localSrc) return null
-  const current = (localSrc.match(AUDIO_EXT_RE)?.[1] || '').toLowerCase()
-  const order = isIOSApp()
-    ? ['aac', 'm4a', 'mp3', 'wav'].filter((e) => IOS_AUDIO_EXTS.has(e))
-    : ['aac', 'm4a', 'mp3']
-  const next = order.find((e) => e !== current && !tried.includes(e))
-  if (!next) return null
-  const bare = localSrc.replace(/^file:\/\//, '').replace(AUDIO_EXT_RE, '')
-  const source = /^(file|content):\/\//.test(localSrc) || localSrc.startsWith('/') ? localSrc : toNativeAudioSrc(localSrc)
-  const named = await persistNamedFile(source, `voice_retry_${Date.now()}.${next}`)
-  return toNativeAudioSrc(named || `${bare}.${next}`)
+  // 关键（真机验证）：uni.downloadFile 在 iOS 上返回的 tempFilePath 是**相对**形态
+  // （_doc/uniapp_temp_<ts>/download/xxx.aac），此前只对「本来就是本地路径」的分支做过绝对化，
+  // 下载产物绕过了转换 → AVPlayer 拿到相对路径直接 onError「播放失败」。此处统一补一道。
+  if (!isRemoteMediaUrl(local) && !local.startsWith('file://') && looksLikeLocalFilePath(local)) {
+    const abs = await resolveAbsAudioPath(local)
+    if (abs && abs !== local) local = abs
+  }
+  const playable = await toNamedPlayableAudio(local, src)
+  if (playableAudioCache.size > 200) playableAudioCache.clear()
+  playableAudioCache.set(original, playable)
+  return playable
 }
 
 /**

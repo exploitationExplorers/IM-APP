@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 	"time"
@@ -76,6 +77,18 @@ func NewMinIO(cfg config.MinIOConfig) (*MinIO, error) {
 
 func (m *MinIO) Available() bool {
 	return m != nil && m.Client != nil
+}
+
+// PutObject 把服务端自己生成的内容（如转码后的语音）写入 MinIO。
+// 现有的上传链路都是预签名直传，客户端字节不过后端；转码场景必须后端写入，故补此方法。
+func (m *MinIO) PutObject(ctx context.Context, objectKey string, r io.Reader, size int64, contentType string) error {
+	if !m.Available() {
+		return fmt.Errorf("minio 不可用")
+	}
+	_, err := m.Client.PutObject(ctx, m.Bucket, objectKey, r, size, minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+	return err
 }
 
 // FileURL 返回对象上传完成后的可访问地址。

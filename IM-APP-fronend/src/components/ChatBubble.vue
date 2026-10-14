@@ -22,8 +22,9 @@ function pumpMeasureQueue() {
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, remapPlayableAudioExt, toNativeAudioSrc, previewImagesWithSave } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
+import { soundMetaOf } from '@/utils/openim'
 
 const props = defineProps<{
   message: ChatMessage
@@ -316,15 +317,11 @@ const parts = computed(() =>
 
 const voiceMeta = computed(() => {
   if (props.message.type !== 'voice') return null
-  try {
-    const parsed = JSON.parse(props.message.content) as { path?: string; duration?: number }
-    return {
-      path: parsed.path || '',
-      duration: Number(parsed.duration || 0),
-    }
-  } catch {
-    return { path: '', duration: 0 }
-  }
+  // 复用 openim.ts 的 soundMetaOf：OpenIM 发送后 content 是 SDK 原始结构
+  //（{ uuid, soundPath, sourceUrl, duration, soundType }），远程地址在 sourceUrl；
+  // 旧逻辑只取 content.path 取不到自己发的语音地址 → 播放失败。
+  const meta = soundMetaOf(props.message as unknown as Record<string, unknown>)
+  return { path: meta.path || '', duration: Number(meta.duration || 0) }
 })
 
 /** 占位阶段 content 是文件名；发送成功后是 { url, fileName }，旧消息只有 URL。 */
@@ -372,6 +369,8 @@ const playing = ref(false)
 /** 已播放进度：波柱按比例分成已播（高亮）/未播两段颜色 */
 const playedBars = ref(0)
 let stopVoiceFn: (() => void) | null = null
+/** H5 语音播放器：整个页面共用一个 <audio>，切歌时 pause+重置，避免 iOS 上多实例/异步起播导致无声 */
+let h5VoiceAudio: HTMLAudioElement | null = null
 /** 进度轮询兜底：个别平台 onTimeUpdate 不回调，保证进度一定推进 */
 let progressTimer: ReturnType<typeof setInterval> | null = null
 
@@ -408,7 +407,6 @@ type InnerAudio = {
   volume?: number
   sessionCategory?: string
   obeyMuteSwitch?: boolean
-  autoplay?: boolean
   currentTime: number
   duration: number
   play: () => void
@@ -418,26 +416,7 @@ type InnerAudio = {
   onError: (cb: (e?: { errMsg?: string; errCode?: number }) => void) => void
   onStop: (cb: () => void) => void
   onPlay?: (cb: () => void) => void
-  onCanplay?: (cb: () => void) => void
   onTimeUpdate: (cb: () => void) => void
-}
-
-type PlusAudioPlayer = {
-  play: (successCB?: () => void, errorCB?: (e?: unknown) => void) => void
-  stop: () => void
-  close?: () => void
-  getPosition?: () => number
-  getDuration?: () => number
-  addEventListener?: (name: string, cb: () => void, capture?: boolean) => void
-  removeEventListener?: (name: string, cb: () => void) => void
-}
-
-function isIOSNative(): boolean {
-  try {
-    return uni.getSystemInfoSync().platform === 'ios'
-  } catch {
-    return false
-  }
 }
 
 function createVoiceInnerAudio(): InnerAudio | null {
@@ -447,7 +426,7 @@ function createVoiceInnerAudio(): InnerAudio | null {
   if (typeof factory !== 'function') return null
   const inner = factory()
   try {
-    // App 端侧边静音键下也要出声（官方 sessionCategory=playback）
+    // iOS 侧边静音键下也要出声
     inner.sessionCategory = 'playback'
   } catch {
     /* 旧基座无此属性 */
@@ -455,7 +434,7 @@ function createVoiceInnerAudio(): InnerAudio | null {
   try {
     inner.obeyMuteSwitch = false
   } catch {
-    /* 小程序只读；App 部分基座也只读 */
+    /* Android 部分基座只读 */
   }
   try {
     inner.volume = 1
@@ -465,21 +444,41 @@ function createVoiceInnerAudio(): InnerAudio | null {
   return inner
 }
 
-function createPlusAudioPlayer(src: string): PlusAudioPlayer | null {
-  try {
-    const audio = (plus as { audio?: { createPlayer?: (url: string) => PlusAudioPlayer } } | undefined)
-      ?.audio
-    if (typeof audio?.createPlayer !== 'function') return null
-    return audio.createPlayer(src)
-  } catch {
-    return null
+/**
+ * 语音候选播放地址：不同 uni 基座对「绝对 file://」与「相对 _doc/...」的支持不一致（iOS 尤其明显，
+ * 有的基座缺 convertLocalFileSystemURL，有的只认相对路径），单一形态很容易直接判死。
+ * 逐个尝试直到真正出声，能显著提升一次点播成功率。
+ */
+function buildVoiceSrcCandidates(primary: string, raw: string): string[] {
+  const list: string[] = []
+  const push = (v?: string) => {
+    const s = (v || '').trim()
+    if (s && !list.includes(s)) list.push(s)
   }
+  // primary 与 raw 都要展开：primary 常是下载后的本地相对路径，raw 常是远程 URL，
+  // 只展开其中一个会漏掉真正可用的形态（iOS 曾因此少掉绝对 file:// 候选）。
+  const expand = (v?: string) => {
+    const s = (v || '').trim()
+    if (!s) return
+    push(s)
+    if (/^_[a-z]+\//i.test(s)) {
+      push(toAbsFileUrl(s))
+      push(toPlayableMediaUrl(s))
+    }
+    if (s.startsWith('/') && !s.startsWith('//')) push(`file://${s}`)
+    // 部分 iOS 基座对 file:// URL 解析有偏差，纯 POSIX 绝对路径有时反而能打开
+    if (s.startsWith('file://')) push(s.slice('file://'.length))
+  }
+  expand(primary)
+  expand(raw)
+  return list
 }
 
 /**
- * 点按播放：再点一次停止；切到别的气泡时前一条自动停。
- * iOS：远程语音先落地并按文件头补真实后缀；优先 plus.audio，失败再 InnerAudio + 换后缀重试。
- * 参考：https://cloud.baidu.com/article/3423064 、uni.createInnerAudioContext 格式表
+ * 点按播放：再点一次停止；切到别的语音气泡时前一条自动停。
+ * H5：页面级 <audio> 在点击手势内同步起播——iOS 自动播放策略要求 play() 必须发生在手势里，
+ *     且 uni 的 H5 InnerAudio 忽略 autoplay，走它必然「波形在动却没声」。
+ * App：远程语音先落地并按文件头补真实后缀，再交给 InnerAudio 同步 play()。
  */
 async function playVoice() {
   const rawPath = voiceMeta.value?.path || ''
@@ -495,12 +494,18 @@ async function playVoice() {
   activeVoiceStopper = stopVoice
   const token = ++voicePlayToken
 
+  // H5：同步起播，保住 iOS 用户手势；ensurePlayableAudioPath 在 H5 仅是地址归一化，无需 await
+  if (isH5) {
+    playVoiceH5(toPlayableMediaUrl(rawPath))
+    return
+  }
+
   let src = ''
   try {
     src = await ensurePlayableAudioPath(rawPath)
   } catch (e) {
     const reason = (e as Error)?.message || ''
-    if (reason.includes('iOS') || reason.includes('格式')) {
+    if (reason.includes('iOS')) {
       if (token === voicePlayToken) uni.showToast({ title: reason, icon: 'none' })
       return
     }
@@ -512,214 +517,191 @@ async function playVoice() {
     return
   }
 
-  const triedExts: string[] = []
-  const startWithSrc = (playSrc: string) => {
-    if (token !== voicePlayToken) return
-    const nativeSrc = toNativeAudioSrc(playSrc) || playSrc
-    // iOS 上 plus.audio 对本地带后缀文件更稳；Android 继续走 InnerAudio
-    if (isIOSNative() && playWithPlusAudio(nativeSrc, token, triedExts, startWithSrc)) return
-    if (playWithInnerAudio(nativeSrc, triedExts, token, startWithSrc)) return
-    if (!isIOSNative() && playWithPlusAudio(nativeSrc, token, triedExts, startWithSrc)) return
-    if (typeof Audio !== 'undefined') {
-      playWithHtmlAudio(nativeSrc, token)
-      return
-    }
-    if (token === voicePlayToken) uni.showToast({ title: '语音播放失败', icon: 'none' })
-  }
-  startWithSrc(src)
-}
-
-function bindPlayingUi(token: number, release: () => void) {
-  if (token !== voicePlayToken) {
-    release()
-    return false
-  }
-  playing.value = true
-  stopVoiceFn = release
-  activeVoiceStopper = stopVoice
-  return true
-}
-
-function finishPlaying(token: number, release: () => void, failed: boolean) {
-  release()
-  if (token !== voicePlayToken) return
-  if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
-  stopVoiceFn = null
-  playing.value = false
-  playedBars.value = 0
-  clearProgressTimer()
-  if (failed) uni.showToast({ title: '语音播放失败', icon: 'none' })
-}
-
-function playWithInnerAudio(
-  src: string,
-  triedExts: string[],
-  token: number,
-  retryWith: (next: string) => void,
-): boolean {
   const inner = createVoiceInnerAudio()
-  if (!inner) return false
-
-  let closed = false
-  let started = false
-  let progressed = false
-  let canplayFired = false
-  const startedAt = Date.now()
-  const markProgress = () => {
-    if (inner.currentTime > 0) progressed = true
+  if (inner) {
+    const candidates = buildVoiceSrcCandidates(src, rawPath)
+    let attempt = 0
+    // 「出过声」只认播放进度：onPlay 在解码失败时也会先回调。
+    // onStop 只有真出过声才复位：iOS 切换 src 时会补发一次 stop，误判会把气泡搞成「一点就停」。
+    let closed = false
+    let started = false
+    let progressed = false
+    const markProgress = () => {
+      if (inner.currentTime > 0) progressed = true
+    }
+    const release = () => {
+      closed = true
+      try {
+        inner.stop()
+        inner.destroy()
+      } catch {
+        /* 已释放 */
+      }
+    }
+    const finish = (failed: boolean) => {
+      if (closed) return
+      release()
+      if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
+      stopVoiceFn = null
+      playing.value = false
+      playedBars.value = 0
+      clearProgressTimer()
+      if (failed) uni.showToast({ title: '语音播放失败', icon: 'none' })
+    }
+    const tryPlusAudioFallback = () => {
+      // InnerAudio 候选全失败时，再用原生 plus.audio 搏一次（部分 iOS 基座更稳）
+      try {
+        const createPlayer = (
+          plus as { audio?: { createPlayer?: (url: string) => { play: (ok?: () => void, err?: () => void) => void; stop: () => void; close?: () => void } } } | undefined
+        )?.audio?.createPlayer
+        if (typeof createPlayer !== 'function') {
+          finish(true)
+          return
+        }
+        const player = createPlayer(candidates[0] || src)
+        const releasePlus = () => {
+          try {
+            player.stop()
+            player.close?.()
+          } catch {
+            /* ignore */
+          }
+        }
+        stopVoiceFn = () => {
+          releasePlus()
+          release()
+        }
+        player.play(
+          () => {
+            started = true
+            progressed = true
+          },
+          () => finish(true),
+        )
+        progressTimer = setInterval(() => {
+          if (closed) return
+          // plus.audio 无统一 timeupdate，能起播即视为成功，靠 onEnded 复位由用户再点停
+        }, 1000)
+        setTimeout(() => {
+          if (!closed && !progressed) finish(true)
+        }, 8000)
+      } catch {
+        finish(true)
+      }
+    }
+    const nextAttempt = () => {
+      clearProgressTimer()
+      if (closed) return
+      if (attempt + 1 >= candidates.length) {
+        tryPlusAudioFallback()
+        return
+      }
+      attempt += 1
+      try {
+        inner.stop()
+      } catch {
+        /* ignore */
+      }
+      startPlayback()
+    }
+    const startPlayback = () => {
+      const target = candidates[attempt]
+      if (!target) {
+        finish(true)
+        return
+      }
+      started = false
+      progressed = false
+      inner.src = target
+      // 必须在点击手势内同步 play()：uni 的 InnerAudio 忽略 autoplay 属性，600ms 后才 play 已脱离手势，
+      // iOS 自动播放策略直接拦截 → App 侧落进 onError 报「语音播放失败」。
+      try {
+        inner.play()
+      } catch {
+        nextAttempt()
+        return
+      }
+      // 兜底轮询：个别平台 onTimeUpdate 不回调；8s 仍无任何进度视为该地址不可用，换下一个候选
+      const startedAt = Date.now()
+      progressTimer = setInterval(() => {
+        if (closed) return
+        markProgress()
+        syncPlayedProgress(inner.currentTime, inner.duration)
+        if (!started && !progressed && Date.now() - startedAt > 8000) nextAttempt()
+      }, 300)
+    }
+    inner.onPlay?.(() => {
+      started = true
+    })
+    inner.onEnded(() => {
+      markProgress()
+      finish(!progressed && !started)
+    })
+    inner.onError(() => {
+      markProgress()
+      // 出过声就正常结束；否则该候选地址不可用，换下一个再试
+      if (progressed) finish(false)
+      else nextAttempt()
+    })
+    inner.onStop(() => {
+      // iOS 在切换 src / 起播瞬间会补发一次 stop，不是用户停止；只有真出过声（有进度）才复位
+      if (progressed) finish(false)
+    })
+    inner.onTimeUpdate(() => {
+      markProgress()
+      syncPlayedProgress(inner.currentTime, inner.duration)
+    })
+    playing.value = true
+    stopVoiceFn = release
+    activeVoiceStopper = stopVoice
+    startPlayback()
+    return
   }
-  const release = () => {
-    if (closed) return
-    closed = true
-    clearProgressTimer()
-    try {
-      inner.stop()
-      inner.destroy()
-    } catch {
-      /* 已释放 */
-    }
+  // createInnerAudioContext 不可用的异形平台兜底：退回页面级 <audio>
+  if (typeof Audio !== 'undefined') {
+    playVoiceH5(src)
   }
-  const failOrRetry = async () => {
-    if (closed) return
-    if (progressed) {
-      finishPlaying(token, release, false)
-      return
-    }
-    release()
-    const next = await remapPlayableAudioExt(src, triedExts)
-    if (next && token === voicePlayToken) {
-      const ext = (next.match(/\.([a-z0-9]+)(\?|#|$)/i)?.[1] || '').toLowerCase()
-      if (ext) triedExts.push(ext)
-      retryWith(next)
-      return
-    }
-    finishPlaying(token, () => undefined, true)
+}
+
+/**
+ * H5 语音播放：复用同一个 <audio>，在点击手势内同步起播。
+ * 关键点：
+ * - uni 的 H5 InnerAudio 忽略 autoplay 属性，且 600ms 延时 play 会脱离手势 → iOS 静默无声；
+ * - 切歌先 pause + currentTime = 0，避免多条同时响；
+ * - play() 被浏览器拦截或解码失败时复位气泡并提示，不留「波形在动却没声」的静默态。
+ */
+function playVoiceH5(src: string) {
+  if (!src) {
+    uni.showToast({ title: '语音地址无效', icon: 'none' })
+    return
   }
-
-  if (!bindPlayingUi(token, release)) return true
-
-  inner.onPlay?.(() => {
-    started = true
-  })
-  inner.onCanplay?.(() => {
-    if (closed || canplayFired) return
-    canplayFired = true
-    try {
-      inner.play()
-    } catch {
-      void failOrRetry()
-    }
-  })
-  inner.onEnded(() => {
-    markProgress()
-    finishPlaying(token, release, !progressed && !started)
-  })
-  inner.onError(() => {
-    markProgress()
-    void failOrRetry()
-  })
-  inner.onStop(() => {
-    if (started || progressed) finishPlaying(token, release, false)
-  })
-  inner.onTimeUpdate(() => {
-    markProgress()
-    syncPlayedProgress(inner.currentTime, inner.duration)
-  })
-
+  if (!h5VoiceAudio) {
+    h5VoiceAudio = new Audio()
+    h5VoiceAudio.preload = 'auto'
+  }
+  const audio = h5VoiceAudio
+  // 切歌：先停掉上一条，避免两条同时响
   try {
-    inner.autoplay = false
+    audio.pause()
+    audio.currentTime = 0
   } catch {
     /* ignore */
   }
-  inner.src = src
-  // 部分基座不回调 onCanplay，延迟补 play；不要一赋 src 就立刻 play（iOS 易先 stop）
-  setTimeout(() => {
-    if (closed || started || progressed || canplayFired) return
-    try {
-      inner.play()
-    } catch {
-      void failOrRetry()
-    }
-  }, 280)
-  progressTimer = setInterval(() => {
-    if (closed) return
-    markProgress()
-    syncPlayedProgress(inner.currentTime, inner.duration)
-    if (!started && !progressed && Date.now() - startedAt > 10000) void failOrRetry()
-  }, 300)
-  return true
-}
-
-function playWithPlusAudio(
-  src: string,
-  token: number,
-  triedExts: string[] = [],
-  retryWith?: (next: string) => void,
-): boolean {
-  const player = createPlusAudioPlayer(src)
-  if (!player) return false
-  let closed = false
-  let started = false
-  const startedAt = Date.now()
-  const onEnded = () => finishPlaying(token, release, false)
-  const onError = () => {
-    void (async () => {
-      if (closed || started) {
-        finishPlaying(token, release, !started)
-        return
-      }
-      release()
-      const next = retryWith ? await remapPlayableAudioExt(src, triedExts) : null
-      if (next && token === voicePlayToken && retryWith) {
-        const ext = (next.match(/\.([a-z0-9]+)(\?|#|$)/i)?.[1] || '').toLowerCase()
-        if (ext) triedExts.push(ext)
-        retryWith(next)
-        return
-      }
-      finishPlaying(token, () => undefined, true)
-    })()
-  }
-  const release = () => {
-    if (closed) return
-    closed = true
+  const resetBubble = () => {
+    if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
+    stopVoiceFn = null
+    playing.value = false
+    playedBars.value = 0
     clearProgressTimer()
-    try {
-      player.removeEventListener?.('ended', onEnded)
-      player.removeEventListener?.('error', onError)
-      player.stop()
-      player.close?.()
-    } catch {
-      /* ignore */
-    }
   }
-  if (!bindPlayingUi(token, release)) return true
-  player.addEventListener?.('ended', onEnded)
-  player.addEventListener?.('error', onError)
-  progressTimer = setInterval(() => {
-    if (closed) return
-    const cur = Number(player.getPosition?.() || 0)
-    const total = Number(player.getDuration?.() || 0) || voiceMeta.value?.duration || 0
-    if (cur > 0) started = true
-    syncPlayedProgress(cur, total)
-    if (!started && Date.now() - startedAt > 10000) onError()
-  }, 300)
-  try {
-    player.play(
-      () => {
-        started = true
-      },
-      () => onError(),
-    )
-  } catch {
-    onError()
-    return true
+  audio.onended = () => resetBubble()
+  audio.ontimeupdate = () => syncPlayedProgress(audio.currentTime, audio.duration)
+  audio.onerror = () => {
+    resetBubble()
+    uni.showToast({ title: '语音播放失败', icon: 'none' })
   }
-  return true
-}
-
-function playWithHtmlAudio(src: string, token: number) {
-  const audio = new Audio(src)
-  const release = () => {
+  playing.value = true
+  stopVoiceFn = () => {
     try {
       audio.pause()
       audio.currentTime = 0
@@ -727,10 +709,21 @@ function playWithHtmlAudio(src: string, token: number) {
       /* ignore */
     }
   }
-  if (!bindPlayingUi(token, release)) return
-  audio.addEventListener('ended', () => finishPlaying(token, release, false))
-  audio.addEventListener('timeupdate', () => syncPlayedProgress(audio.currentTime, audio.duration))
-  audio.play().catch(() => finishPlaying(token, release, true))
+  activeVoiceStopper = stopVoice
+  try {
+    audio.src = src
+    // 手势内同步起播：await / setTimeout 之后的 play 会被 iOS 自动播放策略拦截
+    const p = audio.play()
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {
+        resetBubble()
+        uni.showToast({ title: '语音播放失败', icon: 'none' })
+      })
+    }
+  } catch {
+    resetBubble()
+    uni.showToast({ title: '语音播放失败', icon: 'none' })
+  }
 }
 
 onUnmounted(() => {

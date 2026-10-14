@@ -32,4 +32,7 @@ ios.mp4
 YanChat-*.apk
 base.apk
 
+# 本地打包产物（源码包 / H5 分发包），勿入库
+*.tar.gz
+
 项目发布

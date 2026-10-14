@@ -157,6 +157,7 @@ func main() {
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc, Repo: groupSvc.Groups}
 	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
+	voiceH := &handler.VoiceHandler{MinIO: minioClient}
 	imH := &handler.IMHandler{Service: imSvc}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
 	feedbackH := &handler.FeedbackHandler{Svc: feedbackSvc}
@@ -363,6 +364,8 @@ func main() {
 			auth.POST("/files/uploads", fileH.Uploads)
 			auth.POST("/files/uploads/complete", fileH.Complete)
 			auth.GET("/files", fileH.Get)
+			// 网页端语音上传：后端统一转码成 m4a，解决 iOS AVPlayer 不支持 opus-in-webm
+			auth.POST("/files/voice", voiceH.UploadVoice)
 
 			auth.POST("/im/token", imH.Token)
 			auth.GET("/im/peers/:businessUserId", imH.Peer)
