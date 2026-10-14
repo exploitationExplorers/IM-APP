@@ -138,6 +138,88 @@ export function h5PublicMediaUrl(path: string): string {
   return path
 }
 
+/**
+ * 把 App 本地相对路径（_doc/...、_www/...、_downloads/...）转成 AVPlayer 能打开的绝对 file:// 路径。
+ * 兼容不同 uni 基座：优先 convertToAbsURL，回退 convertLocalFileSystemURL；
+ * 两者都缺失时按 _doc/_www/_downloads 拼应用沙盒绝对路径兜底。
+ */
+export function toAbsFileUrl(p: string): string {
+  if (!p) return p
+  if (p.startsWith('file://') || p.startsWith('cdvfile://')) return p
+  const io = (typeof plus !== 'undefined' && plus.io) as
+    | { convertToAbsURL?: (u: string) => string; convertLocalFileSystemURL?: (u: string) => string }
+    | undefined
+  const convert = io?.convertToAbsURL || io?.convertLocalFileSystemURL
+  if (typeof convert === 'function') {
+    try {
+      const abs = convert(p)
+      if (abs) return abs.startsWith('file://') ? abs : `file://${abs}`
+    } catch {
+      /* ignore */
+    }
+  }
+  if (p.startsWith('_doc/') || p.startsWith('_www/') || p.startsWith('_downloads/')) {
+    const root = p.slice(0, p.indexOf('/') + 1)
+    const base = io?.convertToAbsURL?.(root) || io?.convertLocalFileSystemURL?.(root)
+    if (base) {
+      const absRoot = base.startsWith('file://') ? base : `file://${base}`
+      const tail = p.slice(root.length)
+      return `${absRoot.replace(/\/$/, '')}/${tail}`
+    }
+  }
+  return p
+}
+
+/**
+ * 异步把 App 本地相对路径（_doc/...、_www/...、_downloads/...）解析成 AVPlayer 能打开的绝对 file:// 路径。
+ * 优先同步接口（标准 HBuilder 基座 convertLocalFileSystemURL / convertToAbsURL）；
+ * 自定义基座常缺这两个方法，回退到 plus.io.resolveLocalFileSystemURL —— 该接口在本地文件读写链路里已验证可用，
+ * 其返回的 FileEntry.toURL() 即绝对 file://。playVoice 本就 await ensurePlayableAudioPath，故此处可异步。
+ */
+async function resolveAbsAudioPath(rel: string): Promise<string> {
+  const clean = (rel || '').trim()
+  if (!clean || clean.startsWith('file://') || isRemoteMediaUrl(clean) || clean.startsWith('blob:')) {
+    return clean
+  }
+  const io = plus?.io as
+    | {
+        convertToAbsURL?: (u: string) => string
+        convertLocalFileSystemURL?: (u: string) => string
+        resolveLocalFileSystemURL?: Function
+      }
+    | undefined
+
+  const syncConvert = io?.convertToAbsURL || io?.convertLocalFileSystemURL
+  if (typeof syncConvert === 'function') {
+    try {
+      const abs = syncConvert(clean)
+      if (abs) return abs.startsWith('file://') ? abs : `file://${abs}`
+    } catch {
+      /* 旧基座转换异常，走异步兜底 */
+    }
+  }
+
+  if (typeof io?.resolveLocalFileSystemURL === 'function') {
+    try {
+      const abs = await new Promise<string>((resolve, reject) => {
+        io!.resolveLocalFileSystemURL!(
+          clean,
+          (entry: { toURL?: () => string; toLocalURL?: () => string; fullPath?: string }) => {
+            const u = entry.toURL?.() || entry.toLocalURL?.() || entry.fullPath || ''
+            if (u) resolve(u.startsWith('file://') || isRemoteMediaUrl(u) ? u : `file://${u}`)
+            else reject(new Error('无法解析语音路径'))
+          },
+          (err: unknown) => reject(new Error(typeof err === 'string' ? err : JSON.stringify(err))),
+        )
+      })
+      if (abs) return abs
+    } catch {
+      /* 落到原值 */
+    }
+  }
+  return clean
+}
+
 /** 归一化可播放地址：http(s)/blob/file 原样返回，App 本地路径转 file://。 */
 export function playableMediaUrl(path: string): string {
   if (!path) return ''
@@ -146,8 +228,7 @@ export function playableMediaUrl(path: string): string {
   }
   if (!looksLikeLocalFilePath(path)) return path
   try {
-    const converted = plus?.io?.convertLocalFileSystemURL?.(path)
-    if (converted) return converted.startsWith('file://') ? converted : `file://${converted}`
+    return toAbsFileUrl(path)
   } catch {
     /* H5 无 plus */
   }
@@ -648,6 +729,49 @@ function readFileHead(path: string, size = 16): Promise<Uint8Array | null> {
   })
 }
 
+/** 确认本地语音文件存在（带超时）：不存在直接报明确错误，避免 AVPlayer 拿到无效路径静默失败 */
+function fileExistsForPlay(absPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const io = plus?.io as unknown as { resolveLocalFileSystemURL?: Function } | undefined
+    if (!io?.resolveLocalFileSystemURL) {
+      resolve(true)
+      return
+    }
+    let done = false
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true
+        resolve(true)
+      }
+    }, 2500)
+    try {
+      io.resolveLocalFileSystemURL(
+        absPath,
+        () => {
+          if (!done) {
+            done = true
+            clearTimeout(timer)
+            resolve(true)
+          }
+        },
+        () => {
+          if (!done) {
+            done = true
+            clearTimeout(timer)
+            resolve(false)
+          }
+        },
+      )
+    } catch {
+      if (!done) {
+        done = true
+        clearTimeout(timer)
+        resolve(true)
+      }
+    }
+  })
+}
+
 /**
  * 按文件头判断真实封装。iOS AVPlayer 依赖后缀选解析器：
  * 安卓录的 ADTS-AAC 被改名成 .m4a 会直接 MediaError，必须用和内容一致的后缀。
@@ -676,29 +800,49 @@ function isIOSApp(): boolean {
 
 const playableAudioCache = new Map<string, string>()
 
-async function toNamedPlayableAudio(localPath: string): Promise<string> {
+async function toNamedPlayableAudio(localPath: string, srcHint = ''): Promise<string> {
   const head = await readFileHead(localPath)
   const ext = head ? sniffAudioExt(head) : ''
   if ((ext === 'webm' || ext === 'ogg') && isIOSApp()) {
     throw new Error('该语音为网页端录制的格式，iOS 暂不支持播放')
   }
   if (!ext) {
-    return AUDIO_EXT_RE.test(localPath) ? localPath : persistNamedFile(localPath, `voice_${Date.now()}.m4a`)
+    if (AUDIO_EXT_RE.test(localPath)) return localPath
+    // 读不到文件头时按来源地址后缀兜底；语音几乎都是 aac/m4a，缺省 .aac。
+    // ⚠️ 切勿盲给 .m4a：裸 ADTS-AAC 被当 MP4 容器解析会 MediaError「格式不对」（iOS/安卓都中招）。
+    const m = srcHint.match(/\.(aac|m4a|mp3|wav|caf|amr)(\?|#|$)/i)
+    const fallbackExt = (m && m[1] ? m[1] : 'aac').toLowerCase()
+    return persistNamedFile(localPath, `voice_${Date.now()}.${fallbackExt}`)
   }
   if (new RegExp(`\\.${ext}(\\?|#|$)`, 'i').test(localPath)) return localPath
   return persistNamedFile(localPath, `voice_${Date.now()}.${ext}`)
 }
 
 /**
- * App 上远程语音先下载到本地，再按文件头补上真实后缀后交给 InnerAudio；
+ * App 上远程语音先完整下载到本地，再按文件头/来源后缀补真实封装后交给 InnerAudio；
  * 同一条语音只落地一次。H5 仍走原 URL。
+ *
+ * 为什么 iOS 也走「下载到本地」而不是「直接给 AVPlayer 远程 URL」：
+ * - 业务 App 与 IM 服务端全链路 HTTP（API 即 http://…），原生壳 ATS 已放行 http，故 ATS 不是主因；
+ * - 但 OpenIM / MinIO 返回的 object 地址对 AVPlayer「远程流式」支持差：裸 ADTS-AAC 无容器、
+ *   Range/Content-Type 不稳，iOS 直接 onError「播放失败」。安卓端此前就是「完整下载后播」才正常，
+ *   因此 iOS 统一成同一路径：下载 → file:// 本地播放（无远程流式、按文件头选对解析器）。
  */
 export async function ensurePlayableAudioPath(url: string): Promise<string> {
-  const src = playableMediaUrl((url || '').trim())
+  const original = (url || '').trim()
+  const src = playableMediaUrl(original)
   if (!src) return ''
   if (!isAppPlatform()) return src
 
-  const cached = playableAudioCache.get(src)
+  // 网页端 MediaRecorder 录的 webm/ogg/opus：iOS 与多数安卓基座都无法用系统播放器解码，提前给友好提示
+  if (/\.(webm|ogg|opus)(\?|#|$)/i.test(src)) {
+    const msg = isIOSApp()
+      ? '该语音为网页端录制的格式，iOS 暂不支持播放'
+      : '该语音格式暂不支持播放'
+    throw new Error(msg)
+  }
+
+  const cached = playableAudioCache.get(original)
   if (cached) return cached
 
   let local = src
@@ -706,12 +850,32 @@ export async function ensurePlayableAudioPath(url: string): Promise<string> {
     try {
       local = await downloadRemoteFile(src)
     } catch {
-      return src
+      // 下载失败保留远程地址最后一搏（AVPlayer 可能仍失败，但不再抛错阻断）
+      local = src
     }
+  } else if (
+    looksLikeLocalFilePath(original) ||
+    original.startsWith('_doc') ||
+    original.startsWith('_www') ||
+    original.startsWith('_downloads')
+  ) {
+    // App 本地语音（多为 OpenIM 下载缓存）：转绝对路径并确认文件存在，避免 iOS AVPlayer 拿到相对路径静默失败。
+    const abs = await resolveAbsAudioPath(original)
+    const ok = await fileExistsForPlay(abs)
+    if (!ok) throw new Error('语音文件已过期，请让对方重新发送')
+    local = abs
   }
-  const playable = await toNamedPlayableAudio(local)
+
+  // 关键（真机验证）：uni.downloadFile 在 iOS 上返回的 tempFilePath 是**相对**形态
+  // （_doc/uniapp_temp_<ts>/download/xxx.aac），此前只对「本来就是本地路径」的分支做过绝对化，
+  // 下载产物绕过了转换 → AVPlayer 拿到相对路径直接 onError「播放失败」。此处统一补一道。
+  if (!isRemoteMediaUrl(local) && !local.startsWith('file://') && looksLikeLocalFilePath(local)) {
+    const abs = await resolveAbsAudioPath(local)
+    if (abs && abs !== local) local = abs
+  }
+  const playable = await toNamedPlayableAudio(local, src)
   if (playableAudioCache.size > 200) playableAudioCache.clear()
-  playableAudioCache.set(src, playable)
+  playableAudioCache.set(original, playable)
   return playable
 }
 

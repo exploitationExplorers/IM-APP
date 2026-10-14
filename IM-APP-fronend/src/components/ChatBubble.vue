@@ -22,8 +22,9 @@ function pumpMeasureQueue() {
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
+import { soundMetaOf } from '@/utils/openim'
 
 const props = defineProps<{
   message: ChatMessage
@@ -316,15 +317,11 @@ const parts = computed(() =>
 
 const voiceMeta = computed(() => {
   if (props.message.type !== 'voice') return null
-  try {
-    const parsed = JSON.parse(props.message.content) as { path?: string; duration?: number }
-    return {
-      path: parsed.path || '',
-      duration: Number(parsed.duration || 0),
-    }
-  } catch {
-    return { path: '', duration: 0 }
-  }
+  // 复用 openim.ts 的 soundMetaOf：OpenIM 发送后 content 是 SDK 原始结构
+  //（{ uuid, soundPath, sourceUrl, duration, soundType }），远程地址在 sourceUrl；
+  // 旧逻辑只取 content.path 取不到自己发的语音地址 → 播放失败。
+  const meta = soundMetaOf(props.message as unknown as Record<string, unknown>)
+  return { path: meta.path || '', duration: Number(meta.duration || 0) }
 })
 
 /** 占位阶段 content 是文件名；发送成功后是 { url, fileName }，旧消息只有 URL。 */
@@ -448,6 +445,36 @@ function createVoiceInnerAudio(): InnerAudio | null {
 }
 
 /**
+ * 语音候选播放地址：不同 uni 基座对「绝对 file://」与「相对 _doc/...」的支持不一致（iOS 尤其明显，
+ * 有的基座缺 convertLocalFileSystemURL，有的只认相对路径），单一形态很容易直接判死。
+ * 逐个尝试直到真正出声，能显著提升一次点播成功率。
+ */
+function buildVoiceSrcCandidates(primary: string, raw: string): string[] {
+  const list: string[] = []
+  const push = (v?: string) => {
+    const s = (v || '').trim()
+    if (s && !list.includes(s)) list.push(s)
+  }
+  // primary 与 raw 都要展开：primary 常是下载后的本地相对路径，raw 常是远程 URL，
+  // 只展开其中一个会漏掉真正可用的形态（iOS 曾因此少掉绝对 file:// 候选）。
+  const expand = (v?: string) => {
+    const s = (v || '').trim()
+    if (!s) return
+    push(s)
+    if (/^_[a-z]+\//i.test(s)) {
+      push(toAbsFileUrl(s))
+      push(toPlayableMediaUrl(s))
+    }
+    if (s.startsWith('/') && !s.startsWith('//')) push(`file://${s}`)
+    // 部分 iOS 基座对 file:// URL 解析有偏差，纯 POSIX 绝对路径有时反而能打开
+    if (s.startsWith('file://')) push(s.slice('file://'.length))
+  }
+  expand(primary)
+  expand(raw)
+  return list
+}
+
+/**
  * 点按播放：再点一次停止；切到别的语音气泡时前一条自动停。
  * H5：页面级 <audio> 在点击手势内同步起播——iOS 自动播放策略要求 play() 必须发生在手势里，
  *     且 uni 的 H5 InnerAudio 忽略 autoplay，走它必然「波形在动却没声」。
@@ -492,6 +519,8 @@ async function playVoice() {
 
   const inner = createVoiceInnerAudio()
   if (inner) {
+    const candidates = buildVoiceSrcCandidates(src, rawPath)
+    let attempt = 0
     // 「出过声」只认播放进度：onPlay 在解码失败时也会先回调。
     // onStop 只有真出过声才复位：iOS 切换 src 时会补发一次 stop，误判会把气泡搞成「一点就停」。
     let closed = false
@@ -519,6 +548,47 @@ async function playVoice() {
       clearProgressTimer()
       if (failed) uni.showToast({ title: '语音播放失败', icon: 'none' })
     }
+    const nextAttempt = () => {
+      clearProgressTimer()
+      if (closed) return
+      if (attempt + 1 >= candidates.length) {
+        finish(true)
+        return
+      }
+      attempt += 1
+      try {
+        inner.stop()
+      } catch {
+        /* ignore */
+      }
+      startPlayback()
+    }
+    const startPlayback = () => {
+      const target = candidates[attempt]
+      if (!target) {
+        finish(true)
+        return
+      }
+      started = false
+      progressed = false
+      inner.src = target
+      // 必须在点击手势内同步 play()：uni 的 InnerAudio 忽略 autoplay 属性，600ms 后才 play 已脱离手势，
+      // iOS 自动播放策略直接拦截 → App 侧落进 onError 报「语音播放失败」。
+      try {
+        inner.play()
+      } catch {
+        nextAttempt()
+        return
+      }
+      // 兜底轮询：个别平台 onTimeUpdate 不回调；8s 仍无任何进度视为该地址不可用，换下一个候选
+      const startedAt = Date.now()
+      progressTimer = setInterval(() => {
+        if (closed) return
+        markProgress()
+        syncPlayedProgress(inner.currentTime, inner.duration)
+        if (!started && !progressed && Date.now() - startedAt > 8000) nextAttempt()
+      }, 300)
+    }
     inner.onPlay?.(() => {
       started = true
     })
@@ -528,7 +598,9 @@ async function playVoice() {
     })
     inner.onError(() => {
       markProgress()
-      finish(!progressed)
+      // 出过声就正常结束；否则该候选地址不可用，换下一个再试
+      if (progressed) finish(false)
+      else nextAttempt()
     })
     inner.onStop(() => {
       // iOS 在切换 src / 起播瞬间会补发一次 stop，不是用户停止；只有真出过声（有进度）才复位
@@ -541,23 +613,7 @@ async function playVoice() {
     playing.value = true
     stopVoiceFn = release
     activeVoiceStopper = stopVoice
-    inner.src = src
-    // 必须在点击手势内同步 play()：uni 的 InnerAudio 忽略 autoplay 属性，600ms 后才 play 已脱离手势，
-    // iOS 自动播放策略直接拦截 → App 侧落进 onError 报「语音播放失败」。
-    try {
-      inner.play()
-    } catch {
-      finish(true)
-      return
-    }
-    // 兜底轮询：个别平台 onTimeUpdate 不回调；8s 仍无任何进度视为解码失败
-    const startedAt = Date.now()
-    progressTimer = setInterval(() => {
-      if (closed) return
-      markProgress()
-      syncPlayedProgress(inner.currentTime, inner.duration)
-      if (!started && !progressed && Date.now() - startedAt > 8000) finish(true)
-    }, 300)
+    startPlayback()
     return
   }
   // createInnerAudioContext 不可用的异形平台兜底：退回页面级 <audio>

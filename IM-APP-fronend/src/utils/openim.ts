@@ -18,6 +18,7 @@ import { getToken } from '@/utils/request'
 import { useContactStore } from '@/stores/contact'
 import type { ChatMessage, Conversation, ConversationPinnedMessage, MessageType as AppMessageType } from '@/types'
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
+import { uploadVoiceViaApi } from '@/utils/mediaApi'
 import { formatIMNotification, imNotificationEventKey, notificationKindOf, GROUP_CREATED_WELCOME_TEXT } from '@/utils/im-notification'
 import { effectiveGroupAtType, GroupAtType, highlightTagsOf } from '@/utils/group-announcement'
 import {
@@ -1956,14 +1957,29 @@ export async function sendVoiceMessage(
     return sendCreatedMessage(target, message)
   }
   const file = await pathToFile(filePath)
-  const url = await uploadFile(file)
+  // 网页端（尤其 Chrome）录的是 opus-in-webm，iOS AVPlayer 放不出来；
+  // 改走业务后端，由后端统一转码成 m4a 后再按 URL 发。转码链路异常时回退 OpenIM 直传。
+  let url = ''
+  let dataSize = file.size
+  let soundType = file.type
+  try {
+    const up = await uploadVoiceViaApi(file, file.name || `voice_${Date.now()}.webm`)
+    if (up?.url) {
+      url = up.url
+      dataSize = up.size || file.size
+      soundType = up.format ? `audio/${up.format}` : 'audio/mp4'
+    }
+  } catch {
+    /* 回退 OpenIM 直传 */
+  }
+  if (!url) url = await uploadFile(file)
   const message = await imCall<MessageItem>(IMMethods.CreateSoundMessageByURL, {
     uuid: IMSDK.uuid(),
     soundPath: '',
     sourceUrl: url,
-    dataSize: file.size,
+    dataSize,
     duration: seconds,
-    soundType: file.type,
+    soundType,
   })
   return sendCreatedMessage(target, message, { alreadyUploaded: true })
 }
@@ -2557,7 +2573,7 @@ function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
 }
 
 /** 语音地址：优先远程 URL，兼容 soundElem / SoundElem */
-function soundMetaOf(item: MessageItem | Record<string, unknown>): { path: string; duration: number } {
+export function soundMetaOf(item: MessageItem | Record<string, unknown>): { path: string; duration: number } {
   const raw = item as Record<string, unknown>
   const fromElem = jsonSoundMeta(raw.soundElem ?? raw.SoundElem)
   const fromContent = jsonSoundMeta(raw.content)
