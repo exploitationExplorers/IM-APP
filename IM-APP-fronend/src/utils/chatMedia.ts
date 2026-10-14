@@ -597,6 +597,41 @@ function downloadRemoteFile(url: string): Promise<string> {
   })
 }
 
+const AUDIO_EXT_RE = /\.(aac|m4a|mp3|wav|caf)(\?|#|$)/i
+
+function copyAsNamedAudio(tempPath: string, ext: 'm4a' | 'aac' | 'mp3'): Promise<string> {
+  return persistNamedFile(tempPath, `voice_${Date.now()}.${ext}`)
+}
+
+/**
+ * iOS InnerAudio / AVPlayer 对「无后缀 URL、无后缀临时文件」经常直接 MediaError。
+ * App 上远程语音先下载，再拷成带 .m4a 的本地路径再播；H5 仍走原 URL。
+ */
+export async function ensurePlayableAudioPath(url: string): Promise<string> {
+  const src = playableMediaUrl((url || '').trim())
+  if (!src) return ''
+  if (!isAppPlatform()) return src
+
+  if (isRemoteMediaUrl(src)) {
+    try {
+      const temp = await downloadRemoteFile(src)
+      if (AUDIO_EXT_RE.test(temp)) return temp
+      return await copyAsNamedAudio(temp, 'm4a')
+    } catch {
+      // 下载失败时给路径补一个后缀提示，部分机型靠扩展名选解码器
+      if (AUDIO_EXT_RE.test(src)) return src
+      return src.includes('?') ? `${src}&f=.m4a` : `${src}?f=.m4a`
+    }
+  }
+
+  if (AUDIO_EXT_RE.test(src)) return src
+  try {
+    return await copyAsNamedAudio(src, 'm4a')
+  } catch {
+    return src
+  }
+}
+
 /**
  * 下载结果经常没有后缀，系统不知道用哪个应用打开。
  * 拷到应用目录并带上原始文件名后再交给 openDocument。

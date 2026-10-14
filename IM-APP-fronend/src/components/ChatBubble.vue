@@ -22,7 +22,7 @@ function pumpMeasureQueue() {
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -399,53 +399,112 @@ function stopVoice() {
   clearProgressTimer()
 }
 
+type InnerAudio = {
+  src: string
+  volume?: number
+  sessionCategory?: string
+  obeyMuteSwitch?: boolean
+  currentTime: number
+  duration: number
+  play: () => void
+  stop: () => void
+  destroy: () => void
+  onEnded: (cb: () => void) => void
+  onError: (cb: (e?: { errMsg?: string; errCode?: number }) => void) => void
+  onStop: (cb: () => void) => void
+  onPlay?: (cb: () => void) => void
+  onTimeUpdate: (cb: () => void) => void
+}
+
+function createVoiceInnerAudio(): InnerAudio | null {
+  const factory = (
+    uni as unknown as { createInnerAudioContext?: () => InnerAudio }
+  ).createInnerAudioContext
+  if (typeof factory !== 'function') return null
+  const inner = factory()
+  try {
+    // iOS 侧边静音键下也要出声
+    inner.sessionCategory = 'playback'
+  } catch {
+    /* 旧基座无此属性 */
+  }
+  try {
+    inner.obeyMuteSwitch = false
+  } catch {
+    /* Android 部分基座只读 */
+  }
+  try {
+    inner.volume = 1
+  } catch {
+    /* ignore */
+  }
+  return inner
+}
+
 /**
  * 点按播放：再点一次停止；切到别的语音气泡时前一条自动停。
- * 播放中波形柱变蓝并跳动，结束/出错自动复原。
+ * App/iOS：远程无后缀 URL 先落地成 .m4a 再播，否则 AVPlayer 直接 MediaError。
  */
-function playVoice() {
-  const src = toPlayableMediaUrl(voiceMeta.value?.path || '')
-  if (!src) return
+async function playVoice() {
+  const rawPath = voiceMeta.value?.path || ''
+  if (!rawPath) {
+    uni.showToast({ title: '语音地址无效', icon: 'none' })
+    return
+  }
   if (playing.value) {
     stopVoice()
     return
   }
   activeVoiceStopper?.()
-  const inner = (
-    uni as unknown as {
-      createInnerAudioContext?: () => {
-        src: string
-        currentTime: number
-        duration: number
-        play: () => void
-        stop: () => void
-        destroy: () => void
-        onEnded: (cb: () => void) => void
-        onError: (cb: () => void) => void
-        onStop: (cb: () => void) => void
-        onTimeUpdate: (cb: () => void) => void
-      }
-    }
-  ).createInnerAudioContext?.()
+
+  let src = ''
+  try {
+    src = await ensurePlayableAudioPath(rawPath)
+  } catch {
+    src = toPlayableMediaUrl(rawPath)
+  }
+  if (!src) {
+    uni.showToast({ title: '语音地址无效', icon: 'none' })
+    return
+  }
+
+  const inner = createVoiceInnerAudio()
   if (inner) {
-    inner.src = src
+    // iOS 常在「已出声」或 stop/destroy 后仍回调 onError；区分误报，避免能听到却弹失败
+    let closed = false
+    let heard = false
     const reset = () => {
       playing.value = false
       playedBars.value = 0
       clearProgressTimer()
     }
+    const markHeard = () => {
+      heard = true
+    }
     inner.onEnded(reset)
-    inner.onError(reset)
-    inner.onStop(reset)
-    // 注意：onTimeUpdate 回调在部分平台不带事件参数，必须读实例的 currentTime/duration
-    inner.onTimeUpdate(() => syncPlayedProgress(inner.currentTime, inner.duration))
-    inner.play()
+    inner.onPlay?.(markHeard)
+    inner.onError(() => {
+      if (closed || heard || inner.currentTime > 0) return
+      reset()
+      uni.showToast({ title: '语音播放失败', icon: 'none' })
+    })
+    inner.onStop(() => {
+      if (closed) return
+      reset()
+    })
+    inner.onTimeUpdate(() => {
+      if (inner.currentTime > 0) markHeard()
+      syncPlayedProgress(inner.currentTime, inner.duration)
+    })
+    inner.src = src
     playing.value = true
     progressTimer = setInterval(() => {
       if (!playing.value) return
+      if (inner.currentTime > 0) markHeard()
       syncPlayedProgress(inner.currentTime, inner.duration)
     }, 300)
     stopVoiceFn = () => {
+      closed = true
       try {
         inner.stop()
         inner.destroy()
@@ -454,6 +513,14 @@ function playVoice() {
       }
     }
     activeVoiceStopper = stopVoice
+    try {
+      inner.play()
+    } catch {
+      if (!closed && !heard) {
+        reset()
+        uni.showToast({ title: '语音播放失败', icon: 'none' })
+      }
+    }
     return
   }
   if (typeof Audio !== 'undefined') {
@@ -466,6 +533,7 @@ function playVoice() {
     audio.addEventListener('timeupdate', () => syncPlayedProgress(audio.currentTime, audio.duration))
     audio.play().catch(() => {
       playing.value = false
+      uni.showToast({ title: '语音播放失败', icon: 'none' })
     })
     stopVoiceFn = () => {
       audio.pause()

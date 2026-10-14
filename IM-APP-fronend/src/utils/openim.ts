@@ -1940,14 +1940,15 @@ export async function sendVoiceMessage(
           seconds,
         )
       } catch {
-        const uploaded = await uploadFileFromPath(soundPath, `voice_${Date.now()}.aac`, 'audio/mp4')
+        // iOS 播放依赖后缀/封装；用 m4a（AAC-in-MP4）比裸 .aac 稳
+        const uploaded = await uploadFileFromPath(soundPath, `voice_${Date.now()}.m4a`, 'audio/mp4')
         message = await imCall<MessageItem>(IMMethods.CreateSoundMessageByURL, {
           uuid: IMSDK.uuid(),
           soundPath: '',
           sourceUrl: uploaded.url,
           dataSize: uploaded.size,
           duration: seconds,
-          soundType: 'aac',
+          soundType: 'm4a',
         })
         return sendCreatedMessage(target, message, { alreadyUploaded: true })
       }
@@ -2523,16 +2524,25 @@ function jsonContentField(raw: unknown, key: string): string {
 function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
   if (raw && typeof raw === 'object') {
     const obj = raw as Record<string, unknown>
-    if (obj.soundElem && typeof obj.soundElem === 'object') {
-      const nested = jsonSoundMeta(obj.soundElem)
+    const nestedRaw = obj.soundElem ?? obj.SoundElem
+    if (nestedRaw && typeof nestedRaw === 'object') {
+      const nested = jsonSoundMeta(nestedRaw)
       if (nested.path || nested.duration) return nested
     }
-    const path =
-      (typeof obj.sourceUrl === 'string' && obj.sourceUrl) ||
-      (typeof obj.soundPath === 'string' && obj.soundPath) ||
-      (typeof obj.path === 'string' && obj.path) ||
-      ''
-    return { path, duration: Number(obj.duration || 0) }
+    // App 原生桥偶发 PascalCase：SourceUrl / SoundPath / Duration
+    const path = pickString(obj, [
+      'sourceUrl',
+      'SourceUrl',
+      'sourceURL',
+      'SourceURL',
+      'soundPath',
+      'SoundPath',
+      'path',
+      'Path',
+      'url',
+      'Url',
+    ])
+    return { path, duration: Number(obj.duration ?? obj.Duration ?? 0) }
   }
   if (typeof raw === 'string' && raw) {
     try {
@@ -2542,6 +2552,16 @@ function jsonSoundMeta(raw: unknown): { path: string; duration: number } {
     }
   }
   return { path: '', duration: 0 }
+}
+
+/** 语音地址：优先远程 URL，兼容 soundElem / SoundElem */
+function soundMetaOf(item: MessageItem | Record<string, unknown>): { path: string; duration: number } {
+  const raw = item as Record<string, unknown>
+  const fromElem = jsonSoundMeta(raw.soundElem ?? raw.SoundElem)
+  const fromContent = jsonSoundMeta(raw.content)
+  const path =
+    preferRemoteMediaUrl(fromElem.path, fromContent.path) || fromElem.path || fromContent.path
+  return { path, duration: fromElem.duration || fromContent.duration }
 }
 
 function jsonPictureUrl(raw: unknown): string {
@@ -2702,7 +2722,7 @@ function resolveQuotedAppType(quoted: MessageItem): AppMessageType {
     (typeof quoted.content === 'string' ? quoted.content : '')
   if (looksLikeImageUrl(pictureUrl) || quoted.pictureElem) return 'image'
   if (quoted.videoElem || parseVideoMeta(quoted.content).url) return 'video'
-  if (quoted.soundElem || jsonSoundMeta(quoted.content).path) return 'voice'
+  if (soundMetaOf(quoted).path || (quoted as MessageItem).soundElem) return 'voice'
   if (quoted.fileElem) return 'file'
   if (quoted.cardElem) return 'card'
   return type
@@ -2767,14 +2787,10 @@ function extractContent(item: MessageItem): string {
     case MessageType.PictureMessage:
       return pictureUrlOf(item)
     case MessageType.VoiceMessage: {
-      const fromElem = {
-        path: item.soundElem?.sourceUrl || item.soundElem?.soundPath || '',
-        duration: item.soundElem?.duration || 0,
-      }
-      const fromJson = jsonSoundMeta(item.content)
+      const meta = soundMetaOf(item)
       return JSON.stringify({
-        path: fromElem.path || fromJson.path,
-        duration: fromElem.duration || fromJson.duration,
+        path: meta.path,
+        duration: meta.duration,
       })
     }
     case MessageType.FileMessage: {
@@ -3113,6 +3129,33 @@ export function coerceMessage(raw: unknown): MessageItem | null {
         snapshotUrl,
         duration: fromElem.duration || fromContent.duration,
       } as MessageItem['videoElem']
+    }
+  }
+  // 与视频一致：App 原生桥 SoundElem / SourceUrl 归一成 soundElem，否则 iOS 气泡 path 为空点不开
+  const soundElemRaw = obj.soundElem ?? obj.SoundElem
+  if (soundElemRaw) {
+    let se: Record<string, unknown> | null = null
+    if (typeof soundElemRaw === 'string') {
+      try {
+        const parsed = JSON.parse(soundElemRaw) as Record<string, unknown>
+        if (parsed && typeof parsed === 'object') se = parsed
+      } catch {
+        /* SoundElem 不是 JSON 时保持原样 */
+      }
+    } else if (typeof soundElemRaw === 'object') {
+      se = soundElemRaw as Record<string, unknown>
+    }
+    if (se) {
+      const sourceUrl = pickString(se, ['sourceUrl', 'SourceUrl', 'sourceURL', 'SourceURL'])
+      const soundPath = pickString(se, ['soundPath', 'SoundPath'])
+      item.soundElem = {
+        uuid: pickString(se, ['uuid', 'UUID', 'Uuid']),
+        soundPath,
+        sourceUrl,
+        dataSize: Number(se.dataSize ?? se.DataSize ?? 0),
+        duration: Number(se.duration ?? se.Duration ?? 0),
+        soundType: pickString(se, ['soundType', 'SoundType']),
+      } as MessageItem['soundElem']
     }
   }
   return item as MessageItem
