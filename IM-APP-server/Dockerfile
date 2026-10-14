@@ -12,7 +12,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/im-server ./cmd/server
 
 FROM alpine:3.20
 WORKDIR /app
-RUN apk add --no-cache ca-certificates tzdata
+# ffmpeg：网页端录的 webm/opus 语音在 iOS AVPlayer 上放不出来，服务端转 m4a(AAC)
+RUN apk add --no-cache ca-certificates tzdata ffmpeg
 COPY --from=builder /out/im-server /app/im-server
 COPY migrations /app/migrations
 ENV HTTP_ADDR=:8080
