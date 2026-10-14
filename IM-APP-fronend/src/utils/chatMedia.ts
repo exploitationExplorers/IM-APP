@@ -597,39 +597,122 @@ function downloadRemoteFile(url: string): Promise<string> {
   })
 }
 
-const AUDIO_EXT_RE = /\.(aac|m4a|mp3|wav|caf)(\?|#|$)/i
+const AUDIO_EXT_RE = /\.(aac|m4a|mp3|wav|caf|amr)(\?|#|$)/i
 
-function copyAsNamedAudio(tempPath: string, ext: 'm4a' | 'aac' | 'mp3'): Promise<string> {
-  return persistNamedFile(tempPath, `voice_${Date.now()}.${ext}`)
+type PlusFileReader = {
+  onloadend: ((e: { target?: { result?: unknown } }) => void) | null
+  onerror: (() => void) | null
+  readAsDataURL: (file: unknown) => void
+}
+type PlusIo = {
+  resolveLocalFileSystemURL?: Function
+  FileReader?: new () => PlusFileReader
+}
+
+/** 读文件头若干字节；读不到返回 null（不影响后续按后缀兜底） */
+function readFileHead(path: string, size = 16): Promise<Uint8Array | null> {
+  return new Promise((resolve) => {
+    const io = plus?.io as unknown as PlusIo | undefined
+    const Reader = io?.FileReader
+    if (!io?.resolveLocalFileSystemURL || !Reader) {
+      resolve(null)
+      return
+    }
+    io.resolveLocalFileSystemURL(
+      path,
+      (entry: { file?: Function }) => {
+        if (!entry.file) {
+          resolve(null)
+          return
+        }
+        entry.file(
+          (file: { slice?: (start: number, end: number) => unknown }) => {
+            const reader = new Reader()
+            reader.onloadend = (e) => {
+              const result = String(e.target?.result || '')
+              const base64 = result.slice(result.indexOf(',') + 1)
+              try {
+                resolve(base64 ? new Uint8Array(uni.base64ToArrayBuffer(base64)).slice(0, size) : null)
+              } catch {
+                resolve(null)
+              }
+            }
+            reader.onerror = () => resolve(null)
+            reader.readAsDataURL(typeof file.slice === 'function' ? file.slice(0, size) : file)
+          },
+          () => resolve(null),
+        )
+      },
+      () => resolve(null),
+    )
+  })
 }
 
 /**
- * iOS InnerAudio / AVPlayer 对「无后缀 URL、无后缀临时文件」经常直接 MediaError。
- * App 上远程语音先下载，再拷成带 .m4a 的本地路径再播；H5 仍走原 URL。
+ * 按文件头判断真实封装。iOS AVPlayer 依赖后缀选解析器：
+ * 安卓录的 ADTS-AAC 被改名成 .m4a 会直接 MediaError，必须用和内容一致的后缀。
+ */
+function sniffAudioExt(h: Uint8Array): string {
+  if (h.length < 4) return ''
+  const ascii = (start: number, end: number) => String.fromCharCode(...Array.from(h.slice(start, end)))
+  if (h[0] === 0xff && (h[1] & 0xf6) === 0xf0) return 'aac'
+  if (ascii(4, 8) === 'ftyp') return 'm4a'
+  if (ascii(0, 3) === 'ID3' || (h[0] === 0xff && (h[1] & 0xe0) === 0xe0)) return 'mp3'
+  if (ascii(0, 4) === 'RIFF') return 'wav'
+  if (ascii(0, 4) === 'caff') return 'caf'
+  if (ascii(0, 5) === '#!AMR') return 'amr'
+  if (ascii(0, 4) === 'OggS') return 'ogg'
+  if (h[0] === 0x1a && h[1] === 0x45 && h[2] === 0xdf && h[3] === 0xa3) return 'webm'
+  return ''
+}
+
+function isIOSApp(): boolean {
+  try {
+    return uni.getSystemInfoSync().platform === 'ios'
+  } catch {
+    return false
+  }
+}
+
+const playableAudioCache = new Map<string, string>()
+
+async function toNamedPlayableAudio(localPath: string): Promise<string> {
+  const head = await readFileHead(localPath)
+  const ext = head ? sniffAudioExt(head) : ''
+  if ((ext === 'webm' || ext === 'ogg') && isIOSApp()) {
+    throw new Error('该语音为网页端录制的格式，iOS 暂不支持播放')
+  }
+  if (!ext) {
+    return AUDIO_EXT_RE.test(localPath) ? localPath : persistNamedFile(localPath, `voice_${Date.now()}.m4a`)
+  }
+  if (new RegExp(`\\.${ext}(\\?|#|$)`, 'i').test(localPath)) return localPath
+  return persistNamedFile(localPath, `voice_${Date.now()}.${ext}`)
+}
+
+/**
+ * App 上远程语音先下载到本地，再按文件头补上真实后缀后交给 InnerAudio；
+ * 同一条语音只落地一次。H5 仍走原 URL。
  */
 export async function ensurePlayableAudioPath(url: string): Promise<string> {
   const src = playableMediaUrl((url || '').trim())
   if (!src) return ''
   if (!isAppPlatform()) return src
 
+  const cached = playableAudioCache.get(src)
+  if (cached) return cached
+
+  let local = src
   if (isRemoteMediaUrl(src)) {
     try {
-      const temp = await downloadRemoteFile(src)
-      if (AUDIO_EXT_RE.test(temp)) return temp
-      return await copyAsNamedAudio(temp, 'm4a')
+      local = await downloadRemoteFile(src)
     } catch {
-      // 下载失败时给路径补一个后缀提示，部分机型靠扩展名选解码器
-      if (AUDIO_EXT_RE.test(src)) return src
-      return src.includes('?') ? `${src}&f=.m4a` : `${src}?f=.m4a`
+      return src
     }
   }
-
-  if (AUDIO_EXT_RE.test(src)) return src
-  try {
-    return await copyAsNamedAudio(src, 'm4a')
-  } catch {
-    return src
-  }
+  const playable = await toNamedPlayableAudio(local)
+  if (playableAudioCache.size > 200) playableAudioCache.clear()
+  playableAudioCache.set(src, playable)
+  return playable
 }
 
 /**

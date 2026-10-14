@@ -595,9 +595,13 @@ function pickFavorite() {
 }
 
 function getRecorder() {
+  let manager: any = null
+  // H5 的 uni.getRecorderManager 只是打印 not supported 的桩
+  // #ifndef H5
   const anyUni = uni as unknown as { getRecorderManager?: () => any }
-  if (typeof anyUni.getRecorderManager !== 'function') return null
-  return anyUni.getRecorderManager()
+  if (typeof anyUni.getRecorderManager === 'function') manager = anyUni.getRecorderManager()
+  // #endif
+  return manager
 }
 
 async function startRecord() {

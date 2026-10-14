@@ -391,7 +391,11 @@ function syncPlayedProgress(current: number, totalRaw: number) {
   playedBars.value = Math.round(ratio * waveBars.value.length)
 }
 
+/** 下载语音期间再次点击 / 切到别的气泡时作废上一次准备，避免叠出两个播放器 */
+let voicePlayToken = 0
+
 function stopVoice() {
+  voicePlayToken += 1
   stopVoiceFn?.()
   stopVoiceFn = null
   playing.value = false
@@ -443,7 +447,7 @@ function createVoiceInnerAudio(): InnerAudio | null {
 
 /**
  * 点按播放：再点一次停止；切到别的语音气泡时前一条自动停。
- * App/iOS：远程无后缀 URL 先落地成 .m4a 再播，否则 AVPlayer 直接 MediaError。
+ * App：远程语音先落地并按文件头补真实后缀再播，否则 iOS AVPlayer 直接 MediaError。
  */
 async function playVoice() {
   const rawPath = voiceMeta.value?.path || ''
@@ -456,13 +460,21 @@ async function playVoice() {
     return
   }
   activeVoiceStopper?.()
+  activeVoiceStopper = stopVoice
+  const token = ++voicePlayToken
 
   let src = ''
   try {
     src = await ensurePlayableAudioPath(rawPath)
-  } catch {
+  } catch (e) {
+    const reason = (e as Error)?.message || ''
+    if (reason.includes('iOS')) {
+      if (token === voicePlayToken) uni.showToast({ title: reason, icon: 'none' })
+      return
+    }
     src = toPlayableMediaUrl(rawPath)
   }
+  if (token !== voicePlayToken) return
   if (!src) {
     uni.showToast({ title: '语音地址无效', icon: 'none' })
     return
@@ -470,40 +482,16 @@ async function playVoice() {
 
   const inner = createVoiceInnerAudio()
   if (inner) {
-    // iOS 常在「已出声」或 stop/destroy 后仍回调 onError；区分误报，避免能听到却弹失败
+    // iOS 原生播放器赋 src 即开播，再调 play() 会先 stop 再重播，onStop 把气泡复位成「一点就停」。
+    // 按官方用法 autoplay + src 起播，play() 只在迟迟没起播时补一次。
+    // 「出过声」只认播放进度：onPlay 在解码失败时也会先回调。
     let closed = false
-    let heard = false
-    const reset = () => {
-      playing.value = false
-      playedBars.value = 0
-      clearProgressTimer()
+    let started = false
+    let progressed = false
+    const markProgress = () => {
+      if (inner.currentTime > 0) progressed = true
     }
-    const markHeard = () => {
-      heard = true
-    }
-    inner.onEnded(reset)
-    inner.onPlay?.(markHeard)
-    inner.onError(() => {
-      if (closed || heard || inner.currentTime > 0) return
-      reset()
-      uni.showToast({ title: '语音播放失败', icon: 'none' })
-    })
-    inner.onStop(() => {
-      if (closed) return
-      reset()
-    })
-    inner.onTimeUpdate(() => {
-      if (inner.currentTime > 0) markHeard()
-      syncPlayedProgress(inner.currentTime, inner.duration)
-    })
-    inner.src = src
-    playing.value = true
-    progressTimer = setInterval(() => {
-      if (!playing.value) return
-      if (inner.currentTime > 0) markHeard()
-      syncPlayedProgress(inner.currentTime, inner.duration)
-    }, 300)
-    stopVoiceFn = () => {
+    const release = () => {
       closed = true
       try {
         inner.stop()
@@ -512,15 +500,59 @@ async function playVoice() {
         /* 已释放 */
       }
     }
-    activeVoiceStopper = stopVoice
-    try {
-      inner.play()
-    } catch {
-      if (!closed && !heard) {
-        reset()
-        uni.showToast({ title: '语音播放失败', icon: 'none' })
-      }
+    const finish = (failed: boolean) => {
+      if (closed) return
+      release()
+      if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
+      stopVoiceFn = null
+      playing.value = false
+      playedBars.value = 0
+      clearProgressTimer()
+      if (failed) uni.showToast({ title: '语音播放失败', icon: 'none' })
     }
+    inner.onPlay?.(() => {
+      started = true
+    })
+    inner.onEnded(() => {
+      markProgress()
+      finish(!progressed && !started)
+    })
+    inner.onError(() => {
+      markProgress()
+      finish(!progressed)
+    })
+    inner.onStop(() => {
+      // 起播前 iOS 会为切换 src 补发一次 stop，不是用户停止
+      if (started) finish(false)
+    })
+    inner.onTimeUpdate(() => {
+      markProgress()
+      syncPlayedProgress(inner.currentTime, inner.duration)
+    })
+    try {
+      ;(inner as InnerAudio & { autoplay?: boolean }).autoplay = true
+    } catch {
+      /* ignore */
+    }
+    playing.value = true
+    stopVoiceFn = release
+    activeVoiceStopper = stopVoice
+    inner.src = src
+    const startedAt = Date.now()
+    progressTimer = setInterval(() => {
+      if (closed) return
+      markProgress()
+      syncPlayedProgress(inner.currentTime, inner.duration)
+      if (!started && !progressed && Date.now() - startedAt > 8000) finish(true)
+    }, 300)
+    setTimeout(() => {
+      if (closed || started || progressed) return
+      try {
+        inner.play()
+      } catch {
+        finish(true)
+      }
+    }, 600)
     return
   }
   if (typeof Audio !== 'undefined') {

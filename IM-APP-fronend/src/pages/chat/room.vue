@@ -137,16 +137,18 @@ let groupReadPollStartedAt = 0
 let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
 const input = ref('')
 const inputRef = ref<{ $el?: HTMLElement } | HTMLTextAreaElement | null>(null)
-const scrollInto = ref('')
-/** H5 scroll-view：scroll-into-view 桌面端常滚不到底，再绑 scroll-top 双保险 */
+/**
+ * 消息列表倒置（scroll-view 与内层各 scaleY(-1)）：scrollTop=0 即视觉底部。
+ * 上翻加载的旧消息落在滚动远端，视口不会被推走；新消息、图片撑高、键盘顶起都天然贴底，
+ * 不再需要任何「补偿滚动」，iOS 惯性滚动也不会被打断。
+ * scroll-into-view 在倒置下算反了方向，统一用 scroll-top 定位。
+ */
 const msgScrollTop = ref(0)
 let msgScrollTopNonce = 0
 /** 用户停在底部时才自动贴底；往上翻历史时来新消息不再拽回去 */
 const stickToBottom = ref(true)
-let msgViewportHeight = 0
-let maxScrollTop = 0
-let ignoreScrollUntil = 0
-const scrollRetryTimers: ReturnType<typeof setTimeout>[] = []
+let lastListScrollTop = 0
+const loadingOlder = ref(false)
 const friendRemarkMap = ref<Record<string, string>>({})
 const focusedMsgId = ref('')
 const showPlusPanel = ref(false)
@@ -203,16 +205,32 @@ const messages = computed(() =>
   ),
 )
 
-/** 平时只挂载尾部气泡。窗口只在「滑到顶」或「点 ↓」时切换，不能跟着贴底状态变，否则一滑就跳 */
+/**
+ * 平时只挂载尾部气泡；上翻时按批往前扩（扩出来的在滚动远端，不影响视口）。
+ * renderFromId 记「最早挂载的那条」，新消息进来不会把窗口顶部的气泡挤掉。
+ */
 const RENDER_TAIL = 48
-const browsingHistory = ref(false)
+const RENDER_STEP = 40
+const renderFromId = ref('')
 const renderMessages = computed(() => {
   const all = messages.value
-  if (!browsingHistory.value && all.length > RENDER_TAIL) {
-    return all.slice(-RENDER_TAIL)
-  }
-  return all
+  if (!renderFromId.value) return all.length > RENDER_TAIL ? all.slice(-RENDER_TAIL) : all
+  const idx = all.findIndex((m) => m.id === renderFromId.value)
+  return idx > 0 ? all.slice(idx) : all
 })
+
+/** 往更早扩一批已在内存里的消息；已经全部挂载返回 false */
+function revealOlderMessages(step = RENDER_STEP): boolean {
+  const all = messages.value
+  const shown = renderMessages.value.length
+  if (shown >= all.length) return false
+  renderFromId.value = all[Math.max(0, all.length - shown - step)].id
+  return true
+}
+
+function renderAllMessages() {
+  renderFromId.value = messages.value[0]?.id || ''
+}
 
 let roomFirstMessagesMarked = false
 watch(
@@ -530,11 +548,32 @@ watch(
   },
 )
 
+/** 定位到某条消息并居中。倒置列表里 scrollTop 增大 = 内容往下移，按视觉中心差值换算 */
 function scrollToMessage(id: string) {
-  scrollInto.value = ''
   focusedMsgId.value = id
+  stickToBottom.value = false
+  const all = messages.value
+  const idx = all.findIndex((m) => m.id === id)
+  if (idx >= 0 && !renderMessages.value.some((m) => m.id === id)) {
+    renderFromId.value = all[Math.max(0, idx - 10)].id
+  }
   nextTick(() => {
-    scrollInto.value = `msg_${id}`
+    setTimeout(() => {
+      uni
+        .createSelectorQuery()
+        .select('.msg-list')
+        .boundingClientRect()
+        .select(`#msg_${id}`)
+        .boundingClientRect()
+        .exec((res) => {
+          const box = res?.[0] as UniApp.NodeInfo | null
+          const el = res?.[1] as UniApp.NodeInfo | null
+          if (!box || !el) return
+          const boxCenter = Number(box.top || 0) + Number(box.height || 0) / 2
+          const elCenter = Number(el.top || 0) + Number(el.height || 0) / 2
+          setMsgScrollTop(lastListScrollTop + boxCenter - elCenter)
+        })
+    }, 30)
   })
   setTimeout(() => {
     if (focusedMsgId.value === id) focusedMsgId.value = ''
@@ -545,7 +584,6 @@ function scrollToMessage(id: string) {
 async function onQuoteClick(clientMsgId: string) {
   if (!conversationId.value || !clientMsgId) return
   stickToBottom.value = false
-  browsingHistory.value = true
   uni.showLoading({ title: '定位中…', mask: true })
   try {
     const found = await chatStore.locateMessage(conversationId.value, clientMsgId)
@@ -608,7 +646,6 @@ onShow(() => {
     startGroupReadPolling()
   }
   if (chatType.value === 'private') refreshPrivateTitle()
-  nextTick(() => measureMsgList())
   if (forwardStore.consumeSucceeded()) {
     actions.cancelSelect()
     successVisible.value = true
@@ -628,7 +665,6 @@ onHide(() => {
 
 onUnload(() => {
   if (typeof window !== 'undefined') window.removeEventListener('paste', onWindowPaste)
-  clearScrollRetries()
   stopGroupReadPolling()
   if (groupReadReportTimer) clearTimeout(groupReadReportTimer)
   groupReadReportTimer = null
@@ -736,6 +772,7 @@ onMounted(() => {
     window.addEventListener('paste', onWindowPaste)
     // 捕获阶段处理 Enter：uni-textarea 的 @keydown 会丢 shiftKey，导致 Shift+Enter 被当成发送
     window.addEventListener('keydown', onComposerKeydown, true)
+    window.addEventListener('wheel', onMsgListWheel, { passive: false })
     const vv = window.visualViewport
     if (vv) {
       vv.addEventListener('resize', syncVisualViewport)
@@ -859,7 +896,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     }
     const focusId = String(query?.clientMsgId || props.clientMsgId || '')
     if (focusId) {
-      browsingHistory.value = true
+      renderFromId.value = ''
       stickToBottom.value = false
       const found = await chatStore.locateMessage(conv.id, focusId)
       await nextTick()
@@ -871,7 +908,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
         scrollToBottom(true)
       }
     } else {
-      browsingHistory.value = false
+      renderFromId.value = ''
       stickToBottom.value = true
       await nextTick()
       scrollToBottom(true)
@@ -891,40 +928,32 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 }
 
 let loadingMore = false
-let lastListScrollTop = 0
-async function onScrollToUpper() {
-  // 贴底过程、或其实还没滑到顶，都会误触到顶。这时展开全量会把当前窗口抬走
-  if (Date.now() < ignoreScrollUntil || lastListScrollTop > 48) return
-  const anchor = renderMessages.value[0]?.id
-  stickToBottom.value = false
-  const expanding = !browsingHistory.value && messages.value.length > RENDER_TAIL
-  browsingHistory.value = true
-  if (expanding && anchor) {
-    await nextTick()
-    pinScrollToMessage(anchor)
-  }
-  if (!conversationId.value || loadingMore) return
+/**
+ * 倒置列表的 scrolltolower = 视觉上接近顶部（lower-threshold 提前量预加载）。
+ * 先扩内存里已有的，再向 SDK 要更早一页；追加都在滚动远端，不需要任何位置补偿。
+ */
+async function onReachOldest() {
+  if (revealOlderMessages()) return
+  const convId = conversationId.value
+  if (!convId || loadingMore) return
   loadingMore = true
+  loadingOlder.value = true
   try {
-    const added = await chatStore.loadMoreMessages(conversationId.value)
-    if (!added || !anchor) return
-    await nextTick()
-    pinScrollToMessage(anchor)
+    // 一页全是不可见通知时列表不会变长，用户停在顶端也就收不到下一次触发，这里连拉几页
+    for (let i = 0; i < 3; i++) {
+      const before = messages.value.length
+      const added = await chatStore.loadMoreMessages(convId)
+      if (convId !== conversationId.value) return
+      if (!added) break
+      if (messages.value.length > before) {
+        renderAllMessages()
+        break
+      }
+    }
   } finally {
     loadingMore = false
+    loadingOlder.value = false
   }
-}
-
-/** 把某条消息顶对齐，避免上翻时整表换窗口把视口甩走；用完即清，免得之后被拽回 */
-function pinScrollToMessage(id: string) {
-  const viewId = `msg_${id}`
-  scrollInto.value = ''
-  nextTick(() => {
-    scrollInto.value = viewId
-    setTimeout(() => {
-      if (scrollInto.value === viewId) scrollInto.value = ''
-    }, 80)
-  })
 }
 
 function formatDuration(seconds: number) {
@@ -949,165 +978,66 @@ function cleanupBrowserRecorder() {
   recorder = null
 }
 
-function clearScrollRetries() {
-  scrollRetryTimers.forEach((id) => clearTimeout(id))
-  scrollRetryTimers.length = 0
+/** uni scroll-top 同值不触发：在目标值上交替叠 0 / 0.5px，肉眼不可见 */
+function setMsgScrollTop(top: number) {
+  msgScrollTopNonce = msgScrollTopNonce ? 0 : 0.5
+  msgScrollTop.value = Math.max(0, top) + msgScrollTopNonce
 }
 
-function measureMsgList() {
-  // H5 的 createSelectorQuery 在 onShow 时页面节点还是 null，exec 会读 parentElement 报错
-  if (typeof document !== 'undefined') {
-    const el = document.querySelector('.room .msg-list') as HTMLElement | null
-    const node = (el?.querySelector('.uni-scroll-view') as HTMLElement | null) || el
-    const height = node?.clientHeight || 0
-    if (height > 0) {
-      msgViewportHeight = height
-      return
-    }
-  }
-  try {
-    uni.createSelectorQuery()
-      .select('.msg-list')
-      .boundingClientRect((rect) => {
-        const box = (Array.isArray(rect) ? rect[0] : rect) as { height?: number } | null
-        if (box?.height && box.height > 0) msgViewportHeight = box.height
-      })
-      .exec()
-  } catch {
-    /* 页面还没挂上 */
-  }
+let collapseWindowTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 回到底部后再把挂载窗口收回尾部：裁掉的都在滚动远端，先滚后裁才不会因 scrollTop 被夹而闪 */
+function collapseRenderWindowSoon() {
+  if (collapseWindowTimer) clearTimeout(collapseWindowTimer)
+  collapseWindowTimer = setTimeout(() => {
+    collapseWindowTimer = null
+    if (stickToBottom.value && lastListScrollTop < 60) renderFromId.value = ''
+  }, 300)
 }
 
-/** 仅真正的 H5/Web：App WebView 里改 DOM scrollTop 会和原生 scroll-view 抢手势（iOS 尤其上滑被拽回） */
-function scrollMsgListDomToBottom(): boolean {
-  if (!isH5ComposerPlatform() || typeof document === 'undefined') return false
-  const root = document.querySelector('.room .msg-list') as HTMLElement | null
-  if (!root) return false
-  const node =
-    (root.querySelector('.uni-scroll-view') as HTMLElement | null) ||
-    (root.querySelector('.uni-scroll-view-content')?.parentElement as HTMLElement | null) ||
-    root
-  if (!node) return false
-  const top = Math.max(0, node.scrollHeight - node.clientHeight)
-  node.scrollTop = top
-  return true
-}
-
-function bumpMsgScrollTop() {
-  // uni-app：scroll-top 同值不触发，来回拨一次
-  msgScrollTopNonce = (msgScrollTopNonce + 1) % 2
-  msgScrollTop.value = msgScrollTopNonce
-  nextTick(() => {
-    msgScrollTop.value = 10_000_000 + msgScrollTopNonce
-  })
-}
-
-function scrollToAnchorBottom() {
-  // 先清空再指向锚点：连续发送/连续收消息时值相同不会重复触发滚动，跨一帧重设才能每次都滚。
-  // 滚完立刻清掉，否则输入框长高时 scroll-into-view 还指着底部，往上翻会被拽回去。
-  scrollInto.value = ''
-  nextTick(() => {
-    scrollInto.value = 'bottom-anchor'
-    if (isH5ComposerPlatform()) {
-      scrollMsgListDomToBottom()
-      bumpMsgScrollTop()
-    }
-    setTimeout(() => {
-      if (scrollInto.value === 'bottom-anchor') scrollInto.value = ''
-      if (!isH5ComposerPlatform()) return
-      scrollMsgListDomToBottom()
-      // 贴底落地后把 scroll-top 收成真实位置。留着千万级大值时，每次重绘都会把列表拽回底部。
-      const root = document.querySelector('.room .msg-list .uni-scroll-view') as HTMLElement | null
-      if (root && root.scrollTop > 0) msgScrollTop.value = root.scrollTop
-    }, 80)
-  })
-}
-
-/**
- * 贴底。重试要克制：过密的 scroll-into-view / scroll-top 会在图片撑高时
- * 与 onMsgScroll 互抢，出现「↓」按钮、大块空白、消息列表乱跳。
- */
+/** 贴底 = scrollTop 归零；倒置列表里内容撑高不会让底部移位，无需重试 */
 function scrollToBottom(force = false) {
   // 自己发消息必须贴底。手指标志在 iOS / 部分安卓上可能停在 true，不能因此把发送结果留在屏幕外
   if (userHoldingList && !force) return
   if (!force && !stickToBottom.value) return
   stickToBottom.value = true
-  clearScrollRetries()
-  const last = messages.value[messages.value.length - 1]
-  const media =
-    !!last && last.type !== 'text' && last.type !== 'system'
-  // 只补一拍等图片撑高；再密会和手指对拉
-  const delays = force || media ? [220] : []
-  ignoreScrollUntil = Date.now() + (delays[0] || 0) + 280
-  scrollToAnchorBottom()
-  for (const delay of delays) {
-    scrollRetryTimers.push(
-      setTimeout(() => {
-        if (userHoldingList || !stickToBottom.value) return
-        ignoreScrollUntil = Date.now() + 280
-        scrollToAnchorBottom()
-      }, delay),
-    )
-  }
+  setMsgScrollTop(0)
+  if (renderFromId.value) collapseRenderWindowSoon()
 }
 
-/** 手指按在消息列表上：立刻停掉贴底重试，避免和滑动对拉（iOS 会弹、点 ↓ 也会抖） */
+/** 手指按在消息列表上：此时不做自动贴底，避免和滑动对拉 */
 let userHoldingList = false
 function onMsgListTouchStart() {
   userHoldingList = true
-  clearScrollRetries()
-  ignoreScrollUntil = 0
 }
 function onMsgListTouchEnd() {
   userHoldingList = false
 }
 
-let scrollRaf = 0
-function scheduleScrollFrame(fn: () => void) {
-  const raf =
-    typeof requestAnimationFrame === 'function'
-      ? requestAnimationFrame
-      : (cb: () => void) => setTimeout(cb, 16) as unknown as number
-  return raf(fn)
-}
-function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
+function onMsgScroll(e: { detail?: { scrollTop?: number } }) {
   const top = Number(e.detail?.scrollTop || 0)
-  const height = Number(e.detail?.scrollHeight || 0)
   lastListScrollTop = top
-  // 手指拖动时取消贴底锁。不要在 scroll 回调里改 scroll-top，否则会和手势对拉。
-  if (userHoldingList) {
-    ignoreScrollUntil = 0
-  } else if (Date.now() < ignoreScrollUntil) {
-    return
-  }
-  if (scrollRaf) return
-  scrollRaf = scheduleScrollFrame(() => {
-    scrollRaf = 0
-    if (!userHoldingList && Date.now() < ignoreScrollUntil) return
-    if (msgViewportHeight <= 0) measureMsgList()
-    if (msgViewportHeight > 0 && height > 0) {
-      const distance = height - top - msgViewportHeight
-      if (distance < 80) {
-        stickToBottom.value = true
-      } else if (distance > 120) {
-        stickToBottom.value = false
-      }
-    } else if (top + 80 < maxScrollTop) {
-      stickToBottom.value = false
-    }
-    if (top > maxScrollTop) maxScrollTop = top
-  })
+  // 倒置后 scrollTop 就是离底部的距离；回调里不改 scroll-top，避免和手势对拉
+  if (top < 60) stickToBottom.value = true
+  else if (top > 120) stickToBottom.value = false
+}
+
+/** H5 桌面：列表是倒置的，滚轮/触控板方向要再翻回来（触摸滑动不受影响） */
+function onMsgListWheel(e: WheelEvent) {
+  if (e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+  const target = e.target instanceof Element ? e.target : null
+  const scroller = target?.closest('.msg-list')?.querySelector('.uni-scroll-view') as HTMLElement | null
+  if (!scroller) return
+  e.preventDefault()
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1
+  scroller.scrollTop -= e.deltaY * unit
 }
 
 function jumpToBottom() {
   userHoldingList = false
-  maxScrollTop = 0
-  clearScrollRetries()
-  // 先收成尾部再滚，避免「展开全量 / 收成 48 条」和滚动绑在同一帧里对弹
-  browsingHistory.value = false
   stickToBottom.value = true
-  ignoreScrollUntil = Date.now() + 480
-  nextTick(() => scrollToAnchorBottom())
+  setMsgScrollTop(0)
+  collapseRenderWindowSoon()
 }
 
 watch(
@@ -1115,7 +1045,7 @@ watch(
   (id, prev) => {
     if (!id || id === prev) return
     // 正在上翻看历史/资料时，新消息绝不能强行滚到底
-    if (browsingHistory.value || !stickToBottom.value) return
+    if (!stickToBottom.value) return
     nextTick(() => scrollToBottom())
   },
 )
@@ -1334,8 +1264,9 @@ onUnmounted(() => {
       vv.removeEventListener('resize', syncVisualViewport)
       vv.removeEventListener('scroll', syncVisualViewport)
     }
+    window.removeEventListener('wheel', onMsgListWheel)
   }
-  clearScrollRetries()
+  if (collapseWindowTimer) clearTimeout(collapseWindowTimer)
   // 用 onUnmounted 而不是页面级的 onUnload：桌面端内嵌时 onUnload 不会触发，
   // 留下过期的 activeConversationId 会让补拉去拉一个已经关掉的会话。
   chatStore.setActiveConversation('')
@@ -2032,7 +1963,11 @@ function persistVoiceFile(tempPath: string): Promise<string> {
 async function startVoiceRecord() {
   if (recording.value) return
 
-  const uniRecorder = (uni as any).getRecorderManager?.()
+  let uniRecorder: UniApp.RecorderManager | null = null
+  // H5 的 uni.getRecorderManager 只是打印 not supported 的桩，网页端直接走 MediaRecorder
+  // #ifndef H5
+  uniRecorder = uni.getRecorderManager?.() || null
+  // #endif
   if (uniRecorder) {
     const ok = await requestAudioPermission()
     if (!ok) return
@@ -2111,7 +2046,11 @@ async function startVoiceRecord() {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const mediaRecorder = new MediaRecorder(stream)
+    // iOS 原生播放器解不了 WebM/Opus，浏览器支持时优先录 AAC(mp4)
+    const mimeType = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac', 'audio/webm;codecs=opus', 'audio/webm'].find(
+      (type) => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(type),
+    )
+    const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
     const chunks: BlobPart[] = []
 
     mediaRecorder.ondataavailable = (event) => {
@@ -2500,56 +2439,56 @@ function pickFavorite() {
     <scroll-view
       scroll-y
       class="msg-list"
-      <!-- #ifdef H5 -->
       :scroll-top="msgScrollTop"
-      <!-- #endif -->
-      :scroll-into-view="scrollInto"
+      :lower-threshold="600"
       @scroll="onMsgScroll"
-      @scrolltoupper="onScrollToUpper"
+      @scrolltolower="onReachOldest"
       @touchstart="onMsgListTouchStart"
       @touchend="onMsgListTouchEnd"
       @touchcancel="onMsgListTouchEnd"
     >
-      <view
-        v-for="m in renderMessages"
-        :id="`msg_${m.id}`"
-        :key="m.id"
-        class="msg-row"
-        :class="{ selecting: actions.selecting.value, focused: focusedMsgId === m.id }"
-        @click="actions.selecting.value ? actions.toggleSelect(m) : undefined"
-      >
-        <view v-if="actions.selecting.value && m.type !== 'system'" class="msg-check" :class="{ on: actions.selectedIds.value.has(m.id) }">
-          <text v-if="actions.selectedIds.value.has(m.id)">✓</text>
+      <view class="msg-flip">
+        <view v-if="loadingOlder" class="msg-loading-older">
+          <text class="msg-loading-older-text">加载中…</text>
         </view>
-        <view v-if="m.type === 'system'" class="sys-tip">
-          <text class="sys-tip-text">{{ systemTextOf(m) }}</text>
+        <view
+          v-for="m in renderMessages"
+          :id="`msg_${m.id}`"
+          :key="m.id"
+          class="msg-row"
+          :class="{ selecting: actions.selecting.value, focused: focusedMsgId === m.id }"
+          @click="actions.selecting.value ? actions.toggleSelect(m) : undefined"
+        >
+          <view v-if="actions.selecting.value && m.type !== 'system'" class="msg-check" :class="{ on: actions.selectedIds.value.has(m.id) }">
+            <text v-if="actions.selectedIds.value.has(m.id)">✓</text>
+          </view>
+          <view v-if="m.type === 'system'" class="sys-tip">
+            <text class="sys-tip-text">{{ systemTextOf(m) }}</text>
+          </view>
+          <ChatBubble
+            v-else
+            :message="m"
+            :mine="isMine(m)"
+            :avatar="avatarOf(m)"
+            :fallback-avatar="fallbackAvatarOf(m)"
+            :nickname="nicknameOf(m)"
+            :role="roleOf(m)"
+            :read-state="readStateOf(m)"
+            :text-selecting="actions.textSelectingId.value === m.id"
+            :selecting="actions.selecting.value"
+            @avatar-click="onAvatarClick(m)"
+            @avatar-longpress="onAvatarLongpress(m)"
+            @select-click="actions.toggleSelect(m)"
+            @card-view="onViewCard"
+            @group-invite-apply="onGroupInviteApply"
+            @longpress="(e) => actions.openMenu(m, e)"
+            @retry="onRetry(m)"
+            @play-video="onPlayVideo"
+            @preview-image="openImagePreview"
+            @quote-click="onQuoteClick"
+          />
         </view>
-        <ChatBubble
-          v-else
-          :message="m"
-          :mine="isMine(m)"
-          :avatar="avatarOf(m)"
-          :fallback-avatar="fallbackAvatarOf(m)"
-          :nickname="nicknameOf(m)"
-          :role="roleOf(m)"
-          :read-state="readStateOf(m)"
-          :text-selecting="actions.textSelectingId.value === m.id"
-          :selecting="actions.selecting.value"
-          @avatar-click="onAvatarClick(m)"
-          @avatar-longpress="onAvatarLongpress(m)"
-          @select-click="actions.toggleSelect(m)"
-          @card-view="onViewCard"
-          @group-invite-apply="onGroupInviteApply"
-          @longpress="(e) => actions.openMenu(m, e)"
-          @retry="onRetry(m)"
-          @play-video="onPlayVideo"
-          @preview-image="openImagePreview"
-          @quote-click="onQuoteClick"
-        />
       </view>
-      <!-- 底部锚点：scroll-into-view 只保证元素「顶部」进入视口，最后一条比视口高时会露出上半截；
-           滚到垫底的锚点等于滚到真正的底部，保证最新消息完整可见 -->
-      <view id="bottom-anchor" class="bottom-anchor"></view>
     </scroll-view>
 
     <view v-if="!stickToBottom" class="jump-bottom" @click.stop="jumpToBottom">↓</view>
@@ -2895,18 +2834,38 @@ function pickFavorite() {
   color: #8a8f9c;
 }
 
+/* 倒置列表：外层翻一次让 scrollTop=0 落在视觉底部，内层再翻回来保证内容正向 */
 .msg-list {
   flex: 1;
   height: 0;
-  padding-bottom: 16rpx;
   background: #e6e8ee;
+  transform: scaleY(-1);
 }
 
 .msg-list :deep(.uni-scroll-view),
 .msg-list :deep(.uni-scroll-view-content) {
   background: #e6e8ee;
-  /* 上方气泡高度变化时不要自动改滚动位置，否则手指滑到哪，窗口就弹到哪 */
+  /* 新消息插在滚动起点，浏览器滚动锚定可能把它顶出视口；贴底统一由代码控制 */
   overflow-anchor: none;
+}
+
+/* 至少撑满视口：消息少时从顶部开始排，与微信一致 */
+.msg-flip {
+  min-height: 100%;
+  padding-bottom: 16rpx;
+  box-sizing: border-box;
+  transform: scaleY(-1);
+}
+
+.msg-loading-older {
+  display: flex;
+  justify-content: center;
+  padding: 16rpx 0;
+}
+
+.msg-loading-older-text {
+  font-size: 24rpx;
+  color: #9aa0ab;
 }
 
 .jump-bottom {
@@ -2934,11 +2893,6 @@ function pickFavorite() {
 
 .msg-row.focused {
   background: rgba(10, 47, 194, 0.08);
-}
-
-/** 底部滚动锚点：不可见的 2rpx 垫底元素，滚到它 = 滚到列表真正的底部 */
-.bottom-anchor {
-  height: 2rpx;
 }
 
 .msg-row.selecting {

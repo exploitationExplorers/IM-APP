@@ -2238,7 +2238,9 @@ export async function chooseLocalFiles(
 
 async function pathToFile(path: string, fileName = ''): Promise<File> {
   const blob = await (await fetch(path)).blob()
-  const ext = blob.type.split('/')[1] || 'bin'
+  // MediaRecorder 的 type 带 codecs 参数（audio/webm;codecs=opus），不能原样拼进文件名
+  const subtype = (blob.type.split('/')[1] || '').split(';')[0].trim()
+  const ext = blob.type.startsWith('audio/') && subtype === 'mp4' ? 'm4a' : subtype || 'bin'
   const name = fileName.trim() || `${Date.now()}.${ext}`
   return new File([blob], name, { type: blob.type || 'application/octet-stream' })
 }
