@@ -23,4 +23,13 @@ IM-APP-fronend/pnpm-lock.yaml
 # Apifox 导出文档（本地参考，不入库）
 IM-APP-system/im.md
 
+# 本地安装包 / 录屏 / 逆向证据，勿入库（会导致 push 超时）
+*.apk
+*.ipa
+*.mp4
+*.rea-evidence.json
+ios.mp4
+YanChat-*.apk
+base.apk
+
 项目发布
