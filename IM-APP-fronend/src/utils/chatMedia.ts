@@ -598,6 +598,8 @@ function downloadRemoteFile(url: string): Promise<string> {
 }
 
 const AUDIO_EXT_RE = /\.(aac|m4a|mp3|wav|caf|amr)(\?|#|$)/i
+/** iOS AVPlayer 官方表：m4a/aac/mp3/wav/caf；amr/ogg/webm 播不了 */
+const IOS_AUDIO_EXTS = new Set(['aac', 'm4a', 'mp3', 'wav', 'caf'])
 
 type PlusFileReader = {
   onloadend: ((e: { target?: { result?: unknown } }) => void) | null
@@ -606,7 +608,37 @@ type PlusFileReader = {
 }
 type PlusIo = {
   resolveLocalFileSystemURL?: Function
+  convertLocalFileSystemURL?: (path: string) => string
   FileReader?: new () => PlusFileReader
+}
+
+/** 统一成本地可给 AVPlayer / plus.audio 用的路径（尽量带 file://） */
+export function toNativeAudioSrc(path: string): string {
+  const raw = (path || '').trim()
+  if (!raw) return ''
+  if (isRemoteMediaUrl(raw) || raw.startsWith('blob:')) return playableMediaUrl(raw)
+  try {
+    const io = plus?.io as unknown as PlusIo | undefined
+    const converted = io?.convertLocalFileSystemURL?.(raw)
+    if (converted) return converted.startsWith('file://') ? converted : `file://${converted}`
+  } catch {
+    /* ignore */
+  }
+  if (raw.startsWith('file://')) return raw
+  return raw.startsWith('/') ? `file://${raw}` : raw
+}
+
+function audioFsCandidates(path: string): string[] {
+  const raw = (path || '').trim()
+  if (!raw) return []
+  const out: string[] = []
+  const push = (p: string) => {
+    if (p && !out.includes(p)) out.push(p)
+  }
+  push(raw)
+  push(toNativeAudioSrc(raw))
+  if (raw.startsWith('file://')) push(raw.slice('file://'.length))
+  return out
 }
 
 /** 读文件头若干字节；读不到返回 null（不影响后续按后缀兜底） */
@@ -618,33 +650,43 @@ function readFileHead(path: string, size = 16): Promise<Uint8Array | null> {
       resolve(null)
       return
     }
-    io.resolveLocalFileSystemURL(
-      path,
-      (entry: { file?: Function }) => {
-        if (!entry.file) {
-          resolve(null)
-          return
-        }
-        entry.file(
-          (file: { slice?: (start: number, end: number) => unknown }) => {
-            const reader = new Reader()
-            reader.onloadend = (e) => {
-              const result = String(e.target?.result || '')
-              const base64 = result.slice(result.indexOf(',') + 1)
-              try {
-                resolve(base64 ? new Uint8Array(uni.base64ToArrayBuffer(base64)).slice(0, size) : null)
-              } catch {
-                resolve(null)
+    const candidates = audioFsCandidates(path)
+    let idx = 0
+    const tryNext = () => {
+      if (idx >= candidates.length) {
+        resolve(null)
+        return
+      }
+      const cur = candidates[idx++]
+      io.resolveLocalFileSystemURL!(
+        cur,
+        (entry: { file?: Function }) => {
+          if (!entry.file) {
+            tryNext()
+            return
+          }
+          entry.file(
+            (file: { slice?: (start: number, end: number) => unknown }) => {
+              const reader = new Reader()
+              reader.onloadend = (e) => {
+                const result = String(e.target?.result || '')
+                const base64 = result.slice(result.indexOf(',') + 1)
+                try {
+                  resolve(base64 ? new Uint8Array(uni.base64ToArrayBuffer(base64)).slice(0, size) : null)
+                } catch {
+                  resolve(null)
+                }
               }
-            }
-            reader.onerror = () => resolve(null)
-            reader.readAsDataURL(typeof file.slice === 'function' ? file.slice(0, size) : file)
-          },
-          () => resolve(null),
-        )
-      },
-      () => resolve(null),
-    )
+              reader.onerror = () => tryNext()
+              reader.readAsDataURL(typeof file.slice === 'function' ? file.slice(0, size) : file)
+            },
+            () => tryNext(),
+          )
+        },
+        () => tryNext(),
+      )
+    }
+    tryNext()
   })
 }
 
@@ -655,9 +697,11 @@ function readFileHead(path: string, size = 16): Promise<Uint8Array | null> {
 function sniffAudioExt(h: Uint8Array): string {
   if (h.length < 4) return ''
   const ascii = (start: number, end: number) => String.fromCharCode(...Array.from(h.slice(start, end)))
+  // ADTS-AAC 必须先于通用 MPEG 帧头判断，否则会被误判成 mp3
   if (h[0] === 0xff && (h[1] & 0xf6) === 0xf0) return 'aac'
   if (ascii(4, 8) === 'ftyp') return 'm4a'
-  if (ascii(0, 3) === 'ID3' || (h[0] === 0xff && (h[1] & 0xe0) === 0xe0)) return 'mp3'
+  if (ascii(0, 3) === 'ID3') return 'mp3'
+  if (h[0] === 0xff && (h[1] & 0xe0) === 0xe0 && (h[1] & 0x06) === 0x02) return 'mp3'
   if (ascii(0, 4) === 'RIFF') return 'wav'
   if (ascii(0, 4) === 'caff') return 'caf'
   if (ascii(0, 5) === '#!AMR') return 'amr'
@@ -679,19 +723,20 @@ const playableAudioCache = new Map<string, string>()
 async function toNamedPlayableAudio(localPath: string): Promise<string> {
   const head = await readFileHead(localPath)
   const ext = head ? sniffAudioExt(head) : ''
-  if ((ext === 'webm' || ext === 'ogg') && isIOSApp()) {
-    throw new Error('该语音为网页端录制的格式，iOS 暂不支持播放')
+  if ((ext === 'webm' || ext === 'ogg' || ext === 'amr') && isIOSApp()) {
+    throw new Error('该语音格式 iOS 暂不支持播放')
   }
-  if (!ext) {
-    return AUDIO_EXT_RE.test(localPath) ? localPath : persistNamedFile(localPath, `voice_${Date.now()}.m4a`)
-  }
-  if (new RegExp(`\\.${ext}(\\?|#|$)`, 'i').test(localPath)) return localPath
-  return persistNamedFile(localPath, `voice_${Date.now()}.${ext}`)
+  // 嗅探失败时：iOS 默认按 aac（安卓 recorder format:aac 多是 ADTS），绝不能默认 m4a
+  const namedExt = ext || (isIOSApp() ? 'aac' : AUDIO_EXT_RE.test(localPath) ? '' : 'm4a')
+  if (!namedExt) return toNativeAudioSrc(localPath)
+  if (new RegExp(`\\.${namedExt}(\\?|#|$)`, 'i').test(localPath)) return toNativeAudioSrc(localPath)
+  const named = await persistNamedFile(localPath, `voice_${Date.now()}.${namedExt}`)
+  return toNativeAudioSrc(named)
 }
 
 /**
- * App 上远程语音先下载到本地，再按文件头补上真实后缀后交给 InnerAudio；
- * 同一条语音只落地一次。H5 仍走原 URL。
+ * App 上远程语音先下载到本地，再按文件头补真实后缀。
+ * iOS 无后缀 / 后缀与内容不符都会 MediaError（官方表见 createInnerAudioContext）。
  */
 export async function ensurePlayableAudioPath(url: string): Promise<string> {
   const src = playableMediaUrl((url || '').trim())
@@ -703,16 +748,27 @@ export async function ensurePlayableAudioPath(url: string): Promise<string> {
 
   let local = src
   if (isRemoteMediaUrl(src)) {
-    try {
-      local = await downloadRemoteFile(src)
-    } catch {
-      return src
-    }
+    local = await downloadRemoteFile(src)
   }
   const playable = await toNamedPlayableAudio(local)
   if (playableAudioCache.size > 200) playableAudioCache.clear()
   playableAudioCache.set(src, playable)
   return playable
+}
+
+/** InnerAudio 失败时换后缀再落地一版（aac↔m4a↔mp3），专治 iOS MediaError */
+export async function remapPlayableAudioExt(localSrc: string, tried: string[]): Promise<string | null> {
+  if (!isAppPlatform() || !localSrc) return null
+  const current = (localSrc.match(AUDIO_EXT_RE)?.[1] || '').toLowerCase()
+  const order = isIOSApp()
+    ? ['aac', 'm4a', 'mp3', 'wav'].filter((e) => IOS_AUDIO_EXTS.has(e))
+    : ['aac', 'm4a', 'mp3']
+  const next = order.find((e) => e !== current && !tried.includes(e))
+  if (!next) return null
+  const bare = localSrc.replace(/^file:\/\//, '').replace(AUDIO_EXT_RE, '')
+  const source = /^(file|content):\/\//.test(localSrc) || localSrc.startsWith('/') ? localSrc : toNativeAudioSrc(localSrc)
+  const named = await persistNamedFile(source, `voice_retry_${Date.now()}.${next}`)
+  return toNativeAudioSrc(named || `${bare}.${next}`)
 }
 
 /**

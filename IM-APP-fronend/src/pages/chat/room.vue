@@ -2011,7 +2011,8 @@ async function startVoiceRecord() {
       uni.showToast({ title: '录音失败', icon: 'none' })
     })
 
-    recorder.start({ format: 'aac' })
+    // mp3 两端都能播；安卓 aac(ADTS) 在 iOS 上常被误当成 m4a 直接 MediaError
+    recorder.start({ format: 'mp3' })
     recordingTimer = setInterval(() => {
       recordingSeconds.value += 1
       if (recordingSeconds.value >= 60) {

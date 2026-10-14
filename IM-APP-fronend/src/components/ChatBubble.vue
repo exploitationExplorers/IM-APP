@@ -22,7 +22,7 @@ function pumpMeasureQueue() {
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, remapPlayableAudioExt, toNativeAudioSrc, previewImagesWithSave } from '@/utils/chatMedia'
 import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 
 const props = defineProps<{
@@ -408,6 +408,7 @@ type InnerAudio = {
   volume?: number
   sessionCategory?: string
   obeyMuteSwitch?: boolean
+  autoplay?: boolean
   currentTime: number
   duration: number
   play: () => void
@@ -417,7 +418,26 @@ type InnerAudio = {
   onError: (cb: (e?: { errMsg?: string; errCode?: number }) => void) => void
   onStop: (cb: () => void) => void
   onPlay?: (cb: () => void) => void
+  onCanplay?: (cb: () => void) => void
   onTimeUpdate: (cb: () => void) => void
+}
+
+type PlusAudioPlayer = {
+  play: (successCB?: () => void, errorCB?: (e?: unknown) => void) => void
+  stop: () => void
+  close?: () => void
+  getPosition?: () => number
+  getDuration?: () => number
+  addEventListener?: (name: string, cb: () => void, capture?: boolean) => void
+  removeEventListener?: (name: string, cb: () => void) => void
+}
+
+function isIOSNative(): boolean {
+  try {
+    return uni.getSystemInfoSync().platform === 'ios'
+  } catch {
+    return false
+  }
 }
 
 function createVoiceInnerAudio(): InnerAudio | null {
@@ -427,7 +447,7 @@ function createVoiceInnerAudio(): InnerAudio | null {
   if (typeof factory !== 'function') return null
   const inner = factory()
   try {
-    // iOS 侧边静音键下也要出声
+    // App 端侧边静音键下也要出声（官方 sessionCategory=playback）
     inner.sessionCategory = 'playback'
   } catch {
     /* 旧基座无此属性 */
@@ -435,7 +455,7 @@ function createVoiceInnerAudio(): InnerAudio | null {
   try {
     inner.obeyMuteSwitch = false
   } catch {
-    /* Android 部分基座只读 */
+    /* 小程序只读；App 部分基座也只读 */
   }
   try {
     inner.volume = 1
@@ -445,9 +465,21 @@ function createVoiceInnerAudio(): InnerAudio | null {
   return inner
 }
 
+function createPlusAudioPlayer(src: string): PlusAudioPlayer | null {
+  try {
+    const audio = (plus as { audio?: { createPlayer?: (url: string) => PlusAudioPlayer } } | undefined)
+      ?.audio
+    if (typeof audio?.createPlayer !== 'function') return null
+    return audio.createPlayer(src)
+  } catch {
+    return null
+  }
+}
+
 /**
- * 点按播放：再点一次停止；切到别的语音气泡时前一条自动停。
- * App：远程语音先落地并按文件头补真实后缀再播，否则 iOS AVPlayer 直接 MediaError。
+ * 点按播放：再点一次停止；切到别的气泡时前一条自动停。
+ * iOS：远程语音先落地并按文件头补真实后缀；优先 plus.audio，失败再 InnerAudio + 换后缀重试。
+ * 参考：https://cloud.baidu.com/article/3423064 、uni.createInnerAudioContext 格式表
  */
 async function playVoice() {
   const rawPath = voiceMeta.value?.path || ''
@@ -468,7 +500,7 @@ async function playVoice() {
     src = await ensurePlayableAudioPath(rawPath)
   } catch (e) {
     const reason = (e as Error)?.message || ''
-    if (reason.includes('iOS')) {
+    if (reason.includes('iOS') || reason.includes('格式')) {
       if (token === voicePlayToken) uni.showToast({ title: reason, icon: 'none' })
       return
     }
@@ -480,99 +512,225 @@ async function playVoice() {
     return
   }
 
+  const triedExts: string[] = []
+  const startWithSrc = (playSrc: string) => {
+    if (token !== voicePlayToken) return
+    const nativeSrc = toNativeAudioSrc(playSrc) || playSrc
+    // iOS 上 plus.audio 对本地带后缀文件更稳；Android 继续走 InnerAudio
+    if (isIOSNative() && playWithPlusAudio(nativeSrc, token, triedExts, startWithSrc)) return
+    if (playWithInnerAudio(nativeSrc, triedExts, token, startWithSrc)) return
+    if (!isIOSNative() && playWithPlusAudio(nativeSrc, token, triedExts, startWithSrc)) return
+    if (typeof Audio !== 'undefined') {
+      playWithHtmlAudio(nativeSrc, token)
+      return
+    }
+    if (token === voicePlayToken) uni.showToast({ title: '语音播放失败', icon: 'none' })
+  }
+  startWithSrc(src)
+}
+
+function bindPlayingUi(token: number, release: () => void) {
+  if (token !== voicePlayToken) {
+    release()
+    return false
+  }
+  playing.value = true
+  stopVoiceFn = release
+  activeVoiceStopper = stopVoice
+  return true
+}
+
+function finishPlaying(token: number, release: () => void, failed: boolean) {
+  release()
+  if (token !== voicePlayToken) return
+  if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
+  stopVoiceFn = null
+  playing.value = false
+  playedBars.value = 0
+  clearProgressTimer()
+  if (failed) uni.showToast({ title: '语音播放失败', icon: 'none' })
+}
+
+function playWithInnerAudio(
+  src: string,
+  triedExts: string[],
+  token: number,
+  retryWith: (next: string) => void,
+): boolean {
   const inner = createVoiceInnerAudio()
-  if (inner) {
-    // iOS 原生播放器赋 src 即开播，再调 play() 会先 stop 再重播，onStop 把气泡复位成「一点就停」。
-    // 按官方用法 autoplay + src 起播，play() 只在迟迟没起播时补一次。
-    // 「出过声」只认播放进度：onPlay 在解码失败时也会先回调。
-    let closed = false
-    let started = false
-    let progressed = false
-    const markProgress = () => {
-      if (inner.currentTime > 0) progressed = true
-    }
-    const release = () => {
-      closed = true
-      try {
-        inner.stop()
-        inner.destroy()
-      } catch {
-        /* 已释放 */
-      }
-    }
-    const finish = (failed: boolean) => {
-      if (closed) return
-      release()
-      if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
-      stopVoiceFn = null
-      playing.value = false
-      playedBars.value = 0
-      clearProgressTimer()
-      if (failed) uni.showToast({ title: '语音播放失败', icon: 'none' })
-    }
-    inner.onPlay?.(() => {
-      started = true
-    })
-    inner.onEnded(() => {
-      markProgress()
-      finish(!progressed && !started)
-    })
-    inner.onError(() => {
-      markProgress()
-      finish(!progressed)
-    })
-    inner.onStop(() => {
-      // 起播前 iOS 会为切换 src 补发一次 stop，不是用户停止
-      if (started) finish(false)
-    })
-    inner.onTimeUpdate(() => {
-      markProgress()
-      syncPlayedProgress(inner.currentTime, inner.duration)
-    })
+  if (!inner) return false
+
+  let closed = false
+  let started = false
+  let progressed = false
+  let canplayFired = false
+  const startedAt = Date.now()
+  const markProgress = () => {
+    if (inner.currentTime > 0) progressed = true
+  }
+  const release = () => {
+    if (closed) return
+    closed = true
+    clearProgressTimer()
     try {
-      ;(inner as InnerAudio & { autoplay?: boolean }).autoplay = true
+      inner.stop()
+      inner.destroy()
+    } catch {
+      /* 已释放 */
+    }
+  }
+  const failOrRetry = async () => {
+    if (closed) return
+    if (progressed) {
+      finishPlaying(token, release, false)
+      return
+    }
+    release()
+    const next = await remapPlayableAudioExt(src, triedExts)
+    if (next && token === voicePlayToken) {
+      const ext = (next.match(/\.([a-z0-9]+)(\?|#|$)/i)?.[1] || '').toLowerCase()
+      if (ext) triedExts.push(ext)
+      retryWith(next)
+      return
+    }
+    finishPlaying(token, () => undefined, true)
+  }
+
+  if (!bindPlayingUi(token, release)) return true
+
+  inner.onPlay?.(() => {
+    started = true
+  })
+  inner.onCanplay?.(() => {
+    if (closed || canplayFired) return
+    canplayFired = true
+    try {
+      inner.play()
+    } catch {
+      void failOrRetry()
+    }
+  })
+  inner.onEnded(() => {
+    markProgress()
+    finishPlaying(token, release, !progressed && !started)
+  })
+  inner.onError(() => {
+    markProgress()
+    void failOrRetry()
+  })
+  inner.onStop(() => {
+    if (started || progressed) finishPlaying(token, release, false)
+  })
+  inner.onTimeUpdate(() => {
+    markProgress()
+    syncPlayedProgress(inner.currentTime, inner.duration)
+  })
+
+  try {
+    inner.autoplay = false
+  } catch {
+    /* ignore */
+  }
+  inner.src = src
+  // 部分基座不回调 onCanplay，延迟补 play；不要一赋 src 就立刻 play（iOS 易先 stop）
+  setTimeout(() => {
+    if (closed || started || progressed || canplayFired) return
+    try {
+      inner.play()
+    } catch {
+      void failOrRetry()
+    }
+  }, 280)
+  progressTimer = setInterval(() => {
+    if (closed) return
+    markProgress()
+    syncPlayedProgress(inner.currentTime, inner.duration)
+    if (!started && !progressed && Date.now() - startedAt > 10000) void failOrRetry()
+  }, 300)
+  return true
+}
+
+function playWithPlusAudio(
+  src: string,
+  token: number,
+  triedExts: string[] = [],
+  retryWith?: (next: string) => void,
+): boolean {
+  const player = createPlusAudioPlayer(src)
+  if (!player) return false
+  let closed = false
+  let started = false
+  const startedAt = Date.now()
+  const onEnded = () => finishPlaying(token, release, false)
+  const onError = () => {
+    void (async () => {
+      if (closed || started) {
+        finishPlaying(token, release, !started)
+        return
+      }
+      release()
+      const next = retryWith ? await remapPlayableAudioExt(src, triedExts) : null
+      if (next && token === voicePlayToken && retryWith) {
+        const ext = (next.match(/\.([a-z0-9]+)(\?|#|$)/i)?.[1] || '').toLowerCase()
+        if (ext) triedExts.push(ext)
+        retryWith(next)
+        return
+      }
+      finishPlaying(token, () => undefined, true)
+    })()
+  }
+  const release = () => {
+    if (closed) return
+    closed = true
+    clearProgressTimer()
+    try {
+      player.removeEventListener?.('ended', onEnded)
+      player.removeEventListener?.('error', onError)
+      player.stop()
+      player.close?.()
     } catch {
       /* ignore */
     }
-    playing.value = true
-    stopVoiceFn = release
-    activeVoiceStopper = stopVoice
-    inner.src = src
-    const startedAt = Date.now()
-    progressTimer = setInterval(() => {
-      if (closed) return
-      markProgress()
-      syncPlayedProgress(inner.currentTime, inner.duration)
-      if (!started && !progressed && Date.now() - startedAt > 8000) finish(true)
-    }, 300)
-    setTimeout(() => {
-      if (closed || started || progressed) return
-      try {
-        inner.play()
-      } catch {
-        finish(true)
-      }
-    }, 600)
-    return
   }
-  if (typeof Audio !== 'undefined') {
-    const audio = new Audio(src)
-    playing.value = true
-    audio.addEventListener('ended', () => {
-      playing.value = false
-      playedBars.value = 0
-    })
-    audio.addEventListener('timeupdate', () => syncPlayedProgress(audio.currentTime, audio.duration))
-    audio.play().catch(() => {
-      playing.value = false
-      uni.showToast({ title: '语音播放失败', icon: 'none' })
-    })
-    stopVoiceFn = () => {
+  if (!bindPlayingUi(token, release)) return true
+  player.addEventListener?.('ended', onEnded)
+  player.addEventListener?.('error', onError)
+  progressTimer = setInterval(() => {
+    if (closed) return
+    const cur = Number(player.getPosition?.() || 0)
+    const total = Number(player.getDuration?.() || 0) || voiceMeta.value?.duration || 0
+    if (cur > 0) started = true
+    syncPlayedProgress(cur, total)
+    if (!started && Date.now() - startedAt > 10000) onError()
+  }, 300)
+  try {
+    player.play(
+      () => {
+        started = true
+      },
+      () => onError(),
+    )
+  } catch {
+    onError()
+    return true
+  }
+  return true
+}
+
+function playWithHtmlAudio(src: string, token: number) {
+  const audio = new Audio(src)
+  const release = () => {
+    try {
       audio.pause()
       audio.currentTime = 0
+    } catch {
+      /* ignore */
     }
-    activeVoiceStopper = stopVoice
   }
+  if (!bindPlayingUi(token, release)) return
+  audio.addEventListener('ended', () => finishPlaying(token, release, false))
+  audio.addEventListener('timeupdate', () => syncPlayedProgress(audio.currentTime, audio.duration))
+  audio.play().catch(() => finishPlaying(token, release, true))
 }
 
 onUnmounted(() => {

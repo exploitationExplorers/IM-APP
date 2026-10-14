@@ -2,8 +2,8 @@
     "name" : "易可聊",
     "appid" : "__UNI__EC9D1AE",
     "description" : "",
-    "versionName" : "1.0.93",
-    "versionCode" : "193",
+    "versionName" : "1.0.94",
+    "versionCode" : "194",
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
@@ -54,9 +54,11 @@
             /* ios打包配置 */
             "ios" : {
                 "dSYMs" : false,
+                // 语音消息前台/切后台播放；改此项需重打 IPA，wgt  alone 不生效
+                "UIBackgroundModes" : "audio",
                 "privacyDescription" : {
                     "NSCameraUsageDescription" : "用于拍照、拍摄视频以及扫描二维码",
-                    "NSMicrophoneUsageDescription" : "用于拍摄视频时录制声音",
+                    "NSMicrophoneUsageDescription" : "用于录制语音消息与拍摄视频时采集声音",
                     "NSPhotoLibraryUsageDescription" : "用于从相册选择照片、视频或二维码"
                 }
             },
