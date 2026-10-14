@@ -39,6 +39,7 @@ const messageHitMeta = ref<Map<string, { preview: string; clientMsgId: string }>
 let messageSearchSeq = 0
 let messageSearchTimer: ReturnType<typeof setTimeout> | null = null
 const showAddMenu = ref(false)
+const showReadMenu = ref(false)
 const showFilter = ref(false)
 const filterKey = ref<'all' | 'unread'>('all')
 const selectedConv = ref<Conversation | null>(null)
@@ -131,9 +132,9 @@ async function onHideConversation(item: Conversation) {
   // 群聊：删除会话同时退出，否则通讯录「群组」里还会挂着，客户会觉得删了还在
   if (item.type === 'group') {
     const res = await uni.showModal({
-      title: '删除群聊',
-      content: '删除后将退出该群，并不再出现在群组列表。群主请先转让或解散。确定继续吗？',
-      confirmText: '删除',
+      title: '退出群聊',
+      content: '退出后将不再接收此群消息，并删除本群对话。群主请先转让或解散。确定退出吗？',
+      confirmText: '退出',
       cancelText: '取消',
     })
     if (!res.confirm) return
@@ -312,6 +313,7 @@ async function openConversation(item: Conversation) {
 async function onMarkAllRead() {
   showFilter.value = false
   showAddMenu.value = false
+  showReadMenu.value = false
   if (!chatStore.totalUnread) {
     uni.showToast({ title: '没有未读消息', icon: 'none' })
     return
@@ -326,7 +328,14 @@ async function onMarkAllRead() {
 
 function onAdd() {
   showFilter.value = false
+  showReadMenu.value = false
   showAddMenu.value = !showAddMenu.value
+}
+
+function onReadMenu() {
+  showFilter.value = false
+  showAddMenu.value = false
+  showReadMenu.value = !showReadMenu.value
 }
 
 function go(url: string) {
@@ -346,6 +355,7 @@ function setFilter(key: 'all' | 'unread') {
 
 function closeMenus() {
   showAddMenu.value = false
+  showReadMenu.value = false
   showFilter.value = false
   activeSwipeId.value = null
   convMenu.value = null
@@ -529,16 +539,18 @@ watchEffect(() => {
       >
         <view class="header-row">
           <text class="title">聊天</text>
+          <view class="header-actions">
+          <view class="add-wrap" @click.stop="onReadMenu">
+            <text class="icon-more">⋯</text>
+            <view v-if="showReadMenu" class="popup-menu">
+              <view class="popup-item" @click="onMarkAllRead">
+                <text>全部已读</text>
+              </view>
+            </view>
+          </view>
           <view class="add-wrap" @click.stop="onAdd">
             <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
             <view v-if="showAddMenu" class="popup-menu">
-              <view
-                v-if="chatStore.totalUnread > 0"
-                class="popup-item"
-                @click="onMarkAllRead"
-              >
-                <text>全部已读</text>
-              </view>
               <view class="popup-item" @click="go('/pages/contacts/add-friend')">
                 <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
                 <text>添加朋友</text>
@@ -552,6 +564,7 @@ watchEffect(() => {
                 <text>创建群聊</text>
               </view>
             </view>
+          </view>
           </view>
         </view>
       </view>
@@ -724,6 +737,12 @@ watchEffect(() => {
   line-height: 64rpx;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
 .add-wrap {
   position: relative;
   width: 64rpx;
@@ -731,6 +750,14 @@ watchEffect(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.icon-more {
+  font-size: 44rpx;
+  font-weight: 700;
+  color: #212121;
+  line-height: 1;
+  letter-spacing: 1rpx;
 }
 
 .icon-plus {

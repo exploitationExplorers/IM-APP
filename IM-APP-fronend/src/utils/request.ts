@@ -7,7 +7,7 @@ const REFRESH_TOKEN_KEY = 'im_refresh_token'
 /** 网页多开：每个标签页一份登录态。退出登录时不能把整份删掉。 */
 export const AUTH_SLOTS_KEY = 'im_auth_slots'
 const TAB_ID_KEY = 'im_tab_id'
-/** 最后一次成功建立登录态的标签页 id。sessionStorage 被清空后靠它把登录态续回来。 */
+/** 最近一次成功登录的标签页 id。只用于退出时对上自己的槽位，新开窗口不会拿它续登录。 */
 export const ACTIVE_TAB_KEY = 'im_active_tab'
 const SLOT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -17,27 +17,23 @@ interface AuthSlot {
   at: number
 }
 
+function newTabId(): string {
+  return `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
 /**
- * 网页每个标签页一个 id，放在 sessionStorage 里。
- * 刷新、谷歌回收后台标签后再打开，这个 id 还在。
- *
- * sessionStorage 是「标签页进程级」的：关掉浏览器、手机端结束后台进程、
- * 或从桌面图标重开，它都会被清空。此时若直接生成新 id，im_auth_slots 里的
- * 登录态虽然还在 localStorage，却再也匹配不上，表现就是「每次都要重新登录」。
- * 所以这里先复用上次活跃标签页的 id 把登录态续回来，确实没有可续的槽位
- * 才生成新 id（全新登录）。
+ * 网页每个标签页一个 id，只放在本页的 sessionStorage 里。
+ * 刷新同一标签时 id 还在，登录态跟着走。
+ * 新开的标签 / 窗口 sessionStorage 是空的，必须另起一个 id，不能去续
+ * 别的窗口正在用的号——否则第二个窗口一打开就是上一个账号，
+ * 退出登录也会把另一个窗口一起清掉。
  */
 function currentTabId(): string {
   // #ifdef H5
   if (typeof sessionStorage === 'undefined') return ''
   let id = sessionStorage.getItem(TAB_ID_KEY) || ''
   if (!id) {
-    const resumed = String(uni.getStorageSync(ACTIVE_TAB_KEY) || '')
-    // 槽位还在才续，否则会一直指向一个已经退出登录的旧 id
-    id =
-      resumed && readSlots()[resumed]
-        ? resumed
-        : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    id = newTabId()
     sessionStorage.setItem(TAB_ID_KEY, id)
   }
   return id

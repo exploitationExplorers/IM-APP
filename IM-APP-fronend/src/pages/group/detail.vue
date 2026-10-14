@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import ImSwitch from '@/components/ImSwitch.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
+import ImConfirmDialogHost from '@/components/ImConfirmDialogHost.vue'
+import { imConfirm } from '@/composables/useImConfirm'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { useGroupStore } from '@/stores/group'
 import { useChatStore } from '@/stores/chat'
@@ -421,13 +423,13 @@ async function onDismiss() {
 
 async function onLeave() {
   if (isOwner.value || leaving.value) return
-  const res = await uni.showModal({
+  const ok = await imConfirm({
     title: '退出群聊',
-    content: '退出后将删除本群对话，确定继续吗？',
-    confirmText: '确定',
+    content: '退出后将不再接收此群消息，并删除本群对话。确定退出吗？',
+    confirmText: '退出',
     cancelText: '取消',
   })
-  if (!res.confirm) return
+  if (!ok) return
   leaving.value = true
   try {
     // 必须在退出接口前拿到会话 ID；退出后后端成员校验会拒绝再次解析。
@@ -642,6 +644,7 @@ async function onRemoveDissolved() {
 
     </scroll-view>
     </template>
+    <ImConfirmDialogHost />
     <view v-if="showJoinMode" class="sheet-mask" @click="showJoinMode = false">
       <view class="sheet" @click.stop>
         <view class="sheet-item" @click="selectJoinMode('open')">公开群（扫码入群）</view>

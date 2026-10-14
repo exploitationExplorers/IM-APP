@@ -17,6 +17,7 @@ import { MUTE_OPTIONS } from '@/constants/mute'
 import { useContactStore } from '@/stores/contact'
 import { useUserStore } from '@/stores/user'
 import type { GroupInfo, GroupMember, GroupMemberMuteResult } from '@/types'
+import { formatEventTime } from '@/utils/format'
 
 useAuthGuard()
 
@@ -195,6 +196,11 @@ function goInvite() {
 
 function friendRemark(member: GroupMember) {
   return contactStore.remarkOf(member.id)
+}
+
+function joinTimeText(member: GroupMember) {
+  const text = formatEventTime(member.joinedAt)
+  return text ? `入群 ${text}` : ''
 }
 
 /** 好友备注优先，和群聊里的名字保持一致 */
@@ -385,6 +391,7 @@ async function onRemoveMember(member: GroupMember) {
             v-if="friendRemark(member) && member.nickname && friendRemark(member) !== member.nickname"
             class="origin-name"
           >昵称：{{ member.nickname }}</text>
+          <text v-if="joinTimeText(member)" class="origin-name">{{ joinTimeText(member) }}</text>
         </view>
         <view v-if="canActOn(member)" class="btn-actions">
           <view class="btn-mute" @click.stop="member.isMuted ? onUnmute(member) : onMute(member)">

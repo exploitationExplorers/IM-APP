@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"im-app-server/internal/models"
 
@@ -317,14 +318,26 @@ func (r *ContactRepo) UpdateContactRemark(ctx context.Context, uid, friendID, re
 
 func (r *ContactRepo) GetContact(ctx context.Context, uid, friendID string) (models.Contact, error) {
 	var item models.Contact
+	var friendSince time.Time
+	var lastSeen *time.Time
 	err := r.DB.QueryRow(ctx, `
 		SELECT u.id::text, COALESCE(u.public_id,''), u.nickname, u.avatar, COALESCE(f.remark,''),
-			EXISTS(SELECT 1 FROM user_blocks b WHERE b.user_id=$1::uuid AND b.blocked_id=f.friend_id)
+			EXISTS(SELECT 1 FROM user_blocks b WHERE b.user_id=$1::uuid AND b.blocked_id=f.friend_id),
+			f.created_at, u.last_seen_at
 		FROM friendships f
 		JOIN users u ON u.id = f.friend_id
 		WHERE f.user_id=$1 AND f.friend_id=$2`, uid, friendID,
-	).Scan(&item.ID, &item.PublicID, &item.Nickname, &item.Avatar, &item.Remark, &item.IsBlocked)
-	return item, err
+	).Scan(&item.ID, &item.PublicID, &item.Nickname, &item.Avatar, &item.Remark, &item.IsBlocked, &friendSince, &lastSeen)
+	if err != nil {
+		return item, err
+	}
+	if !friendSince.IsZero() {
+		item.FriendSince = friendSince.UTC().Format(time.RFC3339)
+	}
+	if lastSeen != nil && !lastSeen.IsZero() {
+		item.LastSeenAt = lastSeen.UTC().Format(time.RFC3339)
+	}
+	return item, nil
 }
 
 // ListCommonGroups 双方共同所在的群

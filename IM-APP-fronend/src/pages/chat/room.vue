@@ -32,6 +32,7 @@ import {
 import { pickLocalImages, requestAndroidAlbumPermission } from '@/utils/file-upload'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
+import { fetchContact } from '@/api/contact'
 import { fetchGroupReadState, reportGroupReadCursor, resolveIMGroupByIM } from '@/api/im'
 import {
   acceptGroupInvitation,
@@ -48,7 +49,7 @@ import {
   replaceOpenIMAdminLabel,
 } from '@/utils/im-notification'
 import { getStatusBarHeight } from '@/utils/status-bar'
-import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
+import { formatChatDayLabel, formatLastSeen, formatMeridiemClock, quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
 import { playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
 import {
@@ -95,6 +96,8 @@ const peerAvatar = ref(APP_CONFIG.defaultAvatarUrl)
 const chatType = ref<'private' | 'group'>('group')
 /** 业务侧的好友 / 群 ID，仅用于跳资料页 */
 const businessId = ref('')
+/** 私聊对方最近上线，顶栏展示离线时间 */
+const peerLastSeenAt = ref('')
 const memberCount = ref(0)
 const myRole = ref<'owner' | 'admin' | 'member'>('member')
 /** 进入会话后拿到的会话对象，用于反查资料页所需的业务 ID */
@@ -419,6 +422,54 @@ watch(
   },
 )
 
+function calendarDayKey(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+
+/** 跨天时在消息上方出「昨天 / 星期X / 10月14日」，同一天只出一次 */
+function dayLabelOf(message: ChatMessage, index: number): string {
+  const key = calendarDayKey(message.createdAt)
+  if (!key) return ''
+  const prev = index > 0 ? renderMessages.value[index - 1] : undefined
+  if (prev && calendarDayKey(prev.createdAt) === key) return ''
+  return formatChatDayLabel(message.createdAt)
+}
+
+function systemClockOf(message: ChatMessage): string {
+  return formatMeridiemClock(message.createdAt)
+}
+
+const presenceText = computed(() => {
+  if (chatType.value !== 'private') return ''
+  const peer = convRef.value?.peerUserId || ''
+  return formatLastSeen(peerLastSeenAt.value, peer ? chatStore.isPeerOnline(peer) : false)
+})
+
+async function loadPeerPresence() {
+  if (chatType.value !== 'private') {
+    peerLastSeenAt.value = ''
+    return
+  }
+  let id = businessId.value
+  if (!id) {
+    try {
+      id = await resolveBusinessTarget()
+    } catch {
+      id = ''
+    }
+    if (id) businessId.value = id
+  }
+  if (!id) return
+  try {
+    const contact = await fetchContact(id)
+    peerLastSeenAt.value = contact.lastSeenAt || ''
+  } catch {
+    peerLastSeenAt.value = ''
+  }
+}
+
 function systemTextOf(message: ChatMessage): string {
   // 有原始通知体时现场按好友备注重排「X 邀请 Y」，避免入库时备注索引未就绪
   const raw = chatStore.getRawMessage(message.id)
@@ -645,7 +696,10 @@ onShow(() => {
     scheduleGroupReadReport()
     startGroupReadPolling()
   }
-  if (chatType.value === 'private') refreshPrivateTitle()
+  if (chatType.value === 'private') {
+    refreshPrivateTitle()
+    void loadPeerPresence()
+  }
   if (forwardStore.consumeSucceeded()) {
     actions.cancelSelect()
     successVisible.value = true
@@ -874,6 +928,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     if (chatType.value === 'private') {
       void contactStore.ensureRemarkIndex().then(() => refreshPrivateTitle())
       refreshPrivateTitle()
+      void loadPeerPresence()
     } else if (chatType.value === 'group') {
       // 邀请人/被邀请人系统提示依赖备注索引
       void contactStore.ensureRemarkIndex()
@@ -2400,6 +2455,7 @@ function pickFavorite() {
       <!-- <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text> -->
       <view class="header-title" @click="goToProfile" @longpress.stop="copyHeaderTitle">
         <text class="header-title-text" selectable>{{ title }}</text>
+        <text v-if="presenceText" class="header-presence">{{ presenceText }}</text>
       </view>
       <view class="header-icon-wrap">
         <view class="header-icon" @click.stop="onHeaderMoreClick">⋯</view>
@@ -2453,7 +2509,7 @@ function pickFavorite() {
           <text class="msg-loading-older-text">加载中…</text>
         </view>
         <view
-          v-for="m in renderMessages"
+          v-for="(m, msgIndex) in renderMessages"
           :id="`msg_${m.id}`"
           :key="m.id"
           class="msg-row"
@@ -2463,8 +2519,12 @@ function pickFavorite() {
           <view v-if="actions.selecting.value && m.type !== 'system'" class="msg-check" :class="{ on: actions.selectedIds.value.has(m.id) }">
             <text v-if="actions.selectedIds.value.has(m.id)">✓</text>
           </view>
+          <view v-if="dayLabelOf(m, msgIndex)" class="day-chip">
+            <text class="day-chip-text">{{ dayLabelOf(m, msgIndex) }}</text>
+          </view>
           <view v-if="m.type === 'system'" class="sys-tip">
             <text class="sys-tip-text">{{ systemTextOf(m) }}</text>
+            <text v-if="systemClockOf(m)" class="sys-tip-time">{{ systemClockOf(m) }}</text>
           </view>
           <ChatBubble
             v-else
@@ -2676,8 +2736,9 @@ function pickFavorite() {
 .chat-header {
   display: flex;
   align-items: center;
-  height: 94rpx;
-  padding: 0 26rpx;
+  min-height: 94rpx;
+  height: auto;
+  padding: 8rpx 26rpx;
   box-sizing: content-box;
   background: #ffffff;
   border-bottom: 1rpx solid #ececec;
@@ -2725,6 +2786,18 @@ function pickFavorite() {
   color: #111;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.header-presence {
+  display: block;
+  margin-top: 2rpx;
+  font-size: 22rpx;
+  font-weight: 400;
+  line-height: 1.3;
+  color: #8a8f9c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-icon-wrap {
@@ -2898,6 +2971,7 @@ function pickFavorite() {
 
 .msg-row.selecting {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   padding-left: 8rpx;
 }
@@ -2927,9 +3001,27 @@ function pickFavorite() {
   background: #0a2fc2;
 }
 
-.sys-tip {
+.day-chip {
   display: flex;
   justify-content: center;
+  flex: 0 0 100%;
+  width: 100%;
+  padding: 8rpx 0 4rpx;
+  box-sizing: border-box;
+}
+
+.day-chip-text {
+  font-size: 24rpx;
+  color: #8a8f9c;
+  line-height: 1.4;
+}
+
+.sys-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   padding: 12rpx 32rpx;
 }
 
@@ -2938,6 +3030,13 @@ function pickFavorite() {
   color: #333333;
   text-align: center;
   line-height: 1.5;
+}
+
+.sys-tip-time {
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #8a8f9c;
+  line-height: 1.4;
 }
 
 .composer {

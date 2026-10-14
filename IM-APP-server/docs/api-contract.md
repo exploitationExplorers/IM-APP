@@ -364,7 +364,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### GET `/api/v1/contacts/:id`
 
-好友详情（含备注、标签、共同群组）。
+好友详情（含备注、标签、共同群组）。`friendSince` 是成为好友的时间，`lastSeenAt` 是对方最近上线时间（可能为空）。
 
 **Response**
 ```json
@@ -374,6 +374,8 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
   "nickname": "bug001",
   "avatar": "https://...",
   "remark": "",
+  "friendSince": "2026-10-14T03:29:00Z",
+  "lastSeenAt": "2026-10-14T03:29:00Z",
   "tags": [{ "id": "uuid", "name": "同事", "memberCount": 3 }],
   "commonGroups": [{ "id": "uuid", "name": "观察世界的窗口", "avatar": "", "conversationId": "uuid" }]
 }
@@ -596,13 +598,13 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 群成员列表（分页）。Query：`groupId`（必填）、`cursor`、`limit`（默认 100，最大 200）。
 
-列表按角色排序：群主 → 管理员 → 普通成员，同角色再按用户 ID。  
+列表按角色排序：群主 → 管理员 → 普通成员，同角色再按用户 ID。每条带 `joinedAt`（入群时间）。  
 `nextCursor` 格式为 `{roleRank}:{userId}`（`0=owner` / `1=admin` / `2=member`），与排序键一致；旧客户端只传 `userId` 时服务端按 member 档兜底。
 
 **Response `data`**
 ```json
 {
-  "items": [{ "id": "uuid", "nickname": "成员", "role": "member" }],
+  "items": [{ "id": "uuid", "nickname": "成员", "role": "member", "joinedAt": "2026-10-14T03:29:00Z" }],
   "nextCursor": "2:uuid",
   "hasMore": false
 }

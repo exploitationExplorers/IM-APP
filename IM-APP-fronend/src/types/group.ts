@@ -95,6 +95,8 @@ export interface GroupMember {
   /** 是否被禁言（后端成员列表已带禁言状态） */
   isMuted?: boolean
   mutedUntil?: string | null
+  /** 入群时间 */
+  joinedAt?: string
 }
 
 /**

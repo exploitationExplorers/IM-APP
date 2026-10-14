@@ -16,6 +16,7 @@ import ImSwitch from '@/components/ImSwitch.vue'
 import { MessageReceiveOptType } from 'openim-uniapp-polyfill'
 import { setConversationPin, setConversationRecvOpt } from '@/utils/openim'
 import { safeBack } from '@/utils/nav'
+import { formatEventTime, formatLastSeen } from '@/utils/format'
 import type { Contact, GroupPreview } from '@/types'
 
 const props = withDefaults(
@@ -55,6 +56,11 @@ const groups = computed(() => contact.value?.commonGroups || [])
 /** 对齐参考站：详情页最多展示 3 个，其余走「查看全部」 */
 const previewGroups = computed(() => groups.value.slice(0, 3))
 const showAllGroupsLink = computed(() => groups.value.length > 3)
+const friendSinceText = computed(() => formatEventTime(contact.value?.friendSince))
+const lastSeenText = computed(() => {
+  const id = (contact.value?.id || '').replace(/-/g, '')
+  return formatLastSeen(contact.value?.lastSeenAt, id ? chatStore.isPeerOnline(id) : false)
+})
 
 onLoad((query) => {
   if (props.embedded) return
@@ -338,6 +344,18 @@ function onDelete() {
                 @dblclick.stop="copyText(contact.remark, '已复制备注')"
               >{{ contact.remark }}</text>
               <image class="chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+            </view>
+          </view>
+          <view v-if="friendSinceText" class="row">
+            <text class="label">添加时间</text>
+            <view class="row-right">
+              <text class="value">{{ friendSinceText }}</text>
+            </view>
+          </view>
+          <view v-if="lastSeenText" class="row">
+            <text class="label">最近上线</text>
+            <view class="row-right">
+              <text class="value">{{ lastSeenText }}</text>
             </view>
           </view>
           <view class="row">

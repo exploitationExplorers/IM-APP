@@ -50,7 +50,7 @@ func main() {
 		"im_group_read_cursors":   {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
 		"group_member_limit_logs": {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
 		"group_message_purges":    {"group_id", "user_id", "purged_at"},
-		"users":                   {"id", "public_id", "public_id_changed_at"},
+		"users":                   {"id", "public_id", "public_id_changed_at", "last_seen_at"},
 		"groups":                  {"id", "public_id", "public_id_changed_at"},
 		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
@@ -277,7 +277,7 @@ func main() {
 		api.POST("/auth/logout", authH.Logout)
 
 		auth := api.Group("")
-		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.NoStore())
+		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.TouchLastSeen(userRepo.TouchLastSeen), middleware.NoStore())
 		{
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)

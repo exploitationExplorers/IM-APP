@@ -19,6 +19,10 @@ export interface Contact {
   tagNames?: string[]
   tags?: ContactTagItem[]
   commonGroups?: GroupPreview[]
+  /** 成为好友的时间 */
+  friendSince?: string
+  /** 对方最近上线时间 */
+  lastSeenAt?: string
 }
 
 export interface ContactPage {

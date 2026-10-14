@@ -23,7 +23,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
 import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
-import { formatClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
+import { formatMeridiemClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 import { soundMetaOf } from '@/utils/openim'
 
 const props = defineProps<{
@@ -335,7 +335,7 @@ function openFile() {
   void openChatFile(props.message.content)
 }
 
-const timeText = computed(() => formatClock(props.message.createdAt))
+const timeText = computed(() => formatMeridiemClock(props.message.createdAt))
 
 /** 时长格式对齐设计稿：12'' / 1'12''（微信式） */
 function formatVoiceDuration(seconds: number) {

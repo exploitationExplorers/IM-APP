@@ -265,6 +265,18 @@ func (r *UserRepo) ResolveUserQRCode(ctx context.Context, token string) (models.
 	return u, err
 }
 
+// TouchLastSeen 记下最近上线。60 秒内重复调用由 SQL 条件吞掉，避免每次请求都写库。
+func (r *UserRepo) TouchLastSeen(ctx context.Context, userID string) error {
+	if r == nil || r.DB == nil || userID == "" {
+		return nil
+	}
+	_, err := r.DB.Exec(ctx, `
+		UPDATE users SET last_seen_at = NOW()
+		WHERE id=$1::uuid
+		  AND (last_seen_at IS NULL OR last_seen_at < NOW() - INTERVAL '60 seconds')`, userID)
+	return err
+}
+
 // UpdatePassword 更新登录密码
 func (r *UserRepo) UpdatePassword(ctx context.Context, userID, passwordHash string) error {
 	tag, err := r.DB.Exec(ctx, `

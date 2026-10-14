@@ -142,6 +142,64 @@ export function formatClock(iso: string): string {
   return `${hh}:${mm}`
 }
 
+/** 聊天气泡 / 系统提示用的上午下午时间，例如「上午 11:29」「下午 9:08」 */
+export function formatMeridiemClock(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const hour24 = date.getHours()
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  let hour = hour24 % 12
+  if (hour === 0) hour = 12
+  return `${hour24 < 12 ? '上午' : '下午'} ${hour}:${minute}`
+}
+
+/**
+ * 消息列表按天分隔。今天不单独出日期条（只看具体钟点）；
+ * 昨天 / 近 7 天星期 / 更早的月日，和参考聊天记录一致。
+ */
+export function formatChatDayLabel(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const now = new Date()
+  const start = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diff = Math.round((start(now) - start(date)) / 86400000)
+  if (diff <= 0) return ''
+  if (diff === 1) return '昨天'
+  if (diff < 7) return `星期${'日一二三四五六'[date.getDay()]}`
+  const monthDay = `${date.getMonth() + 1}月${date.getDate()}日`
+  if (date.getFullYear() !== now.getFullYear()) return `${date.getFullYear()}年${monthDay}`
+  return monthDay
+}
+
+/** 加好友 / 入群这类要给人看的时间点：今天带钟点，更早带日期 */
+export function formatEventTime(iso?: string): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const day = formatChatDayLabel(iso) || '今天'
+  const clock = formatMeridiemClock(iso)
+  return clock ? `${day} ${clock}` : day
+}
+
+/**
+ * 私聊顶栏离线时间，方便判断客户多久没上线。
+ * 在线优先；没有最后上线时间时不展示，避免把新号误写成「很久未上线」。
+ */
+export function formatLastSeen(iso: string | undefined, online: boolean): string {
+  if (online) return '在线'
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const diff = Date.now() - date.getTime()
+  if (diff < 60 * 1000) return '刚刚在线'
+  if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}分钟前在线`
+  if (diff < 24 * 60 * 60 * 1000) return '今天在线'
+  if (diff < 2 * 24 * 60 * 60 * 1000) return '昨天在线'
+  if (diff < 7 * 24 * 60 * 60 * 1000) return '1周内有上线'
+  if (diff < 30 * 24 * 60 * 60 * 1000) return '1个月内有上线'
+  return '很久未上线'
+}
+
 /** 将文本中的 URL 拆成片段，便于渲染可点击链接 */
 export function splitTextWithLinks(text: string): Array<{ type: 'text' | 'link'; value: string }> {
   const urlRe = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi

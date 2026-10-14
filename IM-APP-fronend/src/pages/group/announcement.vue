@@ -24,17 +24,12 @@ const history = ref<GroupAnnouncementHistoryItem[]>([])
 
 const count = computed(() => announcement.value.length)
 
-/** 历史第一条常与「当前公告」相同，列表里再画一遍会像重复 */
-const historyDisplay = computed(() => {
-  const list = history.value
-  if (!list.length) return list
+function isCurrentHistory(item: GroupAnnouncementHistoryItem) {
   const cur = announcement.value.trim()
   const curImgs = images.value.filter((u) => isRemoteUrl(u)).join('|')
-  const first = list[0]
-  const firstImgs = (Array.isArray(first.images) ? first.images : []).filter(Boolean).join('|')
-  if (first.content?.trim() === cur && firstImgs === curImgs) return list.slice(1)
-  return list
-})
+  const firstImgs = (Array.isArray(item.images) ? item.images : []).filter(Boolean).join('|')
+  return (item.content || '').trim() === cur && firstImgs === curImgs
+}
 
 function imagesChanged() {
   if (images.value.length !== originalImages.value.length) return true
@@ -152,7 +147,7 @@ async function onSubmit() {
     originalImages.value = [...nextImages]
     await loadHistory()
     uni.hideLoading()
-    uni.showToast({ title: '已保存', icon: 'success' })
+    uni.showToast({ title: '已发布', icon: 'success' })
   } catch (e) {
     uni.hideLoading()
     uni.showToast({ title: (e as Error)?.message || '保存失败', icon: 'none' })
@@ -177,6 +172,7 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
     <scroll-view scroll-y class="body" :show-scrollbar="false">
       <view v-if="canEdit" class="form">
         <text class="section-label">编辑公告</text>
+        <text class="section-hint">改完点发布，会生成下一条公告，最多保留 10 条</text>
         <textarea
           class="textarea"
           v-model="announcement"
@@ -213,10 +209,10 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
       <view class="history-head">
         <text class="history-title">历史发布记录（最多 10 条）</text>
       </view>
-      <view v-if="!historyDisplay.length" class="history-empty">暂无历史公告</view>
-      <view v-for="item in historyDisplay" :key="item.id" class="history-card">
+      <view v-if="!history.length" class="history-empty">暂无历史公告</view>
+      <view v-for="item in history" :key="item.id" class="history-card">
         <view class="history-meta">
-          <text class="history-author">{{ item.publisherName || '管理员' }}</text>
+          <text class="history-author">{{ item.publisherName || '管理员' }}{{ isCurrentHistory(item) ? ' · 当前' : '' }}</text>
           <text class="history-time">{{ historyTime(item) }}</text>
         </view>
         <text class="history-content">{{ item.content || '（空公告）' }}</text>
@@ -238,7 +234,7 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
     </scroll-view>
 
     <view v-if="canEdit" class="footer">
-      <view class="btn" :class="{ disabled: !canSubmit }" @click="onSubmit">确认</view>
+      <view class="btn" :class="{ disabled: !canSubmit }" @click="onSubmit">发布</view>
     </view>
   </view>
 </template>
@@ -268,9 +264,17 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
 
 .section-label {
   display: block;
-  margin-bottom: 16rpx;
+  margin-bottom: 8rpx;
   font-size: 26rpx;
   color: #636e86;
+}
+
+.section-hint {
+  display: block;
+  margin-bottom: 16rpx;
+  font-size: 22rpx;
+  color: #8a8f9c;
+  line-height: 1.5;
 }
 
 .textarea {

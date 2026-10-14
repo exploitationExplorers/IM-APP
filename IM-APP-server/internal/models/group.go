@@ -53,6 +53,8 @@ type GroupMember struct {
 	MemberRemark  string     `json:"memberRemark,omitempty"`
 	IsMuted       bool       `json:"isMuted"`
 	MutedUntil    *time.Time `json:"mutedUntil"`
+	// JoinedAt 入群时间
+	JoinedAt string `json:"joinedAt,omitempty"`
 }
 
 // GroupMessagePurge 记录「某成员在群内的消息被管理员清理过」。

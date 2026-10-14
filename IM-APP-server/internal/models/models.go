@@ -58,6 +58,10 @@ type Contact struct {
 	IsBlocked    bool             `json:"isBlocked"`
 	Tags         []ContactTagItem `json:"tags,omitempty"`
 	CommonGroups []GroupPreview   `json:"commonGroups"`
+	// FriendSince 成为好友的时间，挽回客户时看是什么时候加上的
+	FriendSince string `json:"friendSince,omitempty"`
+	// LastSeenAt 对方最近上线；空表示还没有记录
+	LastSeenAt string `json:"lastSeenAt,omitempty"`
 }
 
 // ContactPage 通讯录分页。全量好友请走转发 generate all_friends，不要一次拉完。

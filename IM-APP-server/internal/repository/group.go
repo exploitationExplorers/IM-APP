@@ -438,7 +438,8 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid, cursor string
 		SELECT u.id::text, COALESCE(u.nickname,''), COALESCE(gm.nickname,''),
 			CASE WHEN COALESCE(gm.nickname,'')='' THEN COALESCE(u.nickname,'') ELSE gm.nickname END,
 			COALESCE(u.avatar,''), gm.role,
-			CASE WHEN gm.muted_until > NOW() THEN gm.muted_until ELSE NULL END
+			CASE WHEN gm.muted_until > NOW() THEN gm.muted_until ELSE NULL END,
+			gm.joined_at
 		FROM group_members gm
 		JOIN users u ON u.id = gm.user_id
 		WHERE gm.group_id=$1::uuid AND COALESCE(u.status,'active')='active'`
@@ -463,10 +464,14 @@ func (r *GroupRepo) ListMembers(ctx context.Context, groupID, uid, cursor string
 	items := make([]models.GroupMember, 0, limit+1)
 	for rows.Next() {
 		var m models.GroupMember
-		if err := rows.Scan(&m.ID, &m.Nickname, &m.GroupNickname, &m.DisplayName, &m.Avatar, &m.Role, &m.MutedUntil); err != nil {
+		var joinedAt time.Time
+		if err := rows.Scan(&m.ID, &m.Nickname, &m.GroupNickname, &m.DisplayName, &m.Avatar, &m.Role, &m.MutedUntil, &joinedAt); err != nil {
 			return page, err
 		}
 		m.IsMuted = m.MutedUntil != nil
+		if !joinedAt.IsZero() {
+			m.JoinedAt = joinedAt.UTC().Format(time.RFC3339)
+		}
 		items = append(items, m)
 	}
 	if err := rows.Err(); err != nil {
