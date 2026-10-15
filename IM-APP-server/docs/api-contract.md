@@ -731,13 +731,31 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 - 两者都可省略或为空数组；省略 fileIds / keep 表示清空配图（仍以本次提交合并结果为准）。
 - 群详情返回 `announcementImages: string[]`。
 
-正式写接口为 `POST /api/v1/groups/settings/update`（`groupId` 在 Body）。每次成功更新公告会写入历史，每群最多保留最近 **10** 条（含图片）。
+正式写接口为 `POST /api/v1/groups/settings/update`（`groupId` 在 Body）。群资料上的 `announcement` 是最新一条，供聊天顶栏使用。
+
+公告列表本身最多 **10** 条，各自独立，可改、可删。相同正文和配图不会再插一条。
 
 ### GET `/api/v1/group-announcements?groupId=100001`
 
-返回当前群近期公告历史（最多 10 条，新在前）。仅群成员可查。
+返回当前群公告（最多 10 条，新在前）。仅群成员可查。
 
 **Response** `{ "items": [{ "id", "content", "images", "publisherId", "publisherName", "createdAt" }] }`
+
+### POST `/api/v1/group-announcements/create`
+
+群主/管理员新增一条。已有 10 条时拒绝。配图只接受本次新上传的 fileId。
+
+**Body** `{ "groupId": "100001", "content": "公告", "announcementImageFileIds": [] }`
+
+### POST `/api/v1/group-announcements/update`
+
+按 id 改某一条，不新增记录。`keepAnnouncementImages` 必须是这一条里已有的图片 URL。
+
+**Body** `{ "groupId": "100001", "announcementId": "uuid", "content": "公告", "announcementImageFileIds": [], "keepAnnouncementImages": [] }`
+
+### POST `/api/v1/group-announcements/delete`
+
+**Body** `{ "groupId": "100001", "announcementId": "uuid" }`
 
 ### PUT `/api/v1/groups/:id/me/nickname`
 

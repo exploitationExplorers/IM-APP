@@ -101,6 +101,259 @@ function isPickCancelError(err: unknown): boolean {
   return /cancel|用户取消|12/i.test(msg) || (err as { code?: number })?.code === 12
 }
 
+/** 华为 / 荣耀 / 鸿蒙：chooseImage 常直接给不可读的 content://（鸿蒙 4 尤其明显） */
+function isHuaweiLikeDevice(): boolean {
+  try {
+    const info = uni.getSystemInfoSync() as UniApp.GetSystemInfoResult & {
+      brand?: string
+      manufacturer?: string
+      romName?: string
+      osName?: string
+      hostName?: string
+    }
+    const blob = [
+      info.brand,
+      info.manufacturer,
+      info.romName,
+      info.osName,
+      info.hostName,
+      info.platform,
+      info.system,
+    ]
+      .map((v) => String(v || '').toLowerCase())
+      .join(' ')
+    return /huawei|honor|harmony|hongmeng|harmonyos/.test(blob)
+  } catch {
+    return false
+  }
+}
+
+function isContentUri(path: string): boolean {
+  return /^content:\/\//i.test(path || '')
+}
+
+function isSandboxLocalPath(path: string): boolean {
+  const p = path || ''
+  if (!p || isContentUri(p)) return false
+  return (
+    p.startsWith('_doc/') ||
+    p.startsWith('_www/') ||
+    p.startsWith('file://') ||
+    p.includes('/files/') ||
+    p.includes('/cache/') ||
+    p.includes('uniapp_temp') ||
+    p.includes('/Android/data/')
+  )
+}
+
+function probeLocalFileSize(filePath: string): Promise<number> {
+  return new Promise((resolve) => {
+    uni.getFileInfo({
+      filePath,
+      success: (res) => resolve(Number(res.size) || 0),
+      fail: () => resolve(0),
+    })
+  })
+}
+
+/** 用 nativeObj.Bitmap 把 content:// / 临时路径落到 _doc jpeg（鸿蒙 4 上比 plus.io 稳） */
+function saveViaNativeBitmap(srcPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      if (typeof plus === 'undefined' || !plus.nativeObj?.Bitmap) {
+        reject(new Error('无法读取图片'))
+        return
+      }
+      const dest = `_doc/picked_${Date.now()}.jpg`
+      const bitmap = new plus.nativeObj.Bitmap(`img_${Date.now()}`)
+      const recycle = () => {
+        try {
+          bitmap.clear()
+        } catch {
+          /* ignore */
+        }
+      }
+      bitmap.load(
+        srcPath,
+        () => {
+          bitmap.save(
+            dest,
+            { overwrite: true, format: 'jpg', quality: 85 },
+            () => {
+              recycle()
+              resolve(dest)
+            },
+            (err) => {
+              recycle()
+              reject(new Error(String((err as { message?: string })?.message || '无法保存图片')))
+            },
+          )
+        },
+        (err) => {
+          recycle()
+          reject(new Error(String((err as { message?: string })?.message || '无法读取图片')))
+        },
+      )
+    } catch (e) {
+      reject(e instanceof Error ? e : new Error('无法读取图片'))
+    }
+  })
+}
+
+/** 鸿蒙 4 / Android 14：content:// 用 ContentResolver 拷进应用目录，plus.io 经常解不开 */
+function copyContentUriViaAndroid(contentUri: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      if (typeof plus === 'undefined' || !plus.android) {
+        reject(new Error('无法读取图片'))
+        return
+      }
+      // plus.android 的 d.ts 参数签名偏窄，这里按运行时可变参数调用
+      const android = plus.android as unknown as {
+        runtimeMainActivity: () => unknown
+        importClass: (name: string) => { parse?: (uri: string) => unknown; TYPE?: unknown; newInstance?: (...args: unknown[]) => unknown }
+        invoke: (target: unknown, method: string, ...args: unknown[]) => unknown
+        newObject: (className: string, ...args: unknown[]) => unknown
+      }
+      const main = android.runtimeMainActivity()
+      const Uri = android.importClass('android.net.Uri')
+      const ReflectArray = android.importClass('java.lang.reflect.Array')
+      const Byte = android.importClass('java.lang.Byte')
+      android.importClass('java.io.File')
+      android.importClass('java.io.FileOutputStream')
+      android.importClass('java.io.BufferedInputStream')
+      const uri = Uri.parse!(contentUri)
+      const resolver = android.invoke(main, 'getContentResolver')
+      const input = android.invoke(resolver, 'openInputStream', uri)
+      if (!input) {
+        reject(new Error('无法读取图片'))
+        return
+      }
+      const destName = `picked_${Date.now()}.jpg`
+      const filesDir = android.invoke(main, 'getFilesDir')
+      const destFile = android.newObject('java.io.File', filesDir, destName)
+      const output = android.newObject('java.io.FileOutputStream', destFile)
+      const bis = android.newObject('java.io.BufferedInputStream', input)
+      const bytes = ReflectArray.newInstance!(Byte.TYPE, 8192)
+      let n = Number(android.invoke(bis, 'read', bytes) || 0)
+      while (n > 0) {
+        android.invoke(output, 'write', bytes, 0, n)
+        n = Number(android.invoke(bis, 'read', bytes) || 0)
+      }
+      android.invoke(bis, 'close')
+      android.invoke(output, 'close')
+      const abs = String(android.invoke(destFile, 'getAbsolutePath') || '')
+      if (!abs) {
+        reject(new Error('无法保存图片'))
+        return
+      }
+      resolve(abs.startsWith('/') ? `file://${abs}` : abs)
+    } catch (e) {
+      reject(e instanceof Error ? e : new Error('无法读取图片'))
+    }
+  })
+}
+
+function copyViaPlusIoToDoc(srcPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!isPlusAvailable()) {
+      reject(new Error('无法读取图片'))
+      return
+    }
+    const destName = `picked_${Date.now()}.jpg`
+    plus.io.resolveLocalFileSystemURL(
+      toAppFileUrl(srcPath),
+      (rawEntry) => {
+        const entry = rawEntry as unknown as {
+          copyTo: (
+            parent: unknown,
+            newName: string,
+            ok: (e: { fullPath?: string; toLocalURL?: () => string }) => void,
+            bad: (err: unknown) => void,
+          ) => void
+        }
+        plus.io.resolveLocalFileSystemURL(
+          '_doc/',
+          (dir) => {
+            entry.copyTo(
+              dir,
+              destName,
+              (copied) => {
+                const local =
+                  (typeof copied.toLocalURL === 'function' ? copied.toLocalURL() : '') ||
+                  copied.fullPath ||
+                  `_doc/${destName}`
+                resolve(local)
+              },
+              reject,
+            )
+          },
+          reject,
+        )
+      },
+      reject,
+    )
+  })
+}
+
+/**
+ * 把相册/相机路径收成应用可读的本地文件。
+ * 鸿蒙 4 的 content:// 不能直接压图、上传、交给 OpenIM，必须先落到沙盒。
+ */
+export async function materializeAppLocalImage(srcPath: string): Promise<string> {
+  const path = String(srcPath || '').trim()
+  if (!path) throw new Error('未获取到图片，请重试')
+  if (!isAppPlatform()) return path
+
+  const tryCompress = async (input: string) => {
+    const compressed = await compressLocalImage(input)
+    if (!compressed || isContentUri(compressed)) return ''
+    const size = await probeLocalFileSize(compressed)
+    return size > 0 ? compressed : ''
+  }
+
+  if (!isContentUri(path)) {
+    const size = await probeLocalFileSize(path)
+    if (size > 0) {
+      const compressed = await tryCompress(path)
+      return compressed || path
+    }
+  }
+
+  const compressed = await tryCompress(path)
+  if (compressed) return compressed
+
+  try {
+    const viaBitmap = await saveViaNativeBitmap(path)
+    const again = await tryCompress(viaBitmap)
+    return again || viaBitmap
+  } catch (e) {
+    console.warn('[image] Bitmap 落盘失败', (e as Error)?.message || e)
+  }
+
+  try {
+    const copied = await copyViaPlusIoToDoc(path)
+    const again = await tryCompress(copied)
+    return again || copied
+  } catch (e) {
+    console.warn('[image] plus.io 拷贝失败', (e as Error)?.message || e)
+  }
+
+  if (isContentUri(path) || !isSandboxLocalPath(path)) {
+    try {
+      const viaAndroid = await copyContentUriViaAndroid(
+        isContentUri(path) ? path : toAppFileUrl(path),
+      )
+      const again = await tryCompress(viaAndroid)
+      return again || viaAndroid
+    } catch (e) {
+      console.warn('[image] ContentResolver 拷贝失败', (e as Error)?.message || e)
+    }
+  }
+
+  throw new Error('无法读取这张图片，请换一张或检查相册权限')
+}
+
 /** plus.gallery.pick：华为上 uni.chooseImage 常挂，系统选择器更稳 */
 function pickViaPlusGallery(opts: {
   count: number
@@ -133,6 +386,7 @@ function pickViaPlusGallery(opts: {
         multiple,
         maximum: opts.count,
         system: opts.system,
+        // 落到应用目录，避免鸿蒙 4 只给一次性 content://
         filename: '_doc/gallery/',
       },
     )
@@ -160,20 +414,55 @@ function chooseImagePaths(opts: {
   })
 }
 
+async function materializePickedPaths(paths: string[]): Promise<string[]> {
+  const out: string[] = []
+  for (const path of paths) {
+    try {
+      out.push(await materializeAppLocalImage(path))
+    } catch (e) {
+      console.warn('[image] 物化选图失败', path, (e as Error)?.message || e)
+    }
+  }
+  if (!out.length && paths.length) {
+    throw new Error('无法读取这张图片，请换一张或检查相册权限')
+  }
+  return out
+}
+
 /**
- * 统一选图：权限 → chooseImage →（空路径/失败）plus.gallery system:true → system:false。
- * 华为 Mate / Harmony 上 chooseImage 常 fail 或 success 空路径，必须有 gallery 兜底。
+ * 统一选图：权限 →（华为/鸿蒙优先 gallery）→ chooseImage → gallery 兜底 → 物化到沙盒。
+ * 鸿蒙 4 上 chooseImage「成功」却返回不可读 content://，不能再直接当本地路径用。
  */
 export async function pickLocalImages(opts?: {
   count?: number
   sourceType?: Array<'album' | 'camera'>
 }): Promise<string[]> {
-  const count = Math.max(1, Math.min(9, opts?.count ?? 1))
+  // 聊天发资料图一次最多 20；其它入口仍可传更小的 count
+  const count = Math.max(1, Math.min(20, opts?.count ?? 1))
   const sourceType = opts?.sourceType?.length ? opts.sourceType : (['album'] as Array<'album' | 'camera'>)
   await requestAndroidAlbumPermission()
 
+  const huaweiLike = isAppPlatform() && isHuaweiLikeDevice()
   let paths: string[] = []
   let chooseErr: unknown
+
+  // 华为/鸿蒙：先走 gallery system:false，直接落到 _doc，避开鸿蒙 4 的 content://
+  if (huaweiLike && sourceType.includes('album') && typeof plus !== 'undefined') {
+    try {
+      paths = await pickViaPlusGallery({ count, system: false })
+      if (paths.length) {
+        try {
+          return await materializePickedPaths(paths)
+        } catch (e) {
+          console.warn('[image] gallery 路径物化失败，继续兜底', (e as Error)?.message || e)
+          paths = []
+        }
+      }
+    } catch (e) {
+      if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
+    }
+  }
+
   try {
     // original 优先：华为 compressed 经常空路径
     paths = await chooseImagePaths({
@@ -186,9 +475,15 @@ export async function pickLocalImages(opts?: {
     chooseErr = e
   }
 
-  // 已有路径（含华为 content://）直接返回，由 sendImageMessage 压图/拷到 _doc；
-  // 这里再弹 gallery 会让用户选两次。
-  if (paths.length) return paths
+  if (paths.length) {
+    try {
+      return await materializePickedPaths(paths)
+    } catch (e) {
+      // 物化失败再试 gallery，不要把坏路径交给上传
+      console.warn('[image] chooseImage 路径不可用，改走 gallery', (e as Error)?.message || e)
+      paths = []
+    }
+  }
 
   if (!isAppPlatform() || typeof plus === 'undefined') {
     if (chooseErr) {
@@ -203,16 +498,15 @@ export async function pickLocalImages(opts?: {
     throw new Error('无法打开相机')
   }
 
-  // chooseImage 空路径时：优先 system:false 落到 _doc（华为 system:true 常给 content://）
   try {
     paths = await pickViaPlusGallery({ count, system: false })
-    if (paths.length) return paths
+    if (paths.length) return materializePickedPaths(paths)
   } catch (e) {
     if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
   }
   try {
     paths = await pickViaPlusGallery({ count, system: true })
-    if (paths.length) return paths
+    if (paths.length) return materializePickedPaths(paths)
   } catch (e) {
     if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
     throw e instanceof Error ? e : new Error('无法打开相册，请检查相册权限')
@@ -241,6 +535,7 @@ function isPlusAvailable(): boolean {
 function toAppFileUrl(path: string): string {
   if (
     path.startsWith('file://') ||
+    path.startsWith('content://') ||
     path.startsWith('http://') ||
     path.startsWith('https://') ||
     path.startsWith('blob:')
@@ -488,22 +783,28 @@ export async function uploadAvatarForProfile(
   remoteUrl?: string,
 ): Promise<string> {
   if (isAppPlatform() && localPath) {
-    // 华为等机型 HEIC / 无扩展名路径直传会被后端 image/* 校验拒绝，先压成 jpeg
-    const compressed = await compressLocalImage(localPath)
-    const meta = await getLocalFileMeta(compressed)
-    const jpegMeta = forceAvatarJpegMeta(meta.fileName, meta.contentType)
-    const init = await createUploadTask({
-      purpose: 'avatar',
-      fileName: jpegMeta.fileName,
-      contentType: jpegMeta.contentType,
-      size: meta.size,
-    })
-    const fileId = init.file.id
-    if (!fileId) throw new Error('创建上传任务失败')
-    if (!init.formUrl || !init.formData) throw new Error('当前环境不支持文件上传')
-    await postLocalFile(init.formUrl, compressed, init.formData)
-    const file = await completeUpload(fileId)
-    return file.id
+    // 鸿蒙 4 等：先物化到沙盒，再压 jpeg；原生直传失败再读字节上传
+    const local = await materializeAppLocalImage(localPath)
+    try {
+      const compressed = await compressLocalImage(local)
+      const meta = await getLocalFileMeta(compressed)
+      const jpegMeta = forceAvatarJpegMeta(meta.fileName, meta.contentType)
+      const init = await createUploadTask({
+        purpose: 'avatar',
+        fileName: jpegMeta.fileName,
+        contentType: jpegMeta.contentType,
+        size: meta.size,
+      })
+      const fileId = init.file.id
+      if (!fileId) throw new Error('创建上传任务失败')
+      if (!init.formUrl || !init.formData) throw new Error('当前环境不支持文件上传')
+      await postLocalFile(init.formUrl, compressed, init.formData)
+      const file = await completeUpload(fileId)
+      return file.id
+    } catch (e) {
+      console.warn('[avatar] 原生直传失败，改走读字节', (e as Error)?.message || e)
+      return uploadViaTask('avatar', await loadImageBytes(local, remoteUrl))
+    }
   }
   return uploadViaTask('avatar', await loadImageBytes(localPath, remoteUrl))
 }
@@ -577,7 +878,13 @@ async function prepareAvatarFile(file: File): Promise<File> {
 /** 上传举报截图并返回 fileId（创建任务 → multipart POST 直传 → 确认完成） */
 export async function uploadReportImage(localPath: string): Promise<string> {
   if (isAppPlatform()) {
-    return uploadViaNativeFile('image', localPath)
+    const local = await materializeAppLocalImage(localPath)
+    try {
+      return await uploadViaNativeFile('image', local)
+    } catch (e) {
+      console.warn('[image] 举报图直传失败，改走读字节', (e as Error)?.message || e)
+      return uploadViaTask('image', await loadImageBytes(local))
+    }
   }
   return uploadViaTask('image', await loadImageBytes(localPath))
 }
@@ -585,7 +892,13 @@ export async function uploadReportImage(localPath: string): Promise<string> {
 /** 上传自定义表情并返回 fileId */
 export async function uploadSticker(localPath: string): Promise<string> {
   if (isAppPlatform()) {
-    return uploadViaNativeFile('sticker', localPath)
+    const local = await materializeAppLocalImage(localPath)
+    try {
+      return await uploadViaNativeFile('sticker', local)
+    } catch (e) {
+      console.warn('[image] 表情直传失败，改走读字节', (e as Error)?.message || e)
+      return uploadViaTask('sticker', await loadImageBytes(local))
+    }
   }
   return uploadViaTask('sticker', await loadImageBytes(localPath))
 }

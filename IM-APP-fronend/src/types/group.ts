@@ -118,7 +118,7 @@ export interface GroupMemberMuteResult {
   changedAt: string
 }
 
-/** 群公告历史条目 */
+/** 群公告一条，每群最多同时存在 10 条 */
 export interface GroupAnnouncementHistoryItem {
   id: string
   content: string

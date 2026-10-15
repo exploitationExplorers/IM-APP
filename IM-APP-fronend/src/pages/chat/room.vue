@@ -577,6 +577,7 @@ const actions = useChatMessageActions({
   onMuteChanged: () => {
     void refreshGroupMeta()
   },
+  onRetry: (m) => onRetry(m),
 })
 
 const pinnedMessage = computed(
@@ -1077,15 +1078,23 @@ function onMsgScroll(e: { detail?: { scrollTop?: number } }) {
   else if (top > 120) stickToBottom.value = false
 }
 
-/** H5 桌面：列表是倒置的，滚轮/触控板方向要再翻回来（触摸滑动不受影响） */
+/**
+ * H5 桌面：列表倒置，滚轮/触控板方向要再翻回来。
+ * uni-scroll-view 里有两层 .uni-scroll-view，外层只是包裹；真正 overflow 的是内容节点的父元素。
+ * 滚错节点再 preventDefault，滚轮会被吃掉、列表完全不动。触摸滑动不走这里。
+ */
 function onMsgListWheel(e: WheelEvent) {
   if (e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
-  const target = e.target instanceof Element ? e.target : null
-  const scroller = target?.closest('.msg-list')?.querySelector('.uni-scroll-view') as HTMLElement | null
-  if (!scroller) return
+  const node = e.target instanceof Element ? e.target : e.target instanceof Node ? e.target.parentElement : null
+  const root = node?.closest('.msg-list')
+  const scroller = root?.querySelector('.uni-scroll-view-content')?.parentElement
+  if (!(scroller instanceof HTMLElement)) return
+  const max = scroller.scrollHeight - scroller.clientHeight
+  if (max <= 1) return
   e.preventDefault()
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1
-  scroller.scrollTop -= e.deltaY * unit
+  const next = scroller.scrollTop - e.deltaY * unit
+  scroller.scrollTop = Math.min(max, Math.max(0, next))
 }
 
 function jumpToBottom() {
@@ -1105,14 +1114,27 @@ watch(
   },
 )
 
+/** H5：v-model 清空后 uni-textarea 常不刷 DOM，回车发送会留下旧字；只动网页端 */
+function setComposerText(text: string) {
+  input.value = text
+  if (!isH5ComposerPlatform()) return
+  const el = getComposerTextareaEl()
+  if (el && el.value !== text) el.value = text
+}
+
 async function onSend() {
   if (composerBlocked.value) return
+  // H5 回车发送：以 textarea 实值为准，避免 v-model 滞后读到空串又把 DOM 旧字留着
+  if (isH5ComposerPlatform()) {
+    const el = getComposerTextareaEl()
+    if (el && el.value !== input.value) input.value = el.value
+  }
   const text = input.value.trim()
   if (!text) return
   // 发送前先快照：失败要回填输入；atList 无论成败都清空，避免残留劫持后续普通消息
   const pendingAt = [...actions.atList.value]
   const hadQuote = !!actions.quote.value
-  input.value = ''
+  setComposerText('')
   userHoldingList = false
   actions.atList.value = []
   showPlusPanel.value = false
@@ -1137,9 +1159,11 @@ async function onSend() {
       await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
     }
     await nextTick()
+    // 发送成功后再清一次：防止回车键后续事件把字写回输入框
+    setComposerText('')
     scrollToBottom(true)
   } catch (e) {
-    input.value = text
+    setComposerText(text)
     if (hadQuote && !actions.quote.value) {
       /* quote 已清则不再恢复，避免重复引用 */
     }
@@ -1165,6 +1189,8 @@ function focusComposer() {
     composerFocusFlag.value = true
     const el = getComposerTextareaEl()
     if (!el) return
+    // 与 v-model 对齐，避免清空后 DOM 仍是旧内容、光标落在「幽灵字」末尾
+    if (el.value !== input.value) el.value = input.value
     el.focus()
     const len = el.value.length
     try {
@@ -2257,8 +2283,8 @@ function onPlus() {
   }
 }
 
-/** 相册 / 文件一次最多可选数量 */
-const MAX_PICK_COUNT = 9
+/** 相册 / 文件一次最多可选数量（资料图一次发完，避免卡在 9 张要分两次） */
+const MAX_PICK_COUNT = 20
 
 function onPlayVideo(message: ChatMessage) {
   uni.navigateTo({
@@ -2313,7 +2339,7 @@ async function sendPickedImagePaths(paths: string[]) {
   }
 }
 
-/** 相册多选：一次最多 9 张；华为走 pickLocalImages 的 gallery 兜底 */
+/** 相册多选：一次最多 20 张；华为走 pickLocalImages 的 gallery 兜底 */
 function pickImage() {
   afterPlusClosed(() => {
     void pickLocalImages({ count: MAX_PICK_COUNT, sourceType: ['album'] })

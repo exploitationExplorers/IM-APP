@@ -208,7 +208,11 @@ func (s *GroupService) UpdateSettings(
 
 	var announcementImages *[]string
 	if announcement != nil {
-		images, err := s.resolveAnnouncementImages(ctx, internalID, uid, announcementImageFileIDs, keepAnnouncementImages)
+		current, err := s.Groups.AnnouncementImagesOf(ctx, internalID)
+		if err != nil {
+			return err
+		}
+		images, err := s.mergeAnnouncementImages(ctx, uid, current, announcementImageFileIDs, keepAnnouncementImages)
 		if err != nil {
 			return err
 		}
@@ -219,10 +223,11 @@ func (s *GroupService) UpdateSettings(
 
 const maxAnnouncementImages = 9
 
-/** 合并保留 URL + 新上传 fileId，上限 9；非法引用直接拒绝 */
-func (s *GroupService) resolveAnnouncementImages(
+/** 合并保留 URL + 新上传 fileId，上限 9；keep 必须落在 allowed 里，防盗链他人资源 */
+func (s *GroupService) mergeAnnouncementImages(
 	ctx context.Context,
-	groupID, uid string,
+	uid string,
+	allowedList []string,
 	fileIDs, keepURLs *[]string,
 ) ([]string, error) {
 	keep := []string{}
@@ -237,12 +242,8 @@ func (s *GroupService) resolveAnnouncementImages(
 		return nil, repository.ErrInvalidGroupOperation
 	}
 
-	current, err := s.Groups.AnnouncementImagesOf(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
 	allowed := map[string]struct{}{}
-	for _, u := range current {
+	for _, u := range allowedList {
 		if u != "" {
 			allowed[u] = struct{}{}
 		}
@@ -303,6 +304,63 @@ func (s *GroupService) ListAnnouncementHistory(ctx context.Context, groupID, uid
 		return nil, err
 	}
 	return s.Groups.ListAnnouncementHistory(ctx, internalID, uid)
+}
+
+func normalizeAnnouncementContent(content string) (string, error) {
+	if len([]rune(content)) > 2000 {
+		return "", repository.ErrInvalidGroupOperation
+	}
+	return content, nil
+}
+
+func (s *GroupService) CreateAnnouncement(ctx context.Context, groupID, uid, content string, fileIDs []string) error {
+	text, err := normalizeAnnouncementContent(content)
+	if err != nil {
+		return err
+	}
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	images, err := s.mergeAnnouncementImages(ctx, uid, nil, &fileIDs, nil)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(text) == "" && len(images) == 0 {
+		return repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.CreateAnnouncement(ctx, internalID, uid, text, images)
+}
+
+func (s *GroupService) UpdateAnnouncement(ctx context.Context, groupID, uid, announcementID, content string, fileIDs, keepURLs []string) error {
+	text, err := normalizeAnnouncementContent(content)
+	if err != nil {
+		return err
+	}
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	allowed, err := s.Groups.AnnouncementImagesOfID(ctx, internalID, announcementID)
+	if err != nil {
+		return err
+	}
+	images, err := s.mergeAnnouncementImages(ctx, uid, allowed, &fileIDs, &keepURLs)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(text) == "" && len(images) == 0 {
+		return repository.ErrInvalidGroupOperation
+	}
+	return s.Groups.UpdateAnnouncement(ctx, internalID, uid, announcementID, text, images)
+}
+
+func (s *GroupService) DeleteAnnouncement(ctx context.Context, groupID, uid, announcementID string) error {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	return s.Groups.DeleteAnnouncement(ctx, internalID, uid, announcementID)
 }
 
 func (s *GroupService) Leave(ctx context.Context, groupID, uid string) error {

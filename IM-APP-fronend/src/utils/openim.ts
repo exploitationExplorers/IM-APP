@@ -1389,16 +1389,22 @@ function copyAppImageToDoc(srcPath: string): Promise<string> {
 
 /**
  * App 发图前把路径收成原生可读文件。
- * 华为 / Harmony：content://、无后缀截图先压 jpeg，压不动再 copy 到 _doc。
+ * 华为 / 鸿蒙 4：content:// 必须先物化到沙盒，否则 FullPath / 上传都会挂。
  */
 async function prepareAppChatImagePath(filePath: string): Promise<string> {
+  try {
+    const { materializeAppLocalImage } = await import('@/utils/file-upload')
+    return await materializeAppLocalImage(filePath)
+  } catch (e) {
+    console.warn('[image] materialize 失败，走旧压缩/拷贝', (e as Error)?.message || e)
+  }
   const compressed = await compressLocalChatImage(filePath)
   if (compressed && !/^content:/i.test(compressed)) return compressed
   if (!/^content:/i.test(filePath) && compressed) return compressed
   try {
     return await copyAppImageToDoc(filePath)
-  } catch (e) {
-    console.warn('[image] copyTo _doc 失败', (e as Error)?.message || e)
+  } catch (err) {
+    console.warn('[image] copyTo _doc 失败', (err as Error)?.message || err)
     return compressed || filePath
   }
 }

@@ -21,8 +21,9 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const gridItems = computed(() => props.items.filter((item) => !item.spacer))
-const wideItems = computed(() => props.items.filter((item) => item.wide))
+/** wide 项只走底部通栏，不能再进网格，否则同一动作会出现两次 */
+const gridItems = computed(() => props.items.filter((item) => !item.wide))
+const wideItems = computed(() => props.items.filter((item) => item.wide && !item.spacer))
 const menuRef = ref<HTMLElement | null>(null)
 const anchoredStyle = ref<Record<string, string>>({})
 

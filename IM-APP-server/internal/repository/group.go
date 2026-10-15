@@ -702,13 +702,12 @@ func (r *GroupRepo) UpdateSettings(
 		if images == nil {
 			images = []string{}
 		}
-		// 3 秒内同发布者同内容同图视为连点，跳过重复 INSERT（仍更新 groups / 同步 IM）
+		// 已有完全相同的一条就不再插，避免连点或原样发布把同一条公告复制进列表
 		var dupID string
 		_ = tx.QueryRow(ctx, `
 			SELECT id::text FROM group_announcement_history
-			WHERE group_id=$1::uuid AND publisher_id=$2::uuid AND content=$3 AND images=$4
-			  AND created_at > NOW() - INTERVAL '3 seconds'
-			LIMIT 1`, groupID, uid, content, images).Scan(&dupID)
+			WHERE group_id=$1::uuid AND content=$2 AND images=$3
+			LIMIT 1`, groupID, content, images).Scan(&dupID)
 		if dupID == "" {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO group_announcement_history(group_id, content, images, publisher_id)
@@ -1148,6 +1147,9 @@ var ErrGroupFull = errors.New("group member limit reached")
 
 var ErrGroupNotFound = errors.New("group not found")
 
+// ErrAnnouncementLimit 群公告已满 10 条
+var ErrAnnouncementLimit = errors.New("announcement limit")
+
 func (r *GroupRepo) EnsureQRCode(ctx context.Context, groupID, uid string) (models.GroupQRCodeResult, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
@@ -1328,6 +1330,200 @@ func (r *GroupRepo) ListAnnouncementHistory(ctx context.Context, groupID, uid st
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+const maxLiveAnnouncements = 10
+
+func (r *GroupRepo) lockAnnouncementEditor(ctx context.Context, tx pgx.Tx, groupID, uid string) error {
+	var role string
+	err := tx.QueryRow(ctx, `
+		SELECT gm.role
+		FROM group_members gm JOIN groups g ON g.id=gm.group_id
+		WHERE gm.group_id=$1::uuid AND gm.user_id=$2::uuid AND g.status='active'
+		FOR UPDATE OF g`, groupID, uid).Scan(&role)
+	if err != nil || (role != "owner" && role != "admin") {
+		return ErrForbidden
+	}
+	return nil
+}
+
+func announcementImagesOrEmpty(images []string) []string {
+	if images == nil {
+		return []string{}
+	}
+	return images
+}
+
+/** 把群资料上的「当前公告」对齐到最新一条；没有公告时清空。正文变了才同步 OpenIM。 */
+func syncLatestAnnouncement(ctx context.Context, tx pgx.Tx, groupID string) error {
+	var currentText string
+	var currentImages []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(announcement,''), COALESCE(announcement_images, '{}')
+		FROM groups WHERE id=$1::uuid`, groupID).Scan(&currentText, &currentImages); err != nil {
+		return err
+	}
+	var latestText string
+	var latestImages []string
+	err := tx.QueryRow(ctx, `
+		SELECT content, COALESCE(images, '{}')
+		FROM group_announcement_history
+		WHERE group_id=$1::uuid
+		ORDER BY created_at DESC
+		LIMIT 1`, groupID).Scan(&latestText, &latestImages)
+	if errors.Is(err, pgx.ErrNoRows) {
+		latestText = ""
+		latestImages = []string{}
+	} else if err != nil {
+		return err
+	}
+	latestImages = announcementImagesOrEmpty(latestImages)
+	currentImages = announcementImagesOrEmpty(currentImages)
+	if latestText == currentText && sameStringSlice(latestImages, currentImages) {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE groups SET announcement=$2, announcement_images=$3, updated_at=NOW()
+		WHERE id=$1::uuid`, groupID, latestText, latestImages); err != nil {
+		return err
+	}
+	if latestText == currentText {
+		return nil
+	}
+	return EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupUpdated, IMGroupUpdatePayload{
+		Announcement: &latestText,
+	})
+}
+
+func announcementDuplicateExists(ctx context.Context, tx pgx.Tx, groupID, content string, images []string, exceptID string) (bool, error) {
+	var exists bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM group_announcement_history
+			WHERE group_id=$1::uuid AND content=$2 AND images=$3
+			  AND ($4 = '' OR id::text <> $4)
+		)`, groupID, content, announcementImagesOrEmpty(images), exceptID).Scan(&exists)
+	return exists, err
+}
+
+// CreateAnnouncement 新增一条公告。已有 10 条或内容与已有条目完全相同则拒绝。
+func (r *GroupRepo) CreateAnnouncement(ctx context.Context, groupID, uid, content string, images []string) error {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := r.lockAnnouncementEditor(ctx, tx, groupID, uid); err != nil {
+		return err
+	}
+	images = announcementImagesOrEmpty(images)
+	var count int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FROM group_announcement_history WHERE group_id=$1::uuid`, groupID).Scan(&count); err != nil {
+		return err
+	}
+	if count >= maxLiveAnnouncements {
+		return ErrAnnouncementLimit
+	}
+	dup, err := announcementDuplicateExists(ctx, tx, groupID, content, images, "")
+	if err != nil {
+		return err
+	}
+	if dup {
+		return ErrInvalidGroupOperation
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO group_announcement_history(group_id, content, images, publisher_id)
+		VALUES($1::uuid, $2, $3, $4::uuid)`, groupID, content, images, uid); err != nil {
+		return err
+	}
+	if err := syncLatestAnnouncement(ctx, tx, groupID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// UpdateAnnouncement 改某一条公告本身，不另插一条。
+func (r *GroupRepo) UpdateAnnouncement(ctx context.Context, groupID, uid, announcementID, content string, images []string) error {
+	if _, err := uuid.Parse(announcementID); err != nil {
+		return ErrInvalidGroupOperation
+	}
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := r.lockAnnouncementEditor(ctx, tx, groupID, uid); err != nil {
+		return err
+	}
+	images = announcementImagesOrEmpty(images)
+	dup, err := announcementDuplicateExists(ctx, tx, groupID, content, images, announcementID)
+	if err != nil {
+		return err
+	}
+	if dup {
+		return ErrInvalidGroupOperation
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE group_announcement_history
+		SET content=$3, images=$4
+		WHERE group_id=$1::uuid AND id=$2::uuid`, groupID, announcementID, content, images)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrGroupNotFound
+	}
+	if err := syncLatestAnnouncement(ctx, tx, groupID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// DeleteAnnouncement 删除一条公告，聊天顶栏改显示剩下的最新一条。
+func (r *GroupRepo) DeleteAnnouncement(ctx context.Context, groupID, uid, announcementID string) error {
+	if _, err := uuid.Parse(announcementID); err != nil {
+		return ErrInvalidGroupOperation
+	}
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := r.lockAnnouncementEditor(ctx, tx, groupID, uid); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM group_announcement_history
+		WHERE group_id=$1::uuid AND id=$2::uuid`, groupID, announcementID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrGroupNotFound
+	}
+	if err := syncLatestAnnouncement(ctx, tx, groupID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// AnnouncementImagesOfID 某一条公告自己的配图，编辑时只允许保留这些 URL
+func (r *GroupRepo) AnnouncementImagesOfID(ctx context.Context, groupID, announcementID string) ([]string, error) {
+	if _, err := uuid.Parse(announcementID); err != nil {
+		return nil, ErrInvalidGroupOperation
+	}
+	var images []string
+	err := r.DB.QueryRow(ctx, `
+		SELECT COALESCE(images, '{}') FROM group_announcement_history
+		WHERE group_id=$1::uuid AND id=$2::uuid`, groupID, announcementID).Scan(&images)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrGroupNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return announcementImagesOrEmpty(images), nil
 }
 
 /** 邀请时需对方验证的待发卡项（事务提交后再发 OpenIM 自定义消息） */

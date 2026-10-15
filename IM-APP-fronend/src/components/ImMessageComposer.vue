@@ -521,7 +521,7 @@ function onConfirmSend() {
 
 async function pickImages() {
   uni.chooseImage({
-    count: 9,
+    count: 20,
     success: async (res) => {
       const anyRes = res as unknown as {
         tempFilePaths?: string[] | string

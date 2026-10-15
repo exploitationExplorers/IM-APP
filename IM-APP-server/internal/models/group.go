@@ -185,7 +185,22 @@ type GroupMemberMuteResult struct {
 	ChangedAt    time.Time  `json:"changedAt"`
 }
 
-// GroupAnnouncementHistoryItem 群公告历史一条
+// SaveGroupAnnouncementReq 新增或修改一条群公告
+type SaveGroupAnnouncementReq struct {
+	GroupID                  string   `json:"groupId"`
+	AnnouncementID           string   `json:"announcementId"`
+	Content                  string   `json:"content"`
+	AnnouncementImageFileIDs []string `json:"announcementImageFileIds"`
+	KeepAnnouncementImages   []string `json:"keepAnnouncementImages"`
+}
+
+// DeleteGroupAnnouncementReq 删除一条群公告
+type DeleteGroupAnnouncementReq struct {
+	GroupID        string `json:"groupId"`
+	AnnouncementID string `json:"announcementId"`
+}
+
+// GroupAnnouncementHistoryItem 群公告一条（每群最多 10 条，可分别编辑）
 type GroupAnnouncementHistoryItem struct {
 	ID            string   `json:"id"`
 	Content       string   `json:"content"`

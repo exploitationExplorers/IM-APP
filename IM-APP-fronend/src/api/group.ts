@@ -349,7 +349,7 @@ export async function acceptGroupInvitation(token: string): Promise<{
 }
 
 
-/** ????????????? 10 ???? */
+/** 群公告列表，最多 10 条，新的在前 */
 export async function fetchAnnouncementHistory(groupId: string) {
   const res = await request<{ items: import('@/types').GroupAnnouncementHistoryItem[] }>({
     url: '/group-announcements',
@@ -357,4 +357,38 @@ export async function fetchAnnouncementHistory(groupId: string) {
     data: { groupId },
   })
   return res?.items || []
+}
+
+export async function createGroupAnnouncement(
+  groupId: string,
+  content: string,
+  announcementImageFileIds: string[],
+): Promise<void> {
+  await request({
+    url: '/group-announcements/create',
+    method: 'POST',
+    data: { groupId, content, announcementImageFileIds },
+  })
+}
+
+export async function updateGroupAnnouncement(
+  groupId: string,
+  announcementId: string,
+  content: string,
+  announcementImageFileIds: string[],
+  keepAnnouncementImages: string[],
+): Promise<void> {
+  await request({
+    url: '/group-announcements/update',
+    method: 'POST',
+    data: { groupId, announcementId, content, announcementImageFileIds, keepAnnouncementImages },
+  })
+}
+
+export async function deleteGroupAnnouncement(groupId: string, announcementId: string): Promise<void> {
+  await request({
+    url: '/group-announcements/delete',
+    method: 'POST',
+    data: { groupId, announcementId },
+  })
 }

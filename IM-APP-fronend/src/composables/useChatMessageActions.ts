@@ -37,6 +37,8 @@ export function useChatMessageActions(opts: {
   onMuteChanged?: () => void
   /** 私聊对方展示名，用于「为我和 xxx 置顶」文案 */
   peerDisplayName?: Ref<string>
+  /** 发送失败气泡菜单「重新发送」 */
+  onRetry?: (message: ChatMessage) => void
 }) {
   const chatStore = useChatStore()
   const forwardStore = useForwardStore()
@@ -135,6 +137,10 @@ export function useChatMessageActions(opts: {
 
     // 参考站顺序：转发|引用 → 复制|收藏 → 置顶|检举 → @TA|禁言 → 撤回|删除|多选
     // 群聊自己撤不限时；私聊超窗口由后端拒绝。别人的消息只有群主/管理员能撤。
+    // 失败消息优先给「重新发送」（点感叹号或长按菜单都行）
+    if (mine && message.status === 'failed') {
+      items.push({ key: 'retry', label: '重新发送' })
+    }
     if (canRevoke(message)) {
       items.push({ key: 'revoke', label: '撤回' })
     }
@@ -168,8 +174,8 @@ export function useChatMessageActions(opts: {
       items.push({ key: '_spacer', label: '', spacer: true })
     }
 
+    // 底部通栏保留；网格侧靠 ImMessageActionMenu 过滤 wide，避免再画一对小格
     if (!mine && canManage) {
-      // 清消息放前面：踢卖料/广告时默认一眼看到「并删除消息」
       items.push({ key: 'kickAndDelete', label: '移除并删除其消息', wide: true })
       items.push({ key: 'kick', label: '仅移除该成员', wide: true })
     }
@@ -685,6 +691,10 @@ export function useChatMessageActions(opts: {
     const message = menuMessage.value
     closeMenu()
     if (!message) return
+    if (key === 'retry') {
+      opts.onRetry?.(message)
+      return
+    }
     if (key === 'forward') {
       enterSelect(message, 'forward')
       return

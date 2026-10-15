@@ -2,7 +2,12 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import ImNavBar from '@/components/ImNavBar.vue'
-import { fetchAnnouncementHistory } from '@/api/group'
+import {
+  createGroupAnnouncement,
+  deleteGroupAnnouncement,
+  fetchAnnouncementHistory,
+  updateGroupAnnouncement,
+} from '@/api/group'
 import { useGroupStore } from '@/stores/group'
 import type { GroupAnnouncementHistoryItem } from '@/types'
 import { uploadReportImage } from '@/utils/file-upload'
@@ -11,11 +16,14 @@ import { formatRelativeTime } from '@/utils/format'
 
 const ANNOUNCE_MAX = 500
 const MAX_IMAGES = 9
+const MAX_ITEMS = 10
 
 const groupStore = useGroupStore()
 const groupId = ref('')
 const announcement = ref('')
 const original = ref('')
+/** 正在改的那一条；空表示在写新公告 */
+const editingId = ref('')
 const images = ref<string[]>([])
 const originalImages = ref<string[]>([])
 const canEdit = ref(false)
@@ -23,25 +31,27 @@ const saving = ref(false)
 const history = ref<GroupAnnouncementHistoryItem[]>([])
 
 const count = computed(() => announcement.value.length)
-
-function isCurrentHistory(item: GroupAnnouncementHistoryItem) {
-  const cur = announcement.value.trim()
-  const curImgs = images.value.filter((u) => isRemoteUrl(u)).join('|')
-  const firstImgs = (Array.isArray(item.images) ? item.images : []).filter(Boolean).join('|')
-  return (item.content || '').trim() === cur && firstImgs === curImgs
-}
+const atLimit = computed(() => !editingId.value && history.value.length >= MAX_ITEMS)
 
 function imagesChanged() {
   if (images.value.length !== originalImages.value.length) return true
   return images.value.some((url, i) => url !== originalImages.value[i])
 }
 
-const canSubmit = computed(
-  () =>
-    canEdit.value &&
-    !saving.value &&
-    (announcement.value !== original.value || imagesChanged()),
-)
+const canSubmit = computed(() => {
+  if (!canEdit.value || saving.value || atLimit.value) return false
+  if (!announcement.value.trim() && images.value.length === 0) return false
+  if (!editingId.value) return true
+  return announcement.value !== original.value || imagesChanged()
+})
+
+function resetComposer() {
+  editingId.value = ''
+  announcement.value = ''
+  original.value = ''
+  images.value = []
+  originalImages.value = []
+}
 
 function isRemoteUrl(path: string) {
   return /^https?:\/\//i.test(path)
@@ -63,11 +73,7 @@ onLoad(async (query) => {
   }
   try {
     const detail = await groupStore.loadDetail(groupId.value)
-    announcement.value = detail.announcement || ''
-    original.value = detail.announcement || ''
-    const imgs = Array.isArray(detail.announcementImages) ? [...detail.announcementImages] : []
-    images.value = imgs
-    originalImages.value = [...imgs]
+    resetComposer()
     canEdit.value =
       detail.permissions?.canEditAnnouncement ??
       (detail.myRole === 'owner' || detail.myRole === 'admin')
@@ -119,10 +125,57 @@ function previewImage(list: string[], index: number) {
   void previewImagesWithSave(list, list[index])
 }
 
+function beginEdit(item: GroupAnnouncementHistoryItem) {
+  editingId.value = item.id
+  announcement.value = item.content || ''
+  original.value = item.content || ''
+  const imgs = historyImages(item)
+  images.value = [...imgs]
+  originalImages.value = [...imgs]
+}
+
+function onDelete(item: GroupAnnouncementHistoryItem) {
+  if (!canEdit.value || saving.value) return
+  uni.showModal({
+    title: '删除公告',
+    content: '删除后成员将看不到这一条',
+    success: (res) => {
+      if (!res.confirm) return
+      void removeAnnouncement(item.id)
+    },
+  })
+}
+
+async function removeAnnouncement(id: string) {
+  saving.value = true
+  uni.showLoading({ title: '删除中…', mask: true })
+  try {
+    await deleteGroupAnnouncement(groupId.value, id)
+    if (editingId.value === id) resetComposer()
+    await loadHistory()
+    void groupStore.loadDetail(groupId.value)
+    uni.hideLoading()
+    uni.showToast({ title: '已删除', icon: 'success' })
+  } catch (e) {
+    uni.hideLoading()
+    uni.showToast({ title: (e as Error)?.message || '删除失败', icon: 'none' })
+  } finally {
+    saving.value = false
+  }
+}
+
 async function onSubmit() {
   // 先卡锁：不要只靠 canSubmit（disabled 下一帧才生效，连点会打出两条公告）
   if (saving.value || !canEdit.value) return
-  if (announcement.value === original.value && !imagesChanged()) {
+  if (atLimit.value) {
+    uni.showToast({ title: '最多 10 条，请先删除或编辑已有公告', icon: 'none' })
+    return
+  }
+  if (!announcement.value.trim() && images.value.length === 0) {
+    uni.showToast({ title: '请填写公告内容或图片', icon: 'none' })
+    return
+  }
+  if (editingId.value && announcement.value === original.value && !imagesChanged()) {
     uni.showToast({ title: '内容未变化', icon: 'none' })
     return
   }
@@ -132,22 +185,26 @@ async function onSubmit() {
   }
   saving.value = true
   uni.showLoading({ title: '保存中…', mask: true })
+  const editing = editingId.value
   try {
-    const keepAnnouncementImages = images.value.filter(isRemoteUrl)
     const localPaths = images.value.filter((p) => !isRemoteUrl(p))
     const announcementImageFileIds = await Promise.all(localPaths.map((p) => uploadReportImage(p)))
-    const updated = await groupStore.updateSettings(groupId.value, {
-      announcement: announcement.value,
-      announcementImageFileIds,
-      keepAnnouncementImages,
-    })
-    original.value = announcement.value
-    const nextImages = Array.isArray(updated.announcementImages) ? [...updated.announcementImages] : []
-    images.value = nextImages
-    originalImages.value = [...nextImages]
+    if (editing) {
+      await updateGroupAnnouncement(
+        groupId.value,
+        editing,
+        announcement.value,
+        announcementImageFileIds,
+        images.value.filter(isRemoteUrl),
+      )
+    } else {
+      await createGroupAnnouncement(groupId.value, announcement.value, announcementImageFileIds)
+    }
+    resetComposer()
     await loadHistory()
+    void groupStore.loadDetail(groupId.value)
     uni.hideLoading()
-    uni.showToast({ title: '已发布', icon: 'success' })
+    uni.showToast({ title: editing ? '已保存' : '已发布', icon: 'success' })
   } catch (e) {
     uni.hideLoading()
     uni.showToast({ title: (e as Error)?.message || '保存失败', icon: 'none' })
@@ -171,13 +228,13 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
 
     <scroll-view scroll-y class="body" :show-scrollbar="false">
       <view v-if="canEdit" class="form">
-        <text class="section-label">编辑公告</text>
-        <text class="section-hint">改完点发布，会生成下一条公告，最多保留 10 条</text>
+        <text class="section-label">{{ editingId ? '编辑这一条' : '发布新公告' }}</text>
+        <text class="section-hint">最多 10 条，互不影响。改某一条请点下面的编辑，不会再复制出一条。</text>
         <textarea
           class="textarea"
           v-model="announcement"
           :maxlength="ANNOUNCE_MAX"
-          placeholder="请输入公告内容"
+          :placeholder="editingId ? '修改这条公告' : '请输入新的公告内容'"
           auto-height
         />
         <view class="meta">
@@ -196,26 +253,22 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
           </view>
         </view>
       </view>
-      <view v-else class="content">
-        <text class="section-label">当前公告</text>
-        <text class="announcement">{{ announcement || '暂无群公告' }}</text>
-        <view v-if="images.length" class="images readonly">
-          <view v-for="(img, i) in images" :key="`${img}-${i}`" class="thumb">
-            <image class="thumb-img" :src="img" mode="aspectFill" @click="previewImage(images, i)" />
-          </view>
-        </view>
-      </view>
 
       <view class="history-head">
-        <text class="history-title">历史发布记录（最多 10 条）</text>
+        <text class="history-title">已发布（{{ history.length }}/{{ MAX_ITEMS }}）</text>
       </view>
-      <view v-if="!history.length" class="history-empty">暂无历史公告</view>
-      <view v-for="item in history" :key="item.id" class="history-card">
+      <view v-if="!history.length" class="history-empty">暂无群公告</view>
+      <view
+        v-for="(item, index) in history"
+        :key="item.id"
+        class="history-card"
+        :class="{ editing: editingId === item.id }"
+      >
         <view class="history-meta">
-          <text class="history-author">{{ item.publisherName || '管理员' }}{{ isCurrentHistory(item) ? ' · 当前' : '' }}</text>
+          <text class="history-author">{{ item.publisherName || '管理员' }}{{ index === 0 ? ' · 最新' : '' }}</text>
           <text class="history-time">{{ historyTime(item) }}</text>
         </view>
-        <text class="history-content">{{ item.content || '（空公告）' }}</text>
+        <text class="history-content">{{ item.content || '（仅图片）' }}</text>
         <view v-if="historyImages(item).length" class="images readonly">
           <view
             v-for="(img, i) in historyImages(item)"
@@ -230,11 +283,16 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
             />
           </view>
         </view>
+        <view v-if="canEdit" class="history-actions">
+          <text class="history-action" @click="beginEdit(item)">编辑</text>
+          <text class="history-action danger" @click="onDelete(item)">删除</text>
+        </view>
       </view>
     </scroll-view>
 
     <view v-if="canEdit" class="footer">
-      <view class="btn" :class="{ disabled: !canSubmit }" @click="onSubmit">发布</view>
+      <view v-if="editingId" class="btn ghost" @click="resetComposer">取消</view>
+      <view class="btn" :class="{ disabled: !canSubmit }" @click="onSubmit">{{ editingId ? '保存' : '发布' }}</view>
     </view>
   </view>
 </template>
@@ -416,13 +474,36 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
   white-space: pre-wrap;
 }
 
+.history-card.editing {
+  box-shadow: inset 0 0 0 2rpx #0a2fc2;
+}
+
+.history-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 32rpx;
+  margin-top: 16rpx;
+}
+
+.history-action {
+  font-size: 26rpx;
+  color: #0a2fc2;
+}
+
+.history-action.danger {
+  color: #e54d42;
+}
+
 .footer {
+  display: flex;
+  gap: 16rpx;
   padding: 24rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
   flex-shrink: 0;
   background: #f3f4f7;
 }
 
 .btn {
+  flex: 1;
   height: 96rpx;
   line-height: 96rpx;
   border-radius: 16rpx;
@@ -431,6 +512,12 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
   font-size: 32rpx;
   font-weight: 600;
   text-align: center;
+}
+
+.btn.ghost {
+  background: #fff;
+  color: #212121;
+  border: 1rpx solid #e1e3ea;
 }
 
 .btn.disabled {

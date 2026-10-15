@@ -228,6 +228,71 @@ func (h *GroupHandler) ListAnnouncementHistory(c *gin.Context) {
 	response.OK(c, gin.H{"items": items})
 }
 
+func (h *GroupHandler) writeAnnouncementError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, repository.ErrAnnouncementLimit):
+		response.Fail(c, http.StatusConflict, "最多 10 条公告，请先删除或编辑已有公告")
+	case errors.Is(err, repository.ErrInvalidGroupOperation):
+		response.Fail(c, http.StatusBadRequest, "公告内容无效或已有相同公告")
+	case errors.Is(err, repository.ErrGroupNotFound):
+		response.Fail(c, http.StatusNotFound, "群不存在")
+	case errors.Is(err, repository.ErrForbidden):
+		response.Fail(c, http.StatusForbidden, "无权限")
+	default:
+		response.Fail(c, http.StatusInternalServerError, "保存公告失败")
+	}
+}
+
+func (h *GroupHandler) CreateAnnouncement(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.SaveGroupAnnouncementReq
+	if err := bindBusinessJSON(c, &req); err != nil || req.GroupID == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := h.Svc.CreateAnnouncement(c.Request.Context(), req.GroupID, uid, req.Content, req.AnnouncementImageFileIDs); err != nil {
+		h.writeAnnouncementError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
+func (h *GroupHandler) UpdateAnnouncement(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.SaveGroupAnnouncementReq
+	if err := bindBusinessJSON(c, &req); err != nil || req.GroupID == "" || req.AnnouncementID == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := h.Svc.UpdateAnnouncement(c.Request.Context(), req.GroupID, uid, req.AnnouncementID, req.Content, req.AnnouncementImageFileIDs, req.KeepAnnouncementImages); err != nil {
+		if errors.Is(err, repository.ErrGroupNotFound) {
+			response.Fail(c, http.StatusNotFound, "公告不存在")
+			return
+		}
+		h.writeAnnouncementError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
+func (h *GroupHandler) DeleteAnnouncement(c *gin.Context) {
+	uid := middleware.UserID(c)
+	var req models.DeleteGroupAnnouncementReq
+	if err := bindBusinessJSON(c, &req); err != nil || req.GroupID == "" || req.AnnouncementID == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := h.Svc.DeleteAnnouncement(c.Request.Context(), req.GroupID, uid, req.AnnouncementID); err != nil {
+		if errors.Is(err, repository.ErrGroupNotFound) {
+			response.Fail(c, http.StatusNotFound, "公告不存在")
+			return
+		}
+		h.writeAnnouncementError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
+}
+
 func (h *GroupHandler) Leave(c *gin.Context) {
 	uid := middleware.UserID(c)
 	if err := h.Svc.Leave(c.Request.Context(), c.Param("id"), uid); err != nil {
