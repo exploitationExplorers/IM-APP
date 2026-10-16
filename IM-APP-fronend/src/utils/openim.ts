@@ -1393,7 +1393,9 @@ function copyAppImageToDoc(srcPath: string): Promise<string> {
  */
 async function prepareAppChatImagePath(filePath: string): Promise<string> {
   try {
-    const { materializeAppLocalImage } = await import('@/utils/file-upload')
+    const { isPreparedChatImage, materializeAppLocalImage } = await import('@/utils/file-upload')
+    // 选图阶段已经物化过的路径不要再压一次；content:// 仍会走进 materialize
+    if (isPreparedChatImage(filePath)) return filePath
     return await materializeAppLocalImage(filePath)
   } catch (e) {
     console.warn('[image] materialize 失败，走旧压缩/拷贝', (e as Error)?.message || e)
@@ -1409,26 +1411,172 @@ async function prepareAppChatImagePath(filePath: string): Promise<string> {
   }
 }
 
+/** 列表缩略图长边。只影响新发出的图，旧消息仍用消息里已有的地址。 */
+const CHAT_THUMB_EDGE = 360
+
+interface ChatThumb {
+  url: string
+  width: number
+  height: number
+}
+
+function compressChatThumbnail(localPath: string): Promise<string> {
+  return new Promise((resolve) => {
+    const compress = uni.compressImage as (options: {
+      src: string
+      quality?: number
+      compressedWidth?: number
+      success?: (res: { tempFilePath?: string }) => void
+      fail?: () => void
+    }) => void
+    compress({
+      src: localPath,
+      quality: 55,
+      compressedWidth: CHAT_THUMB_EDGE,
+      success: (res) => {
+        const next = res.tempFilePath || ''
+        resolve(next && next !== localPath ? next : '')
+      },
+      fail: () => resolve(''),
+    })
+  })
+}
+
+/** 缩略图上传失败不影响原图发送。压完没有变小就放弃，避免再传一份原图。 */
+async function uploadChatThumbnail(localPath: string): Promise<ChatThumb | null> {
+  try {
+    const thumbPath = await compressChatThumbnail(localPath)
+    if (!thumbPath) return null
+    const thumbFull = toNativeFullPath(thumbPath)
+    const originFull = toNativeFullPath(localPath)
+    const [thumbBytes, originBytes, size] = await Promise.all([
+      nativeFileSize(thumbFull),
+      nativeFileSize(originFull),
+      imageSizeOf(thumbPath),
+    ])
+    if (originBytes > 0 && thumbBytes >= originBytes * 0.85) return null
+    const uploaded = await uploadFileFromPath(thumbFull, `thumb_${Date.now()}.jpg`, 'image/jpeg')
+    return { url: uploaded.url, width: size.width, height: size.height }
+  } catch (e) {
+    console.warn('[image] 缩略图上传失败，列表继续用原图', (e as Error)?.message || e)
+    return null
+  }
+}
+
+function h5ThumbnailFile(file: File): Promise<{ file: File; width: number; height: number } | null> {
+  if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') {
+    return Promise.resolve(null)
+  }
+  return createImageBitmap(file)
+    .then(
+      (bitmap) =>
+        new Promise<{ file: File; width: number; height: number } | null>((resolve) => {
+          const scale = Math.min(1, CHAT_THUMB_EDGE / Math.max(bitmap.width, 1))
+          const width = Math.max(1, Math.round(bitmap.width * scale))
+          const height = Math.max(1, Math.round(bitmap.height * scale))
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            bitmap.close?.()
+            resolve(null)
+            return
+          }
+          ctx.drawImage(bitmap, 0, 0, width, height)
+          bitmap.close?.()
+          canvas.toBlob(
+            (blob) => {
+              if (!blob || blob.size >= file.size * 0.85) {
+                resolve(null)
+                return
+              }
+              resolve({
+                file: new File([blob], `thumb_${Date.now()}.jpg`, { type: 'image/jpeg' }),
+                width,
+                height,
+              })
+            },
+            'image/jpeg',
+            0.7,
+          )
+        }),
+    )
+    .catch(() => null)
+}
+
+/** 把宽高和独立缩略图写进待发消息。原图字段保持不动，SDK 仍按本地路径上传原图。 */
+function stampOutgoingPicture(
+  message: MessageItem,
+  size: { width: number; height: number },
+  thumb: ChatThumb | null,
+): MessageItem {
+  const elem = message.pictureElem
+  if (!elem?.sourcePicture || !elem.bigPicture || !elem.snapshotPicture) return message
+  const sized = <T extends { width?: number; height?: number }>(pic: T): T => ({
+    ...pic,
+    width: pic.width || size.width || 0,
+    height: pic.height || size.height || 0,
+  })
+  const snapshot = thumb?.url
+    ? {
+        ...elem.snapshotPicture,
+        uuid: elem.snapshotPicture.uuid || IMSDK.uuid(),
+        type: elem.snapshotPicture.type || 'image/jpeg',
+        size: elem.snapshotPicture.size || 0,
+        width: thumb.width || size.width || 0,
+        height: thumb.height || size.height || 0,
+        url: thumb.url,
+      }
+    : sized(elem.snapshotPicture)
+  return {
+    ...message,
+    pictureElem: {
+      ...elem,
+      sourcePicture: sized(elem.sourcePicture),
+      bigPicture: sized(elem.bigPicture),
+      snapshotPicture: snapshot,
+    },
+  }
+}
+
 /** App：FullPath 失败时压成 jpeg 再走 URL（华为 content URI / HEIC / 无后缀常见） */
-async function sendImageMessageViaUpload(target: IMTarget, filePath: string): Promise<MessageItem> {
-  const prepared = await prepareAppChatImagePath(filePath)
+async function sendImageMessageViaUpload(
+  target: IMTarget,
+  filePath: string,
+  preset?: { prepared?: boolean; thumb?: ChatThumb | null; size?: { width: number; height: number } },
+): Promise<MessageItem> {
+  const prepared = preset?.prepared ? filePath : await prepareAppChatImagePath(filePath)
   const fullPath = toNativeFullPath(prepared)
   const uploaded = await uploadFileFromPath(fullPath, `img_${Date.now()}.jpg`, 'image/jpeg')
-  const size = await imageSizeOf(prepared).catch(() => ({ width: 0, height: 0 }))
+  const size = preset?.size?.width ? preset.size : await imageSizeOf(prepared).catch(() => ({ width: 0, height: 0 }))
+  const thumb = preset?.thumb === undefined ? await uploadChatThumbnail(prepared) : preset.thumb
   const picture = {
     uuid: IMSDK.uuid(),
     type: 'image/jpeg',
     size: uploaded.size,
     url: uploaded.url,
-    ...size,
+    width: size.width,
+    height: size.height,
   }
+  const snapshot = thumb?.url
+    ? {
+        uuid: IMSDK.uuid(),
+        type: 'image/jpeg',
+        size: 0,
+        url: thumb.url,
+        width: thumb.width || size.width,
+        height: thumb.height || size.height,
+      }
+    : picture
   const message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
     sourcePath: uploaded.url,
     sourcePicture: picture,
     bigPicture: picture,
-    snapshotPicture: picture,
+    snapshotPicture: snapshot,
   })
-  return sendCreatedMessage(target, ensurePictureSourceUrl(message, uploaded.url), {
+  const drafted = stampOutgoingPicture(ensurePictureSourceUrl(message, uploaded.url), size, thumb)
+  return sendCreatedMessage(target, drafted, {
     alreadyUploaded: true,
   })
 }
@@ -1439,12 +1587,18 @@ export async function sendImageMessage(target: IMTarget, filePath: string): Prom
     // 先物化成可读本地文件，再 FullPath；华为 content:// 直接 FullPath 必挂
     const prepared = await prepareAppChatImagePath(filePath)
     const fullPath = toNativeFullPath(prepared)
+    const [thumb, size] = await Promise.all([
+      uploadChatThumbnail(prepared),
+      imageSizeOf(prepared).catch(() => ({ width: 0, height: 0 })),
+    ])
     try {
       message = await imCall<MessageItem>(IMMethods.CreateImageMessageFromFullPath, fullPath)
+      // 原图仍由 SDK 上传；缩略图已经是 http 地址，发送时不应再被当成本地文件重传
+      message = stampOutgoingPicture(message, size, thumb)
       return sendCreatedMessage(target, message, { alreadyUploaded: false })
     } catch (e) {
       console.warn('[image] FullPath 失败，改走压缩上传', (e as Error)?.message || e)
-      return sendImageMessageViaUpload(target, fullPath || prepared || filePath)
+      return sendImageMessageViaUpload(target, prepared, { prepared: true, thumb, size })
     }
   }
   // H5：HEIC / 超大图先压 jpeg，避免 iPhone 粘贴/相册偶发发不出
@@ -1455,23 +1609,46 @@ export async function sendImageMessage(target: IMTarget, filePath: string): Prom
   } catch (e) {
     console.warn('[image] H5 预处理失败，尝试原图', (e as Error)?.message || e)
   }
-  const url = await uploadFile(file)
-  const size = await imageSizeOf(filePath)
+  const [url, size, thumbFile] = await Promise.all([
+    uploadFile(file),
+    imageSizeOf(filePath),
+    h5ThumbnailFile(file),
+  ])
+  let thumb: ChatThumb | null = null
+  if (thumbFile) {
+    try {
+      thumb = { url: await uploadFile(thumbFile.file), width: thumbFile.width, height: thumbFile.height }
+    } catch (e) {
+      console.warn('[image] H5 缩略图上传失败，列表继续用原图', (e as Error)?.message || e)
+    }
+  }
   const picture = {
     uuid: IMSDK.uuid(),
     type: file.type || 'image/jpeg',
     size: file.size,
     url,
-    ...size,
+    width: size.width,
+    height: size.height,
   }
+  const snapshot = thumb?.url
+    ? {
+        uuid: IMSDK.uuid(),
+        type: 'image/jpeg',
+        size: thumbFile?.file.size || 0,
+        url: thumb.url,
+        width: thumb.width || size.width,
+        height: thumb.height || size.height,
+      }
+    : picture
   message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
     sourcePath: url,
     sourcePicture: picture,
     bigPicture: picture,
-    snapshotPicture: picture,
+    snapshotPicture: snapshot,
   })
-  // Create 回包偶发缺 pictureElem.url，气泡会空白；强制写回已上传地址
-  return sendCreatedMessage(target, ensurePictureSourceUrl(message, url), { alreadyUploaded: true })
+  // Create 回包偶发缺 pictureElem.url，气泡会空白；强制写回已上传地址，并保留独立缩略图
+  const drafted = stampOutgoingPicture(ensurePictureSourceUrl(message, url), size, thumb)
+  return sendCreatedMessage(target, drafted, { alreadyUploaded: true })
 }
 
 function videoDurationSeconds(duration: number): number {
@@ -2406,11 +2583,13 @@ export function toChatMessage(rawItem: MessageItem): ChatMessage {
   ) {
     type = 'system'
   }
-  // 图片：除首选的原图地址外，把其余候选（缩略图等）一并带上，
-  // 原图对象缺失/上传失败时气泡可以降级重试，而不是留一个空白框。
+  // 图片：气泡优先缩略图。原图放进 fallback / sourceUrl，加载失败或点预览时再用。
+  const imageMeta = type === 'image' ? pictureMetaOf(item) : null
+  const videoSize = type === 'video' ? videoPosterSizeOf(item) : null
+  const displayContent = imageMeta?.displayUrl || content
   const imageFallbacks =
     type === 'image'
-      ? pictureRemoteCandidates(item).filter((u) => u !== content)
+      ? pictureRemoteCandidates(item).filter((u) => u !== displayContent)
       : []
   return {
     id: item.clientMsgID,
@@ -2419,8 +2598,12 @@ export function toChatMessage(rawItem: MessageItem): ChatMessage {
     senderAvatar: item.senderFaceUrl || undefined,
     senderNickname: item.senderNickname || undefined,
     type,
-    content,
+    content: displayContent,
     imageFallbacks: imageFallbacks.length ? imageFallbacks : undefined,
+    thumbUrl: imageMeta?.thumbUrl,
+    sourceUrl: imageMeta?.sourceUrl,
+    width: imageMeta?.width || videoSize?.width,
+    height: imageMeta?.height || videoSize?.height,
     createdAt: toISOTime(item.sendTime),
     systemEventKey: imNotificationEventKey(item) || undefined,
     notificationKind: notificationKind || undefined,
@@ -2667,6 +2850,58 @@ function pictureUrlOf(item: MessageItem): string {
   if (uni.getSystemInfoSync().uniPlatform === 'web') return ''
   const local = candidates.find((u) => looksLikeImageUrl(u))
   return local || candidates[0] || ''
+}
+
+function readPictureBox(picture: unknown): { url: string; width: number; height: number } {
+  if (!picture || typeof picture !== 'object') return { url: '', width: 0, height: 0 }
+  const obj = picture as Record<string, unknown>
+  const width = Number(obj.width ?? obj.Width ?? 0)
+  const height = Number(obj.height ?? obj.Height ?? 0)
+  return {
+    url: pickString(obj, ['url', 'Url', 'URL']),
+    width: Number.isFinite(width) ? width : 0,
+    height: Number.isFinite(height) ? height : 0,
+  }
+}
+
+/**
+ * 列表用缩略图，预览用原图。旧消息三个地址相同时不假装有缩略图，
+ * 但宽高仍然带上，避免气泡再下载一次只为量尺寸。
+ */
+function pictureMetaOf(item: MessageItem): {
+  displayUrl: string
+  thumbUrl?: string
+  sourceUrl?: string
+  width?: number
+  height?: number
+} {
+  const elem = item.pictureElem
+  const snap = readPictureBox(elem?.snapshotPicture)
+  const source = readPictureBox(elem?.sourcePicture)
+  const big = readPictureBox(elem?.bigPicture)
+  const sourceUrl = source.url || big.url
+  const distinctThumb = snap.url && snap.url !== sourceUrl ? snap.url : ''
+  const displayUrl = distinctThumb || pictureUrlOf(item)
+  const box =
+    (snap.width > 0 && snap.height > 0 && snap) ||
+    (source.width > 0 && source.height > 0 && source) ||
+    (big.width > 0 && big.height > 0 && big) ||
+    null
+  return {
+    displayUrl,
+    thumbUrl: distinctThumb || undefined,
+    sourceUrl: sourceUrl && sourceUrl !== displayUrl ? sourceUrl : undefined,
+    width: box ? box.width : undefined,
+    height: box ? box.height : undefined,
+  }
+}
+
+function videoPosterSizeOf(item: MessageItem): { width?: number; height?: number } {
+  const raw = item.videoElem as { snapshotWidth?: number; snapshotHeight?: number } | undefined
+  const width = Number(raw?.snapshotWidth) || 0
+  const height = Number(raw?.snapshotHeight) || 0
+  if (width > 0 && height > 0) return { width, height }
+  return {}
 }
 
 function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {

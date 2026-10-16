@@ -1423,9 +1423,12 @@ export const useChatStore = defineStore('chat', () => {
     conversationId: string,
     placeholder: ChatMessage,
     send: () => Promise<MessageItem>,
+    alreadyInserted = false,
   ) {
-    const list = messagesMap.value[conversationId] || []
-    messagesMap.value = { ...messagesMap.value, [conversationId]: [...list, placeholder] }
+    if (!alreadyInserted) {
+      const list = messagesMap.value[conversationId] || []
+      messagesMap.value = { ...messagesMap.value, [conversationId]: [...list, placeholder] }
+    }
     try {
       const sent = await send()
       rememberRaw(sent)
@@ -1554,9 +1557,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function sendImage(conversationId: string, filePath: string, senderId: string) {
-    const target = targetOf(requireConversation(conversationId))
-    // H5 本地临时路径不能进 <image>；先用 blob 占位，发送成功后再换成远程 URL
-    let preview = filePath
+    const job = prepareOutgoingImage(conversationId, filePath, senderId)
+    await deliverOutgoingImage(job)
+  }
+
+  /** 选图后立刻插入占位，压缩和上传交给 deliverOutgoingImage，可按并发池调用 */
+  function prepareOutgoingImage(conversationId: string, filePath: string, senderId: string) {
+    requireConversation(conversationId)
+    const placeholder = placeholderOf(conversationId, senderId, 'image', filePath)
+    const list = messagesMap.value[conversationId] || []
+    messagesMap.value = { ...messagesMap.value, [conversationId]: [...list, placeholder] }
+    return { conversationId, filePath, placeholder }
+  }
+
+  async function h5ImagePreview(filePath: string): Promise<string> {
     try {
       if (
         typeof window !== 'undefined' &&
@@ -1566,15 +1580,31 @@ export const useChatStore = defineStore('chat', () => {
         !filePath.startsWith('blob:')
       ) {
         const blob = await fetch(filePath).then((r) => r.blob())
-        preview = URL.createObjectURL(blob)
+        return URL.createObjectURL(blob)
       }
     } catch {
-      preview = filePath
+      /* 预览失败仍用原路径发送 */
     }
+    return filePath
+  }
+
+  async function deliverOutgoingImage(job: {
+    conversationId: string
+    filePath: string
+    placeholder: ChatMessage
+  }) {
+    const preview = await h5ImagePreview(job.filePath)
+    let placeholder = job.placeholder
+    if (preview !== placeholder.content) {
+      placeholder = { ...placeholder, content: preview }
+      replaceMessage(job.conversationId, placeholder.id, placeholder)
+    }
+    const target = targetOf(requireConversation(job.conversationId))
     await sendWithPlaceholder(
-      conversationId,
-      placeholderOf(conversationId, senderId, 'image', preview),
-      () => sendImageMessage(target, filePath),
+      job.conversationId,
+      placeholder,
+      () => sendImageMessage(target, job.filePath),
+      true,
     )
   }
 
@@ -1823,6 +1853,8 @@ export const useChatStore = defineStore('chat', () => {
     setOnGroupUnavailable,
     setActiveConversation,
     sendImage,
+    prepareOutgoingImage,
+    deliverOutgoingImage,
     sendCard,
     sendFile,
     sendImageUrl,

@@ -132,6 +132,19 @@ function isContentUri(path: string): boolean {
   return /^content:\/\//i.test(path || '')
 }
 
+/** 本轮已经压过的本地图。发图链路再遇到同一路径就直接用，避免二次 compressImage。 */
+const preparedChatImagePaths = new Set<string>()
+
+export function isPreparedChatImage(path: string): boolean {
+  return preparedChatImagePaths.has(String(path || '').trim())
+}
+
+function rememberPreparedChatImage(path: string): string {
+  const value = String(path || '').trim()
+  if (value) preparedChatImagePaths.add(value)
+  return path
+}
+
 function isSandboxLocalPath(path: string): boolean {
   const p = path || ''
   if (!p || isContentUri(p)) return false
@@ -304,6 +317,7 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
   const path = String(srcPath || '').trim()
   if (!path) throw new Error('未获取到图片，请重试')
   if (!isAppPlatform()) return path
+  if (isPreparedChatImage(path)) return path
 
   const tryCompress = async (input: string) => {
     const compressed = await compressLocalImage(input)
@@ -316,17 +330,17 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
     const size = await probeLocalFileSize(path)
     if (size > 0) {
       const compressed = await tryCompress(path)
-      return compressed || path
+      return rememberPreparedChatImage(compressed || path)
     }
   }
 
   const compressed = await tryCompress(path)
-  if (compressed) return compressed
+  if (compressed) return rememberPreparedChatImage(compressed)
 
   try {
     const viaBitmap = await saveViaNativeBitmap(path)
     const again = await tryCompress(viaBitmap)
-    return again || viaBitmap
+    return rememberPreparedChatImage(again || viaBitmap)
   } catch (e) {
     console.warn('[image] Bitmap 落盘失败', (e as Error)?.message || e)
   }
@@ -334,7 +348,7 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
   try {
     const copied = await copyViaPlusIoToDoc(path)
     const again = await tryCompress(copied)
-    return again || copied
+    return rememberPreparedChatImage(again || copied)
   } catch (e) {
     console.warn('[image] plus.io 拷贝失败', (e as Error)?.message || e)
   }
@@ -345,7 +359,7 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
         isContentUri(path) ? path : toAppFileUrl(path),
       )
       const again = await tryCompress(viaAndroid)
-      return again || viaAndroid
+      return rememberPreparedChatImage(again || viaAndroid)
     } catch (e) {
       console.warn('[image] ContentResolver 拷贝失败', (e as Error)?.message || e)
     }
@@ -436,11 +450,18 @@ async function materializePickedPaths(paths: string[]): Promise<string[]> {
 export async function pickLocalImages(opts?: {
   count?: number
   sourceType?: Array<'album' | 'camera'>
+  /**
+   * 聊天发图传 false：选完立刻把原路径交回去做占位气泡，
+   * 压缩留到发送时做一次。头像等入口保持默认，选完再物化。
+   */
+  materialize?: boolean
 }): Promise<string[]> {
   // 聊天发资料图一次最多 20；其它入口仍可传更小的 count
   const count = Math.max(1, Math.min(20, opts?.count ?? 1))
   const sourceType = opts?.sourceType?.length ? opts.sourceType : (['album'] as Array<'album' | 'camera'>)
   await requestAndroidAlbumPermission()
+  const settle = (picked: string[]) =>
+    opts?.materialize === false ? Promise.resolve(picked.filter(Boolean)) : materializePickedPaths(picked)
 
   const huaweiLike = isAppPlatform() && isHuaweiLikeDevice()
   let paths: string[] = []
@@ -452,7 +473,7 @@ export async function pickLocalImages(opts?: {
       paths = await pickViaPlusGallery({ count, system: false })
       if (paths.length) {
         try {
-          return await materializePickedPaths(paths)
+          return await settle(paths)
         } catch (e) {
           console.warn('[image] gallery 路径物化失败，继续兜底', (e as Error)?.message || e)
           paths = []
@@ -477,7 +498,7 @@ export async function pickLocalImages(opts?: {
 
   if (paths.length) {
     try {
-      return await materializePickedPaths(paths)
+      return await settle(paths)
     } catch (e) {
       // 物化失败再试 gallery，不要把坏路径交给上传
       console.warn('[image] chooseImage 路径不可用，改走 gallery', (e as Error)?.message || e)
@@ -500,13 +521,13 @@ export async function pickLocalImages(opts?: {
 
   try {
     paths = await pickViaPlusGallery({ count, system: false })
-    if (paths.length) return materializePickedPaths(paths)
+    if (paths.length) return settle(paths)
   } catch (e) {
     if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
   }
   try {
     paths = await pickViaPlusGallery({ count, system: true })
-    if (paths.length) return materializePickedPaths(paths)
+    if (paths.length) return settle(paths)
   } catch (e) {
     if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
     throw e instanceof Error ? e : new Error('无法打开相册，请检查相册权限')

@@ -752,7 +752,7 @@ function toPlayableMediaUrl(path: string): string {
 }
 
 /**
- * 图片气泡的候选地址，按优先级排列（原图 → 缩略图 …）。
+ * 图片气泡的候选地址。先缩略图，再原图，加载失败才降级。
  * H5 只用远程 URL；App 在没有远程地址时退回本地路径，供发送中预览。
  */
 const imageSrcCandidates = computed(() => {
@@ -763,6 +763,7 @@ const imageSrcCandidates = computed(() => {
     if (!url || !(isRemoteMediaUrl(url) || url.startsWith('blob:'))) return
     if (!list.includes(url)) list.push(url)
   }
+  push(props.message.thumbUrl || '')
   push(props.message.content || '')
   for (const url of props.message.imageFallbacks || []) push(url)
   if (list.length) return list
@@ -823,11 +824,24 @@ const mediaSrc = computed(() => {
   return ''
 })
 
+function knownMediaSize(): { width: number; height: number } | null {
+  const width = Number(props.message.width) || 0
+  const height = Number(props.message.height) || 0
+  if (width > 0 && height > 0) return { width, height }
+  return null
+}
+
 /**
- * 量原图尺寸。H5 的 getImageInfo 只是 new Image() 读 naturalWidth/Height，
- * 不读像素、不要求 CORS，MinIO 直链也能拿到。入队限流，避免列表同时打爆。
+ * 量原图尺寸。消息里已经带了宽高就直接用，不再 getImageInfo。
+ * App 对网络图的 getImageInfo 会先把整张图下载到临时目录，和 <image> 各下一次。
  */
 function measureMediaSize(src: string) {
+  const known = knownMediaSize()
+  if (known) {
+    naturalSize.value = known
+    naturalSizeFailed.value = false
+    return
+  }
   naturalSizeFailed.value = false
   if (!src) {
     naturalSize.value = null
@@ -849,11 +863,11 @@ function measureMediaSize(src: string) {
           if (naturalSizeCache.size > 500) naturalSizeCache.clear()
           const size = { width, height }
           naturalSizeCache.set(src, size)
-          if (mediaSrc.value === src) naturalSize.value = size
+          if (mediaSrc.value === src && !knownMediaSize()) naturalSize.value = size
         }
       },
       fail: () => {
-        if (mediaSrc.value === src) naturalSizeFailed.value = true
+        if (mediaSrc.value === src && !knownMediaSize()) naturalSizeFailed.value = true
       },
       complete: () => {
         measureActive -= 1
@@ -864,7 +878,11 @@ function measureMediaSize(src: string) {
   pumpMeasureQueue()
 }
 
-watch(mediaSrc, (src) => measureMediaSize(src), { immediate: true })
+watch(
+  () => [mediaSrc.value, props.message.width, props.message.height] as const,
+  ([src]) => measureMediaSize(src),
+  { immediate: true },
+)
 
 /** 等比例缩进上限框后的展示尺寸（小图按旧行为放大到 280rpx 宽） */
 const mediaBoxStyle = computed(() => {

@@ -46,6 +46,16 @@ export interface ChatMessage {
    * 避免原图对象缺失时整条消息只剩一个空白框。
    */
   imageFallbacks?: string[]
+  /**
+   * 列表气泡用的缩略图。和原图不是同一地址时才有值；
+   * 旧消息三个字段都是原图时留空，气泡继续用 content。
+   */
+  thumbUrl?: string
+  /** 点开预览、保存、收藏用的原图。缺省时用 content。 */
+  sourceUrl?: string
+  /** 图片或视频封面的原始宽高。有值时气泡不再调用 getImageInfo 二次下载。 */
+  width?: number
+  height?: number
   createdAt: string
   /** 用于折叠 OpenIM 重试产生的连续重复系统通知；普通消息不设置。 */
   systemEventKey?: string

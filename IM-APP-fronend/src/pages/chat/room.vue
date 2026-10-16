@@ -246,13 +246,14 @@ watch(
   },
 )
 
-/** 按需拼会话图片预览列表（点开时才算，不绑到每条气泡 props） */
+/** 按需拼会话图片预览列表。点开用原图，气泡里显示的是缩略图。 */
 function openImagePreview(message: ChatMessage) {
+  const openUrl = (item: ChatMessage) => playableMediaUrl((item.sourceUrl || item.content || '').trim())
   const urls = messages.value
-    .filter((m) => m.type === 'image' && m.content)
-    .map((m) => playableMediaUrl(m.content.trim()))
+    .filter((m) => m.type === 'image' && (m.sourceUrl || m.content))
+    .map((m) => openUrl(m))
     .filter(Boolean)
-  const current = playableMediaUrl((message.content || '').trim())
+  const current = openUrl(message)
   if (!current) return
   const list = urls.length ? urls : [current]
   void previewImagesWithSave(list, list.includes(current) ? current : list[0])
@@ -1306,12 +1307,13 @@ function clipboardImageFiles(data: DataTransfer | null): File[] {
 }
 
 /** H5/PC：粘贴图片先确认，避免「粘贴完自己就发出去」 */
-function onWindowPaste(e: ClipboardEvent) {
+function onWindowPaste(e: Event) {
+  const event = e as ClipboardEvent
   if (!isH5ComposerPlatform() || composerBlocked.value || voiceMode.value) return
-  if (!composerPasteTarget(e.target)) return
-  const files = clipboardImageFiles(e.clipboardData).slice(0, MAX_PICK_COUNT)
+  if (!composerPasteTarget(event.target)) return
+  const files = clipboardImageFiles(event.clipboardData).slice(0, MAX_PICK_COUNT)
   if (!files.length) return
-  e.preventDefault()
+  event.preventDefault()
   const tip = files.length === 1 ? '发送这张图片？' : `发送这 ${files.length} 张图片？`
   void uni
     .showModal({
@@ -1330,30 +1332,13 @@ async function sendPastedImages(files: File[]) {
     uni.showToast({ title: '会话未就绪', icon: 'none' })
     return
   }
-  let failed = 0
-  let firstReason = ''
-  for (const file of files) {
+  const jobs = files.map((file) => {
     const path = URL.createObjectURL(file)
-    let sent = false
-    try {
-      await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
-      sent = true
-      await nextTick()
-      scrollToBottom(true)
-    } catch (e) {
-      failed++
-      if (!firstReason) firstReason = sendFailReason(e)
-    } finally {
-      // 失败气泡还指着这块本地图，重发要能再读到
-      if (sent) URL.revokeObjectURL(path)
-    }
-  }
-  if (failed) {
-    uni.showToast({
-      title: firstReason ? `${failed} 张图片发送失败：${firstReason}` : `${failed} 张图片发送失败`,
-      icon: 'none',
-    })
-  }
+    return chatStore.prepareOutgoingImage(conversationId.value, path, imUserId.value || myId.value)
+  })
+  await nextTick()
+  scrollToBottom(true)
+  await sendImageJobs(jobs, (path) => URL.revokeObjectURL(path))
 }
 
 onUnmounted(() => {
@@ -2333,24 +2318,32 @@ function afterPlusClosed(run: () => void) {
   setTimeout(run, 320)
 }
 
-async function sendPickedImagePaths(paths: string[]) {
-  const list = paths.filter(Boolean).slice(0, MAX_PICK_COUNT)
-  if (!list.length) {
-    uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
-    return
-  }
+async function sendImageJobs(
+  jobs: Array<{ conversationId: string; filePath: string; placeholder: ChatMessage }>,
+  revokePath?: (filePath: string) => void,
+) {
   let failed = 0
   let firstReason = ''
-  for (const path of list) {
-    try {
-      await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
-      await nextTick()
-      scrollToBottom(true)
-    } catch (e) {
-      failed++
-      if (!firstReason) firstReason = sendFailReason(e)
+  const queue = [...jobs]
+  const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
+    while (queue.length) {
+      const job = queue.shift()
+      if (!job) return
+      let sent = false
+      try {
+        await chatStore.deliverOutgoingImage(job)
+        sent = true
+        await nextTick()
+        scrollToBottom(true)
+      } catch (e) {
+        failed += 1
+        if (!firstReason) firstReason = sendFailReason(e)
+      } finally {
+        if (sent) revokePath?.(job.filePath)
+      }
     }
-  }
+  })
+  await Promise.all(workers)
   if (failed) {
     uni.showToast({
       title: firstReason ? `${failed} 张图片发送失败：${firstReason}` : `${failed} 张图片发送失败`,
@@ -2359,10 +2352,24 @@ async function sendPickedImagePaths(paths: string[]) {
   }
 }
 
+async function sendPickedImagePaths(paths: string[]) {
+  const list = paths.filter(Boolean).slice(0, MAX_PICK_COUNT)
+  if (!list.length) {
+    uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
+    return
+  }
+  const jobs = list.map((path) =>
+    chatStore.prepareOutgoingImage(conversationId.value, path, imUserId.value || myId.value),
+  )
+  await nextTick()
+  scrollToBottom(true)
+  await sendImageJobs(jobs)
+}
+
 /** 相册多选：一次最多 20 张；华为走 pickLocalImages 的 gallery 兜底 */
 function pickImage() {
   afterPlusClosed(() => {
-    void pickLocalImages({ count: MAX_PICK_COUNT, sourceType: ['album'] })
+    void pickLocalImages({ count: MAX_PICK_COUNT, sourceType: ['album'], materialize: false })
       .then((paths) => sendPickedImagePaths(paths))
       .catch((e) => {
         if (String((e as Error)?.message || '') === 'cancel') return
@@ -2377,7 +2384,7 @@ function pickImage() {
 /** 相机拍照即发（与相册同一套 pickLocalImages，含权限/路径兜底） */
 function pickCamera() {
   afterPlusClosed(() => {
-    void pickLocalImages({ count: 1, sourceType: ['camera'] })
+    void pickLocalImages({ count: 1, sourceType: ['camera'], materialize: false })
       .then((paths) => sendPickedImagePaths(paths))
       .catch((e) => {
         if (String((e as Error)?.message || '') === 'cancel') return

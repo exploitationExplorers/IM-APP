@@ -322,7 +322,7 @@ export function useChatMessageActions(opts: {
         return ''
       }
     }
-    const primary = pick(message.content || '')
+    const primary = pick(message.sourceUrl || message.content || '')
     if (primary) return primary
     for (const fallback of message.imageFallbacks || []) {
       const url = pick(fallback)
@@ -409,7 +409,7 @@ export function useChatMessageActions(opts: {
             : message.type === 'voice'
               ? 'voice'
               : 'text'
-    let content = message.content
+    let content = message.type === 'image' && message.sourceUrl ? message.sourceUrl : message.content
     if (isCard) {
       try {
         const card = JSON.parse(message.content) as { nickname?: string }
