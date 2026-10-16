@@ -255,7 +255,8 @@
       "path": "pages/group/members",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "群聊成员"
+        "navigationBarTitleText": "群聊成员",
+        "disableScroll": true
       }
     },
     {

@@ -500,7 +500,26 @@ export const useChatStore = defineStore('chat', () => {
       ...messagesMap.value,
       [message.conversationId]: [...list, message],
     }
-    trimMessageWindow(message.conversationId)
+    // 正在看这个会话时不要按 200 条硬裁：上翻历史可能已超过 WINDOW，
+    // 新消息一来 slice(-200) 会把正在看的旧气泡删掉，视口往上跳。
+    // 离开房间由 trimConversationMemory 回收；在房时最多放到 HISTORY_BROWSE_MAX。
+    if (message.conversationId === activeConversationId) {
+      const cur = messagesMap.value[message.conversationId] || []
+      if (cur.length > HISTORY_BROWSE_MAX) {
+        const trimmed = cur.slice(-HISTORY_BROWSE_MAX)
+        const removedIds = cur.slice(0, cur.length - HISTORY_BROWSE_MAX).map((m) => m.id)
+        messagesMap.value = { ...messagesMap.value, [message.conversationId]: trimmed }
+        if (removedIds.length) {
+          const nextRaw = { ...rawMessages.value }
+          removedIds.forEach((id) => {
+            delete nextRaw[id]
+          })
+          rawMessages.value = nextRaw
+        }
+      }
+    } else {
+      trimMessageWindow(message.conversationId)
+    }
     // 列表预览不能只等 OnConversationChanged：事件慢/丢时会话行会一直挂旧文案
     const isSelf = item.sendID === imUserId.value
     const viewing = !!activeConversationId && message.conversationId === activeConversationId

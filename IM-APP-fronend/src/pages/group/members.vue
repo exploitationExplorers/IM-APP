@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onReachBottom, onShow } from '@dcloudio/uni-app'
 import {
   GROUP_MEMBERS_PAGE_SIZE,
   fetchGroupDetail,
@@ -18,6 +18,7 @@ import { useContactStore } from '@/stores/contact'
 import { useUserStore } from '@/stores/user'
 import type { GroupInfo, GroupMember, GroupMemberMuteResult } from '@/types'
 import { formatEventTime } from '@/utils/format'
+import { getStatusBarHeight } from '@/utils/status-bar'
 
 useAuthGuard()
 
@@ -48,6 +49,19 @@ const filteredMembers = computed(() => {
 // 滚动分页：一次只拉一页，滚到底再拉下一页。搜索是本地过滤，只能命中已加载的部分，
 // 所以一旦开始搜索就把剩余页补齐，避免「成员明明在群里却搜不到」。
 // ---------------------------------------------------------------------------
+
+/** App 上 flex 高度经常不生效，scroll-view 被内容撑满后滚不到底、也就不会加载下一页 */
+const listHeight = ref(480)
+function measureListHeight() {
+  try {
+    const sys = uni.getSystemInfoSync()
+    const rpx = (sys.windowWidth || 375) / 750
+    const chrome = getStatusBarHeight() + (96 + 120 + 72) * rpx
+    listHeight.value = Math.max(240, Math.floor((sys.windowHeight || 640) - chrome))
+  } catch {
+    listHeight.value = 480
+  }
+}
 
 const loadingMore = ref(false)
 const loadingAll = ref(false)
@@ -119,14 +133,26 @@ async function loadMorePage(): Promise<boolean> {
   }
 }
 
-async function onReachBottom() {
-  if (keyword.value.trim() || !hasMore.value) return
+async function onReachListEnd() {
+  if (keyword.value.trim() || !hasMore.value || loading.value || loadingMore.value) return
   try {
     await loadMorePage()
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载更多失败', icon: 'none' })
   }
 }
+
+/** 部分安卓 scroll-view 不抛 scrolltolower，离底部一段距离就补下一页 */
+function onListScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
+  const top = Number(e.detail?.scrollTop || 0)
+  const height = Number(e.detail?.scrollHeight || 0)
+  if (!height || height - top > 480) return
+  void onReachListEnd()
+}
+
+onReachBottom(() => {
+  void onReachListEnd()
+})
 
 /** 搜索需要全量成员才能保证结果完整，这里把剩余页补齐 */
 async function loadAllRemaining() {
@@ -157,6 +183,7 @@ const memberCountLabel = computed(() =>
 
 onLoad((query) => {
   groupId.value = String(query?.id || '')
+  measureListHeight()
 })
 
 onShow(async () => {
@@ -359,7 +386,14 @@ async function onRemoveMember(member: GroupMember) {
       <text class="section-title">群成员 ({{ memberCountLabel }})</text>
     </view>
 
-    <scroll-view scroll-y class="list" :lower-threshold="80" @scrolltolower="onReachBottom">
+    <scroll-view
+      scroll-y
+      class="list"
+      :style="{ height: listHeight + 'px' }"
+      :lower-threshold="120"
+      @scrolltolower="onReachListEnd"
+      @scroll="onListScroll"
+    >
       <text v-if="loading" class="loading">加载中...</text>
       <view
         v-for="member in filteredMembers"
@@ -404,7 +438,7 @@ async function onRemoveMember(member: GroupMember) {
       </view>
       <text v-if="loadingAll" class="loading">正在加载全部成员以便搜索...</text>
       <text v-else-if="loadingMore" class="loading">加载更多...</text>
-      <text v-else-if="!loading && hasMore && !keyword.trim()" class="loading">上滑加载更多</text>
+      <text v-else-if="!loading && hasMore && !keyword.trim()" class="loading more" @click="onReachListEnd">加载更多</text>
       <text v-if="!loading && !filteredMembers.length" class="empty">
         {{ keyword.trim() ? (loadingAll || hasMore ? '正在搜索全部成员...' : '未找到相关成员') : '暂无成员' }}
       </text>
@@ -414,10 +448,13 @@ async function onRemoveMember(member: GroupMember) {
 
 <style scoped lang="scss">
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   background: #fff;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .action {
@@ -441,9 +478,8 @@ async function onRemoveMember(member: GroupMember) {
 }
 
 .list {
-  flex: 1;
-  /* height: 0 让 flex 高度说了算，scroll-view 才会真正滚动、scrolltolower 才会触发 */
-  height: 0;
+  flex: none;
+  width: 100%;
   padding: 0 0 28rpx;
 }
 
@@ -587,5 +623,10 @@ async function onRemoveMember(member: GroupMember) {
   text-align: center;
   color: #8a8f9c;
   font-size: 28rpx;
+}
+
+.loading.more {
+  padding: 24rpx 20rpx 48rpx;
+  color: #1c41c7;
 }
 </style>

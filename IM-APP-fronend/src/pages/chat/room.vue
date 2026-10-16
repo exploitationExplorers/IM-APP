@@ -1070,12 +1070,22 @@ function onMsgListTouchEnd() {
   userHoldingList = false
 }
 
+/** 离开底部时钉住当前渲染窗口顶部，避免尾部 slice(-48) 被新消息挤掉导致往上跳 */
+function pinRenderWindowTop() {
+  if (renderFromId.value) return
+  const first = renderMessages.value[0]?.id
+  if (first) renderFromId.value = first
+}
+
 function onMsgScroll(e: { detail?: { scrollTop?: number } }) {
   const top = Number(e.detail?.scrollTop || 0)
   lastListScrollTop = top
   // 倒置后 scrollTop 就是离底部的距离；回调里不改 scroll-top，避免和手势对拉
   if (top < 60) stickToBottom.value = true
-  else if (top > 120) stickToBottom.value = false
+  else if (top > 120) {
+    if (stickToBottom.value) pinRenderWindowTop()
+    stickToBottom.value = false
+  }
 }
 
 /**
@@ -1093,8 +1103,15 @@ function onMsgListWheel(e: WheelEvent) {
   if (max <= 1) return
   e.preventDefault()
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1
-  const next = scroller.scrollTop - e.deltaY * unit
-  scroller.scrollTop = Math.min(max, Math.max(0, next))
+  const next = Math.min(max, Math.max(0, scroller.scrollTop - e.deltaY * unit))
+  scroller.scrollTop = next
+  // 滚轮不保证触发 @scroll，这里同步贴底状态，避免翻历史时来新消息又贴回去
+  lastListScrollTop = next
+  if (next < 60) stickToBottom.value = true
+  else if (next > 120) {
+    if (stickToBottom.value) pinRenderWindowTop()
+    stickToBottom.value = false
+  }
 }
 
 function jumpToBottom() {
@@ -1108,8 +1125,11 @@ watch(
   () => messages.value[messages.value.length - 1]?.id,
   (id, prev) => {
     if (!id || id === prev) return
-    // 正在上翻看历史/资料时，新消息绝不能强行滚到底
-    if (!stickToBottom.value) return
+    // 正在上翻看历史：钉住窗口顶部，只追加新消息，绝不贴底、不挤掉正在看的气泡
+    if (!stickToBottom.value) {
+      pinRenderWindowTop()
+      return
+    }
     nextTick(() => scrollToBottom())
   },
 )

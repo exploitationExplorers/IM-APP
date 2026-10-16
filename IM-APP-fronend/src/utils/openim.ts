@@ -2621,17 +2621,17 @@ function pictureInfoUrl(elem: unknown, keys: string[]): string {
   return ''
 }
 
-/** 图片消息的候选地址，按优先级原图 → 大图 → 缩略图 → 兜底排列并去重。 */
+/** 图片消息的候选地址：气泡优先缩略图（对齐微信列表），失败再降级原图。 */
 function pictureCandidateList(item: MessageItem): string[] {
   const elem = item.pictureElem as unknown as Record<string, unknown> | undefined
   const pascal = (item as unknown as Record<string, unknown>).PictureElem
   const raw = [
+    pictureInfoUrl(elem, ['snapshotPicture', 'SnapshotPicture']),
+    pictureInfoUrl(pascal, ['snapshotPicture', 'SnapshotPicture']),
     pictureInfoUrl(elem, ['sourcePicture', 'SourcePicture']),
     pictureInfoUrl(elem, ['bigPicture', 'BigPicture']),
     pictureInfoUrl(pascal, ['sourcePicture', 'SourcePicture']),
     pictureInfoUrl(pascal, ['bigPicture', 'BigPicture']),
-    pictureInfoUrl(elem, ['snapshotPicture', 'SnapshotPicture']),
-    pictureInfoUrl(pascal, ['snapshotPicture', 'SnapshotPicture']),
     jsonPictureUrl(item.content),
     item.pictureElem?.sourcePath,
     typeof item.content === 'string' ? item.content : '',
@@ -2899,7 +2899,19 @@ export function messageSearchPreview(item: MessageItem): string {
   ) {
     return ''
   }
-  return extractContent(item) || ''
+  const extracted = extractContent(item)
+  if (extracted && !extracted.startsWith('{') && !extracted.startsWith('[')) return extracted
+  // 文本类型偶发没有 textElem，正文直接在 content 里（否则「三码」这类短句搜不到）
+  const content = typeof item.content === 'string' ? item.content.trim() : ''
+  if (
+    content &&
+    !content.startsWith('{') &&
+    !content.startsWith('[') &&
+    !/^https?:\/\//i.test(content)
+  ) {
+    return content
+  }
+  return ''
 }
 
 /** 会话列表 / 群内关键词搜索：命中会话 + 预览 + 可定位的消息 id */
@@ -2920,6 +2932,7 @@ export async function searchLocalMessages(params: {
   keyword: string
   conversationID?: string
   count?: number
+  pageIndex?: number
 }): Promise<LocalMessageSearchHit[]> {
   const keyword = params.keyword.trim()
   if (!keyword) return []
@@ -2932,7 +2945,7 @@ export async function searchLocalMessages(params: {
     messageTypeList: [] as number[],
     searchTimePosition: 0,
     searchTimePeriod: 0,
-    pageIndex: 1,
+    pageIndex: params.pageIndex ?? 1,
     count: params.count ?? 100,
   }
   try {
@@ -2974,6 +2987,66 @@ function normalizeLocalMessageSearchResult(res: unknown): LocalMessageSearchHit[
     })
   }
   return hits
+}
+
+/** 搜索用正文：文本 / @ / 引用；类型丢失时退回纯文本 content */
+function searchableTextOf(item: MessageItem): string {
+  const preview = messageSearchPreview(item)
+  if (preview) return preview
+  const content = typeof item.content === 'string' ? item.content.trim() : ''
+  if (!content || content.startsWith('{') || content.startsWith('[') || /^https?:\/\//i.test(content)) {
+    return ''
+  }
+  return content
+}
+
+/**
+ * 指定会话内搜出全部命中（新→旧），对齐「每条消息一行」。
+ * SDK 本地索引经常只回最新一条、或漏掉未建索引的消息，所以再按历史分页补扫。
+ */
+export async function searchConversationMessages(
+  conversationID: string,
+  keyword: string,
+): Promise<MessageItem[]> {
+  const key = keyword.trim().toLowerCase()
+  if (!conversationID || !key) return []
+  const byId = new Map<string, MessageItem>()
+  const remember = (item: MessageItem) => {
+    if (item?.clientMsgID) byId.set(item.clientMsgID, item)
+  }
+
+  const pageSize = 100
+  for (let page = 1; page <= 30; page++) {
+    const hits = await searchLocalMessages({
+      keyword,
+      conversationID,
+      count: pageSize,
+      pageIndex: page,
+    })
+    const conv =
+      hits.find((h) => h.conversationID === conversationID) ||
+      (hits.length === 1 ? hits[0] : undefined)
+    const batch = conv?.messages || []
+    if (!batch.length) break
+    const before = byId.size
+    for (const item of batch) {
+      const text = searchableTextOf(item)
+      if (text && text.toLowerCase().includes(key)) remember(item)
+    }
+    if (byId.size === before) break
+    const total = Number(conv?.messageCount || 0)
+    if (total > 0 && byId.size >= total) break
+    // 本页不满，但 SDK 报的命中数还没拿齐时继续翻页（有的端一页只回最新一条）
+    if (batch.length < pageSize && (total <= 0 || byId.size >= total)) break
+  }
+
+  const history = await collectHistoryMessages(conversationID, 4000).catch(() => [] as MessageItem[])
+  for (const item of history) {
+    const text = searchableTextOf(item)
+    if (text && text.toLowerCase().includes(key)) remember(item)
+  }
+
+  return [...byId.values()].sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
 }
 
 function groupIdFromConversationId(conversationId: string): string {

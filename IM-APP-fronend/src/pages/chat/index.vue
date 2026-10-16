@@ -22,7 +22,8 @@ import { getStatusBarHeight } from '@/utils/status-bar'
 import { isDissolvedGroupConversationPreview, isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-notification'
 import { setConversationRecvOpt } from '@/utils/openim'
 import { resolveIMGroupByIM } from '@/api/im'
-import { searchLocalMessages } from '@/utils/openim'
+import { messageSearchPreview, searchLocalMessages } from '@/utils/openim'
+import type { MessageItem } from 'openim-uniapp-polyfill'
 
 useAuthGuard()
 useTabBar()
@@ -34,8 +35,10 @@ const chatStore = useChatStore()
 const contactStore = useContactStore()
 const groupStore = useGroupStore()
 const keyword = ref('')
-/** 关键词命中历史消息的会话 id → 预览 + 可定位消息 id */
-const messageHitMeta = ref<Map<string, { preview: string; clientMsgId: string }>>(new Map())
+/** 关键词命中：同一会话里的每一条都保留，不能只留最新一条 */
+const messageHitMeta = ref<
+  Map<string, { messages: Array<{ preview: string; clientMsgId: string; sendTime: number }> }>
+>(new Map())
 let messageSearchSeq = 0
 let messageSearchTimer: ReturnType<typeof setTimeout> | null = null
 const showAddMenu = ref(false)
@@ -196,6 +199,10 @@ function truncateSearchPreview(text: string, max = 48): string {
   return t.length > max ? `${t.slice(0, max)}…` : t
 }
 
+function hitPreviewOf(item: MessageItem, fallback = ''): string {
+  return truncateSearchPreview(messageSearchPreview(item) || fallback)
+}
+
 async function runMessageSearch(raw: string) {
   const k = raw.trim()
   const seq = ++messageSearchSeq
@@ -203,16 +210,43 @@ async function runMessageSearch(raw: string) {
     messageHitMeta.value = new Map()
     return
   }
-  const hits = await searchLocalMessages({ keyword: k, count: 100 })
-  if (seq !== messageSearchSeq) return
-  const map = new Map<string, { preview: string; clientMsgId: string }>()
-  for (const hit of hits) {
-    if (!hit.conversationID) continue
-    map.set(hit.conversationID, {
-      preview: truncateSearchPreview(hit.preview),
-      clientMsgId: hit.clientMsgID || '',
-    })
+  const map = new Map<string, { messages: Array<{ preview: string; clientMsgId: string; sendTime: number }> }>()
+  for (let page = 1; page <= 10; page++) {
+    const hits = await searchLocalMessages({ keyword: k, count: 100, pageIndex: page })
+    if (seq !== messageSearchSeq) return
+    if (!hits.length) break
+    let added = 0
+    for (const hit of hits) {
+      if (!hit.conversationID) continue
+      const bucket = map.get(hit.conversationID) || { messages: [] }
+      const seen = new Set(bucket.messages.map((m) => m.clientMsgId))
+      const batch = hit.messages.length
+        ? hit.messages
+        : []
+      for (const item of batch) {
+        if (!item.clientMsgID || seen.has(item.clientMsgID)) continue
+        seen.add(item.clientMsgID)
+        bucket.messages.push({
+          preview: hitPreviewOf(item, hit.preview),
+          clientMsgId: item.clientMsgID,
+          sendTime: Number(item.sendTime || 0),
+        })
+        added += 1
+      }
+      if (!batch.length && hit.clientMsgID && !seen.has(hit.clientMsgID)) {
+        bucket.messages.push({
+          preview: truncateSearchPreview(hit.preview),
+          clientMsgId: hit.clientMsgID,
+          sendTime: 0,
+        })
+        added += 1
+      }
+      bucket.messages.sort((a, b) => b.sendTime - a.sendTime)
+      map.set(hit.conversationID, bucket)
+    }
+    if (!added) break
   }
+  if (seq !== messageSearchSeq) return
   messageHitMeta.value = map
 }
 
@@ -244,18 +278,33 @@ const filtered = computed(() => {
         c.lastMessage.toLowerCase().includes(k) ||
         messageHitMeta.value.has(c.id),
     )
-    .map((c) => {
-      // 标题/摘要没命中、靠历史消息命中时，用命中片段替换摘要，避免仍显示无关最后一条
-      const hit = messageHitMeta.value.get(c.id)
-      if (
-        hit &&
-        !c.title.toLowerCase().includes(k) &&
-        !c.lastMessage.toLowerCase().includes(k)
-      ) {
-        return hit.preview ? { ...c, lastMessage: hit.preview } : c
-      }
-      return c
-    })
+})
+
+/** 搜索时按「每条命中消息一行」展开，同一会话里的历史都列出来 */
+const searchRows = computed(() => {
+  const k = keyword.value.trim()
+  if (!k) return [] as Array<{ key: string; item: Conversation; clientMsgId: string }>
+  const rows: Array<{ key: string; item: Conversation; clientMsgId: string }> = []
+  for (const conv of filtered.value) {
+    const hits = messageHitMeta.value.get(conv.id)?.messages || []
+    if (!hits.length) {
+      rows.push({ key: conv.id, item: conv, clientMsgId: '' })
+      continue
+    }
+    for (const hit of hits) {
+      rows.push({
+        key: `${conv.id}:${hit.clientMsgId}`,
+        clientMsgId: hit.clientMsgId,
+        item: {
+          ...conv,
+          lastMessage: hit.preview || conv.lastMessage,
+          lastMessageAt: hit.sendTime ? new Date(hit.sendTime).toISOString() : conv.lastMessageAt,
+          unreadCount: 0,
+        },
+      })
+    }
+  }
+  return rows
 })
 
 async function reloadConversations() {
@@ -273,13 +322,31 @@ async function reloadConversations() {
 
 const { refreshing, onRefresherRefresh } = usePullRefresh(reloadConversations)
 
+function openSearchRow(row: { item: Conversation; clientMsgId: string }) {
+  showAddMenu.value = false
+  showFilter.value = false
+  const item = chatStore.conversations.find((c) => c.id === row.item.id) || row.item
+  const hitMsgId = row.clientMsgId
+  if (isDesktop.value) {
+    if (isDissolvedGroupConversation(item)) {
+      notifyGroupUnavailable(true)
+      return
+    }
+    selectedClientMsgId.value = hitMsgId
+    selectedConv.value = item
+    return
+  }
+  const locate = hitMsgId ? `&clientMsgId=${encodeURIComponent(hitMsgId)}` : ''
+  uni.navigateTo({
+    url: `/pages/chat/room?conversationId=${encodeURIComponent(item.id)}&type=${item.type}&title=${encodeURIComponent(item.title)}&avatar=${encodeURIComponent(item.avatar)}${locate}`,
+  })
+}
+
 async function openConversation(item: Conversation) {
   showAddMenu.value = false
   showFilter.value = false
-  const hitMsgId =
-    keyword.value.trim() && messageHitMeta.value.has(item.id)
-      ? messageHitMeta.value.get(item.id)?.clientMsgId || ''
-      : ''
+  const hits = messageHitMeta.value.get(item.id)?.messages || []
+  const hitMsgId = keyword.value.trim() && hits.length === 1 ? hits[0].clientMsgId : ''
   if (isDesktop.value) {
     if (isDissolvedGroupConversation(item)) {
       notifyGroupUnavailable(true)
@@ -604,7 +671,16 @@ watchEffect(() => {
         @refresherrefresh="onRefresherRefresh"
         @scroll="onListScroll"
       >
-        <template v-if="isDesktop">
+        <template v-if="keyword.trim()">
+          <ConversationItem
+            v-for="row in searchRows"
+            :key="row.key"
+            :item="row.item"
+            :selected="isDesktop && selectedConv?.id === row.item.id && selectedClientMsgId === row.clientMsgId"
+            @click="openSearchRow(row)"
+          />
+        </template>
+        <template v-else-if="isDesktop">
           <ConversationItem
             v-for="item in filtered"
             :key="item.id"
@@ -647,7 +723,7 @@ watchEffect(() => {
             </template>
           </ImSwipeActionItem>
         </uni-swipe-action>
-        <view v-if="!filtered.length" class="empty">{{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}</view>
+        <view v-if="keyword.trim() ? !searchRows.length : !filtered.length" class="empty">{{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}</view>
       </scroll-view>
     </view>
 

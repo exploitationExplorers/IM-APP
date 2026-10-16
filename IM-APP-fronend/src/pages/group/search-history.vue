@@ -6,7 +6,7 @@ import {
   businessUserIdFromIM,
   messageSearchPreview,
   resolveGroupConversationID,
-  searchLocalMessages,
+  searchConversationMessages,
 } from '@/utils/openim'
 import { formatFavoriteDay, formatClock } from '@/utils/format'
 import ImNavBar from '@/components/ImNavBar.vue'
@@ -55,14 +55,9 @@ async function runSearch(raw: string) {
   }
   loading.value = true
   try {
-    const hits = await searchLocalMessages({
-      keyword: text,
-      conversationID: conversationId.value,
-      count: 100,
-    })
+    const hits = await searchConversationMessages(conversationId.value, text)
     if (seq !== searchSeq) return
-    // 指定会话搜索时 SDK 通常只返回一项，messages 里是命中列表
-    results.value = hits.flatMap((h) => h.messages)
+    results.value = hits
   } catch (e) {
     if (seq !== searchSeq) return
     results.value = []
@@ -163,7 +158,7 @@ function openResult(item: MessageItem) {
 .avatar {
   width: 80rpx;
   height: 80rpx;
-  border-radius: 12rpx;
+  border-radius: 50%;
   background: #eee;
   flex-shrink: 0;
 }
