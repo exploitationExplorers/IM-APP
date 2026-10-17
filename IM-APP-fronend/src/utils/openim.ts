@@ -887,16 +887,26 @@ export async function collectHistoryMessages(
   maxCount = 400,
 ): Promise<MessageItem[]> {
   const pages: MessageItem[][] = []
+  const seenCursor = new Set<string>()
   let startClientMsgID = ''
   let loaded = 0
   while (loaded < maxCount) {
     const { messageList, isEnd } = await getHistoryMessages(conversationID, 50, startClientMsgID)
     if (!messageList.length) break
-    pages.push(messageList)
-    loaded += messageList.length
+    const fresh = messageList.filter((item) => {
+      const id = item.clientMsgID
+      if (!id || seenCursor.has(id)) return false
+      seenCursor.add(id)
+      return true
+    })
+    if (!fresh.length) break
+    pages.push(fresh)
+    loaded += fresh.length
     if (isEnd) break
-    startClientMsgID = messageList[0]?.clientMsgID || ''
-    if (!startClientMsgID) break
+    // 下一页从本页最旧的一条继续。H5 有时把新消息放在 [0]，固定取 [0] 会反复扫同一页，旧的「12」永远扫不到
+    const next = oldestClientMsgID(fresh)
+    if (!next || next === startClientMsgID) break
+    startClientMsgID = next
   }
   return pages.flat()
 }
@@ -2889,29 +2899,53 @@ function resolveNoticeDisplayName(userId: string): string {
   }
 }
 
-/** 聊天记录搜索用的纯文本预览（兼容 App PascalCase 字段） */
-export function messageSearchPreview(item: MessageItem): string {
-  const t = Number(item.contentType)
-  if (
-    t !== MessageType.TextMessage &&
-    t !== MessageType.AtTextMessage &&
-    t !== MessageType.QuoteMessage
-  ) {
+/** 本页里发送时间最早的一条，用作向更旧历史翻页的起点 */
+function oldestClientMsgID(list: MessageItem[]): string {
+  let oldest = list[0]
+  for (const item of list) {
+    const time = Number(item.sendTime || 0)
+    const oldestTime = Number(oldest?.sendTime || 0)
+    if (time > 0 && (oldestTime <= 0 || time < oldestTime)) oldest = item
+  }
+  return oldest?.clientMsgID || ''
+}
+
+/**
+ * 搜索用纯文本。H5 文本经常是 `{"content":"12"}`，纯数字还会被收成 `{"content":12}`。
+ * 只认字符串时「12」会被丢掉，App 的 textElem 仍是字符串所以搜得到。
+ */
+function plainSearchText(raw: unknown): string {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw)
+  if (typeof raw !== 'string') return ''
+  const content = raw.trim()
+  if (!content || /^https?:\/\//i.test(content)) return ''
+  if (!content.startsWith('{') && !content.startsWith('[')) return content
+  try {
+    const parsed: unknown = JSON.parse(content)
+    if (typeof parsed === 'number' && Number.isFinite(parsed)) return String(parsed)
+    if (typeof parsed === 'string') return parsed.trim()
+    if (!parsed || typeof parsed !== 'object') return ''
+    const obj = parsed as Record<string, unknown>
+    const text = obj.content ?? obj.Content ?? obj.text ?? obj.Text
+    if (typeof text === 'number' && Number.isFinite(text)) return String(text)
+    if (typeof text === 'string') return text.trim()
+  } catch {
     return ''
   }
-  const extracted = extractContent(item)
-  if (extracted && !extracted.startsWith('{') && !extracted.startsWith('[')) return extracted
-  // 文本类型偶发没有 textElem，正文直接在 content 里（否则「三码」这类短句搜不到）
-  const content = typeof item.content === 'string' ? item.content.trim() : ''
-  if (
-    content &&
-    !content.startsWith('{') &&
-    !content.startsWith('[') &&
-    !/^https?:\/\//i.test(content)
-  ) {
-    return content
-  }
   return ''
+}
+
+/** 聊天记录搜索用的纯文本预览（兼容 App PascalCase 字段，以及 H5 的数字 JSON） */
+export function messageSearchPreview(item: MessageItem): string {
+  const t = Number(item.contentType)
+  const isText =
+    t === MessageType.TextMessage ||
+    t === MessageType.AtTextMessage ||
+    t === MessageType.QuoteMessage
+  if (!isText && t) return ''
+  const extracted = plainSearchText(extractContent(item))
+  if (extracted) return extracted
+  return plainSearchText(item.content)
 }
 
 /** 会话列表 / 群内关键词搜索：命中会话 + 预览 + 可定位的消息 id */
@@ -2941,8 +2975,11 @@ export async function searchLocalMessages(params: {
     keywordList: [keyword],
     keywordListMatchType: 0,
     senderUserIDList: [] as string[],
-    // 空列表 = 全部类型。只传文本类型时，App 上部分群消息类型对不上，搜索会一直空
-    messageTypeList: [] as number[],
+    // App：空列表才等于全部类型，指定文本类型时群消息对不上，搜索会一直空。
+    // H5 WASM：空列表等于不搜任何类型，必须显式带上文本 / @ / 引用，否则「12」这种纯数字也没有结果。
+    messageTypeList: isAppPlatform
+      ? ([] as number[])
+      : [MessageType.TextMessage, MessageType.AtTextMessage, MessageType.QuoteMessage],
     searchTimePosition: 0,
     searchTimePeriod: 0,
     pageIndex: params.pageIndex ?? 1,
@@ -2966,7 +3003,9 @@ function normalizeLocalMessageSearchResult(res: unknown): LocalMessageSearchHit[
   for (const raw of items) {
     if (!raw || typeof raw !== 'object') continue
     const item = raw as Record<string, unknown>
-    const conversationID = String(item.conversationID ?? item.ConversationID ?? '')
+    const conversationID = String(
+      item.conversationID ?? item.ConversationID ?? item.conversationId ?? '',
+    )
     if (!conversationID) continue
     const messageCount = Number(item.messageCount ?? item.MessageCount ?? 0)
     const messageList = item.messageList ?? item.MessageList
@@ -2993,11 +3032,7 @@ function normalizeLocalMessageSearchResult(res: unknown): LocalMessageSearchHit[
 function searchableTextOf(item: MessageItem): string {
   const preview = messageSearchPreview(item)
   if (preview) return preview
-  const content = typeof item.content === 'string' ? item.content.trim() : ''
-  if (!content || content.startsWith('{') || content.startsWith('[') || /^https?:\/\//i.test(content)) {
-    return ''
-  }
-  return content
+  return plainSearchText(item.content)
 }
 
 /**
