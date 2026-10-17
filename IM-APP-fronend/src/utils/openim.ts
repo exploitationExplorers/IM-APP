@@ -3265,7 +3265,7 @@ export async function searchLocalMessages(params: {
     senderUserIDList: [] as string[],
     // App：空列表才等于全部类型，指定文本类型时群消息对不上，搜索会一直空。
     // H5 WASM：空列表等于不搜任何类型，必须显式带上文本 / @ / 引用，否则「12」这种纯数字也没有结果。
-    messageTypeList: isAppPlatform
+    messageTypeList: isApp()
       ? ([] as number[])
       : [MessageType.TextMessage, MessageType.AtTextMessage, MessageType.QuoteMessage],
     searchTimePosition: 0,
