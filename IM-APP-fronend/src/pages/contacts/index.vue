@@ -204,29 +204,68 @@ function onPanelGroupSelect(g: GroupPreview) {
     :class="isDesktop ? 'im-desktop-workspace' : 'page'"
     @click="closeMenus"
   >
-    <ImDesktopSidebar v-if="isDesktop" current="contacts" />
+    <ImDesktopSidebar
+      v-if="isDesktop"
+      current="contacts"
+    />
 
     <view
       :class="isDesktop ? 'im-desktop-list-column page-desktop-list page-desktop-contacts' : ''"
       class="list-panel"
       :style="isDesktop ? { width: `${listWidth}px` } : undefined"
     >
-      <view class="header" :style="{ paddingTop: isDesktop ? '0px' : statusBarHeight + 'px' }">
+      <view
+        class="header"
+        :style="{ paddingTop: isDesktop ? '0px' : statusBarHeight + 'px' }"
+      >
         <view class="header-row">
-          <text class="title">通讯录</text>
-          <view class="add-wrap" @click.stop="onAdd">
-            <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
-            <view v-if="showAddMenu" class="popup-menu">
-              <view class="popup-item" @click="go('/pages/contacts/add-friend')">
-                <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
+          <text class="title">
+            通讯录
+          </text>
+          <view
+            class="add-wrap"
+            @click.stop="onAdd"
+          >
+            <image
+              class="icon-plus"
+              src="/static/icons/icon-plus.svg"
+              mode="aspectFit"
+            />
+            <view
+              v-if="showAddMenu"
+              class="popup-menu"
+            >
+              <view
+                class="popup-item"
+                @click="go('/pages/contacts/add-friend')"
+              >
+                <image
+                  class="popup-icon"
+                  src="/static/icons/menu-add-friend.svg"
+                  mode="aspectFit"
+                />
                 <text>添加朋友</text>
               </view>
-              <view class="popup-item" @click="goAddGroup">
-                <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
+              <view
+                class="popup-item"
+                @click="goAddGroup"
+              >
+                <image
+                  class="popup-icon"
+                  src="/static/icons/menu-add-group.svg"
+                  mode="aspectFit"
+                />
                 <text>添加群聊</text>
               </view>
-              <view class="popup-item" @click="go('/pages/group/create')">
-                <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
+              <view
+                class="popup-item"
+                @click="go('/pages/group/create')"
+              >
+                <image
+                  class="popup-icon"
+                  src="/static/icons/menu-create-group.svg"
+                  mode="aspectFit"
+                />
                 <text>创建群聊</text>
               </view>
             </view>
@@ -248,27 +287,74 @@ function onPanelGroupSelect(g: GroupPreview) {
         @scroll="onScroll"
       >
         <view class="menu-list">
-          <view class="menu-item" @click="go('/pages/contacts/new-friends')">
-            <image class="menu-icon" src="/static/icons/menu-new-friend.svg" mode="aspectFit" />
-            <text class="menu-text">新的朋友</text>
-            <view v-if="friendRequestBadge" class="menu-badge">
-              <text class="menu-badge-text">{{ friendRequestBadge }}</text>
+          <view
+            class="menu-item"
+            @click="go('/pages/contacts/new-friends')"
+          >
+            <image
+              class="menu-icon"
+              src="/static/icons/menu-new-friend.svg"
+              mode="aspectFit"
+            />
+            <text class="menu-text">
+              新的朋友
+            </text>
+            <view
+              v-if="friendRequestBadge"
+              class="menu-badge"
+            >
+              <text class="menu-badge-text">
+                {{ friendRequestBadge }}
+              </text>
             </view>
-            <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+            <image
+              class="arrow"
+              src="/static/icons/icon-chevron.svg"
+              mode="aspectFit"
+            />
           </view>
-          <view class="menu-item" @click="go('/pages/contacts/tags')">
-            <image class="menu-icon" src="/static/icons/menu-tag.svg" mode="aspectFit" />
-            <text class="menu-text">标签</text>
-            <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+          <view
+            class="menu-item"
+            @click="go('/pages/contacts/tags')"
+          >
+            <image
+              class="menu-icon"
+              src="/static/icons/menu-tag.svg"
+              mode="aspectFit"
+            />
+            <text class="menu-text">
+              标签
+            </text>
+            <image
+              class="arrow"
+              src="/static/icons/icon-chevron.svg"
+              mode="aspectFit"
+            />
           </view>
-          <view class="menu-item" @click="go('/pages/contacts/groups')">
-            <image class="menu-icon" src="/static/icons/menu-group.svg" mode="aspectFit" />
-            <text class="menu-text">{{ isDesktop ? '群聊' : '群聊天' }}</text>
-            <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+          <view
+            class="menu-item"
+            @click="go('/pages/contacts/groups')"
+          >
+            <image
+              class="menu-icon"
+              src="/static/icons/menu-group.svg"
+              mode="aspectFit"
+            />
+            <text class="menu-text">
+              {{ isDesktop ? '群聊' : '群聊天' }}
+            </text>
+            <image
+              class="arrow"
+              src="/static/icons/icon-chevron.svg"
+              mode="aspectFit"
+            />
           </view>
 
           <!-- PC：参考站在「群聊」下方内联展示群列表（不显示已解散群） -->
-          <view v-if="isDesktop && activeGroups.length" class="desktop-group-panel">
+          <view
+            v-if="isDesktop && activeGroups.length"
+            class="desktop-group-panel"
+          >
             <view
               v-for="g in desktopGroupsVisible"
               :key="g.id"
@@ -280,59 +366,97 @@ function onPanelGroupSelect(g: GroupPreview) {
                 :src="g.avatar || '/static/icons/menu-group.svg'"
                 mode="aspectFill"
               />
-              <text class="desktop-group-name">{{ g.name }}</text>
+              <text class="desktop-group-name">
+                {{ g.name }}
+              </text>
             </view>
             <view
               v-if="showDesktopGroupExpand"
               class="desktop-group-expand"
               @click.stop="expandDesktopGroups"
             >
-              <text class="desktop-group-expand-text">展开所有群聊 ({{ activeGroups.length }})</text>
+              <text class="desktop-group-expand-text">
+                展开所有群聊 ({{ activeGroups.length }})
+              </text>
             </view>
           </view>
         </view>
 
-        <view v-if="!isDesktop && activeGroups.length" class="group-band">
+        <view
+          v-if="!isDesktop && activeGroups.length"
+          class="group-band"
+        >
           <view
             v-for="g in mobileGroupsVisible"
             :key="g.id"
             class="group-card"
             @click="openGroupChat(g)"
           >
-            <image class="group-avatar" :src="g.avatar || '/static/icons/menu-group.svg'" mode="aspectFill" />
-            <text class="group-name">{{ g.name }}</text>
+            <image
+              class="group-avatar"
+              :src="g.avatar || '/static/icons/menu-group.svg'"
+              mode="aspectFill"
+            />
+            <text class="group-name">
+              {{ g.name }}
+            </text>
           </view>
           <view
             v-if="showMobileGroupExpand"
             class="mobile-group-expand"
             @click.stop="expandMobileGroups"
           >
-            <text class="mobile-group-expand-text">展开所有群聊 ({{ activeGroups.length }})</text>
+            <text class="mobile-group-expand-text">
+              展开所有群聊 ({{ activeGroups.length }})
+            </text>
           </view>
         </view>
-        <view v-if="!isDesktop" class="section-divider" />
+        <view
+          v-if="!isDesktop"
+          class="section-divider"
+        />
 
         <view class="section-head">
-          <text class="section-count">联络人 ({{ contactTotal }})</text>
-          <view class="sort-wrap" @click.stop="showSort = !showSort">
-            <text class="sort">{{ sortLabel }}</text>
-            <image class="sort-caret" src="/static/icons/icon-caret.svg" mode="aspectFit" />
-            <view v-if="showSort" class="popup-menu sort-menu">
+          <text class="section-count">
+            联络人 ({{ contactTotal }})
+          </text>
+          <view
+            class="sort-wrap"
+            @click.stop="showSort = !showSort"
+          >
+            <text class="sort">
+              {{ sortLabel }}
+            </text>
+            <image
+              class="sort-caret"
+              src="/static/icons/icon-caret.svg"
+              mode="aspectFit"
+            />
+            <view
+              v-if="showSort"
+              class="popup-menu sort-menu"
+            >
               <view
                 class="popup-item"
                 :class="{ active: sortKey === 'recent' }"
                 @click="setSort('recent')"
-              >最近加入(默认)</view>
+              >
+                最近加入(默认)
+              </view>
               <view
                 class="popup-item"
                 :class="{ active: sortKey === 'name' }"
                 @click="setSort('name')"
-              >名字</view>
+              >
+                名字
+              </view>
               <view
                 class="popup-item"
                 :class="{ active: sortKey === 'chat' }"
                 @click="setSort('chat')"
-              >最近聊天</view>
+              >
+                最近聊天
+              </view>
             </view>
           </view>
         </view>
@@ -344,12 +468,33 @@ function onPanelGroupSelect(g: GroupPreview) {
           :class="{ selected: isDesktop && selectedContact?.id === c.id }"
           @click="openContact(c)"
         >
-          <image class="avatar" :src="c.avatar" mode="aspectFill" />
-          <text class="name">{{ listName(c) }}</text>
+          <image
+            class="avatar"
+            :src="c.avatar"
+            mode="aspectFill"
+          />
+          <text class="name">
+            {{ listName(c) }}
+          </text>
         </view>
-        <view v-if="contactsLoading" class="list-status">加载中</view>
-        <view v-else-if="!contacts.length" class="list-status">暂无联络人</view>
-        <view v-else-if="!contactHasMore" class="list-status">没有更多了</view>
+        <view
+          v-if="contactsLoading"
+          class="list-status"
+        >
+          加载中
+        </view>
+        <view
+          v-else-if="!contacts.length"
+          class="list-status"
+        >
+          暂无联络人
+        </view>
+        <view
+          v-else-if="!contactHasMore"
+          class="list-status"
+        >
+          没有更多了
+        </view>
       </scroll-view>
     </view>
 
@@ -359,8 +504,14 @@ function onPanelGroupSelect(g: GroupPreview) {
       @start="onResizeStart"
     />
 
-    <view v-if="isDesktop" class="im-desktop-room-column im-desktop-detail-column">
-      <view v-if="!showGroupsPanel" class="im-desktop-room-empty">
+    <view
+      v-if="isDesktop"
+      class="im-desktop-room-column im-desktop-detail-column"
+    >
+      <view
+        v-if="!showGroupsPanel"
+        class="im-desktop-room-empty"
+      >
         {{ selectedContact ? '' : '选择一位好友查看资料' }}
       </view>
 
@@ -379,7 +530,10 @@ function onPanelGroupSelect(g: GroupPreview) {
 
     <ImDesktopNewFriends v-model="showNewFriendsModal" />
 
-    <ImTabBar v-if="!isDesktop" current="contacts" />
+    <ImTabBar
+      v-if="!isDesktop"
+      current="contacts"
+    />
   </view>
 </template>
 

@@ -36,7 +36,7 @@ useAuthGuard()
 
 const contactStore = useContactStore()
 const chatStore = useChatStore()
-const contactId = ref('')
+const detailContactId = ref('')
 const contact = ref<Contact | null>(null)
 const loading = ref(false)
 const showMore = ref(false)
@@ -64,12 +64,12 @@ const lastSeenText = computed(() => {
 
 onLoad((query) => {
   if (props.embedded) return
-  contactId.value = String(query?.id || '')
+  detailContactId.value = String(query?.id || '')
 })
 
 onMounted(() => {
   if (!props.embedded || !props.contactId) return
-  contactId.value = props.contactId
+  detailContactId.value = props.contactId
   void loadDetail()
 })
 
@@ -77,20 +77,20 @@ watch(
   () => props.contactId,
   (id) => {
     if (!props.embedded || !id) return
-    contactId.value = id
+    detailContactId.value = id
     void loadDetail()
   },
 )
 
 onShow(() => {
   if (props.embedded) return
-  if (contactId.value) loadDetail()
+  if (detailContactId.value) loadDetail()
 })
 
 async function loadDetail() {
   loading.value = true
   try {
-    contact.value = await fetchContact(contactId.value)
+    contact.value = await fetchContact(detailContactId.value)
     await initConversationSettings()
   } catch (e) {
     uni.showToast({ title: (e as Error).message || '加载失败', icon: 'none' })
@@ -102,7 +102,7 @@ async function loadDetail() {
 /** 读取与该好友的 OpenIM 会话状态（置顶 / 免打扰） */
 async function initConversationSettings() {
   try {
-    const conv = await chatStore.enterConversation({ type: 'private', businessId: contactId.value })
+    const conv = await chatStore.enterConversation({ type: 'private', businessId: detailContactId.value })
     convId.value = conv.id
     recvOpt.value = conv.recvMsgOpt ?? MessageReceiveOptType.Normal
     pinned.value = conv.pinned ?? false
@@ -271,22 +271,54 @@ function onDelete() {
 </script>
 
 <template>
-  <view class="page" :class="{ 'page-embedded': embedded }" @click="closeMore">
+  <view
+    class="page"
+    :class="{ 'page-embedded': embedded }"
+    @click="closeMore"
+  >
     <view class="hero">
       <view class="hero-img" />
     </view>
 
-    <ImNavBar v-if="!embedded" title="好友详情" @back="goBack">
+    <ImNavBar
+      v-if="!embedded"
+      title="好友详情"
+      @back="goBack"
+    >
       <template #right>
-        <view class="nav-btn" @click.stop="onMore">
-          <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
-          <view v-if="showMore" class="more-menu">
-            <view class="more-item" @click.stop="onBlock">
-              <image class="more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
+        <view
+          class="nav-btn"
+          @click.stop="onMore"
+        >
+          <image
+            class="nav-more-icon"
+            src="/static/icons/icon-more.svg"
+            mode="aspectFit"
+          />
+          <view
+            v-if="showMore"
+            class="more-menu"
+          >
+            <view
+              class="more-item"
+              @click.stop="onBlock"
+            >
+              <image
+                class="more-icon"
+                src="/static/icons/icon-block.svg"
+                mode="aspectFit"
+              />
               <text>{{ contact?.isBlocked ? '移出黑名单' : '加入黑名单' }}</text>
             </view>
-            <view class="more-item danger" @click.stop="onDelete">
-              <image class="more-icon" src="/static/icons/icon-profile-remove.svg" mode="aspectFit" />
+            <view
+              class="more-item danger"
+              @click.stop="onDelete"
+            >
+              <image
+                class="more-icon"
+                src="/static/icons/icon-profile-remove.svg"
+                mode="aspectFit"
+              />
               <text>删除联络人</text>
             </view>
           </view>
@@ -294,23 +326,53 @@ function onDelete() {
       </template>
     </ImNavBar>
 
-    <view v-else class="embedded-toolbar">
-      <view class="embedded-more" @click.stop="onMore">
-        <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
-        <view v-if="showMore" class="more-menu">
-          <view class="more-item" @click.stop="onBlock">
-            <image class="more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
+    <view
+      v-else
+      class="embedded-toolbar"
+    >
+      <view
+        class="embedded-more"
+        @click.stop="onMore"
+      >
+        <image
+          class="nav-more-icon"
+          src="/static/icons/icon-more.svg"
+          mode="aspectFit"
+        />
+        <view
+          v-if="showMore"
+          class="more-menu"
+        >
+          <view
+            class="more-item"
+            @click.stop="onBlock"
+          >
+            <image
+              class="more-icon"
+              src="/static/icons/icon-block.svg"
+              mode="aspectFit"
+            />
             <text>{{ contact?.isBlocked ? '移出黑名单' : '加入黑名单' }}</text>
           </view>
-          <view class="more-item danger" @click.stop="onDelete">
-            <image class="more-icon" src="/static/icons/icon-profile-remove.svg" mode="aspectFit" />
+          <view
+            class="more-item danger"
+            @click.stop="onDelete"
+          >
+            <image
+              class="more-icon"
+              src="/static/icons/icon-profile-remove.svg"
+              mode="aspectFit"
+            />
             <text>删除联络人</text>
           </view>
         </view>
       </view>
     </view>
 
-    <view v-if="contact" class="body">
+    <view
+      v-if="contact"
+      class="body"
+    >
       <view class="sheet">
         <view class="top-card">
           <view class="profile">
@@ -320,14 +382,24 @@ function onDelete() {
               mode="aspectFill"
             />
             <view class="profile-meta">
-              <text class="name selectable" @dblclick.stop="copyText(listName)">{{ listName }}</text>
+              <text
+                class="name selectable"
+                @dblclick.stop="copyText(listName)"
+              >
+                {{ listName }}
+              </text>
               <!-- 有备注时主名是备注，下面补一行原昵称，避免「备注完看不到原来名字」 -->
               <text
                 v-if="contact.remark && contact.nickname && contact.remark.trim() !== contact.nickname.trim()"
                 class="origin-name selectable"
                 @dblclick.stop="copyText(contact.nickname, '已复制昵称')"
-              >昵称：{{ contact.nickname }}</text>
-              <view v-if="contact.isBlocked" class="blocked-tag">
+              >
+                昵称：{{ contact.nickname }}
+              </text>
+              <view
+                v-if="contact.isBlocked"
+                class="blocked-tag"
+              >
                 <text>已拉黑</text>
               </view>
             </view>
@@ -335,49 +407,109 @@ function onDelete() {
 
           <view class="divider" />
 
-          <view class="row" @click="goRemark">
-            <text class="label">备注</text>
+          <view
+            class="row"
+            @click="goRemark"
+          >
+            <text class="label">
+              备注
+            </text>
             <view class="row-right">
               <text
                 v-if="contact.remark"
                 class="value selectable"
                 @dblclick.stop="copyText(contact.remark, '已复制备注')"
-              >{{ contact.remark }}</text>
-              <image class="chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+              >
+                {{ contact.remark }}
+              </text>
+              <image
+                class="chevron"
+                src="/static/icons/icon-chevron.svg"
+                mode="aspectFit"
+              />
             </view>
           </view>
-          <view v-if="friendSinceText" class="row">
-            <text class="label">添加时间</text>
+          <view
+            v-if="friendSinceText"
+            class="row"
+          >
+            <text class="label">
+              添加时间
+            </text>
             <view class="row-right">
-              <text class="value">{{ friendSinceText }}</text>
+              <text class="value">
+                {{ friendSinceText }}
+              </text>
             </view>
           </view>
-          <view v-if="lastSeenText" class="row">
-            <text class="label">最近上线</text>
+          <view
+            v-if="lastSeenText"
+            class="row"
+          >
+            <text class="label">
+              最近上线
+            </text>
             <view class="row-right">
-              <text class="value">{{ lastSeenText }}</text>
+              <text class="value">
+                {{ lastSeenText }}
+              </text>
             </view>
           </view>
           <view class="row">
-            <text class="label">聊天号</text>
+            <text class="label">
+              聊天号
+            </text>
             <view class="row-right">
-              <text class="pid">{{ contact.publicId || '—' }}</text>
-              <view v-if="contact.publicId" class="copy" @click.stop="onCopyPublicId">复制</view>
+              <text class="pid">
+                {{ contact.publicId || '—' }}
+              </text>
+              <view
+                v-if="contact.publicId"
+                class="copy"
+                @click.stop="onCopyPublicId"
+              >
+                复制
+              </view>
             </view>
           </view>
-          <view class="row" @click="goTags">
-            <text class="label">标签</text>
+          <view
+            class="row"
+            @click="goTags"
+          >
+            <text class="label">
+              标签
+            </text>
             <view class="row-right">
-              <text v-if="tagText" class="value">{{ tagText }}</text>
-              <image class="chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+              <text
+                v-if="tagText"
+                class="value"
+              >
+                {{ tagText }}
+              </text>
+              <image
+                class="chevron"
+                src="/static/icons/icon-chevron.svg"
+                mode="aspectFit"
+              />
             </view>
           </view>
         </view>
 
-        <view v-if="groups.length" class="groups">
+        <view
+          v-if="groups.length"
+          class="groups"
+        >
           <view class="groups-bar">
-            <text class="groups-title">共同群组 ({{ groups.length }})</text>
-            <text v-if="showAllGroupsLink" class="groups-all" @click="goAllGroups">查看全部</text>
+            <text class="groups-title">
+              共同群组 ({{ groups.length }})
+            </text>
+            <text
+              v-if="showAllGroupsLink"
+              class="groups-all"
+              @click="goAllGroups"
+            >
+              查看全部
+            </text>
           </view>
           <view
             v-for="g in previewGroups"
@@ -390,32 +522,62 @@ function onDelete() {
               :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
               mode="aspectFill"
             />
-            <text class="group-name">{{ g.name }}</text>
-            <image class="chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+            <text class="group-name">
+              {{ g.name }}
+            </text>
+            <image
+              class="chevron"
+              src="/static/icons/icon-chevron.svg"
+              mode="aspectFit"
+            />
           </view>
         </view>
 
         <view class="switch-card">
           <view class="switch-row">
-            <text class="label">消息免打扰</text>
-            <ImSwitch :model-value="recvOpt === MessageReceiveOptType.NotNotify" @change="onToggleRecv" />
+            <text class="label">
+              消息免打扰
+            </text>
+            <ImSwitch
+              :model-value="recvOpt === MessageReceiveOptType.NotNotify"
+              @change="onToggleRecv"
+            />
           </view>
           <view class="switch-row">
-            <text class="label">置顶聊天</text>
-            <ImSwitch :model-value="pinned" @change="onTogglePin" />
+            <text class="label">
+              置顶聊天
+            </text>
+            <ImSwitch
+              :model-value="pinned"
+              @change="onTogglePin"
+            />
           </view>
         </view>
 
         <view class="footer">
-          <view class="msg-btn" @click="onMessage">
-            <image class="msg-icon" src="/static/icons/icon-chat-white.svg" mode="aspectFit" />
-            <text class="msg-text">消息</text>
+          <view
+            class="msg-btn"
+            @click="onMessage"
+          >
+            <image
+              class="msg-icon"
+              src="/static/icons/icon-chat-white.svg"
+              mode="aspectFit"
+            />
+            <text class="msg-text">
+              消息
+            </text>
           </view>
         </view>
       </view>
     </view>
 
-    <view v-else-if="loading" class="hint">加载中...</view>
+    <view
+      v-else-if="loading"
+      class="hint"
+    >
+      加载中...
+    </view>
   </view>
 </template>
 

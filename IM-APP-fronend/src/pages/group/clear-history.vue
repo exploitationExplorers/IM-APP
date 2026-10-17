@@ -16,7 +16,10 @@ function goBack() {
 
 <template>
   <view class="page">
-    <ImNavBar title="清除聊天记录" @back="goBack" />
+    <ImNavBar
+      title="清除聊天记录"
+      @back="goBack"
+    />
 
     <view class="empty">
       <text>此功能待实现</text>

@@ -183,15 +183,29 @@ async function onDelete() {
 
 <template>
   <view class="page">
-    <ImNavBar title="通讯录标签" @back="goBack">
+    <ImNavBar
+      title="通讯录标签"
+      @back="goBack"
+    >
       <template #right>
-        <text class="nav-action" @click="toggleEdit">{{ editing ? '取消' : '编辑' }}</text>
+        <text
+          class="nav-action"
+          @click="toggleEdit"
+        >
+          {{ editing ? '取消' : '编辑' }}
+        </text>
       </template>
     </ImNavBar>
 
-    <AppSearchBar v-model="keyword" placeholder="搜索" />
+    <AppSearchBar
+      v-model="keyword"
+      placeholder="搜索"
+    />
 
-    <scroll-view scroll-y class="body">
+    <scroll-view
+      scroll-y
+      class="body"
+    >
       <view
         v-for="tag in filtered"
         :key="tag.id"
@@ -200,12 +214,28 @@ async function onDelete() {
         @click="openTag(tag)"
       >
         <view class="row-main">
-          <text class="row-title">{{ tag.name }} ({{ tag.memberCount }})</text>
-          <text v-if="memberPreview(tag)" class="row-sub">{{ memberPreview(tag) }}</text>
+          <text class="row-title">
+            {{ tag.name }} ({{ tag.memberCount }})
+          </text>
+          <text
+            v-if="memberPreview(tag)"
+            class="row-sub"
+          >
+            {{ memberPreview(tag) }}
+          </text>
         </view>
-        <view v-if="editing" class="check" :class="{ on: selected.has(tag.id) }" />
+        <view
+          v-if="editing"
+          class="check"
+          :class="{ on: selected.has(tag.id) }"
+        />
       </view>
-      <view v-if="!filtered.length && !loading" class="empty">暂无标签</view>
+      <view
+        v-if="!filtered.length && !loading"
+        class="empty"
+      >
+        暂无标签
+      </view>
     </scroll-view>
 
     <view class="footer">
@@ -214,31 +244,59 @@ async function onDelete() {
         class="footer-btn danger"
         :class="{ disabled: !selectedCount || deleting }"
         @click="onDelete"
-      >删除{{ selectedCount ? ` (${selectedCount})` : ' (0)' }}</view>
-      <view v-else class="footer-btn" @click="openCreate">新增</view>
+      >
+        删除{{ selectedCount ? ` (${selectedCount})` : ' (0)' }}
+      </view>
+      <view
+        v-else
+        class="footer-btn"
+        @click="openCreate"
+      >
+        新增
+      </view>
     </view>
 
-    <view v-if="showCreate" class="mask" @click="closeCreate">
-      <view class="dialog" @click.stop>
-        <text class="dialog-title">新增标签</text>
+    <view
+      v-if="showCreate"
+      class="mask"
+      @click="closeCreate"
+    >
+      <view
+        class="dialog"
+        @click.stop
+      >
+        <text class="dialog-title">
+          新增标签
+        </text>
         <input
-          class="dialog-input"
           v-model="draftName"
+          class="dialog-input"
           :maxlength="TAG_MAX"
           confirm-type="done"
           @confirm="confirmCreate"
-        />
+        >
         <view class="dialog-meta">
-          <text class="dialog-hint">标签名称最多 {{ TAG_MAX }} 个字</text>
-          <text class="dialog-count">{{ draftCount }}/{{ TAG_MAX }}</text>
+          <text class="dialog-hint">
+            标签名称最多 {{ TAG_MAX }} 个字
+          </text>
+          <text class="dialog-count">
+            {{ draftCount }}/{{ TAG_MAX }}
+          </text>
         </view>
         <view class="dialog-actions">
-          <view class="dialog-btn ghost" @click="closeCreate">取消</view>
+          <view
+            class="dialog-btn ghost"
+            @click="closeCreate"
+          >
+            取消
+          </view>
           <view
             class="dialog-btn solid"
             :class="{ disabled: !canCreate }"
             @click="confirmCreate"
-          >确认</view>
+          >
+            确认
+          </view>
         </view>
       </view>
     </view>

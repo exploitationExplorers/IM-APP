@@ -26,11 +26,21 @@ defineExpose({ validatePhone: (phone: string) => validatePhone(props.modelValue,
 
 <template>
   <view class="country-picker">
-    <view class="code-box" @click="togglePicker">
-      <text class="code-text">{{ modelValue }}</text>
-      <text class="code-caret">▾</text>
+    <view
+      class="code-box"
+      @click="togglePicker"
+    >
+      <text class="code-text">
+        {{ modelValue }}
+      </text>
+      <text class="code-caret">
+        ▾
+      </text>
     </view>
-    <view v-if="showPicker" class="picker-panel">
+    <view
+      v-if="showPicker"
+      class="picker-panel"
+    >
       <view
         v-for="item in COUNTRY_LIST"
         :key="item.code"
@@ -39,7 +49,9 @@ defineExpose({ validatePhone: (phone: string) => validatePhone(props.modelValue,
         @click="selectCountry(item.dialCode)"
       >
         <text>{{ item.name }}</text>
-        <text class="dial">{{ item.dialCode }}</text>
+        <text class="dial">
+          {{ item.dialCode }}
+        </text>
       </view>
     </view>
   </view>

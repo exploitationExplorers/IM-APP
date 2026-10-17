@@ -122,17 +122,26 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="选择联络人" @back="goBack">
+    <ImNavBar
+      title="选择联络人"
+      @back="goBack"
+    >
       <template #right>
         <text
           class="nav-action"
           :class="{ disabled: !selectedCount || saving }"
           @click="onSubmit"
-        >{{ selectedCount ? `新增(${selectedCount})` : '新增' }}</text>
+        >
+          {{ selectedCount ? `新增(${selectedCount})` : '新增' }}
+        </text>
       </template>
     </ImNavBar>
 
-    <scroll-view v-if="selectedList.length" scroll-x class="picked">
+    <scroll-view
+      v-if="selectedList.length"
+      scroll-x
+      class="picked"
+    >
       <view
         v-for="c in selectedList"
         :key="`picked-${c.id}`"
@@ -144,22 +153,44 @@ async function onSubmit() {
           :src="c.avatar || APP_CONFIG.defaultAvatarUrl"
           mode="aspectFill"
         />
-        <text class="picked-name">{{ displayName(c) }}</text>
-        <text class="picked-x">×</text>
+        <text class="picked-name">
+          {{ displayName(c) }}
+        </text>
+        <text class="picked-x">
+          ×
+        </text>
       </view>
     </scroll-view>
 
-    <AppSearchBar v-model="keyword" placeholder="搜索" />
+    <AppSearchBar
+      v-model="keyword"
+      placeholder="搜索"
+    />
 
     <view class="section-head">
-      <text class="section-count">联络人 ({{ contactTotal }})</text>
+      <text class="section-count">
+        联络人 ({{ contactTotal }})
+      </text>
     </view>
-    <view class="select-all" @click="toggleAll">
-      <text class="select-all-text">全选 ({{ selectedCount }}/{{ filtered.length }})</text>
-      <view class="check" :class="{ on: allFilteredSelected }" />
+    <view
+      class="select-all"
+      @click="toggleAll"
+    >
+      <text class="select-all-text">
+        全选 ({{ selectedCount }}/{{ filtered.length }})
+      </text>
+      <view
+        class="check"
+        :class="{ on: allFilteredSelected }"
+      />
     </view>
 
-    <scroll-view scroll-y class="body" :lower-threshold="80" @scrolltolower="contactStore.loadMoreContacts">
+    <scroll-view
+      scroll-y
+      class="body"
+      :lower-threshold="80"
+      @scrolltolower="contactStore.loadMoreContacts"
+    >
       <view
         v-for="c in filtered"
         :key="c.id"
@@ -171,8 +202,13 @@ async function onSubmit() {
           :src="c.avatar || APP_CONFIG.defaultAvatarUrl"
           mode="aspectFill"
         />
-        <text class="name">{{ displayName(c) }}</text>
-        <view class="check" :class="{ on: selected.has(c.id) }" />
+        <text class="name">
+          {{ displayName(c) }}
+        </text>
+        <view
+          class="check"
+          :class="{ on: selected.has(c.id) }"
+        />
       </view>
     </scroll-view>
   </view>

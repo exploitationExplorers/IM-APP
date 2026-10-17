@@ -160,34 +160,72 @@ function onDeleteAccount() {
 
 <template>
   <view class="page">
-    <ImNavBar title="个人资料" @back="goBack" />
+    <ImNavBar
+      title="个人资料"
+      @back="goBack"
+    />
 
-    <view class="avatar-row" @click="onChooseAvatar">
+    <view
+      class="avatar-row"
+      @click="onChooseAvatar"
+    >
       <view class="avatar-wrap">
         <image
-          class="avatar"
           :key="avatarSrc"
+          class="avatar"
           :src="avatarSrc"
           mode="aspectFill"
           @error="onAvatarError"
         />
       </view>
-      <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+      <image
+        class="chevron"
+        src="/static/mine/icon-chevron.svg"
+        mode="aspectFit"
+      />
     </view>
 
     <view class="section">
-      <view class="cell cell-link" @click="goEditNickname">
-        <text class="label">昵称</text>
+      <view
+        class="cell cell-link"
+        @click="goEditNickname"
+      >
+        <text class="label">
+          昵称
+        </text>
         <view class="cell-right">
-          <text v-if="nickname" class="value">{{ nickname }}</text>
-          <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+          <text
+            v-if="nickname"
+            class="value"
+          >
+            {{ nickname }}
+          </text>
+          <image
+            class="chevron"
+            src="/static/mine/icon-chevron.svg"
+            mode="aspectFit"
+          />
         </view>
       </view>
-      <view class="cell cell-link" @click="goEditBio">
-        <text class="label">个性签名</text>
+      <view
+        class="cell cell-link"
+        @click="goEditBio"
+      >
+        <text class="label">
+          个性签名
+        </text>
         <view class="cell-right">
-          <text v-if="bio" class="value">{{ bio }}</text>
-          <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+          <text
+            v-if="bio"
+            class="value"
+          >
+            {{ bio }}
+          </text>
+          <image
+            class="chevron"
+            src="/static/mine/icon-chevron.svg"
+            mode="aspectFit"
+          />
         </view>
       </view>
     </view>
@@ -196,32 +234,69 @@ function onDeleteAccount() {
 
     <view class="section">
       <view class="cell">
-        <text class="label">电话号码</text>
-        <text class="value">{{ phoneDisplay }}</text>
+        <text class="label">
+          电话号码
+        </text>
+        <text class="value">
+          {{ phoneDisplay }}
+        </text>
       </view>
-      <view class="cell cell-link" @click="goEditChatId">
-        <text class="label">聊天号</text>
+      <view
+        class="cell cell-link"
+        @click="goEditChatId"
+      >
+        <text class="label">
+          聊天号
+        </text>
         <view class="cell-right">
-          <text class="public-id">{{ publicId }}</text>
-          <view class="copy-btn" @click.stop="onCopyPublicId">复制</view>
-          <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+          <text class="public-id">
+            {{ publicId }}
+          </text>
+          <view
+            class="copy-btn"
+            @click.stop="onCopyPublicId"
+          >
+            复制
+          </view>
+          <image
+            class="chevron"
+            src="/static/mine/icon-chevron.svg"
+            mode="aspectFit"
+          />
         </view>
       </view>
-      <view class="cell cell-link" @click="goQrcode">
-        <text class="label">二维码</text>
-        <image class="chevron" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+      <view
+        class="cell cell-link"
+        @click="goQrcode"
+      >
+        <text class="label">
+          二维码
+        </text>
+        <image
+          class="chevron"
+          src="/static/mine/icon-chevron.svg"
+          mode="aspectFit"
+        />
       </view>
     </view>
 
     <view class="divider" />
 
     <view class="section">
-      <view class="cell cell-link" @click="onDeleteAccount">
-        <text class="danger-text">注销帐号</text>
+      <view
+        class="cell cell-link"
+        @click="onDeleteAccount"
+      >
+        <text class="danger-text">
+          注销帐号
+        </text>
       </view>
     </view>
 
-    <ImSuccessToast :visible="successVisible" @close="successVisible = false" />
+    <ImSuccessToast
+      :visible="successVisible"
+      @close="successVisible = false"
+    />
   </view>
 </template>
 

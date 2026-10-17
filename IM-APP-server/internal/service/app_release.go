@@ -243,6 +243,8 @@ func normalizeAppChannel(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", string(models.AppChannelTest):
 		return string(models.AppChannelTest), true
+	case string(models.AppChannelCanary):
+		return string(models.AppChannelCanary), true
 	case string(models.AppChannelProd):
 		return string(models.AppChannelProd), true
 	default:

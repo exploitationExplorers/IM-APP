@@ -75,9 +75,18 @@ async function onReject(id: string) {
 
 <template>
   <view class="page">
-    <view v-if="pendingFriendRequests.length" class="section">
-      <view class="section-title">待处理</view>
-      <view v-for="item in pendingFriendRequests" :key="item.id" class="row">
+    <view
+      v-if="pendingFriendRequests.length"
+      class="section"
+    >
+      <view class="section-title">
+        待处理
+      </view>
+      <view
+        v-for="item in pendingFriendRequests"
+        :key="item.id"
+        class="row"
+      >
         <view class="row-main">
           <image
             class="avatar"
@@ -85,21 +94,46 @@ async function onReject(id: string) {
             mode="aspectFill"
           />
           <view class="info">
-            <text class="name">{{ item.fromUser.nickname }}</text>
-            <text class="time">{{ formatRelativeTime(item.createdAt) }}</text>
+            <text class="name">
+              {{ item.fromUser.nickname }}
+            </text>
+            <text class="time">
+              {{ formatRelativeTime(item.createdAt) }}
+            </text>
           </view>
           <view class="actions">
-            <text class="btn-reject" @click="onReject(item.id)">拒绝</text>
-            <text class="btn-accept" @click="onAccept(item.id)">同意</text>
+            <text
+              class="btn-reject"
+              @click="onReject(item.id)"
+            >
+              拒绝
+            </text>
+            <text
+              class="btn-accept"
+              @click="onAccept(item.id)"
+            >
+              同意
+            </text>
           </view>
         </view>
-        <text class="msg">{{ messageOf(item) }}</text>
+        <text class="msg">
+          {{ messageOf(item) }}
+        </text>
       </view>
     </view>
 
-    <view v-if="recentFriendRequests.length" class="section">
-      <view class="section-title">近期请求</view>
-      <view v-for="item in visibleRecent" :key="item.id" class="row">
+    <view
+      v-if="recentFriendRequests.length"
+      class="section"
+    >
+      <view class="section-title">
+        近期请求
+      </view>
+      <view
+        v-for="item in visibleRecent"
+        :key="item.id"
+        class="row"
+      >
         <view class="row-main">
           <image
             class="avatar"
@@ -107,18 +141,39 @@ async function onReject(id: string) {
             mode="aspectFill"
           />
           <view class="info">
-            <text class="name">{{ item.fromUser.nickname }}</text>
-            <text class="time">{{ formatRelativeTime(item.createdAt) }}</text>
+            <text class="name">
+              {{ item.fromUser.nickname }}
+            </text>
+            <text class="time">
+              {{ formatRelativeTime(item.createdAt) }}
+            </text>
           </view>
-          <text class="btn-done">{{ recentActionLabel(item) }}</text>
+          <text class="btn-done">
+            {{ recentActionLabel(item) }}
+          </text>
         </view>
-        <text class="msg">{{ messageOf(item) }}</text>
+        <text class="msg">
+          {{ messageOf(item) }}
+        </text>
       </view>
-      <view v-if="hasMoreRecent" class="load-more">上拉加载更多</view>
-      <view v-else class="load-more">没有更多了</view>
+      <view
+        v-if="hasMoreRecent"
+        class="load-more"
+      >
+        上拉加载更多
+      </view>
+      <view
+        v-else
+        class="load-more"
+      >
+        没有更多了
+      </view>
     </view>
 
-    <EmptyState v-if="showEmpty" text="" />
+    <EmptyState
+      v-if="showEmpty"
+      text=""
+    />
   </view>
 </template>
 

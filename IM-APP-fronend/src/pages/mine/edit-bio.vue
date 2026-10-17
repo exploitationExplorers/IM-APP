@@ -61,7 +61,10 @@ async function onConfirm() {
 
 <template>
   <view class="page">
-    <ImNavBar title="修改个性签名" @back="goBack" />
+    <ImNavBar
+      title="修改个性签名"
+      @back="goBack"
+    />
 
     <view class="form">
       <view class="input-row">
@@ -75,13 +78,23 @@ async function onConfirm() {
           auto-height
           @input="onBioInput"
         />
-        <view v-if="bio" class="clear-btn" @click="clearBio">
-          <text class="clear-icon">×</text>
+        <view
+          v-if="bio"
+          class="clear-btn"
+          @click="clearBio"
+        >
+          <text class="clear-icon">
+            ×
+          </text>
         </view>
       </view>
       <view class="meta">
-        <text class="hint">个性签名最多 {{ BIO_MAX }} 个字</text>
-        <text class="count">{{ bioCount }}/{{ BIO_MAX }}</text>
+        <text class="hint">
+          个性签名最多 {{ BIO_MAX }} 个字
+        </text>
+        <text class="count">
+          {{ bioCount }}/{{ BIO_MAX }}
+        </text>
       </view>
     </view>
 

@@ -81,25 +81,32 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="意见反馈" @back="goBack" />
+    <ImNavBar
+      title="意见反馈"
+      @back="goBack"
+    />
 
     <view class="body">
       <view class="field">
-        <text class="label">联系方式</text>
+        <text class="label">
+          联系方式
+        </text>
         <view class="input-box">
           <input
+            v-model="contact"
             class="input"
             type="text"
             maxlength="64"
             placeholder="手机号码、邮箱、QQ、微信等"
             placeholder-class="ph"
-            v-model="contact"
-          />
+          >
         </view>
       </view>
 
       <view class="field">
-        <text class="label">反馈内容</text>
+        <text class="label">
+          反馈内容
+        </text>
         <view class="textarea-box">
           <textarea
             class="textarea"
@@ -110,19 +117,41 @@ async function onSubmit() {
             @input="onContentInput"
           />
         </view>
-        <text class="counter">{{ contentLen }}/{{ MAX_CONTENT }}</text>
+        <text class="counter">
+          {{ contentLen }}/{{ MAX_CONTENT }}
+        </text>
       </view>
 
       <view class="field">
-        <text class="label">添加图片</text>
-        <view v-if="imagePath" class="image-wrap">
-          <image class="preview" :src="imagePath" mode="aspectFill" />
-          <view class="image-remove" @click="removeImage">
-            <text class="image-remove-text">×</text>
+        <text class="label">
+          添加图片
+        </text>
+        <view
+          v-if="imagePath"
+          class="image-wrap"
+        >
+          <image
+            class="preview"
+            :src="imagePath"
+            mode="aspectFill"
+          />
+          <view
+            class="image-remove"
+            @click="removeImage"
+          >
+            <text class="image-remove-text">
+              ×
+            </text>
           </view>
         </view>
-        <view v-else class="add-box" @click="chooseImage">
-          <text class="add-plus">+</text>
+        <view
+          v-else
+          class="add-box"
+          @click="chooseImage"
+        >
+          <text class="add-plus">
+            +
+          </text>
         </view>
       </view>
     </view>

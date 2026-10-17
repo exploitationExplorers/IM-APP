@@ -112,25 +112,64 @@ function closePanel() {
 <template>
   <view class="emoji-panel">
     <view class="tabs">
-      <view class="tab" :class="{ active: activeTab === 'emoji' }" @click="activeTab = 'emoji'">
-        <text class="tab-icon">☺</text>
+      <view
+        class="tab"
+        :class="{ active: activeTab === 'emoji' }"
+        @click="activeTab = 'emoji'"
+      >
+        <text class="tab-icon">
+          ☺
+        </text>
       </view>
-      <view class="tab" :class="{ active: activeTab === 'favorite' }" @click="activeTab = 'favorite'">
-        <text class="tab-icon">❤</text>
+      <view
+        class="tab"
+        :class="{ active: activeTab === 'favorite' }"
+        @click="activeTab = 'favorite'"
+      >
+        <text class="tab-icon">
+          ❤
+        </text>
       </view>
-      <view class="close-btn" @click="closePanel">×</view>
+      <view
+        class="close-btn"
+        @click="closePanel"
+      >
+        ×
+      </view>
     </view>
 
-    <scroll-view scroll-y class="panel-body" show-scrollbar="false">
-      <view v-if="activeTab === 'emoji'" class="emoji-grid">
-        <view v-for="item in emojiList" :key="item" class="emoji-item" @click="onSelectEmoji(item)">
-          <text class="emoji-char">{{ item }}</text>
+    <scroll-view
+      scroll-y
+      class="panel-body"
+      show-scrollbar="false"
+    >
+      <view
+        v-if="activeTab === 'emoji'"
+        class="emoji-grid"
+      >
+        <view
+          v-for="item in emojiList"
+          :key="item"
+          class="emoji-item"
+          @click="onSelectEmoji(item)"
+        >
+          <text class="emoji-char">
+            {{ item }}
+          </text>
         </view>
       </view>
 
-      <view v-else class="sticker-grid">
-        <view class="sticker-item add-item" @click="onAddSticker">
-          <text class="add-icon">+</text>
+      <view
+        v-else
+        class="sticker-grid"
+      >
+        <view
+          class="sticker-item add-item"
+          @click="onAddSticker"
+        >
+          <text class="add-icon">
+            +
+          </text>
         </view>
         <view
           v-for="item in stickers"
@@ -138,10 +177,20 @@ function closePanel() {
           class="sticker-item"
           @click="onSelectSticker(item)"
         >
-          <image class="sticker-img" :src="playableMediaUrl(item.url)" mode="aspectFill" />
+          <image
+            class="sticker-img"
+            :src="playableMediaUrl(item.url)"
+            mode="aspectFill"
+          />
         </view>
-        <view v-if="!loadingStickers && stickers.length === 0" class="sticker-hint" @click="goManageEmotions">
-          <text class="hint-text">点击 + 添加表情</text>
+        <view
+          v-if="!loadingStickers && stickers.length === 0"
+          class="sticker-hint"
+          @click="goManageEmotions"
+        >
+          <text class="hint-text">
+            点击 + 添加表情
+          </text>
         </view>
       </view>
     </scroll-view>

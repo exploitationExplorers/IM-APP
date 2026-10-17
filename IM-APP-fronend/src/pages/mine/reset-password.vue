@@ -83,7 +83,10 @@ async function onConfirm() {
 
 <template>
   <view class="page">
-    <ImNavBar title="重置密码" @back="goBack" />
+    <ImNavBar
+      title="重置密码"
+      @back="goBack"
+    />
 
     <view class="form">
       <view class="input-box">
@@ -94,8 +97,11 @@ async function onConfirm() {
           placeholder="请输入新密码"
           placeholder-style="color:#636E86"
           @input="onPasswordInput"
-        />
-        <view class="eye-btn" @click="showPassword = !showPassword">
+        >
+        <view
+          class="eye-btn"
+          @click="showPassword = !showPassword"
+        >
           <image
             class="eye-icon"
             :src="showPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
@@ -112,8 +118,11 @@ async function onConfirm() {
           placeholder="请再次输入新密码"
           placeholder-style="color:#636E86"
           @input="onConfirmPasswordInput"
-        />
-        <view class="eye-btn" @click="showConfirmPassword = !showConfirmPassword">
+        >
+        <view
+          class="eye-btn"
+          @click="showConfirmPassword = !showConfirmPassword"
+        >
           <image
             class="eye-icon"
             :src="showConfirmPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"

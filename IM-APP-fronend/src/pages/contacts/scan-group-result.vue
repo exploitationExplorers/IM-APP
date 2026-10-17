@@ -82,26 +82,64 @@ async function onPrimary() {
 
 <template>
   <view class="page">
-    <image class="bg" :src="avatarSrc" mode="aspectFill" />
+    <image
+      class="bg"
+      :src="avatarSrc"
+      mode="aspectFill"
+    />
     <view class="bg-mask" />
 
-    <view class="back-btn" @click="goBack">
-      <image class="back-icon" src="/static/icons/icon-back-white.svg" mode="aspectFit" />
+    <view
+      class="back-btn"
+      @click="goBack"
+    >
+      <image
+        class="back-icon"
+        src="/static/icons/icon-back-white.svg"
+        mode="aspectFit"
+      />
     </view>
 
-    <view v-if="group" class="profile">
-      <image class="avatar" :src="avatarSrc" mode="aspectFit" />
-      <text class="name">{{ group.name }}</text>
+    <view
+      v-if="group"
+      class="profile"
+    >
+      <image
+        class="avatar"
+        :src="avatarSrc"
+        mode="aspectFit"
+      />
+      <text class="name">
+        {{ group.name }}
+      </text>
     </view>
 
-    <view v-if="loading" class="loading">
-      <text class="loading-text">加载中...</text>
+    <view
+      v-if="loading"
+      class="loading"
+    >
+      <text class="loading-text">
+        加载中...
+      </text>
     </view>
 
-    <view v-if="group" class="footer">
-      <view class="chat-btn" :class="{ disabled: submitting }" @click="onPrimary">
-        <image class="chat-icon" src="/static/icons/icon-chat-white.svg" mode="aspectFit" />
-        <text class="chat-text">{{ primaryLabel }}</text>
+    <view
+      v-if="group"
+      class="footer"
+    >
+      <view
+        class="chat-btn"
+        :class="{ disabled: submitting }"
+        @click="onPrimary"
+      >
+        <image
+          class="chat-icon"
+          src="/static/icons/icon-chat-white.svg"
+          mode="aspectFit"
+        />
+        <text class="chat-text">
+          {{ primaryLabel }}
+        </text>
       </view>
     </view>
   </view>

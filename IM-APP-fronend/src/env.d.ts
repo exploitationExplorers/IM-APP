@@ -8,7 +8,11 @@ declare module '*.vue' {
 
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string
-  /** 热更新渠道：test 给客户测试包，prod 给正式包，互不串包 */
+  /**
+   * 热更新渠道，打进安装包后不能靠 wgt 修改。
+   * canary：仅内部验收壳。test：客户现有测试壳。prod：将来正式包。
+   * 不写时按 test，客户壳不要写成 canary。
+   */
   readonly VITE_UPDATE_CHANNEL?: string
   /** 设为 'false' 关闭 OpenIM 聊天（排查用），默认启用 */
   readonly VITE_OPENIM_ENABLED?: string

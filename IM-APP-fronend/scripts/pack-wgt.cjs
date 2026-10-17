@@ -7,7 +7,8 @@
  *   node scripts/pack-wgt.cjs --build --publish --min-native=100
  *   node scripts/pack-wgt.cjs --publish --file=unpackage/release/im-101.wgt --changelog=修复气泡错位
  *
- * --min-native 必须等于客户当前安装的 APK versionCode。
+ * --min-native 必须等于目标壳的 APK versionCode。
+ * 默认发到 canary，只有内部壳会更新。发给客户必须显式 --channel=test。
  */
 const crypto = require('crypto')
 const dns = require('dns')
@@ -60,7 +61,7 @@ function parseArgs(argv) {
     force: false,
     minNative: '',
     changelog: '',
-    channel: 'test',
+    channel: 'canary',
     // wgt 默认双端：安卓/iOS（企业签）共用同一资源包；整包再按单端发
     platform: 'android,ios',
     file: '',
@@ -85,7 +86,29 @@ function parseArgs(argv) {
       throw new Error(`未知参数: ${raw}`)
     }
   }
+  args.channel = normalizeChannel(args.channel)
   return args
+}
+
+const ALLOWED_CHANNELS = new Set(['canary', 'test', 'prod'])
+
+function normalizeChannel(raw) {
+  const channel = String(raw || '').trim().toLowerCase()
+  if (!ALLOWED_CHANNELS.has(channel)) {
+    throw new Error(`--channel 只支持 canary / test / prod，收到: ${raw}`)
+  }
+  return channel
+}
+
+function warnCustomerChannel(channel) {
+  if (channel !== 'test' && channel !== 'prod') return
+  console.warn('')
+  console.warn('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+  console.warn(`警告: 即将发布到客户渠道 channel=${channel}`)
+  console.warn('客户手机上的测试壳下次打开就会安装这个包。')
+  console.warn('内部验收请用: npm run pack:wgt:canary')
+  console.warn('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+  console.warn('')
 }
 
 /** 支持 --platform=android / ios / android,ios / all */
@@ -505,7 +528,7 @@ async function publishReleaseForPlatform(args, platform, filePath, versionName, 
   }
   const published = await apiJson(origin, key, 'POST', '/admin/app-releases', payload)
   console.log(
-    `已发布 ${platform} ${published.packageType} ${published.versionName} (${published.versionCode})`,
+    `已发布 ${platform} ${args.channel} ${published.packageType} ${published.versionName} (${published.versionCode})`,
   )
   console.log(published.downloadUrl)
 }
@@ -559,6 +582,7 @@ async function main() {
     console.log(`wgt 已生成: ${filePath}`)
   }
   if (args.publish) {
+    warnCustomerChannel(args.channel)
     if (!filePath || !fs.existsSync(filePath)) {
       throw new Error('发布需要已生成的安装包，请加 --build 或 --file')
     }

@@ -1,20 +1,13 @@
 import { checkAppRelease } from '@/api/app-release'
 import { APP_CONFIG } from '@/config'
 import type { AppReleaseCheckResult, AppReleaseLocalVersion } from '@/types'
+import { isAppPlatform } from '@/utils/platform'
 
 const AUTO_CHECK_INTERVAL_MS = 2 * 60 * 1000
 
 let checking = false
 let installing = false
 let lastAutoCheckAt = 0
-
-function isAppPlatform(): boolean {
-  try {
-    return uni.getSystemInfoSync().uniPlatform === 'app'
-  } catch {
-    return false
-  }
-}
 
 function whenRuntimeReady(): Promise<void> {
   if (!isAppPlatform() || plus?.runtime) return Promise.resolve()

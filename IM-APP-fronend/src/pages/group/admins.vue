@@ -74,9 +74,18 @@ async function onTapMember(member: GroupMember) {
 
 <template>
   <view class="page">
-    <ImNavBar title="群组管理员" @back="goBack">
+    <ImNavBar
+      title="群组管理员"
+      @back="goBack"
+    >
       <template #right>
-        <text class="nav-action" :class="{ hidden: !isOwner }" @click="goAdd">新增</text>
+        <text
+          class="nav-action"
+          :class="{ hidden: !isOwner }"
+          @click="goAdd"
+        >
+          新增
+        </text>
       </template>
     </ImNavBar>
 
@@ -87,10 +96,18 @@ async function onTapMember(member: GroupMember) {
         class="row"
         @click="onTapMember(member)"
       >
-        <image class="avatar" :src="member.avatar" mode="aspectFill" />
+        <image
+          class="avatar"
+          :src="member.avatar"
+          mode="aspectFill"
+        />
         <view class="meta">
-          <text class="name">{{ displayName(member) }}</text>
-          <text class="role">{{ roleLabel(member) }}</text>
+          <text class="name">
+            {{ displayName(member) }}
+          </text>
+          <text class="role">
+            {{ roleLabel(member) }}
+          </text>
         </view>
       </view>
     </view>

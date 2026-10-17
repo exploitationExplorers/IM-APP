@@ -28,8 +28,16 @@ function onClear() {
 </script>
 
 <template>
-  <view class="search-bar" @click="emit('click')">
-    <icon type="search" size="16" color="#8a8f9c" class="search-icon" />
+  <view
+    class="search-bar"
+    @click="emit('click')"
+  >
+    <icon
+      type="search"
+      size="16"
+      color="#8a8f9c"
+      class="search-icon"
+    />
     <input
       class="search-input"
       type="text"
@@ -39,13 +47,15 @@ function onClear() {
       placeholder-class="search-placeholder"
       @input="onInput"
       @confirm="onConfirm"
-    />
+    >
     <view
       v-if="modelValue"
       class="clear-btn"
       @click.stop="onClear"
     >
-      <text class="clear-x">×</text>
+      <text class="clear-x">
+        ×
+      </text>
     </view>
   </view>
 </template>

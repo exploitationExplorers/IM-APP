@@ -593,7 +593,10 @@ watchEffect(() => {
     :class="isDesktop ? 'im-desktop-workspace' : 'page'"
     @click="closeMenus"
   >
-    <ImDesktopSidebar v-if="isDesktop" current="chat" />
+    <ImDesktopSidebar
+      v-if="isDesktop"
+      current="chat"
+    />
 
     <view
       :class="isDesktop ? 'im-desktop-list-column page-desktop-list' : ''"
@@ -605,59 +608,120 @@ watchEffect(() => {
         :style="isDesktop ? undefined : { paddingTop: statusBarHeight + 'px' }"
       >
         <view class="header-row">
-          <text class="title">聊天</text>
+          <text class="title">
+            聊天
+          </text>
           <view class="header-actions">
-          <view class="add-wrap" @click.stop="onReadMenu">
-            <text class="icon-more">⋯</text>
-            <view v-if="showReadMenu" class="popup-menu">
-              <view class="popup-item" @click="onMarkAllRead">
-                <text>全部已读</text>
+            <view
+              class="add-wrap"
+              @click.stop="onReadMenu"
+            >
+              <text class="icon-more">
+                ⋯
+              </text>
+              <view
+                v-if="showReadMenu"
+                class="popup-menu"
+              >
+                <view
+                  class="popup-item"
+                  @click="onMarkAllRead"
+                >
+                  <text>全部已读</text>
+                </view>
               </view>
             </view>
-          </view>
-          <view class="add-wrap" @click.stop="onAdd">
-            <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
-            <view v-if="showAddMenu" class="popup-menu">
-              <view class="popup-item" @click="go('/pages/contacts/add-friend')">
-                <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
-                <text>添加朋友</text>
-              </view>
-              <view class="popup-item" @click="goAddGroup">
-                <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
-                <text>添加群聊</text>
-              </view>
-              <view class="popup-item" @click="go('/pages/group/create')">
-                <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
-                <text>创建群聊</text>
+            <view
+              class="add-wrap"
+              @click.stop="onAdd"
+            >
+              <image
+                class="icon-plus"
+                src="/static/icons/icon-plus.svg"
+                mode="aspectFit"
+              />
+              <view
+                v-if="showAddMenu"
+                class="popup-menu"
+              >
+                <view
+                  class="popup-item"
+                  @click="go('/pages/contacts/add-friend')"
+                >
+                  <image
+                    class="popup-icon"
+                    src="/static/icons/menu-add-friend.svg"
+                    mode="aspectFit"
+                  />
+                  <text>添加朋友</text>
+                </view>
+                <view
+                  class="popup-item"
+                  @click="goAddGroup"
+                >
+                  <image
+                    class="popup-icon"
+                    src="/static/icons/menu-add-group.svg"
+                    mode="aspectFit"
+                  />
+                  <text>添加群聊</text>
+                </view>
+                <view
+                  class="popup-item"
+                  @click="go('/pages/group/create')"
+                >
+                  <image
+                    class="popup-icon"
+                    src="/static/icons/menu-create-group.svg"
+                    mode="aspectFit"
+                  />
+                  <text>创建群聊</text>
+                </view>
               </view>
             </view>
-          </view>
           </view>
         </view>
       </view>
 
-      <AppSearchBar v-model="keyword" placeholder="搜索聊天 / 关键词" />
+      <AppSearchBar
+        v-model="keyword"
+        placeholder="搜索聊天 / 关键词"
+      />
 
       <view class="filter-row">
         <view
           v-if="chatStore.totalUnread > 0"
           class="mark-all"
           @click.stop="onMarkAllRead"
-        >全部已读</view>
-        <view class="filter-wrap" @click.stop="showFilter = !showFilter">
-          <text class="filter">{{ filterLabel }}</text>
+        >
+          全部已读
+        </view>
+        <view
+          class="filter-wrap"
+          @click.stop="showFilter = !showFilter"
+        >
+          <text class="filter">
+            {{ filterLabel }}
+          </text>
           <view class="filter-caret" />
-          <view v-if="showFilter" class="popup-menu filter-menu">
+          <view
+            v-if="showFilter"
+            class="popup-menu filter-menu"
+          >
             <view
               class="popup-item"
               :class="{ active: filterKey === 'all' }"
               @click="setFilter('all')"
-            >全部</view>
+            >
+              全部
+            </view>
             <view
               class="popup-item"
               :class="{ active: filterKey === 'unread' }"
               @click="setFilter('unread')"
-            >未读</view>
+            >
+              未读
+            </view>
           </view>
         </view>
       </view>
@@ -723,7 +787,12 @@ watchEffect(() => {
             </template>
           </ImSwipeActionItem>
         </uni-swipe-action>
-        <view v-if="keyword.trim() ? !searchRows.length : !filtered.length" class="empty">{{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}</view>
+        <view
+          v-if="keyword.trim() ? !searchRows.length : !filtered.length"
+          class="empty"
+        >
+          {{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}
+        </view>
       </scroll-view>
     </view>
 
@@ -733,7 +802,10 @@ watchEffect(() => {
       @start="onResizeStart"
     />
 
-    <view v-if="isDesktop" class="im-desktop-room-column">
+    <view
+      v-if="isDesktop"
+      class="im-desktop-room-column"
+    >
       <ChatRoom
         v-if="selectedConv"
         :key="selectedConv.id + (selectedClientMsgId ? `:${selectedClientMsgId}` : '')"
@@ -746,10 +818,18 @@ watchEffect(() => {
         @close="clearSelectedConv"
         @dissolved="clearSelectedConv"
       />
-      <view v-else class="im-desktop-room-empty">选择一个会话开始聊天</view>
+      <view
+        v-else
+        class="im-desktop-room-empty"
+      >
+        选择一个会话开始聊天
+      </view>
     </view>
 
-    <ImTabBar v-if="!isDesktop" current="chat" />
+    <ImTabBar
+      v-if="!isDesktop"
+      current="chat"
+    />
     <ImNotificationPermissionDialog />
 
     <view
@@ -759,14 +839,30 @@ watchEffect(() => {
       @click.stop
       @contextmenu.prevent.stop
     >
-      <view class="conv-menu-item" @click="onMenuPin">
+      <view
+        class="conv-menu-item"
+        @click="onMenuPin"
+      >
         {{ convMenu.item.pinned ? '取消置顶' : '置顶' }}
       </view>
-      <view class="conv-menu-item" @click="onMenuMute">
+      <view
+        class="conv-menu-item"
+        @click="onMenuMute"
+      >
         {{ convMenuMuted ? '取消免打扰' : '免打扰' }}
       </view>
-      <view class="conv-menu-item" @click="onMenuRead">已读</view>
-      <view class="conv-menu-item" @click="onMenuDelete">删除</view>
+      <view
+        class="conv-menu-item"
+        @click="onMenuRead"
+      >
+        已读
+      </view>
+      <view
+        class="conv-menu-item"
+        @click="onMenuDelete"
+      >
+        删除
+      </view>
     </view>
   </view>
 </template>

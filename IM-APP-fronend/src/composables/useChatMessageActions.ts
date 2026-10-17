@@ -11,6 +11,7 @@ import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
 import { rememberConversationTitle } from '@/utils/favoriteMeta'
 import { businessUserIdFromIM } from '@/utils/openim'
+import { isAppPlatform } from '@/utils/platform'
 
 /** 群成员的发言管控元信息（房间页从群成员接口构建，业务用户 ID 索引） */
 export interface MemberMeta {
@@ -329,14 +330,6 @@ export function useChatMessageActions(opts: {
       if (url) return url
     }
     return ''
-  }
-
-  function isAppPlatform(): boolean {
-    try {
-      return uni.getSystemInfoSync().uniPlatform === 'app'
-    } catch {
-      return false
-    }
   }
 
   function downloadToTemp(url: string): Promise<string> {

@@ -7,7 +7,7 @@ import { useUserStore } from '@/stores/user'
 import { readFriendRequestBadge } from '@/utils/friend-request-badge'
 import { APP_CONFIG } from '@/config'
 
-const props = defineProps<{
+defineProps<{
   current: 'contacts' | 'chat' | 'mine'
 }>()
 
@@ -42,8 +42,15 @@ function openProfile() {
 
 <template>
   <view class="sidebar">
-    <view class="avatar-wrap" @click="openProfile">
-      <image class="avatar" :src="avatar" mode="aspectFill" />
+    <view
+      class="avatar-wrap"
+      @click="openProfile"
+    >
+      <image
+        class="avatar"
+        :src="avatar"
+        mode="aspectFill"
+      />
     </view>
 
     <view class="nav-group">
@@ -58,8 +65,13 @@ function openProfile() {
             :src="current === 'contacts' ? '/static/tab/contacts-active.svg' : '/static/tab/contacts.svg'"
             mode="aspectFit"
           />
-          <view v-if="contactsBadge" class="badge">
-            <text class="badge-text">{{ contactsBadge }}</text>
+          <view
+            v-if="contactsBadge"
+            class="badge"
+          >
+            <text class="badge-text">
+              {{ contactsBadge }}
+            </text>
           </view>
         </view>
       </view>
@@ -75,8 +87,13 @@ function openProfile() {
             :src="current === 'chat' ? '/static/tab/chat-active.svg' : '/static/tab/chat.svg'"
             mode="aspectFit"
           />
-          <view v-if="chatBadge" class="badge">
-            <text class="badge-text">{{ chatBadge }}</text>
+          <view
+            v-if="chatBadge"
+            class="badge"
+          >
+            <text class="badge-text">
+              {{ chatBadge }}
+            </text>
           </view>
         </view>
       </view>

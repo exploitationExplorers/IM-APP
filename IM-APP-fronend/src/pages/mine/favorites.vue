@@ -16,7 +16,6 @@ import { conversationTitleOf } from '@/utils/favoriteMeta'
 import { formatFavoriteDay } from '@/utils/format'
 import { safeBack } from '@/utils/nav'
 
-const VOICE_WAVE_HEIGHTS = [3.4, 11, 3.7, 7.4, 12.4, 4.1, 13.9, 19.3]
 const PAGE_SIZE = 20
 const MENU_WIDTH_RPX = 176
 const MENU_OFFSET_RPX = 8
@@ -259,7 +258,10 @@ function displayText(item: FavoriteItem) {
 
 <template>
   <view class="page">
-    <ImNavBar title="我的收藏" @back="goBack" />
+    <ImNavBar
+      title="我的收藏"
+      @back="goBack"
+    />
 
     <view class="tabs">
       <view
@@ -273,7 +275,10 @@ function displayText(item: FavoriteItem) {
       </view>
     </view>
 
-    <EmptyState v-if="!loading && favorites.length === 0" text="无收藏" />
+    <EmptyState
+      v-if="!loading && favorites.length === 0"
+      text="无收藏"
+    />
 
     <scroll-view
       v-else
@@ -282,10 +287,18 @@ function displayText(item: FavoriteItem) {
       :show-scrollbar="false"
       @scrolltolower="loadMore"
     >
-      <view v-for="group in groups" :key="group.key" class="group">
+      <view
+        v-for="group in groups"
+        :key="group.key"
+        class="group"
+      >
         <view class="group-head">
-          <text class="group-title">{{ group.title }}</text>
-          <text class="group-date">{{ group.dateLabel }}</text>
+          <text class="group-title">
+            {{ group.title }}
+          </text>
+          <text class="group-date">
+            {{ group.dateLabel }}
+          </text>
         </view>
         <view
           v-for="item in group.items"
@@ -299,7 +312,10 @@ function displayText(item: FavoriteItem) {
           >
             ⋮
           </view>
-          <text v-if="item.type === 'text' || item.type === 'emoji'" class="card-text">
+          <text
+            v-if="item.type === 'text' || item.type === 'emoji'"
+            class="card-text"
+          >
             {{ displayText(item) }}
           </text>
           <image
@@ -308,18 +324,46 @@ function displayText(item: FavoriteItem) {
             :src="item.content"
             mode="widthFix"
           />
-          <view v-else-if="item.type === 'voice'" class="voice">
-            <text class="voice-label">语音 {{ voiceDuration(item) }}</text>
-            <text v-if="!voicePath(item)" class="voice-empty">无法播放</text>
+          <view
+            v-else-if="item.type === 'voice'"
+            class="voice"
+          >
+            <text class="voice-label">
+              语音 {{ voiceDuration(item) }}
+            </text>
+            <text
+              v-if="!voicePath(item)"
+              class="voice-empty"
+            >
+              无法播放
+            </text>
           </view>
-          <text v-else class="card-text">{{ item.content }}</text>
+          <text
+            v-else
+            class="card-text"
+          >
+            {{ item.content }}
+          </text>
         </view>
       </view>
     </scroll-view>
 
-    <view v-if="activeMenuItem && menuStyle.top" class="menu-mask" @click="closeMenu">
-      <view class="menu" :style="menuStyle" @click.stop>
-        <view class="menu-item" @click="handleAction('forward', activeMenuItem)">转发</view>
+    <view
+      v-if="activeMenuItem && menuStyle.top"
+      class="menu-mask"
+      @click="closeMenu"
+    >
+      <view
+        class="menu"
+        :style="menuStyle"
+        @click.stop
+      >
+        <view
+          class="menu-item"
+          @click="handleAction('forward', activeMenuItem)"
+        >
+          转发
+        </view>
         <view
           v-if="activeMenuItem.type === 'text' || activeMenuItem.type === 'emoji'"
           class="menu-item"
@@ -327,7 +371,12 @@ function displayText(item: FavoriteItem) {
         >
           复制
         </view>
-        <view class="menu-item" @click="handleAction('delete', activeMenuItem)">删除</view>
+        <view
+          class="menu-item"
+          @click="handleAction('delete', activeMenuItem)"
+        >
+          删除
+        </view>
       </view>
     </view>
     <ImSuccessToast

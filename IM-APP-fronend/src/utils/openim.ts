@@ -29,6 +29,8 @@ import {
   isRemoteMediaUrl,
 } from '@/utils/chatMedia'
 import { devLog, devWarn } from '@/utils/devLog'
+import { isApp } from '@/utils/platform'
+import type { PlusResolveLocalFile } from '@/types/plus-io'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
 const H5_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 5 // Warn : Silent
@@ -51,15 +53,12 @@ const env = (import.meta as ImportMeta & { env: Record<string, string> }).env
 /** OpenIM：同一 SDK 实例上重复 Login 会返回这个错误，语义是已登录而不是失败 */
 const LOGIN_REPEAT_CODE = 10102
 
-/** app 端走原生插件，web / 小程序端走 @openim/client-sdk，两者初始化方式不同 */
-const isAppPlatform = uni.getSystemInfoSync().uniPlatform === 'app'
-
 /** 标准运行基座不含第三方原生插件，App 聊天必须用包含 OpenIM 的自定义调试基座 */
 const APP_NATIVE_PLUGIN_MISSING =
   'App 端缺少 OpenIM 原生插件，请用自定义调试基座运行'
 
 function hasAppNativeIMSDK(): boolean {
-  if (!isAppPlatform) return true
+  if (!isApp()) return true
   try {
     const sdk = uni.requireNativePlugin('Tuoyun-OpenIMSDK') as { initSDK?: unknown } | null
     return typeof sdk?.initSDK === 'function'
@@ -219,7 +218,7 @@ export function shouldUseOpenIM(): boolean {
 }
 
 function currentPlatformId(): number {
-  if (!isAppPlatform) return Platform.Web
+  if (!isApp()) return Platform.Web
   return uni.getSystemInfoSync().platform === 'ios' ? Platform.iOS : Platform.Android
 }
 
@@ -648,7 +647,7 @@ async function doLogin(): Promise<string> {
     throw new Error('已退出登录')
   }
 
-  if (isAppPlatform) {
+  if (isApp()) {
     const dataDir = await getAppSdkDataDir(imToken.userId)
     await imCall(IMMethods.InitSDK, {
       platformID: imToken.platform,
@@ -906,7 +905,7 @@ export async function clearConversationMessages(conversationID: string): Promise
   // H5 client-sdk 没有 clearConversationAndDeleteAllMsg；调用不存在的方法会在
   // SDK 代理层抛出 "Cannot read properties of undefined (reading 'apply')"。
   // App 原生插件则继续使用已经验证可用的 ClearConversationAndDeleteAllMsg。
-  const method = isAppPlatform
+  const method = isApp()
     ? IMMethods.ClearConversationAndDeleteAllMsg
     : IMMethods.DeleteConversationAndDeleteAllMsg
   await imCall(method, conversationID)
@@ -1043,7 +1042,7 @@ async function sendCreatedMessage(
     recvID = peerIdFromSingleConversation(target.conversationId, imUserId.value)
   }
   // 安卓原生有时只读消息体上的 id，参数里有、消息上没有就会把这部分人的消息拒掉
-  if (isAppPlatform) {
+  if (isApp()) {
     if (groupID && !message.groupID) message.groupID = groupID
     if (recvID && !message.recvID) message.recvID = recvID
     if ((groupID || recvID) && !message.sessionType) message.sessionType = target.sessionType
@@ -1068,7 +1067,7 @@ async function sendCreatedMessage(
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (epoch !== loginEpoch) break
     try {
-      if (isAppPlatform) {
+      if (isApp()) {
         return await sendOnAppNative(method, params, message.clientMsgID, perAttemptTimeout, false)
       }
       const sent = await imCall<unknown>(method, params)
@@ -1096,7 +1095,7 @@ async function sendCreatedMessage(
   }
   const failure = lastErr instanceof Error ? lastErr : new Error('发送失败')
   if (epoch === loginEpoch) {
-    if (isAppPlatform) reportAppNativeSendFailure(params, message.clientMsgID, failure)
+    if (isApp()) reportAppNativeSendFailure(params, message.clientMsgID, failure)
     else reportTargetSendFailure(target, message, 'send', 'send_failed', failure.message)
   }
   throw failure
@@ -1420,43 +1419,93 @@ interface ChatThumb {
   height: number
 }
 
-function compressChatThumbnail(localPath: string): Promise<string> {
-  return new Promise((resolve) => {
-    const compress = uni.compressImage as (options: {
-      src: string
-      quality?: number
-      compressedWidth?: number
-      success?: (res: { tempFilePath?: string }) => void
-      fail?: () => void
-    }) => void
-    compress({
-      src: localPath,
-      quality: 55,
-      compressedWidth: CHAT_THUMB_EDGE,
-      success: (res) => {
-        const next = res.tempFilePath || ''
-        resolve(next && next !== localPath ? next : '')
-      },
-      fail: () => resolve(''),
+/** 长边收到 edge 以内，短边按原比例走。微信缩略图也是这样，只改一边会在安卓/鸿蒙上拉变形。 */
+function fitLongEdge(width: number, height: number, edge: number): { width: number; height: number } {
+  const long = Math.max(width, height)
+  if (width <= 0 || height <= 0 || long <= 0) return { width: 0, height: 0 }
+  const scale = Math.min(1, edge / long)
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  }
+}
+
+function sameImageAspect(
+  a: { width: number; height: number },
+  b: { width: number; height: number },
+): boolean {
+  if (a.width <= 0 || a.height <= 0 || b.width <= 0 || b.height <= 0) return false
+  const left = a.width / a.height
+  const right = b.width / b.height
+  return Math.abs(left - right) / right < 0.04
+}
+
+/**
+ * 缩略图宽高一起传给 compressImage。
+ * 只传 compressedWidth 时，安卓和鸿蒙会把高度也收成这个值，或保持原高度只改宽度，气泡再用 scaleToFill 一铺就变形。
+ * 压完再量一次成品；比例和目标差太多就丢掉，列表退回原图。
+ */
+function compressChatThumbnail(
+  localPath: string,
+): Promise<{ path: string; width: number; height: number } | null> {
+  return imageSizeOf(localPath).then((origin) => {
+    const target = fitLongEdge(origin.width, origin.height, CHAT_THUMB_EDGE)
+    if (!target.width || !target.height) return null
+    if (origin.width <= CHAT_THUMB_EDGE && origin.height <= CHAT_THUMB_EDGE) return null
+    return new Promise((resolve) => {
+      const compress = uni.compressImage as (options: {
+        src: string
+        quality?: number
+        compressedWidth?: number
+        compressedHeight?: number
+        success?: (res: { tempFilePath?: string }) => void
+        fail?: () => void
+      }) => void
+      compress({
+        src: localPath,
+        quality: 55,
+        compressedWidth: target.width,
+        compressedHeight: target.height,
+        success: (res) => {
+          const next = res.tempFilePath || ''
+          if (!next || next === localPath) {
+            resolve(null)
+            return
+          }
+          imageSizeOf(next)
+            .then((measured) => {
+              const size =
+                measured.width > 0 && measured.height > 0
+                  ? measured
+                  : target
+              if (!sameImageAspect(size, target)) {
+                resolve(null)
+                return
+              }
+              resolve({ path: next, width: size.width, height: size.height })
+            })
+            .catch(() => resolve(null))
+        },
+        fail: () => resolve(null),
+      })
     })
   })
 }
 
-/** 缩略图上传失败不影响原图发送。压完没有变小就放弃，避免再传一份原图。 */
+/** 缩略图上传失败不影响原图发送。压完没有变小、或比例被压坏，就放弃，列表继续用原图。 */
 async function uploadChatThumbnail(localPath: string): Promise<ChatThumb | null> {
   try {
-    const thumbPath = await compressChatThumbnail(localPath)
-    if (!thumbPath) return null
-    const thumbFull = toNativeFullPath(thumbPath)
+    const thumb = await compressChatThumbnail(localPath)
+    if (!thumb) return null
+    const thumbFull = toNativeFullPath(thumb.path)
     const originFull = toNativeFullPath(localPath)
-    const [thumbBytes, originBytes, size] = await Promise.all([
+    const [thumbBytes, originBytes] = await Promise.all([
       nativeFileSize(thumbFull),
       nativeFileSize(originFull),
-      imageSizeOf(thumbPath),
     ])
     if (originBytes > 0 && thumbBytes >= originBytes * 0.85) return null
     const uploaded = await uploadFileFromPath(thumbFull, `thumb_${Date.now()}.jpg`, 'image/jpeg')
-    return { url: uploaded.url, width: size.width, height: size.height }
+    return { url: uploaded.url, width: thumb.width, height: thumb.height }
   } catch (e) {
     console.warn('[image] 缩略图上传失败，列表继续用原图', (e as Error)?.message || e)
     return null
@@ -1583,7 +1632,7 @@ async function sendImageMessageViaUpload(
 
 export async function sendImageMessage(target: IMTarget, filePath: string): Promise<MessageItem> {
   let message: MessageItem
-  if (isAppPlatform) {
+  if (isApp()) {
     // 先物化成可读本地文件，再 FullPath；华为 content:// 直接 FullPath 必挂
     const prepared = await prepareAppChatImagePath(filePath)
     const fullPath = toNativeFullPath(prepared)
@@ -1994,7 +2043,7 @@ export async function sendVideoMessage(
   snapshotPath = '',
 ): Promise<MessageItem> {
   const seconds = videoDurationSeconds(duration)
-  if (isAppPlatform) {
+  if (isApp()) {
     // 原生取帧插件对 chooseVideo 的原始临时路径兼容性最好，保存后的 _doc 路径作为后备。
     let snap = await snapshotOfVideo(filePath, snapshotPath, seconds)
     const saved = await persistTempMedia(filePath)
@@ -2108,7 +2157,7 @@ export async function sendVoiceMessage(
   duration: number,
 ): Promise<MessageItem> {
   const seconds = Math.max(1, Math.round(duration > 120 ? duration / 1000 : duration))
-  if (isAppPlatform) {
+  if (isApp()) {
     const soundPath = toNativeFullPath(filePath)
     let message: MessageItem
     try {
@@ -2208,7 +2257,7 @@ function nativeFileSize(fullPath: string): Promise<number> {
 function plusFileSize(fullPath: string): Promise<number> {
   return new Promise((resolve) => {
     try {
-      const io = plus?.io as { resolveLocalFileSystemURL?: Function } | undefined
+      const io = plus?.io as { resolveLocalFileSystemURL?: PlusResolveLocalFile } | undefined
       if (!io?.resolveLocalFileSystemURL) {
         resolve(0)
         return
@@ -2292,7 +2341,7 @@ export async function sendFileMessage(
   fileName: string,
 ): Promise<MessageItem> {
   const safeName = fileName.trim() || '文件'
-  if (isAppPlatform) {
+  if (isApp()) {
     const fullPath = toNativeFullPath(filePath)
     try {
       return await sendUploadedFileMessage(target, fullPath, safeName)
@@ -2404,7 +2453,7 @@ export async function sendImageUrlMessage(target: IMTarget, url: string): Promis
 export async function chooseLocalFiles(
   count = 1,
 ): Promise<Array<{ path: string; name: string }>> {
-  if (isAppPlatform) {
+  if (isApp()) {
     const path = await IMSDK.pickFile()
     if (!path) throw new Error('未选择文件')
     const idx = path.lastIndexOf('/')
@@ -2865,8 +2914,8 @@ function readPictureBox(picture: unknown): { url: string; width: number; height:
 }
 
 /**
- * 列表用缩略图，预览用原图。旧消息三个地址相同时不假装有缩略图，
- * 但宽高仍然带上，避免气泡再下载一次只为量尺寸。
+ * 列表优先用和原图同比例的缩略图，点开仍走原图。
+ * 旧消息三个地址相同时不假装有缩略图，但宽高仍然带上，避免气泡再下载一次只为量尺寸。
  */
 function pictureMetaOf(item: MessageItem): {
   displayUrl: string
@@ -2881,15 +2930,19 @@ function pictureMetaOf(item: MessageItem): {
   const big = readPictureBox(elem?.bigPicture)
   const sourceUrl = source.url || big.url
   const distinctThumb = snap.url && snap.url !== sourceUrl ? snap.url : ''
-  const displayUrl = distinctThumb || pictureUrlOf(item)
-  const box =
-    (snap.width > 0 && snap.height > 0 && snap) ||
-    (source.width > 0 && source.height > 0 && source) ||
-    (big.width > 0 && big.height > 0 && big) ||
-    null
+  const sourceBox = source.width > 0 && source.height > 0 ? source : big
+  // 只信和原图同一比例的缩略图。安卓/鸿蒙只压宽度时缩略图会被拉扁，这种直接显示原图。
+  const thumbTrustworthy =
+    !!distinctThumb &&
+    snap.width > 0 &&
+    snap.height > 0 &&
+    (sourceBox.width <= 0 || sourceBox.height <= 0 || sameImageAspect(snap, sourceBox))
+  const displayUrl = thumbTrustworthy ? distinctThumb : sourceUrl || pictureUrlOf(item)
+  const shown = thumbTrustworthy ? snap : sourceBox
+  const box = shown.width > 0 && shown.height > 0 ? shown : null
   return {
     displayUrl,
-    thumbUrl: distinctThumb || undefined,
+    thumbUrl: thumbTrustworthy ? distinctThumb : undefined,
     sourceUrl: sourceUrl && sourceUrl !== displayUrl ? sourceUrl : undefined,
     width: box ? box.width : undefined,
     height: box ? box.height : undefined,
@@ -3550,7 +3603,7 @@ export async function resolveMessageSeq(
   const immediate = take(cached)
   if (immediate) return immediate
 
-  const delays = isAppPlatform ? [0, 400, 1000] : [0]
+  const delays = isApp() ? [0, 400, 1000] : [0]
   for (const delay of delays) {
     if (delay) await sleep(delay)
     const found = take(await findLocalMessage(conversationID, clientMsgID))
@@ -3623,7 +3676,7 @@ export async function setConversationPin(conversationID: string, isPinned: boole
   try {
     await imCall('setConversation' as IMMethods, { conversationID, isPinned })
   } catch (first) {
-    if (!isAppPlatform) throw first
+    if (!isApp()) throw first
     await imCall('setConversation' as IMMethods, { conversationID, IsPinned: isPinned })
   }
 }
@@ -3812,7 +3865,7 @@ export async function resetConversationGroupAtType(conversationID: string): Prom
     conversationID,
     { conversationID, groupAtType: GroupAtType.AtNormal },
   ]
-  if (isAppPlatform) {
+  if (isApp()) {
     attempts.push({ conversationID, GroupAtType: GroupAtType.AtNormal })
   }
   for (const params of attempts) {
@@ -3823,7 +3876,7 @@ export async function resetConversationGroupAtType(conversationID: string): Prom
       /* 原生桥参数形态不一致，继续尝试 setConversation */
     }
   }
-  const setArgs = isAppPlatform
+  const setArgs = isApp()
     ? [
         { conversationID, groupAtType: GroupAtType.AtNormal },
         { conversationID, GroupAtType: GroupAtType.AtNormal },

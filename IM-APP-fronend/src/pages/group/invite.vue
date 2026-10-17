@@ -180,79 +180,144 @@ async function onConfirm() {
 </script>
 
 <template>
-  <view class="page" @click="showSort = false">
-    <ImNavBar title="选择联络人" @back="goBack">
+  <view
+    class="page"
+    @click="showSort = false"
+  >
+    <ImNavBar
+      title="选择联络人"
+      @back="goBack"
+    >
       <template #right>
-        <view class="confirm-btn" :class="{ enabled: canConfirm }" @click="onConfirm">
+        <view
+          class="confirm-btn"
+          :class="{ enabled: canConfirm }"
+          @click="onConfirm"
+        >
           {{ canConfirm ? `确认(${selectedCount})` : '确认' }}
         </view>
       </template>
     </ImNavBar>
 
-    <view v-if="selectedCount > 0" class="chips">
+    <view
+      v-if="selectedCount > 0"
+      class="chips"
+    >
       <view
         v-for="c in selectedContacts"
         :key="c.id"
         class="chip"
         @click.stop="removeSelected(c.id)"
       >
-        <image class="chip-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-        <text class="chip-name">{{ contactDisplayName(c) }}</text>
+        <image
+          class="chip-avatar"
+          :src="contactAvatar(c.avatar)"
+          mode="aspectFill"
+        />
+        <text class="chip-name">
+          {{ contactDisplayName(c) }}
+        </text>
       </view>
     </view>
 
     <view class="search-wrap">
       <view class="search-box">
-        <text class="search-glyph">⌕</text>
+        <text class="search-glyph">
+          ⌕
+        </text>
         <input
-          class="search-input"
           v-model="keyword"
+          class="search-input"
           placeholder="搜索"
           placeholder-class="search-ph"
-        />
+        >
       </view>
     </view>
 
     <view class="section-head">
-      <text class="section-count">联络人 ({{ candidates.length }})</text>
+      <text class="section-count">
+        联络人 ({{ candidates.length }})
+      </text>
       <view class="head-right">
-        <view class="sort-wrap" @click.stop="showSort = !showSort">
-          <text class="sort">{{ sortLabel }}</text>
-          <image class="sort-caret" src="/static/icons/icon-caret.svg" mode="aspectFit" />
-          <view v-if="showSort" class="sort-menu">
+        <view
+          class="sort-wrap"
+          @click.stop="showSort = !showSort"
+        >
+          <text class="sort">
+            {{ sortLabel }}
+          </text>
+          <image
+            class="sort-caret"
+            src="/static/icons/icon-caret.svg"
+            mode="aspectFit"
+          />
+          <view
+            v-if="showSort"
+            class="sort-menu"
+          >
             <view
               class="sort-item"
               :class="{ active: sortKey === 'recent' }"
               @click="setSort('recent')"
-            >最近加入(默认)</view>
+            >
+              最近加入(默认)
+            </view>
             <view
               class="sort-item"
               :class="{ active: sortKey === 'name' }"
               @click="setSort('name')"
-            >名字</view>
+            >
+              名字
+            </view>
             <view
               class="sort-item"
               :class="{ active: sortKey === 'chat' }"
               @click="setSort('chat')"
-            >最近聊天</view>
+            >
+              最近聊天
+            </view>
           </view>
         </view>
-        <text class="select-all" @click.stop="toggleAll">全选</text>
+        <text
+          class="select-all"
+          @click.stop="toggleAll"
+        >
+          全选
+        </text>
       </view>
     </view>
 
-    <scroll-view scroll-y class="list" :lower-threshold="80" @scrolltolower="contactStore.loadMoreContacts">
+    <scroll-view
+      scroll-y
+      class="list"
+      :lower-threshold="80"
+      @scrolltolower="contactStore.loadMoreContacts"
+    >
       <view
         v-for="c in candidates"
         :key="c.id"
         class="row"
         @click="toggle(c)"
       >
-        <image class="avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-        <text class="name">{{ contactDisplayName(c) }}</text>
-        <view class="check" :class="{ on: isSelected(c.id) }" />
+        <image
+          class="avatar"
+          :src="contactAvatar(c.avatar)"
+          mode="aspectFill"
+        />
+        <text class="name">
+          {{ contactDisplayName(c) }}
+        </text>
+        <view
+          class="check"
+          :class="{ on: isSelected(c.id) }"
+        />
       </view>
-      <view v-if="!candidates.length" class="empty">暂无可邀请的好友</view>
+      <view
+        v-if="!candidates.length"
+        class="empty"
+      >
+        暂无可邀请的好友
+      </view>
     </scroll-view>
   </view>
 </template>

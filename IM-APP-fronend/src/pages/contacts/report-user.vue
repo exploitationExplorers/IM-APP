@@ -45,7 +45,10 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="检举" @back="goBack" />
+    <ImNavBar
+      title="检举"
+      @back="goBack"
+    />
 
     <view class="card">
       <view
@@ -55,7 +58,10 @@ async function onSubmit() {
         @click="selectedId = item.id"
       >
         <text>{{ item.reason }}</text>
-        <view class="check" :class="{ on: selectedId === item.id }" />
+        <view
+          class="check"
+          :class="{ on: selectedId === item.id }"
+        />
       </view>
     </view>
 
@@ -68,7 +74,13 @@ async function onSubmit() {
       />
     </view>
 
-    <view class="submit" :class="{ disabled: !selectedId || submitting }" @click="onSubmit">提交</view>
+    <view
+      class="submit"
+      :class="{ disabled: !selectedId || submitting }"
+      @click="onSubmit"
+    >
+      提交
+    </view>
   </view>
 </template>
 

@@ -81,14 +81,21 @@ function onCellClick(item: MessageMenuItem) {
 </script>
 
 <template>
-  <view class="mask" @click="emit('close')" @touchmove.stop.prevent>
+  <view
+    class="mask"
+    @click="emit('close')"
+    @touchmove.stop.prevent
+  >
     <view
       class="menu-wrap"
       :class="{ anchored: hasAnchor }"
       :style="anchoredStyle"
       @click.stop
     >
-      <view ref="menuRef" class="menu-grid">
+      <view
+        ref="menuRef"
+        class="menu-grid"
+      >
         <view
           v-for="item in gridItems"
           :key="item.key"
@@ -96,10 +103,15 @@ function onCellClick(item: MessageMenuItem) {
           :class="{ spacer: item.spacer }"
           @click="onCellClick(item)"
         >
-          <text v-if="!item.spacer">{{ item.label }}</text>
+          <text v-if="!item.spacer">
+            {{ item.label }}
+          </text>
         </view>
       </view>
-      <view v-if="wideItems.length" class="menu-wide">
+      <view
+        v-if="wideItems.length"
+        class="menu-wide"
+      >
         <view
           v-for="item in wideItems"
           :key="item.key"

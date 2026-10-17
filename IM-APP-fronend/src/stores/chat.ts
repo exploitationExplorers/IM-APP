@@ -70,14 +70,12 @@ import {
   writeUnreadAnnouncement,
 } from '@/utils/group-announcement'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
-
-const PAGE_SIZE = 20
-/** 单会话内存中保留的最大消息条数，超出时裁剪最早的消息 */
-const MESSAGE_WINDOW_SIZE = 200
-/** 上滑翻历史时允许的最大条数（保留旧侧，避免 trim 掉刚 prepend 的消息） */
-const HISTORY_BROWSE_MAX = 400
-/** rawMessages 单会话最大缓存条数 */
-const RAW_MESSAGE_WINDOW_SIZE = 300
+import {
+  CHAT_HISTORY_PAGE_SIZE as PAGE_SIZE,
+  HISTORY_BROWSE_MAX,
+  MESSAGE_WINDOW_SIZE,
+  RAW_MESSAGE_WINDOW_SIZE,
+} from '@/constants/chat'
 
 /** OnNewRecvMessageRevoked 事件载荷；conversationID 仅 App 原生插件可能携带 */
 interface RevokedNotice {

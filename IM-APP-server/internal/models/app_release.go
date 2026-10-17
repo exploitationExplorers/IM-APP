@@ -18,8 +18,10 @@ const (
 type AppReleaseChannel string
 
 const (
-	AppChannelTest AppReleaseChannel = "test"
-	AppChannelProd AppReleaseChannel = "prod"
+	// 内部真机壳。客户现有测试包不会拉这个渠道。
+	AppChannelCanary AppReleaseChannel = "canary"
+	AppChannelTest   AppReleaseChannel = "test"
+	AppChannelProd   AppReleaseChannel = "prod"
 )
 
 type AppUpdateType string

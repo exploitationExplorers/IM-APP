@@ -66,51 +66,104 @@ async function onSendRequest() {
 
 <template>
   <view class="page">
-    <ImNavBar title="添加朋友" @back="goBack">
+    <ImNavBar
+      title="添加朋友"
+      @back="goBack"
+    >
       <template #right>
-        <view class="nav-btn" @click="goScan">
-          <image class="nav-icon" src="/static/icons/icon-scan.svg" mode="aspectFit" />
+        <view
+          class="nav-btn"
+          @click="goScan"
+        >
+          <image
+            class="nav-icon"
+            src="/static/icons/icon-scan.svg"
+            mode="aspectFit"
+          />
         </view>
       </template>
     </ImNavBar>
 
     <view class="search-wrap">
       <view class="search-box">
-        <text class="search-glyph">⌕</text>
+        <text class="search-glyph">
+          ⌕
+        </text>
         <input
-          class="search-input"
           v-model="keyword"
+          class="search-input"
           placeholder="搜索聊天号"
           placeholder-class="search-ph"
           confirm-type="search"
           @confirm="onSearch"
-        />
+        >
       </view>
     </view>
 
-    <scroll-view scroll-y class="body">
-      <view v-if="result" class="result-card" @click="viewProfile">
-        <image class="avatar" :src="result.avatar || '/static/avatar-me.png'" mode="aspectFill" />
+    <scroll-view
+      scroll-y
+      class="body"
+    >
+      <view
+        v-if="result"
+        class="result-card"
+        @click="viewProfile"
+      >
+        <image
+          class="avatar"
+          :src="result.avatar || '/static/avatar-me.png'"
+          mode="aspectFill"
+        />
         <view class="info">
-          <text class="name">{{ result.nickname }}</text>
-          <text class="pid">聊天号: {{ result.publicId }}</text>
+          <text class="name">
+            {{ result.nickname }}
+          </text>
+          <text class="pid">
+            聊天号: {{ result.publicId }}
+          </text>
         </view>
-        <image class="arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+        <image
+          class="arrow"
+          src="/static/icons/icon-chevron.svg"
+          mode="aspectFit"
+        />
       </view>
 
-      <view v-if="result" class="form">
-        <text class="label">验证信息</text>
-        <input class="msg-input" v-model="message" placeholder="填写验证说明" placeholder-class="search-ph" />
-        <view class="send-btn" @click="onSendRequest">发送好友申请</view>
+      <view
+        v-if="result"
+        class="form"
+      >
+        <text class="label">
+          验证信息
+        </text>
+        <input
+          v-model="message"
+          class="msg-input"
+          placeholder="填写验证说明"
+          placeholder-class="search-ph"
+        >
+        <view
+          class="send-btn"
+          @click="onSendRequest"
+        >
+          发送好友申请
+        </view>
       </view>
 
-      <view v-if="searched && !result && !loading" class="empty">
+      <view
+        v-if="searched && !result && !loading"
+        class="empty"
+      >
         <text>未找到该用户，请确认聊天号是否正确</text>
       </view>
     </scroll-view>
 
     <view class="footer">
-      <view class="primary-btn" :class="{ disabled: loading }" @click="onSearch">
+      <view
+        class="primary-btn"
+        :class="{ disabled: loading }"
+        @click="onSearch"
+      >
         {{ loading ? '搜索中...' : '搜索' }}
       </view>
     </view>

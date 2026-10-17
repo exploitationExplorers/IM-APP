@@ -24,13 +24,23 @@
 
 不要用 HBuilderX 单独导出一份 wgt 再手动上传，容易和 `src/manifest.json` 版本对不上。
 
-## 日常命令（就这一条）
+## 日常命令（这个分支只发内部 canary）
 
-在 `IM-APP-fronend/` 目录：
+客户手机上的测试壳渠道是 `test`。本分支的优化还没验收，**不要**用默认命令发给客户。
+
+在 `IM-APP-fronend/` 目录，只更新自己的内部壳：
 
 ```bash
-npm run pack:wgt -- --build --publish --min-native=100 --changelog=这里写客户能看懂的更新说明
+npm run pack:wgt:canary -- --changelog=这里写自己能看懂的说明
 ```
+
+发给客户必须另写渠道，并且先在 canary 真机冷启动过：
+
+```bash
+npm run pack:wgt:customer -- --changelog=客户能看懂的更新说明
+```
+
+`pack:wgt:customer` 会先打出醒目警告。没装 `VITE_UPDATE_CHANNEL=canary` 的内部壳之前，canary 包没有手机会收到，客户壳也不会变。门禁见 [测试环境与发布门禁.md](./测试环境与发布门禁.md)。
 
 脚本会：
 
@@ -99,10 +109,10 @@ wgt 校验通过: __UNI__EC9D1AE 1.0.3 (103)
 # 只编译并打 wgt，不上传（给自己看包）
 npm run pack:wgt -- --build
 
-# 强制更新，客户不能点「稍后」
-npm run pack:wgt -- --build --publish --min-native=100 --force --changelog=必须更新
+# 强制更新，只给内部壳。发给客户时把 canary 换成 customer 脚本
+npm run pack:wgt:canary -- --force --changelog=必须更新
 
-# 正式渠道（客户正式包才用；测试 APK 默认 test）
+# 正式渠道（只有将来的 prod 壳会收到）
 npm run pack:wgt -- --build --publish --channel=prod --min-native=100 --changelog=…
 
 # 只发一端（一般不用；默认已是 android,ios）

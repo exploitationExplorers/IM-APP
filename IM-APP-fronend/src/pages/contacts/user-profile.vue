@@ -64,23 +64,64 @@ async function onChat() {
 
 <template>
   <view class="page">
-    <view v-if="user" class="card">
-      <image class="avatar" :src="user.avatar || '/static/avatar-me.png'" mode="aspectFill" />
-      <text class="name">{{ user.nickname }}</text>
-      <text class="pid">公开 ID: {{ user.publicId || '—' }}</text>
-      <text v-if="user.bio" class="bio">{{ user.bio }}</text>
+    <view
+      v-if="user"
+      class="card"
+    >
+      <image
+        class="avatar"
+        :src="user.avatar || '/static/avatar-me.png'"
+        mode="aspectFill"
+      />
+      <text class="name">
+        {{ user.nickname }}
+      </text>
+      <text class="pid">
+        公开 ID: {{ user.publicId || '—' }}
+      </text>
+      <text
+        v-if="user.bio"
+        class="bio"
+      >
+        {{ user.bio }}
+      </text>
     </view>
 
-    <view v-if="user && !isFriend()" class="form">
-      <input class="input" v-model="message" placeholder="验证信息" />
-      <button class="btn primary" @click="onAddFriend">加好友</button>
+    <view
+      v-if="user && !isFriend()"
+      class="form"
+    >
+      <input
+        v-model="message"
+        class="input"
+        placeholder="验证信息"
+      >
+      <button
+        class="btn primary"
+        @click="onAddFriend"
+      >
+        加好友
+      </button>
     </view>
 
-    <view v-if="user && isFriend()" class="actions">
-      <button class="btn primary" @click="onChat">发消息</button>
+    <view
+      v-if="user && isFriend()"
+      class="actions"
+    >
+      <button
+        class="btn primary"
+        @click="onChat"
+      >
+        发消息
+      </button>
     </view>
 
-    <view v-if="loading" class="loading">加载中...</view>
+    <view
+      v-if="loading"
+      class="loading"
+    >
+      加载中...
+    </view>
   </view>
 </template>
 

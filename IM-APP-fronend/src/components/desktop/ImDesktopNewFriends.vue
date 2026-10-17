@@ -85,47 +85,106 @@ function loadMore() {
 </script>
 
 <template>
-  <view v-if="modelValue" class="nf-layer" @click="close">
-    <view class="nf-modal" @click.stop>
+  <view
+    v-if="modelValue"
+    class="nf-layer"
+    @click="close"
+  >
+    <view
+      class="nf-modal"
+      @click.stop
+    >
       <view class="nf-nav">
-        <text class="nf-title">新的朋友</text>
-        <text class="nf-close" @click="close">关闭</text>
+        <text class="nf-title">
+          新的朋友
+        </text>
+        <text
+          class="nf-close"
+          @click="close"
+        >
+          关闭
+        </text>
       </view>
 
-      <scroll-view scroll-y class="nf-body" @scrolltolower="loadMore">
-        <EmptyState v-if="showEmpty" text="暂无好友申请" />
+      <scroll-view
+        scroll-y
+        class="nf-body"
+        @scrolltolower="loadMore"
+      >
+        <EmptyState
+          v-if="showEmpty"
+          text="暂无好友申请"
+        />
 
-        <view v-if="pendingFriendRequests.length" class="section">
-          <view class="section-title">待处理</view>
-          <view v-for="item in pendingFriendRequests" :key="item.id" class="row">
+        <view
+          v-if="pendingFriendRequests.length"
+          class="section"
+        >
+          <view class="section-title">
+            待处理
+          </view>
+          <view
+            v-for="item in pendingFriendRequests"
+            :key="item.id"
+            class="row"
+          >
             <image
               class="avatar"
               :src="item.fromUser.avatar || APP_CONFIG.defaultAvatarUrl"
               mode="aspectFill"
             />
             <view class="meta">
-              <text class="name">{{ item.fromUser.nickname || '用户' }}</text>
-              <text class="msg">{{ messageOf(item) }}</text>
+              <text class="name">
+                {{ item.fromUser.nickname || '用户' }}
+              </text>
+              <text class="msg">
+                {{ messageOf(item) }}
+              </text>
             </view>
             <view class="actions">
-              <view class="btn ghost" @click="onReject(item.id)">拒绝</view>
-              <view class="btn primary" @click="onAccept(item.id)">同意</view>
+              <view
+                class="btn ghost"
+                @click="onReject(item.id)"
+              >
+                拒绝
+              </view>
+              <view
+                class="btn primary"
+                @click="onAccept(item.id)"
+              >
+                同意
+              </view>
             </view>
           </view>
         </view>
 
-        <view v-if="visibleRecent.length" class="section">
-          <view class="section-title">近三天</view>
-          <view v-for="item in visibleRecent" :key="item.id" class="row">
+        <view
+          v-if="visibleRecent.length"
+          class="section"
+        >
+          <view class="section-title">
+            近三天
+          </view>
+          <view
+            v-for="item in visibleRecent"
+            :key="item.id"
+            class="row"
+          >
             <image
               class="avatar"
               :src="item.fromUser.avatar || APP_CONFIG.defaultAvatarUrl"
               mode="aspectFill"
             />
             <view class="meta">
-              <text class="name">{{ item.fromUser.nickname || '用户' }}</text>
-              <text class="msg">{{ messageOf(item) }}</text>
-              <text class="time">{{ formatRelativeTime(item.createdAt) }} · {{ recentActionLabel(item) }}</text>
+              <text class="name">
+                {{ item.fromUser.nickname || '用户' }}
+              </text>
+              <text class="msg">
+                {{ messageOf(item) }}
+              </text>
+              <text class="time">
+                {{ formatRelativeTime(item.createdAt) }} · {{ recentActionLabel(item) }}
+              </text>
             </view>
           </view>
         </view>

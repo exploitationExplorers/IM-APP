@@ -26,9 +26,9 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/public/app-release`
 
-客户端检查是否有 wgt 热更新或整包更新。无需 JWT；按 IP 限流。`channel` 不传时默认 `test`。
+客户端检查是否有 wgt 热更新或整包更新。无需 JWT；按 IP 限流。`channel` 不传时默认 `test`。`canary` 只给内部壳，客户测试壳仍是 `test`，两条记录互不影响。
 
-Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前安装包 versionCode）、`wgtVersion`（当前资源包 versionCode）。
+Query：`platform=android|ios`、`channel=canary|test|prod`、`nativeVersion`（当前安装包 versionCode）、`wgtVersion`（当前资源包 versionCode）。
 
 **Response**
 ```json

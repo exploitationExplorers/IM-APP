@@ -59,24 +59,37 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="备注名" @back="goBack" />
+    <ImNavBar
+      title="备注名"
+      @back="goBack"
+    />
 
     <view class="form">
       <textarea
-        class="input"
         v-model="remark"
+        class="input"
         :maxlength="REMARK_MAX"
         :placeholder="nickname || '请输入备注名'"
         auto-height
       />
       <view class="meta">
-        <text class="hint">备注名最多 {{ REMARK_MAX }} 个字</text>
-        <text class="count">{{ count }}/{{ REMARK_MAX }}</text>
+        <text class="hint">
+          备注名最多 {{ REMARK_MAX }} 个字
+        </text>
+        <text class="count">
+          {{ count }}/{{ REMARK_MAX }}
+        </text>
       </view>
     </view>
 
     <view class="footer">
-      <button class="btn" :disabled="!canSubmit" @click="onSubmit">确认</button>
+      <button
+        class="btn"
+        :disabled="!canSubmit"
+        @click="onSubmit"
+      >
+        确认
+      </button>
     </view>
   </view>
 </template>

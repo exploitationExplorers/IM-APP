@@ -128,16 +128,36 @@ onShow(() => {
 </script>
 
 <template>
-  <view class="page" @click="closeLang">
+  <view
+    class="page"
+    @click="closeLang"
+  >
     <view class="hero">
-      <view class="hero-bg" :style="{ backgroundImage: `url(${headerBg})` }" />
+      <view
+        class="hero-bg"
+        :style="{ backgroundImage: `url(${headerBg})` }"
+      />
 
-      <view class="lang" @click.stop>
-        <view class="lang-btn" @click="langOpen = !langOpen">
-          <text class="lang-name">{{ langName }}</text>
-          <view class="lang-caret" :class="{ open: langOpen }" />
+      <view
+        class="lang"
+        @click.stop
+      >
+        <view
+          class="lang-btn"
+          @click="langOpen = !langOpen"
+        >
+          <text class="lang-name">
+            {{ langName }}
+          </text>
+          <view
+            class="lang-caret"
+            :class="{ open: langOpen }"
+          />
         </view>
-        <view v-if="langOpen" class="lang-menu">
+        <view
+          v-if="langOpen"
+          class="lang-menu"
+        >
           <view
             v-for="item in DOWNLOAD_LANGS"
             :key="item.code"
@@ -151,33 +171,70 @@ onShow(() => {
       </view>
 
       <view class="hero-inner">
-        <image class="logo" src="/static/logo/logo.png" mode="aspectFill" />
+        <image
+          class="logo"
+          src="/static/logo/logo.png"
+          mode="aspectFill"
+        />
         <view class="subline">
           <text>{{ copy.enthusiastic }}</text>
           <text>{{ copy.analysis }}</text>
         </view>
         <view class="headline">
           <text>{{ copy.share1 }}</text>
-          <text v-if="copy.share2">{{ copy.share2 }}</text>
+          <text v-if="copy.share2">
+            {{ copy.share2 }}
+          </text>
         </view>
 
-        <view class="pill" @click.stop="onDownload">
-          <image class="pill-icon" :src="storeIcon" mode="aspectFit" />
-          <text class="pill-label">{{ copy.download }}</text>
-          <text v-if="versionText" class="pill-version">{{ versionText }}</text>
+        <view
+          class="pill"
+          @click.stop="onDownload"
+        >
+          <image
+            class="pill-icon"
+            :src="storeIcon"
+            mode="aspectFit"
+          />
+          <text class="pill-label">
+            {{ copy.download }}
+          </text>
+          <text
+            v-if="versionText"
+            class="pill-version"
+          >
+            {{ versionText }}
+          </text>
         </view>
 
-        <view class="pill pill-lite" @click.stop="openLite">
-          <image class="pill-icon" :src="liteIcon" mode="aspectFit" />
-          <text class="pill-label">{{ copy.openLite }}</text>
+        <view
+          class="pill pill-lite"
+          @click.stop="openLite"
+        >
+          <image
+            class="pill-icon"
+            :src="liteIcon"
+            mode="aspectFit"
+          />
+          <text class="pill-label">
+            {{ copy.openLite }}
+          </text>
         </view>
 
-        <text class="passion">{{ copy.passion }}</text>
+        <text class="passion">
+          {{ copy.passion }}
+        </text>
       </view>
 
       <view class="flight">
-        <image class="flight-icon" :src="warnIcon" mode="aspectFit" />
-        <text class="flight-text">{{ copy.flight }}</text>
+        <image
+          class="flight-icon"
+          :src="warnIcon"
+          mode="aspectFit"
+        />
+        <text class="flight-text">
+          {{ copy.flight }}
+        </text>
       </view>
     </view>
 
@@ -188,11 +245,22 @@ onShow(() => {
         class="feature"
         :class="{ gradient: item.gradient }"
       >
-        <view class="feature-copy" :class="{ end: item.gradient }">
-          <text class="feature-line">{{ item.title }}</text>
-          <text class="feature-line">{{ item.desc }}</text>
+        <view
+          class="feature-copy"
+          :class="{ end: item.gradient }"
+        >
+          <text class="feature-line">
+            {{ item.title }}
+          </text>
+          <text class="feature-line">
+            {{ item.desc }}
+          </text>
         </view>
-        <image class="feature-shot" :src="item.image" mode="widthFix" />
+        <image
+          class="feature-shot"
+          :src="item.image"
+          mode="widthFix"
+        />
       </view>
     </view>
 

@@ -65,7 +65,10 @@ onPullDownRefresh(async () => {
 <template>
   <view class="page">
     <view class="search-wrap">
-      <AppSearchBar v-model="keyword" placeholder="搜索" />
+      <AppSearchBar
+        v-model="keyword"
+        placeholder="搜索"
+      />
     </view>
 
     <scroll-view
@@ -75,17 +78,35 @@ onPullDownRefresh(async () => {
       :refresher-triggered="loading"
       @refresherrefresh="onPullDownRefresh"
     >
-      <view v-for="item in filtered" :key="item.id" class="item">
-        <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
+      <view
+        v-for="item in filtered"
+        :key="item.id"
+        class="item"
+      >
+        <image
+          class="avatar"
+          :src="item.avatar || '/static/avatar-1.png'"
+          mode="aspectFill"
+        />
         <view class="meta">
-          <text class="name">{{ item.nickname || item.publicId }}</text>
-          <text class="time">拉黑于 {{ formatRelativeTime(item.blockedAt) }}</text>
+          <text class="name">
+            {{ item.nickname || item.publicId }}
+          </text>
+          <text class="time">
+            拉黑于 {{ formatRelativeTime(item.blockedAt) }}
+          </text>
         </view>
-        <view class="action" @click="onUnblock(item)">
+        <view
+          class="action"
+          @click="onUnblock(item)"
+        >
           <text>解除</text>
         </view>
       </view>
-      <view v-if="!filtered.length && !loading" class="empty">
+      <view
+        v-if="!filtered.length && !loading"
+        class="empty"
+      >
         <text>{{ list.length ? '无匹配结果' : '暂无黑名单' }}</text>
       </view>
     </scroll-view>

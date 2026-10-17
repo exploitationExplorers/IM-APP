@@ -90,63 +90,173 @@ async function confirmReselectLine() {
 
 <template>
   <view class="page">
-    <ImNavBar title="通用" @back="goBack" />
+    <ImNavBar
+      title="通用"
+      @back="goBack"
+    />
 
-    <view class="cell" @click="onLanguage">
-      <text class="label">切换语言</text>
+    <view
+      class="cell"
+      @click="onLanguage"
+    >
+      <text class="label">
+        切换语言
+      </text>
       <view class="right">
-        <text class="value">简体中文</text>
-        <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+        <text class="value">
+          简体中文
+        </text>
+        <image
+          class="arrow"
+          src="/static/mine/icon-chevron.svg"
+          mode="aspectFit"
+        />
       </view>
     </view>
-    <view class="cell" @click="onDisplayMode">
-      <text class="label">显示模式</text>
+    <view
+      class="cell"
+      @click="onDisplayMode"
+    >
+      <text class="label">
+        显示模式
+      </text>
       <view class="right">
-        <text class="value">行动版</text>
-        <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+        <text class="value">
+          行动版
+        </text>
+        <image
+          class="arrow"
+          src="/static/mine/icon-chevron.svg"
+          mode="aspectFit"
+        />
       </view>
     </view>
-    <view class="cell" @click="goFeedback">
-      <text class="label">意见反馈</text>
-      <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+    <view
+      class="cell"
+      @click="goFeedback"
+    >
+      <text class="label">
+        意见反馈
+      </text>
+      <image
+        class="arrow"
+        src="/static/mine/icon-chevron.svg"
+        mode="aspectFit"
+      />
     </view>
-    <view class="cell" @click="goAbout">
-      <text class="label">关于我们</text>
-      <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+    <view
+      class="cell"
+      @click="goAbout"
+    >
+      <text class="label">
+        关于我们
+      </text>
+      <image
+        class="arrow"
+        src="/static/mine/icon-chevron.svg"
+        mode="aspectFit"
+      />
     </view>
-    <view class="cell" @click="openClearModal">
-      <text class="label">清除缓存数据</text>
-      <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+    <view
+      class="cell"
+      @click="openClearModal"
+    >
+      <text class="label">
+        清除缓存数据
+      </text>
+      <image
+        class="arrow"
+        src="/static/mine/icon-chevron.svg"
+        mode="aspectFit"
+      />
     </view>
-    <view class="cell" @click="openLineModal">
-      <text class="label">重新选线</text>
-      <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+    <view
+      class="cell"
+      @click="openLineModal"
+    >
+      <text class="label">
+        重新选线
+      </text>
+      <image
+        class="arrow"
+        src="/static/mine/icon-chevron.svg"
+        mode="aspectFit"
+      />
     </view>
-    <view class="cell" @click="onDebug">
-      <text class="label">调试资讯</text>
-      <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+    <view
+      class="cell"
+      @click="onDebug"
+    >
+      <text class="label">
+        调试资讯
+      </text>
+      <image
+        class="arrow"
+        src="/static/mine/icon-chevron.svg"
+        mode="aspectFit"
+      />
     </view>
 
-    <view v-if="showClearModal" class="modal-mask" @click="closeClearModal">
-      <view class="modal" @click.stop>
-        <text class="modal-title">释放存储空间</text>
-        <text class="modal-desc">释放存储空间将会清除部分本地暂存资料，不会造成使用上的影响</text>
+    <view
+      v-if="showClearModal"
+      class="modal-mask"
+      @click="closeClearModal"
+    >
+      <view
+        class="modal"
+        @click.stop
+      >
+        <text class="modal-title">
+          释放存储空间
+        </text>
+        <text class="modal-desc">
+          释放存储空间将会清除部分本地暂存资料，不会造成使用上的影响
+        </text>
         <view class="modal-actions">
-          <text class="modal-cancel" @click="closeClearModal">取消</text>
-          <view class="modal-confirm" @click="confirmClearCache">
-            <text class="modal-confirm-text">确认</text>
+          <text
+            class="modal-cancel"
+            @click="closeClearModal"
+          >
+            取消
+          </text>
+          <view
+            class="modal-confirm"
+            @click="confirmClearCache"
+          >
+            <text class="modal-confirm-text">
+              确认
+            </text>
           </view>
         </view>
       </view>
     </view>
 
-    <view v-if="showLineModal" class="modal-mask" @click="closeLineModal">
-      <view class="modal modal-line" @click.stop>
-        <text class="modal-title">重新选线</text>
+    <view
+      v-if="showLineModal"
+      class="modal-mask"
+      @click="closeLineModal"
+    >
+      <view
+        class="modal modal-line"
+        @click.stop
+      >
+        <text class="modal-title">
+          重新选线
+        </text>
         <view class="modal-actions">
-          <text class="modal-cancel" @click="closeLineModal">取消</text>
-          <view class="modal-confirm" @click="confirmReselectLine">
-            <text class="modal-confirm-text">确认</text>
+          <text
+            class="modal-cancel"
+            @click="closeLineModal"
+          >
+            取消
+          </text>
+          <view
+            class="modal-confirm"
+            @click="confirmReselectLine"
+          >
+            <text class="modal-confirm-text">
+              确认
+            </text>
           </view>
         </view>
       </view>

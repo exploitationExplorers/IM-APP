@@ -1,21 +1,13 @@
 import { completeUpload, createUploadTask } from '@/api/file'
 import type { UploadPurpose } from '@/types'
 import { h5PublicMediaUrl } from '@/utils/chatMedia'
+import { isAppPlatform } from '@/utils/platform'
 
 interface ImageBytes {
   bytes: ArrayBuffer
   fileName: string
   contentType: string
   size: number
-}
-
-/** App WebView 也有 fetch，但不能用来读 file:// / _doc 本地图。 */
-function isAppPlatform(): boolean {
-  try {
-    return uni.getSystemInfoSync().uniPlatform === 'app'
-  } catch {
-    return false
-  }
 }
 
 function guessContentType(fileName: string): string {

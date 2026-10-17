@@ -117,23 +117,57 @@ function openResult(item: MessageItem) {
 
 <template>
   <view class="page">
-    <ImNavBar title="搜索聊天记录" @back="goBack" />
+    <ImNavBar
+      title="搜索聊天记录"
+      @back="goBack"
+    />
 
-    <AppSearchBar v-model="keyword" placeholder="请输入关键词" />
+    <AppSearchBar
+      v-model="keyword"
+      placeholder="请输入关键词"
+    />
 
-    <view v-if="keyword.trim()" class="list">
-      <view v-for="item in results" :key="item.clientMsgID" class="row" @click="openResult(item)">
-        <image class="avatar" :src="item.senderFaceUrl" mode="aspectFill" />
+    <view
+      v-if="keyword.trim()"
+      class="list"
+    >
+      <view
+        v-for="item in results"
+        :key="item.clientMsgID"
+        class="row"
+        @click="openResult(item)"
+      >
+        <image
+          class="avatar"
+          :src="item.senderFaceUrl"
+          mode="aspectFill"
+        />
         <view class="body">
           <view class="top">
-            <text class="name">{{ displayNameOf(item) }}</text>
-            <text class="time">{{ timeOf(item) }}</text>
+            <text class="name">
+              {{ displayNameOf(item) }}
+            </text>
+            <text class="time">
+              {{ timeOf(item) }}
+            </text>
           </view>
-          <text class="preview">{{ previewOf(item) }}</text>
+          <text class="preview">
+            {{ previewOf(item) }}
+          </text>
         </view>
       </view>
-      <view v-if="loading" class="empty">搜索中…</view>
-      <view v-else-if="!results.length" class="empty">未找到相关记录</view>
+      <view
+        v-if="loading"
+        class="empty"
+      >
+        搜索中…
+      </view>
+      <view
+        v-else-if="!results.length"
+        class="empty"
+      >
+        未找到相关记录
+      </view>
     </view>
   </view>
 </template>

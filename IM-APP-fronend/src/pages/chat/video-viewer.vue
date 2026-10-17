@@ -24,6 +24,8 @@ const layout = ref({
   playerH: 500,
   bottomH: 56,
 })
+/** 底部安全区单独留白，按钮落在手势条上方 */
+const safeBottom = ref(0)
 
 onLoad((query) => {
   conversationId.value = String(query?.conversationId || '')
@@ -35,8 +37,10 @@ onLoad((query) => {
 
 onReady(() => {
   const sys = uni.getSystemInfoSync()
+  const inset = sys.safeAreaInsets?.bottom || 0
+  safeBottom.value = inset
   const headerH = statusBarHeight + 48
-  const bottomH = 56 + (sys.safeAreaInsets?.bottom || 0)
+  const bottomH = 56 + inset
   const playerH = Math.max(280, sys.windowHeight - headerH - bottomH)
   layout.value = { headerH, playerH, bottomH }
 })
@@ -177,100 +181,170 @@ onUnload(() => {
 </script>
 
 <template>
-  <!-- H5：DOM video 与普通 view 同层，三段布局即可 -->
-  <!-- #ifdef H5 -->
+  <!--
+    顶栏、视频、底栏分成三段，互不重叠。
+    App 原生进度条会吃掉同一区域的点击，底栏必须留在 video 外面。
+    cover-view 的文字必须紧贴标签：中间再换行或套一层，真机上点不到。
+  -->
+  <!-- eslint-disable vue/multiline-html-element-content-newline, vue/singleline-html-element-content-newline -->
   <view class="page">
-    <view class="header" :style="{ height: `${layout.headerH}px`, paddingTop: `${statusBarHeight}px` }">
+    <!-- #ifdef H5 -->
+    <view
+      class="header"
+      :style="{ height: `${layout.headerH}px`, paddingTop: `${statusBarHeight}px` }"
+    >
       <view class="header-left">
-        <view class="back-btn" @click="goBack">
-          <text class="back-chevron">‹</text>
+        <view
+          class="back-btn"
+          @tap="goBack"
+        >
+          <text class="back-chevron">
+            ‹
+          </text>
         </view>
         <view class="header-meta">
-          <text class="sender-name">{{ senderLabel }}</text>
-          <text class="send-time">{{ timeLabel }}</text>
+          <text class="sender-name">
+            {{ senderLabel }}
+          </text>
+          <text class="send-time">
+            {{ timeLabel }}
+          </text>
         </view>
       </view>
       <view class="header-right">
-        <image class="header-icon" src="/static/icons/video-category.svg" mode="aspectFit" />
-        <image class="header-icon" src="/static/icons/video-share.svg" mode="aspectFit" />
+        <image
+          class="header-icon"
+          src="/static/icons/video-category.svg"
+          mode="aspectFit"
+        />
+        <image
+          class="header-icon"
+          src="/static/icons/video-share.svg"
+          mode="aspectFit"
+        />
       </view>
     </view>
-
-    <view class="player-host" :style="{ height: `${layout.playerH}px` }">
-      <view v-if="!videoUrl" class="empty-tip">视频地址无效</view>
-    </view>
-
-    <view class="bottom-bar" :style="{ height: `${layout.bottomH}px` }">
-      <view class="tool-btn" @click="onDelete">
-        <image class="tool-icon" src="/static/icons/video-trash.svg" mode="aspectFit" />
-      </view>
-      <view class="tool-btn" @click="onSave">
-        <image class="tool-icon" src="/static/icons/video-download.svg" mode="aspectFit" />
-      </view>
-      <view class="tool-btn" @click="onForward">
-        <image class="tool-icon tool-icon-forward" src="/static/icons/video-forward.svg" mode="aspectFit" />
-      </view>
-    </view>
-  </view>
-  <!-- #endif -->
-
-  <!--
-    App 真机：原生 video 会盖住普通 view（模拟器往往正常），顶栏/底栏必须用 cover-view。
-    关掉全屏按钮，避免再跳进系统全屏播放器把自定义栏冲掉。
-  -->
-  <!-- #ifndef H5 -->
-  <view class="page app-page">
-    <video
-      v-if="videoUrl"
-      class="app-player-full"
-      :src="videoUrl"
-      :poster="videoPoster"
-      autoplay
-      controls
-      object-fit="contain"
-      codec="hardware"
-      :http-cache="true"
-      :play-strategy="0"
-      :show-center-play-btn="true"
-      :show-fullscreen-btn="false"
-      :enable-progress-gesture="true"
-      :vslide-gesture-in-fullscreen="false"
-      @error="onVideoError"
+    <!-- #endif -->
+    <!-- #ifndef H5 -->
+    <!-- 占位，避免 video 顶到状态栏；真正可点的顶栏用 cover-view -->
+    <view
+      class="header"
+      :style="{ height: `${layout.headerH}px` }"
     />
-    <view v-else class="empty-tip app-empty">视频地址无效</view>
-
     <cover-view
       class="cover-header"
       :style="{ height: `${layout.headerH}px`, paddingTop: `${statusBarHeight}px` }"
     >
-      <cover-view class="cover-header-left">
-        <cover-view class="cover-back" @tap="goBack">
-          <cover-view class="cover-back-text">‹</cover-view>
-        </cover-view>
-        <cover-view class="cover-meta">
-          <cover-view class="cover-sender">{{ senderLabel }}</cover-view>
-          <cover-view class="cover-time">{{ timeLabel }}</cover-view>
-        </cover-view>
+      <cover-view
+        class="cover-back"
+        @tap="goBack"
+      >‹</cover-view>
+      <cover-view class="cover-meta">
+        <cover-view class="cover-sender">{{ senderLabel }}</cover-view>
+        <cover-view class="cover-time">{{ timeLabel }}</cover-view>
       </cover-view>
     </cover-view>
+    <!-- #endif -->
 
-    <cover-view class="cover-bottom" :style="{ height: `${layout.bottomH}px` }">
-      <cover-view class="cover-tool" @tap="onDelete">
-        <cover-view class="cover-tool-text">删除</cover-view>
-      </cover-view>
-      <cover-view class="cover-tool" @tap="onSave">
-        <cover-view class="cover-tool-text">保存</cover-view>
-      </cover-view>
-      <cover-view class="cover-tool" @tap="onForward">
-        <cover-view class="cover-tool-text">转发</cover-view>
-      </cover-view>
+    <view
+      class="player-host"
+      :style="{ height: `${layout.playerH}px` }"
+    >
+      <!-- #ifndef H5 -->
+      <video
+        v-if="videoUrl"
+        class="app-player"
+        :style="{ width: '100%', height: `${layout.playerH}px` }"
+        :src="videoUrl"
+        :poster="videoPoster"
+        autoplay
+        controls
+        object-fit="contain"
+        codec="hardware"
+        :http-cache="true"
+        :play-strategy="0"
+        :show-center-play-btn="true"
+        :show-fullscreen-btn="false"
+        :enable-progress-gesture="true"
+        :vslide-gesture-in-fullscreen="false"
+        @error="onVideoError"
+      />
+      <!-- #endif -->
+      <view
+        v-if="!videoUrl"
+        class="empty-tip"
+      >
+        视频地址无效
+      </view>
+    </view>
+
+    <!-- #ifdef H5 -->
+    <view
+      class="bottom-bar"
+      :style="{ height: `${layout.bottomH}px`, paddingBottom: `${safeBottom}px` }"
+    >
+      <view
+        class="tool-btn"
+        @tap="onDelete"
+      >
+        <image
+          class="tool-icon"
+          src="/static/icons/video-trash.svg"
+          mode="aspectFit"
+        />
+      </view>
+      <view
+        class="tool-btn"
+        @tap="onSave"
+      >
+        <image
+          class="tool-icon"
+          src="/static/icons/video-download.svg"
+          mode="aspectFit"
+        />
+      </view>
+      <view
+        class="tool-btn"
+        @tap="onForward"
+      >
+        <image
+          class="tool-icon tool-icon-forward"
+          src="/static/icons/video-forward.svg"
+          mode="aspectFit"
+        />
+      </view>
+    </view>
+    <!-- #endif -->
+    <!-- #ifndef H5 -->
+    <!-- 占位把 video 顶上去；按钮用单层 cover-view，文字中间不能再套一层，否则点不到 -->
+    <view
+      class="bottom-bar"
+      :style="{ height: `${layout.bottomH}px` }"
+    />
+    <cover-view
+      class="cover-bottom"
+      :style="{ height: `${layout.bottomH}px`, paddingBottom: `${safeBottom}px` }"
+    >
+      <cover-view
+        class="cover-tool"
+        @tap="onDelete"
+      >删除</cover-view>
+      <cover-view
+        class="cover-tool"
+        @tap="onSave"
+      >保存</cover-view>
+      <cover-view
+        class="cover-tool"
+        @tap="onForward"
+      >转发</cover-view>
     </cover-view>
+    <!-- #endif -->
   </view>
-  <!-- #endif -->
 </template>
 
 <style scoped lang="scss">
 .page {
+  position: relative;
   width: 100%;
   height: 100vh;
   height: 100dvh;
@@ -371,15 +445,16 @@ onUnload(() => {
   width: 100%;
   box-sizing: border-box;
   display: flex;
+  flex-direction: row;
   align-items: center;
   justify-content: space-around;
-  padding: 0 36px;
+  padding: 0 12px;
   background: #000;
 }
 
 .tool-btn {
-  width: 56px;
-  height: 44px;
+  flex: 1;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -396,62 +471,26 @@ onUnload(() => {
   height: 26px;
 }
 
-/* —— App：全屏 video + cover 浮层 —— */
-.app-page {
-  position: relative;
-  display: block;
-}
-
-.app-player-full {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: 100%;
-  background: #000;
-}
-
-.app-empty {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
+.app-player { width: 100%; display: block; background: #000; }
 
 .cover-header {
   position: absolute;
   left: 0;
   top: 0;
   right: 0;
+  z-index: 2;
   box-sizing: border-box;
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
   padding-left: 4px;
   padding-right: 12px;
-  padding-bottom: 8px;
   background-color: rgba(0, 0, 0, 0.35);
-}
-
-.cover-header-left {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  flex: 1;
-  overflow: hidden;
 }
 
 .cover-back {
   width: 36px;
   height: 36px;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-}
-
-.cover-back-text {
   color: #ffffff;
   font-size: 28px;
   line-height: 36px;
@@ -461,8 +500,8 @@ onUnload(() => {
 .cover-meta {
   display: flex;
   flex-direction: column;
+  flex: 1;
   overflow: hidden;
-  padding-right: 8px;
 }
 
 .cover-sender {
@@ -482,40 +521,26 @@ onUnload(() => {
   margin-top: 2px;
 }
 
-.cover-header-right {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-}
-
 .cover-bottom {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
+  z-index: 2;
   box-sizing: border-box;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-around;
-  padding-left: 36px;
-  padding-right: 36px;
-  background-color: rgba(0, 0, 0, 0.55);
+  background-color: #000000;
 }
 
 .cover-tool {
-  width: 64px;
-  height: 44px;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-}
-
-.cover-tool-text {
+  width: 33%;
+  height: 48px;
   color: #ffffff;
   font-size: 15px;
-  line-height: 44px;
+  line-height: 48px;
   text-align: center;
 }
 </style>

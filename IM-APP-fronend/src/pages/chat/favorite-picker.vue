@@ -229,16 +229,27 @@ function goBack() {
 
 <template>
   <view class="page">
-    <ImNavBar title="我的收藏" @back="goBack">
+    <ImNavBar
+      title="我的收藏"
+      @back="goBack"
+    >
       <template #right>
-        <view class="header-btn" :class="{ on: managing }" @click="toggleManage">
-          <image class="header-icon" src="/static/icon-favorite.png" mode="aspectFit" />
+        <view
+          class="header-btn"
+          :class="{ on: managing }"
+          @click="toggleManage"
+        >
+          <image
+            class="header-icon"
+            src="/static/icon-favorite.png"
+            mode="aspectFit"
+          />
         </view>
       </template>
     </ImNavBar>
 
     <view class="search-bar">
-      <view class="lens"></view>
+      <view class="lens" />
       <input
         v-model="keyword"
         class="search-input"
@@ -246,7 +257,7 @@ function goBack() {
         placeholder="搜索收藏内容"
         placeholder-class="search-placeholder"
         confirm-type="search"
-      />
+      >
     </view>
 
     <view class="tabs">
@@ -261,42 +272,116 @@ function goBack() {
       </view>
     </view>
 
-    <scroll-view scroll-y class="list" @scrolltolower="load()">
+    <scroll-view
+      scroll-y
+      class="list"
+      @scrolltolower="load()"
+    >
       <view
         v-for="item in filtered"
         :key="item.id"
         class="fav-row"
         @click="toggle(item)"
       >
-        <view class="check" :class="{ on: isSelected(item) }">
-          <text v-if="isSelected(item)" class="check-mark">✓</text>
+        <view
+          class="check"
+          :class="{ on: isSelected(item) }"
+        >
+          <text
+            v-if="isSelected(item)"
+            class="check-mark"
+          >
+            ✓
+          </text>
         </view>
-        <image v-if="item.type === 'image'" class="fav-thumb" :src="item.content" mode="aspectFill" />
-        <view v-else class="fav-icon">
-          <image v-if="item.type === 'file'" class="type-img" src="/static/icon-file.png" mode="aspectFit" />
-          <image v-else-if="item.type === 'voice'" class="type-img" src="/static/icon-mic.png" mode="aspectFit" />
-          <image v-else-if="item.type === 'video'" class="type-img" src="/static/icon-photo.png" mode="aspectFit" />
-          <text v-else class="type-glyph">文</text>
+        <image
+          v-if="item.type === 'image'"
+          class="fav-thumb"
+          :src="item.content"
+          mode="aspectFill"
+        />
+        <view
+          v-else
+          class="fav-icon"
+        >
+          <image
+            v-if="item.type === 'file'"
+            class="type-img"
+            src="/static/icon-file.png"
+            mode="aspectFit"
+          />
+          <image
+            v-else-if="item.type === 'voice'"
+            class="type-img"
+            src="/static/icon-mic.png"
+            mode="aspectFit"
+          />
+          <image
+            v-else-if="item.type === 'video'"
+            class="type-img"
+            src="/static/icon-photo.png"
+            mode="aspectFit"
+          />
+          <text
+            v-else
+            class="type-glyph"
+          >
+            文
+          </text>
         </view>
         <view class="fav-body">
-          <text class="fav-content">{{ previewText(item) }}</text>
-          <text class="fav-sub">{{ typeLabel(item) }}</text>
+          <text class="fav-content">
+            {{ previewText(item) }}
+          </text>
+          <text class="fav-sub">
+            {{ typeLabel(item) }}
+          </text>
         </view>
-        <text class="fav-time">{{ formatFavoriteDay(item.createdAt) }}</text>
+        <text class="fav-time">
+          {{ formatFavoriteDay(item.createdAt) }}
+        </text>
       </view>
 
-      <text v-if="loading && !items.length" class="empty">加载中...</text>
-      <text v-else-if="!filtered.length" class="empty">
+      <text
+        v-if="loading && !items.length"
+        class="empty"
+      >
+        加载中...
+      </text>
+      <text
+        v-else-if="!filtered.length"
+        class="empty"
+      >
         {{ keyword.trim() ? '无匹配收藏' : '无收藏' }}
       </text>
-      <text v-else-if="loading" class="load-more">加载中...</text>
-      <text v-else-if="finished" class="load-more">没有更多了</text>
+      <text
+        v-else-if="loading"
+        class="load-more"
+      >
+        加载中...
+      </text>
+      <text
+        v-else-if="finished"
+        class="load-more"
+      >
+        没有更多了
+      </text>
     </scroll-view>
 
     <view class="bottom-bar">
-      <view class="bar-back" @click="goBack">‹</view>
-      <text class="bar-count" :class="{ zero: !selectedCount }">已选 {{ selectedCount }}</text>
-      <view class="bar-space"></view>
+      <view
+        class="bar-back"
+        @click="goBack"
+      >
+        ‹
+      </view>
+      <text
+        class="bar-count"
+        :class="{ zero: !selectedCount }"
+      >
+        已选 {{ selectedCount }}
+      </text>
+      <view class="bar-space" />
       <view
         class="main-btn"
         :class="{ send: !managing, danger: managing, disabled: !selectedCount || sending }"

@@ -125,7 +125,10 @@ function onPreview(item: MediaItem) {
 
 <template>
   <view class="page">
-    <ImNavBar title="图片与视频" @back="goBack" />
+    <ImNavBar
+      title="图片与视频"
+      @back="goBack"
+    />
 
     <view class="tabs">
       <view
@@ -139,19 +142,49 @@ function onPreview(item: MediaItem) {
       </view>
     </view>
 
-    <view v-if="tab !== 'file'" class="grid">
-      <view v-for="item in visible" :key="item.id" class="cell" @click="onPreview(item)">
-        <image class="thumb" :src="playableMediaUrl(item.thumb || item.url)" mode="aspectFill" />
-        <view v-if="item.kind === 'video'" class="play">▶</view>
+    <view
+      v-if="tab !== 'file'"
+      class="grid"
+    >
+      <view
+        v-for="item in visible"
+        :key="item.id"
+        class="cell"
+        @click="onPreview(item)"
+      >
+        <image
+          class="thumb"
+          :src="playableMediaUrl(item.thumb || item.url)"
+          mode="aspectFill"
+        />
+        <view
+          v-if="item.kind === 'video'"
+          class="play"
+        >
+          ▶
+        </view>
       </view>
     </view>
-    <view v-else class="files">
-      <view v-for="item in visible" :key="item.id" class="file-row" @click="onPreview(item)">
-        <text class="file-name">{{ item.name }}</text>
+    <view
+      v-else
+      class="files"
+    >
+      <view
+        v-for="item in visible"
+        :key="item.id"
+        class="file-row"
+        @click="onPreview(item)"
+      >
+        <text class="file-name">
+          {{ item.name }}
+        </text>
       </view>
     </view>
 
-    <EmptyState v-if="!loading && !visible.length" text="暂无图片和视频" />
+    <EmptyState
+      v-if="!loading && !visible.length"
+      text="暂无图片和视频"
+    />
   </view>
 </template>
 

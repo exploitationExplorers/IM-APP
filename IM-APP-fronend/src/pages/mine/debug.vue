@@ -243,46 +243,93 @@ onUnmounted(() => {
 
 <template>
   <view class="page">
-    <ImNavBar title="调试资讯" @back="goBack" />
+    <ImNavBar
+      title="调试资讯"
+      @back="goBack"
+    />
 
-    <scroll-view scroll-y class="scroll">
-      <view id="debug-capture" class="capture">
+    <scroll-view
+      scroll-y
+      class="scroll"
+    >
+      <view
+        id="debug-capture"
+        class="capture"
+      >
         <view class="info-table">
           <view class="info-row">
-            <text class="info-label">聊天号</text>
-            <text class="info-value">{{ chatIdText }}</text>
+            <text class="info-label">
+              聊天号
+            </text>
+            <text class="info-value">
+              {{ chatIdText }}
+            </text>
           </view>
           <view class="info-row">
-            <text class="info-label">版本号</text>
-            <text class="info-value">{{ versionText }}</text>
+            <text class="info-label">
+              版本号
+            </text>
+            <text class="info-value">
+              {{ versionText }}
+            </text>
           </view>
           <view class="info-row">
-            <text class="info-label">画面尺寸</text>
-            <text class="info-value">{{ screenSize }}</text>
+            <text class="info-label">
+              画面尺寸
+            </text>
+            <text class="info-value">
+              {{ screenSize }}
+            </text>
           </view>
         </view>
 
         <view class="section">
-          <view v-for="item in probes" :key="item.label + item.host" class="probe-row">
+          <view
+            v-for="item in probes"
+            :key="item.label + item.host"
+            class="probe-row"
+          >
             <view class="probe-main">
-              <text class="probe-label">{{ item.label }}</text>
-              <text class="probe-host">{{ item.host }}</text>
+              <text class="probe-label">
+                {{ item.label }}
+              </text>
+              <text class="probe-host">
+                {{ item.host }}
+              </text>
             </view>
             <view class="probe-right">
-              <text class="probe-ms" :class="{ fail: !item.ok }">
-                {{ item.ms == null ? '—' : item.ms }}<text class="probe-unit">ms</text>
+              <text
+                class="probe-ms"
+                :class="{ fail: !item.ok }"
+              >
+                {{ item.ms == null ? '—' : item.ms }}<text class="probe-unit">
+                  ms
+                </text>
               </text>
-              <view class="probe-dot" :class="{ ok: item.ok, bad: !item.ok }">
-                <text class="probe-dot-mark">{{ item.ok ? '✓' : '!' }}</text>
+              <view
+                class="probe-dot"
+                :class="{ ok: item.ok, bad: !item.ok }"
+              >
+                <text class="probe-dot-mark">
+                  {{ item.ok ? '✓' : '!' }}
+                </text>
               </view>
             </view>
           </view>
-          <view v-if="!probes.length" class="empty">
-            <text class="empty-text">{{ probing ? '探测中…' : '暂无探测结果' }}</text>
+          <view
+            v-if="!probes.length"
+            class="empty"
+          >
+            <text class="empty-text">
+              {{ probing ? '探测中…' : '暂无探测结果' }}
+            </text>
           </view>
         </view>
 
-        <view v-if="history.length" class="section chart-section">
+        <view
+          v-if="history.length"
+          class="section chart-section"
+        >
           <view class="chart">
             <view
               v-for="(h, idx) in history"
@@ -294,72 +341,144 @@ onUnmounted(() => {
                 :class="{ bad: !h.ok }"
                 :style="{ height: Math.max(8, Math.round((h.ms / historyMaxMs) * 120)) + 'rpx' }"
               />
-              <text class="bar-ms">{{ h.ms }}ms</text>
-              <text class="bar-time">{{ h.label }}</text>
+              <text class="bar-ms">
+                {{ h.ms }}ms
+              </text>
+              <text class="bar-time">
+                {{ h.label }}
+              </text>
             </view>
           </view>
         </view>
 
         <view class="section meta-section">
           <view class="meta-row">
-            <text class="meta-label">浏览器</text>
-            <text class="meta-value">{{ browserText }}</text>
+            <text class="meta-label">
+              浏览器
+            </text>
+            <text class="meta-value">
+              {{ browserText }}
+            </text>
           </view>
           <view class="meta-row">
-            <text class="meta-label">私密浏览</text>
-            <text class="meta-value">{{ privateBrowse }}</text>
+            <text class="meta-label">
+              私密浏览
+            </text>
+            <text class="meta-value">
+              {{ privateBrowse }}
+            </text>
           </view>
           <view class="meta-row">
-            <text class="meta-label">网络状态</text>
-            <text class="meta-value">{{ networkText }}</text>
+            <text class="meta-label">
+              网络状态
+            </text>
+            <text class="meta-value">
+              {{ networkText }}
+            </text>
           </view>
           <view class="meta-row">
-            <text class="meta-label">储存空间</text>
-            <text class="meta-value">{{ storageText }}</text>
+            <text class="meta-label">
+              储存空间
+            </text>
+            <text class="meta-value">
+              {{ storageText }}
+            </text>
           </view>
         </view>
 
         <view class="section">
-          <text class="block-title">媒体支援</text>
+          <text class="block-title">
+            媒体支援
+          </text>
           <view class="tag-wrap">
-            <text v-for="m in mediaList" :key="m" class="tag">{{ m }}</text>
+            <text
+              v-for="m in mediaList"
+              :key="m"
+              class="tag"
+            >
+              {{ m }}
+            </text>
           </view>
         </view>
 
         <view class="section">
           <view class="cap-grid">
-            <view v-for="(val, key) in perms" :key="'p-' + key" class="cap-item">
-              <text class="cap-k">{{ key }}</text>
-              <text class="cap-v">{{ val }}</text>
+            <view
+              v-for="(val, key) in perms"
+              :key="'p-' + key"
+              class="cap-item"
+            >
+              <text class="cap-k">
+                {{ key }}
+              </text>
+              <text class="cap-v">
+                {{ val }}
+              </text>
             </view>
-            <view v-for="(val, key) in caps" :key="'c-' + key" class="cap-item">
-              <text class="cap-k">{{ key }}</text>
-              <text class="cap-v">{{ val === true ? '是' : val === false ? '否' : val }}</text>
+            <view
+              v-for="(val, key) in caps"
+              :key="'c-' + key"
+              class="cap-item"
+            >
+              <text class="cap-k">
+                {{ key }}
+              </text>
+              <text class="cap-v">
+                {{ val === true ? '是' : val === false ? '否' : val }}
+              </text>
             </view>
           </view>
         </view>
 
         <view class="section">
           <view class="meta-row">
-            <text class="meta-label">现在时间</text>
-            <text class="meta-value">{{ nowText || startedAt }}</text>
+            <text class="meta-label">
+              现在时间
+            </text>
+            <text class="meta-value">
+              {{ nowText || startedAt }}
+            </text>
           </view>
-          <view v-if="openimApi" class="meta-row">
-            <text class="meta-label">OpenIM API</text>
-            <text class="meta-value small">{{ hostOf(openimApi) }}</text>
+          <view
+            v-if="openimApi"
+            class="meta-row"
+          >
+            <text class="meta-label">
+              OpenIM API
+            </text>
+            <text class="meta-value small">
+              {{ hostOf(openimApi) }}
+            </text>
           </view>
-          <view v-if="openimWs" class="meta-row">
-            <text class="meta-label">OpenIM WS</text>
-            <text class="meta-value small">{{ hostOf(openimWs) }}</text>
+          <view
+            v-if="openimWs"
+            class="meta-row"
+          >
+            <text class="meta-label">
+              OpenIM WS
+            </text>
+            <text class="meta-value small">
+              {{ hostOf(openimWs) }}
+            </text>
           </view>
         </view>
 
         <view class="actions">
-          <view class="save-btn" @click="onSaveImage">
-            <text class="save-btn-text">以图片保存</text>
+          <view
+            class="save-btn"
+            @click="onSaveImage"
+          >
+            <text class="save-btn-text">
+              以图片保存
+            </text>
           </view>
-          <view class="refresh-btn" @click="runProbes">
-            <text class="refresh-btn-text">{{ probing ? '探测中…' : '重新探测' }}</text>
+          <view
+            class="refresh-btn"
+            @click="runProbes"
+          >
+            <text class="refresh-btn-text">
+              {{ probing ? '探测中…' : '重新探测' }}
+            </text>
           </view>
         </view>
       </view>

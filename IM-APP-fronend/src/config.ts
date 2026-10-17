@@ -12,13 +12,22 @@ let apiBaseUrl = env.VITE_API_BASE_URL || 'http://8.154.44.197/api/v1'
 apiBaseUrl = '/api/v1'
 // #endif
 
+function resolveUpdateChannel(raw: string | undefined): 'canary' | 'test' | 'prod' {
+  if (raw === 'canary' || raw === 'prod') return raw
+  return 'test'
+}
+
 export const APP_CONFIG = {
   appName: 'Chat',
   displayName: '易可聊',
   version: 'v1.0.0',
   apiBaseUrl,
-  /** 热更新渠道，打包测试 APK 保持 test，正式包再改为 prod */
-  updateChannel: env.VITE_UPDATE_CHANNEL === 'prod' ? 'prod' : 'test',
+  /**
+   * 热更新渠道，打进壳里，wgt 改不了。
+   * 不写或写错时保持 test，避免误打出来的客户壳去拉 canary。
+   * 内部壳必须显式 VITE_UPDATE_CHANNEL=canary。
+   */
+  updateChannel: resolveUpdateChannel(env.VITE_UPDATE_CHANNEL),
   defaultCountryCode: '+86',
   /** 参考站默认头像 */
   defaultAvatarUrl:

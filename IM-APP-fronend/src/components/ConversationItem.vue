@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Conversation } from '@/types'
-import { APP_CONFIG } from '@/config'
 import { formatRelativeTime } from '@/utils/format'
 import { useChatStore } from '@/stores/chat'
 
@@ -119,24 +118,63 @@ const lastFailed = computed(() => {
     @touchcancel="cancelHold"
   >
     <view class="avatar-wrap">
-      <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
-      <image v-if="item.pinned" class="pin-badge" src="/static/icons/icon-pin.svg" mode="aspectFit" />
-      <view v-if="isOnline" class="online-dot" />
+      <image
+        class="avatar"
+        :src="item.avatar || '/static/avatar-1.png'"
+        mode="aspectFill"
+      />
+      <image
+        v-if="item.pinned"
+        class="pin-badge"
+        src="/static/icons/icon-pin.svg"
+        mode="aspectFit"
+      />
+      <view
+        v-if="isOnline"
+        class="online-dot"
+      />
     </view>
     <view class="body">
       <view class="top">
-        <text class="title">{{ item.title }}</text>
-        <text class="time">{{ timeText }}</text>
+        <text class="title">
+          {{ item.title }}
+        </text>
+        <text class="time">
+          {{ timeText }}
+        </text>
       </view>
       <view class="bottom">
         <view class="preview">
-          <view v-if="lastFailed" class="failed-mark">!</view>
-          <image v-if="isMuted" class="mute-icon" src="/static/icons/icon-bell-slash.svg" mode="aspectFit" />
-          <text v-for="tag in item.highlightTags" :key="tag" class="tag">{{ tag }}</text>
-          <view class="msg">{{ previewText }}</view>
+          <view
+            v-if="lastFailed"
+            class="failed-mark"
+          >
+            !
+          </view>
+          <image
+            v-if="isMuted"
+            class="mute-icon"
+            src="/static/icons/icon-bell-slash.svg"
+            mode="aspectFit"
+          />
+          <text
+            v-for="tag in item.highlightTags"
+            :key="tag"
+            class="tag"
+          >
+            {{ tag }}
+          </text>
+          <view class="msg">
+            {{ previewText }}
+          </view>
         </view>
-        <view v-if="item.unreadCount > 0" class="badge">
-          <text class="badge-text">{{ item.unreadCount > 99 ? '99+' : item.unreadCount }}</text>
+        <view
+          v-if="item.unreadCount > 0"
+          class="badge"
+        >
+          <text class="badge-text">
+            {{ item.unreadCount > 99 ? '99+' : item.unreadCount }}
+          </text>
         </view>
       </view>
     </view>

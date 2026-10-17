@@ -1,3 +1,6 @@
+import { isAndroid, isAppPlatform } from '@/utils/platform'
+import type { PlusFileEntry, PlusGallerySave, PlusResolveLocalFile } from '@/types/plus-io'
+
 export interface VideoMeta {
   url: string
   snapshotUrl: string
@@ -185,7 +188,7 @@ async function resolveAbsAudioPath(rel: string): Promise<string> {
     | {
         convertToAbsURL?: (u: string) => string
         convertLocalFileSystemURL?: (u: string) => string
-        resolveLocalFileSystemURL?: Function
+        resolveLocalFileSystemURL?: PlusResolveLocalFile
       }
     | undefined
 
@@ -321,18 +324,8 @@ export function videoPosterUrlFromContent(content: string): string {
   return isUsableVideoPoster(poster) ? playableMediaUrl(poster) : ''
 }
 
-function isAppPlatform(): boolean {
-  try {
-    return uni.getSystemInfoSync().uniPlatform === 'app'
-  } catch {
-    return false
-  }
-}
-
 function isAndroidApp(): boolean {
-  if (!isAppPlatform()) return false
-  const os = `${uni.getSystemInfoSync().osName || ''} ${uni.getSystemInfoSync().platform || ''}`.toLowerCase()
-  return os.includes('android')
+  return isAppPlatform() && isAndroid()
 }
 
 /** 华为等机型 previewImage 内置「保存图像」常因未申请写相册权限失败；保存前先要权限。 */
@@ -363,7 +356,7 @@ export function requestAndroidSaveAlbumPermission(): Promise<void> {
 
 function saveLocalImageViaGallery(filePath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const gallery = plus?.gallery as { save?: Function } | undefined
+    const gallery = plus?.gallery as { save?: PlusGallerySave } | undefined
     if (typeof gallery?.save !== 'function') {
       reject(new Error('保存图片失败'))
       return
@@ -686,7 +679,7 @@ type PlusFileReader = {
   readAsDataURL: (file: unknown) => void
 }
 type PlusIo = {
-  resolveLocalFileSystemURL?: Function
+  resolveLocalFileSystemURL?: PlusResolveLocalFile
   FileReader?: new () => PlusFileReader
 }
 
@@ -701,7 +694,7 @@ function readFileHead(path: string, size = 16): Promise<Uint8Array | null> {
     }
     io.resolveLocalFileSystemURL(
       path,
-      (entry: { file?: Function }) => {
+      (entry: { file?: PlusFileEntry['file'] }) => {
         if (!entry.file) {
           resolve(null)
           return
@@ -732,7 +725,7 @@ function readFileHead(path: string, size = 16): Promise<Uint8Array | null> {
 /** 确认本地语音文件存在（带超时）：不存在直接报明确错误，避免 AVPlayer 拿到无效路径静默失败 */
 function fileExistsForPlay(absPath: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const io = plus?.io as unknown as { resolveLocalFileSystemURL?: Function } | undefined
+    const io = plus?.io as unknown as { resolveLocalFileSystemURL?: PlusResolveLocalFile } | undefined
     if (!io?.resolveLocalFileSystemURL) {
       resolve(true)
       return
@@ -885,7 +878,7 @@ export async function ensurePlayableAudioPath(url: string): Promise<string> {
  */
 function persistNamedFile(tempPath: string, fileName: string): Promise<string> {
   return new Promise((resolve) => {
-    const io = plus?.io as { resolveLocalFileSystemURL?: Function } | undefined
+    const io = plus?.io as { resolveLocalFileSystemURL?: PlusResolveLocalFile } | undefined
     if (!io?.resolveLocalFileSystemURL) {
       resolve(tempPath)
       return
@@ -894,7 +887,7 @@ function persistNamedFile(tempPath: string, fileName: string): Promise<string> {
     const src = /^(file|content):\/\//.test(tempPath) ? tempPath : tempPath
     io.resolveLocalFileSystemURL(
       src,
-      (entry: { copyTo?: Function }) => {
+      (entry: { copyTo?: PlusFileEntry['copyTo'] }) => {
         io.resolveLocalFileSystemURL?.(
           '_doc/',
           (dir: object) => {
