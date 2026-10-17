@@ -865,19 +865,58 @@ export async function getOneConversation(
   throw lastErr instanceof Error ? lastErr : new Error('getOneConversation 重试/重登后仍失败')
 }
 
+function isSdkResourceNotReady(err: unknown): boolean {
+  if (err instanceof IMCallError && (err.code === 10004 || err.code === 10005)) return true
+  const text = err instanceof Error ? err.message : String(err || '')
+  return text.includes('10004') || text.includes('10005')
+}
+
+/**
+ * 新装的壳或刚重连时，本地库还没初始化完就拉历史，
+ * SDK 会把 10004 包在 10005 里抛出来。先退避再重登，避免把原文弹给用户。
+ */
+async function callHistoryWhenReady(
+  conversationID: string,
+  count: number,
+  startClientMsgID: string,
+): Promise<{ messageList: MessageItem[]; isEnd: boolean }> {
+  const run = () =>
+    imCall<unknown>(IMMethods.GetAdvancedHistoryMessageList, {
+      conversationID,
+      count,
+      startClientMsgID: startClientMsgID || '',
+      lastMinSeq: 0,
+      viewType: ViewType.History,
+    }).then(normalizeHistoryResult)
+
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= 3; attempt++) {
+    try {
+      return await run()
+    } catch (e) {
+      lastErr = e
+      if (!isSdkResourceNotReady(e) || attempt === 3) break
+      await new Promise((r) => setTimeout(r, 300 * 2 ** attempt))
+    }
+  }
+  if (!isSdkResourceNotReady(lastErr)) throw lastErr
+  resetLoginCache()
+  await ensureIMLogin()
+  await waitForSync(5000)
+  try {
+    return await run()
+  } catch (e) {
+    if (isSdkResourceNotReady(e)) throw new Error('聊天记录还在同步，请稍后再试')
+    throw e
+  }
+}
+
 export async function getHistoryMessages(
   conversationID: string,
   count = 20,
   startClientMsgID = '',
 ): Promise<{ messageList: MessageItem[]; isEnd: boolean }> {
-  const res = await imCall<unknown>(IMMethods.GetAdvancedHistoryMessageList, {
-    conversationID,
-    count,
-    startClientMsgID: startClientMsgID || '',
-    lastMinSeq: 0,
-    viewType: ViewType.History,
-  })
-  return normalizeHistoryResult(res)
+  return callHistoryWhenReady(conversationID, count, startClientMsgID)
 }
 
 /** 从新到旧分页拉出会话历史，供搜索 / 媒体页使用 */

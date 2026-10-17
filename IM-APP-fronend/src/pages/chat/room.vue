@@ -286,17 +286,23 @@ watch(
     void refreshGroupMeta()
   },
 )
-// 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
-// 用 ref 快照而不是 computed：避免 H5/热更新下 computed 与全局 ref 不同步导致 mine 判断失效
+// 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID。
+// 不用 computed 盯全局 ref：H5 热更新时 computed 会和 imUserId 脱节。
+// 登录完成后立刻写入，并在 imUserId 后续变化时跟上，避免历史先渲染、ID 后到，自己的消息停在左边。
 const myId = ref('')
+watch(imUserId, (id) => {
+  if (id) myId.value = id
+})
 const myAvatar = computed(() => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl)
 const settingsStore = useChatSettingsStore()
 
 function isMine(message: ChatMessage): boolean {
-  if (myId.value && message.senderId === myId.value) return true
   // 发送中的占位消息一定属于自己，避免 myId 还没拿到时跑到左边
   if (message.status === 'sending') return true
-  return false
+  const me = myId.value || imUserId.value
+  if (!me || !message.senderId) return false
+  // 业务 UUID 和去掉横线的 OpenIM id 是同一个人，大小写也不稳定
+  return sameBusinessUserId(message.senderId, me)
 }
 
 /** 联系人 id → 资料，避免每条气泡 contacts.find 扫全表 */
@@ -857,6 +863,15 @@ onMounted(() => {
   })
 })
 
+/** SDK 资源未就绪时原文含 errCode / withStack，不直接展示 */
+function roomOpenErrorText(e: unknown): string {
+  const message = e instanceof Error ? e.message : ''
+  if (!message || /errCode=|withStack|not load resource|10004|10005/.test(message)) {
+    return '聊天记录还在同步，请稍后再试'
+  }
+  return message
+}
+
 async function bootstrapRoom(query: Record<string, string | undefined>) {
   roomExited = false
   roomFirstMessagesMarked = false
@@ -875,6 +890,9 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     if (convIdHint) activeConversationId.value = convIdHint
 
     await ensureIMLogin()
+    // 必须在拉历史之前写上。本地库很快时，消息会先于 enterConversation 画出来，
+    // 此时 myId 仍为空，自己的气泡会落在左边，App 滚动列表不一定会再改位置。
+    if (imUserId.value) myId.value = imUserId.value
 
     const enterTask = (async () => {
       perfMarkStart('chat:room-enter-conversation')
@@ -993,7 +1011,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     }
   } catch (e) {
     console.error('[chat] 打开会话失败', e)
-    uni.showToast({ title: (e as Error)?.message || '会话打开失败', icon: 'none', duration: 4000 })
+    uni.showToast({ title: roomOpenErrorText(e), icon: 'none', duration: 2500 })
   }
 }
 
@@ -2640,7 +2658,7 @@ function pickFavorite() {
         <view
           v-for="(m, msgIndex) in renderMessages"
           :id="`msg_${m.id}`"
-          :key="m.id"
+          :key="`${myId || 'pending'}-${m.id}`"
           class="msg-row"
           :class="{ selecting: actions.selecting.value, focused: focusedMsgId === m.id }"
           @click="actions.selecting.value ? actions.toggleSelect(m) : undefined"

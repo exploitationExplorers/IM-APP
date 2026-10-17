@@ -1,0 +1,462 @@
+/* 易可聊下载页：对齐参考站移动端布局 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue",
+    "Microsoft YaHei", Arial, sans-serif;
+  background: #fff;
+  color: #111;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- PC ---------- */
+.pc-box {
+  min-height: 100vh;
+  padding: 48px 16px 32px;
+  text-align: center;
+}
+
+.pc-logo img {
+  width: 88px;
+  height: 88px;
+  border-radius: 18px;
+  object-fit: cover;
+}
+
+.pc-box > p {
+  margin-top: 12px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+#Dqcode {
+  margin: 28px auto 0;
+  display: inline-block;
+}
+
+#Dqcode img,
+#Dqcode canvas {
+  display: block;
+  margin: 0 auto;
+}
+
+.pc-box .info {
+  margin-top: 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111;
+}
+
+/* ---------- 移动端 ---------- */
+.contain-page {
+  padding: 20px 16px 40px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 4px 0;
+}
+
+.hero-logo {
+  width: 90px;
+  height: 90px;
+  border-radius: 20px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.hero-name {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.hero-stars {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-stars .stars {
+  color: #ffdb00;
+  letter-spacing: 1px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.hero-stars .score {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111;
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  margin-top: 18px;
+  gap: 12px;
+}
+
+.btn-install,
+.btn-trust {
+  height: 38px;
+  border-radius: 19px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+.btn-install {
+  flex: 1;
+  background: #007aff;
+  color: #fff;
+}
+
+.btn-trust {
+  width: 100px;
+  flex-shrink: 0;
+  background: #fff;
+  color: #007aff;
+  border: 2px solid #007aff;
+}
+
+.install-tip {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8e8d92;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 22px;
+  padding: 8px 4px 4px;
+}
+
+.stat-item {
+  width: 33.33%;
+  text-align: center;
+}
+
+.stat-icon {
+  width: 36px;
+  height: 36px;
+  margin: 0 auto 8px;
+  border-radius: 50%;
+  background: rgba(0, 122, 255, 0.2);
+  position: relative;
+}
+
+.stat-icon::after {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: #007aff;
+}
+
+.stat-icon.like::after {
+  clip-path: polygon(50% 10%, 90% 45%, 70% 90%, 30% 90%, 10% 45%);
+  border-radius: 0;
+}
+
+.stat-icon.users::after {
+  width: 10px;
+  height: 10px;
+  inset: auto;
+  top: 8px;
+  left: 13px;
+  box-shadow: 8px 10px 0 0 #007aff;
+}
+
+.stat-icon.cloud::after {
+  inset: 10px 8px 12px;
+  border-radius: 10px 10px 6px 6px;
+}
+
+.stat-num {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.stat-label {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #8e8d92;
+}
+
+.auth-card {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, #eaf3ff 0%, #f7faff 100%);
+  border: 1px solid #d6e8ff;
+}
+
+.auth-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0a2fc2;
+}
+
+.auth-sub {
+  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #5b6b8c;
+}
+
+.section {
+  margin-top: 24px;
+}
+
+.section-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.rating-box {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.rating-left {
+  width: 90px;
+  text-align: center;
+}
+
+.rating-big {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.rating-stars {
+  margin-top: 4px;
+  color: #ffdb00;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.rating-right {
+  flex: 1;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #8e8d92;
+}
+
+.bar-row span {
+  width: 10px;
+}
+
+.bar {
+  flex: 1;
+  height: 4px;
+  background: #ececec;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  background: #8e8d92;
+  border-radius: 2px;
+}
+
+.rating-count {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #8e8d92;
+  text-align: right;
+}
+
+.review-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.review-user {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #666;
+}
+
+.review-stars {
+  margin-top: 4px;
+  color: #ffdb00;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.review-body {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #333;
+}
+
+.review-date {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8e8d92;
+}
+
+.info-list {
+  list-style: none;
+}
+
+.info-list li {
+  display: flex;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 14px;
+}
+
+.info-list li span {
+  width: 90px;
+  color: #8e8d92;
+  flex-shrink: 0;
+}
+
+.info-list li div {
+  flex: 1;
+  color: #111;
+}
+
+.disclaimer {
+  margin-top: 28px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #999;
+}
+
+/* 微信提示 */
+#weixin,
+#weixin_an {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+#weixin.show,
+#weixin_an.show {
+  display: block;
+}
+
+.click_opacity {
+  position: absolute;
+  inset: 0;
+}
+
+.to_btn {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  color: #fff;
+  text-align: left;
+  max-width: 280px;
+}
+
+.to_btn .span1 img {
+  width: 48px;
+  float: right;
+}
+
+.to_btn .span2 {
+  display: block;
+  clear: both;
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.to_btn em {
+  font-style: normal;
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  text-align: center;
+  background: #007aff;
+  border-radius: 50%;
+  margin-right: 6px;
+  font-size: 12px;
+}
+
+.to_btn .span2 img {
+  width: 22px;
+  vertical-align: middle;
+  margin: 0 4px;
+}
+
+/* 去信任弹层 */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+}
+
+.modal-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.modal-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100% - 48px);
+  max-width: 340px;
+  background: #fff;
+  border-radius: 14px;
+  padding: 20px 18px 16px;
+}
+
+.modal-card h3 {
+  font-size: 18px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.modal-card ol {
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #333;
+  margin-bottom: 16px;
+}
+
+.modal-card .btn-install {
+  width: 100%;
+}
