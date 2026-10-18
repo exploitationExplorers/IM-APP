@@ -5,7 +5,12 @@ import { createFavorite } from '@/api/favorites'
 import { createSticker } from '@/api/sticker'
 import { playableMediaUrl, saveImageToDevice, saveVideoToDevice } from '@/utils/chatMedia'
 import { uploadSticker } from '@/utils/file-upload'
-import { muteGroupMember, removeGroupMember, unmuteGroupMember } from '@/api/group'
+import {
+  muteGroupMember,
+  purgeGroupMemberMessages,
+  removeGroupMember,
+  unmuteGroupMember,
+} from '@/api/group'
 import { MUTE_OPTIONS } from '@/constants/mute'
 import { useChatStore } from '@/stores/chat'
 import { useForwardStore } from '@/stores/forward'
@@ -177,8 +182,13 @@ export function useChatMessageActions(opts: {
 
     // 底部通栏保留；网格侧靠 ImMessageActionMenu 过滤 wide，避免再画一对小格
     if (!mine && canManage) {
-      items.push({ key: 'kickAndDelete', label: '移除并删除其消息', wide: true })
-      items.push({ key: 'kick', label: '仅移除该成员', wide: true })
+      if (isSenderInGroup(message)) {
+        items.push({ key: 'kickAndDelete', label: '移除并删除其消息', wide: true })
+        items.push({ key: 'kick', label: '仅移除该成员', wide: true })
+      } else {
+        // 已退群（炸群后退出）无法再移除，只剩为所有人清掉他的消息
+        items.push({ key: 'purgeMessages', label: '删除其全部消息', wide: true })
+      }
     }
     return items
   })
@@ -680,6 +690,26 @@ export function useChatMessageActions(opts: {
     }
   }
 
+  /** 不经 guardSenderInGroup：目标正是已退群的人 */
+  async function purgeUserMessages(message: ChatMessage) {
+    const userId = businessUserIdFromIM(message.senderId)
+    if (!userId || !opts.businessId.value) return
+    const ok = await confirm('确定为所有人删除该成员在本群的全部消息吗？此操作不可恢复。', '全部删除')
+    if (!ok) return
+    try {
+      await purgeGroupMemberMessages(opts.businessId.value, userId)
+      const theirs = opts.visibleMessages.value.filter((m) => m.senderId === message.senderId)
+      await chatStore.removeLocalMany(
+        opts.conversationId.value,
+        theirs.map((m) => m.id),
+      )
+      uni.showToast({ title: '已删除', icon: 'none' })
+      opts.onMuteChanged?.()
+    } catch (e) {
+      uni.showToast({ title: (e as Error).message || '删除失败', icon: 'none' })
+    }
+  }
+
   async function onMenuSelect(key: string) {
     const message = menuMessage.value
     closeMenu()
@@ -775,6 +805,10 @@ export function useChatMessageActions(opts: {
     }
     if (key === 'kickAndDelete') {
       await kickUser(message, true)
+      return
+    }
+    if (key === 'purgeMessages') {
+      await purgeUserMessages(message)
     }
   }
 

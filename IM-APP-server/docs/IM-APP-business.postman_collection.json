@@ -487,6 +487,20 @@
           "response": []
         },
         {
+          "name": "删除群成员全部消息",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"memberUserId\": \"{{memberUserId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/group-members/purge-messages",
+            "description": "群主/管理员为所有人隐藏该成员在群内的全部历史消息；成员已退群也可操作。管理员不可操作群主和其他管理员。"
+          },
+          "response": []
+        },
+        {
           "name": "修改群设置",
           "request": {
             "method": "POST",

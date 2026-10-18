@@ -642,9 +642,11 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 
 ### POST `/api/v1/groups/qrcode/resolve`
 
-只读解析群二维码，返回 `joined`、`joinMode` 和 `nextAction=enter|join`。
+只读解析群二维码，返回 `joined`、`joinMode` 和 `nextAction=enter|join|apply`。
 
-扫码路径视为群主私发邀请：未入群时一律 `nextAction=join`，**不受**群 `joinMode=approval`、也不受被扫码用户「邀请入群需验证」影响。
+- 已在群中：`nextAction=enter`
+- 公开群（`joinMode=open`）且未入群：`nextAction=join`，确认后直接入群
+- 私密群（`joinMode=approval`）且未入群：`nextAction=apply`，确认后只提交入群申请，不能直接进群
 
 **Body** `{ "token": "..." }`
 
@@ -653,9 +655,10 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 用户确认后按二维码加入群：
 
 - 已是成员：返回 `enter`，并补齐 OpenIM 成员同步（自愈业务库有人、IM 未入群的历史脏数据）
-- 未入群：直接写入成员并返回 `joined`（忽略 `joinMode`，以群主邀请方式同步 OpenIM）
+- 公开群未入群：直接写入成员并返回 `joined`（以群主邀请方式同步 OpenIM）
+- 私密群未入群：写入入群申请并返回 `pending_approval`，管理员同意前不是群成员。`remark` 为空时记为「扫码申请入群」
 
-**Body** `{ "token": "...", "remark": "可选，扫码直入时忽略" }`，也支持传完整 `payload`。
+**Body** `{ "token": "...", "remark": "可选，仅私密群申请时使用" }`，也支持传完整 `payload`。
 
 ### POST `/api/v1/groups/:id/join`
 
@@ -725,6 +728,19 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 ### DELETE `/api/v1/groups/:id/members/:userId`
 
 移除群成员。群主可移除管理员和普通成员，管理员只能移除普通成员。
+
+### POST `/api/v1/group-members/purge-messages`
+
+为所有人删除某成员在群内的全部历史消息，**目标已退群也可操作**（炸群后退出的场景）。
+权限：群主/管理员；不能操作自己和群主，管理员不能操作其他管理员；已退群的目标按普通成员处理。
+
+**Body** `{ "groupId": "qun_xxx", "memberUserId": "<业务用户 UUID>" }`
+
+**Response** `data: { "userId": "...", "purgedAt": "2026-10-18T08:00:00Z" }`
+
+- 写入 `group_message_purges` 水位（与「移除并删除其消息」同一张表），重复调用把水位推到当前时间；客户端经 `GET /groups/:id/message-purges` 拉取后隐藏该成员在 `purgedAt` 之前的消息。
+- 成功后 imAdmin 向群内发一条文本 `群主|管理员清除了「昵称」的全部消息`，客户端识别为系统提示并重新拉取水位；发送失败只记日志，不影响结果。
+- 错误：`403 无权限`；`404 用户不存在`；`400 参数错误 / 操作失败`。
 
 ### PUT `/api/v1/groups/:id/settings`
 

@@ -317,6 +317,18 @@ export async function removeGroupMember(
   })
 }
 
+/** 为所有人删除某成员在群内的全部消息，成员已退群也可以（群主/管理员，服务端校验权限）。 */
+export async function purgeGroupMemberMessages(
+  groupId: string,
+  memberUserId: string,
+): Promise<GroupMessagePurge> {
+  return request<GroupMessagePurge>({
+    url: '/group-members/purge-messages',
+    method: 'POST',
+    data: { groupId, memberUserId },
+  })
+}
+
 /** 群内被「移除并删除消息」清理过的成员；进群时拉一次，用于隐藏其历史消息。 */
 export async function fetchGroupMessagePurges(groupId: string): Promise<GroupMessagePurge[]> {
   const res = await request<{ items?: GroupMessagePurge[] }>({

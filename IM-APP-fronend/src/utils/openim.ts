@@ -19,7 +19,13 @@ import { useContactStore } from '@/stores/contact'
 import type { ChatMessage, Conversation, ConversationPinnedMessage, MessageType as AppMessageType } from '@/types'
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
 import { uploadVoiceViaApi } from '@/utils/mediaApi'
-import { formatIMNotification, imNotificationEventKey, notificationKindOf, GROUP_CREATED_WELCOME_TEXT } from '@/utils/im-notification'
+import {
+  formatIMNotification,
+  imNotificationEventKey,
+  isGroupPurgeTipText,
+  notificationKindOf,
+  GROUP_CREATED_WELCOME_TEXT,
+} from '@/utils/im-notification'
 import { effectiveGroupAtType, GroupAtType, highlightTagsOf } from '@/utils/group-announcement'
 import {
   parseVideoMeta,
@@ -2757,14 +2763,13 @@ export function toChatMessage(rawItem: MessageItem): ChatMessage {
       content = JSON.stringify(invite)
     }
   }
+  const fromIMAdmin = item.sendID === 'imAdmin' || item.senderNickname === 'imAdmin'
   // 历史：建群欢迎语曾由 imAdmin 以文本气泡下发；归一为系统提示，避免假用户头像
-  if (
-    type === 'text' &&
-    content.trim() === GROUP_CREATED_WELCOME_TEXT &&
-    (item.sendID === 'imAdmin' || item.senderNickname === 'imAdmin')
-  ) {
+  if (type === 'text' && fromIMAdmin && content.trim() === GROUP_CREATED_WELCOME_TEXT) {
     type = 'system'
   }
+  const isPurgeTip = type === 'text' && fromIMAdmin && isGroupPurgeTipText(content)
+  if (isPurgeTip) type = 'system'
   // 图片：气泡优先缩略图。原图放进 fallback / sourceUrl，加载失败或点预览时再用。
   const imageMeta = type === 'image' ? pictureMetaOf(item) : null
   const videoSize = type === 'video' ? videoPosterSizeOf(item) : null
@@ -2787,7 +2792,10 @@ export function toChatMessage(rawItem: MessageItem): ChatMessage {
     width: imageMeta?.width || videoSize?.width,
     height: imageMeta?.height || videoSize?.height,
     createdAt: toISOTime(item.sendTime),
-    systemEventKey: imNotificationEventKey(item) || undefined,
+    systemEventKey:
+      imNotificationEventKey(item) ||
+      (isPurgeTip ? `group-purge:${item.groupID || ''}:${item.clientMsgID}` : '') ||
+      undefined,
     notificationKind: notificationKind || undefined,
     quote: quotePreviewOf(item),
     hasRead: messageIsRead(item),

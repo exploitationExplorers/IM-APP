@@ -527,6 +527,45 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
 
+  /api/v1/group-members/purge-messages:
+    post:
+      tags: [Group Sync]
+      summary: 为所有人删除某群成员的全部消息
+      description: |
+        群主或管理员可操作；目标可已退群（已退群按普通成员处理）。
+        不允许操作自己、群主，也不允许管理员操作其他管理员。
+        写入 group_message_purges 水位（重复调用把水位推到当前时间），客户端隐藏该成员在 purgedAt 之前的群消息；
+        成功后 imAdmin 向群内发送一条文本提示「群主|管理员清除了「昵称」的全部消息」，提示发送失败不影响结果。
+      operationId: purgeGroupMemberMessages
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PurgeGroupMemberMessagesRequest'}
+      responses:
+        '200':
+          description: 清理成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [userId, purgedAt]
+                        properties:
+                          userId: {$ref: '#/components/schemas/UUID'}
+                          purgedAt: {type: string, format: date-time}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
   /api/v1/groups/{id}/dismiss:
     post:
       tags: [Group Sync]
@@ -2123,6 +2162,14 @@ components:
       properties:
         groupId: {type: string, pattern: '^[0-9]+$', description: 目标业务群 ID。, example: '100001'}
         memberUserId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 待解除禁言群成员的业务用户 ID。}
+
+    PurgeGroupMemberMessagesRequest:
+      type: object
+      required: [groupId, memberUserId]
+      additionalProperties: false
+      properties:
+        groupId: {type: string, description: 目标业务群 ID。, example: '100001'}
+        memberUserId: {allOf: [{$ref: '#/components/schemas/UUID'}], description: 待清理消息的成员业务用户 ID，可已退群。}
 
     GroupMemberMuteResult:
       type: object
