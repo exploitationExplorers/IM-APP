@@ -16,6 +16,44 @@ function pumpMeasureQueue() {
     job()
   }
 }
+
+/** App 进群时一屏图片一起下，手机会空很久。只放行最新的几张，下完再补后面的。 */
+const IMAGE_LOAD_SLOTS = 3
+let imageSlotsUsed = 0
+type ImageLoadWaiter = { run: () => void; cancelled: boolean }
+const imageLoadWaiters: ImageLoadWaiter[] = []
+let imageLoadTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleImageLoads() {
+  if (imageLoadTimer != null) return
+  imageLoadTimer = setTimeout(() => {
+    imageLoadTimer = null
+    pumpImageLoads()
+  }, 0)
+}
+
+function pumpImageLoads() {
+  while (imageSlotsUsed < IMAGE_LOAD_SLOTS && imageLoadWaiters.length) {
+    const waiter = imageLoadWaiters.pop()
+    if (!waiter || waiter.cancelled) continue
+    imageSlotsUsed += 1
+    waiter.run()
+  }
+}
+
+function acquireImageLoad(run: () => void): () => void {
+  const waiter: ImageLoadWaiter = { run, cancelled: false }
+  imageLoadWaiters.push(waiter)
+  scheduleImageLoads()
+  return () => {
+    waiter.cancelled = true
+  }
+}
+
+function releaseImageLoad() {
+  imageSlotsUsed = Math.max(0, imageSlotsUsed - 1)
+  scheduleImageLoads()
+}
 </script>
 
 <script setup lang="ts">
@@ -24,6 +62,7 @@ import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
 import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
 import { forgetMediaCache, peekMediaCache, requestMediaCache } from '@/utils/mediaCache'
+import { isAppPlatform } from '@/utils/platform'
 import { formatMeridiemClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 import { soundMetaOf } from '@/utils/openim'
 
@@ -735,6 +774,9 @@ function playVoiceH5(src: string) {
 onUnmounted(() => {
   if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
   stopVoice()
+  imageDisposed = true
+  cancelImageWait()
+  finishImageSlot()
 })
 
 /** 归一化媒体地址：网络/blob 原样；App 本地路径仅在 App 端转 file://；H5 绝不拼 file:// */
@@ -820,8 +862,48 @@ const imageDisplaySrc = computed(() => {
   return raw ? toPlayableMediaUrl(raw) : ''
 })
 
+/** App 上先占位，轮到这条再给 src，避免进群时几十张大图一起挤占网络 */
+const imageSrcReady = ref(!isAppPlatform())
+let imageSlotHeld = false
+let cancelImageWait = () => {}
+let imageSlotTimer: ReturnType<typeof setTimeout> | null = null
+let imageDisposed = false
+
+function finishImageSlot() {
+  if (imageSlotTimer) {
+    clearTimeout(imageSlotTimer)
+    imageSlotTimer = null
+  }
+  if (!imageSlotHeld) return
+  imageSlotHeld = false
+  releaseImageLoad()
+}
+
+function beginImageLoad() {
+  if (imageSrcReady.value || imageSlotHeld || imageDisposed) return
+  if (cachedImageSrc.value) {
+    imageSrcReady.value = true
+    return
+  }
+  const src = imageDisplaySrc.value
+  if (!src || !isRemoteMediaUrl(src) || !isAppPlatform()) {
+    imageSrcReady.value = true
+    return
+  }
+  cancelImageWait = acquireImageLoad(() => {
+    if (imageDisposed) {
+      releaseImageLoad()
+      return
+    }
+    imageSlotHeld = true
+    imageSrcReady.value = true
+    imageSlotTimer = setTimeout(() => finishImageSlot(), 12000)
+  })
+}
+
 const shownImageSrc = computed(() => {
   if (cachedImageSrc.value) return cachedImageSrc.value
+  if (!imageSrcReady.value && isRemoteMediaUrl(imageDisplaySrc.value)) return ''
   return holdImageForCache.value ? '' : imageDisplaySrc.value
 })
 
@@ -842,6 +924,8 @@ watch(
   { immediate: true },
 )
 
+watch(imageDisplaySrc, () => beginImageLoad(), { immediate: true })
+
 watch(
   videoPoster,
   (src) => {
@@ -854,6 +938,23 @@ watch(
   { immediate: true },
 )
 
+function onImageLoad(event: unknown) {
+  finishImageSlot()
+  if (knownMediaSize() || naturalSize.value) return
+  const detail = (event as { detail?: { width?: number; height?: number } } | undefined)?.detail
+  const width = Number(detail?.width) || 0
+  const height = Number(detail?.height) || 0
+  if (!width || !height) return
+  const size = { width, height }
+  const src = mediaSrc.value
+  if (src) {
+    if (naturalSizeCache.size > 500) naturalSizeCache.clear()
+    naturalSizeCache.set(src, size)
+  }
+  naturalSize.value = size
+  naturalSizeFailed.value = false
+}
+
 function onImageError() {
   if (cachedImageSrc.value) {
     forgetMediaCache(imageDisplaySrc.value)
@@ -862,7 +963,9 @@ function onImageError() {
   }
   if (imageFallbackIndex.value + 1 < imageSrcCandidates.value.length) {
     imageFallbackIndex.value += 1
+    return
   }
+  finishImageSlot()
 }
 
 /**
@@ -925,6 +1028,8 @@ function measureMediaSize(src: string) {
     return
   }
   naturalSize.value = null
+  // 网络图的尺寸等 @load。App 的 getImageInfo 会把整张图再下一次，进群会更慢。
+  if (isRemoteMediaUrl(src)) return
   measureQueue.push(() => {
     uni.getImageInfo({
       src,
@@ -1052,6 +1157,7 @@ function openLink(url: string) {
             :style="mediaBoxStyle"
             :src="shownImageSrc"
             :mode="mediaMode"
+            @load="onImageLoad"
             @error="onImageError"
           />
           <view
@@ -1072,6 +1178,7 @@ function openLink(url: string) {
             :style="mediaBoxStyle"
             :src="shownVideoPoster"
             :mode="mediaMode"
+            @load="onImageLoad"
             @error="onVideoPosterError"
           />
           <view
@@ -1368,6 +1475,7 @@ function openLink(url: string) {
 .msg-image {
   border-radius: 12rpx;
   display: block;
+  background: #e8e8e8;
 }
 
 .image-placeholder {
