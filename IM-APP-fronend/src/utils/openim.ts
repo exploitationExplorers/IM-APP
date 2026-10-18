@@ -329,6 +329,33 @@ async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
   return raw as T
 }
 
+/** iOS 桥接对象是只读的，展开复制会抛 Attempted to assign to readonly property。先变成普通 JSON。 */
+function plainNativeRecord(obj: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(JSON.stringify(obj))
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    /* 不能整体序列化时再逐字段读 */
+  }
+  const plain: Record<string, unknown> = {}
+  let keys: string[] = []
+  try {
+    keys = Object.keys(obj)
+  } catch {
+    keys = []
+  }
+  for (const key of keys) {
+    try {
+      plain[key] = obj[key]
+    } catch {
+      /* 单个只读字段跳过 */
+    }
+  }
+  return plain
+}
+
 function copyNativeCreatedMessage(raw: unknown): MessageItem {
   const obj = unwrapRawMessage(raw)
   const clientMsgID = obj && pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
@@ -337,8 +364,9 @@ function copyNativeCreatedMessage(raw: unknown): MessageItem {
     throw new Error('原生 SDK 创建消息结果无效')
   }
   // 保留完整媒体元素及原生扩展字段，不用展示层的归一化逻辑裁剪待发消息。
+  const plain = plainNativeRecord(obj)
   return {
-    ...obj,
+    ...plain,
     clientMsgID,
     contentType,
     groupID: pickString(obj, ['groupID', 'GroupID']),
@@ -1118,11 +1146,12 @@ async function sendCreatedMessage(
   }
   // 安卓原生有时只读消息体上的 id；iOS 桥返回值可能只读，补字段必须新建发送对象。
   if (isApp()) {
+    const plain = plainNativeRecord(message as unknown as Record<string, unknown>) as unknown as MessageItem
     message = {
-      ...message,
-      ...(groupID && !message.groupID ? { groupID } : {}),
-      ...(recvID && !message.recvID ? { recvID } : {}),
-      ...((groupID || recvID) && !message.sessionType ? { sessionType: target.sessionType } : {}),
+      ...plain,
+      ...(groupID && !plain.groupID ? { groupID } : {}),
+      ...(recvID && !plain.recvID ? { recvID } : {}),
+      ...((groupID || recvID) && !plain.sessionType ? { sessionType: target.sessionType } : {}),
     }
   }
   const params = {
@@ -2992,7 +3021,7 @@ function readPictureBox(picture: unknown): { url: string; width: number; height:
 }
 
 /**
- * 列表优先用和原图同比例的缩略图，点开仍走原图。
+ * 列表优先用和原图同比例的缩略图。点开走 1280 中图，保存和转发仍用原图。
  * 旧消息三个地址相同时不假装有缩略图，但宽高仍然带上，避免气泡再下载一次只为量尺寸。
  */
 function pictureMetaOf(item: MessageItem): {

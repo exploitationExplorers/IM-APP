@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const platform = vi.hoisted(() => ({ app: false }))
-vi.mock('@/utils/platform', () => ({ isAppPlatform: () => platform.app, isAndroid: () => false }))
+vi.mock('@/utils/platform', () => ({
+  isAppPlatform: () => platform.app,
+  isAndroid: () => false,
+  isIOSApp: () => false,
+}))
 import { previewImagesWithSave } from '@/utils/chatMedia'
 
 const preview = vi.fn()

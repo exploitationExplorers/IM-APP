@@ -1,4 +1,5 @@
-import { isAndroid, isAppPlatform } from '@/utils/platform'
+import { peekMediaCache } from '@/utils/mediaCache'
+import { isAndroid, isAppPlatform, isIOSApp } from '@/utils/platform'
 import type { PlusFileEntry, PlusGallerySave, PlusResolveLocalFile } from '@/types/plus-io'
 import { isOSSStorageUrl } from '@/utils/storage-url'
 
@@ -148,25 +149,38 @@ export function h5PublicMediaUrl(path: string): string {
   return path
 }
 
-/** 列表气泡用的缩略图。OpenIM 按宽高框等比缩小，不是把图拉成正方形。 */
-export function listThumbnailUrl(url: string): string {
+/**
+ * OpenIM `/object/` 按宽高框等比出图。签名直链不能改参数，否则签名失效。
+ * 已经带 type=image 时仍覆盖宽高，方便列表 360、预览 1280 共用同一条地址。
+ */
+function withObjectThumbnail(url: string, edge: number): string {
   const raw = (url || '').trim()
-  if (isOSSStorageUrl(raw) || /[?&](X-Amz-Signature|Signature)=/i.test(raw)) return raw
-  if (!/^https?:\/\//i.test(raw) || /[?&]type=image\b/i.test(raw)) return raw
+  if (!raw || isOSSStorageUrl(raw) || /[?&](X-Amz-Signature|Signature)=/i.test(raw)) return raw
+  if (!/^https?:\/\//i.test(raw)) return raw
   try {
     const parsed = new URL(raw)
     const path = parsed.pathname
     if (/\.(mp4|mov|m4v|webm|mkv|aac|m4a|mp3)(\?|$)/i.test(path)) return raw
-    // Only OpenIM's object resolver understands these thumbnail parameters.
-    const isPicture = path.startsWith('/object/')
-    if (!isPicture) return raw
+    if (!path.startsWith('/object/')) return raw
     parsed.searchParams.set('type', 'image')
-    parsed.searchParams.set('width', '360')
-    parsed.searchParams.set('height', '360')
+    parsed.searchParams.set('width', String(edge))
+    parsed.searchParams.set('height', String(edge))
     return parsed.toString()
   } catch {
     return raw
   }
+}
+
+/** 列表气泡用的缩略图。OpenIM 按宽高框等比缩小，不是把图拉成正方形。 */
+export function listThumbnailUrl(url: string): string {
+  const raw = (url || '').trim()
+  if (/[?&]type=image\b/i.test(raw)) return raw
+  return withObjectThumbnail(raw, 360)
+}
+
+/** 点开看的中图。比列表小图清楚，但不要把未压缩原图交给系统预览。 */
+export function previewThumbnailUrl(url: string): string {
+  return withObjectThumbnail(url, 1280)
 }
 
 /**
@@ -514,28 +528,75 @@ export async function saveImageToDevice(url: string): Promise<void> {
   throw new Error('当前平台暂不支持保存图片')
 }
 
+/** iOS 系统预览不跟随 /object/ 的跳转，远程地址会停在黑屏转圈。先下到本地再打开。 */
+function iosPreviewNeedsLocalFile(url: string): boolean {
+  if (!isIOSApp() || !/^https?:\/\//i.test(url)) return false
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.pathname.startsWith('/object/')
+  } catch {
+    return false
+  }
+}
+
+function downloadPreviewFile(url: string): Promise<string> {
+  const cached = peekMediaCache(url)
+  if (cached) {
+    const abs = toAbsFileUrl(cached)
+    if (abs) return Promise.resolve(abs)
+  }
+  return new Promise((resolve) => {
+    uni.downloadFile({
+      url,
+      timeout: 20000,
+      success: (res) => {
+        if (res.statusCode === 200 && res.tempFilePath) resolve(res.tempFilePath)
+        else resolve('')
+      },
+      fail: () => resolve(''),
+    })
+  })
+}
+
 /**
  * 统一图片预览：接管长按「保存」，避免华为上 previewImage 内置「保存图像到相册失败」。
- * App 用 longPressActions；H5 保留 uni 的滑动/缩放预览，但由
- * scripts/fix-uni-h5-preview.cjs 限制为按访问的页加载原图，不能一次预取整个列表。
+ * App 用 longPressActions。iPhone 只打开当前这一张的本地文件，避免整组远程地址把预览卡在黑屏。
+ * H5 保留滑动和缩放，由 scripts/fix-uni-h5-preview.cjs 按访问过的页加载原图，不一次预取整组。
  */
 export async function previewImagesWithSave(urls: string[], current?: string): Promise<void> {
   const list = urls.map((u) => playableMediaUrl((u || '').trim())).filter(Boolean)
   if (!list.length) return
   const cur = playableMediaUrl((current || '').trim())
-  const currentUrl = cur && list.includes(cur) ? cur : list[0]
+  let currentUrl = cur && list.includes(cur) ? cur : list[0]
+  let previewList = list
+
+  if (iosPreviewNeedsLocalFile(currentUrl)) {
+    uni.showLoading({ title: '打开图片', mask: true })
+    let local = ''
+    try {
+      local = await downloadPreviewFile(currentUrl)
+    } finally {
+      uni.hideLoading()
+    }
+    if (!local) {
+      uni.showToast({ title: '图片打开失败', icon: 'none' })
+      return
+    }
+    previewList = [local]
+    currentUrl = local
+  }
 
   if (isAppPlatform()) {
     await requestAndroidSaveAlbumPermission()
     uni.previewImage({
-      urls: list,
+      urls: previewList,
       current: currentUrl,
       // App 端接管长按菜单，走带权限/华为兜底的保存逻辑
       longPressActions: {
         itemList: ['保存图片'],
         success: (data: { tapIndex?: number; index?: number }) => {
-          const idx = typeof data.index === 'number' ? data.index : list.indexOf(currentUrl)
-          const url = list[idx] || list[0]
+          const idx = typeof data.index === 'number' ? data.index : previewList.indexOf(currentUrl)
+          const url = previewList[idx] || previewList[0]
           if (data.tapIndex !== 0 || !url) return
           void saveImageToDevice(url)
             .then(() => {
@@ -557,7 +618,7 @@ export async function previewImagesWithSave(urls: string[], current?: string): P
   }
 
   uni.previewImage({
-    urls: list,
+    urls: previewList,
     current: currentUrl,
   })
 }
@@ -810,14 +871,6 @@ function sniffAudioExt(h: Uint8Array): string {
   if (ascii(0, 4) === 'OggS') return 'ogg'
   if (h[0] === 0x1a && h[1] === 0x45 && h[2] === 0xdf && h[3] === 0xa3) return 'webm'
   return ''
-}
-
-function isIOSApp(): boolean {
-  try {
-    return uni.getSystemInfoSync().platform === 'ios'
-  } catch {
-    return false
-  }
 }
 
 const playableAudioCache = new Map<string, string>()
