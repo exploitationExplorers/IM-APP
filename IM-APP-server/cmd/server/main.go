@@ -26,6 +26,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.ValidateRetention(); err != nil {
+		log.Fatalf("retention configuration: %v", err)
+	}
 	if err := cfg.ValidateMigrations(); err != nil {
 		log.Fatalf("migration configuration: %v", err)
 	}
@@ -462,6 +465,16 @@ func main() {
 	}
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
+	if cfg.GroupRetentionMode == "queue_only" {
+		if err := db.RequireColumns(workerCtx, pool, map[string][]string{
+			"group_retention_jobs": {"id", "group_id", "run_day", "status", "lease_token", "plan", "committed_watermark"},
+		}); err != nil {
+			log.Fatalf("retention schema check: %v; requires 054_group_retention_plans.sql", err)
+		}
+		retentionScheduler := &service.GroupRetentionScheduler{Store: &repository.GroupRetentionRepo{DB: pool}}
+		go retentionScheduler.RunQueueOnly(workerCtx)
+		log.Println("group retention queue_only enabled; no messages/files are deleted and no client cleanup state is published")
+	}
 	if kafkaQueue.Available() {
 		outboxPublisher := &service.ForwardOutboxPublisher{
 			Repo: forwardRepo, Kafka: kafkaQueue,

@@ -36,6 +36,7 @@ type Config struct {
 	SMS                    SMSConfig
 	CORSAllowOrigins       []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
 	MediaSourcePrefixes    []string
+	GroupRetentionMode     string
 	SMSRate                SMSRateConfig
 }
 
@@ -113,6 +114,7 @@ func Load() Config {
 	ossRegion := getenv("OSS_REGION", "cn-hangzhou")
 
 	return Config{
+		GroupRetentionMode:  strings.ToLower(strings.TrimSpace(getenv("GROUP_RETENTION_MODE", "off"))),
 		MediaSourcePrefixes: splitCSV(getenv("MEDIA_SOURCE_URL_PREFIXES", "")),
 		AppEnvironment:      strings.TrimSpace(getenv("APP_ENV", "")),
 		StorageProvider:     storageProvider(getenv("STORAGE_PROVIDER", "oss")),
