@@ -929,6 +929,12 @@ paths:
     post:
       tags: [Favorites]
       summary: 收藏一条 OpenIM 消息快照
+      description: |
+        客户端提交消息快照；同一用户同一 messageId 幂等，重试使用数据库中已保存的内容。
+        image/video/voice/file 先复制到当前业务存储的 favorites 独立目录，提交后返回独立副本的稳定地址。
+        兼容 camelCase/PascalCase 和嵌套 JSON；输入及输出快照上限 64 KiB、64 个媒体地址、累计 512 MiB、归档最长 45 秒。
+        源地址及每次重定向须属于配置范围；复制失败不新增成功记录，已有快照保留。text/emoji 不依赖媒体存储。
+        当前不通过 OpenIM 校验源消息或会话成员身份；源文件访问取决于 URL 本身的访问能力和配置范围，不附加用户登录凭据。
       operationId: createFavorite
       x-change-type: optimized
       security: [{bearerAuth: []}]

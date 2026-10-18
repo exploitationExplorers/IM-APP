@@ -74,6 +74,9 @@ func (h *VoiceHandler) UploadVoice(c *gin.Context) {
 	userID := middleware.UserID(c)
 	objectKey := fmt.Sprintf("voices/%s/%s.%s", userID, uuid.NewString(), outExt)
 	store := h.Storage.Current
+	if store.Provider() == "oss" {
+		objectKey = "chat/" + objectKey
+	}
 	objectKey, err = store.NewKey(objectKey)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "语音文件名无效")

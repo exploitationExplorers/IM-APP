@@ -32,6 +32,9 @@ func main() {
 	if err := cfg.ValidateStorage(); err != nil {
 		log.Fatalf("storage configuration: %v", err)
 	}
+	if err := infra.ValidateArchiveSources(cfg.MediaSourcePrefixes); err != nil {
+		log.Fatalf("favorite media configuration: %v", err)
+	}
 	// Validate OSS locally BEFORE touching any DB/migrations. No cloud I/O.
 	if cfg.StorageBackend() == "oss" || cfg.OSS.Bucket != "" {
 		if _, err := infra.NewOSS(cfg.OSS); err != nil {
@@ -50,6 +53,7 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
+		"favorites":               {"media_archived"},
 		"files":                   {"storage_provider", "storage_bucket"},
 		"report_reasons":          {"id", "target_type", "reason", "language", "sort_order", "status"},
 		"reports":                 {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
@@ -67,7 +71,7 @@ func main() {
 		"groups":                  {"id", "public_id", "public_id_changed_at"},
 		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
+		log.Fatalf("schema check: %v; required migrations include 052_media_preservation.sql", err)
 	}
 	if cfg.MigrationsMode == "verify" {
 		log.Println("database schema verified; startup migration replay disabled")
@@ -145,7 +149,11 @@ func main() {
 		chatSvc.Hub = hub
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
-	favSvc := &service.FavoriteService{Fav: favRepo}
+	mediaGuard := &repository.MediaGuard{DB: pool}
+	favSvc := &service.FavoriteService{Fav: favRepo, Guard: mediaGuard,
+		Media: infra.NewArchive(storageClient, infra.SourcePrefixes(cfg.MediaSourcePrefixes,
+			cfg.OpenIM.PublicAPIURL, cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL,
+			cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket))}
 	stickerRepo := &repository.StickerRepo{DB: pool}
 	stickerSvc := &service.StickerService{Stickers: stickerRepo, Files: fileRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}

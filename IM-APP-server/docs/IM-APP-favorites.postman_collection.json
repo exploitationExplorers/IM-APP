@@ -2,13 +2,13 @@
   "info": {
     "_postman_id": "9f3a8c21-4b7d-4a1e-b5c8-6d2e3f4a5b6c",
     "name": "IM-APP 后端 · 收藏接口",
-    "description": "收藏消息（文字/图片/视频/文件/语音）。\n\n使用说明：\n1) 导入 Apifox：创建项目 → 导入数据 → Postman → 选本文件。\n2) baseUrl 默认正式环境 http://8.210.72.157:8080/api/v1，本机联调可改为 http://localhost:8080/api/v1。\n3) 先跑「0. 登录」获取 token（自动写入 accessToken 变量），后续接口直接可用。\n4) 「2. 收藏列表」会自动把第一条的 favoriteId 写入变量，供「3. 取消收藏」使用。\n5) 演示账号：13800138000 / 123456。",
+    "description": "收藏消息快照（文字/表情/图片/视频/文件/语音）。\n\n使用说明：\n1) 导入 Apifox：创建项目 → 导入数据 → Postman → 选本文件。\n2) baseUrl 默认为本机 http://localhost:8080/api/v1，按测试环境实际入口修改。\n3) 通过项目登录接口获取 token，填入 accessToken 变量；此集合不包含登录请求。\n4) 「2. 收藏列表」会自动把第一条的 favoriteId 写入变量，供「3. 取消收藏」使用。\n5) 媒体收藏成功后使用独立副本，源文件复制失败则接口失败。",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://8.210.72.157:8080/api/v1",
+      "value": "http://localhost:8080/api/v1",
       "type": "string"
     },
     {
@@ -39,10 +39,10 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"messageId\": \"要收藏的消息ID（从会话消息接口获取）\"\n}"
+          "raw": "{\n  \"messageId\": \"填写真实的 OpenIM clientMsgID\",\n  \"type\": \"text\",\n  \"content\": \"测试收藏文字\",\n  \"senderId\": \"填写发送者 ID\",\n  \"conversationId\": \"填写 OpenIM conversationID\"\n}"
         },
         "url": "{{baseUrl}}/favorites",
-        "description": "收藏一条消息。\n需要登录态。\n后端会校验消息存在、你是该会话成员、类型支持（text/emoji/image/video/file/voice）。\n重复收藏幂等，返回已有记录。\n\n响应 data：{ id, messageId, type, content, senderId, conversationId, createdAt }"
+        "description": "收藏一条客户端提交的消息快照，需要登录态。type 支持 text/emoji/image/video/file/voice。\n媒体类型需把 content 改为真实可访问的应用媒体 URL 或 JSON；服务器先复制至 favorites 独立目录再提交记录，返回 content 为独立副本稳定地址。复制失败返回失败，原快照保留。\n输入及输出快照最多 64 KiB，最多 64 个媒体地址，累计媒体上限 512 MiB，归档最长 45 秒。支持 camelCase/PascalCase 及嵌套 JSON。\n同一用户同一 messageId 幂等，使用已有数据库快照，不覆盖为重试请求中的内容。旧收藏补偿不在列表查询时自动执行。\n当前不会通过 OpenIM 校验源消息存在或会话成员身份；源 URL 与全部重定向须属于配置范围，不附加用户登录凭据。\n\n响应 data：{ id, messageId, type, content, senderId, conversationId, createdAt }"
       },
       "response": []
     },

@@ -35,6 +35,7 @@ type Config struct {
 	Forward                ForwardConfig
 	SMS                    SMSConfig
 	CORSAllowOrigins       []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
+	MediaSourcePrefixes    []string
 	SMSRate                SMSRateConfig
 }
 
@@ -112,9 +113,10 @@ func Load() Config {
 	ossRegion := getenv("OSS_REGION", "cn-hangzhou")
 
 	return Config{
-		AppEnvironment:  strings.TrimSpace(getenv("APP_ENV", "")),
-		StorageProvider: storageProvider(getenv("STORAGE_PROVIDER", "oss")),
-		MigrationsMode:  strings.ToLower(strings.TrimSpace(getenv("MIGRATIONS_MODE", "auto"))),
+		MediaSourcePrefixes: splitCSV(getenv("MEDIA_SOURCE_URL_PREFIXES", "")),
+		AppEnvironment:      strings.TrimSpace(getenv("APP_ENV", "")),
+		StorageProvider:     storageProvider(getenv("STORAGE_PROVIDER", "oss")),
+		MigrationsMode:      strings.ToLower(strings.TrimSpace(getenv("MIGRATIONS_MODE", "auto"))),
 		OSS: OSSConfig{
 			Region:          ossRegion,
 			Endpoint:        getenv("OSS_ENDPOINT", "https://oss-"+ossRegion+".aliyuncs.com"),
