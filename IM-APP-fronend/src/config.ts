@@ -33,6 +33,8 @@ export const APP_CONFIG = {
    * 内部壳必须显式 VITE_UPDATE_CHANNEL=canary。
    */
   updateChannel: resolveUpdateChannel(env.VITE_UPDATE_CHANNEL),
+  /** 聊天图片落本地。/object/ 每次 302 到新的 OSS 签名地址，HTTP 缓存永远命中不了，只能自己存。 */
+  mediaCacheEnabled: env.VITE_MEDIA_CACHE !== 'off',
   defaultCountryCode: '+86',
   /** 参考站默认头像 */
   defaultAvatarUrl:

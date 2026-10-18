@@ -18,6 +18,8 @@ type ChatSettingsState = {
 }
 
 const STORAGE_KEY = 'im_chat_settings_v1'
+/** 回车发送改为默认开启。只迁移一次，之后用户再关掉会记住。 */
+const ENTER_TO_SEND_DEFAULTED_KEY = 'im_enter_to_send_default_on'
 
 function safeParse<T>(raw: string | null): T | null {
   if (!raw) return null
@@ -64,7 +66,7 @@ function applyParsed(
 }
 
 export const useChatSettingsStore = defineStore('chatSettings', () => {
-  const enterToSend = ref(false)
+  const enterToSend = ref(true)
   const noDisturb = ref(false)
   const message = ref(true)
   const voice = ref(true)
@@ -164,7 +166,24 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
     persist()
   }
 
-  // 启动：主 key → json 备份
+  function ensureEnterToSendDefaultOn() {
+    let applied = false
+    try {
+      applied = uni.getStorageSync(ENTER_TO_SEND_DEFAULTED_KEY) === '1'
+    } catch {
+      applied = false
+    }
+    if (applied) return
+    enterToSend.value = true
+    persist()
+    try {
+      uni.setStorageSync(ENTER_TO_SEND_DEFAULTED_KEY, '1')
+    } catch {
+      /* 没记下标记时，下次启动再开一次 */
+    }
+  }
+
+  // 启动：主 key → json 备份。回车发送的默认开启要放在读完旧设置之后，避免整份设置被默认值盖掉。
   const primary = readStoredSettings()
   if (primary) {
     applyParsed(primary, {
@@ -195,6 +214,8 @@ export const useChatSettingsStore = defineStore('chatSettings', () => {
       /* ignore */
     }
   }
+
+  ensureEnterToSendDefaultOn()
 
   return {
     enterToSend,

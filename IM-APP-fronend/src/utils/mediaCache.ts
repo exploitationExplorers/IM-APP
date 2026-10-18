@@ -3,18 +3,20 @@ import { deleteH5, readH5Meta, storeH5, writeH5Meta } from '@/utils/mediaCacheH5
 import { isApp, isIOS } from '@/utils/platform'
 
 /**
- * canary 列表媒体缓存。
- * 只服务气泡上正在显示的图片和视频封面：内存索引，下载排队，
- * 单张超过上限的原图直接丢掉，不写索引。test / prod 渠道整段关闭。
+ * 聊天媒体本地缓存。
+ * 气泡上正在显示的缩略图 / 视频封面走前台队列（后请求的先下，即最新消息先出）；
+ * 点开用的中图走后台队列，前台空了才一张张预取。内存索引，单张超过上限的原图不写索引。
+ * key 是消息里稳定的 /object/ 地址，不是 302 之后会过期的签名地址。
  */
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024
-const MAX_TOTAL_BYTES = 200 * 1024 * 1024
+const MAX_TOTAL_BYTES = 500 * 1024 * 1024
 const DIR_REL = '_doc/media_cache'
 const INDEX_NAME = 'index.json'
+const BACKGROUND_SLOTS = 1
 
 export function mediaCacheEnabled(): boolean {
-  return APP_CONFIG.updateChannel === 'canary'
+  return APP_CONFIG.mediaCacheEnabled
 }
 
 export function mediaCacheKey(url: string): string {
@@ -58,8 +60,10 @@ const skipped = new Set<string>()
 const listeners = new Map<string, Array<(path: string) => void>>()
 const queued = new Set<string>()
 const order: string[] = []
+const waiting = new Set<string>()
+const backlog: string[] = []
 const inflight = new Set<string>()
-let generation = 0
+const backgroundInflight = new Set<string>()
 let ready: Promise<void> | null = null
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -78,12 +82,15 @@ export function mediaCacheHas(url: string): boolean {
   return mediaCacheEnabled() && rows.has(url.trim())
 }
 
+/** 换会话：没开始的下载全部作废。等待方收到空地址，气泡自己退回远程图。 */
 export function resetMediaCacheQueue(): void {
-  generation += 1
+  const dropped = [...order, ...backlog]
   order.length = 0
+  backlog.length = 0
   queued.clear()
-  for (const url of [...listeners.keys()]) {
-    if (!inflight.has(url)) listeners.delete(url)
+  waiting.clear()
+  for (const url of dropped) {
+    if (!inflight.has(url)) fail(url)
   }
 }
 
@@ -98,16 +105,24 @@ export function forgetMediaCache(url: string): void {
   scheduleFlush()
 }
 
-export function requestMediaCache(url: string, onReady: (path: string) => void): void {
-  if (!mediaCacheEnabled()) return
+/**
+ * 返回 true 表示之后一定会回调 onReady（失败时给空字符串）；false 表示不缓存这条，调用方直接用远程地址。
+ * background：点开才用的中图，只在前台队列空闲时预取。
+ */
+export function requestMediaCache(
+  url: string,
+  onReady: (path: string) => void,
+  options: { background?: boolean } = {},
+): boolean {
+  if (!mediaCacheEnabled()) return false
   const remote = url.trim()
-  if (!/^https?:\/\//i.test(remote) || skipped.has(remote)) return
+  if (!/^https?:\/\//i.test(remote) || skipped.has(remote)) return false
   const hit = rows.get(remote)
   if (hit?.path) {
     hit.at = Date.now()
     scheduleFlush()
     onReady(hit.path)
-    return
+    return true
   }
   const list = listeners.get(remote) || []
   list.push(onReady)
@@ -118,7 +133,28 @@ export function requestMediaCache(url: string, onReady: (path: string) => void):
       deliver(remote, loaded.path)
       return
     }
-    enqueue(remote)
+    enqueue(remote, !!options.background)
+  })
+  return true
+}
+
+/** 预取点开用的中图，不占前台名额。 */
+export function prefetchMediaCache(url: string): void {
+  requestMediaCache(url, () => {}, { background: true })
+}
+
+/** 马上要用（点开预览）：插到前台队首，超时给空字符串。 */
+export function fetchMediaCacheNow(url: string, timeoutMs = 15000): Promise<string> {
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (path: string) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve(path)
+    }
+    const timer = setTimeout(() => finish(''), timeoutMs)
+    if (!requestMediaCache(url, finish)) finish('')
   })
 }
 
@@ -133,38 +169,60 @@ function fail(url: string): void {
   deliver(url, '')
 }
 
-function enqueue(url: string): void {
-  if (queued.has(url) || inflight.has(url) || rows.get(url)?.path) return
-  queued.add(url)
-  order.push(url)
+function dropFrom(list: string[], url: string): void {
+  const at = list.lastIndexOf(url)
+  if (at >= 0) list.splice(at, 1)
+}
+
+function enqueue(url: string, background: boolean): void {
+  if (inflight.has(url) || rows.get(url)?.path) return
+  if (background) {
+    if (queued.has(url) || waiting.has(url)) return
+    waiting.add(url)
+    backlog.push(url)
+  } else {
+    if (waiting.delete(url)) dropFrom(backlog, url)
+    if (queued.has(url)) dropFrom(order, url)
+    queued.add(url)
+    order.push(url)
+  }
   pump()
 }
 
+/** 缩略图几十 KB，瓶颈在每张都要先走一次 /object/ 302，多开几路比排队快。 */
 function pump(): void {
-  const limit = isIOS() ? 2 : 3
-  while (inflight.size < limit && order.length > 0) {
-    const url = order.shift()
-    if (!url) return
-    queued.delete(url)
+  const limit = isIOS() ? 4 : 6
+  while (inflight.size < limit) {
+    let url = order.pop()
+    let background = false
+    if (url) {
+      queued.delete(url)
+    } else {
+      if (backgroundInflight.size >= BACKGROUND_SLOTS) return
+      url = backlog.pop()
+      if (!url) return
+      waiting.delete(url)
+      background = true
+    }
     if (!listeners.has(url)) continue
-    const gen = generation
-    inflight.add(url)
-    void storeRemote(url)
-      .then((result) => finishStore(url, gen, result))
-      .catch(() => finishStore(url, gen, { ok: false, skip: true }))
+    const target = url
+    inflight.add(target)
+    if (background) backgroundInflight.add(target)
+    void storeRemote(target)
+      .then((result) => finishStore(target, result))
+      .catch(() => finishStore(target, { ok: false, skip: true }))
   }
 }
 
 function finishStore(
   url: string,
-  gen: number,
   result: { ok: true; path: string; rel: string; bytes: number } | { ok: false; skip: boolean },
 ): void {
   inflight.delete(url)
+  backgroundInflight.delete(url)
   if (!result.ok) {
     if (result.skip) skipped.add(url)
-    if (gen === generation) fail(url)
-    else listeners.delete(url)
+    fail(url)
     pump()
     return
   }
@@ -345,7 +403,7 @@ async function storeApp(
   if (!temp) return { ok: false, skip: false }
   const bytes = await fileBytes(temp)
   if (!mediaCacheAcceptsSize(bytes)) return { ok: false, skip: true }
-  const name = `${mediaCacheKey(url)}.img`
+  const name = `${mediaCacheKey(url)}.${cacheFileExt(url)}`
   const rel = `${DIR_REL}/${name}`
   const dir = await cacheDir()
   const src = await resolveLocal(temp)
@@ -356,16 +414,26 @@ async function storeApp(
     }
     src.copyTo(dir, name, () => resolve(true), () => resolve(false))
   })
+  // 下载临时文件不删的话，每张图在手机上占两份
+  src.remove?.(() => {}, () => {})
   if (!copied) return { ok: false, skip: false }
   const path = playableLocal(rel)
   if (!path) return { ok: false, skip: false }
   return { ok: true, path, rel, bytes }
 }
 
+/** 本地文件没有 Content-Type，WebView 和系统预览只能看扩展名；认不出的按 jpg。 */
+function cacheFileExt(url: string): string {
+  const path = url.split(/[?#]/)[0] || ''
+  const match = /\.(jpe?g|png|gif|webp|heic)$/i.exec(path)
+  return match ? match[1].toLowerCase() : 'jpg'
+}
+
 function downloadTemp(url: string): Promise<string> {
   return new Promise((resolve) => {
     uni.downloadFile({
       url,
+      timeout: 20000,
       success: (res) => {
         if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath) {
           resolve(res.tempFilePath)

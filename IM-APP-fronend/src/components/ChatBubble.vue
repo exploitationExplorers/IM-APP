@@ -60,8 +60,8 @@ function releaseImageLoad() {
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
-import { forgetMediaCache, peekMediaCache, requestMediaCache } from '@/utils/mediaCache'
+import { parseVideoMeta, formatVideoDuration, imagePreviewUrlOf, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
+import { forgetMediaCache, peekMediaCache, prefetchMediaCache, requestMediaCache } from '@/utils/mediaCache'
 import { isAppPlatform } from '@/utils/platform'
 import { formatMeridiemClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 import { soundMetaOf } from '@/utils/openim'
@@ -835,24 +835,32 @@ watch(imageSrcCandidates, () => {
   imageFallbackIndex.value = 0
 })
 
+/**
+ * 缓存在下载时先不给 <image> 远程地址，否则同一张图下两遍（WebView 一遍、缓存一遍），
+ * 而且 /object/ 每次 302 到新签名地址，WebView 那一遍永远进不了 HTTP 缓存。
+ * 缓存下载失败（late 且 path 为空）才退回远程地址。
+ */
 function bindCachedMedia(
   remote: string,
   token: number,
   current: () => number,
-  apply: (path: string, hold: boolean) => void,
+  apply: (path: string, hold: boolean, late: boolean) => void,
 ) {
-  apply('', false)
-  if (!remote || !isRemoteMediaUrl(remote)) return
-  const hit = peekMediaCache(remote)
-  if (hit) {
-    apply(hit, false)
+  if (!remote || !isRemoteMediaUrl(remote)) {
+    apply('', false, false)
     return
   }
-  // 缓存还没落盘时先画远程地址。挡住等下载会让整屏图空白更久。
-  requestMediaCache(remote, (path) => {
-    if (current() !== token || !path) return
-    apply(path, false)
+  const hit = peekMediaCache(remote)
+  if (hit) {
+    apply(hit, false, false)
+    return
+  }
+  let settled = false
+  const pending = requestMediaCache(remote, (path) => {
+    settled = true
+    if (current() === token) apply(path, false, true)
   })
+  if (!settled) apply('', pending, false)
 }
 
 /** 图片气泡展示地址：H5 只用远程 URL */
@@ -880,7 +888,7 @@ function finishImageSlot() {
 }
 
 function beginImageLoad() {
-  if (imageSrcReady.value || imageSlotHeld || imageDisposed) return
+  if (imageSrcReady.value || imageSlotHeld || imageDisposed || holdImageForCache.value) return
   if (cachedImageSrc.value) {
     imageSrcReady.value = true
     return
@@ -916,15 +924,23 @@ watch(
   imageDisplaySrc,
   (src) => {
     const token = ++imageCacheToken
-    bindCachedMedia(src, token, () => imageCacheToken, (path, hold) => {
+    bindCachedMedia(src, token, () => imageCacheToken, (path, hold, late) => {
       cachedImageSrc.value = path
       holdImageForCache.value = hold
+      if (late && !path) beginImageLoad()
     })
   },
   { immediate: true },
 )
 
 watch(imageDisplaySrc, () => beginImageLoad(), { immediate: true })
+
+// 小图出来后，在后台把点开用的中图也下到本地，点开时直接读文件（H5 预览另有按需加载，不预取）
+watch(cachedImageSrc, (path) => {
+  if (!path || !isAppPlatform() || props.message.type !== 'image') return
+  const preview = imagePreviewUrlOf(props.message)
+  if (preview && preview !== imageDisplaySrc.value) prefetchMediaCache(preview)
+})
 
 watch(
   videoPoster,
@@ -959,6 +975,7 @@ function onImageError() {
   if (cachedImageSrc.value) {
     forgetMediaCache(imageDisplaySrc.value)
     cachedImageSrc.value = ''
+    beginImageLoad()
     return
   }
   if (imageFallbackIndex.value + 1 < imageSrcCandidates.value.length) {

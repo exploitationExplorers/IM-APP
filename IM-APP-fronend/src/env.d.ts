@@ -17,6 +17,8 @@ interface ImportMetaEnv {
   /** 设为 'false' 关闭 OpenIM 聊天（排查用），默认启用 */
   readonly VITE_OPENIM_ENABLED?: string
   readonly VITE_DEFAULT_AVATAR_URL?: string
+  /** 聊天图片 / 封面本地缓存，默认开启；设为 'off' 整段关闭（出问题时随 wgt 回退用） */
+  readonly VITE_MEDIA_CACHE?: string
 }
 
 interface ImportMeta {

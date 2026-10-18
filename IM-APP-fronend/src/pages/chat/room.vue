@@ -56,7 +56,7 @@ import {
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { formatChatDayLabel, formatLastSeen, formatMeridiemClock, quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
-import { playableMediaUrl, previewImagesWithSave, previewThumbnailUrl } from '@/utils/chatMedia'
+import { imagePreviewUrlOf, previewImagesWithSave } from '@/utils/chatMedia'
 import { resetMediaCacheQueue } from '@/utils/mediaCache'
 import {
   isAnnouncementDismissed,
@@ -252,15 +252,11 @@ watch(
 
 /** 点开用 1280 中图。系统预览直接拉原图会黑屏，气泡里仍是小图。 */
 function openImagePreview(message: ChatMessage) {
-  const openUrl = (item: ChatMessage) => {
-    const shown = (item.content || item.sourceUrl || '').trim()
-    return playableMediaUrl(previewThumbnailUrl(shown))
-  }
   const urls = messages.value
     .filter((m) => m.type === 'image' && (m.sourceUrl || m.content))
-    .map((m) => openUrl(m))
+    .map((m) => imagePreviewUrlOf(m))
     .filter(Boolean)
-  const current = openUrl(message)
+  const current = imagePreviewUrlOf(message)
   if (!current) return
   const list = urls.length ? urls : [current]
   void previewImagesWithSave(list, list.includes(current) ? current : list[0])

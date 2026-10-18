@@ -1,4 +1,4 @@
-import { peekMediaCache } from '@/utils/mediaCache'
+import { fetchMediaCacheNow, peekMediaCache } from '@/utils/mediaCache'
 import { isAndroid, isAppPlatform, isIOSApp } from '@/utils/platform'
 import type { PlusFileEntry, PlusGallerySave, PlusResolveLocalFile } from '@/types/plus-io'
 import { isOSSStorageUrl } from '@/utils/storage-url'
@@ -181,6 +181,15 @@ export function listThumbnailUrl(url: string): string {
 /** 点开看的中图。比列表小图清楚，但不要把未压缩原图交给系统预览。 */
 export function previewThumbnailUrl(url: string): string {
   return withObjectThumbnail(url, 1280)
+}
+
+/**
+ * 图片消息点开时用的地址。必须从原图出中图：新消息的 content 是单独上传的 360 小图，
+ * 拿它要 1280 只会得到同一张小图。预取和预览共用这一个函数，缓存 key 才对得上。
+ */
+export function imagePreviewUrlOf(message: { sourceUrl?: string; content?: string }): string {
+  const source = (message.sourceUrl || message.content || '').trim()
+  return source ? playableMediaUrl(previewThumbnailUrl(source)) : ''
 }
 
 /**
@@ -558,9 +567,28 @@ function downloadPreviewFile(url: string): Promise<string> {
   })
 }
 
+function cachedPreviewFile(url: string): string {
+  const hit = peekMediaCache(url)
+  return hit ? toAbsFileUrl(hit) : ''
+}
+
+/** 当前这张没预取到时现下：走缓存队列插队，下完顺便落盘，下次秒开。 */
+async function localPreviewFile(url: string): Promise<string> {
+  const loadingTimer = setTimeout(() => uni.showLoading({ title: '打开图片', mask: true }), 300)
+  try {
+    const cached = await fetchMediaCacheNow(url)
+    if (cached) return toAbsFileUrl(cached)
+    return iosPreviewNeedsLocalFile(url) ? await downloadPreviewFile(url) : ''
+  } finally {
+    clearTimeout(loadingTimer)
+    uni.hideLoading()
+  }
+}
+
 /**
  * 统一图片预览：接管长按「保存」，避免华为上 previewImage 内置「保存图像到相册失败」。
- * App 用 longPressActions。iPhone 只打开当前这一张的本地文件，避免整组远程地址把预览卡在黑屏。
+ * App 用 longPressActions，已缓存的图换成本地文件直接打开；当前这张没缓存就先下到本地。
+ * iPhone 系统预览不跟 /object/ 的跳转，没缓存的远程图不放进列表，避免滑过去卡黑屏。
  * H5 保留滑动和缩放，由 scripts/fix-uni-h5-preview.cjs 按访问过的页加载原图，不一次预取整组。
  */
 export async function previewImagesWithSave(urls: string[], current?: string): Promise<void> {
@@ -570,20 +598,19 @@ export async function previewImagesWithSave(urls: string[], current?: string): P
   let currentUrl = cur && list.includes(cur) ? cur : list[0]
   let previewList = list
 
-  if (iosPreviewNeedsLocalFile(currentUrl)) {
-    uni.showLoading({ title: '打开图片', mask: true })
-    let local = ''
-    try {
-      local = await downloadPreviewFile(currentUrl)
-    } finally {
-      uni.hideLoading()
-    }
-    if (!local) {
+  if (isAppPlatform() && /^https?:\/\//i.test(currentUrl)) {
+    const currentLocal = cachedPreviewFile(currentUrl) || (await localPreviewFile(currentUrl))
+    if (!currentLocal && iosPreviewNeedsLocalFile(currentUrl)) {
       uni.showToast({ title: '图片打开失败', icon: 'none' })
       return
     }
-    previewList = [local]
-    currentUrl = local
+    previewList = list
+      .map((url) => {
+        if (url === currentUrl && currentLocal) return currentLocal
+        return cachedPreviewFile(url) || (iosPreviewNeedsLocalFile(url) ? '' : url)
+      })
+      .filter(Boolean)
+    currentUrl = currentLocal || currentUrl
   }
 
   if (isAppPlatform()) {
