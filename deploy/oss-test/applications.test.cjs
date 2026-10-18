@@ -68,6 +68,8 @@ test('local WSL workaround disables only Go diagnostic mapping annotations', () 
 })
 test('business/admin share only the new database and use independent login secrets', () => {
   assert.equal(output.business.APP_ENV, 'oss-test')
+  assert.equal(output.business.GROUP_RETENTION_MODE, 'off')
+  assert.equal(output.business.GROUP_RETENTION_ALL_GROUPS, 'false')
   assert.equal(output.business.DATABASE_URL, output.admin.DATABASE_URL)
   const u = new URL(output.business.DATABASE_URL)
   assert.equal(u.host, 'postgres:5432')

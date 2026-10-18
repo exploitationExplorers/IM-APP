@@ -20,7 +20,7 @@ const binaries = {
 
 function overlayFiles() {
   return {
-    'api.Dockerfile': 'ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nCOPY --chmod=0755 im-server /app/im-server\nCOPY migrations /app/migrations\nENV MIGRATIONS_MODE=verify GROUP_RETENTION_MODE=off FAVORITE_ARCHIVE_WORKER_ENABLED=false SEED_DEMO=false GROUP_RETENTION_ALL_GROUPS=false\nLABEL im.app.retention="visibility-v2"\n',
+    'api.Dockerfile': 'ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nCOPY --chmod=0755 im-server /app/im-server\nCOPY migrations /app/migrations\nENV MIGRATIONS_MODE=verify GROUP_RETENTION_MODE=visibility_only FAVORITE_ARCHIVE_WORKER_ENABLED=false SEED_DEMO=false GROUP_RETENTION_ALL_GROUPS=true\nLABEL im.app.retention="visibility-v2-default-on"\n',
     // BASE_IMAGE must be the CURRENT production OSS image, pinned by digest/ID.
     // Preserve its third RPC, API, gateway, configs, libraries and entrypoint.
     'openim.Dockerfile': 'ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n' + Object.keys(binaries).map(name => `COPY --chmod=0755 ${name} /openim-server/_output/bin/platforms/linux/amd64/${name}\n`).join('') + 'ENV IM_APP_RETENTION_BODY_PURGE_ENABLED=false IM_APP_RETENTION_BODY_PURGE_GROUP_IDS="" IM_APP_RETENTION_BODY_PURGE_ACK=""\nLABEL im.app.retention="visibility-v2-body-fence1"\n',
@@ -84,11 +84,12 @@ function build() {
     fs.writeFileSync(path.join(output, 'bundle-manifest.json'), JSON.stringify({
       kind: 'retention-incremental', openim: version, protocol: 'im-app-retention-visibility-v2', platform: 'linux/amd64',
       sourceCommit: git(['rev-parse', 'HEAD']), workingTreeDirty: Boolean(git(['status', '--porcelain'])),
+      groupVisibility: 'enabled_by_default_all_groups', requiredConfiguration: ['GROUP_RETENTION_ADAPTER_URL', 'GROUP_RETENTION_ADAPTER_KEY'],
       mongoBodyPurge: 'disabled_by_default', ossObjectPurge: false, automaticDeployment: false, deviceAcceptance: 'pending', files,
     }, null, 2)+'\n', { flag: 'wx' })
     fs.writeFileSync(path.join(output, 'SHA256SUMS'), Object.entries(files).map(([file, sum]) => `${sum}  ${file}\n`).join(''), { flag: 'wx' })
     console.log('RETENTION_LOCAL_BUNDLE_BUILT: '+output)
-    console.log('MONGO BODY PURGE DEFAULT OFF; OSS OBJECT PURGE UNAVAILABLE. No deployment/WGT publication. Real-device gate remains closed.')
+    console.log('GROUP VISIBILITY DEFAULT ON (requires private bridge URL/key); MONGO BODY PURGE OFF; OSS OBJECT PURGE UNAVAILABLE. No deployment/WGT publication.')
   } finally {
     // Only the fresh, explicitly named disposable build root may be removed.
     const resolved = fs.realpathSync(temporary)

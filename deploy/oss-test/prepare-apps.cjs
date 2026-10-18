@@ -88,6 +88,9 @@ function createConfiguration(e, upstream) {
     JWT_SECRET: e.TEST_JWT_SECRET, IM_INTERNAL_API_KEY: e.TEST_INTERNAL_API_KEY,
     REDIS_URL: `redis://:${e.TEST_REDIS_PASSWORD}@redis:6379/0`,
     LEGACY_CHAT_ENABLED: 'false', SEED_DEMO: 'false', DEV_SMS_CODE: '246810',
+    // This OSS smoke stack has no retention bridge; never fall through to the
+    // application's default-on retention policy without its required service.
+    GROUP_RETENTION_MODE: 'off', GROUP_RETENTION_ALL_GROUPS: 'false',
     KAFKA_BROKERS: 'kafka:19092', KAFKA_FORWARD_TOPIC: 'im-forward-tasks_oss_test', KAFKA_FORWARD_GROUP_ID: 'im-forward-workers_oss_test', FORWARD_WORKER_ENABLED: 'true',
     OPENIM_API_URL: 'http://openim-api:10002', OPENIM_PUBLIC_API_URL: `${e.TEST_PUBLIC_ORIGIN}/openim-api`, OPENIM_PUBLIC_WS_URL: `${e.TEST_PUBLIC_ORIGIN.replace('https:', 'wss:')}/openim-ws`,
     OPENIM_SECRET: e.TEST_OPENIM_SECRET, OPENIM_ADMIN_USER: 'imAdmin', OPENIM_WEBHOOK_SECRET: e.TEST_WEBHOOK_SECRET,

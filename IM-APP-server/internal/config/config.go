@@ -41,6 +41,7 @@ type Config struct {
 	GroupRetentionAdapterKey     string
 	GroupRetentionGroupIDs       []string
 	GroupRetentionAllGroups      bool
+	retentionScopeError          error
 	FavoriteArchiveWorkerEnabled bool
 	SMSRate                      SMSRateConfig
 }
@@ -117,13 +118,15 @@ func Load() Config {
 		loadDotEnv(".env")
 	}
 	ossRegion := getenv("OSS_REGION", "cn-hangzhou")
+	retentionGroups, retentionAllGroups, retentionScopeError := loadRetentionScope()
 
 	return Config{
-		GroupRetentionMode:           strings.ToLower(strings.TrimSpace(getenv("GROUP_RETENTION_MODE", "off"))),
+		GroupRetentionMode:           strings.ToLower(strings.TrimSpace(getenv("GROUP_RETENTION_MODE", "visibility_only"))),
 		GroupRetentionAdapterURL:     strings.TrimSpace(getenv("GROUP_RETENTION_ADAPTER_URL", "")),
 		GroupRetentionAdapterKey:     getenv("GROUP_RETENTION_ADAPTER_KEY", ""),
-		GroupRetentionGroupIDs:       splitCSV(getenv("GROUP_RETENTION_GROUP_IDS", "")),
-		GroupRetentionAllGroups:      getenvBool("GROUP_RETENTION_ALL_GROUPS", false),
+		GroupRetentionGroupIDs:       retentionGroups,
+		GroupRetentionAllGroups:      retentionAllGroups,
+		retentionScopeError:          retentionScopeError,
 		FavoriteArchiveWorkerEnabled: getenvBool("FAVORITE_ARCHIVE_WORKER_ENABLED", false),
 		MediaSourcePrefixes:          splitCSV(getenv("MEDIA_SOURCE_URL_PREFIXES", "")),
 		AppEnvironment:               strings.TrimSpace(getenv("APP_ENV", "")),

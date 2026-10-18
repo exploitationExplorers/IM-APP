@@ -2,12 +2,12 @@
 
 ## 当前交付边界
 
-**逻辑清理已实现，新增默认关闭的 Mongo 正文延迟清理；不是 OSS 文件空间回收版本。尚未发布，真机验收待执行。**
+**群逻辑清理默认开启；Mongo 正文延迟清理仍默认关闭；不是 OSS 文件空间回收版本。尚未发布，真机验收待执行。**
 
 - 规则：每群每日计算，保留最近 168 小时内且最多 500 条真实可见消息；超出任一限制即过期。单聊不参与。
 - 已实现：可信快照、持久化任务/租约/重试、OpenIM 单调可见边界、已读范围校正、搜索/定位/最后消息过滤、业务水位接口、H5/App 水位同步、新收藏与转发/引用独立副本、旧收藏补偿 worker。
 - `visibility_only` 请求本身不删除源消息/对象。独立 Mongo 正文 worker 需额外门禁，至少等待首次 ACK 后 24 小时；默认仍保留原消息。无论是否启用正文 worker，旧 MinIO/OSS 文件与对象映射均不删除。详见 `BODY-PURGE.md`。
-- 没有 `cleanup`/`apply` 开关；错误配置会拒绝启动。业务端默认 `off`，旧收藏补偿默认关闭。
+- 业务端默认 `visibility_only`，未指定群时默认全群；可用 `off` 显式关闭。没有 `cleanup`/`apply` 开关；私有桥 URL/key 缺失、错误范围等配置会拒绝启动，不假装已开启。旧收藏补偿默认关闭。
 - OSS 物理回收仍需跨会话引用、历史引用、上传在途及 OpenIM 去重映射的统一保护，尚未实现，禁止用整个桶的 7 天生命周期代替。
 
 ## 1. 固定版本及构建
@@ -46,14 +46,18 @@ IM_APP_RETENTION_KEY=<独立随机密钥，至少32字节>
 - 私有密钥与 RAM AK/SK、OpenIM secret、JWT、业务内部 key 分离，不写入 Git、聊天、截图或下载页。业务适配器禁用环境代理且拒绝重定向。
 - Mongo 仅新增 `im_app_retention_receipts_v1` 收据集合，30 天 TTL 只清收据。收据绑定会话、精确边界及期限；授权同时检查 Mongo 时间，不依赖异步 TTL 删除。
 
-业务后端初期保持：
+默认启用的完整配置如下；须先部署私有桥、迁移并完成发布门禁，不能只复制模板而不填 URL/key：
 
 ```dotenv
-GROUP_RETENTION_MODE=off
+GROUP_RETENTION_MODE=visibility_only
+GROUP_RETENTION_ADAPTER_URL=http://<私有OpenIM服务名>:19093
+GROUP_RETENTION_ADAPTER_KEY=<与桥相同的独立密钥>
+GROUP_RETENTION_GROUP_IDS=
+GROUP_RETENTION_ALL_GROUPS=true
 FAVORITE_ARCHIVE_WORKER_ENABLED=false
 ```
 
-完成所有发布门禁后，才配置：
+逐步发布尚未准备好适配器时，必须临时显式设 `GROUP_RETENTION_MODE=off`；这属于操作者维护覆盖，不再是程序/模板/镜像默认值。已有 `.env`、进程或 Compose 中的 `off` 不会被新默认值覆盖。隔离测试/手机灰度时可显式收窄：
 
 ```dotenv
 GROUP_RETENTION_MODE=visibility_only
@@ -61,10 +65,10 @@ GROUP_RETENTION_ADAPTER_URL=http://<私有OpenIM服务名>:19093
 GROUP_RETENTION_ADAPTER_KEY=<与桥相同的独立密钥>
 GROUP_RETENTION_GROUP_IDS=<单个专用测试群的业务UUID，带横线、小写>
 GROUP_RETENTION_ALL_GROUPS=false
-FAVORITE_ARCHIVE_WORKER_ENABLED=true
+FAVORITE_ARCHIVE_WORKER_ENABLED=false
 ```
 
-`visibility_only` 必须明确选择范围：`GROUP_RETENTION_GROUP_IDS` 最多 100 个唯一业务 UUID（逗号分隔，不是 `sg_` 会话 ID），或清空名单并显式 `GROUP_RETENTION_ALL_GROUPS=true`。两者同时配置、名单无效或未选范围都拒绝启动。名单同时限制入队、规划领取、旧计划回填和应用领取，不能只限制“新入队”而漏过旧积压任务。缩小范围/关闭任务也不会隐藏已发布水位的读取，不使旧历史复活。
+`visibility_only` 在两个范围变量都未配置时默认全群。`GROUP_RETENTION_GROUP_IDS` 最多 100 个唯一业务 UUID（逗号分隔，不是 `sg_` 会话 ID）；只配置名单而不配置 `ALL_GROUPS` 时，程序自动收窄为名单。模板/镜像显式设置了 `ALL_GROUPS=true`，灰度时须改成 `false`。两者冲突、名单无效、非法布尔值或显式 `false` 却没有名单时拒绝启动，不偷偷扩大范围。名单同时限制入队、规划领取、旧计划回填和应用领取。缩小范围/关闭任务不撤销已发布水位，不使旧历史复活。仅用于 OSS 冒烟、没有桥的 `deploy/oss-test` 脚手架单独显式设 `off`，不改变应用默认策略。
 
 收藏 worker 每轮最多 20 条，单条复制失败不阻塞后续，整轮后等待一小时再扫失败项。成功进度在 `media_archived` 中，重启可重扫；失败记录不伪装成归档成功，不删除源文件。仅支持 OSS，沿用受限媒体源地址白名单和原有稳定签名密钥。
 
@@ -97,7 +101,7 @@ OpenAPI/Postman 见本目录的 `openapi.json`、`postman_collection.json`。GET
 
 1. 后端 `8.154.44.197`：只读确认当前业务/OpenIM 容器名、镜像 ID、挂载、启动命令、进程数量、可用空间。不要输出完整 `docker inspect`/环境变量；它们含密码和密钥。
 2. 固定当前运行镜像的 ID/摘要及编排文件副本，保留旧卷。已有 OSS 切换完成，**不要重跑 `deploy-production-oss.py` 或旧 bundle**。不恢复任何备份到现有数据库。
-3. 上传新的增量包到新目录；执行 `sha256sum -c SHA256SUMS`。核对 `bundle-manifest.json`，其中 `mongoBodyPurge=disabled_by_default`、`ossObjectPurge=false`、`deviceAcceptance=pending` 是真实限制，不是可忽略的提示。旧包不含本轮槽位 fence，不能用于正文清理。
+3. 上传新的增量包到新目录；执行 `sha256sum -c SHA256SUMS`。核对 `bundle-manifest.json`，其中 `groupVisibility=enabled_by_default_all_groups`、`mongoBodyPurge=disabled_by_default`、`ossObjectPurge=false`、`deviceAcceptance=pending` 是真实策略/限制。旧包的逻辑清理默认值不同，不要用旧包代替。
 4. 对业务 PostgreSQL 依次仅执行审核后的 052、053、054、055，单个文件事务并设置合理 `lock_timeout`，遇锁/DDL 故障就停，不自动杀生产连接。不要执行整个历史迁移目录，也不要改 Mongo 消息内容。新后端即使 worker 为 `off`，水位查询接口也要求 055 的 visibility 表。
 5. 用当前**生产 OSS**业务/OpenIM 镜像作为 `BASE_IMAGE` 构建覆盖层。不要用原始官方镜像替代当前镜像，否则可能丢失已经上线的 OSS third RPC；核验目标二进制路径未被现有挂载遮挡。
 6. 先在隔离服务验证镜像，更新所有消息转存实例和消息 RPC，后端 worker 继续 `off`。这是应用更新，不应重启 PostgreSQL/MongoDB/Redis/Kafka/etcd 或删除卷。
