@@ -27,6 +27,7 @@ import {
   downloadRemoteVideoForCover,
   preferRemoteMediaUrl,
   isRemoteMediaUrl,
+  listThumbnailUrl,
 } from '@/utils/chatMedia'
 import { devLog, devWarn } from '@/utils/devLog'
 import { isApp } from '@/utils/platform'
@@ -663,9 +664,8 @@ async function doLogin(): Promise<string> {
   if (status === LoginStatus.Logged) {
     const loggedUserId = await getSdkLoginUserId()
     if (loggedUserId === imToken.userId) {
-      // H5 WASM 刷新后常直接 Logged，本地库仍是离线前快照。
-      // 必须等本轮同步结束，否则随后拉会话/历史会漏掉离线消息。
-      await waitForSync(15000)
+      // 已经登录就先读本地库，进群不用干等本轮同步。
+      // 同步结束会走 OnSyncServerFinish，再把离线期间的新消息补进当前房间。
       if (epoch !== loginEpoch) {
         throw new Error('已退出登录')
       }
@@ -2986,13 +2986,15 @@ function pictureMetaOf(item: MessageItem): {
     snap.width > 0 &&
     snap.height > 0 &&
     (sourceBox.width <= 0 || sourceBox.height <= 0 || sameImageAspect(snap, sourceBox))
-  const displayUrl = thumbTrustworthy ? distinctThumb : sourceUrl || pictureUrlOf(item)
+  const original = sourceUrl || pictureUrlOf(item)
+  // 旧消息缩略图和原图是同一个地址。列表改要 OpenIM 的等比小图，点开仍用原图。
+  const displayUrl = thumbTrustworthy ? distinctThumb : listThumbnailUrl(original)
   const shown = thumbTrustworthy ? snap : sourceBox
   const box = shown.width > 0 && shown.height > 0 ? shown : null
   return {
     displayUrl,
-    thumbUrl: thumbTrustworthy ? distinctThumb : undefined,
-    sourceUrl: sourceUrl && sourceUrl !== displayUrl ? sourceUrl : undefined,
+    thumbUrl: displayUrl || undefined,
+    sourceUrl: original && original !== displayUrl ? original : undefined,
     width: box ? box.width : undefined,
     height: box ? box.height : undefined,
   }

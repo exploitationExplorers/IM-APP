@@ -23,7 +23,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
 import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
-import { forgetMediaCache, mediaCacheHas, peekMediaCache, requestMediaCache } from '@/utils/mediaCache'
+import { forgetMediaCache, peekMediaCache, requestMediaCache } from '@/utils/mediaCache'
 import { formatMeridiemClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 import { soundMetaOf } from '@/utils/openim'
 
@@ -806,9 +806,9 @@ function bindCachedMedia(
     apply(hit, false)
     return
   }
-  apply('', mediaCacheHas(remote))
+  // 缓存还没落盘时先画远程地址。挡住等下载会让整屏图空白更久。
   requestMediaCache(remote, (path) => {
-    if (current() !== token) return
+    if (current() !== token || !path) return
     apply(path, false)
   })
 }

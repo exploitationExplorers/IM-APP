@@ -116,9 +116,10 @@ export function parseVideoMeta(raw: unknown): VideoMeta {
  */
 export function h5PublicMediaUrl(path: string): string {
   // #ifdef H5
-  if (typeof location !== 'undefined' && location.protocol === 'https:' && path.startsWith('http://')) {
+  if (typeof location !== 'undefined' && location.host && /^https?:\/\//i.test(path)) {
     try {
       const url = new URL(path)
+      if (url.host === location.host) return path
       const name = url.pathname
       const known =
         name.startsWith('/object/') ||
@@ -139,6 +140,26 @@ export function h5PublicMediaUrl(path: string): string {
   }
   // #endif
   return path
+}
+
+/** 列表气泡用的缩略图。OpenIM 按宽高框等比缩小，不是把图拉成正方形。 */
+export function listThumbnailUrl(url: string): string {
+  const raw = (url || '').trim()
+  if (!/^https?:\/\//i.test(raw) || /[?&]type=image\b/i.test(raw)) return raw
+  try {
+    const parsed = new URL(raw)
+    const path = parsed.pathname
+    if (/\.(mp4|mov|m4v|webm|mkv|aac|m4a|mp3)(\?|$)/i.test(path)) return raw
+    const isPicture =
+      /\/object\//i.test(path) || /\.(jpe?g|png|gif|webp|bmp)(\?|$)/i.test(path)
+    if (!isPicture) return raw
+    parsed.searchParams.set('type', 'image')
+    parsed.searchParams.set('width', '360')
+    parsed.searchParams.set('height', '360')
+    return parsed.toString()
+  } catch {
+    return raw
+  }
 }
 
 /**
@@ -240,8 +261,8 @@ export function playableMediaUrl(path: string): string {
 
 /** 把样式里的 http 对象存储地址换成当前站点，uni-image 的头像是 background-image 不是 img */
 function rewriteCssMediaUrls(css: string): string {
-  if (!css || !css.includes('http://')) return css
-  return css.replace(/url\(\s*(['"]?)(http:\/\/[^)'"\s]+)\1\s*\)/gi, (full, quote, raw) => {
+  if (!css || (!css.includes('http://') && !css.includes('https://'))) return css
+  return css.replace(/url\(\s*(['"]?)(https?:\/\/[^)'"\s]+)\1\s*\)/gi, (full, quote, raw) => {
     const next = h5PublicMediaUrl(raw)
     return next === raw ? full : `url(${quote}${next}${quote})`
   })

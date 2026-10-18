@@ -4,6 +4,24 @@ import uni from '@dcloudio/vite-plugin-uni'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 const analyze = process.env.ANALYZE === 'true'
+const mediaOrigin = 'http://8.154.44.197'
+
+/** 对象存储 302 到绝对地址时，改成同源路径，避免浏览器再跨域去拉原图。 */
+function rewriteMediaRedirect(proxy: { on: (event: string, handler: (proxyRes: { headers: Record<string, string | string[] | undefined> }) => void) => void }) {
+  proxy.on('proxyRes', (proxyRes) => {
+    const raw = proxyRes.headers.location
+    const loc = Array.isArray(raw) ? raw[0] : raw
+    if (!loc) return
+    try {
+      const url = new URL(loc, mediaOrigin)
+      if (/^\/(object|openim|minio|openim-api)\//.test(url.pathname)) {
+        proxyRes.headers.location = `${url.pathname}${url.search}`
+      }
+    } catch {
+      /* 保持上游跳转 */
+    }
+  })
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -77,16 +95,19 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/openim/': {
-        target: 'http://8.154.44.197',
+        target: mediaOrigin,
         changeOrigin: true,
+        configure: rewriteMediaRedirect,
       },
       '/object/': {
-        target: 'http://8.154.44.197',
+        target: mediaOrigin,
         changeOrigin: true,
+        configure: rewriteMediaRedirect,
       },
       '/minio/': {
-        target: 'http://8.154.44.197',
+        target: mediaOrigin,
         changeOrigin: true,
+        configure: rewriteMediaRedirect,
       },
     },
   },
