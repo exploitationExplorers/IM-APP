@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"sort"
 	"strings"
@@ -28,12 +29,25 @@ func IsMedia(kind string) bool {
 // Rewrite preserves field casing and the string/JSON shape used by older App
 // bridges. It traverses quote/merge snapshots and JSON encoded inside content.
 func Rewrite(ctx context.Context, content string, replace func(context.Context, string) (string, error)) (string, int, error) {
+	return rewrite(ctx, content, replace, true)
+}
+
+// RewriteForward parses embedded message JSON without treating quoted text
+// such as {"content":"https://example.com"} as a downloadable media file.
+func RewriteForward(ctx context.Context, content string, replace func(context.Context, string) (string, error)) (string, int, error) {
+	return rewrite(ctx, content, replace, false)
+}
+
+func rewrite(ctx context.Context, content string, replace func(context.Context, string) (string, error), rawContentURL bool) (string, int, error) {
 	if len(content) > MaxContentBytes {
 		return "", 0, ErrContent
 	}
 	count := 0
-	var walk func(any, int, bool) (any, error)
-	walk = func(value any, depth int, isURL bool) (any, error) {
+	var walk func(any, int, bool, bool) (any, error)
+	walk = func(value any, depth int, isURL, parseJSON bool) (any, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if depth > 16 || count > 64 {
 			return nil, ErrContent
 		}
@@ -47,22 +61,32 @@ func Rewrite(ctx context.Context, content string, replace func(context.Context, 
 				}
 				return replace(ctx, trimmed)
 			}
-			if isURL && (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "\"")) {
+			if parseJSON && (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "\"")) {
 				var nested any
 				decoder := json.NewDecoder(strings.NewReader(trimmed))
 				decoder.UseNumber() // Native SDK identifiers may exceed JavaScript's safe integer range.
 				if json.Valid([]byte(trimmed)) && decoder.Decode(&nested) == nil {
-					out, err := walk(nested, depth+1, isURL)
+					out, err := walk(nested, depth+1, isURL, parseJSON)
 					if err != nil {
 						return nil, err
 					}
 					encoded, err := json.Marshal(out)
 					return string(encoded), err
 				}
-				return nil, ErrContent
+				if rawContentURL {
+					return nil, ErrContent
+				}
 			}
 			return value, nil
 		case map[string]any:
+			textMessage := false
+			if !rawContentURL {
+				for key, item := range value {
+					if strings.EqualFold(key, "contentType") {
+						textMessage = fmt.Sprint(item) == "101"
+					}
+				}
+			}
 			keys := make([]string, 0, len(value))
 			for key := range value {
 				keys = append(keys, key)
@@ -70,7 +94,13 @@ func Rewrite(ctx context.Context, content string, replace func(context.Context, 
 			sort.Strings(keys)
 			for _, key := range keys {
 				item := value[key]
-				out, err := walk(item, depth+1, urlFields[strings.ToLower(key)] || strings.EqualFold(key, "content"))
+				if !rawContentURL && (strings.EqualFold(key, "textElem") || (textMessage && strings.EqualFold(key, "content"))) {
+					continue
+				}
+				isContent := strings.EqualFold(key, "content")
+				isURL := urlFields[strings.ToLower(key)] || (isContent && rawContentURL)
+				isJSON := isURL || isContent || strings.EqualFold(key, "multiMessage") || strings.EqualFold(key, "quoteMessage")
+				out, err := walk(item, depth+1, isURL, isJSON)
 				if err != nil {
 					return nil, err
 				}
@@ -79,7 +109,7 @@ func Rewrite(ctx context.Context, content string, replace func(context.Context, 
 			return value, nil
 		case []any:
 			for i, item := range value {
-				out, err := walk(item, depth+1, isURL)
+				out, err := walk(item, depth+1, isURL, parseJSON)
 				if err != nil {
 					return nil, err
 				}
@@ -90,7 +120,7 @@ func Rewrite(ctx context.Context, content string, replace func(context.Context, 
 			return value, nil
 		}
 	}
-	out, err := walk(content, 0, true)
+	out, err := walk(content, 0, rawContentURL, true)
 	if err != nil {
 		return "", count, err
 	}

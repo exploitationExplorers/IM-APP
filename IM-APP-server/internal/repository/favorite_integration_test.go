@@ -6,10 +6,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
@@ -48,11 +50,32 @@ func mediaTestPool(t *testing.T) *pgxpool.Pool {
 			t.Fatal("database query override forbidden")
 		}
 	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	admin, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
 		t.Fatal("test database connection failed")
 	}
-	t.Cleanup(pool.Close)
+	schema := "media_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := admin.Exec(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+		admin.Close()
+		t.Fatal(err)
+	}
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		pool.Close()
+		_, err := admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+		admin.Close()
+		if err != nil {
+			t.Error("disposable schema cleanup failed")
+		}
+	})
 	_, err = pool.Exec(context.Background(), `CREATE TABLE users(id uuid PRIMARY KEY);
 	CREATE TABLE favorites (
 	 id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id),

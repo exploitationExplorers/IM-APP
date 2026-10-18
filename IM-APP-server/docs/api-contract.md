@@ -1095,6 +1095,25 @@ OSS 模式要求 `size` 为 1～20 MiB（含边界，单位 byte）；签名有�
 
 接口约定：GET 使用 query 参数；新建的 POST 写接口全部使用静态路径和 JSON body，不把 `taskId` 拼入路径。`GET /api/v1/forward-tasks/:id` 只保留给旧客户端兼容，新客户端使用 `/forward-task-progress?taskId=...`。
 
+### POST `/api/v1/forward-media/preserve`
+
+客户端直接用 SDK 转发或引用回复前，为涉及的媒体生成独立副本。本接口只复制并返回快照，不发送消息。登录用户是副本所有者；只接收 JSON 请求体，禁止 query 参数、未知请求字段、客户端指定所有者或归档标志。
+
+```json
+{
+  "sourceSnapshot": {
+    "contentType": 102,
+    "content": {"sourcePicture": {"url": "https://chat.example.com/app/chat/image.jpg", "type": "image/jpeg"}}
+  }
+}
+```
+
+成功响应 `data` 为同样的 `{contentType,content}` 结构，媒体 URL 改为 `forwards/<ownerId>/...` 的独立副本稳定地址。按用户和规范化快照去重；不跨用户共享快照。图片/语音/视频/文件、@/引用/合并消息内嵌媒体均处理，兼容 App PascalCase 与 H5 camelCase、字符串内嵌 JSON。普通文字里的 URL/JSON 仍是文字，不下载。
+
+每条内嵌媒体都须有远程原文件，不能用旁边的缩略图或另一条文件的地址替代；视频还须有远程封面。快照及重写结果最多 64 KiB、最多 64 个媒体 URL，累计文件 512 MiB。应用地址范围、重定向、公网下载限制与收藏相同；不验证 OpenIM 源消息存在或群成员身份，源下载不附加 JWT/Cookie。
+
+无登录凭证返回 401；参数不合法、仅本地文件、快照超限返回 400；源不存在、范围/权限/超时/复制或持久化失败返回 503（不输出源链接和凭据）。失败时客户端必须停止本次转发或引用发送，允许重试；不得回退使用源地址。普通文字不依赖复制服务。
+
 ### POST `/api/v1/forward-tasks`
 
 创建异步转发草稿任务。`targetUserIds` 可以一次传入全部目标，服务端内部按每批 1000 条写 PostgreSQL；也可以先创建空任务，再通过 add/generate 逐批补充。
@@ -1116,6 +1135,8 @@ OSS 模式要求 `size` 为 1～20 MiB（含边界，单位 byte）；签名有�
 ```
 
 `sourceClientMsgId` 与兼容字段 `sourceMessageId` 至少传一个；`sourceSnapshot.contentType` 只能是 1～999，禁止借转发接口伪造 OpenIM 通知/控制消息。
+
+媒体及引用快照在创建、提交和旧任务投递前进行独立复制；成功后冻结为副本快照。创建返回 503 时可能已存在未提交的草稿，使用同一幂等键重试即可；不会投递未保存副本的媒体。既有任务中尚未发送的目标由 worker 补偿保护，已发送的历史消息不会因此改写。批量接口复用同样流程；复制失败时可能已创建前面的草稿或提交前面的任务，请保留相同批量幂等键重试。
 
 ### 目标管理
 

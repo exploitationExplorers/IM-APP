@@ -21,7 +21,7 @@ import (
 const MaxArchiveBytes int64 = 512 << 20
 const ArchiveTimeout = 45 * time.Second // Below the existing clients' default 60s request timeout.
 
-var ErrArchive = errors.New("收藏媒体保存失败，请稍后重试")
+var ErrArchive = errors.New("媒体副本保存失败，请稍后重试")
 
 // Archive reads only explicitly configured application media locations. No
 // credentials are attached to source requests; existing capability URLs apply.
@@ -127,6 +127,17 @@ func (a *Archive) Preserve(ctx context.Context, userID, messageID, kind, content
 	if !media.IsMedia(kind) {
 		return content, nil
 	}
+	return a.preserve(ctx, "favorites", userID, messageID, content, media.Rewrite, true)
+}
+
+// PreserveForward uses a separate namespace, including nested quote/merge
+// media. It never changes the source object or relies on a source chat lifetime.
+func (a *Archive) PreserveForward(ctx context.Context, userID, messageID, content string) (string, error) {
+	return a.preserve(ctx, "forwards", userID, messageID, content, media.RewriteForward, false)
+}
+
+func (a *Archive) preserve(ctx context.Context, namespace, userID, messageID, content string,
+	rewrite func(context.Context, string, func(context.Context, string) (string, error)) (string, int, error), requireURL bool) (string, error) {
 	if a == nil || !a.Storage.Available() {
 		return "", ErrArchive
 	}
@@ -134,11 +145,11 @@ func (a *Archive) Preserve(ctx context.Context, userID, messageID, kind, content
 	defer cancel()
 	remaining := MaxArchiveBytes // Limit the whole snapshot, not 64 separate 512 MiB files.
 	cache := map[string]string{}
-	out, count, err := media.Rewrite(ctx, content, func(ctx context.Context, source string) (string, error) {
+	out, count, err := rewrite(ctx, content, func(ctx context.Context, source string) (string, error) {
 		if saved, ok := cache[source]; ok {
 			return saved, nil
 		}
-		saved, size, err := a.copy(ctx, userID, messageID, source, remaining)
+		saved, size, err := a.copy(ctx, namespace, userID, messageID, source, remaining)
 		if err != nil {
 			return "", err
 		}
@@ -146,13 +157,13 @@ func (a *Archive) Preserve(ctx context.Context, userID, messageID, kind, content
 		cache[source] = saved
 		return saved, nil
 	})
-	if err != nil || count == 0 {
+	if err != nil || (requireURL && count == 0) {
 		return "", ErrArchive
 	}
 	return out, nil
 }
 
-func (a *Archive) copy(ctx context.Context, userID, messageID, source string, limit int64) (string, int64, error) {
+func (a *Archive) copy(ctx context.Context, namespace, userID, messageID, source string, limit int64) (string, int64, error) {
 	if !validStorageKey(userID) || strings.Contains(userID, "/") || !a.allowed(source) || limit <= 0 {
 		return "", 0, ErrArchive
 	}
@@ -168,7 +179,7 @@ func (a *Archive) copy(ctx context.Context, userID, messageID, source string, li
 	if res.StatusCode != http.StatusOK || res.ContentLength > limit {
 		return "", 0, ErrArchive
 	}
-	tmp, err := os.CreateTemp("", "im-favorite-*")
+	tmp, err := os.CreateTemp("", "im-media-archive-*")
 	if err != nil {
 		return "", 0, ErrArchive
 	}
@@ -188,7 +199,7 @@ func (a *Archive) copy(ctx context.Context, userID, messageID, source string, li
 	}
 	messageHash := sha256.Sum256([]byte(messageID))
 	// Content-addressed key independent of MIME headers, OS MIME databases and expiring URLs.
-	logical := path.Join("favorites", userID, hex.EncodeToString(messageHash[:16]), hex.EncodeToString(digest.Sum(nil)))
+	logical := path.Join(namespace, userID, hex.EncodeToString(messageHash[:16]), hex.EncodeToString(digest.Sum(nil)))
 	store := a.Storage.Current
 	key, err := store.NewKey(logical)
 	if err != nil {

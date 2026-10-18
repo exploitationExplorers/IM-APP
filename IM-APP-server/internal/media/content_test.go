@@ -80,3 +80,23 @@ func TestRewritePreservesMetadataAndRejectsOversizedResult(t *testing.T) {
 		t.Fatal("oversized rewritten snapshot accepted")
 	}
 }
+
+func TestForwardRewriteNestedMediaAndTextIsolation(t *testing.T) {
+	input := `{"text":"https://text.example","multiMessage":[{"ContentType":101,"Content":"{\"url\":\"https://text.example\"}","TextElem":{"Content":"https://text.example"}},{"ContentType":114,"QuoteElem":{"Text":"{keep}","QuoteMessage":{"ContentType":104,"VideoElem":{"VideoUrl":"https://chat.example/a","SnapshotUrl":"https://chat.example/b"},"Seq":9007199254740993}}}]}`
+	var sources []string
+	out, count, err := RewriteForward(context.Background(), input, func(_ context.Context, raw string) (string, error) {
+		sources = append(sources, raw)
+		return strings.Replace(raw, "chat.example", "business.example", 1), nil
+	})
+	if err != nil || count != 2 || !reflect.DeepEqual(sources, []string{"https://chat.example/b", "https://chat.example/a"}) {
+		t.Fatal("wrong media traversal", sources, err)
+	}
+	if !strings.Contains(out, "9007199254740993") || !strings.Contains(out, `\"url\":\"https://text.example\"`) || strings.Contains(out, "chat.example") {
+		t.Fatal("text or media corrupted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := RewriteForward(ctx, input, func(context.Context, string) (string, error) { t.Fatal("copy after cancellation"); return "", nil }); !errors.Is(err, context.Canceled) {
+		t.Fatal("cancellation ignored")
+	}
+}

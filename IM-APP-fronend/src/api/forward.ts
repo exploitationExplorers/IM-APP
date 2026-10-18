@@ -6,10 +6,22 @@ import type {
   ForwardTask,
   ForwardTaskPage,
   ForwardTaskTargetPage,
+  ForwardMessageSnapshot,
   OkResult,
 } from '@/types/forward'
 
 const TARGET_WRITE_BATCH = 1000
+
+/** Save independent media copies before direct SDK forwarding/quote replies. */
+export function preserveForwardMedia(
+  sourceSnapshot: ForwardMessageSnapshot,
+): Promise<ForwardMessageSnapshot> {
+  return request<ForwardMessageSnapshot>({
+    url: '/forward-media/preserve',
+    method: 'POST',
+    data: { sourceSnapshot },
+  })
+}
 
 export function forwardTargetWriteBatch(): number {
   return TARGET_WRITE_BATCH
@@ -43,7 +55,9 @@ export interface ForwardBatchAccepted {
   status: 'queued'
 }
 
-export async function createForwardBatch(input: CreateForwardBatchInput): Promise<ForwardBatchAccepted> {
+export async function createForwardBatch(
+  input: CreateForwardBatchInput,
+): Promise<ForwardBatchAccepted> {
   return request<ForwardBatchAccepted>({ url: '/forward-batches', method: 'POST', data: input })
 }
 

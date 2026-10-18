@@ -60,7 +60,8 @@ func main() {
 		"report_files":            {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
 		"feedbacks":               {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
 		"app_releases":            {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
-		"forward_tasks":           {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
+		"forward_tasks":           {"id", "user_id", "source_snapshot", "media_archived", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
+		"forward_media_snapshots": {"user_id", "source_hash", "snapshot", "created_at"},
 		"forward_task_targets":    {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
 		"forward_kafka_outbox":    {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
 		"im_message_recalls":      {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
@@ -150,15 +151,18 @@ func main() {
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
 	mediaGuard := &repository.MediaGuard{DB: pool}
+	mediaArchive := infra.NewArchive(storageClient, infra.SourcePrefixes(cfg.MediaSourcePrefixes,
+		cfg.OpenIM.PublicAPIURL, cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL,
+		cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket))
 	favSvc := &service.FavoriteService{Fav: favRepo, Guard: mediaGuard,
-		Media: infra.NewArchive(storageClient, infra.SourcePrefixes(cfg.MediaSourcePrefixes,
-			cfg.OpenIM.PublicAPIURL, cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL,
-			cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket))}
+		Media: mediaArchive}
+	forwardMedia := &service.ForwardMediaService{
+		Repo: &repository.ForwardMediaRepo{DB: pool}, Media: mediaArchive, Guard: mediaGuard}
 	stickerRepo := &repository.StickerRepo{DB: pool}
 	stickerSvc := &service.StickerService{Stickers: stickerRepo, Files: fileRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo, Users: userRepo, IM: imClient}
-	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue}
+	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue, Media: forwardMedia}
 	reportSvc := &service.ReportService{Reports: reportRepo}
 	feedbackSvc := &service.FeedbackService{Feedbacks: feedbackRepo}
 	appReleaseSvc := &service.AppReleaseService{Releases: appReleaseRepo, Storage: storageClient}
@@ -423,6 +427,7 @@ func main() {
 
 			// 新增写接口全部使用静态路径 + JSON body；旧 GET 动态路径仅保留兼容。
 			auth.POST("/forward-tasks", forwardH.Create)
+			auth.POST("/forward-media/preserve", forwardH.PreserveMedia)
 			auth.POST("/forward-batches", forwardH.CreateBatch)
 			auth.GET("/forward-tasks", forwardH.List)
 			auth.GET("/forward-tasks/:id", forwardH.GetLegacy)
@@ -478,6 +483,7 @@ func main() {
 		if cfg.Forward.WorkerEnabled {
 			forwardWorker := &service.ForwardWorker{
 				Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue,
+				Media:     forwardMedia,
 				BatchSize: cfg.Forward.BatchSize, MaxAttempts: cfg.Forward.MaxAttempts,
 				Concurrency: cfg.Forward.Concurrency, QPS: cfg.Forward.QPS,
 				PollInterval: time.Duration(cfg.Forward.PollSeconds) * time.Second,

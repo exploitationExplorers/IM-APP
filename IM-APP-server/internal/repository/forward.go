@@ -36,7 +36,7 @@ type CreateForwardTaskParams struct {
 const forwardTaskSelect = `
 	SELECT ft.id::text, ft.user_id::text, COALESCE(ft.source_message_id,''),
 		ft.source_conversation_id, ft.source_client_msg_id, ft.source_server_msg_id,
-		ft.source_snapshot, ft.selector, COALESCE(ft.idempotency_key,''), ft.status,
+		ft.source_snapshot, ft.media_archived, ft.selector, COALESCE(ft.idempotency_key,''), ft.status,
 		ft.target_count, ft.done_count, ft.success_count, ft.failed_count, ft.skipped_count, ft.cancelled_count,
 		(SELECT COUNT(*) FROM forward_task_targets t WHERE t.task_id=ft.id AND t.status IN ('pending','retrying')),
 		(SELECT COUNT(*) FROM forward_task_targets t WHERE t.task_id=ft.id AND t.status='processing'),
@@ -48,7 +48,7 @@ func scanForwardTask(row pgx.Row) (models.ForwardTask, error) {
 	var snapshotRaw, selectorRaw []byte
 	err := row.Scan(&task.ID, &task.UserID, &task.SourceMessageID,
 		&task.SourceConversationID, &task.SourceClientMsgID, &task.SourceServerMsgID,
-		&snapshotRaw, &selectorRaw, &task.IdempotencyKey, &task.Status,
+		&snapshotRaw, &task.MediaArchived, &selectorRaw, &task.IdempotencyKey, &task.Status,
 		&task.TargetCount, &task.DoneCount, &task.SuccessCount, &task.FailedCount, &task.SkippedCount, &task.CancelledCount,
 		&task.PendingCount, &task.ProcessingCount, &task.StartedAt, &task.FinishedAt,
 		&task.CreatedAt, &task.UpdatedAt)

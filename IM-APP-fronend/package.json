@@ -42,7 +42,7 @@
     "format": "prettier --write \"src/**/*.{ts,vue,scss}\"",
     "test:unit": "vitest run",
     "test:notifications": "node --test tests/im-notification.test.mts",
-    "test:video-compat": "node --test tests/video-compat.test.mts",
+    "test:video-compat": "vitest run tests/video-compat.test.ts",
     "build:app": "uni build -p app-plus",
     "pack:wgt": "node scripts/pack-wgt.cjs",
     "pack:wgt:canary": "node scripts/pack-wgt.cjs --build --publish --channel=canary --min-native=100",

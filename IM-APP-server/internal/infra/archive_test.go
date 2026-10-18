@@ -80,6 +80,28 @@ func TestArchiveIndependentCopyAndIdempotence(t *testing.T) {
 	}
 }
 
+func TestForwardArchiveSeparateFromFavoritesAndSource(t *testing.T) {
+	a, s := newTestArchive()
+	content := `{"quoteMessage":{"ContentType":102,"PictureElem":{"SourcePicture":{"Url":"https://chat.example/chat/a"},"SnapshotPicture":{"Url":"https://chat.example/chat/b"}}},"text":"https://untrusted.example/keep-as-text"}`
+	saved, err := a.PreserveForward(context.Background(), "user", "source", content)
+	if err != nil || strings.Contains(saved, "chat.example") || !strings.Contains(saved, "/forwards/user/") || s.puts != 1 {
+		t.Fatal("independent forward failed", err)
+	}
+	favorite, err := a.Preserve(context.Background(), "user", "source", "image", `{"url":"https://chat.example/chat/a"}`)
+	if err != nil || strings.Contains(favorite, "/forwards/") || !strings.Contains(favorite, "/favorites/") || s.puts != 2 {
+		t.Fatal("favorite and forward share lifetime", err)
+	}
+	if !strings.Contains(saved, "https://untrusted.example/keep-as-text") {
+		t.Fatal("text URL rewritten")
+	}
+	a.client.Transport = archiveTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader("missing")), Request: r}, nil
+	})
+	if _, err = a.PreserveForward(context.Background(), "user", "missing", content); !errors.Is(err, ErrArchive) || s.puts != 2 {
+		t.Fatal("missing source was marked protected")
+	}
+}
+
 func TestArchiveFailsClosed(t *testing.T) {
 	for _, test := range []string{"source404", "putDenied", "headDenied", "missingURL", "invalidOwner", "untrustedHost", "partialBody", "oversize", "emptyURL"} {
 		t.Run(test, func(t *testing.T) {
@@ -178,7 +200,7 @@ func TestArchiveDefaultsIncludeScopedBusinessURLs(t *testing.T) {
 
 func TestArchiveCopyTotalByteBudget(t *testing.T) {
 	a, s := newTestArchive()
-	if _, _, err := a.copy(context.Background(), "user", "message", "https://chat.example/chat/a", 10); !errors.Is(err, ErrArchive) || s.puts != 0 {
+	if _, _, err := a.copy(context.Background(), "favorites", "user", "message", "https://chat.example/chat/a", 10); !errors.Is(err, ErrArchive) || s.puts != 0 {
 		t.Fatal("aggregate byte budget not enforced")
 	}
 }

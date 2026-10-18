@@ -33,6 +33,8 @@ import { devLog, devWarn } from '@/utils/devLog'
 import { isApp } from '@/utils/platform'
 import { isOSSStorageUrl } from '@/utils/storage-url'
 import type { PlusResolveLocalFile } from '@/types/plus-io'
+import { preserveForwardMedia } from '@/api/forward'
+import { mayContainForwardMedia, snapshotFromMessage, withForwardSnapshot } from '@/utils/forwardSnapshot'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
 const H5_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 5 // Warn : Silent
@@ -1040,20 +1042,34 @@ export async function sendQuoteMessage(
   text: string,
   quote: MessageItem,
 ): Promise<MessageItem> {
+  const protectedQuote = await protectReferencedMedia(quote)
   // SDK 的 createQuoteMessage 要求 message 是被引用消息的 JSON 字符串（QuoteMsgParams.message: string），
   // 直接传对象会被 JSON.parse 隐式转成 "[object Object]" 而报 errCode=10006。
   const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
     text,
-    message: JSON.stringify(quote),
+    message: JSON.stringify(protectedQuote),
   })
   return sendCreatedMessage(target, message)
 }
 
 export async function sendForwardMessage(target: IMTarget, source: MessageItem): Promise<MessageItem> {
-  const message = await imCall<MessageItem>(IMMethods.CreateForwardMessage, {
-    message: source,
+  const protectedSource = await protectReferencedMedia(source)
+  // H5 client-sdk expects MessageItem directly; the native plugin takes { message }.
+  const message = await imCall<MessageItem>(
+    IMMethods.CreateForwardMessage,
+    isApp() ? { message: protectedSource } : protectedSource,
+  )
+  return sendCreatedMessage(target, message, {
+    alreadyUploaded: mayContainForwardMedia(protectedSource.contentType),
   })
-  return sendCreatedMessage(target, message)
+}
+
+async function protectReferencedMedia(source: MessageItem): Promise<MessageItem> {
+  const snapshot = snapshotFromMessage(source)
+  if (!mayContainForwardMedia(snapshot.contentType)) return withForwardSnapshot(source, snapshot)
+  const protectedSnapshot = await preserveForwardMedia(snapshot)
+  if (protectedSnapshot.contentType !== snapshot.contentType) throw new Error('转发媒体保存结果无效')
+  return withForwardSnapshot(source, protectedSnapshot)
 }
 
 export async function sendAtTextMessage(
