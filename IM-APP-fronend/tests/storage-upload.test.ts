@@ -7,7 +7,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('storage URL compatibility', () => {
   it('preserves OSS host, encoded key and signature query verbatim', () => {
-    vi.stubGlobal('location', { protocol: 'https:', origin: 'https://test.example' })
+    vi.stubGlobal('location', { protocol: 'https:', host: 'test.example', origin: 'https://test.example' })
     const urls = [
       'https://bucket.oss-cn-hangzhou.aliyuncs.com/a%20b.jpg?x-oss-signature=a%2Bb%2F&x-oss-date=20261017T000000Z',
       'http://bucket.oss-cn-hangzhou.aliyuncs.com/object/a.jpg?OSSAccessKeyId=fake&Signature=a%2Bb%3D',
@@ -20,7 +20,7 @@ describe('storage URL compatibility', () => {
   })
 
   it('keeps the existing HTTP MinIO same-origin rewrite', () => {
-    vi.stubGlobal('location', { protocol: 'https:', origin: 'https://test.example' })
+    vi.stubGlobal('location', { protocol: 'https:', host: 'test.example', origin: 'https://test.example' })
     const url = 'http://127.0.0.1:9000/minio/im-uploads/a.jpg?X-Amz-Signature=a%2Fb'
     expect(isOSSStorageUrl(url)).toBe(false)
     expect(h5PublicMediaUrl(url)).toBe('https://test.example/minio/im-uploads/a.jpg?X-Amz-Signature=a%2Fb')
@@ -31,6 +31,14 @@ describe('storage URL compatibility', () => {
       expect(isOSSStorageUrl(path)).toBe(false)
       expect(h5PublicMediaUrl(path)).toBe(path)
     }
+  })
+
+  it('keeps HTTPS custom storage URLs and rewrites only legacy storage paths', () => {
+    vi.stubGlobal('location', { protocol: 'https:', host: 'test.example', origin: 'https://test.example' })
+    const custom = 'https://cdn.example/oss-test/business/uploads/a.jpg'
+    expect(h5PublicMediaUrl(custom)).toBe(custom)
+    expect(h5PublicMediaUrl('https://legacy.example/openim/bucket/a.jpg?x=1'))
+      .toBe('https://test.example/openim/bucket/a.jpg?x=1')
   })
 })
 
