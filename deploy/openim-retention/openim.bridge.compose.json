@@ -1,0 +1,14 @@
+{
+  "services": {
+    "openim-api": {
+      "image": "${RETENTION_OPENIM_IMAGE:?Run prepare-production.py prepare first}",
+      "environment": {
+        "IM_APP_RETENTION_LISTEN": "0.0.0.0:19093",
+        "IM_APP_RETENTION_KEY": "${IM_APP_RETENTION_KEY:?Run prepare-production.py prepare first}",
+        "IM_APP_RETENTION_BODY_PURGE_ENABLED": "false",
+        "IM_APP_RETENTION_BODY_PURGE_GROUP_IDS": "",
+        "IM_APP_RETENTION_BODY_PURGE_ACK": ""
+      }
+    }
+  }
+}

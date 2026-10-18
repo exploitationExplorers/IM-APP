@@ -38,7 +38,8 @@
 # 启动（★ 必须带 --env-file，否则 IMENV_SHARE_SECRET 取不到，后端调 OpenIM 全部 401）：
 #   注意 --env-file 是相对【当前工作目录】解析的，所以先 cd 到 deploy 再用 .env：
 #   cd /www/wwwroot/deploy
-#   docker compose --env-file .env -f openim/docker-compose.yml up -d
+#   现有 OSS 生产更新统一使用 ../production.sh，顺序见 ../PRODUCTION.md。
+#   不要单用本文件 up，否则会丢失已上线的 OSS 镜像和配置。
 # ───────────────────────────────────────────────────────────────────────────
 
 name: openim
@@ -190,7 +191,7 @@ services:
   openim-api:
     # 官方 tag。v3.8.3-patch.16 拉不到（Docker Hub 上不存在），
     # 实测可拉的：v3.8.3-patch.15 > .14 > .12（按新到旧）。
-    # 换 tag 只改这一行，然后 docker compose ... up -d（会重建容器）。
+    # 现网由 production.sh 叠加 OSS 与 retention override；不要单改此 tag 回退。
     image: openim/openim-server:v3.8.3-patch.15
     container_name: openim-api
     logging: *default-logging

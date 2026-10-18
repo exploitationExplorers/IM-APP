@@ -1,0 +1,11 @@
+{
+  "services": {
+    "api": {
+      "environment": {
+        "GROUP_RETENTION_MODE": "visibility_only",
+        "GROUP_RETENTION_ALL_GROUPS": "false",
+        "GROUP_RETENTION_GROUP_IDS": "${RETENTION_CANARY_GROUP_ID:?Set one canonical business group UUID in private/retention.env}"
+      }
+    }
+  }
+}

@@ -17,6 +17,8 @@ const binaries = {
   // REQUIRED: the unpatched transfer allocator resets Mongo min_seq.
   'openim-msgtransfer': './cmd/openim-msgtransfer',
 }
+const productionFiles = ['api.install.compose.json', 'api.enable.compose.json', 'api.canary.compose.json',
+  'openim.bridge.compose.json', 'compose-functions.sh', 'prepare-production.py']
 
 function overlayFiles() {
   return {
@@ -69,7 +71,10 @@ function build() {
     fs.mkdirSync(path.join(output, 'migrations'))
     for (const file of migrations) fs.copyFileSync(path.join(root, 'IM-APP-server/migrations', file), path.join(output, 'migrations', file))
     for (const [name, data] of Object.entries(overlayFiles())) fs.writeFileSync(path.join(output, name), data, { flag: 'wx' })
-    for (const file of ['README.md', 'ACCEPTANCE.md', 'BODY-PURGE.md', 'openapi.json', 'postman_collection.json']) fs.copyFileSync(path.join(__dirname, file), path.join(output, file))
+    for (const file of ['README.md', 'ACCEPTANCE.md', 'BODY-PURGE.md', 'openapi.json', 'postman_collection.json', ...productionFiles]) fs.copyFileSync(path.join(__dirname, file), path.join(output, file))
+    for (const file of ['production.sh', 'PRODUCTION.md']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(output, file))
+    const readme = path.join(output, 'README.md')
+    fs.writeFileSync(readme, fs.readFileSync(readme, 'utf8').replace('](../PRODUCTION.md)', '](PRODUCTION.md)'))
     const files = {}
     function collect(directory) {
       for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name))) {
@@ -99,7 +104,7 @@ function build() {
   }
 }
 
-module.exports = { overlayFiles, binaries, migrations, validateBinary }
+module.exports = { overlayFiles, binaries, migrations, productionFiles, validateBinary }
 if (require.main === module) {
   try { build() } catch {
     console.error('RETENTION_LOCAL_BUILD_FAILED: no deployment performed; preserve output and inspect local compiler/test errors.')

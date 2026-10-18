@@ -97,6 +97,8 @@ OpenAPI/Postman 见本目录的 `openapi.json`、`postman_collection.json`。GET
 
 ## 4. 宝塔手动发布顺序（尚未执行）
 
+**可执行的新构建/部署入口见 [deploy/PRODUCTION.md](../PRODUCTION.md)。** 已补齐基础 Compose 的 OSS/群策略变量映射；`production.sh` 始终叠加原 OSS 私密 override 和本次配置，替代旧裸 `docker compose up --build`。`prepare-production.py` 在已核实后端生成私密桥 key/固定镜像配置，不执行部署或迁移。安装阶段显式 off，验收后再开启群任务。
+
 **当前不能越过验收门禁直接开启全量清理。先完成独立环境和手机验收。**
 
 1. 后端 `8.154.44.197`：只读确认当前业务/OpenIM 容器名、镜像 ID、挂载、启动命令、进程数量、可用空间。不要输出完整 `docker inspect`/环境变量；它们含密码和密钥。
