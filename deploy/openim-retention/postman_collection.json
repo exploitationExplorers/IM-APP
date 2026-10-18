@@ -1,0 +1,10 @@
+{
+  "info": {"name": "Private retention visibility v2 (NO PUBLIC EXPOSURE)", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json", "description": "Internal network only. Separate key; no real credentials in exports. Apply logically hides the receipt's group prefix and does not delete files."},
+  "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{retention_adapter_key}}", "type": "string"}]},
+  "variable": [{"key": "base", "value": "http://openim-api:19093"}, {"key": "retention_adapter_key", "value": ""}, {"key": "groupId", "value": "11111111111141118111111111111111"}, {"key": "snapshotId", "value": ""}, {"key": "minVisibleSeq", "value": ""}],
+  "item": [
+    {"name": "Capabilities", "request": {"method": "GET", "url": {"raw": "{{base}}/internal/retention/capabilities", "host": ["{{base}}"], "path": ["internal", "retention", "capabilities"]}}},
+    {"name": "Classified snapshot (private group)", "request": {"method": "GET", "url": {"raw": "{{base}}/internal/retention/snapshot?groupId={{groupId}}", "host": ["{{base}}"], "path": ["internal", "retention", "snapshot"], "query": [{"key": "groupId", "value": "{{groupId}}"}]}}},
+    {"name": "Apply exact receipt boundary (changes visibility)", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "url": {"raw": "{{base}}/internal/retention/apply", "host": ["{{base}}"], "path": ["internal", "retention", "apply"]}, "body": {"mode": "raw", "raw": "{\"snapshotId\":\"{{snapshotId}}\",\"conversationId\":\"sg_{{groupId}}\",\"minVisibleSeq\":{{minVisibleSeq}}}", "options": {"raw": {"language": "json"}}}}}
+  ]
+}

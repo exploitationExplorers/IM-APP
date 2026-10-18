@@ -51,6 +51,7 @@ import {
 } from '@/utils/openim'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { mergeVideoContent } from '@/utils/chatMedia'
+import { groupRetention } from '@/utils/groupRetention'
 import {
   isIMNotification,
   isGroupAnnouncementNotice,
@@ -122,6 +123,39 @@ export const useChatStore = defineStore('chat', () => {
    * 所以「回到前台补拉当前会话」这件事只能由 store 代劳——room.vue 在这里报备自己是谁。
    */
   let activeConversationId = ''
+  let sessionGeneration = 0
+  let retentionTimer: ReturnType<typeof setTimeout> | undefined
+
+  function sanitizeRetentionPreview(conv: Conversation): Conversation {
+    const latest = { seq: conv.lastMessageSeq }
+    if (groupRetention.removed(conv.id, latest))
+      return { ...conv, lastMessage: '', lastMessageAt: '', unreadCount: 0, groupAtType: 0, highlightTags: [] }
+    const unreadCount = groupRetention.unread(conv.id, latest, conv.unreadCount)
+    return unreadCount === conv.unreadCount ? conv : { ...conv, unreadCount }
+  }
+
+  function pruneRetainedHistory(ids: string[]) {
+    for (const id of ids) {
+      const old = messagesMap.value[id]
+      if (old) messagesMap.value = { ...messagesMap.value, [id]: groupRetention.filter(id, old) }
+    }
+    const next = { ...rawMessages.value }
+    for (const [key, raw] of Object.entries(next)) {
+      if (groupRetention.removed(conversationIdOf(raw), raw)) delete next[key]
+    }
+    rawMessages.value = next
+    conversations.value = conversations.value.map(sanitizeRetentionPreview)
+  }
+
+  function scheduleRetentionSync() {
+    if (retentionTimer !== undefined) return
+    retentionTimer = setTimeout(async () => {
+      retentionTimer = undefined
+      if (!unsubscribers.length || !imUserId.value) return
+      await groupRetention.sync(conversations.value.map((c) => c.id))
+      if (unsubscribers.length) scheduleRetentionSync()
+    }, 30_000)
+  }
 
   /**
    * OpenIM hideConversation 在 H5 WASM 不可用；用本地隐藏列表兜底。
@@ -339,6 +373,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function rememberRaw(item: MessageItem) {
     if (!item?.clientMsgID) return
+    if (groupRetention.removed(conversationIdOf(item), item)) return
     rawMessages.value = { ...rawMessages.value, [item.clientMsgID]: item }
     trimRawMessagesWindow(conversationIdOf(item))
   }
@@ -415,6 +450,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function decorateConversation(conv: Conversation): Conversation {
+    conv = sanitizeRetentionPreview(conv)
     const stored = unreadAnnouncementState(announcementOwnerId(), conv.id)
     const unread =
       stored === true || (stored !== false && conv.groupAtType === GroupAtType.AtGroupNotice)
@@ -438,7 +474,7 @@ export const useChatStore = defineStore('chat', () => {
         if (remark) next.title = remark
       }
     }
-    return next
+    return sanitizeRetentionPreview(next)
   }
 
   function applyContactRemarks() {
@@ -455,6 +491,7 @@ export const useChatStore = defineStore('chat', () => {
   function appendMessage(item: MessageItem) {
     if (!item?.clientMsgID) return
     const incomingConversationId = conversationIdOf(item)
+    if (groupRetention.removed(incomingConversationId, item)) return
     // 退出群与普通“删除会话”不同：OpenIM 异步退群完成前仍可能推送尾部消息，
     // 这些消息不能把已经退出的群重新插回会话列表。
     if (incomingConversationId && exitedGroupIds.has(incomingConversationId)) return
@@ -524,6 +561,8 @@ export const useChatStore = defineStore('chat', () => {
     patchConversation(message.conversationId, {
       lastMessage: previewOf(message),
       lastMessageAt: message.createdAt,
+      lastMessageSeq: message.seq,
+      lastMessageId: message.id,
       ...(viewing || isSelf
         ? { unreadCount: 0 }
         : {
@@ -619,6 +658,7 @@ export const useChatStore = defineStore('chat', () => {
     const list = source
       .map((item) => coerceMessage(item) || item)
       .filter((item): item is MessageItem => !!item?.clientMsgID)
+      .filter((item) => !groupRetention.removed(conversationIdOf(item), item))
     if (!list.length) return
     list.forEach(appendMessage)
     // 收到消息后统一尝试提示音：一批消息只响一次
@@ -675,7 +715,8 @@ export const useChatStore = defineStore('chat', () => {
     const nextTime = new Date(next.lastMessageAt).getTime() || 0
     let merged =
       prev.lastMessage && prevTime > nextTime
-        ? { ...next, lastMessage: prev.lastMessage, lastMessageAt: prev.lastMessageAt }
+        ? { ...next, lastMessage: prev.lastMessage, lastMessageAt: prev.lastMessageAt,
+            lastMessageSeq: prev.lastMessageSeq, lastMessageId: prev.lastMessageId }
         : next
     // 正在看的会话：SDK 推回未读也不要盖掉本地已清的红点
     if (activeConversationId && merged.id === activeConversationId) {
@@ -721,7 +762,7 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
     }
-    return merged
+    return sanitizeRetentionPreview(merged)
   }
 
   function dropRevokedMessage(conversationId: string, clientMsgId: string, tip = '消息已撤回') {
@@ -812,12 +853,16 @@ export const useChatStore = defineStore('chat', () => {
       onUserStatusChanged((state) => {
         onlineStatus.value[state.userID] = state.status
       }),
+      groupRetention.subscribe(pruneRetainedHistory),
     ]
+    scheduleRetentionSync()
   }
 
   function unsubscribeRealtime() {
     unsubscribers.forEach((off) => off())
     unsubscribers = []
+    if (retentionTimer !== undefined) clearTimeout(retentionTimer)
+    retentionTimer = undefined
   }
 
   async function loadConversations() {
@@ -850,6 +895,7 @@ export const useChatStore = defineStore('chat', () => {
       // ★ 必须先对账再过滤：仍留在 exitedGroupIds 里的会话会被下面的 filter 直接筛掉，
       //   那样就永远没机会做成员校验恢复了（见 reconcileExitedGroups）。
       await reconcileExitedGroups(list)
+      await groupRetention.sync(list.map((item) => String(item.conversationID || (item as unknown as Record<string, unknown>).ConversationID || '')))
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       conversations.value = sortConversations(
         list
@@ -1090,13 +1136,14 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadMessages(conversationId: string) {
     perfMarkStart('chat:load-messages')
-    const existing = messagesMap.value[conversationId] || []
+    let existing = messagesMap.value[conversationId] || []
     perfMarkStart('chat:load-messages:sdk')
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
+    existing = groupRetention.filter(conversationId, existing)
     perfMarkEnd('chat:load-messages:sdk', `${messageList.length} msgs`)
     messageList.forEach(rememberRaw)
     const mapped = messageList
-      .filter((item) => !messagePinPayloadOf(item))
+      .filter((item) => !messagePinPayloadOf(item) && !groupRetention.removed(conversationId, item))
       .map(toChatMessage)
     // App 历史接口偶发空结果时不要把房间里刚发出的消息整表冲掉
     if (!mapped.length && existing.length) {
@@ -1112,7 +1159,7 @@ export const useChatStore = defineStore('chat', () => {
       : mapped
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: mergeLocalPending(withRead, existing),
+      [conversationId]: groupRetention.filter(conversationId, mergeLocalPending(withRead, existing)),
     }
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
     trimMessageWindow(conversationId)
@@ -1158,7 +1205,7 @@ export const useChatStore = defineStore('chat', () => {
       return false
     }
     messageList.forEach(rememberRaw)
-    const older = messageList.filter((item) => !messagePinPayloadOf(item)).map(toChatMessage)
+    const older = messageList.filter((item) => !messagePinPayloadOf(item) && !groupRetention.removed(conversationId, item)).map(toChatMessage)
     if (!older.length) {
       perfMarkEnd('chat:load-more-messages', 'empty-mapped')
       return false
@@ -1168,7 +1215,7 @@ export const useChatStore = defineStore('chat', () => {
     // 离开聊天室时由 trimConversationMemory 回收。
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: [...older, ...list],
+      [conversationId]: groupRetention.filter(conversationId, [...older, ...list]),
     }
     perfMarkEnd('chat:load-more-messages', `${older.length} msgs`)
     return true
@@ -1195,8 +1242,8 @@ export const useChatStore = defineStore('chat', () => {
       historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
       if (!messageList.length) return false
       messageList.forEach(rememberRaw)
-      const older = messageList.filter((item) => !messagePinPayloadOf(item)).map(toChatMessage)
-      const merged = [...older, ...list]
+      const older = messageList.filter((item) => !messagePinPayloadOf(item) && !groupRetention.removed(conversationId, item)).map(toChatMessage)
+      const merged = groupRetention.filter(conversationId, [...older, ...list])
       messagesMap.value = { ...messagesMap.value, [conversationId]: merged }
       if (merged.some((m) => m.id === clientMsgId)) {
         retainFromMessage(conversationId, clientMsgId)
@@ -1270,7 +1317,7 @@ export const useChatStore = defineStore('chat', () => {
       })
       rawMessages.value = nextRaw
     }
-    patchConversation(conversationId, { lastMessage: '', lastMessageAt: '' })
+    patchConversation(conversationId, { lastMessage: '', lastMessageAt: '', lastMessageSeq: undefined, lastMessageId: undefined })
   }
 
   /**
@@ -1423,12 +1470,14 @@ export const useChatStore = defineStore('chat', () => {
     send: () => Promise<MessageItem>,
     alreadyInserted = false,
   ) {
+    const generation = sessionGeneration
     if (!alreadyInserted) {
       const list = messagesMap.value[conversationId] || []
       messagesMap.value = { ...messagesMap.value, [conversationId]: [...list, placeholder] }
     }
     try {
       const sent = await send()
+      if (generation !== sessionGeneration) throw new Error('登录状态已变化，请重新进入会话')
       rememberRaw(sent)
       const mapped = toChatMessage(sent)
       const withCover =
@@ -1440,26 +1489,51 @@ export const useChatStore = defineStore('chat', () => {
       const isGroup = requireConversation(conversationId).type === 'group'
       const delivered = isGroup ? { ...withCover, trackGroupRead: true } : withCover
       replaceMessage(conversationId, placeholder.id, delivered)
+      // A new preview must carry its own seq (including unknown/zero), not the
+      // previous message's expired seq. Keep a newer realtime/parallel send.
+      await reappearConversation(conversationId)
+      if (generation !== sessionGeneration) throw new Error('登录状态已变化，请重新进入会话')
+      const current = requireConversation(conversationId)
+      const newerSeq = !!current.lastMessageSeq && !!withCover.seq && current.lastMessageSeq > withCover.seq
+      const newerTime = (Date.parse(current.lastMessageAt) || 0) > (Date.parse(withCover.createdAt) || 0)
+      if (!current.lastMessage || (!newerSeq && !newerTime)) {
+        patchConversation(conversationId, sanitizeRetentionPreview({
+          ...current,
+          lastMessage: previewOf(withCover),
+          lastMessageAt: withCover.createdAt,
+          lastMessageSeq: withCover.seq,
+          lastMessageId: withCover.id,
+        }))
+      }
       // App 原生发送成功回调经常暂时没有 seq；群聊已读游标必须依赖 seq。
       // 后台短轮询本地库补齐，不阻塞发送成功 UI，也不会按群成员数放大请求量。
       if (isGroup && !withCover.seq) {
         void resolveMessageSeq(conversationId, withCover.id, sent).then((resolved) => {
-          if (!resolved.seq) return
-          if (resolved.message) rememberRaw(resolved.message)
+          if (!resolved.seq || generation !== sessionGeneration ||
+            !messagesMap.value[conversationId]?.some((m) => m.id === withCover.id)) return
+          const resolvedRaw = resolved.message || rawMessages.value[withCover.id]
+          if (groupRetention.removed(conversationId, { seq: resolved.seq })) {
+            const nextRaw = { ...rawMessages.value }
+            delete nextRaw[withCover.id]
+            rawMessages.value = nextRaw
+          } else if (resolvedRaw) {
+            rememberRaw({ ...resolvedRaw, seq: resolved.seq })
+          }
           replaceMessage(conversationId, withCover.id, {
             ...delivered,
             seq: resolved.seq,
             trackGroupRead: true,
           })
+          const preview = conversations.value.find((c) => c.id === conversationId)
+          if (preview?.lastMessageId === withCover.id) {
+            patchConversation(conversationId, sanitizeRetentionPreview({ ...preview, lastMessageSeq: resolved.seq }))
+          }
         }).catch(() => undefined)
       }
-      // 自己给已隐藏的会话主动发消息时，让该会话重新出现在列表顶部
-      await reappearConversation(conversationId)
-      patchConversation(conversationId, {
-        lastMessage: previewOf(withCover),
-        lastMessageAt: withCover.createdAt,
-      })
     } catch (e) {
+      // A send/seq callback from the previous account must not reinsert its
+      // placeholder or raw message into the next account's store after reset.
+      if (generation !== sessionGeneration) throw e
       replaceMessage(conversationId, placeholder.id, { ...placeholder, status: 'failed' })
       const msg = (e as Error)?.message || ''
       if (isNotInGroupIMError(e) || isGroupUnavailableError(msg)) {
@@ -1499,7 +1573,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!replaced && !next.some((m) => m.id === message.id)) next.push(message)
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: next,
+      [conversationId]: groupRetention.filter(conversationId, next),
     }
   }
 
@@ -1807,6 +1881,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function reset() {
+    sessionGeneration++
     unsubscribeRealtime()
     conversations.value = []
     messagesMap.value = {}

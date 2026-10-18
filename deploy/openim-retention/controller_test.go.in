@@ -1,0 +1,40 @@
+package controller
+
+import (
+	"context"
+	"testing"
+
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
+	"github.com/openimsdk/protocol/constant"
+)
+
+type imAppRetentionSeqStub struct { cache.SeqConversationCache }
+func (*imAppRetentionSeqStub) GetMinSeq(_ context.Context, id string) (int64,error) { if id == "sg_group" { return 10,nil }; return 0,nil }
+
+type imAppRetentionMsgStub struct { database.Msg; calls int }
+func (*imAppRetentionMsgStub) GetLastMessage(_ context.Context, id string) (*model.MsgInfoModel,error) {
+	seq := int64(10); if id == "sg_group" { seq = 9 }
+	return &model.MsgInfoModel{Msg:&model.MsgDataModel{Seq:seq,ContentType:constant.Text,Content:"body"}},nil
+}
+func (s *imAppRetentionMsgStub) FindOneByDocID(context.Context,string) (*model.MsgDocModel,error) {
+	s.calls++
+	rows := make([]*model.MsgInfoModel,100)
+	rows[9] = &model.MsgInfoModel{Msg:&model.MsgDataModel{Seq:10,ContentType:constant.Text,Content:"body"}}
+	return &model.MsgDocModel{Msg:rows},nil
+}
+
+func TestIMAppRetentionLastAndLocate(t *testing.T) {
+	ctx := context.Background()
+	messages := &imAppRetentionMsgStub{}
+	db := &commonMsgDatabase{seqConversation:&imAppRetentionSeqStub{},msgDocDatabase:messages}
+	last, err := db.GetLastMessage(ctx, []string{"sg_group","si_a_b"},"owner")
+	if err != nil || last["sg_group"] != nil || last["si_a_b"] == nil { t.Fatal("expired preview returned or single chat changed", err) }
+	for _, seq := range []int64{9,10,11} {
+		found, err := db.FindOneByDocIDs(ctx, []string{"sg_group"},map[string]int64{"sg_group":seq})
+		if err != nil { t.Fatal(err) }
+		if (found["sg_group"] != nil) != (seq==10) { t.Fatal("locate returned expired/missing message or lost retained message") }
+	}
+	if messages.calls != 2 { t.Fatal("expired locator read source message") }
+}

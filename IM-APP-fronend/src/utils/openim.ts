@@ -35,6 +35,7 @@ import { isOSSStorageUrl } from '@/utils/storage-url'
 import type { PlusResolveLocalFile } from '@/types/plus-io'
 import { preserveForwardMedia } from '@/api/forward'
 import { mayContainForwardMedia, snapshotFromMessage, withForwardSnapshot } from '@/utils/forwardSnapshot'
+import { groupRetention, retentionSeq } from '@/utils/groupRetention'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
 const H5_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 5 // Warn : Silent
@@ -171,6 +172,7 @@ function waitToRetrySend(attempt: number, epoch: number): Promise<boolean> {
  */
 function resetLoginCache() {
   imUserId.value = ''
+  groupRetention.setOwner('')
   tokenExpireAt = 0
   connected = false
   serverSyncReady = false
@@ -526,6 +528,7 @@ async function getSdkLoginUserId(): Promise<string> {
 
 function rememberLogin(imToken: IMTokenResult): string {
   imUserId.value = imToken.userId
+  groupRetention.setOwner(imToken.userId)
   tokenExpireAt = Date.now() + Math.max(0, imToken.expireSec - 300) * 1000
   connected = true // 登录 + 同步已成功，视为已连上服务端
   boundAccessToken = getToken()
@@ -972,7 +975,10 @@ export async function getHistoryMessages(
   count = 20,
   startClientMsgID = '',
 ): Promise<{ messageList: MessageItem[]; isEnd: boolean }> {
-  return callHistoryWhenReady(conversationID, count, startClientMsgID)
+  await groupRetention.sync([conversationID])
+  const result = await callHistoryWhenReady(conversationID, count, startClientMsgID)
+  const filtered = groupRetention.filter(conversationID, result.messageList)
+  return { messageList: filtered, isEnd: result.isEnd || filtered.length < result.messageList.length }
 }
 
 /** 从新到旧分页拉出会话历史，供搜索 / 媒体页使用 */
@@ -2686,10 +2692,11 @@ function conversationBoolField(item: ConversationItem, camel: string, pascal: st
 
 export function toConversation(item: ConversationItem): Conversation {
   const raw = item as ConversationItem & Record<string, unknown>
+  const conversationID = String(raw.conversationID ?? raw.ConversationID ?? '')
   const conversationType = Number(raw.conversationType ?? raw.ConversationType ?? SessionType.Single)
   const isGroup = conversationType !== SessionType.Single
   const groupId =
-    String(raw.groupID ?? raw.GroupID ?? '') || groupIdFromConversationId(item.conversationID)
+    String(raw.groupID ?? raw.GroupID ?? '') || groupIdFromConversationId(conversationID)
   const remark = isGroup ? groupRemarkFromEx(conversationEx(item)) : ''
   const unreadCount = conversationNumericField(item, 'unreadCount', 'UnreadCount')
   const groupAtType = conversationNumericField(item, 'groupAtType', 'GroupAtType')
@@ -2699,7 +2706,8 @@ export function toConversation(item: ConversationItem): Conversation {
   const latestMsg = (raw.latestMsg ?? raw.LatestMsg) as ConversationItem['latestMsg']
   const latestMsgSendTime = Number(raw.latestMsgSendTime ?? raw.LatestMsgSendTime ?? 0)
   const recvMsgOpt = conversationNumericField(item, 'recvMsgOpt', 'RecvMsgOpt')
-  const conversationID = String(raw.conversationID ?? raw.ConversationID ?? item.conversationID)
+  const latest = coerceMessage(latestMsg)
+  const latestRemoved = groupRetention.removed(conversationID, latest)
   let userID = String(raw.userID ?? raw.UserID ?? '')
   // App 原生偶发不带 userID，备注覆盖和发消息都依赖 peer，从 si_ 会话 id 补回来
   if (!isGroup && !userID) {
@@ -2712,16 +2720,18 @@ export function toConversation(item: ConversationItem): Conversation {
     avatar:
       faceURL ||
       (isGroup ? APP_CONFIG.defaultGroupAvatarUrl : APP_CONFIG.defaultAvatarUrl),
-    lastMessage: summarize(latestMsg),
-    lastMessageAt: toISOTime(latestMsgSendTime),
-    unreadCount,
+    lastMessage: latestRemoved ? '' : summarize(latestMsg),
+    lastMessageAt: latestRemoved ? '' : toISOTime(latestMsgSendTime),
+    lastMessageSeq: retentionSeq(latest) || undefined,
+    lastMessageId: latest?.clientMsgID || undefined,
+    unreadCount: latestRemoved ? 0 : groupRetention.unread(conversationID, latest, unreadCount),
     pinned: conversationBoolField(item, 'isPinned', 'IsPinned'),
     pinnedMessage: pinnedMessageFromEx(conversationEx(item)),
     recvMsgOpt,
     peerUserId: userID || undefined,
     groupId: groupId || undefined,
-    groupAtType,
-    highlightTags: highlightTagsOf(atType, false),
+    groupAtType: latestRemoved ? 0 : groupAtType,
+    highlightTags: latestRemoved ? [] : highlightTagsOf(atType, false),
   }
 }
 
@@ -3390,7 +3400,14 @@ export async function searchLocalMessages(params: {
   }
   try {
     const res = await imCall<unknown>(IMMethods.SearchLocalMessages, payload)
-    return normalizeLocalMessageSearchResult(res)
+    const hits = normalizeLocalMessageSearchResult(res)
+    await groupRetention.sync(hits.map((hit) => hit.conversationID))
+    return hits.flatMap((hit) => {
+      const messages = groupRetention.filter(hit.conversationID, hit.messages)
+      if (!messages.length) return []
+      return [{ ...hit, messages, messageCount: messages.length, clientMsgID: messages[0].clientMsgID,
+        preview: messageSearchPreview(messages[0]) }]
+    })
   } catch {
     // H5 / 旧基座偶发无此方法：回退为空，调用方仍可用标题/摘要过滤
     return []
@@ -3721,12 +3738,17 @@ export async function findLocalMessage(
   clientMsgID: string,
 ): Promise<MessageItem | null> {
   if (!conversationID || !clientMsgID) return null
+  await groupRetention.sync([conversationID])
   const tryCall = (params: unknown) => imCall<unknown>('findMessageList' as IMMethods, params)
+  const take = (res: unknown) => {
+    const item = parseFindMessageResult(res, clientMsgID)
+    return groupRetention.removed(conversationID, item) ? null : item
+  }
   try {
-    return parseFindMessageResult(await tryCall([{ conversationID, clientMsgIDList: [clientMsgID] }]), clientMsgID)
+    return take(await tryCall([{ conversationID, clientMsgIDList: [clientMsgID] }]))
   } catch {
     try {
-      return parseFindMessageResult(await tryCall({ conversationID, clientMsgIDList: [clientMsgID] }), clientMsgID)
+      return take(await tryCall({ conversationID, clientMsgIDList: [clientMsgID] }))
     } catch {
       return null
     }

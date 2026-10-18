@@ -100,6 +100,10 @@ export interface Conversation {
   avatar: string
   lastMessage: string
   lastMessageAt: string
+  /** Authoritative SDK latest-message seq; used to suppress expired previews. */
+  lastMessageSeq?: number
+  /** Client message ID belonging to this preview, fencing delayed native seq ACKs. */
+  lastMessageId?: string
   unreadCount: number
   /** 会话预览红色提醒，如 [有人@我]、[有新公告] */
   highlightTags?: string[]

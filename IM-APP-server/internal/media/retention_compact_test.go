@@ -1,0 +1,48 @@
+package media
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestRetentionCountProvenPrefix(t *testing.T) {
+	full := retentionSnapshot(21000)
+	expected, err := PlanGroupRetention(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := RetentionMinSeq(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact := full
+	compact.Messages = full.Messages[len(full.Messages)-500:]
+	compact.OverCountThrough = compact.Messages[0].Seq - 1
+	got, err := PlanGroupRetention(compact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundary, err := RetentionMinSeq(got)
+	if err != nil || boundary != want || !reflect.DeepEqual(got.Kept, expected.Kept) {
+		t.Fatal("tail proof differs from full actual-message count", boundary, want, err)
+	}
+	if got.OverCountThrough != compact.OverCountThrough {
+		t.Fatal("prefix proof lost")
+	}
+	for _, mutate := range []func(*RetentionSnapshot){
+		func(s *RetentionSnapshot) { s.Messages = s.Messages[1:] },
+		func(s *RetentionSnapshot) {
+			s.Messages = append([]RetentionMessage(nil), s.Messages...)
+			s.Messages[0].Visibility = "hidden"
+		},
+		func(s *RetentionSnapshot) { s.OverCountThrough = s.Watermark },
+		func(s *RetentionSnapshot) { s.OverCountThrough = -1 },
+		func(s *RetentionSnapshot) { s.OverCountThrough = s.Messages[0].Seq },
+	} {
+		invalid := compact
+		mutate(&invalid)
+		if _, err := PlanGroupRetention(invalid); err == nil {
+			t.Fatal("invalid compact proof accepted")
+		}
+	}
+}

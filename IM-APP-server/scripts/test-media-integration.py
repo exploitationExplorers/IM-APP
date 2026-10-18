@@ -64,7 +64,7 @@ def main():
         env["IM_APP_MEDIA_TEST_ALLOW_SCHEMA_INIT"] = "1"
         print("MEDIA_INTEGRATION_BEGIN: disposable localhost database; no existing volumes", flush=True)
         result = subprocess.run(["go", "test", "./internal/repository", "-run",
-                                 "^Test((Favorite|Forward)Media|Retention)PostgresIntegration$", "-count=1", "-v"],
+                                 "^Test((Favorite|Forward)Media|Retention|RetentionVisibility)PostgresIntegration$", "-count=1", "-v"],
                                 cwd=root, env=env, timeout=180)
         return result.returncode
     finally:

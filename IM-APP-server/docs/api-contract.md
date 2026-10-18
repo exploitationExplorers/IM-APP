@@ -4,6 +4,18 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 架构说明见 [architecture.md](./architecture.md)。
 
+## 群历史清理状态（只读）
+
+`GET /api/v1/im/group-retention/states?conversationIds=sg_<32位群ID>[,sg_<32位群ID>]`，Bearer 鉴权。
+仅接受这一个 query 参数、1～50 个不重复的小写群会话 ID，不接受 GET body。
+成功返回 `data.items=[{conversationId,minVisibleSeq,revision,updatedAt}]`，`Cache-Control: private, no-store`。
+仅查询当前有效成员及有效账号有权访问的群；无权访问或尚无已执行状态的群省略，空数组不撤销已知边界。
+`minVisibleSeq` 以下的正数 seq 不应再进入聊天历史、搜索、媒体列表或会话预览；seq=0 的本地发送中消息不因此丢弃。
+客户端按账号持久化并只接受递增版本和不后退的边界，超时、空结果、后端回滚不应复活旧消息。
+400 为参数错误，401 为未登录，503 为状态服务不可用；上游错误、群消息正文和凭据不出现在响应中。
+本接口没有执行清理或发布边界的写能力；预览计划永远不能作为已清理结果返回。
+详见 `openapi.yaml` 与 `group-retention.postman_collection.json`。
+
 ## 统一响应
 
 统一响应格式：

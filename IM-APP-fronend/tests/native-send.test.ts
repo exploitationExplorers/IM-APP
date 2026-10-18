@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   sendMessageNotOss: vi.fn(),
   reportSendFailure: vi.fn(),
   preserveForwardMedia: vi.fn(),
+  fetchRetention: vi.fn(),
 }))
 
 vi.mock('openim-uniapp-polyfill', async () => ({
@@ -26,6 +27,7 @@ vi.mock('@/utils/platform', () => ({
 }))
 vi.mock('@/api/im', () => ({ reportSendFailure: mocks.reportSendFailure }))
 vi.mock('@/api/forward', () => ({ preserveForwardMedia: mocks.preserveForwardMedia }))
+vi.mock('@/api/groupRetention', () => ({ fetchGroupRetentionStates: mocks.fetchRetention }))
 vi.mock('@/utils/request', () => ({ getToken: () => '' }))
 vi.mock('@/stores/contact', () => ({ useContactStore: vi.fn() }))
 
@@ -36,7 +38,12 @@ import {
   sendVoiceMessage,
   sendForwardMessage,
   sendQuoteMessage,
+  getHistoryMessages,
+  searchLocalMessages,
+  findLocalMessage,
+  toConversation,
 } from '@/utils/openim'
+import { groupRetention } from '@/utils/groupRetention'
 
 const group = {
   conversationId: 'sg_group-test',
@@ -55,6 +62,7 @@ type NativeReply = (reply: { errCode: number; data: unknown }) => void
 
 beforeEach(() => {
   vi.resetAllMocks()
+  groupRetention.setOwner('')
   mocks.app = true
   const success = (_operation: string, params: NativeParams, callback: NativeReply) => {
     callback({
@@ -70,6 +78,38 @@ beforeEach(() => {
       sendMessage: mocks.sendMessage,
       sendMessageNotOss: mocks.sendMessageNotOss,
     }),
+  })
+})
+
+describe.each([true, false])('SDK retention ingress (native=%s)', (app) => {
+  const id = 'sg_aabbccdd112243448566778899aabbcc'
+  const old = Object.freeze({ ClientMsgID: 'expired', ContentType: 101, Seq: '99', TextElem: { Content: 'expired text' } })
+  const kept = Object.freeze({ ClientMsgID: 'kept', ContentType: 101, Seq: '100', TextElem: { Content: 'kept text' } })
+  beforeEach(() => {
+    mocks.app = app
+    mocks.fetchRetention.mockResolvedValue({ items: [{ conversationId: id, minVisibleSeq: 100, revision: 1, updatedAt: '2026-10-18T06:00:00Z' }] })
+    groupRetention.setOwner('retention-owner')
+  })
+  it('filters native/Web SDK history and terminates pagination at the prefix', async () => {
+    mocks.asyncApi.mockResolvedValue({ MessageList: [old, kept], IsEnd: false })
+    const result = await getHistoryMessages(id)
+    expect(result.messageList.map((m) => m.clientMsgID)).toEqual(['kept'])
+    expect(result.isEnd).toBe(true)
+    expect(old.Seq).toBe('99')
+  })
+  it('does not expose expired search matches or allow locating them', async () => {
+    mocks.asyncApi.mockResolvedValue({ SearchResultItems: [{ ConversationID: id, MessageCount: 2, MessageList: [old, kept] }] })
+    const hits = await searchLocalMessages({ keyword: 'text', conversationID: id })
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toMatchObject({ messageCount: 1, clientMsgID: 'kept', preview: 'kept text' })
+    mocks.asyncApi.mockResolvedValue({ FindResultItems: [{ ConversationID: id, MessageList: [old] }] })
+    expect(await findLocalMessage(id, 'expired')).toBeNull()
+  })
+  it('clears stale native preview/@ badges and caps cached unread counts', async () => {
+    await groupRetention.sync([id])
+    const conversation = (latest: unknown) => Object.freeze({ ConversationID: id, ConversationType: 3, LatestMsg: JSON.stringify(latest), UnreadCount: 105, GroupAtType: 1, ShowName: 'group' })
+    expect(toConversation(conversation(old) as never)).toMatchObject({ lastMessage: '', unreadCount: 0, groupAtType: 0, highlightTags: [] })
+    expect(toConversation(conversation({ ...kept, Seq: '105' }) as never).unreadCount).toBe(6)
   })
 })
 

@@ -56,26 +56,27 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
-		"favorites":               {"media_archived"},
-		"files":                   {"storage_provider", "storage_bucket"},
-		"report_reasons":          {"id", "target_type", "reason", "language", "sort_order", "status"},
-		"reports":                 {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
-		"report_files":            {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
-		"feedbacks":               {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
-		"app_releases":            {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
-		"forward_tasks":           {"id", "user_id", "source_snapshot", "media_archived", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
-		"forward_media_snapshots": {"user_id", "source_hash", "snapshot", "created_at"},
-		"forward_task_targets":    {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
-		"forward_kafka_outbox":    {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
-		"im_message_recalls":      {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
-		"im_group_read_cursors":   {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
-		"group_member_limit_logs": {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
-		"group_message_purges":    {"group_id", "user_id", "purged_at"},
-		"users":                   {"id", "public_id", "public_id_changed_at", "last_seen_at"},
-		"groups":                  {"id", "public_id", "public_id_changed_at"},
-		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
+		"favorites":                  {"media_archived"},
+		"files":                      {"storage_provider", "storage_bucket"},
+		"report_reasons":             {"id", "target_type", "reason", "language", "sort_order", "status"},
+		"reports":                    {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
+		"report_files":               {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
+		"feedbacks":                  {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
+		"app_releases":               {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
+		"forward_tasks":              {"id", "user_id", "source_snapshot", "media_archived", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
+		"forward_media_snapshots":    {"user_id", "source_hash", "snapshot", "created_at"},
+		"group_retention_visibility": {"group_id", "min_visible_seq", "revision", "updated_at"},
+		"forward_task_targets":       {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
+		"forward_kafka_outbox":       {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
+		"im_message_recalls":         {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
+		"im_group_read_cursors":      {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
+		"group_member_limit_logs":    {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
+		"group_message_purges":       {"group_id", "user_id", "purged_at"},
+		"users":                      {"id", "public_id", "public_id_changed_at", "last_seen_at"},
+		"groups":                     {"id", "public_id", "public_id_changed_at"},
+		"user_stickers":              {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations include 052_media_preservation.sql", err)
+		log.Fatalf("schema check: %v; required migrations include 052 through 055", err)
 	}
 	if cfg.MigrationsMode == "verify" {
 		log.Println("database schema verified; startup migration replay disabled")
@@ -194,6 +195,7 @@ func main() {
 	fileH := &handler.FileHandler{Storage: storageClient, Files: fileRepo}
 	voiceH := &handler.VoiceHandler{Storage: storageClient}
 	imH := &handler.IMHandler{Service: imSvc}
+	retentionH := &handler.GroupRetentionHandler{Reader: &repository.GroupRetentionRepo{DB: pool}}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
 	feedbackH := &handler.FeedbackHandler{Svc: feedbackSvc}
 	appReleaseH := &handler.AppReleaseHandler{Svc: appReleaseSvc}
@@ -408,6 +410,7 @@ func main() {
 			auth.POST("/files/voice", voiceH.UploadVoice)
 
 			auth.POST("/im/token", imH.Token)
+			auth.GET("/im/group-retention/states", retentionH.States)
 			auth.GET("/im/peers/:businessUserId", imH.Peer)
 			auth.GET("/im/groups/:businessGroupId", imH.Group)
 			auth.GET("/im/groups/by-im/:imGroupId", imH.GroupByIM)
@@ -465,15 +468,39 @@ func main() {
 	}
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
-	if cfg.GroupRetentionMode == "queue_only" {
+	if cfg.FavoriteArchiveWorkerEnabled {
+		if cfg.StorageBackend() != "oss" {
+			log.Fatal("legacy favorite archive worker requires OSS")
+		}
+		go (&service.LegacyFavoriteArchiveWorker{Pending: favRepo, Archiver: favSvc}).Run(workerCtx)
+		log.Println("legacy favorite archive worker enabled; bounded copying only, no source deletion")
+	}
+	if cfg.GroupRetentionMode != "off" {
 		if err := db.RequireColumns(workerCtx, pool, map[string][]string{
 			"group_retention_jobs": {"id", "group_id", "run_day", "status", "lease_token", "plan", "committed_watermark"},
 		}); err != nil {
 			log.Fatalf("retention schema check: %v; requires 054_group_retention_plans.sql", err)
 		}
-		retentionScheduler := &service.GroupRetentionScheduler{Store: &repository.GroupRetentionRepo{DB: pool}}
-		go retentionScheduler.RunQueueOnly(workerCtx)
-		log.Println("group retention queue_only enabled; no messages/files are deleted and no client cleanup state is published")
+		retentionRepo := &repository.GroupRetentionRepo{DB: pool, GroupIDs: cfg.GroupRetentionGroupIDs}
+		retentionScheduler := &service.GroupRetentionScheduler{Store: retentionRepo}
+		if cfg.GroupRetentionMode == "queue_only" {
+			go retentionScheduler.RunQueueOnly(workerCtx)
+			log.Println("group retention queue_only enabled; no messages/files are deleted and no client cleanup state is published")
+		} else {
+			if err := db.RequireColumns(workerCtx, pool, map[string][]string{
+				"group_retention_applications": {"job_id", "status", "attempts", "lease_token", "locked_until", "next_attempt_at"},
+			}); err != nil {
+				log.Fatalf("retention apply schema requires migration 055: %v", err)
+			}
+			adapter, err := service.NewRetentionHTTPAdapter(cfg.GroupRetentionAdapterURL, cfg.GroupRetentionAdapterKey)
+			if err != nil {
+				log.Fatal("invalid private retention adapter")
+			}
+			worker := &service.GroupRetentionWorker{Scheduler: retentionScheduler,
+				Applier: &service.GroupRetentionApplier{Store: retentionRepo}, Provider: adapter}
+			go worker.Run(workerCtx)
+			log.Println("group retention visibility_only enabled; source messages and OSS files remain protected")
+		}
 	}
 	if kafkaQueue.Available() {
 		outboxPublisher := &service.ForwardOutboxPublisher{

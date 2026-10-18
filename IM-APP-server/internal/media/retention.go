@@ -15,15 +15,20 @@ const (
 var ErrRetentionSnapshot = errors.New("retention requires a complete, classified group snapshot with trusted server time and committed watermark")
 
 // RetentionSnapshot must come from an authoritative server adapter, never a
-// client's local history. Complete includes all visible history below Watermark;
-// sequence gaps are permitted. This structure grants no deletion capability.
+// client's local history. Complete includes all history still requiring
+// classification. An optional count-proven prefix can be summarized only when
+// at least 500 actual visible messages after it are included. Sequence arithmetic
+// or a reserved maxSeq is never such proof. This grants no object deletion ability.
 type RetentionSnapshot struct {
-	ConversationID string             `json:"conversationId"`
-	SessionType    string             `json:"sessionType"`
-	ServerTime     time.Time          `json:"serverTime"`
-	Watermark      int64              `json:"committedWatermark"`
-	Complete       bool               `json:"complete"`
-	Messages       []RetentionMessage `json:"messages"`
+	// Adapter-issued receipt binds an apply request to the exact persisted snapshot.
+	SnapshotID       string             `json:"snapshotId,omitempty"`
+	ConversationID   string             `json:"conversationId"`
+	SessionType      string             `json:"sessionType"`
+	ServerTime       time.Time          `json:"serverTime"`
+	Watermark        int64              `json:"committedWatermark"`
+	OverCountThrough int64              `json:"overCountThrough,omitempty"`
+	Complete         bool               `json:"complete"`
+	Messages         []RetentionMessage `json:"messages"`
 }
 
 type RetentionMessage struct {
@@ -41,11 +46,15 @@ type RetentionCandidate struct {
 }
 
 type RetentionPlan struct {
-	Mode                string               `json:"mode"`
-	ConversationID      string               `json:"conversationId"`
-	ServerTime          time.Time            `json:"serverTime"`
-	Cutoff              time.Time            `json:"cutoff"`
-	Watermark           int64                `json:"committedWatermark"`
+	SnapshotID     string    `json:"snapshotId,omitempty"`
+	Mode           string    `json:"mode"`
+	ConversationID string    `json:"conversationId"`
+	ServerTime     time.Time `json:"serverTime"`
+	Cutoff         time.Time `json:"cutoff"`
+	Watermark      int64     `json:"committedWatermark"`
+	// Every older sequence is over quota regardless of missing/pending slots.
+	// Candidates contains only explicitly scanned rows, not this summarized prefix.
+	OverCountThrough    int64                `json:"overCountThrough,omitempty"`
 	Kept                []int64              `json:"keptSeqs"`
 	Candidates          []RetentionCandidate `json:"candidates"`
 	HiddenCount         int                  `json:"hiddenCount"`
@@ -57,16 +66,17 @@ type RetentionPlan struct {
 // this output may be used as an authorization to delete objects or messages.
 func PlanGroupRetention(snapshot RetentionSnapshot) (RetentionPlan, error) {
 	if snapshot.SessionType != "group" || !strings.HasPrefix(snapshot.ConversationID, "sg_") ||
-		len(snapshot.ConversationID) <= 3 || snapshot.ServerTime.IsZero() || snapshot.Watermark < 0 || !snapshot.Complete {
+		len(snapshot.ConversationID) <= 3 || snapshot.ServerTime.IsZero() || snapshot.Watermark < 0 || snapshot.Watermark >= 1<<53 ||
+		snapshot.OverCountThrough < 0 || (snapshot.OverCountThrough > 0 && snapshot.OverCountThrough >= snapshot.Watermark) || !snapshot.Complete {
 		return RetentionPlan{}, ErrRetentionSnapshot
 	}
-	plan := RetentionPlan{Mode: "preview_only", ConversationID: snapshot.ConversationID,
+	plan := RetentionPlan{SnapshotID: snapshot.SnapshotID, Mode: "preview_only", ConversationID: snapshot.ConversationID,
 		ServerTime: snapshot.ServerTime.UTC(), Cutoff: snapshot.ServerTime.Add(-GroupRetentionWindow).UTC(),
-		Watermark: snapshot.Watermark, Kept: []int64{}, Candidates: []RetentionCandidate{}}
+		Watermark: snapshot.Watermark, OverCountThrough: snapshot.OverCountThrough, Kept: []int64{}, Candidates: []RetentionCandidate{}}
 	seen := make(map[int64]bool, len(snapshot.Messages))
 	visible := make([]RetentionMessage, 0, len(snapshot.Messages))
 	for _, message := range snapshot.Messages {
-		if message.Seq <= 0 || seen[message.Seq] {
+		if message.Seq <= snapshot.OverCountThrough || message.Seq >= 1<<53 || seen[message.Seq] {
 			return RetentionPlan{}, ErrRetentionSnapshot
 		}
 		seen[message.Seq] = true
@@ -85,6 +95,9 @@ func PlanGroupRetention(snapshot RetentionSnapshot) (RetentionPlan, error) {
 		default:
 			return RetentionPlan{}, ErrRetentionSnapshot
 		}
+	}
+	if snapshot.OverCountThrough > 0 && len(visible) < GroupRetentionCount {
+		return RetentionPlan{}, ErrRetentionSnapshot
 	}
 	sort.Slice(visible, func(i, j int) bool { return visible[i].Seq > visible[j].Seq })
 	for rank, message := range visible {

@@ -40,6 +40,50 @@ tags:
     description: 仅供 OpenIM Server 回调
 
 paths:
+  /api/v1/im/group-retention/states:
+    get:
+      operationId: getGroupRetentionStates
+      summary: 批量读取当前成员可见的已执行群历史清理边界
+      description: |
+        仅返回已由可信适配器确认执行且持久化发布的状态，不返回预览计划。
+        未加入、已退出、无效群以及尚无发布状态的群均省略。空结果不是撤销已知边界。
+        客户端按账号保存且只允许边界递增。禁止 GET body、额外或重复 query 参数。
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: conversationIds
+          required: true
+          schema: {type: string, maxLength: 1799}
+          description: 1 至 50 个不重复的 sg_加32位小写十六进制群会话 ID，以英文逗号分隔。
+      responses:
+        '200':
+          description: 私有且 no-store；data.items 为状态数组，可能为空。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer, example: 0}
+                  message: {type: string}
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        maxItems: 50
+                        items:
+                          type: object
+                          required: [conversationId, minVisibleSeq, revision, updatedAt]
+                          properties:
+                            conversationId: {type: string, pattern: '^sg_[0-9a-f]{32}$'}
+                            minVisibleSeq: {type: integer, format: int64, minimum: 1, maximum: 9007199254740991}
+                            revision: {type: integer, format: int64, minimum: 1}
+                            updatedAt: {type: string, format: date-time}
+        '400': {description: query、群会话 ID、数量、重复项或 GET body 不正确}
+        '401': {description: 未登录}
+        '503': {description: 同步服务暂不可用；客户端保留之前的清理边界}
   /api/v1/auth/register:
     post:
       tags: [Auth Sync]

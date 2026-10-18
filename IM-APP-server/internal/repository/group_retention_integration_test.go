@@ -54,6 +54,43 @@ func TestRetentionPostgresIntegration(t *testing.T) {
 			Messages: []media.RetentionMessage{{Seq: 1, SendTime: now.Add(-169 * time.Hour), Visibility: "visible"}, {Seq: 3, SendTime: now, Visibility: "visible"}}}
 	}
 
+	t.Run("scoped_enqueue_and_claim_exclude_old_unscoped_backlog", func(t *testing.T) {
+		reset()
+		const allowed = "22222222-2222-4222-8222-222222222222"
+		scoped := &repository.GroupRetentionRepo{DB: pool, GroupIDs: []string{allowed}}
+		if n, e := scoped.EnqueueToday(ctx, 200); e != nil || n != 1 {
+			t.Fatal(n, e)
+		}
+		if n, e := repo.EnqueueToday(ctx, 200); e != nil || n != 1 {
+			t.Fatal(n, e)
+		}
+		j, e := scoped.Claim(ctx)
+		if e != nil || j == nil || j.GroupID != allowed {
+			t.Fatal("scope did not fence planning", j, e)
+		}
+		if e = scoped.SavePlan(ctx, *j, snapshot(*j)); e != nil {
+			t.Fatal(e)
+		}
+		if j, e := scoped.Claim(ctx); e != nil || j != nil {
+			t.Fatal("claimed another group's backlog", j, e)
+		}
+		if j, e := repo.Claim(ctx); e != nil || j == nil || j.GroupID == allowed {
+			t.Fatal("outside backlog was modified", j, e)
+		}
+	})
+	t.Run("stored_job_group_cannot_be_rebound_by_caller", func(t *testing.T) {
+		reset()
+		_, _ = repo.EnqueueToday(ctx, 200)
+		j := claim()
+		if j.GroupID == "11111111-1111-4111-8111-111111111111" {
+			j.GroupID = "22222222-2222-4222-8222-222222222222"
+		} else {
+			j.GroupID = "11111111-1111-4111-8111-111111111111"
+		}
+		if e := repo.SavePlan(ctx, j, snapshot(j)); !errors.Is(e, repository.ErrRetentionLease) {
+			t.Fatal("caller changed persisted job's group binding", e)
+		}
+	})
 	t.Run("daily_idempotency_and_active_groups_only", func(t *testing.T) {
 		reset()
 		var wg sync.WaitGroup
