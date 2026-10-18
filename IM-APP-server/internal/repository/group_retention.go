@@ -30,8 +30,14 @@ type RetentionJob struct {
 }
 
 // GroupRetentionRepo has no message/object deletion methods or cleanup cursor.
-// Only a trusted future server adapter can supply snapshots to SavePlan.
-type GroupRetentionRepo struct{ DB *pgxpool.Pool }
+// Only the trusted private server adapter supplies snapshots to SavePlan.
+type GroupRetentionRepo struct {
+	DB *pgxpool.Pool
+	// Scope applies to enqueue AND claims, including old queued/planned jobs.
+	// Empty means all; configuration requires explicit all-groups opt-in before
+	// starting the visibility worker. Published state reads remain unscoped.
+	GroupIDs []string
+}
 
 // EnqueueToday uses database UTC time and a unique group/day constraint. The
 // bounded anti-join also lets a restart/multiple API replicas continue safely.
@@ -42,10 +48,11 @@ func (r *GroupRetentionRepo) EnqueueToday(ctx context.Context, limit int) (int64
 	tag, err := r.DB.Exec(ctx, `
 		INSERT INTO group_retention_jobs(group_id,run_day)
 		SELECT g.id, (NOW() AT TIME ZONE 'UTC')::date FROM groups g
-		WHERE COALESCE(g.status,'active')='active' AND NOT EXISTS (
+		WHERE COALESCE(g.status,'active')='active'
+		AND (COALESCE(cardinality($2::uuid[]),0)=0 OR g.id=ANY($2::uuid[])) AND NOT EXISTS (
 			SELECT 1 FROM group_retention_jobs j WHERE j.group_id=g.id
 			AND j.run_day=(NOW() AT TIME ZONE 'UTC')::date)
-		ORDER BY g.id LIMIT $1 ON CONFLICT (group_id,run_day) DO NOTHING`, limit)
+		ORDER BY g.id LIMIT $1 ON CONFLICT (group_id,run_day) DO NOTHING`, limit, r.GroupIDs)
 	return tag.RowsAffected(), err
 }
 
@@ -53,7 +60,8 @@ func (r *GroupRetentionRepo) Claim(ctx context.Context) (*RetentionJob, error) {
 	// A worker that dies on its eighth attempt must not leave a permanent lease.
 	if _, err := r.DB.Exec(ctx, `UPDATE group_retention_jobs SET status='blocked',
 		lease_token=NULL,locked_until=NULL,failure_code='attempts_exhausted',updated_at=NOW()
-		WHERE status='planning' AND locked_until<=NOW() AND attempts >= $1`, RetentionMaxAttempts); err != nil {
+		WHERE status='planning' AND locked_until<=NOW() AND attempts >= $1
+		AND (COALESCE(cardinality($2::uuid[]),0)=0 OR group_id=ANY($2::uuid[]))`, RetentionMaxAttempts, r.GroupIDs); err != nil {
 		return nil, err
 	}
 	job := &RetentionJob{LeaseToken: uuid.NewString()}
@@ -61,13 +69,14 @@ func (r *GroupRetentionRepo) Claim(ctx context.Context) (*RetentionJob, error) {
 		WITH picked AS (
 			SELECT j.id FROM group_retention_jobs j JOIN groups g ON g.id=j.group_id
 			WHERE COALESCE(g.status,'active')='active' AND j.attempts<$1 AND
+			 (COALESCE(cardinality($3::uuid[]),0)=0 OR g.id=ANY($3::uuid[])) AND
 			 ((j.status IN ('queued','retry') AND j.next_attempt_at<=NOW()) OR
 			  (j.status='planning' AND j.locked_until<=NOW()))
 			ORDER BY j.run_day,j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1)
 		UPDATE group_retention_jobs j SET status='planning',attempts=attempts+1,
 		 lease_token=$2::uuid,locked_until=NOW()+INTERVAL '2 minutes',updated_at=NOW()
 		FROM picked WHERE j.id=picked.id RETURNING j.id,j.group_id::text,j.attempts`,
-		RetentionMaxAttempts, job.LeaseToken).Scan(&job.ID, &job.GroupID, &job.Attempts)
+		RetentionMaxAttempts, job.LeaseToken, r.GroupIDs).Scan(&job.ID, &job.GroupID, &job.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -94,8 +103,8 @@ func (r *GroupRetentionRepo) SavePlan(ctx context.Context, job RetentionJob, sna
 	}
 	tag, err := r.DB.Exec(ctx, `UPDATE group_retention_jobs SET status='planned',plan=$3::jsonb,
 		committed_watermark=$4,candidate_count=$5,failure_code='',lease_token=NULL,locked_until=NULL,updated_at=NOW()
-		WHERE id=$1 AND lease_token=$2::uuid AND status='planning' AND locked_until>NOW()`,
-		job.ID, job.LeaseToken, raw, plan.Watermark, len(plan.Candidates))
+		WHERE id=$1 AND lease_token=$2::uuid AND status='planning' AND locked_until>NOW() AND group_id=$6::uuid`,
+		job.ID, job.LeaseToken, raw, plan.Watermark, len(plan.Candidates), job.GroupID)
 	if err != nil {
 		return err
 	}

@@ -21,7 +21,7 @@ type RetentionPlanningStore interface {
 
 // Snapshot must be an authoritative, fixed committed watermark and complete
 // classified history. SDK caches, allocated maxSeq and ordinary paged search do
-// not meet this contract. No implementation is installed in the server yet.
+// not meet this contract. visibility_only installs the private pinned adapter.
 type RetentionSnapshotProvider interface {
 	Snapshot(context.Context, string) (media.RetentionSnapshot, error)
 }
@@ -60,8 +60,8 @@ func (s *GroupRetentionScheduler) Enqueue(ctx context.Context) error {
 	return nil
 }
 
-// PlanNext is deliberately NOT started by main. A missing trusted adapter is
-// rejected before leasing anything. Even with an adapter this only plans.
+// PlanNext is called only by the explicitly gated visibility worker. A missing
+// trusted adapter is rejected before leasing anything. This step only plans.
 func (s *GroupRetentionScheduler) PlanNext(ctx context.Context, provider RetentionSnapshotProvider) (bool, error) {
 	if provider == nil {
 		return false, ErrRetentionAdapterUnavailable

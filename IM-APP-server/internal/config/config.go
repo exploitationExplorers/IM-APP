@@ -28,16 +28,21 @@ type Config struct {
 	// 保存并发布（存在 app_config_versions，只认 status='published'）。
 	// 后台没部署、或不想走发布流程时，用这两个环境变量直接把上限钉住；
 	// 设了之后管理后台再改也不影响线上，想交回后台托管就把变量去掉。
-	GroupMemberMax         int
-	DefaultGroupMaxMembers int
-	SeedDemo               bool
-	Kafka                  KafkaConfig
-	Forward                ForwardConfig
-	SMS                    SMSConfig
-	CORSAllowOrigins       []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
-	MediaSourcePrefixes    []string
-	GroupRetentionMode     string
-	SMSRate                SMSRateConfig
+	GroupMemberMax               int
+	DefaultGroupMaxMembers       int
+	SeedDemo                     bool
+	Kafka                        KafkaConfig
+	Forward                      ForwardConfig
+	SMS                          SMSConfig
+	CORSAllowOrigins             []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
+	MediaSourcePrefixes          []string
+	GroupRetentionMode           string
+	GroupRetentionAdapterURL     string
+	GroupRetentionAdapterKey     string
+	GroupRetentionGroupIDs       []string
+	GroupRetentionAllGroups      bool
+	FavoriteArchiveWorkerEnabled bool
+	SMSRate                      SMSRateConfig
 }
 
 // SMSRateConfig 设备指纹 + 多维度验证码限流配置
@@ -114,11 +119,16 @@ func Load() Config {
 	ossRegion := getenv("OSS_REGION", "cn-hangzhou")
 
 	return Config{
-		GroupRetentionMode:  strings.ToLower(strings.TrimSpace(getenv("GROUP_RETENTION_MODE", "off"))),
-		MediaSourcePrefixes: splitCSV(getenv("MEDIA_SOURCE_URL_PREFIXES", "")),
-		AppEnvironment:      strings.TrimSpace(getenv("APP_ENV", "")),
-		StorageProvider:     storageProvider(getenv("STORAGE_PROVIDER", "oss")),
-		MigrationsMode:      strings.ToLower(strings.TrimSpace(getenv("MIGRATIONS_MODE", "auto"))),
+		GroupRetentionMode:           strings.ToLower(strings.TrimSpace(getenv("GROUP_RETENTION_MODE", "off"))),
+		GroupRetentionAdapterURL:     strings.TrimSpace(getenv("GROUP_RETENTION_ADAPTER_URL", "")),
+		GroupRetentionAdapterKey:     getenv("GROUP_RETENTION_ADAPTER_KEY", ""),
+		GroupRetentionGroupIDs:       splitCSV(getenv("GROUP_RETENTION_GROUP_IDS", "")),
+		GroupRetentionAllGroups:      getenvBool("GROUP_RETENTION_ALL_GROUPS", false),
+		FavoriteArchiveWorkerEnabled: getenvBool("FAVORITE_ARCHIVE_WORKER_ENABLED", false),
+		MediaSourcePrefixes:          splitCSV(getenv("MEDIA_SOURCE_URL_PREFIXES", "")),
+		AppEnvironment:               strings.TrimSpace(getenv("APP_ENV", "")),
+		StorageProvider:              storageProvider(getenv("STORAGE_PROVIDER", "oss")),
+		MigrationsMode:               strings.ToLower(strings.TrimSpace(getenv("MIGRATIONS_MODE", "auto"))),
 		OSS: OSSConfig{
 			Region:          ossRegion,
 			Endpoint:        getenv("OSS_ENDPOINT", "https://oss-"+ossRegion+".aliyuncs.com"),

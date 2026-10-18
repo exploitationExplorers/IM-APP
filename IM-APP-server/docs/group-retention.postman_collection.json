@@ -1,0 +1,24 @@
+{
+  "info": {
+    "name": "IM-APP 群历史清理同步（只读）",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://127.0.0.1:18080"},
+    {"key": "token", "value": ""},
+    {"key": "conversationIds", "value": "sg_11111111111141118111111111111111"}
+  ],
+  "item": [{
+    "name": "查询已执行群清理边界（最多50群）",
+    "request": {
+      "method": "GET",
+      "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+      "url": "{{baseUrl}}/api/v1/im/group-retention/states?conversationIds={{conversationIds}}"
+    },
+    "event": [{"listen": "test", "script": {"exec": [
+      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+      "pm.test('state array', () => pm.expect(pm.response.json().data.items).to.be.an('array'));",
+      "pm.test('no shared cache', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('private, no-store'));"
+    ]}}]
+  }]
+}

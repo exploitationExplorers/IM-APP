@@ -2,6 +2,7 @@ import { ACTIVE_TAB_KEY, AUTH_SLOTS_KEY } from '@/utils/request'
 import { LOGIN_REMEMBER_KEYS } from '@/utils/login-phone'
 import { clearPreviewImageCache } from '@/utils/previewImageCache'
 import { PREVIEW_IMAGE_INDEX_KEY } from '@/utils/previewImageStorage'
+import { isRetentionStorageKey } from '@/utils/groupRetention'
 
 const DEVICE_ID_KEY = 'im_device_id'
 /** 聊天偏好（回车发送等）：登出/清缓存都保留，否则每次登录都要重开开关 */
@@ -35,7 +36,7 @@ export function clearAppCache(): void {
   ])
   const info = uni.getStorageInfoSync()
   for (const key of info.keys) {
-    if (!keep.has(key)) {
+    if (!keep.has(key) && !isRetentionStorageKey(key)) {
       uni.removeStorageSync(key)
     }
   }
@@ -55,7 +56,7 @@ export function clearSessionStorage(): void {
   ])
   const info = uni.getStorageInfoSync()
   for (const key of info.keys) {
-    if (!keep.has(key)) {
+    if (!keep.has(key) && !isRetentionStorageKey(key)) {
       uni.removeStorageSync(key)
     }
   }
