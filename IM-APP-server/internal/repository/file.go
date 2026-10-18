@@ -16,27 +16,27 @@ type FileRepo struct {
 }
 
 // CreateFile 创建上传记录（pending）
-func (r *FileRepo) CreateFile(ctx context.Context, ownerID, purpose, fileName, contentType, objectKey, sha256, url string, size int64) (models.FileObject, error) {
+func (r *FileRepo) CreateFile(ctx context.Context, ownerID, purpose, fileName, contentType, objectKey, sha256, url string, size int64, provider, bucket string) (models.FileObject, error) {
 	var f models.FileObject
 	err := r.DB.QueryRow(ctx, `
-		INSERT INTO files(owner_id, purpose, object_key, content_type, size, sha256, status, url)
-		VALUES($1::uuid,$2,$3,$4,$5,$6,'pending',$7)
+		INSERT INTO files(owner_id, purpose, object_key, content_type, size, sha256, status, url, storage_provider, storage_bucket)
+		VALUES($1::uuid,$2,$3,$4,$5,$6,'pending',$7,$8,$9)
 		RETURNING id::text, purpose, content_type, size, status, url`,
-		ownerID, purpose, objectKey, contentType, size, sha256, url,
+		ownerID, purpose, objectKey, contentType, size, sha256, url, provider, bucket,
 	).Scan(&f.ID, &f.Purpose, &f.ContentType, &f.Size, &f.Status, &f.URL)
 	f.FileName = fileName
 	return f, err
 }
 
-// FindPendingByID 查询待确认上传的文件，返回其对象键，供 Complete 做 MinIO 存在性校验
-func (r *FileRepo) FindPendingByID(ctx context.Context, fileID, ownerID string) (string, error) {
-	var objectKey string
+// FindPendingByID pins completion to the provider/bucket selected at creation.
+func (r *FileRepo) FindPendingByID(ctx context.Context, fileID, ownerID string) (models.PendingFile, error) {
+	var f models.PendingFile
 	err := r.DB.QueryRow(ctx, `
-		SELECT object_key FROM files
+		SELECT object_key, storage_provider, storage_bucket, size FROM files
 		WHERE id=$1::uuid AND owner_id=$2::uuid AND status='pending'`,
 		fileID, ownerID,
-	).Scan(&objectKey)
-	return objectKey, err
+	).Scan(&f.ObjectKey, &f.StorageProvider, &f.StorageBucket, &f.Size)
+	return f, err
 }
 
 // MarkReady 标记上传完成（仅 pending → ready）

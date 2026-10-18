@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -29,6 +30,10 @@ type MinIO struct {
 }
 
 func NewMinIO(cfg config.MinIOConfig) (*MinIO, error) {
+	return newMinIO(cfg, true)
+}
+
+func newMinIO(cfg config.MinIOConfig, initialize bool) (*MinIO, error) {
 	if cfg.Endpoint == "" {
 		return &MinIO{}, nil
 	}
@@ -54,6 +59,9 @@ func NewMinIO(cfg config.MinIOConfig) (*MinIO, error) {
 			return nil, err
 		}
 	}
+	if !initialize {
+		return m, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	exists, err := client.BucketExists(ctx, cfg.Bucket)
@@ -73,6 +81,16 @@ func NewMinIO(cfg config.MinIOConfig) (*MinIO, error) {
 		}
 	}
 	return m, nil
+}
+
+func minioStatOptions() minio.StatObjectOptions { return minio.StatObjectOptions{} }
+
+func classifyMinIOError(err error) error {
+	var response minio.ErrorResponse
+	if errors.As(err, &response) && (response.Code == "NoSuchKey" || response.Code == "NoSuchObject") {
+		return ErrObjectNotFound
+	}
+	return err
 }
 
 func (m *MinIO) Available() bool {

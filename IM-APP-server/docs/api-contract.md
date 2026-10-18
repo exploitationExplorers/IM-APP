@@ -44,15 +44,25 @@ Query：`platform=android|ios`、`channel=canary|test|prod`、`nativeVersion`（
 }
 ```
 
-`updateType`：`none` | `wgt` | `native`。无发布记录或已是最新时 `hasUpdate=false` 且 `updateType=none`。`downloadUrl` 为限时预签名地址。
+`updateType`：`none` | `wgt` | `native`。无发布记录或已是最新时 `hasUpdate=false` 且 `updateType=none`。`downloadUrl` 为服务端返回的可下载地址：兼容 MinIO、媒体/CDN URL，或 OSS 私有桶的稳定解析地址（302 到限时签名 GET）。客户端不得替换其中的 host、key 编码或签名参数。
 
 发布接口走内部密钥，不面向 App。线上 Nginx 只反代 `/api/`，因此本机 `pack:wgt --publish` 使用下面这组：
 
-- `POST /api/v1/admin/app-releases/uploads` Body：`{ "platform", "packageType", "fileName" }`，返回 `uploadUrl`（PUT）、`objectKey`、`fileUrl`
+- `POST /api/v1/admin/app-releases/uploads` Body：`{ "platform", "packageType", "fileName" }`，返回 `uploadUrl`（PUT）、`objectKey`、`fileUrl`、`expiresIn`，可选扩展 `headers`（存储签名要求的请求头）、`storageProvider`（`minio|oss`）。PUT 字节上传必须携带这些 headers；OSS 失败不得回退 MinIO，也不得继续发布记录。
 - `POST /api/v1/admin/app-releases` Body：`{ "platform", "channel", "versionName", "versionCode", "packageType", "objectKey", "changelog", "forceUpdate", "minNativeVersion?" }`
 - `GET /api/v1/admin/app-releases?platform=&channel=&limit=`
 
 内网仍保留 `POST/GET /internal/admin/app-releases*`。Header 均需 `X-Internal-API-Key`。日常用前端 `npm run pack:wgt -- --build --publish --min-native=100` 发布。详见仓库根目录 [plan.md](../../plan.md)。
+
+OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API 必须隔离。发布时按 `objectKey` 命名空间查对应存储，HEAD 校验非空且不超过 200 MiB；保留旧包 download URL，不自动改成当前桶。
+
+### GET `/api/v1/public/oss-media`
+
+私有业务 OSS 桶的稳定读取入口。Query：`key`、`token`，均为服务端生成的媒体 URL 中的原值，无需 JWT。该 token 是指定 bucket/key 的 HMAC capability，持有链接即可读，不代表会话成员权限校验。
+
+成功返回 HTTP **302**，`Location` 为 10 分钟有效的 OSS 签名 GET；`Cache-Control: private, no-store`，`Referrer-Policy: no-referrer`。无效/缺失 token 或越界 key 返回 404，解析服务未配置返回 503。这是裸 HTTP 响应，不使用统一 JSON envelope。媒体签名 key 必须稳定持久化，不能随部署随机变化；日志不得泄露完整 token。
+
+增量机器契约及独立测试请求见 `openapi-oss.yaml`、`oss-storage.postman_collection.json`。
 
 ### POST `/api/v1/auth/sms/send`
 
@@ -865,6 +875,10 @@ Query：`platform=android|ios`、`channel=canary|test|prod`、`nativeVersion`（
 
 创建上传任务，获取预签名 multipart POST 表单。H5 和 App 都使用 `formUrl` + `formData` 上传，文件字段名为 `file`；`uploadUrl` 仅为兼容字段，值与 `formUrl` 相同。
 
+默认 OSS，也可显式设置 `STORAGE_PROVIDER=minio` 保留旧存储；路由与响应字段不变。客户端须原样发送所有 formData（可能是 `x-amz-*` 或 `x-oss-*`），**file 字段最后**，不要手工设置 multipart boundary，不向存储域名携带业务 JWT / 内部密钥。OSS 签名主机/编码/query 禁止改写。原生 App 使用 `uni.uploadFile`，不依赖 H5 fetch/File；均接受存储返回的 2xx。
+
+OSS 模式要求 `size` 为 1～20 MiB（含边界，单位 byte）；签名有效期 900 秒，policy 精确绑定实际 key 和桶、禁止覆盖。文件任务保存 provider/bucket；旧记录和旧 MinIO 客户端协议不变。
+
 **Body**
 ```json
 {
@@ -895,6 +909,8 @@ Query：`platform=android|ios`、`channel=canary|test|prod`、`nativeVersion`（
 
 确认上传完成，`fileId` 放在 JSON 请求体中。
 
+按该任务创建时保存的 provider/bucket 查询对象，不随全局存储开关变化。OSS 须真实存在、非空、不超过 20 MiB 且大小与创建时声明一致；缺对象/大小不符返回 400，存储无权限/故障返回 503，不标记 ready。MinIO 保留旧客户端的 size 声明兼容性。
+
 **Body**
 ```json
 { "fileId": "uuid", "etag": "optional" }
@@ -908,7 +924,7 @@ Query：`platform=android|ios`、`channel=canary|test|prod`、`nativeVersion`（
 
 ### POST `/api/v1/files/presign`（旧版 / 兼容）
 
-获取 MinIO 预签名 multipart POST 表单（MinIO 未配置时返回 dev 占位 URL）。
+获取当前存储（默认 OSS，可显式选择 MinIO）预签名 multipart POST 表单；显式选择 MinIO 且无存储的本地开发模式仍保留 dev 占位 URL，OSS 配置缺失时启动失败，不伪装成功。
 
 **Body**
 ```json

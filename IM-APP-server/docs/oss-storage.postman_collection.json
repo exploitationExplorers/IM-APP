@@ -1,0 +1,269 @@
+{
+  "info": {
+    "name": "OSS 接入（仅隔离测试，默认禁用）",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "请先阅读 deploy/oss-test/OSS接入与验收.md。不能连接生产；不要在 Postman 同步或导出含真实密钥的环境。存储直传需使用返回的 formUrl/formData 或 uploadUrl/headers，不能把业务 token 传给 OSS。未自动执行真实上传或发布。"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:18080",
+      "type": "string"
+    },
+    {
+      "key": "environment",
+      "value": "oss-test",
+      "type": "string"
+    },
+    {
+      "key": "ossTestConfirmed",
+      "value": "false",
+      "type": "string"
+    },
+    {
+      "key": "allowTestReleaseWrite",
+      "value": "false",
+      "type": "string"
+    },
+    {
+      "key": "testAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "testInternalKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fileId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "mediaKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "mediaToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "testReleaseObjectKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "size",
+      "value": "3",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const base = String(pm.variables.get('baseUrl') || '');",
+          "if (pm.variables.get('environment') !== 'oss-test' || pm.variables.get('ossTestConfirmed') !== 'true') throw new Error('仅用于已核对隔离资源的 oss-test 环境，请先阅读接入验收手册');",
+          "if (!/^https?:\\/\\/[^/]+$/.test(base)) throw new Error('baseUrl 只能为测试 Origin');",
+          "const host = base.replace(/^https?:\\/\\//, '').split(':')[0];",
+          "if (!((host === '127.0.0.1' || host === 'localhost') && /:18080$/.test(base)) && !/(^|[.-])oss-test([.-]|$)/.test(host)) throw new Error('拒绝非明确测试地址');",
+          "if (pm.info.requestName === '发布测试包记录' && pm.variables.get('allowTestReleaseWrite') !== 'true') throw new Error('包发布默认关闭；只允许在独立测试库验收时显式开启');"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "创建上传任务",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{testAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"purpose\": \"image\",\n  \"fileName\": \"oss-test.jpg\",\n  \"contentType\": \"image/jpeg\",\n  \"size\": 3\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/v1/files/uploads"
+      }
+    },
+    {
+      "name": "完成上传（先手工直传）",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{testAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fileId\": \"{{fileId}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/v1/files/uploads/complete"
+      }
+    },
+    {
+      "name": "查询文件",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{testAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/files?fileId={{fileId}}"
+      }
+    },
+    {
+      "name": "兼容预签名表单",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{testAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"filename\": \"oss-test.jpg\",\n  \"contentType\": \"image/jpeg\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/v1/files/presign"
+      }
+    },
+    {
+      "name": "已有语音 multipart 协议",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{testAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            }
+          ]
+        },
+        "url": "{{baseUrl}}/api/v1/files/voice"
+      }
+    },
+    {
+      "name": "私有媒体解析",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/v1/public/oss-media?key={{mediaKey}}&token={{mediaToken}}"
+      }
+    },
+    {
+      "name": "获取测试包 PUT 签名",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Internal-API-Key",
+            "value": "{{testInternalKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"platform\": \"android\",\n  \"packageType\": \"wgt\",\n  \"fileName\": \"oss-test.wgt\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/v1/admin/app-releases/uploads"
+      }
+    },
+    {
+      "name": "发布测试包记录",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Internal-API-Key",
+            "value": "{{testInternalKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"platform\": \"android\",\n  \"channel\": \"canary\",\n  \"versionName\": \"0.0.1-test\",\n  \"versionCode\": 1,\n  \"packageType\": \"wgt\",\n  \"objectKey\": \"{{testReleaseObjectKey}}\",\n  \"changelog\": \"isolated OSS integration test\",\n  \"forceUpdate\": false,\n  \"minNativeVersion\": 0\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/api/v1/admin/app-releases"
+      }
+    },
+    {
+      "name": "查询测试包记录",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-API-Key",
+            "value": "{{testInternalKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/admin/app-releases?platform=android&channel=canary&limit=10"
+      }
+    }
+  ]
+}

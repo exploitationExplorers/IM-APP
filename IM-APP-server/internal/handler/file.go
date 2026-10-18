@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -10,7 +12,6 @@ import (
 	"im-app-server/internal/infra"
 	"im-app-server/internal/middleware"
 	"im-app-server/internal/models"
-	"im-app-server/internal/repository"
 	"im-app-server/internal/response"
 
 	"github.com/gin-gonic/gin"
@@ -18,8 +19,15 @@ import (
 )
 
 type FileHandler struct {
-	MinIO *infra.MinIO
-	Files *repository.FileRepo
+	Storage *infra.Storage
+	Files   FileRepository
+}
+
+type FileRepository interface {
+	CreateFile(context.Context, string, string, string, string, string, string, string, int64, string, string) (models.FileObject, error)
+	FindPendingByID(context.Context, string, string) (models.PendingFile, error)
+	MarkReady(context.Context, string, string) (models.FileObject, error)
+	FindByID(context.Context, string, string) (models.FileObject, error)
 }
 
 type presignReq struct {
@@ -28,8 +36,8 @@ type presignReq struct {
 }
 
 func (h *FileHandler) Presign(c *gin.Context) {
-	if h.MinIO == nil || !h.MinIO.Available() {
-		response.Fail(c, http.StatusServiceUnavailable, "文件服务未配置，请启用 MinIO")
+	if !h.Storage.Available() {
+		response.Fail(c, http.StatusServiceUnavailable, "文件服务未配置")
 		return
 	}
 	var req presignReq
@@ -43,11 +51,17 @@ func (h *FileHandler) Presign(c *gin.Context) {
 		ext = ".bin"
 	}
 	objectKey := fmt.Sprintf("users/%s/%s%s", userID, uuid.NewString(), ext)
+	store := h.Storage.Current
+	objectKey, err := store.NewKey(objectKey)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "文件名无效")
+		return
+	}
 	contentType := req.ContentType
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	uploadURL, formData, err := h.MinIO.PresignPost(c.Request.Context(), objectKey, contentType, 15*time.Minute)
+	uploadURL, formData, err := store.PresignPost(c.Request.Context(), objectKey, contentType, 15*time.Minute)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "生成上传凭证失败")
 		return
@@ -56,7 +70,7 @@ func (h *FileHandler) Presign(c *gin.Context) {
 		"uploadUrl": uploadURL,
 		"formUrl":   uploadURL,
 		"formData":  formData,
-		"fileUrl":   h.MinIO.FileURL(objectKey),
+		"fileUrl":   store.FileURL(objectKey),
 		"objectKey": objectKey,
 		"expiresIn": 900,
 	})
@@ -104,15 +118,27 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 
 	var uploadURL, fileURL, formURL string
 	var formData map[string]string
-	if h.MinIO != nil && h.MinIO.Available() {
+	provider, bucket := "minio", ""
+	if h.Storage.Available() {
+		store := h.Storage.Current
+		provider, bucket = store.Provider(), store.BucketName()
+		if provider == "oss" && (req.Size <= 0 || req.Size > infra.MaxFormUploadBytes) {
+			response.Fail(c, http.StatusBadRequest, "文件大小须在 1 字节至 20 MiB 之间")
+			return
+		}
 		var err error
-		formURL, formData, err = h.MinIO.PresignPost(c.Request.Context(), objectKey, req.ContentType, 15*time.Minute)
+		objectKey, err = store.NewKey(objectKey)
+		if err != nil {
+			response.Fail(c, http.StatusBadRequest, "文件名无效")
+			return
+		}
+		formURL, formData, err = store.PresignPost(c.Request.Context(), objectKey, req.ContentType, 15*time.Minute)
 		if err != nil {
 			response.Fail(c, http.StatusInternalServerError, "生成上传凭证失败")
 			return
 		}
 		uploadURL = formURL
-		fileURL = h.MinIO.FileURL(objectKey)
+		fileURL = store.FileURL(objectKey)
 	} else {
 		// 开发模式：直接给一个可访问地址
 		base := strings.TrimSuffix(c.Request.Host, ":8080")
@@ -120,7 +146,7 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 		uploadURL = fileURL
 	}
 
-	f, err := h.Files.CreateFile(c.Request.Context(), userID, req.Purpose, req.FileName, req.ContentType, objectKey, req.SHA256, fileURL, req.Size)
+	f, err := h.Files.CreateFile(c.Request.Context(), userID, req.Purpose, req.FileName, req.ContentType, objectKey, req.SHA256, fileURL, req.Size, provider, bucket)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "创建上传任务失败")
 		return
@@ -142,15 +168,34 @@ func (h *FileHandler) Complete(c *gin.Context) {
 		return
 	}
 	userID := middleware.UserID(c)
-	objectKey, err := h.Files.FindPendingByID(c.Request.Context(), req.FileID, userID)
+	pending, err := h.Files.FindPendingByID(c.Request.Context(), req.FileID, userID)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "文件不存在或已处理")
 		return
 	}
-	// 校验对象真实存在于 MinIO，避免空包/上传失败的 URL 被标记 ready（Android PUT 空包问题导致头像 404）
-	if h.MinIO != nil && h.MinIO.Available() && !h.MinIO.ObjectExists(c.Request.Context(), objectKey) {
-		response.Fail(c, http.StatusBadRequest, "文件未上传成功，请重新上传")
-		return
+	// Preserve the unconfigured local-dev behavior only for dev-created tasks.
+	devTask := !h.Storage.Available() && pending.StorageProvider == "minio" && pending.StorageBucket == ""
+	if !devTask {
+		store, err := h.Storage.ForLocation(pending.StorageProvider, pending.StorageBucket)
+		if err != nil {
+			response.Fail(c, http.StatusServiceUnavailable, "文件所属存储不可用")
+			return
+		}
+		info, err := store.Stat(c.Request.Context(), pending.ObjectKey)
+		if err != nil {
+			if errors.Is(err, infra.ErrObjectNotFound) {
+				response.Fail(c, http.StatusBadRequest, "文件未上传成功，请重新上传")
+			} else {
+				response.Fail(c, http.StatusServiceUnavailable, "检查上传结果失败，请稍后重试")
+			}
+			return
+		}
+		// Keep legacy MinIO completion semantics; stricter declaration checks are
+		// opt-in with OSS and must not break older App clients/pending tasks.
+		if info.Size <= 0 || (store.Provider() == "oss" && (info.Size > infra.MaxFormUploadBytes || (pending.Size > 0 && info.Size != pending.Size))) {
+			response.Fail(c, http.StatusBadRequest, "文件大小与上传声明不符，请重新上传")
+			return
+		}
 	}
 	f, err := h.Files.MarkReady(c.Request.Context(), req.FileID, userID)
 	if err != nil {

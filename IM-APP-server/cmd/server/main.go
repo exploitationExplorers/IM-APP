@@ -26,6 +26,15 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.ValidateStorage(); err != nil {
+		log.Fatalf("storage configuration: %v", err)
+	}
+	// Validate OSS locally BEFORE touching any DB/migrations. No cloud I/O.
+	if cfg.StorageBackend() == "oss" || cfg.OSS.Bucket != "" {
+		if _, err := infra.NewOSS(cfg.OSS); err != nil {
+			log.Fatalf("OSS configuration: %v", err)
+		}
+	}
 
 	pool, err := db.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -38,6 +47,7 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
+		"files":                   {"storage_provider", "storage_bucket"},
 		"report_reasons":          {"id", "target_type", "reason", "language", "sort_order", "status"},
 		"reports":                 {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
 		"report_files":            {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
@@ -81,12 +91,15 @@ func main() {
 		defer redisClient.Close()
 	}
 
-	minioClient, err := infra.NewMinIO(cfg.MinIO)
+	storageClient, err := infra.NewStorage(cfg)
 	if err != nil {
+		if cfg.StorageBackend() == "oss" || cfg.OSS.Bucket != "" {
+			log.Fatalf("storage: %v", err)
+		}
 		log.Printf("minio disabled: %v", err)
-		minioClient = &infra.MinIO{}
-	} else if minioClient.Available() {
-		log.Println("minio connected")
+		storageClient = &infra.Storage{Current: &infra.MinIO{}, Legacy: &infra.MinIO{}}
+	} else if storageClient.Available() {
+		log.Printf("object storage configured: %s", storageClient.Current.Provider())
 	}
 
 	imClient := im.NewClient(cfg.OpenIM)
@@ -133,7 +146,7 @@ func main() {
 	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue}
 	reportSvc := &service.ReportService{Reports: reportRepo}
 	feedbackSvc := &service.FeedbackService{Feedbacks: feedbackRepo}
-	appReleaseSvc := &service.AppReleaseService{Releases: appReleaseRepo, MinIO: minioClient}
+	appReleaseSvc := &service.AppReleaseService{Releases: appReleaseRepo, Storage: storageClient}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
 	var smsGateway service.SMSGateway = service.DevSMSGateway{}
@@ -156,8 +169,8 @@ func main() {
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc, Repo: groupSvc.Groups}
-	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
-	voiceH := &handler.VoiceHandler{MinIO: minioClient}
+	fileH := &handler.FileHandler{Storage: storageClient, Files: fileRepo}
+	voiceH := &handler.VoiceHandler{Storage: storageClient}
 	imH := &handler.IMHandler{Service: imSvc}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
 	feedbackH := &handler.FeedbackHandler{Svc: feedbackSvc}
@@ -190,17 +203,18 @@ func main() {
 		"127.0.0.1", "::1",
 		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
 	})
-	loggerConfig := gin.LoggerConfig{}
+	// Media capability query tokens must not be persisted in access logs.
+	loggerConfig := gin.LoggerConfig{SkipPaths: []string{"/api/v1/public/oss-media"}}
 	if cfg.OpenIM.WebhookSecret != "" {
 		base := "/internal/openim/webhooks/" + cfg.OpenIM.WebhookSecret
-		loggerConfig.SkipPaths = []string{
-			base + "/callbackBeforeSendSingleMsgCommand",
-			base + "/callbackBeforeSendGroupMsgCommand",
-			base + "/callbackAfterSendSingleMsgCommand",
-			base + "/callbackAfterSendGroupMsgCommand",
-			base + "/callbackBeforeAfterMsgCommand",
-			base + "/callbackAfterDismissGroupCommand",
-		}
+		loggerConfig.SkipPaths = append(loggerConfig.SkipPaths,
+			base+"/callbackBeforeSendSingleMsgCommand",
+			base+"/callbackBeforeSendGroupMsgCommand",
+			base+"/callbackAfterSendSingleMsgCommand",
+			base+"/callbackAfterSendGroupMsgCommand",
+			base+"/callbackBeforeAfterMsgCommand",
+			base+"/callbackAfterDismissGroupCommand",
+		)
 	}
 	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
 	r.Use(corsMiddleware(cfg.CORSAllowOrigins))
@@ -258,6 +272,7 @@ func main() {
 
 	api := r.Group("/api/v1")
 	{
+		api.GET("/public/oss-media", fileH.OSSMedia)
 		api.GET("/public/countries", countryH.Countries)
 		api.GET("/public/app-release", middleware.RateLimitIP(redisClient, 30, time.Minute, "app-release"), appReleaseH.Check)
 		// 线上 Nginx 只反代 /api/，本机 pack:wgt 走公网发布时用这组，仍要内部密钥
@@ -359,7 +374,7 @@ func main() {
 			auth.POST("/friend-requests/:id/accept", contactH.AcceptFriendRequest)
 			auth.POST("/friend-requests/:id/reject", contactH.RejectFriendRequest)
 
-			if minioClient.Available() {
+			if storageClient.Available() {
 				auth.POST("/files/presign", fileH.Presign)
 			} else {
 				auth.POST("/files/presign", handler.DevPresign)

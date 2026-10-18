@@ -66,10 +66,12 @@ type CreateAppReleaseUploadRequest struct {
 }
 
 type AppReleaseUploadResult struct {
-	UploadURL string `json:"uploadUrl"`
-	ObjectKey string `json:"objectKey"`
-	FileURL   string `json:"fileUrl"`
-	ExpiresIn int    `json:"expiresIn"`
+	UploadURL       string            `json:"uploadUrl"`
+	ObjectKey       string            `json:"objectKey"`
+	FileURL         string            `json:"fileUrl"`
+	ExpiresIn       int               `json:"expiresIn"`
+	Headers         map[string]string `json:"headers,omitempty"`
+	StorageProvider string            `json:"storageProvider,omitempty"`
 }
 
 type PublishAppReleaseRequest struct {

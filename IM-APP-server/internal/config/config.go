@@ -7,6 +7,9 @@ import (
 )
 
 type Config struct {
+	AppEnvironment       string
+	StorageProvider      string
+	OSS                  OSSConfig
 	HTTPAddr             string
 	DatabaseURL          string
 	JWTSecret            string
@@ -100,9 +103,29 @@ type SMSConfig struct {
 }
 
 func Load() Config {
-	loadDotEnv(".env")
+	// Explicit test processes must never pick up credentials/targets from an
+	// existing developer or production .env in the server working directory.
+	if strings.TrimSpace(os.Getenv("APP_ENV")) != "oss-test" {
+		loadDotEnv(".env")
+	}
+	ossRegion := getenv("OSS_REGION", "cn-hangzhou")
 
 	return Config{
+		AppEnvironment:  strings.TrimSpace(getenv("APP_ENV", "")),
+		StorageProvider: storageProvider(getenv("STORAGE_PROVIDER", "oss")),
+		OSS: OSSConfig{
+			Region:          ossRegion,
+			Endpoint:        getenv("OSS_ENDPOINT", "https://oss-"+ossRegion+".aliyuncs.com"),
+			PublicUploadURL: getenv("OSS_PUBLIC_UPLOAD_URL", ""),
+			Bucket:          getenv("OSS_BUCKET", ""),
+			AccessKeyID:     getenv("OSS_ACCESS_KEY_ID", ""),
+			AccessKeySecret: getenv("OSS_ACCESS_KEY_SECRET", ""),
+			SessionToken:    getenv("OSS_SESSION_TOKEN", ""),
+			KeyPrefix:       getenv("OSS_KEY_PREFIX", ""),
+			PublicBaseURL:   getenv("OSS_PUBLIC_BASE_URL", ""),
+			MediaProxyURL:   getenv("OSS_MEDIA_PROXY_URL", ""),
+			MediaSigningKey: getenv("OSS_MEDIA_SIGNING_KEY", ""),
+		},
 		HTTPAddr:               getenv("HTTP_ADDR", ":8080"),
 		DatabaseURL:            getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
 		JWTSecret:              getenv("JWT_SECRET", "im-local-dev-secret-change-me"),

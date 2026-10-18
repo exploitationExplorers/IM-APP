@@ -1,0 +1,243 @@
+openapi: 3.0.3
+info:
+  title: IM-APP OSS 接入增量契约
+  version: 1.0.0
+  description: |
+    存储后端默认为 OSS；显式配置 STORAGE_PROVIDER=minio 可保留旧存储，不更换客户端业务路由。
+    JSON 接口返回 {code,message,data}，oss-media 是裸 HTTP 302/404/503。
+    multipart 直传在存储域名发生，不携带业务鉴权，file 字段最后。
+    本文件补充 openapi.yaml，完整发布/语音流程以 api-contract.md 为准。
+servers:
+  - url: http://127.0.0.1:18080
+    description: 仅独立测试业务服务，非生产
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/files/uploads:
+    post:
+      operationId: createStorageUpload
+      summary: 创建文件任务并获取精确绑定 key 的 POST policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose, fileName]
+              properties:
+                purpose: {type: string, enum: [avatar, image, voice, file, sticker]}
+                fileName: {type: string, minLength: 1}
+                contentType: {type: string}
+                size: {type: integer, format: int64, description: OSS 必填，1 至 20971520 bytes；MinIO 保持旧契约}
+                sha256: {type: string}
+      responses:
+        '200':
+          description: pending 文件及上传表单，原样传给存储且 file 最后
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          file: {$ref: '#/components/schemas/File'}
+                          uploadUrl: {type: string}
+                          formUrl: {type: string}
+                          formData: {type: object, additionalProperties: {type: string}}
+                          expiresIn: {type: integer, example: 900}
+        '400': {description: 参数错误或 OSS 大小无效}
+        '401': {description: 未登录}
+        '500': {description: 创建任务或签名失败}
+  /api/v1/files/uploads/complete:
+    post:
+      operationId: completeStorageUpload
+      summary: 在任务所属 provider/bucket 校验对象后标记 ready
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileId]
+              properties:
+                fileId: {type: string, minLength: 1}
+                etag: {type: string, description: 兼容字段，不代替服务端 HEAD 校验}
+      responses:
+        '200': {description: Envelope.data 为 File，status=ready}
+        '400': {description: 文件不存在/已处理/未上传/OSS 实际大小不符}
+        '401': {description: 未登录}
+        '503': {description: 任务所属存储不可用或检查失败，不标记 ready}
+  /api/v1/files:
+    get:
+      operationId: getStorageFile
+      summary: 查询当前用户的文件信息
+      parameters:
+        - {name: fileId, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Envelope.data 为 File；返回持久化 URL，不随全局 provider 改写}
+        '400': {description: fileId 缺失}
+        '401': {description: 未登录}
+        '404': {description: 文件不存在}
+  /api/v1/files/presign:
+    post:
+      operationId: legacyStoragePresign
+      summary: 兼容旧版预签名表单接口
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename]
+              properties:
+                filename: {type: string, minLength: 1}
+                contentType: {type: string}
+      responses:
+        '200': {description: Envelope.data 含 uploadUrl/formUrl/formData/fileUrl/objectKey/expiresIn，未配置存储的开发模式含 devMode}
+        '400': {description: 参数错误}
+        '401': {description: 未登录}
+        '500': {description: 签名失败}
+        '503': {description: 文件服务不可用}
+  /api/v1/files/voice:
+    post:
+      operationId: uploadVoiceToStorage
+      summary: 保留已有 multipart 语音转码协议，仅切换存储实现
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary, description: 非空且不超过 10 MiB}
+      responses:
+        '200': {description: Envelope.data 含 url/size/format}
+        '400': {description: 缺文件/空包/无效文件名}
+        '401': {description: 未登录}
+        '413': {description: 语音过大}
+        '500': {description: 读取或保存失败}
+        '503': {description: 文件服务未配置}
+  /api/v1/public/oss-media:
+    get:
+      operationId: resolvePrivateOSSMedia
+      summary: 稳定 capability URL 解析到短期 OSS GET
+      description: 持有链接即可读，不是会话成员授权。不要记录完整 token。
+      security: []
+      parameters:
+        - {name: key, in: query, required: true, schema: {type: string}}
+        - {name: token, in: query, required: true, schema: {type: string}}
+      responses:
+        '302':
+          description: 不使用 JSON envelope；签名 GET 有效 10 分钟
+          headers:
+            Location: {schema: {type: string}}
+            Cache-Control: {schema: {type: string, example: 'private, no-store'}}
+            Referrer-Policy: {schema: {type: string, example: no-referrer}}
+        '404': {description: 无效或越界的 key/token}
+        '503': {description: OSS 解析未配置}
+  /api/v1/admin/app-releases/uploads:
+    post:
+      operationId: createReleaseStorageUpload
+      summary: 获取安装包 PUT 签名及必须携带的 headers
+      security: [{internalKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, packageType, fileName]
+              properties:
+                platform: {type: string, enum: [android, ios]}
+                packageType: {type: string, enum: [wgt, apk, ipa]}
+                fileName: {type: string}
+      responses:
+        '200':
+          description: OSS 错误不得回退 MinIO 或继续发布
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          uploadUrl: {type: string}
+                          objectKey: {type: string}
+                          fileUrl: {type: string}
+                          expiresIn: {type: integer, example: 900}
+                          headers: {type: object, additionalProperties: {type: string}}
+                          storageProvider: {type: string, enum: [minio, oss]}
+        '400': {description: 参数错误}
+        '401': {description: 内部密钥无效}
+        '500': {description: 签名失败}
+        '503': {description: 未配置存储}
+  /api/v1/admin/app-releases:
+    get:
+      operationId: listStorageReleases
+      summary: 读取隔离测试库发布记录
+      security: [{internalKey: []}]
+      parameters:
+        - {name: platform, in: query, schema: {type: string}}
+        - {name: channel, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer}}
+      responses:
+        '200': {description: Envelope.data 为发布记录数组}
+        '400': {description: 参数错误}
+        '401': {description: 内部密钥无效}
+    post:
+      operationId: publishStorageRelease
+      summary: HEAD 校验原存储的安装包后发布记录
+      description: 接入阶段不要对生产 API 调用；非空且至多 200 MiB，字段详见 api-contract.md。
+      security: [{internalKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, channel, versionName, versionCode, packageType, objectKey]
+              properties:
+                platform: {type: string, enum: [android, ios]}
+                channel: {type: string, enum: [canary, test, prod]}
+                versionName: {type: string}
+                versionCode: {type: integer, minimum: 1}
+                packageType: {type: string, enum: [wgt, apk, ipa]}
+                objectKey: {type: string}
+                changelog: {type: string}
+                forceUpdate: {type: boolean}
+                minNativeVersion: {type: integer, minimum: 0}
+      responses:
+        '200': {description: Envelope.data 为新增发布记录}
+        '400': {description: 参数/命名空间无效或文件未上传完成}
+        '401': {description: 内部密钥无效}
+        '409': {description: 版本已存在}
+        '500': {description: 发布失败}
+        '503': {description: 对象所属存储不可用}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+    internalKey: {type: apiKey, in: header, name: X-Internal-API-Key}
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        code: {type: integer, example: 0}
+        message: {type: string, example: ok}
+        data: {type: object}
+    File:
+      type: object
+      properties:
+        id: {type: string}
+        purpose: {type: string}
+        fileName: {type: string}
+        contentType: {type: string}
+        size: {type: integer, format: int64}
+        url: {type: string, description: 持久化稳定 URL，不写短期 OSS GET 签名}
+        status: {type: string, enum: [pending, ready, rejected]}
