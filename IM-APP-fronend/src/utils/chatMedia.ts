@@ -560,8 +560,8 @@ function downloadPreviewFile(url: string): Promise<string> {
 
 /**
  * 统一图片预览：接管长按「保存」，避免华为上 previewImage 内置「保存图像到相册失败」。
- * App 用 longPressActions；H5 仍走系统预览。
- * iPhone 只打开当前这一张的本地文件，避免整组远程地址把预览卡在黑屏。
+ * App 用 longPressActions。iPhone 只打开当前这一张的本地文件，避免整组远程地址把预览卡在黑屏。
+ * H5 保留滑动和缩放，由 scripts/fix-uni-h5-preview.cjs 按访问过的页加载原图，不一次预取整组。
  */
 export async function previewImagesWithSave(urls: string[], current?: string): Promise<void> {
   const list = urls.map((u) => playableMediaUrl((u || '').trim())).filter(Boolean)

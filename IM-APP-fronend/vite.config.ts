@@ -4,6 +4,12 @@ import uni from '@dcloudio/vite-plugin-uni'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { createRequire } from 'node:module'
 
+// Also apply when an existing node_modules is reused without npm install.
+// Fail loudly on an SDK upgrade instead of silently restoring eager downloads.
+if (process.env.UNI_PLATFORM === 'h5') {
+  createRequire(import.meta.url)('./scripts/fix-uni-h5-preview.cjs').ensureLazyPreview()
+}
+
 const analyze = process.env.ANALYZE === 'true'
 const mediaOrigin = 'http://8.154.44.197'
 

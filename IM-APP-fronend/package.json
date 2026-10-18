@@ -47,7 +47,7 @@
     "pack:wgt": "node scripts/pack-wgt.cjs",
     "pack:wgt:canary": "node scripts/pack-wgt.cjs --build --publish --channel=canary --min-native=100",
     "pack:wgt:customer": "node scripts/pack-wgt.cjs --build --publish --channel=test --min-native=100",
-    "postinstall": "node scripts/fix-openim-protocol.cjs"
+    "postinstall": "node scripts/fix-openim-protocol.cjs && node scripts/fix-uni-h5-preview.cjs"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020320260806002",
