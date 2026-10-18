@@ -1,4 +1,8 @@
-const env = (import.meta as ImportMeta & { env: Record<string, string> }).env
+const env = import.meta.env
+const ossTest = env.MODE === 'oss-test'
+if (ossTest && env.VITE_API_BASE_URL !== 'https://localhost:18443/api/v1') {
+  throw new Error('OSS test build requires the isolated local API; production fallback is forbidden')
+}
 
 /**
  * 分平台取值，两边都要能走通：
@@ -18,12 +22,13 @@ function resolveUpdateChannel(raw: string | undefined): 'canary' | 'test' | 'pro
 }
 
 export const APP_CONFIG = {
+  ossTest,
   appName: 'Chat',
   displayName: '易可聊',
   version: 'v1.0.0',
   apiBaseUrl,
   /**
-   * 热更新渠道，打进壳里，wgt 改不了。
+   * 热更新渠道会编译进 App 资源，后续 WGT 也可替换；每次构建都须核对。
    * 不写或写错时保持 test，避免误打出来的客户壳去拉 canary。
    * 内部壳必须显式 VITE_UPDATE_CHANNEL=canary。
    */

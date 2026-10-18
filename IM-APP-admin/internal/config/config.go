@@ -7,8 +7,9 @@ import (
 )
 
 type Config struct {
-	HTTPAddr    string
-	DatabaseURL string
+	AppEnvironment string
+	HTTPAddr       string
+	DatabaseURL    string
 
 	// 管理端 JWT 独立密钥，避免与 APP 的 JWT_SECRET 撞车（清单 3.2）
 	AdminJWTSecret  string
@@ -39,7 +40,8 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		HTTPAddr: getenv("HTTP_ADDR", ":8081"),
+		AppEnvironment: strings.TrimSpace(rawEnv("APP_ENV")),
+		HTTPAddr:       getenv("HTTP_ADDR", ":8081"),
 		// 默认值不携带口令，避免弱默认口令被复用；生产必须显式配置 DATABASE_URL
 		DatabaseURL:          getenv("DATABASE_URL", "postgres://im@127.0.0.1:5433/im_app?sslmode=disable"),
 		AdminJWTSecret:       adminJWTSecret(),
@@ -70,10 +72,22 @@ func positiveIntEnv(key string, fallback int) int {
 }
 
 // fileEnv 从同目录 .env 文件加载的键值（系统环境变量优先，.env 兜底）
-var fileEnv = loadEnvFile(".env")
+var fileEnv = initialFileEnv()
+
+func initialFileEnv() map[string]string {
+	if strings.TrimSpace(os.Getenv("APP_ENV")) == "oss-test" {
+		return map[string]string{}
+	}
+	return loadEnvFile(".env")
+}
 
 // rawEnv 读取配置：系统环境变量优先，其次 .env 文件
 func rawEnv(key string) string {
+	// Explicit test processes never fall back to an ordinary application .env,
+	// including when a caller deliberately leaves a variable empty.
+	if strings.TrimSpace(os.Getenv("APP_ENV")) == "oss-test" {
+		return os.Getenv(key)
+	}
 	if v := os.Getenv(key); v != "" {
 		return v
 	}

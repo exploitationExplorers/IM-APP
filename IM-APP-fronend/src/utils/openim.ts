@@ -30,6 +30,7 @@ import {
 } from '@/utils/chatMedia'
 import { devLog, devWarn } from '@/utils/devLog'
 import { isApp } from '@/utils/platform'
+import { isOSSStorageUrl } from '@/utils/storage-url'
 import type { PlusResolveLocalFile } from '@/types/plus-io'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
@@ -550,6 +551,7 @@ function h5SdkAddr(raw: string, kind: 'api' | 'ws'): string {
  */
 function rewriteH5StorageUrl(raw: string): string {
   // #ifdef H5
+  if (isOSSStorageUrl(raw)) return raw
   if (typeof location !== 'undefined' && location.host && raw) {
     try {
       const url = new URL(raw, location.href)

@@ -1,5 +1,6 @@
 import { isAndroid, isAppPlatform } from '@/utils/platform'
 import type { PlusFileEntry, PlusGallerySave, PlusResolveLocalFile } from '@/types/plus-io'
+import { isOSSStorageUrl } from '@/utils/storage-url'
 
 export interface VideoMeta {
   url: string
@@ -116,6 +117,9 @@ export function parseVideoMeta(raw: unknown): VideoMeta {
  */
 export function h5PublicMediaUrl(path: string): string {
   // #ifdef H5
+  // OSS signs the original host/key/query; legacy MinIO same-origin rules must
+  // never rewrite it, even when a misconfigured upstream returns HTTP.
+  if (isOSSStorageUrl(path)) return path
   if (typeof location !== 'undefined' && location.protocol === 'https:' && path.startsWith('http://')) {
     try {
       const url = new URL(path)

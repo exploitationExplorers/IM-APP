@@ -1,0 +1,97 @@
+// Injected ONLY into the private patched tools module by patch-openim.cjs.
+// No network or real credentials. Tests the actual SDK signer, not a fake URL.
+package oss
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/json"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openimsdk/tools/s3"
+)
+
+func testCNAMEConfig() Config {
+	return Config{Endpoint: "https://oss-chat-test.xn--jprz53bj9s.com", Bucket: "yikeliao-188-hk-test", BucketURL: "https://oss-chat-test.xn--jprz53bj9s.com", AccessKeyID: "FakeTestAccessKeyID", AccessKeySecret: "FakeTestAccessKeySecret000"}
+}
+
+func TestCNAMEConstructorAndSignedURLs(t *testing.T) {
+	c := testCNAMEConfig()
+	o, err := NewOSS(c)
+	if err != nil { t.Fatal(err) }
+	if !o.bucket.Client.Config.IsCname { t.Fatal("CNAME was not enabled before SDK initialization") }
+	ctx := context.Background()
+	key := "oss-test/chat/test-image.jpg"
+	put, err := o.PresignedPutObject(ctx, key, time.Minute, nil)
+	if err != nil { t.Fatal(err) }
+	get, err := o.AccessURL(ctx, key, time.Minute, nil)
+	if err != nil { t.Fatal(err) }
+	for method, raw := range map[string]string{"PUT": put.URL, "GET": get} {
+		u, err := url.Parse(raw)
+		if err != nil { t.Fatal(err) }
+		if u.Scheme != "https" || "https://"+u.Host != c.Endpoint || u.Path != "/"+key { t.Fatal("signer used the wrong host or key") }
+		q := u.Query()
+		mac := hmac.New(sha1.New, []byte(c.AccessKeySecret))
+		contentType := ""
+		if method == "PUT" { contentType = put.Header.Get("Content-Type") }
+		mac.Write([]byte(method+"\n\n"+contentType+"\n"+q.Get("Expires")+"\n/"+c.Bucket+"/"+key))
+		if !hmac.Equal([]byte(q.Get("Signature")), []byte(base64.StdEncoding.EncodeToString(mac.Sum(nil)))) { t.Fatal("signature canonical bucket/key differs") }
+	}
+	form, err := o.FormData(ctx, key, 42, "image/jpeg", time.Minute)
+	if err != nil { t.Fatal(err) }
+	if strings.TrimSuffix(form.URL, "/") != c.Endpoint || form.FormData["key"] != key { t.Fatal("form host/key differs") }
+	policy, err := base64.StdEncoding.DecodeString(form.FormData["policy"])
+	if err != nil { t.Fatal(err) }
+	var p struct { Conditions []json.RawMessage `json:"conditions"` }
+	if err := json.Unmarshal(policy, &p); err != nil { t.Fatal(err) }
+	if len(p.Conditions) != 3 || !strings.Contains(string(p.Conditions[0]), `"bucket":"`+c.Bucket+`"`) { t.Fatal("POST policy has wrong bucket") }
+	auth, err := o.AuthSign(ctx, "fake-upload", key, time.Minute, []int{1})
+	if err != nil { t.Fatal(err) }
+	if !strings.HasPrefix(auth.URL, c.Endpoint+"/"+key) || len(auth.Parts) != 1 || auth.Parts[0].Header.Get("Authorization") == "" { t.Fatal("multipart host/signature differs") }
+	if auth.Parts[0].Header.Get("Content-Type") != "application/octet-stream" { t.Fatal("multipart MIME must not be inferred differently by H5/native clients") }
+	image, err := o.AccessURL(ctx, key, time.Minute, &s3.AccessURLOption{Image: &s3.Image{Width: 100}})
+	if err != nil { t.Fatal(err) }
+	u, err := url.Parse(image)
+	if err != nil || "https://"+u.Host != c.Endpoint || u.Query().Get("x-oss-process") == "" { t.Fatal("thumbnail signing lost CNAME or image options") }
+}
+
+func TestPresignedPutContentTypeMatchesClientHeaders(t *testing.T) {
+	c := testCNAMEConfig()
+	o, err := NewOSS(c)
+	if err != nil { t.Fatal(err) }
+	key := "oss-test/chat/client-mime.png"
+	for _, opt := range []*s3.PutOption{nil, {}, {ContentType: "image/png"}} {
+		before := ""
+		if opt != nil { before = opt.ContentType }
+		signed, err := o.PresignedPutObject(context.Background(), key, time.Minute, opt)
+		if err != nil { t.Fatal(err) }
+		contentType := signed.Header.Get("Content-Type")
+		if contentType == "" { t.Fatal("client would add unsigned file MIME and OSS would reject the signature") }
+		if opt != nil && opt.ContentType != before { t.Fatal("signing mutated caller options") }
+		if before != "" && contentType != before { t.Fatal("explicit MIME lost") }
+		u, err := url.Parse(signed.URL)
+		if err != nil { t.Fatal(err) }
+		q := u.Query()
+		mac := hmac.New(sha1.New, []byte(c.AccessKeySecret))
+		mac.Write([]byte("PUT\n\n"+contentType+"\n"+q.Get("Expires")+"\n/"+c.Bucket+"/"+key))
+		if !hmac.Equal([]byte(q.Get("Signature")), []byte(base64.StdEncoding.EncodeToString(mac.Sum(nil)))) { t.Fatal("actual client header MIME differs from canonical signature") }
+	}
+}
+
+func TestCNAMERejectsLegacyBucketsAndOtherHosts(t *testing.T) {
+	for _, change := range []func(*Config){
+		func(c *Config) { c.Endpoint = "https://oss-cn-hangzhou.aliyuncs.com" },
+		func(c *Config) { c.Bucket = "yikeliao-188" },
+		func(c *Config) { c.BucketURL = "https://production.example" },
+		func(c *Config) { c.PublicRead = true },
+		func(c *Config) { c.SessionToken = "unsupported-token" },
+	} {
+		c := testCNAMEConfig(); change(&c)
+		if _, err := NewOSS(c); err == nil { t.Fatal("unsafe test config accepted") }
+	}
+}

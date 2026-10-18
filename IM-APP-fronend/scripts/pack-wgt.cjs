@@ -19,6 +19,7 @@ const path = require('path')
 const zlib = require('zlib')
 const { execFileSync, spawnSync } = require('child_process')
 const { URL } = require('url')
+const { canFallbackToMinio, releaseUploadHeaders } = require('./release-upload.cjs')
 
 /**
  * 源站 IP 固定。当前线上是 8.154.44.197，纯 IP、无域名 —— 请求本来就直连 IP，
@@ -479,13 +480,16 @@ async function publishReleaseForPlatform(args, platform, filePath, versionName, 
   try {
     putRes = await requestBuffer(upload.uploadUrl, {
       method: 'PUT',
-      headers: { 'Content-Length': String(buf.length) },
+      headers: releaseUploadHeaders(upload, buf.length),
       body: buf,
     })
   } catch (err) {
     putRes = { ok: false, status: 0, error: err }
   }
   if (!putRes.ok) {
+    if (!canFallbackToMinio(upload)) {
+      throw new Error(`对象存储上传失败 (${putRes.status})，不会回退到 MinIO，也不会发布记录`)
+    }
     // 必须走 nginx 的 /minio 前缀：deploy/docker-compose.yml 把 MinIO 绑在 127.0.0.1:9000，
     // 只回环，外网直连 :9000 连不上（改了会静默失败，只在预签名 PUT 失败时才暴露）。
     const minioEndpoint =
@@ -507,7 +511,7 @@ async function publishReleaseForPlatform(args, platform, filePath, versionName, 
     })
   }
   if (!putRes.ok) {
-    throw new Error(`上传 MinIO 失败 (${putRes.status})`)
+    throw new Error(`文件上传失败 (${putRes.status})`)
   }
 
   const payload = {

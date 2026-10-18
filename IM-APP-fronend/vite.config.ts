@@ -2,11 +2,13 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
 import { visualizer } from 'rollup-plugin-visualizer'
+import { createRequire } from 'node:module'
 
 const analyze = process.env.ANALYZE === 'true'
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const base = {
   plugins: [
     uni(),
     analyze &&
@@ -19,7 +21,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks(id) {
+        manualChunks(id: string) {
           // 不要把 openim-uniapp-polyfill / @openim/* 单独拆包：
           // H5 产物里该包在模块加载期会读 __uniConfig，独立 chunk 可能先于 uni 入口执行 → 白屏。
           if (id.includes('node_modules')) {
@@ -90,4 +92,10 @@ export default defineConfig({
       },
     },
   },
+  }
+  if (mode !== 'oss-test') return base
+  const { testFrontendConfig } = createRequire(import.meta.url)('../deploy/oss-test/frontend-vite.cjs')
+  const test = testFrontendConfig('client')
+  // Replace, never merge with production proxies. Keep the refactored app/plugin behavior.
+  return { ...base, ...test, build: { ...base.build, ...test.build } }
 })

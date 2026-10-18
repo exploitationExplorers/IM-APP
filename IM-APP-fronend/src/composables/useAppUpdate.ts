@@ -153,6 +153,11 @@ async function applyRelease(release: AppReleaseCheckResult): Promise<void> {
 }
 
 export async function checkAndPromptAppUpdate(options: { manual?: boolean } = {}): Promise<boolean> {
+  // Resource builds for OSS verification must never install/publish an existing release.
+  if (APP_CONFIG.ossTest) {
+    if (options.manual) uni.showToast({ title: 'OSS 隔离测试包不执行热更新', icon: 'none' })
+    return false
+  }
   if (!isAppPlatform() || checking || installing) {
     if (!isAppPlatform() && options.manual) {
       uni.showToast({ title: '请在 App 内检查更新', icon: 'none' })

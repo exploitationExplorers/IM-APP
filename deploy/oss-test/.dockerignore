@@ -1,0 +1,13 @@
+**
+!openim.Dockerfile
+!openim.prebuilt.Dockerfile
+!openim-scope/
+!openim-scope/*.go
+!openim-scope/go.mod
+!openim-scope/go.sum
+!openim-scope/patch-openim.cjs
+!openim-scope/contracts/
+!openim-scope/contracts/oss_test.go.in
+!artifacts/
+!artifacts/openim-linux/
+!artifacts/openim-linux/openim-*

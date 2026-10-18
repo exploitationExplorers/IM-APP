@@ -1,7 +1,7 @@
 import { completeUpload, createUploadTask } from '@/api/file'
 import type { UploadPurpose } from '@/types'
-import { h5PublicMediaUrl } from '@/utils/chatMedia'
 import { isAppPlatform } from '@/utils/platform'
+import { postStorageBytes as postBytes, postStorageLocalFile as postLocalFile } from '@/utils/storage-upload'
 
 interface ImageBytes {
   bytes: ArrayBuffer
@@ -669,23 +669,6 @@ async function loadImageBytes(localPath?: string, remoteUrl?: string): Promise<I
   throw new Error('请选择头像')
 }
 
-async function postBytes(
-  formUrl: string,
-  formData: Record<string, string>,
-  bytes: ArrayBuffer,
-  fileName: string,
-  contentType: string,
-): Promise<void> {
-  if (typeof fetch !== 'function' || typeof FormData === 'undefined' || typeof Blob === 'undefined') {
-    throw new Error('当前环境不支持文件上传')
-  }
-  const body = new FormData()
-  Object.entries(formData).forEach(([key, value]) => body.append(key, value))
-  body.append('file', new Blob([bytes], { type: contentType }), fileName)
-  const res = await fetch(h5PublicMediaUrl(formUrl), { method: 'POST', body })
-  if (!res.ok) throw new Error(`上传失败(${res.status})`)
-}
-
 async function uploadViaTask(
   purpose: UploadPurpose,
   image: ImageBytes,
@@ -703,7 +686,7 @@ async function uploadViaTask(
   if (!init.formUrl || !init.formData) {
     throw new Error('当前环境不支持文件上传')
   }
-  await postBytes(init.formUrl, init.formData, image.bytes, image.fileName, image.contentType)
+  await postBytes(init.formUrl, init.formData, image)
   const file = await completeUpload(fileId)
   return file.id
 }
@@ -742,29 +725,6 @@ function getLocalFileMeta(filePath: string): Promise<{ fileName: string; content
           fail,
         )
       },
-    })
-  })
-}
-
-function postLocalFile(
-  formUrl: string,
-  filePath: string,
-  formData: Record<string, string>,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    uni.uploadFile({
-      url: formUrl,
-      filePath,
-      name: 'file',
-      formData,
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve()
-          return
-        }
-        reject(new Error(`上传失败(${res.statusCode})`))
-      },
-      fail: (err) => reject(new Error(err.errMsg || '上传失败')),
     })
   })
 }

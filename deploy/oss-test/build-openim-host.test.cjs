@@ -1,0 +1,22 @@
+'use strict'
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const { buildEnv, validateBinary } = require('./build-openim-host.cjs')
+test('host fallback uses static Linux/amd64 outputs and clears inherited Go build flags', () => {
+  const env = buildEnv({ GOFLAGS: '-modfile=production.mod', GOENV: 'production', GOOS: 'windows', CGO_ENABLED: '1' })
+  assert.equal(env.GOFLAGS, '')
+  assert.equal(env.GOENV, 'off')
+  assert.equal(env.GOOS, 'linux')
+  assert.equal(env.GOARCH, 'amd64')
+  assert.equal(env.CGO_ENABLED, '0')
+  assert.equal(buildEnv({}, false).GOOS, 'windows')
+})
+test('host fallback refuses Windows binaries and wrong ELF platform', () => {
+  const elf = Buffer.alloc(128)
+  Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1]).copy(elf)
+  elf.writeUInt16LE(62, 18)
+  assert.doesNotThrow(() => validateBinary(elf))
+  assert.throws(() => validateBinary(Buffer.from('MZ-windows-binary')))
+  elf.writeUInt16LE(183, 18)
+  assert.throws(() => validateBinary(elf))
+})

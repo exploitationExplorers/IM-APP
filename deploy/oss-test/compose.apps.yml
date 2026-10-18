@@ -1,0 +1,128 @@
+# Use ONLY with compose.infra.yml through local.cjs. Never merge production files.
+name: im-app-oss-test
+
+x-app: &app
+  restart: unless-stopped
+  networks: [data, egress]
+  labels: {im.app.environment: oss-test}
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "2"}
+
+x-openim: &openim
+  <<: *app
+  image: im-app-oss-test-openim:v3.8.3-patch.15-scoped
+  build: {context: ., dockerfile: openim.Dockerfile}
+  environment:
+    IM_APP_ENV: oss-test
+    IM_APP_OSS_TEST_PREFIX: oss-test/chat/
+    IM_APP_OSS_TEST_DELETE_ENABLED: "false"
+  volumes:
+    - type: bind
+      source: ./private/runtime/openim
+      target: /config
+      read_only: true
+      bind: {create_host_path: false}
+  depends_on:
+    openim-mongodb: {condition: service_healthy}
+    openim-redis: {condition: service_healthy}
+    openim-etcd: {condition: service_healthy}
+    openim-kafka: {condition: service_healthy}
+
+services:
+  api:
+    <<: *app
+    image: im-app-oss-test-business:local
+    build: {context: ../../IM-APP-server, dockerfile: Dockerfile}
+    # Optional only for offline rendering; local.cjs requires generated integrity.
+    # The mandatory explicit test mode below fails closed if the file is absent.
+    env_file: [{path: ./private/runtime/business.env, format: raw, required: false}]
+    environment: {APP_ENV: oss-test, GODEBUG: "decoratemappings=0"}
+    ports: ["127.0.0.1:18080:8080"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      openim-api: {condition: service_started}
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8080/health']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  admin:
+    <<: *app
+    image: im-app-oss-test-admin:local
+    build: {context: ../../IM-APP-admin, dockerfile: Dockerfile}
+    env_file: [{path: ./private/runtime/admin.env, format: raw, required: false}]
+    environment: {APP_ENV: oss-test, GODEBUG: "decoratemappings=0"}
+    ports: ["127.0.0.1:18090:8090"]
+    # Both migrate the same NEW test database. Wait for business migrations first.
+    depends_on: {api: {condition: service_healthy}}
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8090/api/admin/v1/health']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  openim-api:
+    <<: *openim
+    command: [openim-api, -c, /config]
+    ports: ["127.0.0.1:11002:10002"]
+  openim-msggateway:
+    <<: *openim
+    command: [openim-msggateway, -c, /config]
+    ports: ["127.0.0.1:11001:10001"]
+  openim-msgtransfer:
+    <<: *openim
+    command: [openim-msgtransfer, -c, /config]
+  openim-push:
+    <<: *openim
+    command: [openim-push, -c, /config]
+  openim-rpc-auth:
+    <<: *openim
+    command: [openim-rpc-auth, -c, /config]
+  openim-rpc-conversation:
+    <<: *openim
+    command: [openim-rpc-conversation, -c, /config]
+  openim-rpc-friend:
+    <<: *openim
+    command: [openim-rpc-friend, -c, /config]
+  openim-rpc-group:
+    <<: *openim
+    command: [openim-rpc-group, -c, /config]
+  openim-rpc-msg:
+    <<: *openim
+    command: [openim-rpc-msg, -c, /config]
+  openim-rpc-third:
+    <<: *openim
+    command: [openim-rpc-third, -c, /config]
+  openim-rpc-user:
+    <<: *openim
+    command: [openim-rpc-user, -c, /config]
+
+  gateway:
+    <<: *app
+    image: nginx:1.28-alpine
+    ports: ["127.0.0.1:18443:8443", "127.0.0.1:18444:8444"]
+    volumes:
+      - {type: bind, source: ./nginx.conf, target: /etc/nginx/nginx.conf, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./private/tls, target: /etc/nginx/tls, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./artifacts/front-h5, target: /srv/front, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: ./artifacts/admin-web, target: /srv/admin, read_only: true, bind: {create_host_path: false}}
+    depends_on:
+      api: {condition: service_healthy}
+      admin: {condition: service_healthy}
+      openim-msggateway: {condition: service_started}
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8088/health']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+networks:
+  egress:
+    ipam:
+      config: [{subnet: 172.30.188.0/24}]
