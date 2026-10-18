@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -17,6 +19,39 @@ import (
 
 type ForwardHandler struct {
 	Svc *service.ForwardService
+}
+
+// PreserveMedia protects content used by direct SDK forwarding/quote replies.
+// The client cannot choose the destination namespace, owner or archived flag.
+func (h *ForwardHandler) PreserveMedia(c *gin.Context) {
+	if middleware.UserID(c) == "" {
+		response.Unauthorized(c, "缺少登录凭证")
+		return
+	}
+	if c.Request.URL.RawQuery != "" || c.ContentType() != "application/json" {
+		response.Fail(c, http.StatusBadRequest, "请使用 JSON 请求体")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10)
+	var req struct {
+		SourceSnapshot models.ForwardMessageSnapshot `json:"sourceSnapshot"`
+	}
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	snapshot, err := h.Svc.Media.Preserve(c.Request.Context(), middleware.UserID(c), req.SourceSnapshot)
+	if err != nil {
+		forwardError(c, err)
+		return
+	}
+	response.OK(c, snapshot)
 }
 
 type createForwardReq struct {
@@ -263,6 +298,8 @@ func forwardError(c *gin.Context, err error) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrForwardUnavailable):
 		response.Fail(c, http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, service.ErrForwardMedia):
+		response.Fail(c, http.StatusServiceUnavailable, "转发媒体副本保存失败，请稍后重试")
 	default:
 		response.Fail(c, http.StatusInternalServerError, "转发服务处理失败")
 	}

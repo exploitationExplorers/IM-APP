@@ -7,10 +7,11 @@ const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   sendMessageNotOss: vi.fn(),
   reportSendFailure: vi.fn(),
+  preserveForwardMedia: vi.fn(),
 }))
 
 vi.mock('openim-uniapp-polyfill', async () => ({
-  ...await import('../node_modules/openim-uniapp-polyfill/src/types/enum'),
+  ...(await import('../node_modules/openim-uniapp-polyfill/src/types/enum')),
   default: {
     asyncApi: mocks.asyncApi,
     uuid: () => 'operation-test',
@@ -24,28 +25,42 @@ vi.mock('@/utils/platform', () => ({
   isAndroid: () => false,
 }))
 vi.mock('@/api/im', () => ({ reportSendFailure: mocks.reportSendFailure }))
+vi.mock('@/api/forward', () => ({ preserveForwardMedia: mocks.preserveForwardMedia }))
 vi.mock('@/utils/request', () => ({ getToken: () => '' }))
 vi.mock('@/stores/contact', () => ({ useContactStore: vi.fn() }))
 
 import { IMMethods, MessageStatus, SessionType } from 'openim-uniapp-polyfill'
-import { sendImageUrlMessage, sendTextMessage, sendVoiceMessage } from '@/utils/openim'
+import {
+  sendImageUrlMessage,
+  sendTextMessage,
+  sendVoiceMessage,
+  sendForwardMessage,
+  sendQuoteMessage,
+} from '@/utils/openim'
 
 const group = {
-  conversationId: 'sg_group-test', sessionType: SessionType.Group,
-  groupId: 'group-test', recvId: '',
+  conversationId: 'sg_group-test',
+  sessionType: SessionType.Group,
+  groupId: 'group-test',
+  recvId: '',
 }
 const peer = {
-  conversationId: 'si_self_peer', sessionType: SessionType.Single,
-  groupId: '', recvId: 'peer',
+  conversationId: 'si_self_peer',
+  sessionType: SessionType.Single,
+  groupId: '',
+  recvId: 'peer',
 }
 type NativeParams = { recvID: string; groupID: string; message: MessageItem }
 type NativeReply = (reply: { errCode: number; data: unknown }) => void
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   mocks.app = true
   const success = (_operation: string, params: NativeParams, callback: NativeReply) => {
-    callback({ errCode: 0, data: JSON.stringify({ ...params.message, status: MessageStatus.Succeed }) })
+    callback({
+      errCode: 0,
+      data: JSON.stringify({ ...params.message, status: MessageStatus.Succeed }),
+    })
   }
   mocks.sendMessage.mockImplementation(success)
   mocks.sendMessageNotOss.mockImplementation(success)
@@ -57,55 +72,190 @@ beforeEach(() => {
     }),
   })
 })
+
+describe.each([true, false])('protected media sends (native=%s)', (app) => {
+  beforeEach(() => {
+    mocks.app = app
+  })
+  const oldURL = 'https://chat.example/source.jpg?Signature=a%2Bb'
+  const savedURL = 'https://business.example/forwards/owner/copy'
+  const source = Object.freeze({
+    ClientMsgID: 'source-test',
+    ContentType: 102,
+    SendID: 'sender',
+    SendTime: 1234,
+    Content: JSON.stringify({ SourcePicture: { Url: oldURL } }),
+    PictureElem: Object.freeze({
+      SourcePicture: Object.freeze({ Url: oldURL, Type: 'image/jpeg' }),
+    }),
+  }) as unknown as MessageItem
+
+  it('copies media before creating/sending a forward and uses the platform contract', async () => {
+    mocks.preserveForwardMedia.mockResolvedValue({
+      contentType: 102,
+      content: {
+        sourcePath: '',
+        sourcePicture: { url: savedURL, type: 'image/jpeg' },
+        bigPicture: { url: savedURL, type: 'image/jpeg' },
+        snapshotPicture: { url: savedURL, type: 'image/jpeg' },
+      },
+    })
+    const created = Object.freeze({ clientMsgID: 'forward-test', contentType: 102, status: 1 })
+    mocks.asyncApi.mockResolvedValueOnce(created).mockResolvedValueOnce({ ...created, status: 2 })
+    await expect(sendForwardMessage(group, source)).resolves.toMatchObject({ status: 2 })
+    expect(mocks.preserveForwardMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ contentType: 102 }),
+    )
+    const create = mocks.asyncApi.mock.calls[0]
+    expect(create[0]).toBe(IMMethods.CreateForwardMessage)
+    const protectedSource = app ? create[2].message : create[2]
+    expect(protectedSource).toMatchObject({
+      clientMsgID: 'source-test',
+      sendID: 'sender',
+      sendTime: 1234,
+      pictureElem: { sourcePicture: { url: savedURL } },
+      PictureElem: { sourcePicture: { url: savedURL } },
+    })
+    expect(JSON.stringify(protectedSource)).not.toContain(oldURL)
+    expect((source as unknown as { Content: string }).Content).toContain('chat.example')
+    if (app) {
+      expect(mocks.sendMessageNotOss).toHaveBeenCalledTimes(1)
+      expect(mocks.sendMessage).not.toHaveBeenCalled()
+    } else {
+      expect(mocks.asyncApi.mock.calls[1][0]).toBe(IMMethods.SendMessageNotOss)
+      expect(mocks.sendMessageNotOss).not.toHaveBeenCalled()
+    }
+  })
+
+  it('protects quoted media while keeping the SDK quote JSON-string contract', async () => {
+    mocks.preserveForwardMedia.mockResolvedValue({
+      contentType: 102,
+      content: { sourcePicture: { url: savedURL } },
+    })
+    const created = Object.freeze({ clientMsgID: 'quote-test', contentType: 114, status: 1 })
+    mocks.asyncApi.mockResolvedValueOnce(created).mockResolvedValueOnce({ ...created, status: 2 })
+    await expect(sendQuoteMessage(group, 'reply', source)).resolves.toMatchObject({ status: 2 })
+    expect(mocks.asyncApi.mock.calls[0][0]).toBe(IMMethods.CreateQuoteMessage)
+    const params = mocks.asyncApi.mock.calls[0][2]
+    expect(params.text).toBe('reply')
+    expect(typeof params.message).toBe('string')
+    expect(params.message).toContain(savedURL)
+    expect(params.message).not.toContain('chat.example')
+  })
+
+  it.each(['forward', 'quote'])(
+    'does not invoke the SDK when %s preservation fails',
+    async (kind) => {
+      mocks.preserveForwardMedia.mockRejectedValue(new Error('副本保存失败'))
+      const send =
+        kind === 'forward'
+          ? sendForwardMessage(group, source)
+          : sendQuoteMessage(group, 'reply', source)
+      await expect(send).rejects.toThrow('副本保存失败')
+      expect(mocks.asyncApi).not.toHaveBeenCalled()
+      expect(mocks.sendMessage).not.toHaveBeenCalled()
+      expect(mocks.sendMessageNotOss).not.toHaveBeenCalled()
+    },
+  )
+
+  it('keeps text-only forwarding independent of the preservation service', async () => {
+    const created = { clientMsgID: 'text-forward', contentType: 101, status: 1 }
+    mocks.asyncApi.mockResolvedValueOnce(created).mockResolvedValueOnce({ ...created, status: 2 })
+    await sendForwardMessage(
+      peer,
+      Object.freeze({
+        contentType: 101,
+        textElem: Object.freeze({ content: oldURL }),
+      }) as MessageItem,
+    )
+    expect(mocks.preserveForwardMedia).not.toHaveBeenCalled()
+    if (app) expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    else expect(mocks.asyncApi.mock.calls[1][0]).toBe(IMMethods.SendMessage)
+  })
+})
 afterEach(() => vi.unstubAllGlobals())
 
 describe('native message sending with read-only bridge results', () => {
-  it.each([group, peer])('sends text without modifying the SDK message ($conversationId)', async (target) => {
-    const original = Object.freeze({
-      clientMsgID: 'text-test', contentType: 101, status: 1,
-      groupID: '', recvID: '', sessionType: 0,
-      textElem: Object.freeze({ content: 'test' }),
-    })
-    mocks.asyncApi.mockResolvedValue(original)
+  it.each([group, peer])(
+    'sends text without modifying the SDK message ($conversationId)',
+    async (target) => {
+      const original = Object.freeze({
+        clientMsgID: 'text-test',
+        contentType: 101,
+        status: 1,
+        groupID: '',
+        recvID: '',
+        sessionType: 0,
+        textElem: Object.freeze({ content: 'test' }),
+      })
+      mocks.asyncApi.mockResolvedValue(original)
 
-    await expect(sendTextMessage(target, 'test')).resolves.toMatchObject({
-      clientMsgID: 'text-test', status: MessageStatus.Succeed,
-    })
-    const params = mocks.sendMessage.mock.calls[0][1] as NativeParams
-    expect(params.message).not.toBe(original)
-    expect(params.message).toMatchObject({
-      groupID: target.groupId, recvID: target.recvId, sessionType: target.sessionType,
-      textElem: { content: 'test' },
-    })
-    expect(original).toMatchObject({ groupID: '', recvID: '', sessionType: 0, status: 1 })
-    expect(mocks.reportSendFailure).not.toHaveBeenCalled()
-  })
+      await expect(sendTextMessage(target, 'test')).resolves.toMatchObject({
+        clientMsgID: 'text-test',
+        status: MessageStatus.Succeed,
+      })
+      const params = mocks.sendMessage.mock.calls[0][1] as NativeParams
+      expect(params.message).not.toBe(original)
+      expect(params.message).toMatchObject({
+        groupID: target.groupId,
+        recvID: target.recvId,
+        sessionType: target.sessionType,
+        textElem: { content: 'test' },
+      })
+      expect(original).toMatchObject({ groupID: '', recvID: '', sessionType: 0, status: 1 })
+      expect(mocks.reportSendFailure).not.toHaveBeenCalled()
+    },
+  )
 
-  it.each([false, true])('sends an uploaded OSS image and preserves its signed URL (JSON=%s)', async (json) => {
-    const url = 'https://chat.example/image.jpg?Signature=a%2Bb%3D'
-    const original = Object.freeze({
-      clientMsgID: 'image-test', contentType: 102, status: 1, groupID: '',
-      pictureElem: Object.freeze({ sourcePicture: Object.freeze({ url, width: 100, height: 200 }) }),
-    })
-    mocks.asyncApi.mockResolvedValue(json ? { errCode: 0, data: JSON.stringify(original) } : original)
+  it.each([false, true])(
+    'sends an uploaded OSS image and preserves its signed URL (JSON=%s)',
+    async (json) => {
+      const url = 'https://chat.example/image.jpg?Signature=a%2Bb%3D'
+      const original = Object.freeze({
+        clientMsgID: 'image-test',
+        contentType: 102,
+        status: 1,
+        groupID: '',
+        pictureElem: Object.freeze({
+          sourcePicture: Object.freeze({ url, width: 100, height: 200 }),
+        }),
+      })
+      mocks.asyncApi.mockResolvedValue(
+        json ? { errCode: 0, data: JSON.stringify(original) } : original,
+      )
 
-    await expect(sendImageUrlMessage(group, url)).resolves.toMatchObject({ status: MessageStatus.Succeed })
-    expect(mocks.sendMessageNotOss.mock.calls[0][1].message.pictureElem.sourcePicture.url).toBe(url)
-    expect(mocks.sendMessage).not.toHaveBeenCalled()
-    expect(original.groupID).toBe('')
-  })
+      await expect(sendImageUrlMessage(group, url)).resolves.toMatchObject({
+        status: MessageStatus.Succeed,
+      })
+      expect(mocks.sendMessageNotOss.mock.calls[0][1].message.pictureElem.sourcePicture.url).toBe(
+        url,
+      )
+      expect(mocks.sendMessage).not.toHaveBeenCalled()
+      expect(original.groupID).toBe('')
+    },
+  )
 
   it('sends a local voice message through the native upload method', async () => {
     const original = Object.freeze({
-      clientMsgID: 'voice-test', contentType: 103, status: 1, groupID: '',
+      clientMsgID: 'voice-test',
+      contentType: 103,
+      status: 1,
+      groupID: '',
       soundElem: Object.freeze({ soundPath: '/private/voice.m4a', duration: 2 }),
     })
     mocks.asyncApi.mockResolvedValue(original)
 
-    await expect(sendVoiceMessage(group, '/private/voice.m4a', 2)).resolves.toMatchObject({ status: 2 })
-    expect(mocks.asyncApi).toHaveBeenCalledWith(IMMethods.CreateSoundMessageFromFullPath, 'operation-test', {
-      soundPath: '/private/voice.m4a', duration: 2,
+    await expect(sendVoiceMessage(group, '/private/voice.m4a', 2)).resolves.toMatchObject({
+      status: 2,
     })
+    expect(mocks.asyncApi).toHaveBeenCalledWith(
+      IMMethods.CreateSoundMessageFromFullPath,
+      'operation-test',
+      {
+        soundPath: '/private/voice.m4a',
+        duration: 2,
+      },
+    )
     expect(mocks.sendMessage.mock.calls[0][1].message.soundElem).toEqual(original.soundElem)
     expect(mocks.sendMessageNotOss).not.toHaveBeenCalled()
   })
@@ -116,23 +266,40 @@ describe('native message sending with read-only bridge results', () => {
     (value: unknown) => value,
   ])('accepts JSON and PascalCase native creation results', async (wrap) => {
     const original = Object.freeze({
-      ClientMsgID: 'ios-text-test', ContentType: 101, Status: 1,
-      GroupID: '', RecvID: '', SessionType: 0,
+      ClientMsgID: 'ios-text-test',
+      ContentType: 101,
+      Status: 1,
+      GroupID: '',
+      RecvID: '',
+      SessionType: 0,
       TextElem: Object.freeze({ Content: 'test' }),
     })
     mocks.asyncApi.mockResolvedValue(wrap(original))
-    mocks.sendMessage.mockImplementation((_operation: string, params: NativeParams, callback: NativeReply) => {
-      callback({ errCode: 0, data: JSON.stringify({
-        ClientMsgID: params.message.clientMsgID, ContentType: params.message.contentType,
-        Status: MessageStatus.Succeed, GroupID: params.groupID, SessionType: group.sessionType,
-      }) })
-    })
+    mocks.sendMessage.mockImplementation(
+      (_operation: string, params: NativeParams, callback: NativeReply) => {
+        callback({
+          errCode: 0,
+          data: JSON.stringify({
+            ClientMsgID: params.message.clientMsgID,
+            ContentType: params.message.contentType,
+            Status: MessageStatus.Succeed,
+            GroupID: params.groupID,
+            SessionType: group.sessionType,
+          }),
+        })
+      },
+    )
 
     await expect(sendTextMessage(group, 'test')).resolves.toMatchObject({
-      clientMsgID: 'ios-text-test', contentType: 101, groupID: group.groupId, status: 2,
+      clientMsgID: 'ios-text-test',
+      contentType: 101,
+      groupID: group.groupId,
+      status: 2,
     })
     expect(mocks.sendMessage.mock.calls[0][1].message).toMatchObject({
-      clientMsgID: 'ios-text-test', contentType: 101, TextElem: { Content: 'test' },
+      clientMsgID: 'ios-text-test',
+      contentType: 101,
+      TextElem: { Content: 'test' },
     })
     expect(original.GroupID).toBe('')
   })
@@ -144,22 +311,37 @@ describe('native message sending with read-only bridge results', () => {
   })
 
   it('keeps a real native send error as a failure', async () => {
-    mocks.asyncApi.mockResolvedValue(Object.freeze({ clientMsgID: 'denied-test', contentType: 101 }))
-    mocks.sendMessage.mockImplementation((_operation: string, _params: NativeParams, callback: (reply: unknown) => void) => {
-      callback({ errCode: 1002, errMsg: 'not in group', data: '' })
-    })
+    mocks.asyncApi.mockResolvedValue(
+      Object.freeze({ clientMsgID: 'denied-test', contentType: 101 }),
+    )
+    mocks.sendMessage.mockImplementation(
+      (_operation: string, _params: NativeParams, callback: (reply: unknown) => void) => {
+        callback({ errCode: 1002, errMsg: 'not in group', data: '' })
+      },
+    )
     await expect(sendTextMessage(group, 'test')).rejects.toThrow('not in group')
-    expect(mocks.reportSendFailure).toHaveBeenCalledWith(expect.objectContaining({
-      clientMsgId: 'denied-test', stage: 'send', contentType: 101,
-    }))
+    expect(mocks.reportSendFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientMsgId: 'denied-test',
+        stage: 'send',
+        contentType: 101,
+      }),
+    )
   })
 
   it('keeps H5 sending through the web SDK', async () => {
     mocks.app = false
-    const original = Object.freeze({ clientMsgID: 'web-test', contentType: 101, textElem: { content: 'test' } })
+    const original = Object.freeze({
+      clientMsgID: 'web-test',
+      contentType: 101,
+      textElem: { content: 'test' },
+    })
     mocks.asyncApi.mockResolvedValueOnce(original).mockResolvedValueOnce({ ...original, status: 2 })
 
-    await expect(sendTextMessage(group, 'test')).resolves.toMatchObject({ clientMsgID: 'web-test', status: 2 })
+    await expect(sendTextMessage(group, 'test')).resolves.toMatchObject({
+      clientMsgID: 'web-test',
+      status: 2,
+    })
     expect(mocks.asyncApi.mock.calls[1][0]).toBe(IMMethods.SendMessage)
     expect(mocks.asyncApi.mock.calls[1][2].message).toBe(original)
     expect(mocks.sendMessage).not.toHaveBeenCalled()

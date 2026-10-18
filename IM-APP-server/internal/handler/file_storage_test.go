@@ -89,7 +89,7 @@ func TestFileUploadContractPreservedForBothProviders(t *testing.T) {
 			if repo.pending.StorageProvider != provider || repo.pending.StorageBucket != "test-bucket" || repo.creates != 1 {
 				t.Fatal("task location not persisted")
 			}
-			if provider == "oss" && !strings.HasPrefix(repo.pending.ObjectKey, "oss-test/business/uploads/") {
+			if provider == "oss" && !strings.HasPrefix(repo.pending.ObjectKey, "oss-test/business/avatars/") {
 				t.Fatal("OSS task missing prefix")
 			}
 			if provider == "minio" && !strings.HasPrefix(repo.pending.ObjectKey, "uploads/") {

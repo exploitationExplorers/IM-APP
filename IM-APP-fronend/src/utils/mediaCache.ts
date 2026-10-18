@@ -143,21 +143,6 @@ export function prefetchMediaCache(url: string): void {
   requestMediaCache(url, () => {}, { background: true })
 }
 
-/** 马上要用（点开预览）：插到前台队首，超时给空字符串。 */
-export function fetchMediaCacheNow(url: string, timeoutMs = 15000): Promise<string> {
-  return new Promise((resolve) => {
-    let done = false
-    const finish = (path: string) => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      resolve(path)
-    }
-    const timer = setTimeout(() => finish(''), timeoutMs)
-    if (!requestMediaCache(url, finish)) finish('')
-  })
-}
-
 function deliver(url: string, path: string): void {
   const list = listeners.get(url) || []
   listeners.delete(url)
@@ -208,10 +193,29 @@ function pump(): void {
     const target = url
     inflight.add(target)
     if (background) backgroundInflight.add(target)
-    void storeRemote(target)
+    void withDeadline(storeRemote(target))
       .then((result) => finishStore(target, result))
       .catch(() => finishStore(target, { ok: false, skip: true }))
   }
+}
+
+type StoreResult = { ok: true; path: string; rel: string; bytes: number } | { ok: false; skip: boolean }
+
+/** 气泡等缓存时是空白的；plus.io 回调丢了也得放手，让气泡退回远程地址。 */
+function withDeadline(task: Promise<StoreResult>): Promise<StoreResult> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve({ ok: false, skip: false }), 30000)
+    task.then(
+      (result) => {
+        clearTimeout(timer)
+        resolve(result)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
 }
 
 function finishStore(

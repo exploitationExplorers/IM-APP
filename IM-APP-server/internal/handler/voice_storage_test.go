@@ -51,7 +51,7 @@ func TestVoiceStorageSwitchKeepsMultipartAndResponse(t *testing.T) {
 			h.UploadVoice(c)
 			prefix := "voices/test-owner/"
 			if provider == "oss" {
-				prefix = "oss-test/business/" + prefix
+				prefix = "oss-test/business/chat/" + prefix
 			}
 			if w.Code != 200 || !strings.HasPrefix(store.key, prefix) || store.contentType != "audio/mp4" || string(store.data) != "fake-aac-audio" {
 				t.Fatalf("voice contract changed: %s", w.Body.String())

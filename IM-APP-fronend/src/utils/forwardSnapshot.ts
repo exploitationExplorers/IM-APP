@@ -9,10 +9,16 @@ const MESSAGE_TYPE = {
   Video: 104,
   File: 105,
   AtText: 106,
+  Merge: 107,
   Quote: 114,
 } as const
 
 export function snapshotFromMessage(item: MessageItem): ForwardMessageSnapshot {
+  return buildSnapshot(item, 0)
+}
+
+function buildSnapshot(item: MessageItem, depth: number): ForwardMessageSnapshot {
+  if (depth > 6) throw new Error('引用消息层级过深，无法转发')
   const raw = item as unknown as Record<string, unknown>
   const contentType = Number(raw.contentType ?? raw.ContentType ?? 0)
   if (!contentType || contentType >= 1000) {
@@ -20,47 +26,181 @@ export function snapshotFromMessage(item: MessageItem): ForwardMessageSnapshot {
   }
   return {
     contentType,
-    content: contentFromMessage(item, contentType),
+    content: contentFromMessage(item, contentType, depth),
   }
 }
 
-function contentFromMessage(item: MessageItem, contentType: number): unknown {
+function contentFromMessage(item: MessageItem, contentType: number, depth: number): unknown {
+  const raw = item as unknown as Record<string, unknown>
+  const stored = () => parseStoredContent(raw.content ?? raw.Content)
   switch (contentType) {
     case MESSAGE_TYPE.Text:
-      if (item.textElem?.content) return { content: item.textElem.content }
+      {
+        const elem = asObject(raw.textElem ?? raw.TextElem)
+        if (elem) return { content: elem.content ?? elem.Content ?? '' }
+      }
       break
     case MESSAGE_TYPE.AtText:
-      if (item.atTextElem) return item.atTextElem
-      break
+      return normalizeReference(
+        asObject(raw.atTextElem ?? raw.AtTextElem) ?? asObject(stored()) ?? {},
+        depth,
+        true,
+      )
     case MESSAGE_TYPE.Quote:
-      if (item.quoteElem) return item.quoteElem
-      break
+      return normalizeReference(
+        asObject(raw.quoteElem ?? raw.QuoteElem) ?? asObject(stored()) ?? {},
+        depth,
+      )
     case MESSAGE_TYPE.Picture:
-      if (item.pictureElem) return normalizePictureElem(item.pictureElem)
-      break
-    case MESSAGE_TYPE.Voice:
-      if (item.soundElem) return item.soundElem
-      break
-    case MESSAGE_TYPE.File:
-      if (item.fileElem) return item.fileElem
-      break
+      return normalizePictureElem(asObject(raw.pictureElem ?? raw.PictureElem) ?? stored())
+    case MESSAGE_TYPE.Voice: {
+      const elem = asObject(raw.soundElem ?? raw.SoundElem) ?? asObject(stored()) ?? {}
+      return {
+        uuid: stringOf(elem, ['uuid', 'UUID']),
+        soundPath: '',
+        sourceUrl: preferHttpUrl(
+          stringOf(elem, ['sourceUrl', 'SourceUrl', 'SourceURL']),
+          stringOf(elem, ['soundPath', 'SoundPath']),
+        ),
+        dataSize: numberOf(elem, ['dataSize', 'DataSize']),
+        duration: numberOf(elem, ['duration', 'Duration']),
+      }
+    }
+    case MESSAGE_TYPE.File: {
+      const elem = asObject(raw.fileElem ?? raw.FileElem) ?? asObject(stored()) ?? {}
+      return {
+        uuid: stringOf(elem, ['uuid', 'UUID']),
+        filePath: '',
+        sourceUrl: preferHttpUrl(
+          stringOf(elem, ['sourceUrl', 'SourceUrl', 'SourceURL']),
+          stringOf(elem, ['filePath', 'FilePath']),
+        ),
+        fileName: stringOf(elem, ['fileName', 'FileName']),
+        fileSize: numberOf(elem, ['fileSize', 'FileSize']),
+      }
+    }
     case MESSAGE_TYPE.Video:
       return normalizeVideoElem(item)
+    case MESSAGE_TYPE.Merge: {
+      const elem = asObject(raw.mergeElem ?? raw.MergeElem) ?? asObject(stored()) ?? {}
+      const messages = elem.multiMessage ?? elem.MultiMessage
+      const parsedMessages: unknown = typeof messages === 'string' ? JSON.parse(messages) : messages
+      if (!Array.isArray(parsedMessages) || parsedMessages.length === 0)
+        throw new Error('合并消息内容无效')
+      return {
+        title: elem.title ?? elem.Title ?? '',
+        abstractList: elem.abstractList ?? elem.AbstractList ?? [],
+        multiMessage: parsedMessages.map((message) => normalizeEmbeddedMessage(message, depth + 1)),
+        messageEntityList: elem.messageEntityList ?? elem.MessageEntityList ?? [],
+      }
+    }
     default:
       break
   }
-  return parseStoredContent(item.content)
+  return stored()
+}
+
+function normalizeReference(
+  elem: Record<string, unknown>,
+  depth: number,
+  atText = false,
+): Record<string, unknown> {
+  const quote = elem.quoteMessage ?? elem.QuoteMessage
+  return {
+    text: elem.text ?? elem.Text ?? '',
+    ...(quote ? { quoteMessage: normalizeEmbeddedMessage(quote, depth + 1) } : {}),
+    ...(atText
+      ? {
+          atUserList: elem.atUserList ?? elem.AtUserList ?? [],
+          atUsersInfo: normalizeAtUsersInfo(elem.atUsersInfo ?? elem.AtUsersInfo),
+        }
+      : {}),
+  }
+}
+
+function normalizeAtUsersInfo(raw: unknown): Array<{ atUserID: string; groupNickname: string }> {
+  if (!Array.isArray(raw)) return []
+  return raw.map((value) => {
+    const info = asObject(value) ?? {}
+    return {
+      atUserID: stringOf(info, ['atUserID', 'AtUserID']),
+      groupNickname: stringOf(info, ['groupNickname', 'GroupNickname']),
+    }
+  })
+}
+
+function normalizeEmbeddedMessage(raw: unknown, depth: number): MessageItem {
+  const message = asObject(raw)
+  if (!message) throw new Error('引用消息内容无效')
+  const item = message as unknown as MessageItem
+  return withForwardSnapshot(item, buildSnapshot(item, depth))
+}
+
+const elemNames: Record<number, string> = {
+  101: 'textElem',
+  102: 'pictureElem',
+  103: 'soundElem',
+  104: 'videoElem',
+  105: 'fileElem',
+  106: 'atTextElem',
+  107: 'mergeElem',
+  114: 'quoteElem',
+}
+
+/** The native bridge can return frozen objects. Update a plain copy and both
+ * field aliases so an SDK cannot prefer a stale content/element URL. */
+export function withForwardSnapshot(
+  item: MessageItem,
+  snapshot: ForwardMessageSnapshot,
+): MessageItem {
+  const plain = JSON.parse(JSON.stringify(item)) as Record<string, unknown>
+  const content = JSON.parse(JSON.stringify(snapshot.content)) as unknown
+  plain.contentType = snapshot.contentType
+  plain.content = JSON.stringify(content)
+  if ('ContentType' in plain) plain.ContentType = snapshot.contentType
+  if ('Content' in plain) plain.Content = plain.content
+  // Quoted native messages also need identity/time aliases for H5 rendering.
+  for (const key of [
+    'clientMsgID',
+    'serverMsgID',
+    'sendID',
+    'recvID',
+    'groupID',
+    'sendTime',
+    'createTime',
+    'sessionType',
+    'seq',
+    'status',
+    'senderNickname',
+    'senderFaceUrl',
+  ]) {
+    const pascal = key[0].toUpperCase() + key.slice(1)
+    if (plain[key] === undefined && plain[pascal] !== undefined) plain[key] = plain[pascal]
+  }
+  const name = elemNames[snapshot.contentType]
+  if (name) {
+    plain[name] = content
+    const pascal = name[0].toUpperCase() + name.slice(1)
+    if (pascal in plain) plain[pascal] = content
+  }
+  return plain as unknown as MessageItem
+}
+
+export function mayContainForwardMedia(contentType: number): boolean {
+  return [102, 103, 104, 105, 106, 107, 114].includes(contentType)
 }
 
 function asObject(raw: unknown): Record<string, unknown> | null {
-  if (typeof raw === 'string' && raw) {
+  for (let depth = 0; typeof raw === 'string' && raw && depth < 4; depth += 1) {
     try {
-      return asObject(JSON.parse(raw) as unknown)
+      raw = JSON.parse(raw) as unknown
     } catch {
       return null
     }
   }
-  return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+  return raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : null
 }
 
 function stringOf(obj: Record<string, unknown>, keys: string[]): string {
@@ -85,7 +225,8 @@ function numberOf(obj: Record<string, unknown>, keys: string[]): number {
  */
 export function normalizeVideoElem(item: MessageItem): Record<string, unknown> {
   const raw = item as unknown as Record<string, unknown>
-  const elem = asObject(raw.videoElem ?? raw.VideoElem) || asObject(raw.content) || {}
+  const elem =
+    asObject(raw.videoElem ?? raw.VideoElem) || asObject(raw.content ?? raw.Content) || {}
   const videoUrl = preferHttpUrl(
     stringOf(elem, ['videoUrl', 'VideoUrl', 'videoURL', 'VideoURL', 'url', 'URL']),
     stringOf(elem, ['videoPath', 'VideoPath']),
@@ -97,7 +238,8 @@ export function normalizeVideoElem(item: MessageItem): Record<string, unknown> {
     stringOf(elem, ['snapshotUrl', 'SnapshotUrl', 'snapshotURL', 'SnapshotURL']),
     stringOf(elem, ['snapshotPath', 'SnapshotPath']),
   )
-  const fallbackId = item.clientMsgID || stringOf(raw, ['ClientMsgID', 'clientMsgId']) || `video_${Date.now()}`
+  const fallbackId =
+    item.clientMsgID || stringOf(raw, ['ClientMsgID', 'clientMsgId']) || `video_${Date.now()}`
   const duration = numberOf(elem, ['duration', 'Duration'])
   const videoSize = numberOf(elem, ['videoSize', 'VideoSize'])
   const snapshotWidth = numberOf(elem, ['snapshotWidth', 'SnapshotWidth'])
@@ -111,7 +253,8 @@ export function normalizeVideoElem(item: MessageItem): Record<string, unknown> {
     videoSize: videoSize > 0 ? videoSize : 1,
     duration: duration > 0 ? duration : 1,
     snapshotPath: '',
-    snapshotUUID: stringOf(elem, ['snapshotUUID', 'SnapshotUUID', 'snapshotUuid']) || `${fallbackId}_cover`,
+    snapshotUUID:
+      stringOf(elem, ['snapshotUUID', 'SnapshotUUID', 'snapshotUuid']) || `${fallbackId}_cover`,
     snapshotSize: numberOf(elem, ['snapshotSize', 'SnapshotSize']),
     snapshotUrl: /^https?:\/\//i.test(snapshotUrl) ? snapshotUrl : '',
     snapshotWidth: snapshotWidth > 0 ? snapshotWidth : 720,
@@ -133,7 +276,9 @@ export function mergeVideoSnapshotFromChatContent(
   if (snapshot.contentType !== MESSAGE_TYPE.Video) return snapshot
   const meta = (() => {
     try {
-      return typeof chatContent === 'string' ? (JSON.parse(chatContent) as Record<string, unknown>) : null
+      return typeof chatContent === 'string'
+        ? (JSON.parse(chatContent) as Record<string, unknown>)
+        : null
     } catch {
       return null
     }
@@ -175,7 +320,7 @@ export function videoSnapshotNeedsRemoteCover(snapshot: ForwardMessageSnapshot):
   return !/^https?:\/\//i.test(String(content.snapshotUrl || ''))
 }
 
-function parseStoredContent(raw: string): unknown {
+function parseStoredContent(raw: unknown): unknown {
   if (typeof raw === 'string' && raw) {
     try {
       const parsed: unknown = JSON.parse(raw)
@@ -214,24 +359,40 @@ function firstPictureType(pics: Array<PictureInfo | undefined>): string {
   return DEFAULT_PICTURE_TYPE
 }
 
-function withPictureType(pic: PictureInfo | undefined, fallbackType: string): PictureInfo | undefined {
+function withPictureType(
+  pic: PictureInfo | undefined,
+  fallbackType: string,
+): PictureInfo | undefined {
   if (!pic || typeof pic !== 'object') return undefined
   if (pic.type && pic.type.trim()) return pic
   return { ...pic, type: fallbackType }
 }
 
 function normalizePictureElem(elem: unknown): unknown {
-  if (!elem || typeof elem !== 'object') return elem
-  const e = elem as {
-    sourcePicture?: PictureInfo
-    bigPicture?: PictureInfo
-    snapshotPicture?: PictureInfo
+  const raw = asObject(elem)
+  if (!raw) return elem
+  const picture = (value: unknown): PictureInfo | undefined => {
+    const p = asObject(value)
+    if (!p) return undefined
+    return {
+      uuid: stringOf(p, ['uuid', 'UUID']),
+      type: stringOf(p, ['type', 'Type']),
+      url: stringOf(p, ['url', 'Url', 'URL']),
+      size: numberOf(p, ['size', 'Size']),
+      width: numberOf(p, ['width', 'Width']),
+      height: numberOf(p, ['height', 'Height']),
+    }
+  }
+  const e = {
+    sourcePicture: picture(raw.sourcePicture ?? raw.SourcePicture),
+    bigPicture: picture(raw.bigPicture ?? raw.BigPicture),
+    snapshotPicture: picture(raw.snapshotPicture ?? raw.SnapshotPicture),
   }
   const fallbackType = firstPictureType([e.sourcePicture, e.bigPicture, e.snapshotPicture])
   const source = withPictureType(e.sourcePicture, fallbackType)
   const big = withPictureType(e.bigPicture, fallbackType) ?? source
   const snapshot = withPictureType(e.snapshotPicture, fallbackType) ?? source
-  return { ...e, sourcePicture: source, bigPicture: big, snapshotPicture: snapshot }
+  return { sourcePath: '', sourcePicture: source, bigPicture: big, snapshotPicture: snapshot }
 }
 
 export function createIdempotencyKey(): string {

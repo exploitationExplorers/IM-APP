@@ -184,6 +184,45 @@ type storageRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f storageRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestOSSArchivePutIsScopedAndKeepsOrdinaryUploadLimit(t *testing.T) {
+	o := testOSS(t)
+	calls := 0
+	o.client = oss.NewClient(oss.LoadDefaultConfig().WithRegion(o.cfg.Region).WithEndpoint(o.cfg.Endpoint).
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test-id", "test-secret")).
+		WithHttpClient(&http.Client{Transport: storageRoundTripper(func(r *http.Request) (*http.Response, error) {
+			calls++
+			if r.Header.Get("x-oss-forbid-overwrite") != "true" {
+				t.Fatal("archive can overwrite existing object")
+			}
+			if r.ContentLength != MaxFormUploadBytes+1 {
+				t.Fatal("archive size contract lost")
+			}
+			return &http.Response{StatusCode: 200, Header: http.Header{"x-oss-request-id": {"test"}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+		})}))
+	key, _ := o.NewKey("favorites/user/message/sha256")
+	if err := o.putArchive(context.Background(), key, strings.NewReader("x"), MaxFormUploadBytes+1, "image/jpeg"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal("archive not written")
+	}
+	for _, size := range []int64{0, -1, MaxArchiveBytes + 1} {
+		if err := o.putArchive(context.Background(), key, strings.NewReader("x"), size, "image/jpeg"); !errors.Is(err, ErrObjectKeyScope) {
+			t.Fatal("archive byte limit bypassed")
+		}
+	}
+	wrong, _ := o.NewKey("uploads/user/a")
+	if err := o.putArchive(context.Background(), wrong, strings.NewReader("x"), 1, "image/jpeg"); !errors.Is(err, ErrObjectKeyScope) {
+		t.Fatal("non-favorite archive write allowed")
+	}
+	if err := o.PutObject(context.Background(), key, strings.NewReader("x"), MaxFormUploadBytes+1, "image/jpeg"); err == nil {
+		t.Fatal("ordinary 20 MiB upload limit relaxed")
+	}
+	if calls != 1 {
+		t.Fatal("invalid archive or client upload reached OSS")
+	}
+}
+
 func TestOSSHeadErrorsDistinguishMissingAndUnavailable(t *testing.T) {
 	for _, status := range []int{200, 403, 404, 503} {
 		t.Run(http.StatusText(status), func(t *testing.T) {

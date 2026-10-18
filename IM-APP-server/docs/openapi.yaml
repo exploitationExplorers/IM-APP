@@ -929,6 +929,12 @@ paths:
     post:
       tags: [Favorites]
       summary: 收藏一条 OpenIM 消息快照
+      description: |
+        客户端提交消息快照；同一用户同一 messageId 幂等，重试使用数据库中已保存的内容。
+        image/video/voice/file 先复制到当前业务存储的 favorites 独立目录，提交后返回独立副本的稳定地址。
+        兼容 camelCase/PascalCase 和嵌套 JSON；输入及输出快照上限 64 KiB、64 个媒体地址、累计 512 MiB、归档最长 45 秒。
+        源地址及每次重定向须属于配置范围；复制失败不新增成功记录，已有快照保留。text/emoji 不依赖媒体存储。
+        当前不通过 OpenIM 校验源消息或会话成员身份；源文件访问取决于 URL 本身的访问能力和配置范围，不附加用户登录凭据。
       operationId: createFavorite
       x-change-type: optimized
       security: [{bearerAuth: []}]
@@ -978,6 +984,47 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/forward-media/preserve:
+    post:
+      tags: [Forward]
+      summary: 为客户端转发或引用回复保存独立媒体副本
+      description: |
+        先保存媒体副本，再返回可交给 SDK 的快照；本接口不会发送消息。
+        支持图片、语音、视频、文件和 @/引用/合并消息中的媒体，兼容 camelCase/PascalCase。
+        普通文字不下载链接。副本按登录用户和规范化快照缓存，客户端不能指定所有者或存储路径。
+        sourceSnapshot.content 序列化后和重写后均最多 64 KiB，最多 64 个媒体 URL，累计 512 MiB。
+        本接口只接收 application/json，不接受 query 参数和未知顶层字段。
+        源文件须位于配置的应用媒体地址范围，包含重定向目的地址；凭源 URL 的访问能力下载，
+        不验证 OpenIM 源消息存在或会话成员身份，不附加用户 JWT/Cookie。
+        副本失败时客户端应停止本次转发/引用发送，不能回退到原文件地址。
+      operationId: preserveForwardMedia
+      x-change-type: new
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceSnapshot]
+              additionalProperties: false
+              properties:
+                sourceSnapshot: {$ref: '#/components/schemas/ForwardMessageSnapshot'}
+      responses:
+        '200':
+          description: 副本已保存，data 为冻结的消息快照；纯文字原样返回
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseEnvelope'
+                  - type: object
+                    properties:
+                      data: {$ref: '#/components/schemas/ForwardMessageSnapshot'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
   /api/v1/forward-tasks:
     post:
       tags: [Forward]
@@ -985,6 +1032,7 @@ paths:
       description: |
         转发总人数不设业务上限。创建接口可直接传入全部 targetUserIds，服务端会按 1000 条一批持久化；
         也可通过 add 或 generate 继续分批写入。任务状态保存在 PostgreSQL，提交后由 Kafka 异步派发。
+        媒体快照先复制为独立副本；复制失败返回 503，任务不会进入投递。
       operationId: createForwardTask
       x-change-type: optimized
       security: [{bearerAuth: []}]
@@ -1000,6 +1048,7 @@ paths:
 
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
     get:
       tags: [Forward]
       summary: 分页查询当前用户的转发任务
@@ -1019,7 +1068,7 @@ paths:
     post:
       tags: [Forward]
       summary: 将有序多消息批次可靠加入好友和群聊投递队列
-      description: HTTP 成功仅表示 PostgreSQL 已持久化任务与 Outbox；不表示全部消息已送达。总消息数和总投递数不受日、小时或业务配额限制。
+      description: HTTP 成功仅表示 PostgreSQL 已持久化任务与 Outbox；不表示全部消息已送达。总消息数和总投递数不受日、小时或业务配额限制。媒体先复制为独立副本；失败可能留下已创建的草稿或前面已提交的任务，需使用相同幂等键重试。
       operationId: createForwardBatch
       x-change-type: new
       security: [{bearerAuth: []}]
@@ -1034,6 +1083,7 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
 
   /api/v1/forward-tasks/{id}:
     get:
@@ -2491,6 +2541,7 @@ components:
     ForwardMessageSnapshot:
       type: object
       required: [contentType, content]
+      additionalProperties: false
       properties:
         contentType:
           type: integer
@@ -2498,7 +2549,7 @@ components:
           maximum: 999
           description: OpenIM 消息内容类型；禁止转发 1000 及以上的通知/控制消息。
         content:
-          description: 符合 OpenIM send_msg 的非 null JSON 消息内容，任务创建后冻结。
+          description: 符合 OpenIM send_msg 的非 null JSON 消息内容，序列化后及媒体重写后最多 64 KiB；任务归档后冻结。媒体引用须有可用的远程原文件，视频还须有远程封面。
           oneOf:
             - {type: object, additionalProperties: true}
             - {type: array, items: {}}

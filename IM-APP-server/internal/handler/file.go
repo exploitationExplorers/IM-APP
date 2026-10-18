@@ -122,6 +122,9 @@ func (h *FileHandler) Uploads(c *gin.Context) {
 	if h.Storage.Available() {
 		store := h.Storage.Current
 		provider, bucket = store.Provider(), store.BucketName()
+		if provider == "oss" && req.Purpose == "avatar" {
+			objectKey = fmt.Sprintf("avatars/%s/%s%s", userID, uuid.NewString(), ext)
+		}
 		if provider == "oss" && (req.Size <= 0 || req.Size > infra.MaxFormUploadBytes) {
 			response.Fail(c, http.StatusBadRequest, "文件大小须在 1 字节至 20 MiB 之间")
 			return

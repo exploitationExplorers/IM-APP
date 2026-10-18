@@ -26,11 +26,17 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.ValidateRetention(); err != nil {
+		log.Fatalf("retention configuration: %v", err)
+	}
 	if err := cfg.ValidateMigrations(); err != nil {
 		log.Fatalf("migration configuration: %v", err)
 	}
 	if err := cfg.ValidateStorage(); err != nil {
 		log.Fatalf("storage configuration: %v", err)
+	}
+	if err := infra.ValidateArchiveSources(cfg.MediaSourcePrefixes); err != nil {
+		log.Fatalf("favorite media configuration: %v", err)
 	}
 	// Validate OSS locally BEFORE touching any DB/migrations. No cloud I/O.
 	if cfg.StorageBackend() == "oss" || cfg.OSS.Bucket != "" {
@@ -50,13 +56,15 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
+		"favorites":               {"media_archived"},
 		"files":                   {"storage_provider", "storage_bucket"},
 		"report_reasons":          {"id", "target_type", "reason", "language", "sort_order", "status"},
 		"reports":                 {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
 		"report_files":            {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
 		"feedbacks":               {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
 		"app_releases":            {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
-		"forward_tasks":           {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
+		"forward_tasks":           {"id", "user_id", "source_snapshot", "media_archived", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
+		"forward_media_snapshots": {"user_id", "source_hash", "snapshot", "created_at"},
 		"forward_task_targets":    {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
 		"forward_kafka_outbox":    {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
 		"im_message_recalls":      {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
@@ -67,7 +75,7 @@ func main() {
 		"groups":                  {"id", "public_id", "public_id_changed_at"},
 		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
+		log.Fatalf("schema check: %v; required migrations include 052_media_preservation.sql", err)
 	}
 	if cfg.MigrationsMode == "verify" {
 		log.Println("database schema verified; startup migration replay disabled")
@@ -145,12 +153,19 @@ func main() {
 		chatSvc.Hub = hub
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
-	favSvc := &service.FavoriteService{Fav: favRepo}
+	mediaGuard := &repository.MediaGuard{DB: pool}
+	mediaArchive := infra.NewArchive(storageClient, infra.SourcePrefixes(cfg.MediaSourcePrefixes,
+		cfg.OpenIM.PublicAPIURL, cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL,
+		cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket))
+	favSvc := &service.FavoriteService{Fav: favRepo, Guard: mediaGuard,
+		Media: mediaArchive}
+	forwardMedia := &service.ForwardMediaService{
+		Repo: &repository.ForwardMediaRepo{DB: pool}, Media: mediaArchive, Guard: mediaGuard}
 	stickerRepo := &repository.StickerRepo{DB: pool}
 	stickerSvc := &service.StickerService{Stickers: stickerRepo, Files: fileRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo, Users: userRepo, IM: imClient}
-	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue}
+	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue, Media: forwardMedia}
 	reportSvc := &service.ReportService{Reports: reportRepo}
 	feedbackSvc := &service.FeedbackService{Feedbacks: feedbackRepo}
 	appReleaseSvc := &service.AppReleaseService{Releases: appReleaseRepo, Storage: storageClient}
@@ -415,6 +430,7 @@ func main() {
 
 			// 新增写接口全部使用静态路径 + JSON body；旧 GET 动态路径仅保留兼容。
 			auth.POST("/forward-tasks", forwardH.Create)
+			auth.POST("/forward-media/preserve", forwardH.PreserveMedia)
 			auth.POST("/forward-batches", forwardH.CreateBatch)
 			auth.GET("/forward-tasks", forwardH.List)
 			auth.GET("/forward-tasks/:id", forwardH.GetLegacy)
@@ -449,6 +465,16 @@ func main() {
 	}
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
+	if cfg.GroupRetentionMode == "queue_only" {
+		if err := db.RequireColumns(workerCtx, pool, map[string][]string{
+			"group_retention_jobs": {"id", "group_id", "run_day", "status", "lease_token", "plan", "committed_watermark"},
+		}); err != nil {
+			log.Fatalf("retention schema check: %v; requires 054_group_retention_plans.sql", err)
+		}
+		retentionScheduler := &service.GroupRetentionScheduler{Store: &repository.GroupRetentionRepo{DB: pool}}
+		go retentionScheduler.RunQueueOnly(workerCtx)
+		log.Println("group retention queue_only enabled; no messages/files are deleted and no client cleanup state is published")
+	}
 	if kafkaQueue.Available() {
 		outboxPublisher := &service.ForwardOutboxPublisher{
 			Repo: forwardRepo, Kafka: kafkaQueue,
@@ -470,6 +496,7 @@ func main() {
 		if cfg.Forward.WorkerEnabled {
 			forwardWorker := &service.ForwardWorker{
 				Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue,
+				Media:     forwardMedia,
 				BatchSize: cfg.Forward.BatchSize, MaxAttempts: cfg.Forward.MaxAttempts,
 				Concurrency: cfg.Forward.Concurrency, QPS: cfg.Forward.QPS,
 				PollInterval: time.Duration(cfg.Forward.PollSeconds) * time.Second,

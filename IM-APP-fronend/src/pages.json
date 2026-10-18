@@ -98,6 +98,16 @@
       }
     },
     {
+      "path": "pages/chat/image-viewer",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "图片",
+        "backgroundColor": "#080808",
+        "disableScroll": true,
+        "app-plus": { "background": "#080808" }
+      }
+    },
+    {
       "path": "pages/chat/video-viewer",
       "style": {
         "navigationStyle": "custom",
