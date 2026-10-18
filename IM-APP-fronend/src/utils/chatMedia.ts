@@ -1,5 +1,6 @@
-import { peekMediaCache } from '@/utils/mediaCache'
 import { isAndroid, isAppPlatform, isIOSApp } from '@/utils/platform'
+import { createImagePreviewSession } from '@/utils/imagePreviewSession'
+import { previewCacheOwner } from '@/utils/previewImageCache'
 import type { PlusFileEntry, PlusGallerySave, PlusResolveLocalFile } from '@/types/plus-io'
 import { isOSSStorageUrl } from '@/utils/storage-url'
 
@@ -528,99 +529,24 @@ export async function saveImageToDevice(url: string): Promise<void> {
   throw new Error('当前平台暂不支持保存图片')
 }
 
-/** iOS 系统预览不跟随 /object/ 的跳转，远程地址会停在黑屏转圈。先下到本地再打开。 */
-function iosPreviewNeedsLocalFile(url: string): boolean {
-  if (!isIOSApp() || !/^https?:\/\//i.test(url)) return false
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'http:' || parsed.pathname.startsWith('/object/')
-  } catch {
-    return false
-  }
-}
-
-function downloadPreviewFile(url: string): Promise<string> {
-  const cached = peekMediaCache(url)
-  if (cached) {
-    const abs = toAbsFileUrl(cached)
-    if (abs) return Promise.resolve(abs)
-  }
-  return new Promise((resolve) => {
-    uni.downloadFile({
-      url,
-      timeout: 20000,
-      success: (res) => {
-        if (res.statusCode === 200 && res.tempFilePath) resolve(res.tempFilePath)
-        else resolve('')
-      },
-      fail: () => resolve(''),
-    })
-  })
-}
-
 /**
- * 统一图片预览：接管长按「保存」，避免华为上 previewImage 内置「保存图像到相册失败」。
- * App 用 longPressActions。iPhone 只打开当前这一张的本地文件，避免整组远程地址把预览卡在黑屏。
- * H5 保留滑动和缩放，由 scripts/fix-uni-h5-preview.cjs 按访问过的页加载原图，不一次预取整组。
+ * H5/App share an on-demand viewer with persistent cache, decode/error deadline,
+ * retry, pinch zoom and saving. Mini-programs keep the platform's native preview.
  */
-export async function previewImagesWithSave(urls: string[], current?: string): Promise<void> {
-  const list = urls.map((u) => playableMediaUrl((u || '').trim())).filter(Boolean)
+export async function previewImagesWithSave(urls: string[], current?: string, thumbnails: string[] = []): Promise<void> {
+  const items = urls.map((u, i) => ({ url: playableMediaUrl((u || '').trim()), thumbnail: playableMediaUrl(thumbnails[i] || '') })).filter((item) => item.url)
+  const list = items.map((item) => item.url)
   if (!list.length) return
   const cur = playableMediaUrl((current || '').trim())
-  let currentUrl = cur && list.includes(cur) ? cur : list[0]
-  let previewList = list
-
-  if (iosPreviewNeedsLocalFile(currentUrl)) {
-    uni.showLoading({ title: '打开图片', mask: true })
-    let local = ''
-    try {
-      local = await downloadPreviewFile(currentUrl)
-    } finally {
-      uni.hideLoading()
-    }
-    if (!local) {
-      uni.showToast({ title: '图片打开失败', icon: 'none' })
-      return
-    }
-    previewList = [local]
-    currentUrl = local
-  }
-
-  if (isAppPlatform()) {
-    await requestAndroidSaveAlbumPermission()
-    uni.previewImage({
-      urls: previewList,
-      current: currentUrl,
-      // App 端接管长按菜单，走带权限/华为兜底的保存逻辑
-      longPressActions: {
-        itemList: ['保存图片'],
-        success: (data: { tapIndex?: number; index?: number }) => {
-          const idx = typeof data.index === 'number' ? data.index : previewList.indexOf(currentUrl)
-          const url = previewList[idx] || previewList[0]
-          if (data.tapIndex !== 0 || !url) return
-          void saveImageToDevice(url)
-            .then(() => {
-              uni.showToast({ title: '已保存到相册', icon: 'success' })
-            })
-            .catch((e: unknown) => {
-              uni.showToast({
-                title: e instanceof Error ? e.message : '保存图片失败',
-                icon: 'none',
-              })
-            })
-        },
-        fail: () => {
-          /* 用户取消菜单 */
-        },
-      },
-    } as UniApp.PreviewImageOptions)
+  const currentUrl = cur && list.includes(cur) ? cur : list[0]
+  if (isAppPlatform() || typeof document !== 'undefined') {
+    const session = createImagePreviewSession({ urls: list, current: list.indexOf(currentUrl), owner: previewCacheOwner(), thumbnails: items.map((item) => item.thumbnail) })
+    await new Promise<void>((resolve) => {
+      uni.navigateTo({ url: `/pages/chat/image-viewer?session=${session}`, animationType: 'fade-in', success: () => resolve(), fail: () => { uni.showToast({ title: '无法打开图片预览，请重试', icon: 'none' }); resolve() } })
+    })
     return
   }
-
-  uni.previewImage({
-    urls: previewList,
-    current: currentUrl,
-  })
+  uni.previewImage({ urls: list, current: currentUrl })
 }
 
 function captureH5VideoPoster(url: string): Promise<string> {

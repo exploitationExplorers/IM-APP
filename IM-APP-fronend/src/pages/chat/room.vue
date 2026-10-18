@@ -56,7 +56,7 @@ import {
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { formatChatDayLabel, formatLastSeen, formatMeridiemClock, quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
-import { playableMediaUrl, previewImagesWithSave, previewThumbnailUrl } from '@/utils/chatMedia'
+import { playableMediaUrl, previewImagesWithSave, previewThumbnailUrl, listThumbnailUrl } from '@/utils/chatMedia'
 import { resetMediaCacheQueue } from '@/utils/mediaCache'
 import {
   isAnnouncementDismissed,
@@ -256,14 +256,15 @@ function openImagePreview(message: ChatMessage) {
     const shown = (item.content || item.sourceUrl || '').trim()
     return playableMediaUrl(previewThumbnailUrl(shown))
   }
-  const urls = messages.value
+  const imageMessages = messages.value
     .filter((m) => m.type === 'image' && (m.sourceUrl || m.content))
-    .map((m) => openUrl(m))
-    .filter(Boolean)
+    .filter((m) => openUrl(m))
+  const urls = imageMessages.map(openUrl)
   const current = openUrl(message)
   if (!current) return
   const list = urls.length ? urls : [current]
-  void previewImagesWithSave(list, list.includes(current) ? current : list[0])
+  const thumbnails = imageMessages.map((m) => playableMediaUrl(listThumbnailUrl(m.content || m.sourceUrl || '')))
+  void previewImagesWithSave(list, list.includes(current) ? current : list[0], thumbnails)
 }
 
 watch(
