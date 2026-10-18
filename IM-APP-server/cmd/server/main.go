@@ -26,6 +26,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.ValidateMigrations(); err != nil {
+		log.Fatalf("migration configuration: %v", err)
+	}
 	if err := cfg.ValidateStorage(); err != nil {
 		log.Fatalf("storage configuration: %v", err)
 	}
@@ -43,7 +46,7 @@ func main() {
 	defer pool.Close()
 
 	migrationsDir := filepath.Join("migrations")
-	if err := db.RunMigrationsDir(context.Background(), pool, migrationsDir); err != nil {
+	if err := db.RunStartupMigrations(context.Background(), pool, migrationsDir, cfg.MigrationsMode); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
@@ -66,7 +69,11 @@ func main() {
 	}); err != nil {
 		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
 	}
-	log.Println("migrations applied")
+	if cfg.MigrationsMode == "verify" {
+		log.Println("database schema verified; startup migration replay disabled")
+	} else {
+		log.Println("migrations applied")
+	}
 
 	if cfg.SeedDemo {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

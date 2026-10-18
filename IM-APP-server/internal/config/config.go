@@ -9,6 +9,7 @@ import (
 type Config struct {
 	AppEnvironment       string
 	StorageProvider      string
+	MigrationsMode       string
 	OSS                  OSSConfig
 	HTTPAddr             string
 	DatabaseURL          string
@@ -113,6 +114,7 @@ func Load() Config {
 	return Config{
 		AppEnvironment:  strings.TrimSpace(getenv("APP_ENV", "")),
 		StorageProvider: storageProvider(getenv("STORAGE_PROVIDER", "oss")),
+		MigrationsMode:  strings.ToLower(strings.TrimSpace(getenv("MIGRATIONS_MODE", "auto"))),
 		OSS: OSSConfig{
 			Region:          ossRegion,
 			Endpoint:        getenv("OSS_ENDPOINT", "https://oss-"+ossRegion+".aliyuncs.com"),
