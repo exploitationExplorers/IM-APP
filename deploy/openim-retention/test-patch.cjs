@@ -21,6 +21,17 @@ test('allocator and stale writes cannot reset a durable retention bound', () => 
   assert.doesNotMatch(result, /"\$set": map\[string\]any\{"min_seq":/)
 })
 
+test('both Mongo slot writers are fenced and admin deletion preserves tombstones', () => {
+  const name = 'pkg/common/storage/database/mgo/msg.go'
+  const result = transform(name, fs.readFileSync(path.join(source, name)))
+  assert.equal(result.split('return m.imAppRetentionGuardedWrite(ctx, docID, index, filter, update)').length - 1, 2)
+  assert.match(result, /return m.imAppRetentionDeleteDoc\(ctx, docID\)/)
+  const body = fs.readFileSync(path.join(__dirname, 'body_purge.go.in'), 'utf8')
+  assert.match(body, /24\s*\*\s*time.Hour/)
+  assert.match(body, /all-writers-patched-and-accepted/)
+  assert.doesNotMatch(body, /DeleteObject|DeleteBucket|DeleteMany|RemoveAll|http\.DefaultClient/)
+})
+
 test('private API docs and collection expose only static GET reads and POST JSON writes', () => {
   const doc = JSON.parse(fs.readFileSync(path.join(__dirname, 'openapi.json'), 'utf8'))
   const collection = JSON.parse(fs.readFileSync(path.join(__dirname, 'postman_collection.json'), 'utf8'))
@@ -35,4 +46,7 @@ test('private API docs and collection expose only static GET reads and POST JSON
     else assert.equal(item.request.url.query, undefined)
   }
   assert.equal(collection.variable.find(v => v.key === 'retention_adapter_key').value, '')
+  const caps = doc.paths['/internal/retention/capabilities'].get.responses['200'].content['application/json'].schema
+  assert.deepEqual(caps.properties.objectPurge.enum, ['off'])
+  assert.deepEqual(caps.properties.bodyPurge.enum, ['off', 'mongo_bodies_only'])
 })

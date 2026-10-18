@@ -2,13 +2,13 @@
 
 ## 当前交付边界
 
-**这是逻辑清理版本，不是 OSS 存储空间回收版本。尚未发布，真机验收待执行。**
+**逻辑清理已实现，新增默认关闭的 Mongo 正文延迟清理；不是 OSS 文件空间回收版本。尚未发布，真机验收待执行。**
 
 - 规则：每群每日计算，保留最近 168 小时内且最多 500 条真实可见消息；超出任一限制即过期。单聊不参与。
 - 已实现：可信快照、持久化任务/租约/重试、OpenIM 单调可见边界、已读范围校正、搜索/定位/最后消息过滤、业务水位接口、H5/App 水位同步、新收藏与转发/引用独立副本、旧收藏补偿 worker。
-- `visibility_only` 不删除源 Mongo 消息、旧 MinIO 文件或 OSS 对象，因此旧收藏和已投递引用仍可依赖原文件。**不能把它宣传为已释放存储空间。**
+- `visibility_only` 请求本身不删除源消息/对象。独立 Mongo 正文 worker 需额外门禁，至少等待首次 ACK 后 24 小时；默认仍保留原消息。无论是否启用正文 worker，旧 MinIO/OSS 文件与对象映射均不删除。详见 `BODY-PURGE.md`。
 - 没有 `cleanup`/`apply` 开关；错误配置会拒绝启动。业务端默认 `off`，旧收藏补偿默认关闭。
-- 物理回收仍需跨会话引用、历史引用、上传在途及 OpenIM 去重映射的统一保护，尚未实现，禁止用整个桶的 7 天生命周期代替。
+- OSS 物理回收仍需跨会话引用、历史引用、上传在途及 OpenIM 去重映射的统一保护，尚未实现，禁止用整个桶的 7 天生命周期代替。
 
 ## 1. 固定版本及构建
 
@@ -97,7 +97,7 @@ OpenAPI/Postman 见本目录的 `openapi.json`、`postman_collection.json`。GET
 
 1. 后端 `8.154.44.197`：只读确认当前业务/OpenIM 容器名、镜像 ID、挂载、启动命令、进程数量、可用空间。不要输出完整 `docker inspect`/环境变量；它们含密码和密钥。
 2. 固定当前运行镜像的 ID/摘要及编排文件副本，保留旧卷。已有 OSS 切换完成，**不要重跑 `deploy-production-oss.py` 或旧 bundle**。不恢复任何备份到现有数据库。
-3. 上传新的增量包到新目录；执行 `sha256sum -c SHA256SUMS`。核对 `bundle-manifest.json`，其中 `physicalCleanup=false`、`deviceAcceptance=pending` 是真实限制，不是可忽略的提示。
+3. 上传新的增量包到新目录；执行 `sha256sum -c SHA256SUMS`。核对 `bundle-manifest.json`，其中 `mongoBodyPurge=disabled_by_default`、`ossObjectPurge=false`、`deviceAcceptance=pending` 是真实限制，不是可忽略的提示。旧包不含本轮槽位 fence，不能用于正文清理。
 4. 对业务 PostgreSQL 依次仅执行审核后的 052、053、054、055，单个文件事务并设置合理 `lock_timeout`，遇锁/DDL 故障就停，不自动杀生产连接。不要执行整个历史迁移目录，也不要改 Mongo 消息内容。新后端即使 worker 为 `off`，水位查询接口也要求 055 的 visibility 表。
 5. 用当前**生产 OSS**业务/OpenIM 镜像作为 `BASE_IMAGE` 构建覆盖层。不要用原始官方镜像替代当前镜像，否则可能丢失已经上线的 OSS third RPC；核验目标二进制路径未被现有挂载遮挡。
 6. 先在隔离服务验证镜像，更新所有消息转存实例和消息 RPC，后端 worker 继续 `off`。这是应用更新，不应重启 PostgreSQL/MongoDB/Redis/Kafka/etcd 或删除卷。
@@ -138,4 +138,4 @@ ROLLBACK;
 
 任务 `planned` 不等于已清理，`applied` 才表示适配器 ACK 并提交业务水位。部分群失败会进入独立退避，不阻塞其他群；版本/认证失败则不领任务。不要手工把失败任务改成 `applied`。
 
-需要止损时将业务 `GROUP_RETENTION_MODE=off`、`FAVORITE_ARCHIVE_WORKER_ENABLED=false`，只更新业务服务；保持新 OpenIM 读路径和转存分配器、客户端 tombstone 与新数据库表。**已应用水位后不能直接回滚到旧 OpenIM allocator，也不能删 visibility 表或客户端 tombstone**，否则旧消息可能再出现。不要降低 `min_seq`，不要还原数据库快照，更不要删 MinIO/OSS 原文件。
+需要止损时将业务 `GROUP_RETENTION_MODE=off`、`FAVORITE_ARCHIVE_WORKER_ENABLED=false`。若曾开启独立正文 worker，还须关闭 `IM_APP_RETENTION_BODY_PURGE_ENABLED` 并清空其 scope/ACK，仅关闭业务 worker 不会停止已有 ACK 的正文待办。保持新 OpenIM 读写 fence、转存分配器、客户端 tombstone 与新表。**已应用水位后不能直接回滚到旧 OpenIM allocator，也不能删 visibility 表、Mongo fence 或客户端 tombstone**，否则旧消息可能再出现。不要降低 `min_seq`，不要还原数据库快照，更不要删 MinIO/OSS 原文件。

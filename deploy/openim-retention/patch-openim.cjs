@@ -25,6 +25,14 @@ function transform(name, source) {
   } else if (name.endsWith('/as_read.go')) {
     s = once(s, '\treturn resp, nil', '\tif err := m.clampIMAppRetentionRead(ctx, resp); err != nil { return nil, err }\n\treturn resp, nil')
   } else if (name.endsWith('/controller/msg.go')) {
+    s = once(s, '\tvar msgs []*model.MsgInfoModel\n\tif v, ok := cache[quoteMsg.QuoteMessage.Seq]; ok {', `\t// A retention boundary expires the source, not the embedded quote copy.
+\t// Do not reinterpret a purged source as a user revoke.
+\tif strings.HasPrefix(conversationID, "sg_") && quoteMsg.QuoteMessage.Seq > 0 {
+\t\tminimum, err := db.seqConversation.GetMinSeq(ctx, conversationID)
+\t\tif err != nil || quoteMsg.QuoteMessage.Seq < minimum { return }
+\t}
+\tvar msgs []*model.MsgInfoModel
+\tif v, ok := cache[quoteMsg.QuoteMessage.Seq]; ok {`)
     s = once(s, '\t\ttmp := []*model.MsgInfoModel{msg}', `\t\tminSeq, err := db.seqConversation.GetMinSeq(ctx, conversationID)
 \t\tif err != nil { return nil, err }
 \t\tif msg == nil || msg.Msg == nil || msg.Msg.Seq < minSeq { continue }
@@ -38,6 +46,9 @@ function transform(name, source) {
 \t\ttotalMsgs[conversationID] = convert.MsgDB2Pb(msgs.Msg[index].Msg)`)
   } else if (name.endsWith('/mgo/msg.go')) {
     s = once(s, '\treturn mongoutil.Aggregate[searchMessageIndex](ctx, m.coll, pipeline)', '\treturn mongoutil.Aggregate[searchMessageIndex](ctx, m.coll, imAppRetentionSearchPipeline(pipeline))')
+    s = once(s, '\treturn mongoutil.UpdateOneResult(ctx, m.coll, filter, update)\n}\n\nfunc (m *MsgMgo) PushUnique', '\treturn m.imAppRetentionGuardedWrite(ctx, docID, index, filter, update)\n}\n\nfunc (m *MsgMgo) PushUnique')
+    s = once(s, '\treturn mongoutil.UpdateOneResult(ctx, m.coll, filter, update)\n}', '\treturn m.imAppRetentionGuardedWrite(ctx, docID, index, filter, update)\n}')
+    s = once(s, '\treturn mongoutil.DeleteOne(ctx, m.coll, bson.M{"doc_id": docID})', '\treturn m.imAppRetentionDeleteDoc(ctx, docID)')
   } else {
     // Upstream Malloc resets min_seq on every range reservation. That would
     // resurrect expired history after Redis loss. Never reset an existing bound.
@@ -66,6 +77,10 @@ function apply(root) {
     ['controller.go.in', 'pkg/common/storage/controller/im_app_retention.go'],
     ['controller_test.go.in', 'pkg/common/storage/controller/im_app_retention_test.go'],
     ['search.go.in', 'pkg/common/storage/database/mgo/im_app_retention_search.go'],
+    ['body_purge.go.in', 'internal/rpc/msg/im_app_retention_body_purge.go'],
+    ['body_purge_test.go.in', 'internal/rpc/msg/im_app_retention_body_purge_test.go'],
+    ['write_fence.go.in', 'pkg/common/storage/database/mgo/im_app_retention_write_fence.go'],
+    ['transfer_test.go.in', 'pkg/common/storage/controller/im_app_retention_transfer_test.go'],
   ]) {
     const target = path.join(root, dest)
     if (fs.existsSync(target)) throw new Error('Requires a fresh checkout')

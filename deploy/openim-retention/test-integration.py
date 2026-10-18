@@ -67,6 +67,14 @@ def main():
             print('RETENTION_INTEGRATION_BEGIN: pinned source + empty loopback MongoDB/Redis', flush=True)
             result = subprocess.run(['go', 'test', './internal/imappretention', './internal/rpc/msg', './pkg/common/storage/controller', './pkg/common/storage/database/mgo',
                                      '-run', 'Test(IMAppRetention|Retention|PlanGroupRetention)', '-count=1', '-v'], cwd=copy, env=env, timeout=300)
+            if result.returncode == 0:
+                # Exercise the ACTUAL transfer controller's Create/duplicate
+                # retry and atomic Mongo fence repeatedly under concurrent
+                # purge/replay. No Kafka ingress or full-service claim implied.
+                result = subprocess.run(['go', 'test', './pkg/common/storage/controller',
+                                         '-run', '^TestIMAppRetentionTransferFenceIntegration$', '-count=5'], cwd=copy, env=env, timeout=180)
+                if result.returncode == 0:
+                    print('RETENTION_TRANSFER_FENCE_REPEAT_OK: five independent concurrent replay runs', flush=True)
             if result.returncode == 0 and args.build_linux:
                 env.update({'GOOS': 'linux', 'GOARCH': 'amd64', 'CGO_ENABLED': '0'})
                 for binary, package in [('openim-rpc-msg', './cmd/openim-rpc/openim-rpc-msg'), ('openim-msgtransfer', './cmd/openim-msgtransfer')]:

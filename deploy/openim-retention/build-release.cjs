@@ -23,7 +23,7 @@ function overlayFiles() {
     'api.Dockerfile': 'ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nCOPY --chmod=0755 im-server /app/im-server\nCOPY migrations /app/migrations\nENV MIGRATIONS_MODE=verify GROUP_RETENTION_MODE=off FAVORITE_ARCHIVE_WORKER_ENABLED=false SEED_DEMO=false GROUP_RETENTION_ALL_GROUPS=false\nLABEL im.app.retention="visibility-v2"\n',
     // BASE_IMAGE must be the CURRENT production OSS image, pinned by digest/ID.
     // Preserve its third RPC, API, gateway, configs, libraries and entrypoint.
-    'openim.Dockerfile': 'ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n' + Object.keys(binaries).map(name => `COPY --chmod=0755 ${name} /openim-server/_output/bin/platforms/linux/amd64/${name}\n`).join('') + 'LABEL im.app.retention="visibility-v2"\n',
+    'openim.Dockerfile': 'ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n' + Object.keys(binaries).map(name => `COPY --chmod=0755 ${name} /openim-server/_output/bin/platforms/linux/amd64/${name}\n`).join('') + 'ENV IM_APP_RETENTION_BODY_PURGE_ENABLED=false IM_APP_RETENTION_BODY_PURGE_GROUP_IDS="" IM_APP_RETENTION_BODY_PURGE_ACK=""\nLABEL im.app.retention="visibility-v2-body-fence1"\n',
   }
 }
 
@@ -69,7 +69,7 @@ function build() {
     fs.mkdirSync(path.join(output, 'migrations'))
     for (const file of migrations) fs.copyFileSync(path.join(root, 'IM-APP-server/migrations', file), path.join(output, 'migrations', file))
     for (const [name, data] of Object.entries(overlayFiles())) fs.writeFileSync(path.join(output, name), data, { flag: 'wx' })
-    for (const file of ['README.md', 'ACCEPTANCE.md', 'openapi.json', 'postman_collection.json']) fs.copyFileSync(path.join(__dirname, file), path.join(output, file))
+    for (const file of ['README.md', 'ACCEPTANCE.md', 'BODY-PURGE.md', 'openapi.json', 'postman_collection.json']) fs.copyFileSync(path.join(__dirname, file), path.join(output, file))
     const files = {}
     function collect(directory) {
       for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name))) {
@@ -82,13 +82,13 @@ function build() {
     collect(output)
     const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
     fs.writeFileSync(path.join(output, 'bundle-manifest.json'), JSON.stringify({
-      kind: 'visibility-only-incremental', openim: version, protocol: 'im-app-retention-visibility-v2', platform: 'linux/amd64',
+      kind: 'retention-incremental', openim: version, protocol: 'im-app-retention-visibility-v2', platform: 'linux/amd64',
       sourceCommit: git(['rev-parse', 'HEAD']), workingTreeDirty: Boolean(git(['status', '--porcelain'])),
-      physicalCleanup: false, automaticDeployment: false, deviceAcceptance: 'pending', files,
+      mongoBodyPurge: 'disabled_by_default', ossObjectPurge: false, automaticDeployment: false, deviceAcceptance: 'pending', files,
     }, null, 2)+'\n', { flag: 'wx' })
     fs.writeFileSync(path.join(output, 'SHA256SUMS'), Object.entries(files).map(([file, sum]) => `${sum}  ${file}\n`).join(''), { flag: 'wx' })
     console.log('RETENTION_LOCAL_BUNDLE_BUILT: '+output)
-    console.log('VISIBILITY ONLY; no deployment, WGT publication or physical cleanup. Real-device gate remains closed.')
+    console.log('MONGO BODY PURGE DEFAULT OFF; OSS OBJECT PURGE UNAVAILABLE. No deployment/WGT publication. Real-device gate remains closed.')
   } finally {
     // Only the fresh, explicitly named disposable build root may be removed.
     const resolved = fs.realpathSync(temporary)

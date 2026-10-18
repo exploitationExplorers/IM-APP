@@ -34,7 +34,7 @@ var imAppGroupID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var imAppReceiptID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 var errIMAppSnapshot = errors.New("incomplete or unsupported persisted group history")
 
-type imAppRetentionBridge struct { server *msgServer; db *mongo.Database; key string }
+type imAppRetentionBridge struct { server *msgServer; db *mongo.Database; key string; bodyPurgeGroups map[string]bool }
 type imAppReceipt struct {
 	ID string `bson:"_id"`
 	ConversationID string `bson:"conversation_id"`
@@ -46,21 +46,27 @@ type imAppReceipt struct {
 // configures BOTH variables. Never publish this port or proxy it through Nginx.
 func startIMAppRetention(ctx context.Context, server *msgServer, db *mongo.Database) error {
 	addr, key := os.Getenv("IM_APP_RETENTION_LISTEN"), os.Getenv("IM_APP_RETENTION_KEY")
-	if addr == "" && key == "" { return nil }
+	scope, err := imAppBodyPurgeEnvironment()
+	if err != nil { return err }
+	if addr == "" && key == "" {
+		if len(scope) != 0 { return errors.New("body purge requires private retention bridge") }
+		return nil
+	}
 	if len(key) < 32 || strings.ContainsAny(key, "\r\n") { return errors.New("retention bridge requires a separate >=32-byte key") }
 	if _, _, err := net.SplitHostPort(addr); err != nil { return errors.New("invalid private retention listen address") }
 	indexCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	_, err := db.Collection(imAppRetentionReceipts).Indexes().CreateOne(indexCtx, mongo.IndexModel{
+	_, err = db.Collection(imAppRetentionReceipts).Indexes().CreateOne(indexCtx, mongo.IndexModel{
 		Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0),
 	})
 	if err != nil { return errors.New("retention receipt index unavailable") }
 	listener, err := net.Listen("tcp", addr)
 	if err != nil { return errors.New("private retention listener unavailable") }
-	bridge := &imAppRetentionBridge{server: server, db: db, key: key}
+	bridge := &imAppRetentionBridge{server: server, db: db, key: key, bodyPurgeGroups:scope}
 	httpServer := &http.Server{Handler: bridge, ReadHeaderTimeout: 5*time.Second, ReadTimeout: 10*time.Second, WriteTimeout: 55*time.Second, IdleTimeout: 30*time.Second, MaxHeaderBytes: 8192}
 	go func() { <-ctx.Done(); _ = httpServer.Close() }()
 	go func() { _ = httpServer.Serve(listener) }()
+	if len(scope) != 0 { go bridge.bodyPurgeLoop(ctx) }
 	return nil
 }
 
@@ -76,7 +82,8 @@ func (b *imAppRetentionBridge) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if r.Method == "GET" && r.ContentLength != 0 { http.Error(w, "invalid request", 400); return }
 	switch {
 	case r.Method == "GET" && r.URL.Path == "/internal/retention/capabilities" && r.URL.RawQuery == "":
-		imAppJSON(w, map[string]string{"protocol": imAppRetentionProtocol, "mode": "visibility_only"})
+		purge := "off"; if len(b.bodyPurgeGroups) != 0 { purge = "mongo_bodies_only" }
+		imAppJSON(w, map[string]string{"protocol": imAppRetentionProtocol, "mode": "visibility_only", "bodyPurge":purge, "objectPurge":"off"})
 	case r.Method == "GET" && r.URL.Path == "/internal/retention/snapshot":
 		q, err := netQuery(r)
 		if err != nil { http.Error(w, "invalid request", 400); return }
@@ -229,7 +236,8 @@ func (b *imAppRetentionBridge) apply(ctx context.Context, receiptID, conversatio
 	// SetMinSeq persists Mongo's monotonic $max BEFORE invalidating Redis. A
 	// timeout is safe to retry. No message bodies, quote targets or media are
 	// removed. Native clients additionally consume the business visibility API.
-	return b.server.MsgDatabase.SetMinSeq(ctx, conversationID, boundary)
+	if err := b.server.MsgDatabase.SetMinSeq(ctx, conversationID, boundary); err != nil { return err }
+	return b.markBodyPurgeReceipt(ctx,receiptID)
 }
 
 func (m *msgServer) clampIMAppRetentionRead(ctx context.Context, resp *pbmsg.GetConversationsHasReadAndMaxSeqResp) error {

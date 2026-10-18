@@ -38,3 +38,14 @@ func TestIMAppRetentionLastAndLocate(t *testing.T) {
 	}
 	if messages.calls != 2 { t.Fatal("expired locator read source message") }
 }
+
+func TestIMAppRetentionEmbeddedQuoteSurvivesSourceExpiry(t *testing.T) {
+    messages := &imAppRetentionMsgStub{}
+    db := &commonMsgDatabase{seqConversation:&imAppRetentionSeqStub{},msgDocDatabase:messages}
+    content := `{"text":"reply","quoteMessage":{"seq":9,"contentType":102,"content":"{\"sourcePicture\":{\"url\":\"https://example.invalid/favorites/copy\"}}"}}`
+    for _, snapshot := range []string{content, `{"Text":"native reply","QuoteMessage":{"Seq":9,"ContentType":102,"Content":"{\"SourcePicture\":{\"URL\":\"https://example.invalid/favorites/copy\"}}"}}`} {
+        row := &model.MsgInfoModel{Msg:&model.MsgDataModel{ContentType:constant.Quote,Content:snapshot}}
+        db.handlerDBMsg(context.Background(),map[int64][]*model.MsgInfoModel{},"owner","sg_group",row)
+        if row.Msg.Content != snapshot { t.Fatal("expired source was incorrectly treated as a revoke") }
+    }
+}

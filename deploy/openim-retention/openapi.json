@@ -1,49 +1,288 @@
 {
   "openapi": "3.0.3",
-  "info": {"title": "IM private retention bridge", "version": "visibility-v2", "description": "Private container network ONLY. Dedicated bearer key, never a client JWT. Logical visibility; NO message/object deletion. TTL receipt expiry is explicitly checked with Mongo time."},
-  "servers": [{"url": "http://openim-api:19093", "description": "Replace with the private service name; never expose publicly"}],
-  "security": [{"PrivateRetentionKey": []}],
+  "info": {
+    "title": "IM private retention bridge",
+    "version": "visibility-v2",
+    "description": "Private container network ONLY. Dedicated bearer key. Logical apply never deletes objects; optional separate grace-aged Mongo-body worker is disabled by default. No OSS/MinIO deletion capability. TTL receipt expiry uses Mongo time."
+  },
+  "servers": [
+    {
+      "url": "http://openim-api:19093",
+      "description": "Replace with the private service name; never expose publicly"
+    }
+  ],
+  "security": [
+    {
+      "PrivateRetentionKey": []
+    }
+  ],
   "paths": {
     "/internal/retention/capabilities": {
       "get": {
         "summary": "Read protocol capabilities; no body or query parameters",
         "responses": {
-          "200": {"description": "Compatible private bridge", "content": {"application/json": {"schema": {"type": "object", "required": ["protocol", "mode"], "properties": {"protocol": {"type": "string", "enum": ["im-app-retention-visibility-v2"]}, "mode": {"type": "string", "enum": ["visibility_only"]}}}}}},
-          "400": {"description": "Unexpected GET body"}, "401": {"description": "Missing/invalid private key"}, "404": {"description": "Invalid path or extra query"}
+          "200": {
+            "description": "Compatible private bridge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "protocol",
+                    "mode",
+                    "bodyPurge",
+                    "objectPurge"
+                  ],
+                  "properties": {
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "im-app-retention-visibility-v2"
+                      ]
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "visibility_only"
+                      ]
+                    },
+                    "bodyPurge": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "mongo_bodies_only"
+                      ],
+                      "description": "Optional separate worker; explicit operator gates and 24-hour grace. Not enabled by API requests."
+                    },
+                    "objectPurge": {
+                      "type": "string",
+                      "enum": [
+                        "off"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unexpected GET body"
+          },
+          "401": {
+            "description": "Missing/invalid private key"
+          },
+          "404": {
+            "description": "Invalid path or extra query"
+          }
         }
       }
     },
     "/internal/retention/snapshot": {
       "get": {
         "summary": "Read classified persisted tail and create an expiring prefix receipt; GET body forbidden",
-        "parameters": [{"in": "query", "name": "groupId", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "groupId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ],
         "responses": {
-          "200": {"description": "Fixed watermark and Mongo server time; no bodies, URLs or tokens. overCountThrough is valid only with at least 500 actual visible rows after it. complete applies to all history not covered by that proof.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Snapshot"}}}},
-          "400": {"description": "Invalid/missing/duplicate/extra query or GET body"}, "401": {"description": "Invalid private key"}, "503": {"description": "Incomplete/unsupported persisted tail, storage failure or deadline; no apply authority granted"}
+          "200": {
+            "description": "Fixed watermark and Mongo server time; no bodies, URLs or tokens. overCountThrough is valid only with at least 500 actual visible rows after it. complete applies to all history not covered by that proof.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid/missing/duplicate/extra query or GET body"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Incomplete/unsupported persisted tail, storage failure or deadline; no apply authority granted"
+          }
         }
       }
     },
     "/internal/retention/apply": {
       "post": {
         "summary": "Advance monotonic group visibility using the exact private receipt; no query parameters",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["snapshotId", "conversationId", "minVisibleSeq"], "properties": {"snapshotId": {"type": "string", "format": "uuid", "description": "Unexpired UUID v4 from snapshot"}, "conversationId": {"type": "string", "pattern": "^sg_[0-9a-f]{32}$"}, "minVisibleSeq": {"type": "integer", "format": "int64", "minimum": 1, "maximum": 9007199254740991}}}}}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "snapshotId",
+                  "conversationId",
+                  "minVisibleSeq"
+                ],
+                "properties": {
+                  "snapshotId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Unexpired UUID v4 from snapshot"
+                  },
+                  "conversationId": {
+                    "type": "string",
+                    "pattern": "^sg_[0-9a-f]{32}$"
+                  },
+                  "minVisibleSeq": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {"description": "Durable acknowledgement. Safe to retry; no messages/media deleted.", "content": {"application/json": {"schema": {"type": "object", "required": ["protocol", "conversationId", "minVisibleSeq"], "properties": {"protocol": {"type": "string", "enum": ["im-app-retention-visibility-v2"]}, "conversationId": {"type": "string"}, "minVisibleSeq": {"type": "integer", "format": "int64"}}}}}},
-          "400": {"description": "Invalid JSON/media type/fields; body capped at 4096 bytes"}, "401": {"description": "Invalid private key"}, "404": {"description": "Query/path not allowed"}, "503": {"description": "Missing/expired/foreign receipt, mismatched boundary, persistence/cache invalidation failure or deadline; retry only with same valid receipt"}
+          "200": {
+            "description": "Durable visibility ACK and first Mongo-server applied_at timestamp; safe to retry without extending grace. This request does not delete messages or files. A separately gated Mongo-body worker may later scrub expired slots.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "protocol",
+                    "conversationId",
+                    "minVisibleSeq"
+                  ],
+                  "properties": {
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "im-app-retention-visibility-v2"
+                      ]
+                    },
+                    "conversationId": {
+                      "type": "string"
+                    },
+                    "minVisibleSeq": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON/media type/fields; body capped at 4096 bytes"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "404": {
+            "description": "Query/path not allowed"
+          },
+          "503": {
+            "description": "Missing/expired/foreign receipt, mismatched boundary, persistence/cache invalidation failure or deadline; retry only with same valid receipt"
+          }
         }
       }
     }
   },
   "components": {
-    "securitySchemes": {"PrivateRetentionKey": {"type": "http", "scheme": "bearer", "description": "Separate private random key >=32 bytes. Never save actual key in collection/Git."}},
+    "securitySchemes": {
+      "PrivateRetentionKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Separate private random key >=32 bytes. Never save actual key in collection/Git."
+      }
+    },
     "schemas": {
       "Snapshot": {
-        "type": "object", "required": ["snapshotId", "conversationId", "sessionType", "serverTime", "committedWatermark", "complete", "messages"],
+        "type": "object",
+        "required": [
+          "snapshotId",
+          "conversationId",
+          "sessionType",
+          "serverTime",
+          "committedWatermark",
+          "complete",
+          "messages"
+        ],
         "properties": {
-          "snapshotId": {"type": "string", "format": "uuid"}, "conversationId": {"type": "string", "pattern": "^sg_[0-9a-f]{32}$"}, "sessionType": {"type": "string", "enum": ["group"]},
-          "serverTime": {"type": "string", "format": "date-time"}, "committedWatermark": {"type": "integer", "format": "int64", "minimum": 0}, "complete": {"type": "boolean", "enum": [true]},
-          "overCountThrough": {"type": "integer", "format": "int64", "minimum": 0, "description": "Optional count-proven summarized prefix, not a count of deleted messages"},
-          "messages": {"type": "array", "maxItems": 20000, "items": {"type": "object", "required": ["seq", "sendTime", "visibility"], "properties": {"seq": {"type": "integer", "format": "int64", "minimum": 1}, "sendTime": {"type": "string", "format": "date-time"}, "visibility": {"type": "string", "enum": ["visible", "hidden"]}}}}
+          "snapshotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "pattern": "^sg_[0-9a-f]{32}$"
+          },
+          "sessionType": {
+            "type": "string",
+            "enum": [
+              "group"
+            ]
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "committedWatermark": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "complete": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "overCountThrough": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Optional count-proven summarized prefix, not a count of deleted messages"
+          },
+          "messages": {
+            "type": "array",
+            "maxItems": 20000,
+            "items": {
+              "type": "object",
+              "required": [
+                "seq",
+                "sendTime",
+                "visibility"
+              ],
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1
+                },
+                "sendTime": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "visibility": {
+                  "type": "string",
+                  "enum": [
+                    "visible",
+                    "hidden"
+                  ]
+                }
+              }
+            }
+          }
         }
       }
     }

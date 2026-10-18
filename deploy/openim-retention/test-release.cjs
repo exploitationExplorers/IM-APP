@@ -8,6 +8,7 @@ test('overlay includes BOTH retention-aware readers and allocator, not third/API
   const overlay = overlayFiles()
   assert.match(overlay['openim.Dockerfile'], /COPY --chmod=0755 openim-rpc-msg /)
   assert.match(overlay['openim.Dockerfile'], /COPY --chmod=0755 openim-msgtransfer /)
+  assert.match(overlay['openim.Dockerfile'], /IM_APP_RETENTION_BODY_PURGE_ENABLED=false IM_APP_RETENTION_BODY_PURGE_GROUP_IDS="" IM_APP_RETENTION_BODY_PURGE_ACK=""/)
   assert.doesNotMatch(overlay['openim.Dockerfile'], /openim-rpc-third|COPY.*openim-api|COPY.*config|ENTRYPOINT|CMD/)
   assert.match(overlay['api.Dockerfile'], /MIGRATIONS_MODE=verify GROUP_RETENTION_MODE=off/)
   assert.match(overlay['api.Dockerfile'], /FAVORITE_ARCHIVE_WORKER_ENABLED=false SEED_DEMO=false/)
