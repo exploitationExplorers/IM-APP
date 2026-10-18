@@ -319,9 +319,33 @@ async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
   if (raw && typeof raw === 'object' && 'errCode' in raw) {
     const envelope = raw as { errCode: number; errMsg?: string; data?: T }
     if (envelope.errCode !== 0) throw toIMError(envelope, method)
-    if ('data' in envelope) return envelope.data as T
+    if ('data' in envelope) raw = envelope.data
+  }
+  // iOS 创建消息可能返回 JSON 字符串或只读桥接对象，不能直接补写属性。
+  // 在所有 createXxxMessage 的出口解析并复制，图片/视频等后续加工也使用普通对象。
+  if (isApp() && /^create.*Message/.test(method)) {
+    return copyNativeCreatedMessage(raw) as T
   }
   return raw as T
+}
+
+function copyNativeCreatedMessage(raw: unknown): MessageItem {
+  const obj = unwrapRawMessage(raw)
+  const clientMsgID = obj && pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
+  const contentType = Number(obj?.contentType ?? obj?.ContentType ?? 0)
+  if (!obj || !clientMsgID || !Number.isFinite(contentType) || contentType <= 0) {
+    throw new Error('原生 SDK 创建消息结果无效')
+  }
+  // 保留完整媒体元素及原生扩展字段，不用展示层的归一化逻辑裁剪待发消息。
+  return {
+    ...obj,
+    clientMsgID,
+    contentType,
+    groupID: pickString(obj, ['groupID', 'GroupID']),
+    recvID: pickString(obj, ['recvID', 'RecvID']),
+    sessionType: Number(obj.sessionType ?? obj.SessionType ?? 0),
+    status: messageStatusOf(obj),
+  } as MessageItem
 }
 
 /**
@@ -1092,11 +1116,14 @@ async function sendCreatedMessage(
   if (target.sessionType === SessionType.Single && !recvID) {
     recvID = peerIdFromSingleConversation(target.conversationId, imUserId.value)
   }
-  // 安卓原生有时只读消息体上的 id，参数里有、消息上没有就会把这部分人的消息拒掉
+  // 安卓原生有时只读消息体上的 id；iOS 桥返回值可能只读，补字段必须新建发送对象。
   if (isApp()) {
-    if (groupID && !message.groupID) message.groupID = groupID
-    if (recvID && !message.recvID) message.recvID = recvID
-    if ((groupID || recvID) && !message.sessionType) message.sessionType = target.sessionType
+    message = {
+      ...message,
+      ...(groupID && !message.groupID ? { groupID } : {}),
+      ...(recvID && !message.recvID ? { recvID } : {}),
+      ...((groupID || recvID) && !message.sessionType ? { sessionType: target.sessionType } : {}),
+    }
   }
   const params = {
     recvID,
