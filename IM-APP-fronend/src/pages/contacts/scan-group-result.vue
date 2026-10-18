@@ -15,7 +15,10 @@ const submitting = ref(false)
 
 const avatarSrc = computed(() => group.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
 
+const applied = ref(false)
+
 const primaryLabel = computed(() => {
+  if (applied.value) return '已提交申请'
   if (nextAction.value === 'enter') return '进入群聊'
   if (nextAction.value === 'apply') return '申请加入'
   return '加入群组'
@@ -56,7 +59,7 @@ async function enterGroup() {
 }
 
 async function onPrimary() {
-  if (!group.value || submitting.value) return
+  if (!group.value || submitting.value || applied.value) return
   if (nextAction.value === 'enter') {
     await enterGroup()
     return
@@ -66,7 +69,8 @@ async function onPrimary() {
     const result = await joinGroupByQRCode(token.value)
     if (result.action === 'pending_approval') {
       nextAction.value = 'apply'
-      uni.showToast({ title: '已提交入群申请', icon: 'success' })
+      applied.value = true
+      uni.showToast({ title: '已提交入群申请，等待管理员同意', icon: 'none' })
       return
     }
     group.value = result.group
@@ -112,6 +116,12 @@ async function onPrimary() {
       <text class="name">
         {{ group.name }}
       </text>
+      <text
+        v-if="nextAction === 'apply'"
+        class="hint"
+      >
+        私密群需要管理员同意后才能加入
+      </text>
     </view>
 
     <view
@@ -129,7 +139,7 @@ async function onPrimary() {
     >
       <view
         class="chat-btn"
-        :class="{ disabled: submitting }"
+        :class="{ disabled: submitting || applied }"
         @click="onPrimary"
       >
         <image
@@ -212,6 +222,15 @@ async function onPrimary() {
   color: #fff;
   line-height: 48rpx;
   font-weight: 500;
+}
+
+.hint {
+  margin-top: 16rpx;
+  padding: 0 48rpx;
+  font-size: 26rpx;
+  line-height: 40rpx;
+  color: rgba(255, 255, 255, 0.82);
+  text-align: center;
 }
 
 .loading {

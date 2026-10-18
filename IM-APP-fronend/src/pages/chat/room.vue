@@ -274,7 +274,8 @@ watch(
         key &&
         (key.startsWith('group-member:') ||
           key.startsWith('group-mute:') ||
-          key.startsWith('group-announce:'))
+          key.startsWith('group-announce:') ||
+          key.startsWith('group-purge:'))
       ) {
         return `${key}:${m.id}`
       }

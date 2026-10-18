@@ -372,6 +372,7 @@ func main() {
 			auth.PUT("/groups/:id/members/:userId/role", groupH.UpdateMemberRole)
 			auth.POST("/group-members/mute", groupH.MuteMember)
 			auth.POST("/group-members/unmute", groupH.UnmuteMember)
+			auth.POST("/group-members/purge-messages", groupH.PurgeMemberMessages)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
 			auth.GET("/groups/:id/message-purges", groupH.MessagePurges)
 			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)

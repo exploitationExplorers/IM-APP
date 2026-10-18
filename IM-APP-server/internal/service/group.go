@@ -574,6 +574,41 @@ func (s *GroupService) RemoveMember(ctx context.Context, groupID, uid, targetID 
 	return s.Groups.RemoveMember(ctx, internalID, uid, targetID, purgeMessages)
 }
 
+// PurgeMemberMessages 为所有人隐藏某成员在群内的全部历史消息（目标可已退群），
+// 并以 imAdmin 发一条群提示，让在线客户端收到后重新拉取清理水位。
+func (s *GroupService) PurgeMemberMessages(ctx context.Context, groupID, uid, targetID string) (time.Time, error) {
+	internalID, err := s.internalGroupID(ctx, groupID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	nickname, actorRole, purgedAt, err := s.Groups.PurgeMemberMessages(ctx, internalID, uid, targetID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if s.IM != nil {
+		// 提示发送失败不回滚：水位已生效，客户端下次进群拉取时仍会隐藏
+		if imGroupID, idErr := im.UserIDFromBusinessID(internalID); idErr != nil {
+			log.Printf("group purge tip: group id %s: %v", internalID, idErr)
+		} else if _, sendErr := s.IM.SendTextMessage(ctx, imGroupID, 3, groupPurgeTipText(actorRole, nickname)); sendErr != nil {
+			log.Printf("group purge tip: send to %s: %v", imGroupID, sendErr)
+		}
+	}
+	return purgedAt, nil
+}
+
+// groupPurgeTipText 文案格式与前端 isGroupPurgeTipText 的识别规则保持一致。
+func groupPurgeTipText(actorRole, nickname string) string {
+	actor := "管理员"
+	if actorRole == "owner" {
+		actor = "群主"
+	}
+	name := strings.Join(strings.Fields(nickname), " ")
+	if name == "" {
+		name = "该成员"
+	}
+	return fmt.Sprintf("%s清除了「%s」的全部消息", actor, name)
+}
+
 // MessagePurges 返回群内被「移除并删除消息」清理过的成员列表。
 func (s *GroupService) MessagePurges(ctx context.Context, groupID, uid string) ([]models.GroupMessagePurge, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
