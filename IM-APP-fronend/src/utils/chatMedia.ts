@@ -516,7 +516,8 @@ export async function saveImageToDevice(url: string): Promise<void> {
 
 /**
  * 统一图片预览：接管长按「保存」，避免华为上 previewImage 内置「保存图像到相册失败」。
- * App 用 longPressActions；H5 仍走系统预览。
+ * App 用 longPressActions；H5 保留 uni 的滑动/缩放预览，但由
+ * scripts/fix-uni-h5-preview.cjs 限制为按访问的页加载原图，不能一次预取整个列表。
  */
 export async function previewImagesWithSave(urls: string[], current?: string): Promise<void> {
   const list = urls.map((u) => playableMediaUrl((u || '').trim())).filter(Boolean)
