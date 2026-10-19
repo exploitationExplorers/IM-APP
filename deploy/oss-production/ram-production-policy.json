@@ -1,0 +1,44 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:GetObject",
+        "oss:PutObject",
+        "oss:ListParts"
+      ],
+      "Resource": [
+        "acs:oss:*:*:yikeliao-188-hk-test/im-app-production/chat/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:GetObject",
+        "oss:PutObject"
+      ],
+      "Resource": [
+        "acs:oss:*:*:yikeliao-188-business-hk-test/im-app-production/business/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:GetBucketVersioning"
+      ],
+      "Resource": [
+        "acs:oss:*:*:yikeliao-188-hk-test"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:DeleteObject"
+      ],
+      "Resource": [
+        "acs:oss:*:*:yikeliao-188-hk-test/im-app-production/chat/managed-v1/*"
+      ]
+    }
+  ]
+}
