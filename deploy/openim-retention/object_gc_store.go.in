@@ -1,0 +1,140 @@
+package third
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	gc "github.com/openimsdk/open-im-server/v3/internal/imappgc"
+	"github.com/openimsdk/tools/s3"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+)
+
+var errIMAppGCNotFound = errors.New("managed media object no longer exists")
+
+// The embedded delegate is ALREADY the production scope wrapper. Its public
+// DeleteObject stays disabled. Only Delete below has access to the original
+// raw implementation, and it insists on the new namespace and sealed record.
+type imAppGCStore struct {
+	s3.Interface
+	raw s3.Interface
+	db  *mongo.Database
+}
+
+func (s *imAppGCStore) Check(ctx context.Context, probe bool) error {
+	checker, ok := s.raw.(interface {
+		IMAppGCCheck(context.Context, bool) error
+	})
+	if !ok {
+		return gc.ErrProtected
+	}
+	if checker.IMAppGCCheck(ctx, probe) != nil {
+		return gc.ErrProtected
+	}
+	return nil
+}
+
+func (s *imAppGCStore) writable(ctx context.Context, key string) error {
+	return gc.BeginWrite(ctx, s.db, key)
+}
+func (s *imAppGCStore) InitiateMultipartUpload(ctx context.Context, key string, opt *s3.PutOption) (*s3.InitiateMultipartUploadResult, error) {
+	if err := s.writable(ctx, key); err != nil {
+		return nil, err
+	}
+	return s.Interface.InitiateMultipartUpload(ctx, key, opt)
+}
+func (s *imAppGCStore) CompleteMultipartUpload(ctx context.Context, id, key string, parts []s3.Part) (*s3.CompleteMultipartUploadResult, error) {
+	if err := s.writable(ctx, key); err != nil {
+		return nil, err
+	}
+	return s.Interface.CompleteMultipartUpload(ctx, id, key, parts)
+}
+func (s *imAppGCStore) PresignedPutObject(ctx context.Context, key string, expire time.Duration, opt *s3.PutOption) (*s3.PresignedPutResult, error) {
+	if expire > 7*24*time.Hour {
+		return nil, gc.ErrProtected
+	}
+	if err := s.writable(ctx, key); err != nil {
+		return nil, err
+	}
+	return s.Interface.PresignedPutObject(ctx, key, expire, opt)
+}
+func (s *imAppGCStore) AuthSign(ctx context.Context, id, key string, expire time.Duration, parts []int) (*s3.AuthSignResult, error) {
+	if expire > 7*24*time.Hour {
+		return nil, gc.ErrProtected
+	}
+	if err := s.writable(ctx, key); err != nil {
+		return nil, err
+	}
+	return s.Interface.AuthSign(ctx, id, key, expire, parts)
+}
+func (s *imAppGCStore) FormData(ctx context.Context, key string, size int64, kind string, expire time.Duration) (*s3.FormData, error) {
+	if expire > 7*24*time.Hour {
+		return nil, gc.ErrProtected
+	}
+	if err := s.writable(ctx, key); err != nil {
+		return nil, err
+	}
+	return s.Interface.FormData(ctx, key, size, kind, expire)
+}
+func (s *imAppGCStore) CopyObject(ctx context.Context, src, dst string) (*s3.CopyObjectInfo, error) {
+	if err := s.writable(ctx, dst); err != nil {
+		return nil, err
+	}
+	return s.Interface.CopyObject(ctx, src, dst)
+}
+func (s *imAppGCStore) StatObject(ctx context.Context, key string) (*s3.ObjectInfo, error) {
+	if gc.Managed(key) {
+		var r gc.Record
+		if err := s.db.Collection(gc.Collection).FindOne(ctx, bson.M{"_id": key}).Decode(&r); err != nil {
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return nil, errIMAppGCNotFound
+			}
+			return nil, gc.ErrProtected
+		}
+		if r.State == "deleted" {
+			return nil, errIMAppGCNotFound
+		}
+		if r.State != "open" {
+			return nil, gc.ErrProtected
+		}
+	}
+	return s.Interface.StatObject(ctx, key)
+}
+func (s *imAppGCStore) AccessURL(ctx context.Context, key string, expire time.Duration, opt *s3.AccessURLOption) (string, error) {
+	if gc.Managed(key) {
+		var r gc.Record
+		if s.db.Collection(gc.Collection).FindOne(ctx, bson.M{"_id": key, "state": "open"}).Decode(&r) != nil {
+			return "", gc.ErrProtected
+		}
+	}
+	return s.Interface.AccessURL(ctx, key, expire, opt)
+}
+func (s *imAppGCStore) IsNotFound(err error) bool {
+	return errors.Is(err, errIMAppGCNotFound) || s.Interface.IsNotFound(err)
+}
+
+func (s *imAppGCStore) Delete(ctx context.Context, key string) (int64, error) {
+	if !gc.Managed(key) {
+		return 0, gc.ErrProtected
+	}
+	if err := s.Check(ctx, false); err != nil {
+		return 0, err
+	}
+	var r gc.Record
+	if s.db.Collection(gc.Collection).FindOne(ctx, bson.M{"_id": key, "state": "deleting", "delete_started": true}).Decode(&r) != nil {
+		return 0, gc.ErrProtected
+	}
+	physical := gc.PhysicalPrefix + key
+	info, err := s.raw.StatObject(ctx, physical)
+	if err != nil {
+		if s.raw.IsNotFound(err) {
+			return 0, nil
+		}
+		return 0, gc.ErrProtected
+	}
+	if err := s.raw.DeleteObject(ctx, physical); err != nil {
+		return 0, gc.ErrProtected
+	}
+	return info.Size, nil
+}

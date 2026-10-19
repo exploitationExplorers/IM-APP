@@ -26,6 +26,8 @@ PROTOCOL = "im-app-retention-visibility-v2"
 DOCKER = ["docker", "--host=unix:///var/run/docker.sock"]
 CHAT_SOURCE = "https://oss-chat-test.xn--jprz53bj9s.com/im-app-production/chat/"
 BUSINESS_ORIGIN = "https://oss-business-test.xn--jprz53bj9s.com"
+BINARIES = ("openim-rpc-msg", "openim-msgtransfer", "openim-rpc-third", "openim-rpc-user", "openim-rpc-group")
+GC_POLICY = "managed_v1_only_default_on_after_writer_verification"
 
 
 class Refused(RuntimeError):
@@ -76,7 +78,7 @@ def process_counts():
     raw = docker(["exec", "openim-api", "sh", "-c",
                   'for p in /proc/[0-9]*/exe; do readlink "$p" 2>/dev/null || :; done'])
     names = [PurePosixPath(p).name for p in raw.decode().splitlines()]
-    return {name: names.count(name) for name in ("openim-rpc-msg", "openim-msgtransfer")}
+    return {name: names.count(name) for name in BINARIES}
 
 
 def masked(info, paths):
@@ -109,7 +111,8 @@ def verify_manifest(root):
     manifest = json.loads((root / "bundle-manifest.json").read_text())
     require(manifest.get("kind") == "retention-incremental" and manifest.get("protocol") == PROTOCOL and
             manifest.get("platform") == "linux/amd64" and manifest.get("groupVisibility") == "enabled_by_default_all_groups" and
-            manifest.get("mongoBodyPurge") == "disabled_by_default" and manifest.get("ossObjectPurge") is False,
+            manifest.get("mongoBodyPurge") == "disabled_by_default" and manifest.get("ossObjectPurge") == GC_POLICY and
+            manifest.get("mediaGCProtocol") == "im-app-media-gc-v1",
             "WRONG_RELEASE_MANIFEST")
     require(re.fullmatch(r"[0-9a-f]{40}", manifest.get("sourceCommit", "")), "INVALID_SOURCE_COMMIT")
     for name, digest in manifest["files"].items():
@@ -132,19 +135,31 @@ def validate_runtime():
         if kind == "api":
             require(info["State"].get("Health", {}).get("Status") == "healthy", "RESTORE_HEALTHY_OSS_API_FIRST")
         image = json.loads(docker(["image", "inspect", config["image"]]))[0]
-        require(image["Id"] == info["Image"], "RUNNING_IMAGE_DIFFERS_FROM_SAVED_OSS_OVERRIDE")
+        if image["Id"] != info["Image"]:
+            # An already installed retention overlay is a valid upgrade base.
+            # Never revert to the old OSS image or regenerate its credentials.
+            current = json.loads(docker(["image", "inspect", info["Image"]]))[0]
+            require(current.get("Config", {}).get("Labels", {}).get("im.app.retention", "").startswith("visibility-v2-"),
+                    "RUNNING_IMAGE_DIFFERS_FROM_SAVED_OSS_OVERRIDE")
+            image = current
         require(image["Architecture"] == "amd64" and image["Os"] == "linux", "AMD64_IMAGES_REQUIRED")
         # Compare the previously saved runtime values, not newly introduced
         # optional settings in the updated base Compose (e.g. retention mode).
         saved = json.loads((OLD / (kind + ".compose.json")).read_text())["services"][service]
         resolved = resolved_environment(config)
+        # Retention/GC overlays intentionally change only these reviewed task
+        # settings. Comparing them to the ORIGINAL OSS cutover would reject a
+        # valid upgrade (or force operators to restore obsolete task switches).
+        mutable = {"MEDIA_GC_REFERENCE_GUARD_ENABLED", "MEDIA_SOURCE_URL_PREFIXES",
+                   "FAVORITE_ARCHIVE_WORKER_ENABLED"}
         require(all(env.get(k, "") == resolved.get(k, "")
-                    for k in saved.get("environment", {})),
+                    for k in saved.get("environment", {})
+                    if not k.startswith(("GROUP_RETENTION_", "IM_APP_RETENTION_", "IM_APP_MEDIA_GC_")) and k not in mutable),
                 "RUNNING_ENV_DIFFERS_FROM_SAVED_OSS_OVERRIDE")
         require(SHARED in info["NetworkSettings"]["Networks"] and info["HostConfig"].get("NetworkMode") != "host",
                 "EXPECTED_SHARED_BRIDGE_NETWORK_REQUIRED")
         targets = ["/app/im-server", "/app/migrations"] if kind == "api" else [
-            "/openim-server/_output/bin/platforms/linux/amd64/" + p for p in ("openim-rpc-msg", "openim-msgtransfer")]
+            "/openim-server/_output/bin/platforms/linux/amd64/" + p for p in BINARIES]
         require(not masked(info, targets), "BINARY_OR_MIGRATIONS_HIDDEN_BY_MOUNT")
         configs[kind], infos[kind] = config, info
     api, chat = settings(infos["api"]), settings(infos["openim"])
@@ -156,7 +171,7 @@ def validate_runtime():
             api.get("OSS_KEY_PREFIX") == "im-app-production/business/" and
             chat.get("IM_APP_OSS_PREFIX") == "im-app-production/chat/", "MEDIA_SOURCE_SCOPE_CHANGED_REVIEW_REQUIRED")
     require(chat.get("IM_APP_ENV") == "oss-production", "KEEP_EXISTING_OSS_OPENIM_IMAGE")
-    require(not infos["openim"]["HostConfig"].get("PortBindings", {}).get("19093/tcp"), "PRIVATE_BRIDGE_PORT_IS_PUBLISHED")
+    require(all(not infos["openim"]["HostConfig"].get("PortBindings", {}).get(str(p)+"/tcp") for p in (19093,19094)), "PRIVATE_BRIDGE_PORT_IS_PUBLISHED")
     counts = process_counts()
     require(counts["openim-rpc-msg"] == 1 and counts["openim-msgtransfer"] >= 1, "REVIEW_OPENIM_PROCESS_TOPOLOGY")
     pg = detail("im-app-postgres")
@@ -185,16 +200,20 @@ def prepare(root, group_id):
     values = {"RETENTION_API_IMAGE": "im-app-retention-api:" + tag,
               "RETENTION_OPENIM_IMAGE": "im-app-retention-openim:" + tag}
     images = {"BASE_API_IMAGE": infos["api"]["Image"], "BASE_OPENIM_IMAGE": infos["openim"]["Image"], **values}
-    values.update(IM_APP_RETENTION_KEY=secrets.token_hex(32), RETENTION_MEDIA_SOURCE_URL_PREFIXES=",".join(dict.fromkeys(sources)),
+    key = api.get("GROUP_RETENTION_ADAPTER_KEY") or secrets.token_hex(32)
+    require(re.fullmatch(r"[0-9a-f]{64}", key), "EXISTING_RETENTION_KEY_FORMAT_REQUIRES_REVIEW")
+    if api.get("GROUP_RETENTION_ADAPTER_KEY"):
+        require(settings(infos["openim"]).get("IM_APP_RETENTION_KEY") == key, "EXISTING_BRIDGE_KEY_MISMATCH")
+    values.update(IM_APP_RETENTION_KEY=key, RETENTION_MEDIA_SOURCE_URL_PREFIXES=",".join(dict.fromkeys(sources)),
                   RETENTION_CANARY_GROUP_ID=group_id)
     directory.mkdir(mode=0o700)
     private_write(directory / "retention.env", "".join(k + "='" + v + "'\n" for k, v in values.items()))
     private_write(directory / "images.env", "".join(k + "='" + v + "'\n" for k, v in images.items()))
     private_write(directory / "prepared.json", json.dumps({"sourceCommit": manifest["sourceCommit"], "images": images,
-        "data_containers": {n: {"id": detail(n)["Id"], "started_at": detail(n)["State"]["StartedAt"]}
+        "openim_process_counts": process_counts(), "data_containers": {n: {"id": detail(n)["Id"], "started_at": detail(n)["State"]["StartedAt"]}
                             for n in ("im-app-postgres", "openim-mongodb")}}, indent=2) + "\n")
     print("RETENTION_CONFIGURATION_PREPARED: " + str(directory))
-    print("key=backend_generated_64_hex; original_oss_keys=unchanged; worker_install=off; final_policy=all_groups")
+    print("key=backend_generated_or_reused; original_oss_keys=unchanged; worker_install=on; final_policy=all_groups")
     print("builds=none; migrations=none; service_restarts=none; acceptance=pending")
 
 
@@ -212,15 +231,29 @@ def verify(root):
     require(ipaddress.ip_address(addr).is_private, "PRIVATE_BRIDGE_ADDRESS_REQUIRED")
     require(env.get("GROUP_RETENTION_ADAPTER_URL") == "http://openim-api:19093" and
             len(env.get("GROUP_RETENTION_ADAPTER_KEY", "")) >= 32, "API_BRIDGE_CONFIG_MISSING")
-    require(not chat["HostConfig"].get("PortBindings", {}).get("19093/tcp") and
+    require(all(not chat["HostConfig"].get("PortBindings", {}).get(str(p)+"/tcp") for p in (19093,19094)) and
             chat["HostConfig"].get("NetworkMode") != "host", "PRIVATE_BRIDGE_PORT_IS_PUBLISHED")
     counts = process_counts()
-    require(counts["openim-rpc-msg"] == 1 and counts["openim-msgtransfer"] >= 1, "REVIEW_OPENIM_PROCESS_TOPOLOGY")
-    for name, container, target in (("im-server", "im-app-api", "/app/im-server"),
-        ("openim-rpc-msg", "openim-api", "/openim-server/_output/bin/platforms/linux/amd64/openim-rpc-msg"),
-        ("openim-msgtransfer", "openim-api", "/openim-server/_output/bin/platforms/linux/amd64/openim-msgtransfer")):
+    expected = json.loads((root / "private/prepared.json").read_text()).get("openim_process_counts", {})
+    require(all(counts.get(n) == expected.get(n) and counts.get(n,0) >= 1 for n in BINARIES), "REVIEW_OPENIM_PROCESS_TOPOLOGY")
+    for name, container, target in [("im-server", "im-app-api", "/app/im-server")] + [
+        (n, "openim-api", "/openim-server/_output/bin/platforms/linux/amd64/"+n) for n in BINARIES]:
         digest = docker(["exec", container, "sha256sum", target]).decode().split()[0]
         require(digest == manifest["files"][name], "RUNNING_BINARY_DIFFERS_FROM_RELEASE")
+    # Hash actual running /proc/*/exe as well as installed files. A container
+    # can hold new files while mage still runs stale or missing writers.
+    hashes = docker(["exec", "openim-api", "sh", "-c", '''for p in /proc/[0-9]*/exe; do
+      n=$(readlink "$p" 2>/dev/null) || continue; n=${n##*/}
+      case "$n" in openim-rpc-msg|openim-msgtransfer|openim-rpc-third|openim-rpc-user|openim-rpc-group)
+        h=$(sha256sum "$p" 2>/dev/null) || exit 1; printf '%s %s\\n' "$n" "${h%% *}";; esac
+    done''']).decode().splitlines()
+    actual = {n: [] for n in BINARIES}
+    for row in hashes:
+        n, digest = row.split(); actual[n].append(digest)
+    require(all(len(actual[n])==counts[n] and all(h==manifest["files"][n] for h in actual[n]) for n in BINARIES),
+            "STALE_OR_MISSING_RUNNING_WRITER")
+    require(env.get("MEDIA_GC_REFERENCE_GUARD_ENABLED") == "true" and
+            settings(chat).get("IM_APP_MEDIA_GC_REFERENCES") == "true", "MEDIA_REFERENCE_GUARDS_REQUIRED")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     def call(key):
         req = urllib.request.Request("http://" + addr + ":19093/internal/retention/capabilities",
@@ -236,11 +269,16 @@ def verify(root):
     require(caps == {"protocol": PROTOCOL, "mode": "visibility_only", "bodyPurge": "off", "objectPurge": "off"},
             "UNEXPECTED_BRIDGE_CAPABILITIES")
     require(call("invalid-auth-check")[0] == 401, "PRIVATE_BRIDGE_ACCEPTED_WRONG_KEY")
+    try:
+        with opener.open("http://127.0.0.1:8080/health",timeout=5) as response:
+            require(response.headers.get("X-IM-Media-Reference-Guard")=="im-app-media-gc-v1", "BUSINESS_REFERENCE_GUARD_NOT_RUNNING")
+    except (urllib.error.URLError, OSError):
+        raise Refused("BUSINESS_HEALTH_UNAVAILABLE") from None
     baseline = json.loads((root / "private/prepared.json").read_text())
     for name, before in baseline["data_containers"].items():
         now = detail(name)
         require(now["Id"] == before["id"] and now["State"]["StartedAt"] == before["started_at"], "DATA_CONTAINER_WAS_RESTARTED")
-    print("RETENTION_SERVER_CHECKS_OK: release_binaries_match; protocol=v2; wrong_key=401; body_and_object_purge=off")
+    print("RETENTION_SERVER_CHECKS_OK: all_live_writer_hashes_match; protocol=v2; wrong_key=401; body_purge=off; managed_GC_activation_separate")
     print("scope=server_capabilities_only; full_OpenIM_and_device_acceptance=still_required")
 
 

@@ -37,3 +37,8 @@ base.apk
 *.zip
 
 项目发布
+docs/前端架构分析与优化方案.html
+
+# Python 本地缓存，不随源码提交
+__pycache__/
+*.py[cod]

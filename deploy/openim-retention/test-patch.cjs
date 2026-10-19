@@ -35,8 +35,8 @@ test('both Mongo slot writers are fenced and admin deletion preserves tombstones
 test('private API docs and collection expose only static GET reads and POST JSON writes', () => {
   const doc = JSON.parse(fs.readFileSync(path.join(__dirname, 'openapi.json'), 'utf8'))
   const collection = JSON.parse(fs.readFileSync(path.join(__dirname, 'postman_collection.json'), 'utf8'))
-  assert.deepEqual(Object.keys(doc.paths).sort(), ['/internal/retention/apply','/internal/retention/capabilities','/internal/retention/snapshot'])
-  assert.deepEqual(collection.item.map(x => x.request.method), ['GET','GET','POST'])
+  assert.deepEqual(Object.keys(doc.paths).sort(), ['/internal/media-gc/configure','/internal/media-gc/protect','/internal/media-gc/run','/internal/media-gc/status','/internal/retention/apply','/internal/retention/capabilities','/internal/retention/snapshot'])
+  assert.deepEqual(collection.item.map(x => x.request.method), ['GET','GET','POST','POST','GET','POST','POST'])
   assert.equal(doc.paths['/internal/retention/apply'].post.requestBody.content['application/json'].schema.additionalProperties, false)
   for (const item of collection.item) {
     const endpoint = '/'+item.request.url.path.join('/')

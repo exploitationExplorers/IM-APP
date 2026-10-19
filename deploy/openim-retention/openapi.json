@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "IM private retention bridge",
-    "version": "visibility-v2",
-    "description": "Private container network ONLY. Dedicated bearer key. Logical apply never deletes objects; optional separate grace-aged Mongo-body worker is disabled by default. No OSS/MinIO deletion capability. TTL receipt expiry uses Mongo time."
+    "version": "visibility-v2-managed-gc-v1",
+    "description": "Private network only. Port 19093 logical retention + permanent reference registration; port 19094 guarded managed-v1 object GC. Existing retention capabilities describe ONLY the logical bridge. Physical deletion never sweeps legacy keys. Mongo body purge stays OFF."
   },
   "servers": [
     {
@@ -195,6 +195,161 @@
           }
         }
       }
+    },
+    "/internal/media-gc/protect": {
+      "post": {
+        "summary": "Permanently pin resolved managed objects BEFORE business writes/archive copies",
+        "responses": {
+          "200": {
+            "description": "Operation completed"
+          },
+          "400": {
+            "description": "Invalid JSON/body/query"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Fail closed; no unsafe fallback"
+          },
+          "409": {
+            "description": "Managed object is expired, sealed or protection is unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "maxLength": 4194304
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/media-gc/status": {
+      "get": {
+        "summary": "Read active/schedule/counts/last batch; no body or query",
+        "responses": {
+          "200": {
+            "description": "Operation completed"
+          },
+          "400": {
+            "description": "Invalid JSON/body/query"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Fail closed; no unsafe fallback"
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "http://openim-api:19094",
+          "description": "Container-private only; never publish"
+        }
+      ]
+    },
+    "/internal/media-gc/configure": {
+      "post": {
+        "summary": "Enable after all-writer verification and private OSS probe, or pause GC without removing reference fences",
+        "responses": {
+          "200": {
+            "description": "Operation completed"
+          },
+          "400": {
+            "description": "Invalid JSON/body/query"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Fail closed; no unsafe fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "active"
+                ],
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "http://openim-api:19094",
+          "description": "Container-private only; never publish"
+        }
+      ]
+    },
+    "/internal/media-gc/run": {
+      "post": {
+        "summary": "One bounded batch, max 50; dryRun true does not mutate GC/OSS state",
+        "responses": {
+          "200": {
+            "description": "Operation completed"
+          },
+          "400": {
+            "description": "Invalid JSON/body/query"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Fail closed; no unsafe fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "dryRun"
+                ],
+                "properties": {
+                  "dryRun": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "http://openim-api:19094",
+          "description": "Container-private only; never publish"
+        }
+      ]
     }
   },
   "components": {

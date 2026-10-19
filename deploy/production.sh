@@ -49,10 +49,16 @@ case "$ACTION" in
     retention_openim config --quiet
     retention_openim up -d --no-deps --no-build --pull never openim-api
     ;;
-  up-api|disable)
+  up-api)
     retention_api_install config --quiet
     retention_api_install up -d --no-deps --no-build --pull never api
-    echo 'RETENTION_API_WORKER_OFF: keep_new_binaries_and_published_boundaries'
+    echo 'RETENTION_API_WORKER_ON: all_groups; media_reference_guard_on; GC_activation_after_verify'
+    ;;
+  disable)
+    python3 "$RELEASE/cleanup-production.py" disable-gc
+    retention_api_disable config --quiet
+    retention_api_disable up -d --no-deps --no-build --pull never api
+    echo 'RETENTION_TASKS_OFF: reference_guards_and_published_boundaries_retained'
     ;;
   canary)
     python3 "$RELEASE/prepare-production.py" verify

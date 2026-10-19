@@ -1,0 +1,42 @@
+package third
+
+import (
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestIMAppRetentionGCScheduleAndHTTP(t *testing.T) {
+	now := time.Date(2026, 10, 19, 19, 29, 0, 0, time.UTC)
+	next := imAppGCNext(now)
+	if next.Sub(now) != time.Minute {
+		t.Fatal("not Beijing 03:30", next)
+	}
+	if imAppGCNext(next).Sub(next) != 24*time.Hour {
+		t.Fatal("daily boundary repeats")
+	}
+	s := &imAppGCServer{key: strings.Repeat("k", 32)}
+	for _, test := range []struct {
+		path, body string
+		auth       bool
+		want       int
+	}{
+		{"/internal/media-gc/status", "", false, 401},
+		{"/internal/media-gc/run?dryRun=false", `{"dryRun":true}`, true, 400},
+		{"/internal/media-gc/run", `{"dryRun":true,"unknown":1}`, true, 400},
+		{"/internal/media-gc/run", `{"active":true}`, true, 400},
+		{"/internal/media-gc/configure", `{"dryRun":true}`, true, 400},
+	} {
+		r := httptest.NewRequest("POST", test.path, strings.NewReader(test.body))
+		r.Header.Set("Content-Type", "application/json")
+		if test.auth {
+			r.Header.Set("Authorization", "Bearer "+s.key)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != test.want {
+			t.Fatal("unexpected HTTP result", test.path, w.Code)
+		}
+	}
+}

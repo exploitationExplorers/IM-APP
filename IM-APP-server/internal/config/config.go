@@ -43,6 +43,7 @@ type Config struct {
 	GroupRetentionAllGroups      bool
 	retentionScopeError          error
 	FavoriteArchiveWorkerEnabled bool
+	MediaGCReferenceGuardEnabled bool
 	SMSRate                      SMSRateConfig
 }
 
@@ -128,6 +129,7 @@ func Load() Config {
 		GroupRetentionAllGroups:      retentionAllGroups,
 		retentionScopeError:          retentionScopeError,
 		FavoriteArchiveWorkerEnabled: getenvBool("FAVORITE_ARCHIVE_WORKER_ENABLED", false),
+		MediaGCReferenceGuardEnabled: getenvBool("MEDIA_GC_REFERENCE_GUARD_ENABLED", getenv("APP_ENV", "") == "oss-production"),
 		MediaSourcePrefixes:          splitCSV(getenv("MEDIA_SOURCE_URL_PREFIXES", "")),
 		AppEnvironment:               strings.TrimSpace(getenv("APP_ENV", "")),
 		StorageProvider:              storageProvider(getenv("STORAGE_PROVIDER", "oss")),

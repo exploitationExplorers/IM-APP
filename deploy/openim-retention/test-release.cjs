@@ -5,13 +5,14 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { overlayFiles, binaries, migrations, productionFiles, validateBinary } = require('./build-release.cjs')
 
-test('overlay includes BOTH retention-aware readers and allocator, not third/API/gateway replacements', () => {
-  assert.deepEqual(Object.keys(binaries).sort(), ['openim-msgtransfer', 'openim-rpc-msg'])
+test('overlay includes all five fenced writer types, preserving API/gateway/config', () => {
+  assert.deepEqual(Object.keys(binaries).sort(), ['openim-msgtransfer', 'openim-rpc-group', 'openim-rpc-msg', 'openim-rpc-third', 'openim-rpc-user'])
   const overlay = overlayFiles()
   assert.match(overlay['openim.Dockerfile'], /COPY --chmod=0755 openim-rpc-msg /)
   assert.match(overlay['openim.Dockerfile'], /COPY --chmod=0755 openim-msgtransfer /)
   assert.match(overlay['openim.Dockerfile'], /IM_APP_RETENTION_BODY_PURGE_ENABLED=false IM_APP_RETENTION_BODY_PURGE_GROUP_IDS="" IM_APP_RETENTION_BODY_PURGE_ACK=""/)
-  assert.doesNotMatch(overlay['openim.Dockerfile'], /openim-rpc-third|COPY.*openim-api|COPY.*config|ENTRYPOINT|CMD/)
+  assert.match(overlay['openim.Dockerfile'], /COPY --chmod=0755 openim-rpc-third /)
+  assert.doesNotMatch(overlay['openim.Dockerfile'], /COPY.*openim-api|COPY.*config|ENTRYPOINT|CMD/)
   assert.match(overlay['api.Dockerfile'], /MIGRATIONS_MODE=verify GROUP_RETENTION_MODE=visibility_only/)
   assert.match(overlay['api.Dockerfile'], /FAVORITE_ARCHIVE_WORKER_ENABLED=false SEED_DEMO=false/)
   assert.match(overlay['api.Dockerfile'], /GROUP_RETENTION_ALL_GROUPS=true/)
@@ -22,7 +23,9 @@ test('production templates preserve OSS overrides and separate install, canary, 
   for (const file of productionFiles) assert.ok(fs.existsSync(path.join(__dirname, file)))
   const read = file => JSON.parse(fs.readFileSync(path.join(__dirname, file), 'utf8'))
   const install = read('api.install.compose.json').services.api
-  assert.equal(install.environment.GROUP_RETENTION_MODE, 'off')
+  assert.equal(install.environment.GROUP_RETENTION_MODE, 'visibility_only')
+  assert.equal(install.environment.MEDIA_GC_REFERENCE_GUARD_ENABLED, 'true')
+  assert.equal(read('api.disable.compose.json').services.api.environment.GROUP_RETENTION_MODE, 'off')
   assert.equal(install.environment.MIGRATIONS_MODE, 'verify')
   assert.equal(install.environment.STORAGE_PROVIDER, 'oss')
   assert.match(install.image, /\$\{RETENTION_API_IMAGE:\?/)
@@ -36,6 +39,8 @@ test('production templates preserve OSS overrides and separate install, canary, 
   assert.match(read('api.canary.compose.json').services.api.environment.GROUP_RETENTION_GROUP_IDS, /:\?/)
   const chat = read('openim.bridge.compose.json').services['openim-api']
   assert.equal(chat.ports, undefined)
+  assert.equal(chat.environment.IM_APP_MEDIA_GC_REFERENCES, 'true')
+  assert.equal(chat.environment.IM_APP_MEDIA_GC_SCHEDULE_ENABLED, 'true')
   assert.equal(chat.environment.IM_APP_RETENTION_BODY_PURGE_ENABLED, 'false')
   assert.equal(chat.environment.IM_APP_RETENTION_BODY_PURGE_GROUP_IDS, '')
   assert.equal(chat.environment.IM_APP_RETENTION_KEY, install.environment.GROUP_RETENTION_ADAPTER_KEY)

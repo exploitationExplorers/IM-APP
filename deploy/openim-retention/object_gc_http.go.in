@@ -1,0 +1,184 @@
+package third
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
+	gc "github.com/openimsdk/open-im-server/v3/internal/imappgc"
+	"github.com/openimsdk/tools/log"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+type imAppGCServer struct {
+	store *imAppGCStore
+	key   string
+	mu    sync.Mutex
+}
+
+func startIMAppGC(ctx context.Context, store *imAppGCStore) error {
+	if !gc.Enabled() {
+		return nil
+	}
+	addr, key := os.Getenv("IM_APP_MEDIA_GC_LISTEN"), os.Getenv("IM_APP_RETENTION_KEY")
+	if mode := os.Getenv("IM_APP_MEDIA_GC_SCHEDULE_ENABLED"); mode != "" && mode != "true" && mode != "false" {
+		return errors.New("invalid media GC schedule flag")
+	}
+	if len(key) < 32 {
+		return errors.New("media GC requires private authentication")
+	}
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return errors.New("invalid private media GC listener")
+	}
+	if err := gc.Setup(ctx, store.db); err != nil {
+		return errors.New("media GC metadata unavailable")
+	}
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return errors.New("private media GC listener unavailable")
+	}
+	s := &imAppGCServer{store: store, key: key}
+	h := &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 55 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	go func() { <-ctx.Done(); _ = h.Close() }()
+	go func() { _ = h.Serve(l) }()
+	if os.Getenv("IM_APP_MEDIA_GC_SCHEDULE_ENABLED") != "false" {
+		go s.loop(ctx)
+	}
+	return nil
+}
+func (s *imAppGCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	if len(s.key) < 32 || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.key)) != 1 {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	if r.URL.RawQuery != "" {
+		http.Error(w, "unexpected query", 400)
+		return
+	}
+	write := func(v any) { w.Header().Set("Content-Type", "application/json"); _ = json.NewEncoder(w).Encode(v) }
+	if r.Method == "GET" && r.URL.Path == "/internal/media-gc/status" && r.ContentLength == 0 {
+		counts := map[string]int64{}
+		for _, state := range []string{"open", "deleting", "deleted"} {
+			n, err := s.store.db.Collection(gc.Collection).CountDocuments(ctx, bson.M{"state": state})
+			if err != nil {
+				http.Error(w, "status unavailable", 503)
+				return
+			}
+			counts[state] = n
+		}
+		var control bson.M
+		_ = s.store.db.Collection(gc.ControlCollection).FindOne(ctx, bson.M{"_id": gc.Protocol}).Decode(&control)
+		write(map[string]any{"protocol": gc.Protocol, "active": gc.Ready(ctx, s.store.db), "scheduleEnabled": os.Getenv("IM_APP_MEDIA_GC_SCHEDULE_ENABLED") != "false", "schedule": "03:30 Asia/Shanghai", "scope": gc.PhysicalPrefix + gc.Namespace, "legacyDeletion": false, "counts": counts, "lastRun": control["last_run"], "lastRunAt": control["last_run_at"], "lastRunDeferred": control["last_run_deferred"]})
+		return
+	}
+	if r.Method != "POST" || r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "invalid request", 400)
+		return
+	}
+	var req struct {
+		DryRun *bool `json:"dryRun"`
+		Active *bool `json:"active"`
+	}
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	d.DisallowUnknownFields()
+	if d.Decode(&req) != nil || d.Decode(new(any)) != io.EOF {
+		http.Error(w, "invalid JSON", 400)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch r.URL.Path {
+	case "/internal/media-gc/configure":
+		if req.Active == nil || req.DryRun != nil {
+			http.Error(w, "active required", 400)
+			return
+		}
+		if *req.Active && s.store.Check(ctx, true) != nil {
+			http.Error(w, "OSS permission or bucket versioning check failed; GC remains unchanged", 503)
+			return
+		}
+		_, err := s.store.db.Collection(gc.ControlCollection).UpdateOne(ctx, bson.M{"_id": gc.Protocol}, bson.M{"$set": bson.M{"active": *req.Active}, "$currentDate": bson.M{"changed_at": true}}, options.Update().SetUpsert(true))
+		if err != nil {
+			http.Error(w, "configuration unavailable", 503)
+			return
+		}
+		write(map[string]bool{"active": *req.Active})
+	case "/internal/media-gc/run":
+		if req.DryRun == nil || req.Active != nil {
+			http.Error(w, "dryRun required", 400)
+			return
+		}
+		stats, err := gc.Run(ctx, s.store.db, s.store, *req.DryRun)
+		if !*req.DryRun {
+			s.record(ctx, stats, err)
+		}
+		if err != nil {
+			http.Error(w, "collection deferred", 503)
+			return
+		}
+		write(stats)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *imAppGCServer) record(ctx context.Context, stats gc.Stats, err error) {
+	// Aggregate only: never persist signed URLs, credentials or user content.
+	_, _ = s.store.db.Collection(gc.ControlCollection).UpdateOne(ctx, bson.M{"_id": gc.Protocol}, bson.M{
+		"$set": bson.M{"last_run": stats, "last_run_deferred": err != nil}, "$currentDate": bson.M{"last_run_at": true},
+	})
+}
+
+func imAppGCNext(now time.Time) time.Time {
+	zone := time.FixedZone("Asia/Shanghai", 8*3600)
+	n := now.In(zone)
+	next := time.Date(n.Year(), n.Month(), n.Day(), 3, 30, 0, 0, zone)
+	if !next.After(n) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
+}
+func (s *imAppGCServer) loop(ctx context.Context) {
+	for {
+		timer := time.NewTimer(time.Until(imAppGCNext(time.Now())))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		// Ten bounded batches per day, never an unbounded full bucket sweep.
+		for n := 0; n < 10; n++ {
+			run, cancel := context.WithTimeout(ctx, 45*time.Second)
+			s.mu.Lock()
+			stats, err := gc.Run(run, s.store.db, s.store, false)
+			s.record(run, stats, err)
+			s.mu.Unlock()
+			cancel()
+			if err != nil {
+				log.ZWarn(ctx, "media GC deferred", errors.New("no unsafe fallback; inspect private status"))
+				break
+			}
+			log.ZInfo(ctx, "media GC batch", "scanned", stats.Scanned, "deleted", stats.Deleted, "deletedBytes", stats.Bytes, "deferred", stats.Deferred)
+			if stats.Scanned < 50 {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
+}

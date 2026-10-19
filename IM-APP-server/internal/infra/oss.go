@@ -262,7 +262,8 @@ func (o *OSS) Stat(ctx context.Context, key string) (ObjectInfo, error) {
 
 // putArchive is separate from client uploads so their 20 MiB contract stays fixed.
 func (o *OSS) putArchive(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
-	if !o.accepts(key) || !strings.HasPrefix(key, o.cfg.KeyPrefix+"favorites/") || size <= 0 || size > MaxArchiveBytes {
+	archiveKey := strings.HasPrefix(key, o.cfg.KeyPrefix+"favorites/") || strings.HasPrefix(key, o.cfg.KeyPrefix+"forwards/")
+	if !o.accepts(key) || !archiveKey || size <= 0 || size > MaxArchiveBytes {
 		return ErrObjectKeyScope
 	}
 	_, err := o.client.PutObject(ctx, &oss.PutObjectRequest{Bucket: oss.Ptr(o.cfg.Bucket), Key: oss.Ptr(key), Body: body,
