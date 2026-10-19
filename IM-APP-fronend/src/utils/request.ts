@@ -249,6 +249,7 @@ function handleAuthExpired() {
   authExpiredHandler?.()
   if (authRedirectScheduled) return
   authRedirectScheduled = true
+  uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
   uni.reLaunch({
     url: '/pages/auth/sign-in',
     complete: () => {
@@ -367,8 +368,10 @@ export async function request<T>(options: RequestOptions, retried = false): Prom
       }
       throw new Error(retriedRes.body?.message || `请求失败(${retriedRes.statusCode})`)
     } catch (e) {
-      if (isAuthFailureError(e)) throw e
+      // refresh 失败（含服务端「登录已过期，请重新登录」）必须清会话并跳登录。
+      // 以前对 isAuthFailureError 直接 rethrow，页面只 toast、用户得手动退出。
       handleAuthExpired()
+      if (isAuthFailureError(e)) throw e
       throw new Error('未登录或登录已过期')
     }
   }

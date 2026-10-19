@@ -143,6 +143,29 @@ export function prefetchMediaCache(url: string): void {
   requestMediaCache(url, () => {}, { background: true })
 }
 
+/**
+ * 等一条远程媒体进本地缓存（与气泡同一套 OSS 下载）。
+ * 命中或下完返回本地路径；超时/失败返回空串，调用方再决定退路。
+ */
+export function awaitMediaCache(url: string, timeoutMs = 30000): Promise<string> {
+  const remote = (url || '').trim()
+  if (!remote || !mediaCacheEnabled()) return Promise.resolve('')
+  const hit = peekMediaCache(remote)
+  if (hit) return Promise.resolve(hit)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (path: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(path || '')
+    }
+    const timer = setTimeout(() => finish(''), Math.max(3000, timeoutMs))
+    const queued = requestMediaCache(remote, (path) => finish(path))
+    if (!queued) finish('')
+  })
+}
+
 function deliver(url: string, path: string): void {
   const list = listeners.get(url) || []
   listeners.delete(url)

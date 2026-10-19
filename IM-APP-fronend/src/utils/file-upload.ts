@@ -1,5 +1,6 @@
 import { completeUpload, createUploadTask } from '@/api/file'
 import type { UploadPurpose } from '@/types'
+import { awaitMediaCache } from '@/utils/mediaCache'
 import { isAppPlatform } from '@/utils/platform'
 import { postStorageBytes as postBytes, postStorageLocalFile as postLocalFile } from '@/utils/storage-upload'
 
@@ -585,20 +586,107 @@ function toAppFileUrl(path: string): string {
   }
 }
 
-function downloadToTemp(url: string): Promise<string> {
+function downloadToTemp(url: string, timeoutMs = 30000): Promise<string> {
   return new Promise((resolve, reject) => {
-    uni.downloadFile({
-      url,
-      success: (res) => {
-        if (res.statusCode === 200 && res.tempFilePath) {
-          resolve(res.tempFilePath)
-          return
-        }
-        reject(new Error('下载图片失败'))
-      },
-      fail: () => reject(new Error('下载图片失败')),
-    })
+    let settled = false
+    const finish = (err?: Error, path?: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (err) reject(err)
+      else resolve(path!)
+    }
+    const timer = setTimeout(() => finish(new Error('下载图片超时')), Math.max(3000, timeoutMs))
+    try {
+      uni.downloadFile({
+        url,
+        success: (res) => {
+          if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath) {
+            finish(undefined, res.tempFilePath)
+            return
+          }
+          finish(new Error('下载图片失败'))
+        },
+        fail: () => finish(new Error('下载图片失败')),
+      })
+    } catch {
+      finish(new Error('下载图片失败'))
+    }
   })
+}
+
+/** 按文件头识别类型，避免临时路径无后缀时被当成 jpeg（GIF 会变静态）。 */
+function sniffImageMeta(bytes: ArrayBuffer): { contentType: string; ext: string } | null {
+  const head = new Uint8Array(bytes.slice(0, 16))
+  if (head.length >= 6 && head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) {
+    return { contentType: 'image/gif', ext: 'gif' }
+  }
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
+    return { contentType: 'image/jpeg', ext: 'jpg' }
+  }
+  if (
+    head.length >= 8 &&
+    head[0] === 0x89 &&
+    head[1] === 0x50 &&
+    head[2] === 0x4e &&
+    head[3] === 0x47
+  ) {
+    return { contentType: 'image/png', ext: 'png' }
+  }
+  if (
+    head.length >= 12 &&
+    head[0] === 0x52 &&
+    head[1] === 0x49 &&
+    head[2] === 0x46 &&
+    head[3] === 0x46 &&
+    head[8] === 0x57 &&
+    head[9] === 0x45 &&
+    head[10] === 0x42 &&
+    head[11] === 0x50
+  ) {
+    return { contentType: 'image/webp', ext: 'webp' }
+  }
+  return null
+}
+
+function withStickerMeta(fileName: string, contentType: string, bytes: ArrayBuffer): {
+  fileName: string
+  contentType: string
+} {
+  const sniffed = sniffImageMeta(bytes)
+  const type = (sniffed?.contentType || contentType || guessContentType(fileName) || '').toLowerCase()
+  const ext = sniffed?.ext || (type === 'image/jpeg' || type === 'image/jpg' ? 'jpg' : type.replace(/^image\//, ''))
+  if (type.startsWith('image/') && !type.includes('heic') && !type.includes('heif') && ext) {
+    const base = (fileName || 'sticker').replace(/\.[^.]+$/i, '') || 'sticker'
+    return {
+      fileName: `${base}.${ext}`,
+      contentType: type === 'image/jpg' ? 'image/jpeg' : type,
+    }
+  }
+  return forceAvatarJpegMeta(fileName, type)
+}
+
+async function resolveStickerSource(path: string): Promise<string> {
+  const src = String(path || '').trim()
+  if (!src) throw new Error('请选择表情图片')
+  if (src.startsWith('blob:') || src.startsWith('file://') || src.startsWith('content://')) return src
+  if (!/^https?:\/\//i.test(src)) return src
+  // 与群聊气泡同一套媒体缓存（含 OSS 302），避免 iOS 直连下载挂死
+  const cached = await awaitMediaCache(src, 30000)
+  if (cached) return cached
+  if (!isAppPlatform()) return src
+  return downloadToTemp(src, 30000)
+}
+
+async function loadStickerBytes(sourcePath: string): Promise<ImageBytes> {
+  const raw = await loadImageBytes(sourcePath)
+  const meta = withStickerMeta(raw.fileName, raw.contentType, raw.bytes)
+  return {
+    bytes: raw.bytes,
+    fileName: meta.fileName,
+    contentType: meta.contentType,
+    size: raw.bytes.byteLength,
+  }
 }
 
 function readAppFile(filePath: string, fallbackName = 'avatar.jpg'): Promise<ImageBytes> {
@@ -897,16 +985,22 @@ export async function uploadReportImage(localPath: string): Promise<string> {
   return uploadViaTask('image', await loadImageBytes(localPath))
 }
 
-/** 上传自定义表情并返回 fileId */
+/**
+ * 上传自定义表情并返回 fileId。
+ * 不走 materialize/compress：那条链路会压成 jpeg，GIF 动图会变成静态。
+ * 远程图先走聊天媒体缓存（与群聊图同一套 OSS），再原样字节上传 purpose=sticker。
+ */
 export async function uploadSticker(localPath: string): Promise<string> {
-  if (isAppPlatform()) {
-    const local = await materializeAppLocalImage(localPath)
-    try {
-      return await uploadViaNativeFile('sticker', local)
-    } catch (e) {
-      console.warn('[image] 表情直传失败，改走读字节', (e as Error)?.message || e)
-      return uploadViaTask('sticker', await loadImageBytes(local))
-    }
+  const source = await resolveStickerSource(localPath)
+  // HEIC 仍需转 jpeg；其余格式（含 gif）保持原字节
+  const lower = source.toLowerCase()
+  const maybeHeic = lower.includes('.heic') || lower.includes('.heif')
+  const local = maybeHeic && isAppPlatform() ? await materializeAppLocalImage(source) : source
+  try {
+    return await uploadViaTask('sticker', await loadStickerBytes(local))
+  } catch (e) {
+    if (!isAppPlatform() || /^https?:\/\//i.test(local) || local.startsWith('blob:')) throw e
+    console.warn('[image] 表情读字节失败，改走原生直传', (e as Error)?.message || e)
+    return uploadViaNativeFile('sticker', local)
   }
-  return uploadViaTask('sticker', await loadImageBytes(localPath))
 }

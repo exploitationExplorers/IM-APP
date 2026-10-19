@@ -312,6 +312,8 @@ async function reloadConversations() {
     await chatStore.loadConversations()
   } catch (e) {
     const message = (e as Error)?.message || '会话加载失败'
+    // 登录过期由 request 层 reLaunch 登录页，这里不再挡在聊天页只弹 toast
+    if (message.includes('登录已过期') || message.includes('未登录')) return
     if (message.includes('自定义调试基座')) {
       uni.showModal({ title: '无法连接聊天', content: message, showCancel: false })
       return

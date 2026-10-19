@@ -5,20 +5,27 @@ import { uploadSticker } from '@/utils/file-upload'
 import { isAppPlatform } from '@/utils/platform'
 import { imageUrlOfMessage } from './imageUrl'
 
-function downloadToTemp(url: string): Promise<string> {
+function withTimeout<T>(task: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    uni.downloadFile({
-      url,
-      success: (res) => {
-        if (res.statusCode === 200 && res.tempFilePath) resolve(res.tempFilePath)
-        else reject(new Error('下载图片失败'))
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    task.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
       },
-      fail: () => reject(new Error('下载图片失败')),
-    })
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
   })
 }
 
 export function createMediaActions() {
+  /**
+   * 聊天图 → 表情：uploadSticker（媒体缓存 + OSS purpose=sticker）→ POST /stickers。
+   * 不再单独 downloadFile，避免 iOS 私有链下载挂死、以及 compress 把 GIF 压成静态图。
+   */
   async function addImageSticker(message: ChatMessage) {
     const url = imageUrlOfMessage(message)
     if (!url) {
@@ -27,15 +34,14 @@ export function createMediaActions() {
     }
     uni.showLoading({ title: '添加中', mask: true })
     try {
-      const source = isAppPlatform()
-        ? await downloadToTemp(playableMediaUrl(url))
-        : playableMediaUrl(url)
-      await createSticker(await uploadSticker(source))
-      uni.hideLoading()
+      const source = playableMediaUrl(url)
+      const fileId = await withTimeout(uploadSticker(source), 45000, '添加超时，请重试')
+      await createSticker(fileId)
       uni.showToast({ title: '已加入表情包', icon: 'success' })
     } catch (e) {
-      uni.hideLoading()
       uni.showToast({ title: (e as Error).message || '添加失败', icon: 'none' })
+    } finally {
+      uni.hideLoading()
     }
   }
 
