@@ -1785,13 +1785,16 @@ export async function sendImageMessage(target: IMTarget, filePath: string): Prom
       return sendImageMessageViaUpload(target, prepared, { prepared: true, thumb, size })
     }
   }
-  // H5：HEIC / 超大图先压 jpeg，避免 iPhone 粘贴/相册偶发发不出
+  // H5：HEIC / WebP / 超大图先压 jpeg；WebP 原样上传易触发 OSS Content-Type 签名不一致（表现像跨域）
   const { prepareImageFile } = await import('@/utils/file-upload')
   let file = await pathToFile(filePath)
   try {
     file = await prepareImageFile(file, { fileName: `img_${Date.now()}.jpg`, maxBytes: 2_000_000 })
   } catch (e) {
     console.warn('[image] H5 预处理失败，尝试原图', (e as Error)?.message || e)
+  }
+  if (/webp/i.test(file.type) || /\.webp$/i.test(file.name)) {
+    throw new Error('暂不支持直接发送 WebP，请换一张图片')
   }
   const [url, size, thumbFile] = await Promise.all([
     uploadFile(file),
@@ -2456,9 +2459,12 @@ async function dataUrlToFile(dataUrl: string, fileName: string): Promise<File> {
 }
 
 async function uploadFile(file: File): Promise<string> {
+  // 空 type 时浏览器/SDK 常补成 octet-stream 或按扩展名猜 MIME，与 OSS 预签名不一致会 403（表现像跨域）
+  const contentType =
+    (file.type || '').trim() || fileContentType(file.name) || 'application/octet-stream'
   const res = await imCall<{ url: string }>(IMMethods.UploadFile, {
     name: file.name,
-    contentType: file.type,
+    contentType,
     uuid: IMSDK.uuid(),
     file,
   })

@@ -305,6 +305,22 @@ function copyViaPlusIoToDoc(srcPath: string): Promise<string> {
  * 把相册/相机路径收成应用可读的本地文件。
  * 鸿蒙 4 的 content:// 不能直接压图、上传、交给 OpenIM，必须先落到沙盒。
  */
+function looksLikeWebpPath(path: string): boolean {
+  return /\.webp(\?|#|$)/i.test(path || '')
+}
+
+/** WebP 原样上传易触发 OpenIM Content-Type 签名不一致；尽量落到 jpg。 */
+async function ensureAppChatJpeg(path: string): Promise<string> {
+  if (!looksLikeWebpPath(path) && !/\.hei[cf](\?|#|$)/i.test(path || '')) return path
+  try {
+    const jpeg = await saveViaNativeBitmap(path)
+    if (jpeg) return jpeg
+  } catch (e) {
+    console.warn('[image] WebP/HEIC 转 jpg 失败', (e as Error)?.message || e)
+  }
+  return path
+}
+
 export async function materializeAppLocalImage(srcPath: string): Promise<string> {
   const path = String(srcPath || '').trim()
   if (!path) throw new Error('未获取到图片，请重试')
@@ -322,12 +338,16 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
     const size = await probeLocalFileSize(path)
     if (size > 0) {
       const compressed = await tryCompress(path)
-      return rememberPreparedChatImage(compressed || path)
+      const next = await ensureAppChatJpeg(compressed || path)
+      return rememberPreparedChatImage(next)
     }
   }
 
   const compressed = await tryCompress(path)
-  if (compressed) return rememberPreparedChatImage(compressed)
+  if (compressed) {
+    const next = await ensureAppChatJpeg(compressed)
+    return rememberPreparedChatImage(next)
+  }
 
   try {
     const viaBitmap = await saveViaNativeBitmap(path)
@@ -340,7 +360,8 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
   try {
     const copied = await copyViaPlusIoToDoc(path)
     const again = await tryCompress(copied)
-    return rememberPreparedChatImage(again || copied)
+    const next = await ensureAppChatJpeg(again || copied)
+    return rememberPreparedChatImage(next)
   } catch (e) {
     console.warn('[image] plus.io 拷贝失败', (e as Error)?.message || e)
   }
@@ -351,7 +372,8 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
         isContentUri(path) ? path : toAppFileUrl(path),
       )
       const again = await tryCompress(viaAndroid)
-      return rememberPreparedChatImage(again || viaAndroid)
+      const next = await ensureAppChatJpeg(again || viaAndroid)
+      return rememberPreparedChatImage(next)
     } catch (e) {
       console.warn('[image] ContentResolver 拷贝失败', (e as Error)?.message || e)
     }
@@ -795,12 +817,23 @@ export async function uploadAvatarFile(file: File): Promise<string> {
   })
 }
 
+/**
+ * 可原样上传的类型。不含 webp：OpenIM OSS 预签名常按 application/octet-stream，
+ * Web SDK 再补 image/webp 会 403（浏览器常报成跨域）；部分 App WebView 预览也不稳。
+ * GIF 保留动画；PNG/JPEG 走原图。
+ */
 function isReadyImageType(type: string): boolean {
-  return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' || type === 'image/webp' || type === 'image/gif'
+  return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' || type === 'image/gif'
+}
+
+function isWebpLike(type: string, fileName: string): boolean {
+  const t = (type || '').toLowerCase()
+  const n = (fileName || '').toLowerCase()
+  return t.includes('webp') || n.endsWith('.webp')
 }
 
 /**
- * H5：HEIC / 超大图 / 空 type 压成 jpeg，聊天发图与换头像共用。
+ * H5：HEIC / WebP / 超大图 / 空 type 压成 jpeg，聊天发图与换头像共用。
  * App 无 document 时原样返回（走原生压缩路径）。
  */
 export async function prepareImageFile(
@@ -811,7 +844,8 @@ export async function prepareImageFile(
   const edge = opts?.edge ?? 1280
   const fileName = opts?.fileName || 'image.jpg'
   const type = (file.type || '').toLowerCase()
-  if (isReadyImageType(type) && file.size > 0 && file.size <= maxBytes) return file
+  const mustJpeg = isWebpLike(type, file.name) || type.includes('heic') || type.includes('heif')
+  if (!mustJpeg && isReadyImageType(type) && file.size > 0 && file.size <= maxBytes) return file
   if (typeof document === 'undefined') return file
   const url = URL.createObjectURL(file)
   try {
@@ -835,10 +869,11 @@ export async function prepareImageFile(
     ctx.drawImage(img, 0, 0, width, height)
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86))
     if (!blob) throw new Error('无法读取这张图片，请换一张')
+    const jpegName = `${(fileName || 'image.jpg').replace(/\.[^.]+$/i, '') || 'image'}.jpg`
     if (typeof File !== 'undefined') {
-      return new File([blob], fileName, { type: 'image/jpeg' })
+      return new File([blob], jpegName, { type: 'image/jpeg' })
     }
-    return Object.assign(blob, { name: fileName, lastModified: Date.now() }) as File
+    return Object.assign(blob, { name: jpegName, lastModified: Date.now() }) as File
   } finally {
     URL.revokeObjectURL(url)
   }

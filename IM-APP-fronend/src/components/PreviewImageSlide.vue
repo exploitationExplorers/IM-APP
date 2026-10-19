@@ -120,7 +120,8 @@ onBeforeUnmount(() => {
       </movable-view>
     </movable-area>
     <view v-if="!loaded" class="preview-state">
-      <text class="preview-message">{{ error || '正在加载图片…' }}</text>
+      <view v-if="!error" class="preview-spinner" />
+      <text v-if="error" class="preview-message">{{ error }}</text>
       <button v-if="error" class="preview-retry" size="mini" @click.stop="load(true)">
         重新加载
       </button>
@@ -162,14 +163,29 @@ onBeforeUnmount(() => {
 }
 .preview-state {
   position: absolute;
-  top: 46%;
-  left: 16px;
-  right: 16px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 18px;
   pointer-events: none;
+}
+.preview-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: preview-spin 0.75s linear infinite;
+}
+@keyframes preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .preview-message {
   color: #ddd;
@@ -178,6 +194,7 @@ onBeforeUnmount(() => {
   background: rgba(0, 0, 0, 0.55);
   padding: 10px 14px;
   border-radius: 8px;
+  margin: 0 16px;
 }
 .preview-retry {
   color: #fff;

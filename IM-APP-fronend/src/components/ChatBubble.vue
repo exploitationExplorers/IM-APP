@@ -233,7 +233,7 @@ function onRetry() {
 }
 
 /**
- * 点按图片：多选只通知外层勾选；否则预览。
+ * 点按图片：多选只通知外层勾选；缩略图未画出前拦截预览（避免点开空白/无效图）。
  */
 function onImageBubbleClick() {
   if (props.selecting) {
@@ -241,6 +241,7 @@ function onImageBubbleClick() {
     return
   }
   if (props.message.type !== 'image') return
+  if (!canOpenImagePreview.value) return
   if (props.previewUrls?.length) {
     const urls = props.previewUrls.map((url) => toPlayableMediaUrl((url || '').trim())).filter(Boolean)
     const shown = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
@@ -915,6 +916,16 @@ const shownImageSrc = computed(() => {
   return holdImageForCache.value ? '' : imageDisplaySrc.value
 })
 
+/** 缩略图是否已真正画出；未画出前转圈并禁止点开预览 */
+const imagePainted = ref(false)
+const imageLoadFailed = ref(false)
+const imageBubbleLoading = computed(
+  () => props.message.type === 'image' && !imagePainted.value && !imageLoadFailed.value,
+)
+const canOpenImagePreview = computed(
+  () => imageLoadFailed.value || (!!shownImageSrc.value && imagePainted.value),
+)
+
 const shownVideoPoster = computed(() => {
   if (cachedVideoSrc.value) return cachedVideoSrc.value
   return holdVideoForCache.value ? '' : videoPoster.value
@@ -934,6 +945,11 @@ watch(
 )
 
 watch(imageDisplaySrc, () => beginImageLoad(), { immediate: true })
+
+watch(shownImageSrc, () => {
+  imagePainted.value = false
+  imageLoadFailed.value = false
+})
 
 // 小图出来后，在后台把点开用的中图也下到本地，点开时直接读文件（H5 预览另有按需加载，不预取）
 watch(cachedImageSrc, (path) => {
@@ -956,6 +972,10 @@ watch(
 
 function onImageLoad(event: unknown) {
   finishImageSlot()
+  if (props.message.type === 'image') {
+    imagePainted.value = true
+    imageLoadFailed.value = false
+  }
   if (knownMediaSize() || naturalSize.value) return
   const detail = (event as { detail?: { width?: number; height?: number } } | undefined)?.detail
   const width = Number(detail?.width) || 0
@@ -982,6 +1002,8 @@ function onImageError() {
     imageFallbackIndex.value += 1
     return
   }
+  imageLoadFailed.value = true
+  imagePainted.value = false
   finishImageSlot()
 }
 
@@ -1180,7 +1202,14 @@ function openLink(url: string) {
           <view
             v-else
             class="msg-image image-placeholder"
+            :style="mediaBoxStyle"
           />
+          <view
+            v-if="imageBubbleLoading"
+            class="image-loading"
+          >
+            <view class="image-spinner" />
+          </view>
         </view>
         <view
           v-else-if="message.type === 'video'"
@@ -1484,6 +1513,7 @@ function openLink(url: string) {
 }
 
 .image-bubble {
+  position: relative;
   padding: 0;
   background: transparent;
   overflow: hidden;
@@ -1501,6 +1531,31 @@ function openLink(url: string) {
   min-height: 180rpx;
   background: #e8e8e8;
   border-radius: 12rpx;
+}
+
+.image-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(232, 232, 232, 0.55);
+  pointer-events: none;
+}
+
+.image-spinner {
+  width: 48rpx;
+  height: 48rpx;
+  border: 6rpx solid rgba(0, 0, 0, 0.12);
+  border-top-color: rgba(0, 0, 0, 0.45);
+  border-radius: 50%;
+  animation: image-spin 0.75s linear infinite;
+}
+
+@keyframes image-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /** 尺寸交给封面图自己撑（可能比 280rpx 窄，比如竖屏视频），播放键才居中对得上 */

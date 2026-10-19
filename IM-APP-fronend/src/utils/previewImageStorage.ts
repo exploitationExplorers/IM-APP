@@ -56,6 +56,45 @@ function nativeInfo(path: string): Promise<boolean> {
   })
 }
 
+/** OSS 私有链常无扩展名且 Content-Type 为 octet-stream；按文件头补 MIME，便于 H5 blob 解码。 */
+async function sniffImageBlob(blob: Blob): Promise<Blob> {
+  if (/^image\//i.test(blob.type || '')) return blob
+  try {
+    const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer())
+    if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
+      return new Blob([blob], { type: 'image/jpeg' })
+    }
+    if (
+      head.length >= 8 &&
+      head[0] === 0x89 &&
+      head[1] === 0x50 &&
+      head[2] === 0x4e &&
+      head[3] === 0x47
+    ) {
+      return new Blob([blob], { type: 'image/png' })
+    }
+    if (head.length >= 6 && head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) {
+      return new Blob([blob], { type: 'image/gif' })
+    }
+    if (
+      head.length >= 12 &&
+      head[0] === 0x52 &&
+      head[1] === 0x49 &&
+      head[2] === 0x46 &&
+      head[3] === 0x46 &&
+      head[8] === 0x57 &&
+      head[9] === 0x45 &&
+      head[10] === 0x42 &&
+      head[11] === 0x50
+    ) {
+      return new Blob([blob], { type: 'image/webp' })
+    }
+  } catch {
+    /* keep original */
+  }
+  return blob
+}
+
 function nativeIndex(): Record<string, SavedRow> {
   try {
     const rows: unknown = uni.getStorageSync(INDEX)
@@ -109,17 +148,18 @@ function nativeDownload(url: string): Promise<PreviewAsset> {
             finish(previewHTTPError(res.statusCode))
             return
           }
+          // getImageInfo 对无后缀 WebP 偶发失败；先交给预览页 <image> 解码，由其 @error 判定
           void nativeInfo(res.tempFilePath).then((valid) => {
             if (settled) return
-            if (!valid) {
-              finish(new Error('图片内容无效或格式不受支持'))
-              return
-            }
             const asset: PreviewAsset = {
               path: res.tempFilePath,
               bytes: 0,
               at: Date.now(),
               source: 'network',
+            }
+            if (!valid) {
+              finish(undefined, asset)
+              return
             }
             try {
               uni.getFileInfo({
@@ -305,12 +345,12 @@ async function webDownload(url: string): Promise<PreviewAsset> {
       throw error
     }
     if (!response.ok) throw previewHTTPError(response.status)
-    const blob = await response.blob()
-    if (
-      !blob.size ||
-      (blob.type && !/^image\//i.test(blob.type) && blob.type !== 'application/octet-stream')
-    )
+    const raw = await response.blob()
+    if (!raw.size) throw new Error('图片内容无效或格式不受支持')
+    const blob = await sniffImageBlob(raw)
+    if (blob.type && !/^image\//i.test(blob.type) && blob.type !== 'application/octet-stream') {
       throw new Error('图片内容无效或格式不受支持')
+    }
     return {
       path: URL.createObjectURL(blob),
       blob,
