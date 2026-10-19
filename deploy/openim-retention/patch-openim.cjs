@@ -72,6 +72,8 @@ function apply(root) {
     changes.push([target, fs.readFileSync(path.join(backend, name), 'utf8').replace('package media', 'package imappretention')])
   }
   for (const [template, dest] of [
+    ['object_gc.go.in', 'internal/imappgc/gc.go'],
+    ['object_gc_test.go.in', 'internal/imappgc/gc_test.go'],
     ['bridge.go.in', 'internal/rpc/msg/im_app_retention.go'],
     ['bridge_test.go.in', 'internal/rpc/msg/im_app_retention_test.go'],
     ['controller.go.in', 'pkg/common/storage/controller/im_app_retention.go'],

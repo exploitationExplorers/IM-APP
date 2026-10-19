@@ -22,7 +22,7 @@ def bundle(root):
     (root / "example").write_bytes(b"reviewed input")
     data = {"kind": "retention-incremental", "protocol": p.PROTOCOL, "platform": "linux/amd64",
             "sourceCommit": "a" * 40, "groupVisibility": "enabled_by_default_all_groups",
-            "mongoBodyPurge": "disabled_by_default", "ossObjectPurge": False,
+            "mongoBodyPurge": "disabled_by_default", "ossObjectPurge": p.GC_POLICY, "mediaGCProtocol": "im-app-media-gc-v1",
             "files": {"example": hashlib.sha256(b"reviewed input").hexdigest()}}
     (root / "bundle-manifest.json").write_text(json.dumps(data))
     return data
@@ -56,7 +56,7 @@ class ConfigurationTests(unittest.TestCase):
             (root / "bundle-manifest.json").write_text(json.dumps(data))
             with self.assertRaisesRegex(p.Refused, "MANIFEST"):
                 p.verify_manifest(root)
-            data["ossObjectPurge"] = False
+            data["ossObjectPurge"] = p.GC_POLICY
             data["files"] = {"../outside": "0" * 64}
             (root / "bundle-manifest.json").write_text(json.dumps(data))
             with self.assertRaisesRegex(p.Refused, "UNSAFE_MANIFEST_PATH"):
@@ -69,7 +69,7 @@ class ConfigurationTests(unittest.TestCase):
             root = Path(temp).resolve()
             bundle(root)
             out = io.StringIO()
-            with patch.object(p, "validate_runtime", return_value=(infos, api)), patch.object(p, "detail", return_value=pg), contextlib.redirect_stdout(out):
+            with patch.object(p, "validate_runtime", return_value=(infos, api)), patch.object(p, "detail", return_value=pg), patch.object(p,"process_counts",return_value={n:1 for n in p.BINARIES}), contextlib.redirect_stdout(out):
                 p.prepare(root, "11111111-1111-4111-8111-111111111111")
                 content = (root / "private/retention.env").read_text()
                 self.assertRegex(content, r"IM_APP_RETENTION_KEY='[0-9a-f]{64}'")
@@ -92,10 +92,13 @@ class ConfigurationTests(unittest.TestCase):
         # Base Compose can acquire new optional keys without changing the old
         # saved production environment. It must not block a staged upgrade.
         configs["api"]["environment"]["GROUP_RETENTION_MODE"] = "visibility_only"
+        infos["api"]["Config"]["Env"].append("GROUP_RETENTION_MODE=visibility_only")
         with tempfile.TemporaryDirectory() as temp:
             old = Path(temp)
             for kind, service in (("api", "api"), ("openim", "openim-api")):
                 saved_env = p.settings(infos[kind])
+                if kind == "api":
+                    saved_env["GROUP_RETENTION_MODE"] = "off" # Original OSS cutover, before retention was installed.
                 (old / (kind + ".compose.json")).write_text(json.dumps({"services": {service: {
                     "environment": {k: v.replace("$", "$$") for k, v in saved_env.items()}}}}))
             def read(args):
@@ -181,7 +184,10 @@ class ConfigurationTests(unittest.TestCase):
             app = p.resolved_environment(services["api"])
             self.assertEqual(app["OSS_ACCESS_KEY_SECRET"], "sentinel$literal")
             self.assertEqual(app["OSS_MEDIA_SIGNING_KEY"], "stable-sentinel")
-            self.assertEqual(app["GROUP_RETENTION_MODE"], "off")
+            self.assertEqual(app["GROUP_RETENTION_MODE"], "visibility_only")
+            disabled = config("api.disable.compose.json")
+            self.assertEqual(disabled.returncode,0)
+            self.assertEqual(json.loads(disabled.stdout)["services"]["api"]["environment"]["GROUP_RETENTION_MODE"],"off")
             self.assertEqual(services["openim-api"]["environment"]["IM_APP_RETENTION_KEY"], app["GROUP_RETENTION_ADAPTER_KEY"])
             self.assertEqual(services["openim-api"]["volumes"][0]["target"], "/openim-server/config/openim-rpc-third.yml")
             enabled = config("api.enable.compose.json")

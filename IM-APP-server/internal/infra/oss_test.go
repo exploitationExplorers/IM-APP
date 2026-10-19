@@ -199,26 +199,31 @@ func TestOSSArchivePutIsScopedAndKeepsOrdinaryUploadLimit(t *testing.T) {
 			}
 			return &http.Response{StatusCode: 200, Header: http.Header{"x-oss-request-id": {"test"}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 		})}))
-	key, _ := o.NewKey("favorites/user/message/sha256")
-	if err := o.putArchive(context.Background(), key, strings.NewReader("x"), MaxFormUploadBytes+1, "image/jpeg"); err != nil {
-		t.Fatal(err)
+	for _, namespace := range []string{"favorites", "forwards"} {
+		key, _ := o.NewKey(namespace + "/user/message/sha256")
+		if err := o.putArchive(context.Background(), key, strings.NewReader("x"), MaxFormUploadBytes+1, "image/jpeg"); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if calls != 1 {
+	if calls != 2 {
 		t.Fatal("archive not written")
 	}
+	key, _ := o.NewKey("favorites/user/message/sha256")
 	for _, size := range []int64{0, -1, MaxArchiveBytes + 1} {
 		if err := o.putArchive(context.Background(), key, strings.NewReader("x"), size, "image/jpeg"); !errors.Is(err, ErrObjectKeyScope) {
 			t.Fatal("archive byte limit bypassed")
 		}
 	}
-	wrong, _ := o.NewKey("uploads/user/a")
-	if err := o.putArchive(context.Background(), wrong, strings.NewReader("x"), 1, "image/jpeg"); !errors.Is(err, ErrObjectKeyScope) {
-		t.Fatal("non-favorite archive write allowed")
+	for _, namespace := range []string{"uploads", "avatars", "favorites-old", "forwards-old"} {
+		wrong, _ := o.NewKey(namespace + "/user/a")
+		if err := o.putArchive(context.Background(), wrong, strings.NewReader("x"), 1, "image/jpeg"); !errors.Is(err, ErrObjectKeyScope) {
+			t.Fatal("non-archive write allowed")
+		}
 	}
 	if err := o.PutObject(context.Background(), key, strings.NewReader("x"), MaxFormUploadBytes+1, "image/jpeg"); err == nil {
 		t.Fatal("ordinary 20 MiB upload limit relaxed")
 	}
-	if calls != 1 {
+	if calls != 2 {
 		t.Fatal("invalid archive or client upload reached OSS")
 	}
 }

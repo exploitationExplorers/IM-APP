@@ -1,0 +1,74 @@
+package oss
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	ali "github.com/aliyun/aliyun-oss-go-sdk/oss"
+)
+
+func TestIMAppRetentionGCOssProbe(t *testing.T) {
+	for _, state := range []string{"", "Enabled", "Suspended", "denied"} {
+		t.Run("version_"+state, func(t *testing.T) {
+			var writes, deletes int
+			var sentinel string
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "GET" && r.URL.RawQuery == "versioning" {
+					if state == "denied" {
+						w.WriteHeader(403)
+						return
+					}
+					w.Header().Set("Content-Type", "application/xml")
+					_, _ = w.Write([]byte(`<VersioningConfiguration><Status>` + state + `</Status></VersioningConfiguration>`))
+					return
+				}
+				if !strings.HasPrefix(r.URL.Path, "/im-app-production/chat/managed-v1/openim/temp/gc-probe/") {
+					t.Error("probe escaped scoped fresh sentinel")
+					w.WriteHeader(400)
+					return
+				}
+				switch r.Method {
+				case "PUT":
+					writes++
+					sentinel = r.URL.Path
+					w.Header().Set("ETag", `"d41d8cd98f00b204e9800998ecf8427e"`)
+					w.WriteHeader(200)
+				case "DELETE":
+					deletes++
+					if r.URL.Path != sentinel {
+						t.Error("deleted a different object")
+					}
+					w.WriteHeader(204)
+				default:
+					t.Error("unexpected probe method")
+					w.WriteHeader(400)
+				}
+			}))
+			defer s.Close()
+			// The SDK deliberately selects path-style for numeric IP endpoints,
+			// even when UseCname is true. Use loopback DNS to exercise the SAME
+			// CNAME request path as production, without contacting real OSS.
+			endpoint := strings.Replace(s.URL, "127.0.0.1", "localhost", 1)
+			client, err := ali.New(endpoint, "unit-id", "unit-secret", ali.UseCname(true))
+			if err != nil {
+				t.Fatal(err)
+			}
+			bucket, err := client.Bucket("unit-bucket")
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := &OSS{bucket: bucket}
+			err = o.IMAppGCCheck(context.Background(), true)
+			if state == "" {
+				if err != nil || writes != 1 || deletes != 1 {
+					t.Fatal("scoped probe did not succeed", err, writes, deletes)
+				}
+			} else if err == nil || writes != 0 || deletes != 0 {
+				t.Fatal("versioned/unreadable bucket mutated", err, writes, deletes)
+			}
+		})
+	}
+}

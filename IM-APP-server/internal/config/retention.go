@@ -54,8 +54,8 @@ func (c Config) ValidateRetention() error {
 			seen[id] = true
 		}
 	}
-	if c.GroupRetentionMode == "visibility_only" {
-		if len(c.GroupRetentionGroupIDs) == 0 && !c.GroupRetentionAllGroups {
+	if c.GroupRetentionMode == "visibility_only" || c.MediaGCReferenceGuardEnabled {
+		if c.GroupRetentionMode == "visibility_only" && len(c.GroupRetentionGroupIDs) == 0 && !c.GroupRetentionAllGroups {
 			return errors.New("visibility_only requires GROUP_RETENTION_GROUP_IDS or GROUP_RETENTION_ALL_GROUPS=true")
 		}
 		u, err := url.Parse(c.GroupRetentionAdapterURL)

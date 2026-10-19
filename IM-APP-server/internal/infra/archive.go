@@ -26,9 +26,10 @@ var ErrArchive = errors.New("媒体副本保存失败，请稍后重试")
 // Archive reads only explicitly configured application media locations. No
 // credentials are attached to source requests; existing capability URLs apply.
 type Archive struct {
-	Storage  *Storage
-	Prefixes []string
-	client   *http.Client
+	Storage    *Storage
+	Prefixes   []string
+	BeforeCopy func(context.Context, string) error
+	client     *http.Client
 }
 
 func NewArchive(storage *Storage, prefixes []string) *Archive {
@@ -166,6 +167,11 @@ func (a *Archive) preserve(ctx context.Context, namespace, userID, messageID, co
 func (a *Archive) copy(ctx context.Context, namespace, userID, messageID, source string, limit int64) (string, int64, error) {
 	if !validStorageKey(userID) || strings.Contains(userID, "/") || !a.allowed(source) || limit <= 0 {
 		return "", 0, ErrArchive
+	}
+	if a.BeforeCopy != nil {
+		if err := a.BeforeCopy(ctx, source); err != nil {
+			return "", 0, ErrArchive
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {

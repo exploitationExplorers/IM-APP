@@ -2,7 +2,7 @@
   "info": {
     "name": "Private retention visibility v2 (NO PUBLIC EXPOSURE)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Internal network only. Separate key; no real credentials in exports. Apply logically hides the receipt's group prefix and does not delete files. Capabilities report bodyPurge/off or mongo_bodies_only and objectPurge/off. Optional Mongo body purge is a separately gated delayed worker, not enabled by these requests; OSS deletion is unavailable."
+    "description": "Private ports only. Logical bridge objectPurge=off does not describe separate managed GC at 19094. Do not enable raw configure directly: cleanup-production.py verifies all live writer hashes first. No legacy sweep or Mongo body purge."
   },
   "auth": {
     "type": "bearer",
@@ -34,6 +34,10 @@
     {
       "key": "minVisibleSeq",
       "value": ""
+    },
+    {
+      "key": "gc_base",
+      "value": "http://openim-api:19094"
     }
   ],
   "item": [
@@ -101,6 +105,119 @@
         "body": {
           "mode": "raw",
           "raw": "{\"snapshotId\":\"{{snapshotId}}\",\"conversationId\":\"sg_{{groupId}}\",\"minVisibleSeq\":{{minVisibleSeq}}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Protect media reference",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{base}}/internal/media-gc/protect",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "internal",
+            "media-gc",
+            "protect"
+          ]
+        },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"content\": \"\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "GC status",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{gc_base}}/internal/media-gc/status",
+          "host": [
+            "{{gc_base}}"
+          ],
+          "path": [
+            "internal",
+            "media-gc",
+            "status"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Configure GC (use release CLI safety gates)",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{gc_base}}/internal/media-gc/configure",
+          "host": [
+            "{{gc_base}}"
+          ],
+          "path": [
+            "internal",
+            "media-gc",
+            "configure"
+          ]
+        },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"active\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "GC bounded preview",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{gc_base}}/internal/media-gc/run",
+          "host": [
+            "{{gc_base}}"
+          ],
+          "path": [
+            "internal",
+            "media-gc",
+            "run"
+          ]
+        },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"dryRun\": true}",
           "options": {
             "raw": {
               "language": "json"

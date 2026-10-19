@@ -10,6 +10,7 @@ _retention_business() {
     install) ;;
     canary) files+=(-f "$RETENTION_BUNDLE/api.canary.compose.json") ;;
     enable) files+=(-f "$RETENTION_BUNDLE/api.enable.compose.json") ;;
+    disable) files+=(-f "$RETENTION_BUNDLE/api.disable.compose.json") ;;
     *) echo 'Unknown retention phase' >&2; return 1 ;;
   esac
   docker --host=unix:///var/run/docker.sock compose \
@@ -25,6 +26,7 @@ _retention_business() {
 retention_api_install() { _retention_business install "$@"; }
 retention_api_canary() { _retention_business canary "$@"; }
 retention_api_enable() { _retention_business enable "$@"; }
+retention_api_disable() { _retention_business disable "$@"; }
 
 retention_openim() {
   docker --host=unix:///var/run/docker.sock compose \

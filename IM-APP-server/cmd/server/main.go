@@ -158,6 +158,14 @@ func main() {
 	mediaArchive := infra.NewArchive(storageClient, infra.SourcePrefixes(cfg.MediaSourcePrefixes,
 		cfg.OpenIM.PublicAPIURL, cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL,
 		cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket))
+	var mediaProtection *infra.MediaProtection
+	if cfg.MediaGCReferenceGuardEnabled {
+		mediaProtection, err = infra.NewMediaProtection(cfg.GroupRetentionAdapterURL, cfg.GroupRetentionAdapterKey)
+		if err != nil {
+			log.Fatal("media GC reference guard requires a private bridge URL/key")
+		}
+		mediaArchive.BeforeCopy = mediaProtection.Hold
+	}
 	favSvc := &service.FavoriteService{Fav: favRepo, Guard: mediaGuard,
 		Media: mediaArchive}
 	forwardMedia := &service.ForwardMediaService{
@@ -245,6 +253,9 @@ func main() {
 
 	// health 限流：每 IP 每分钟最多 20 次，防止前端频繁轮询
 	r.GET("/health", middleware.RateLimitIP(redisClient, 20, time.Minute, "health"), func(c *gin.Context) {
+		if mediaProtection != nil {
+			c.Header("X-IM-Media-Reference-Guard", infra.MediaGCProtocol)
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	if cfg.LegacyChatEnabled {
@@ -263,6 +274,9 @@ func main() {
 	}
 	internalIM := r.Group("/internal/im")
 	internalIM.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+	if mediaProtection != nil {
+		internalIM.Use(middleware.ProtectMedia(mediaProtection))
+	}
 	{
 		internalIM.POST("/messages", imInternalH.SendMessage)
 		internalIM.GET("/health", imInternalH.Health)
@@ -274,6 +288,9 @@ func main() {
 	// 管理后台内部接口（方案 A：admin 经 HTTP 调 server 执行业务逻辑 + OpenIM 同步）
 	internalAdmin := r.Group("/internal/admin")
 	internalAdmin.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+	if mediaProtection != nil {
+		internalAdmin.Use(middleware.ProtectMedia(mediaProtection))
+	}
 	{
 		internalAdmin.POST("/groups/:id/dismiss", adminGroupH.DismissGroup)
 		internalAdmin.POST("/groups/:id/mute", adminGroupH.MuteGroup)
@@ -302,6 +319,9 @@ func main() {
 		// 线上 Nginx 只反代 /api/，本机 pack:wgt 走公网发布时用这组，仍要内部密钥
 		adminRelease := api.Group("/admin")
 		adminRelease.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+		if mediaProtection != nil {
+			adminRelease.Use(middleware.ProtectMedia(mediaProtection))
+		}
 		{
 			adminRelease.POST("/app-releases/uploads", appReleaseH.CreateUpload)
 			adminRelease.POST("/app-releases", appReleaseH.Publish)
@@ -317,6 +337,9 @@ func main() {
 
 		auth := api.Group("")
 		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.TouchLastSeen(userRepo.TouchLastSeen), middleware.NoStore())
+		if mediaProtection != nil {
+			auth.Use(middleware.ProtectMedia(mediaProtection))
+		}
 		{
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)

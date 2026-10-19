@@ -18,6 +18,7 @@ import (
 	"time"
 
 	rules "github.com/openimsdk/open-im-server/v3/internal/imappretention"
+	gc "github.com/openimsdk/open-im-server/v3/internal/imappgc"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
 	"github.com/openimsdk/protocol/constant"
@@ -81,6 +82,14 @@ func (b *imAppRetentionBridge) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	if r.Method == "GET" && r.ContentLength != 0 { http.Error(w, "invalid request", 400); return }
 	switch {
+	case r.Method == "POST" && r.URL.Path == "/internal/media-gc/protect" && r.URL.RawQuery == "":
+		if !gc.Enabled() { http.Error(w,"reference guard unavailable",503); return }
+		if r.Header.Get("Content-Type") != "application/json" { http.Error(w,"JSON required",400); return }
+		var req struct { Content string `json:"content"` }
+		decoder := json.NewDecoder(http.MaxBytesReader(w,r.Body,8<<20)); decoder.DisallowUnknownFields()
+		if decoder.Decode(&req)!=nil || decoder.Decode(new(any))!=io.EOF {http.Error(w,"invalid request",400);return}
+		if err:=gc.Protect(ctx,b.db,req.Content,nil);err!=nil {http.Error(w,"media reference unavailable",409);return}
+		imAppJSON(w,map[string]string{"protocol":gc.Protocol})
 	case r.Method == "GET" && r.URL.Path == "/internal/retention/capabilities" && r.URL.RawQuery == "":
 		purge := "off"; if len(b.bodyPurgeGroups) != 0 { purge = "mongo_bodies_only" }
 		imAppJSON(w, map[string]string{"protocol": imAppRetentionProtocol, "mode": "visibility_only", "bodyPurge":purge, "objectPurge":"off"})
