@@ -1,9 +1,8 @@
 import { computed, ref, type Ref } from 'vue'
-import type { MessageMenuItem } from '@/components/ImMessageActionMenu.vue'
 import type { ChatMessage } from '@/types'
 import { buildMessageMenuItems } from './buildMenuItems'
 import { resolveMenuPoint } from './menuCoords'
-import type { ChatMessageActionsOpts } from './types'
+import type { ChatMessageActionsOpts, MessageMenuItem } from './types'
 import type { createSenderGuards } from './senderGuards'
 
 type Guards = ReturnType<typeof createSenderGuards>

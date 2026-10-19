@@ -1,5 +1,5 @@
-import type { MessageMenuItem } from '@/components/ImMessageActionMenu.vue'
 import type { ChatMessage } from '@/types'
+import type { MessageMenuItem } from './types'
 
 export type BuildMenuItemsInput = {
   message: ChatMessage

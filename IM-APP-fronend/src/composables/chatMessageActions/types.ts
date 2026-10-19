@@ -1,6 +1,15 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { ChatMessage, GroupRole } from '@/types'
 
+/** 气泡长按菜单项（勿从 .vue 具名导入：env.d.ts 的 *.vue 只暴露 default） */
+export interface MessageMenuItem {
+  key: string
+  label: string
+  wide?: boolean
+  /** 参考站「多选」右侧占位格，保持 5 行双列网格 */
+  spacer?: boolean
+}
+
 /** 群成员的发言管控元信息（房间页从群成员接口构建，业务用户 ID 索引） */
 export interface MemberMeta {
   role: GroupRole

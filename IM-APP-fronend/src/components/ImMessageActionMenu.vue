@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-
-export interface MessageMenuItem {
-  key: string
-  label: string
-  wide?: boolean
-  /** 参考站「多选」右侧占位格，保持 5 行双列网格 */
-  spacer?: boolean
-}
+import type { MessageMenuItem } from '@/composables/chatMessageActions/types'
 
 const props = defineProps<{
   items: MessageMenuItem[]
