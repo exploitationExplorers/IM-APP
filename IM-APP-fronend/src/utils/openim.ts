@@ -654,6 +654,7 @@ function installH5StorageProxy(): void {
     }
     if (typeof Request !== 'undefined' && input instanceof Request) {
       const next = rewriteH5StorageUrl(input.url)
+      // eslint-disable-next-line max-lines
       if (next !== input.url) return rawFetch(new Request(next, input), init)
     }
     return rawFetch(input, init)
@@ -3237,92 +3238,114 @@ function textLikeElemOf(
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
 }
 
-function extractContent(item: MessageItem): string {
+function extractTextContent(item: MessageItem): string {
   const textElem = textLikeElemOf(item, 'textElem', 'TextElem')
+  return (
+    pickString(textElem || {}, ['content', 'Content']) ||
+    item.textElem?.content ||
+    jsonContentField(item.content, 'content')
+  )
+}
+
+function extractAtTextContent(item: MessageItem): string {
   const atElem = textLikeElemOf(item, 'atTextElem', 'AtTextElem')
+  return (
+    pickString(atElem || {}, ['text', 'Text']) ||
+    item.atTextElem?.text ||
+    jsonContentField(item.content, 'text')
+  )
+}
+
+function extractQuoteContent(item: MessageItem): string {
+  const elem = normalizeQuoteElem(item)
+  return elem?.text || item.quoteElem?.text || jsonContentField(item.content, 'text')
+}
+
+function extractVoiceContent(item: MessageItem): string {
+  const meta = soundMetaOf(item)
+  return JSON.stringify({ path: meta.path, duration: meta.duration })
+}
+
+function extractFileContent(item: MessageItem): string {
+  const url = fileSourceUrlOf(item)
+  const fileName = fileDisplayNameOf(item, url)
+  return url ? JSON.stringify({ url, fileName }) : fileName
+}
+
+function extractVideoContent(item: MessageItem): string {
+  const merged = parseVideoMeta(item)
+  const fromJson = parseVideoMeta(item.content)
+  // 气泡只保留可跨端访问的远程封面；发送端本地 snapshotPath 在接收端/App 历史里是死链，
+  // 写进 content 会让 H5 走截帧、App 却去加载坏图，表现为「H5 有封面、App 没有」。
+  const snap = preferRemoteMediaUrl(merged.snapshotUrl, fromJson.snapshotUrl)
+  return JSON.stringify({
+    url: preferRemoteMediaUrl(merged.url, fromJson.url),
+    snapshotUrl: isRemoteMediaUrl(snap) ? snap : '',
+    duration: merged.duration || fromJson.duration,
+  })
+}
+
+/** 名片 content：{userId, nickname, avatar}；业务 ID 优先读 ex，旧消息再从 OpenIM userID 反推 */
+function extractCardContent(item: MessageItem): string {
+  const card = item.cardElem
+  let userId = ''
+  try {
+    const ex = card?.ex ? (JSON.parse(card.ex) as { businessUserId?: string }) : null
+    userId = ex?.businessUserId || ''
+  } catch {
+    /* ex 不是 JSON 时走反推 */
+  }
+  if (!userId) userId = businessUserIdFromIM(card?.userID || '')
+  return JSON.stringify({
+    userId,
+    nickname: card?.nickname || '',
+    avatar: card?.faceURL || '',
+  })
+}
+
+function extractCustomContent(item: MessageItem): string {
+  const invite = parseGroupInvitePayload(customMessageDataOf(item))
+  if (invite) return JSON.stringify(invite)
+  const raw = item as MessageItem & Record<string, unknown>
+  const elem = (raw.customElem ?? raw.CustomElem) as
+    | { description?: string; Description?: string }
+    | undefined
+  const desc =
+    (typeof elem?.description === 'string' && elem.description) ||
+    (typeof elem?.Description === 'string' && elem.Description) ||
+    jsonContentField(item.content, 'description') ||
+    ''
+  return desc || '[自定义消息]'
+}
+
+function extractFallbackContent(item: MessageItem): string {
+  // App 偶发 contentType 丢失，但 content 已是图片 URL
+  if (typeof item.content === 'string' && looksLikeImageUrl(item.content)) return item.content
+  return jsonPictureUrl(item.content) || formatIMNotification(item, resolveNoticeDisplayName)
+}
+
+function extractContent(item: MessageItem): string {
   switch (Number(item.contentType)) {
     case MessageType.TextMessage:
-      return (
-        pickString(textElem || {}, ['content', 'Content']) ||
-        item.textElem?.content ||
-        jsonContentField(item.content, 'content')
-      )
+      return extractTextContent(item)
     case MessageType.AtTextMessage:
-      return (
-        pickString(atElem || {}, ['text', 'Text']) ||
-        item.atTextElem?.text ||
-        jsonContentField(item.content, 'text')
-      )
-    case MessageType.QuoteMessage: {
-      const elem = normalizeQuoteElem(item)
-      return elem?.text || item.quoteElem?.text || jsonContentField(item.content, 'text')
-    }
+      return extractAtTextContent(item)
+    case MessageType.QuoteMessage:
+      return extractQuoteContent(item)
     case MessageType.PictureMessage:
       return pictureUrlOf(item)
-    case MessageType.VoiceMessage: {
-      const meta = soundMetaOf(item)
-      return JSON.stringify({
-        path: meta.path,
-        duration: meta.duration,
-      })
-    }
-    case MessageType.FileMessage: {
-      const url = fileSourceUrlOf(item)
-      const fileName = fileDisplayNameOf(item, url)
-      return url ? JSON.stringify({ url, fileName }) : fileName
-    }
-    case MessageType.VideoMessage: {
-      const merged = parseVideoMeta(item)
-      const fromJson = parseVideoMeta(item.content)
-      // 气泡只保留可跨端访问的远程封面；发送端本地 snapshotPath 在接收端/App 历史里是死链，
-      // 写进 content 会让 H5 走截帧、App 却去加载坏图，表现为「H5 有封面、App 没有」。
-      const snap = preferRemoteMediaUrl(merged.snapshotUrl, fromJson.snapshotUrl)
-      return JSON.stringify({
-        url: preferRemoteMediaUrl(merged.url, fromJson.url),
-        snapshotUrl: isRemoteMediaUrl(snap) ? snap : '',
-        duration: merged.duration || fromJson.duration,
-      })
-    }
-    case MessageType.CardMessage: {
-      // 名片：content 统一存 {userId, nickname, avatar}，userId 为业务 UUID。
-      // 发送时把业务 ID 冗余进 ex；旧消息没有 ex 则从 OpenIM userID 反推。
-      const card = item.cardElem
-      let userId = ''
-      try {
-        const ex = card?.ex ? (JSON.parse(card.ex) as { businessUserId?: string }) : null
-        userId = ex?.businessUserId || ''
-      } catch {
-        /* ex 不是 JSON 时走反推 */
-      }
-      if (!userId) userId = businessUserIdFromIM(card?.userID || '')
-      return JSON.stringify({
-        userId,
-        nickname: card?.nickname || '',
-        avatar: card?.faceURL || '',
-      })
-    }
-    case MessageType.CustomMessage: {
-      const dataStr = customMessageDataOf(item)
-      const invite = parseGroupInvitePayload(dataStr)
-      if (invite) return JSON.stringify(invite)
-      const raw = item as MessageItem & Record<string, unknown>
-      const elem = (raw.customElem ?? raw.CustomElem) as
-        | { description?: string; Description?: string }
-        | undefined
-      const desc =
-        (typeof elem?.description === 'string' && elem.description) ||
-        (typeof elem?.Description === 'string' && elem.Description) ||
-        jsonContentField(item.content, 'description') ||
-        ''
-      return desc || '[自定义消息]'
-    }
-    default: {
-      // App 偶发 contentType 丢失，但 content 已是图片 URL
-      if (typeof item.content === 'string' && looksLikeImageUrl(item.content)) return item.content
-      const pictureUrl = jsonPictureUrl(item.content)
-      if (pictureUrl) return pictureUrl
-      return formatIMNotification(item, resolveNoticeDisplayName)
-    }
+    case MessageType.VoiceMessage:
+      return extractVoiceContent(item)
+    case MessageType.FileMessage:
+      return extractFileContent(item)
+    case MessageType.VideoMessage:
+      return extractVideoContent(item)
+    case MessageType.CardMessage:
+      return extractCardContent(item)
+    case MessageType.CustomMessage:
+      return extractCustomContent(item)
+    default:
+      return extractFallbackContent(item)
   }
 }
 
