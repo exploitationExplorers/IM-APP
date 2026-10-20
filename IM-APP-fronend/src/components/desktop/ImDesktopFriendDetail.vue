@@ -493,7 +493,7 @@ function onDelete() {
 </template>
 
 <style scoped lang="scss">
-/* 参考站：fixed 居中 + 透明遮罩 + 400×90dvh 白卡片 shadow-modal */
+/* 参考站：fixed 居中 + 透明遮罩 + 400 宽白卡片；高度比参考站 90dvh 略收 */
 .friend-layer {
   position: fixed;
   inset: 0;
@@ -509,8 +509,8 @@ function onDelete() {
   position: relative;
   width: 400px;
   max-width: calc(100vw - 48px);
-  height: 90dvh;
-  max-height: 90dvh;
+  height: 76dvh;
+  max-height: 76dvh;
   display: flex;
   flex-direction: column;
   background: #fff;
