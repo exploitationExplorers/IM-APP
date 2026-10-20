@@ -80,7 +80,7 @@ def status():
     state = request("status")
     api = p.settings(p.detail("im-app-api"))
     state["groupRetentionMode"] = api.get("GROUP_RETENTION_MODE","missing")
-    state["groupPolicy"] = "last_168_hours_and_at_most_500_visible_messages_per_group"
+    state["groupPolicy"] = "last_168_hours_and_at_most_1500_visible_messages_per_group_configurable"
     print(json.dumps(state,ensure_ascii=False,indent=2))
 
 

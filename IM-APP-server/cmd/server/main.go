@@ -73,10 +73,10 @@ func main() {
 		"group_member_limit_logs":    {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
 		"group_message_purges":       {"group_id", "user_id", "purged_at"},
 		"users":                      {"id", "public_id", "public_id_changed_at", "last_seen_at"},
-		"groups":                     {"id", "public_id", "public_id_changed_at"},
+		"groups":                     {"id", "public_id", "public_id_changed_at", "retention_max_messages", "retention_keep_hours"},
 		"user_stickers":              {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations include 052 through 055", err)
+		log.Fatalf("schema check: %v; required migrations include 052 through 056", err)
 	}
 	if cfg.MigrationsMode == "verify" {
 		log.Println("database schema verified; startup migration replay disabled")

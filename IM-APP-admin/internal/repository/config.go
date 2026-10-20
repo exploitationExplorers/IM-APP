@@ -138,7 +138,11 @@ func (r *OpsRepo) SetReportReasonStatus(ctx context.Context, id, status string) 
 const cfgKeySystemLimits = "system.limits"
 
 func defaultLimits() *models.SystemLimits {
-	return &models.SystemLimits{MaxFileSizeMB: 20, MaxGroupMembers: 2000, DefaultGroupMaxMembers: 2000, RecallWindowSec: 120, MaxForwardTargets: 10000, MaxNicknameLen: 32}
+	return &models.SystemLimits{
+		MaxFileSizeMB: 20, MaxGroupMembers: 2000, DefaultGroupMaxMembers: 2000,
+		RecallWindowSec: 120, MaxForwardTargets: 10000, MaxNicknameLen: 32,
+		GroupRetentionMaxMessages: 1500, GroupRetentionHours: 168,
+	}
 }
 
 func (r *OpsRepo) GetSystemLimits(ctx context.Context) (*models.SystemLimits, error) {
@@ -146,6 +150,12 @@ func (r *OpsRepo) GetSystemLimits(ctx context.Context) (*models.SystemLimits, er
 	var raw string
 	if err := r.DB.QueryRow(ctx, `SELECT value FROM app_configs WHERE key=$1`, cfgKeySystemLimits).Scan(&raw); err == nil && raw != "" {
 		_ = json.Unmarshal([]byte(raw), l)
+	}
+	if l.GroupRetentionMaxMessages <= 0 {
+		l.GroupRetentionMaxMessages = 1500
+	}
+	if l.GroupRetentionHours <= 0 {
+		l.GroupRetentionHours = 168
 	}
 	return l, nil
 }

@@ -57,7 +57,8 @@ function build() {
   fs.mkdirSync(artifacts, { recursive: true })
   const output = fs.mkdtempSync(path.join(artifacts, 'media-gc-release-'))
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'imapp-retention-build-'))
-  const env = { ...process.env, GOENV: 'off', GOFLAGS: '', CGO_ENABLED: '0', GOOS: process.platform === 'win32' ? 'windows' : process.platform, GOARCH: 'amd64' }
+  // -buildvcs=false: OpenIM module checkout under Temp has no usable .git on Windows.
+  const env = { ...process.env, GOENV: 'off', GOFLAGS: '-buildvcs=false', CGO_ENABLED: '0', GOOS: process.platform === 'win32' ? 'windows' : process.platform, GOARCH: 'amd64' }
   const linux = { ...env, GOOS: 'linux' }
   const goExe = process.env.GO_EXECUTABLE || 'go'
   const go = (args, cwd, buildEnv = env) => execFileSync(goExe, args, { cwd, env: buildEnv, stdio: 'inherit', timeout: 300000 })

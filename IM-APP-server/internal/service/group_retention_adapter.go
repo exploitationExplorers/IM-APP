@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,13 +92,22 @@ func (a *RetentionHTTPAdapter) Check(ctx context.Context) error {
 	return nil
 }
 
-func (a *RetentionHTTPAdapter) Snapshot(ctx context.Context, groupID string) (media.RetentionSnapshot, error) {
+func (a *RetentionHTTPAdapter) Snapshot(ctx context.Context, groupID string, policy media.RetentionPolicy) (media.RetentionSnapshot, error) {
 	id, err := uuid.Parse(groupID)
 	if err != nil {
 		return media.RetentionSnapshot{}, ErrRetentionAdapter
 	}
+	policy = media.NormalizeRetentionPolicy(policy)
+	hours := int(policy.Window / time.Hour)
+	if hours < 1 {
+		hours = 1
+	}
+	q := url.Values{}
+	q.Set("groupId", strings.ReplaceAll(id.String(), "-", ""))
+	q.Set("maxMessages", strconv.Itoa(policy.MaxMessages))
+	q.Set("keepHours", strconv.Itoa(hours))
 	var snapshot media.RetentionSnapshot
-	if err := a.call(ctx, "GET", "/internal/retention/snapshot?groupId="+strings.ReplaceAll(id.String(), "-", ""), nil, &snapshot); err != nil {
+	if err := a.call(ctx, "GET", "/internal/retention/snapshot?"+q.Encode(), nil, &snapshot); err != nil {
 		return snapshot, err
 	}
 	if snapshot.ConversationID != "sg_"+strings.ReplaceAll(id.String(), "-", "") || !snapshot.Complete ||
@@ -107,7 +117,7 @@ func (a *RetentionHTTPAdapter) Snapshot(ctx context.Context, groupID string) (me
 	if _, err := uuid.Parse(snapshot.SnapshotID); err != nil {
 		return media.RetentionSnapshot{}, ErrRetentionAdapter
 	}
-	if _, err := media.PlanGroupRetention(snapshot); err != nil {
+	if _, err := media.PlanGroupRetention(snapshot, policy); err != nil {
 		return media.RetentionSnapshot{}, ErrRetentionAdapter
 	}
 	return snapshot, nil

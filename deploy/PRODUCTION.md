@@ -15,7 +15,7 @@ sha256sum -c SHA256SUMS && python3 cleanup-production.py deploy
 python3 cleanup-production.py status
 ```
 
-默认打开全群“168 小时且最多 500 条”逻辑策略，**可能立即处理当日旧任务**；受控 OSS GC 在全部运行进程 SHA/健康/私网/RAM/版本探针通过后自动激活，每日北京时间 03:30。头像、收藏、转发副本、单聊及永久保护保留；仅回收新 managed-v1 文件，旧对象不扫，Mongo 正文清理不启用。
+默认打开全群“168 小时且最多 1500 条”逻辑策略（可由管理后台 system.limits / 单群覆盖调整），**可能立即处理当日旧任务**；受控 OSS GC 在全部运行进程 SHA/健康/私网/RAM/版本探针通过后自动激活，每日北京时间 03:30。头像、收藏、转发副本、单聊及永久保护保留；仅回收新 managed-v1 文件，旧对象不扫，Mongo 正文清理不启用。
 
 脚本保留基础 Compose → 原 OSS 私密 override → 新版本覆盖层的顺序；以当前镜像叠加二进制，不回退原 OSS 配置。复用现有私有桥 key；不重新生成媒体签名 key。只重启两个应用容器，有短暂重连；不重启数据库/Redis/Kafka，不删卷，不导出/恢复数据库。不执行裸 `docker compose up -d --build`、整栈 down 或 prune。
 

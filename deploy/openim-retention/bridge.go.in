@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,7 +97,7 @@ func (b *imAppRetentionBridge) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	case r.Method == "GET" && r.URL.Path == "/internal/retention/snapshot":
 		q, err := netQuery(r)
 		if err != nil { http.Error(w, "invalid request", 400); return }
-		snapshot, err := b.snapshot(ctx, q)
+		snapshot, err := b.snapshot(ctx, q.groupID, q.policy)
 		if err != nil { http.Error(w, "snapshot unavailable", 503); return }
 		imAppJSON(w, snapshot)
 	case r.Method == "POST" && r.URL.Path == "/internal/retention/apply" && r.URL.RawQuery == "":
@@ -117,10 +118,37 @@ func (b *imAppRetentionBridge) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-func netQuery(r *http.Request) (string, error) {
+type imAppSnapshotQuery struct {
+	groupID string
+	policy  rules.RetentionPolicy
+}
+
+func netQuery(r *http.Request) (imAppSnapshotQuery, error) {
 	q, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil || len(q) != 1 || len(q["groupId"]) != 1 || !imAppGroupID.MatchString(q.Get("groupId")) { return "", errIMAppSnapshot }
-	return q.Get("groupId"), nil
+	if err != nil || len(q["groupId"]) != 1 || !imAppGroupID.MatchString(q.Get("groupId")) {
+		return imAppSnapshotQuery{}, errIMAppSnapshot
+	}
+	for key := range q {
+		if key != "groupId" && key != "maxMessages" && key != "keepHours" {
+			return imAppSnapshotQuery{}, errIMAppSnapshot
+		}
+	}
+	policy := rules.DefaultRetentionPolicy()
+	if raw := q.Get("maxMessages"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return imAppSnapshotQuery{}, errIMAppSnapshot
+		}
+		policy.MaxMessages = n
+	}
+	if raw := q.Get("keepHours"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return imAppSnapshotQuery{}, errIMAppSnapshot
+		}
+		policy.Window = time.Duration(n) * time.Hour
+	}
+	return imAppSnapshotQuery{groupID: q.Get("groupId"), policy: rules.NormalizeRetentionPolicy(policy)}, nil
 }
 
 func imAppUUID() (string, error) {
@@ -132,8 +160,8 @@ func imAppUUID() (string, error) {
 
 // Only classified, actually persisted slots are evidence. A missing slot in
 // the retained tail is NOT a committed hole: transfer may still be in flight.
-// Once 500 actual visible rows are proven, all lower seqs are over count even
-// if they contain pending slots. Never use reserved max_seq as this proof.
+// Once MaxMessages actual visible rows are proven, all lower seqs are over
+// count even if they contain pending slots. Never use reserved max_seq as this proof.
 func imAppClassify(info *model.MsgInfoModel, groupID string, seq int64) (rules.RetentionMessage, error) {
 	if info == nil || info.Msg == nil { return rules.RetentionMessage{}, errIMAppSnapshot }
 	m := info.Msg
@@ -164,7 +192,7 @@ func imAppClassify(info *model.MsgInfoModel, groupID string, seq int64) (rules.R
 }
 
 // Match the app's messagePinPayloadOf contract, including native casing. Pin
-// synchronization is not a displayed message and must not consume the 500 quota.
+// synchronization is not a displayed message and must not consume the keep quota.
 func imAppPinControl(content string) bool {
 	var outer map[string]json.RawMessage
 	if len(content) > 128*1024 || json.Unmarshal([]byte(content), &outer) != nil { return false }
@@ -181,7 +209,8 @@ func imAppPinControl(content string) bool {
 	return strings.ToLower(field("action", "Action")) == "unpin" || strings.TrimSpace(field("clientMsgID", "ClientMsgID")) != ""
 }
 
-func (b *imAppRetentionBridge) snapshot(ctx context.Context, groupID string) (rules.RetentionSnapshot, error) {
+func (b *imAppRetentionBridge) snapshot(ctx context.Context, groupID string, policy rules.RetentionPolicy) (rules.RetentionSnapshot, error) {
+	policy = rules.NormalizeRetentionPolicy(policy)
 	conversationID := "sg_"+groupID
 	watermark, err := b.server.MsgDatabase.GetMaxSeq(ctx, conversationID)
 	if err != nil || watermark < 0 || watermark >= 1<<53 { return rules.RetentionSnapshot{}, errIMAppSnapshot }
@@ -196,8 +225,8 @@ func (b *imAppRetentionBridge) snapshot(ctx context.Context, groupID string) (ru
 		Messages: make([]rules.RetentionMessage, 0)}
 	var table model.MsgDocModel
 	visible, scanned := 0, 0
-	// Descend only until the newest 500 visible messages are proven. This makes
-	// a million-message group's first run bounded without loading/deleting its
+	// Descend only until MaxMessages visible rows are proven. This makes a
+	// million-message group's first run bounded without loading/deleting its
 	// old history. Hidden controls never count. Pending holes in this tail retry.
 	for last := watermark; last >= start; {
 		var doc model.MsgDocModel
@@ -212,7 +241,7 @@ func (b *imAppRetentionBridge) snapshot(ctx context.Context, groupID string) (ru
 			if err != nil { return rules.RetentionSnapshot{}, err }
 			result.Messages = append(result.Messages, row)
 			if row.Visibility == "visible" { visible++ }
-			if visible == rules.GroupRetentionCount && n > start {
+			if visible == policy.MaxMessages && n > start {
 				result.OverCountThrough = n-1
 				break
 			}
@@ -223,7 +252,7 @@ func (b *imAppRetentionBridge) snapshot(ctx context.Context, groupID string) (ru
 	result.Complete = true
 	result.SnapshotID, err = imAppUUID()
 	if err != nil { return rules.RetentionSnapshot{}, errIMAppSnapshot }
-	plan, err := rules.PlanGroupRetention(result)
+	plan, err := rules.PlanGroupRetention(result, policy)
 	if err != nil { return rules.RetentionSnapshot{}, err }
 	boundary, err := rules.RetentionMinSeq(plan)
 	// A non-prefix plan is still a valid read-only preview; never issue apply

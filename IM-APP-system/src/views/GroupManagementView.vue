@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "elem
 import { Delete, RefreshLeft, Search } from "@element-plus/icons-vue";
 import { getGroups, getGroupDetail, dissolveGroup as dissolveGroupApi, muteGroupAll, getGroupRecallLogs, getGroupReports, getGroupStatusLogs } from "@/api/modules/admin";
 import GroupCapacityEditor from "@/components/groups/GroupCapacityEditor.vue";
+import GroupRetentionEditor from "@/components/groups/GroupRetentionEditor.vue";
 import { getGroupMembersApi, postGroupRecallMessageApi, putGroupMemberAddFriendApi } from "@/api/modules/adminGroups";
 import type { AdminGroups } from "@/api/modules/adminGroups";
 import type { Groups, Reports } from "@/api/interface";
@@ -710,6 +711,17 @@ onMounted(() => {
               :member-count="selectedGroup.memberCount || 0"
               :max-members="selectedGroup.maxMembers || 200"
               @updated="(maxMembers) => { if (selectedGroup) selectedGroup.maxMembers = maxMembers; }"
+            />
+            <h4>群消息保留</h4>
+            <GroupRetentionEditor
+              :group-id="selectedGroup.id"
+              :retention-max-messages="selectedGroup.retentionMaxMessages"
+              :retention-keep-hours="selectedGroup.retentionKeepHours"
+              @updated="(payload) => {
+                if (!selectedGroup) return;
+                selectedGroup.retentionMaxMessages = payload.retentionMaxMessages ?? null;
+                selectedGroup.retentionKeepHours = payload.retentionKeepHours ?? null;
+              }"
             />
             <div class="switch-row">
               <span>全员禁言</span>

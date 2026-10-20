@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	rules "github.com/openimsdk/open-im-server/v3/internal/imappretention"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/controller"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache/cachekey"
@@ -123,7 +124,9 @@ func TestIMAppRetentionMongoIntegration(t *testing.T) {
 			Seq:n, GroupID:group, SessionType:3, ContentType:constant.Text, SendTime:time.Now().Add(-time.Hour).UnixMilli(), Content:"original content must remain"}} }
 		if _, err := db.Collection(model.MsgTableName).InsertOne(ctx, doc); err != nil { t.Fatal(err) }
 	}
-	snapshot, err := b.snapshot(ctx, group); if err != nil { t.Fatal(err) }
+	// Integration cases below pin MaxMessages=500 so the 503-seq fixture still proves a compact prefix.
+	legacy := rules.RetentionPolicy{MaxMessages: 500, Window: rules.GroupRetentionWindow}
+	snapshot, err := b.snapshot(ctx, group, legacy); if err != nil { t.Fatal(err) }
 	if !snapshot.Complete || snapshot.Watermark != 503 || len(snapshot.Messages) != 500 || snapshot.OverCountThrough != 3 { t.Fatal("snapshot used reservation instead of persisted tail proof") }
 	if err := b.apply(ctx, snapshot.SnapshotID, conversation, 5); !errors.Is(err, errIMAppSnapshot) { t.Fatal("forged boundary accepted") }
 	if err := b.apply(ctx, snapshot.SnapshotID, "sg_"+strings.Repeat("b",32), 4); err == nil { t.Fatal("cross-group receipt accepted") }
@@ -139,7 +142,7 @@ func TestIMAppRetentionMongoIntegration(t *testing.T) {
 	if _, err := cache.Malloc(ctx,conversation,1); err != nil { t.Fatal(err) }
 	if minimum, err := seq.GetMinSeq(ctx,conversation); err != nil || minimum != 4 { t.Fatal("real allocator reset durable minimum", err) }
 	if minimum, err := cache.GetMinSeq(ctx,conversation); err != nil || minimum != 4 { t.Fatal("cache refill regressed visible history", err) }
-	snapshot2, err := b.snapshot(ctx, group); if err != nil || len(snapshot2.Messages) != 500 { t.Fatal("new snapshot did not respect durable prefix", err) }
+	snapshot2, err := b.snapshot(ctx, group, legacy); if err != nil || len(snapshot2.Messages) != 500 { t.Fatal("new snapshot did not respect durable prefix", err) }
 	// Actual Mongo aggregation must filter before count and pagination. Simply
 	// removing a page's rows afterwards would make the first page empty and the
 	// total include hidden history. A single-chat source remains searchable.
@@ -156,8 +159,8 @@ func TestIMAppRetentionMongoIntegration(t *testing.T) {
 	if err := db.Collection(model.MsgTableName).FindOne(ctx, bson.M{"doc_id": conversation+":0"}).Decode(&original); err != nil || original.Msg[0].Msg.Content == "" { t.Fatal("source for legacy references was deleted") }
 	// A single pending persistence hole must prevent issuing a complete receipt.
 	_, _ = db.Collection(model.MsgTableName).UpdateOne(ctx, bson.M{"doc_id": conversation+":4"}, bson.M{"$set": bson.M{"msgs.9.msg": nil}})
-	if _, err := b.snapshot(ctx, group); err == nil { t.Fatal("unpersisted slot treated as committed gap") }
-	if _, err := b.snapshot(ctx, strings.Repeat("c",32)); err == nil { t.Fatal("foreign group slots accepted") }
+	if _, err := b.snapshot(ctx, group, legacy); err == nil { t.Fatal("unpersisted slot treated as committed gap") }
+	if _, err := b.snapshot(ctx, strings.Repeat("c",32), legacy); err == nil { t.Fatal("foreign group slots accepted") }
 	// TTL indexes may delete late. Expiry must still reject stale authority.
 	_, _ = db.Collection(imAppRetentionReceipts).UpdateOne(ctx, bson.M{"_id": snapshot.SnapshotID}, bson.M{"$set": bson.M{"expires_at": time.Now().Add(-time.Hour)}})
 	if err := b.apply(ctx, snapshot.SnapshotID, conversation, 4); err == nil { t.Fatal("expired receipt accepted before TTL deletion") }
@@ -172,7 +175,7 @@ func TestIMAppRetentionMongoIntegration(t *testing.T) {
 			Seq:n, GroupID:largeGroup, SessionType:3, ContentType:constant.Text, SendTime:time.Now().Add(-time.Hour).UnixMilli()}} }
 		if _, err := db.Collection(model.MsgTableName).InsertOne(ctx, doc); err != nil { t.Fatal(err) }
 	}
-	large, err := b.snapshot(ctx, largeGroup)
+	large, err := b.snapshot(ctx, largeGroup, legacy)
 	if err != nil || len(large.Messages) != 500 || large.OverCountThrough != 1000000 { t.Fatal("large history failed bounded tail proof", err) }
 	if err := b.apply(ctx, large.SnapshotID, largeID, 1000001); err != nil { t.Fatal("large group's proven prefix not applied", err) }
 }

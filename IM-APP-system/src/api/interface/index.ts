@@ -347,6 +347,8 @@ export namespace Groups {
     dissolvedAt?: string;
     dissolveReason?: string;
     dissolvedByAdminId?: string;
+    retentionMaxMessages?: number | null;
+    retentionKeepHours?: number | null;
   }
 
   export interface GroupStatusLogItem {

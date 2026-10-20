@@ -6,8 +6,9 @@ import (
 )
 
 func TestRetentionCountProvenPrefix(t *testing.T) {
+	quota := GroupRetentionCount
 	full := retentionSnapshot(21000)
-	expected, err := PlanGroupRetention(full)
+	expected, err := planDefault(full)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -16,9 +17,9 @@ func TestRetentionCountProvenPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	compact := full
-	compact.Messages = full.Messages[len(full.Messages)-500:]
+	compact.Messages = full.Messages[len(full.Messages)-quota:]
 	compact.OverCountThrough = compact.Messages[0].Seq - 1
-	got, err := PlanGroupRetention(compact)
+	got, err := planDefault(compact)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func TestRetentionCountProvenPrefix(t *testing.T) {
 	} {
 		invalid := compact
 		mutate(&invalid)
-		if _, err := PlanGroupRetention(invalid); err == nil {
+		if _, err := planDefault(invalid); err == nil {
 			t.Fatal("invalid compact proof accepted")
 		}
 	}

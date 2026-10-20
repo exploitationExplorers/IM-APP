@@ -59,7 +59,8 @@ func TestRetentionAdapterProtocolAndReceipts(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"protocol": protocol, "mode": "visibility_only"})
 		case "/internal/retention/snapshot":
-			if r.URL.Query().Get("groupId") != "aabbccdd112233445566778899aabbcc" || r.Method != "GET" {
+			if r.URL.Query().Get("groupId") != "aabbccdd112233445566778899aabbcc" || r.Method != "GET" ||
+				r.URL.Query().Get("maxMessages") == "" || r.URL.Query().Get("keepHours") == "" {
 				t.Error("invalid snapshot query")
 			}
 			cid := conversation
@@ -94,7 +95,7 @@ func TestRetentionAdapterProtocolAndReceipts(t *testing.T) {
 	if err := a.Check(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Snapshot(ctx, group); err != nil {
+	if _, err := a.Snapshot(ctx, group, media.DefaultRetentionPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	job := repository.RetentionApplication{GroupID: group, Plan: media.RetentionPlan{Mode: "preview_only", SnapshotID: receipt, ConversationID: conversation,
@@ -113,7 +114,7 @@ func TestRetentionAdapterProtocolAndReceipts(t *testing.T) {
 		}
 	}
 	behavior = "foreign"
-	if _, err := a.Snapshot(ctx, group); err == nil {
+	if _, err := a.Snapshot(ctx, group, media.DefaultRetentionPolicy()); err == nil {
 		t.Fatal("accepted foreign group snapshot")
 	}
 	behavior = "bad_ack"

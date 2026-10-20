@@ -14,6 +14,65 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type publishedRetentionLimits struct {
+	GroupRetentionMaxMessages int `json:"groupRetentionMaxMessages"`
+	GroupRetentionHours       int `json:"groupRetentionHours"`
+}
+
+// EffectiveRetentionPolicy resolves per-group override → published system.limits → code defaults.
+func (r *GroupRetentionRepo) EffectiveRetentionPolicy(ctx context.Context, groupID string) (media.RetentionPolicy, error) {
+	policy := media.DefaultRetentionPolicy()
+	var raw string
+	_ = r.DB.QueryRow(ctx, `SELECT data_json FROM app_config_versions
+		WHERE status='published' ORDER BY version DESC, id DESC LIMIT 1`).Scan(&raw)
+	if raw != "" {
+		var limits publishedRetentionLimits
+		if json.Unmarshal([]byte(raw), &limits) == nil {
+			if limits.GroupRetentionMaxMessages > 0 {
+				policy.MaxMessages = limits.GroupRetentionMaxMessages
+			}
+			if limits.GroupRetentionHours > 0 {
+				policy.Window = time.Duration(limits.GroupRetentionHours) * time.Hour
+			}
+		}
+	}
+	var maxMessages, keepHours *int
+	err := r.DB.QueryRow(ctx, `SELECT retention_max_messages, retention_keep_hours
+		FROM groups WHERE id=$1::uuid`, groupID).Scan(&maxMessages, &keepHours)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return media.RetentionPolicy{}, err
+	}
+	if maxMessages != nil && *maxMessages > 0 {
+		policy.MaxMessages = *maxMessages
+	}
+	if keepHours != nil && *keepHours > 0 {
+		policy.Window = time.Duration(*keepHours) * time.Hour
+	}
+	return media.NormalizeRetentionPolicy(policy), nil
+}
+
+// GlobalRetentionPolicy returns published system defaults (no per-group override).
+func (r *GroupRetentionRepo) GlobalRetentionPolicy(ctx context.Context) media.RetentionPolicy {
+	policy := media.DefaultRetentionPolicy()
+	var raw string
+	_ = r.DB.QueryRow(ctx, `SELECT data_json FROM app_config_versions
+		WHERE status='published' ORDER BY version DESC, id DESC LIMIT 1`).Scan(&raw)
+	if raw == "" {
+		return policy
+	}
+	var limits publishedRetentionLimits
+	if json.Unmarshal([]byte(raw), &limits) != nil {
+		return policy
+	}
+	if limits.GroupRetentionMaxMessages > 0 {
+		policy.MaxMessages = limits.GroupRetentionMaxMessages
+	}
+	if limits.GroupRetentionHours > 0 {
+		policy.Window = time.Duration(limits.GroupRetentionHours) * time.Hour
+	}
+	return media.NormalizeRetentionPolicy(policy)
+}
+
 var (
 	ErrRetentionLease    = errors.New("retention planning lease expired or replaced")
 	ErrRetentionPlanSize = errors.New("retention preview plan exceeds storage limit")
@@ -89,7 +148,11 @@ func (r *GroupRetentionRepo) SavePlan(ctx context.Context, job RetentionJob, sna
 	if snapshot.ConversationID != "sg_"+strings.ReplaceAll(job.GroupID, "-", "") {
 		return media.ErrRetentionSnapshot
 	}
-	plan, err := media.PlanGroupRetention(snapshot)
+	policy, err := r.EffectiveRetentionPolicy(ctx, job.GroupID)
+	if err != nil {
+		return err
+	}
+	plan, err := media.PlanGroupRetention(snapshot, policy)
 	if err != nil {
 		return err
 	}

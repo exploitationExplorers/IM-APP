@@ -110,6 +110,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.GET("/groups", middleware.RequirePermission(rbacRepo, "groups.read"), d.DataH.ListGroups)
 			auth.GET("/groups/:id", middleware.RequirePermission(rbacRepo, "groups.read"), d.DataH.GetGroup)
 			auth.POST("/group-member-limits/update", middleware.RequirePermission(rbacRepo, "groups.member-limit.write"), d.DataH.UpdateGroupMemberLimit)
+			auth.PUT("/groups/:id/retention", middleware.RequirePermission(rbacRepo, "groups.settings"), d.DataH.UpdateGroupRetention)
 			auth.GET("/groups/:id/members", middleware.RequirePermission(rbacRepo, "groups.members.read"), d.DataH.ListGroupMembers)
 			auth.GET("/groups/:id/reports", middleware.RequirePermission(rbacRepo, "reports.read"), d.DataH.ListGroupReports)
 			auth.PUT("/groups/:id/mute-all", middleware.RequirePermission(rbacRepo, "groups.mute"), d.DataH.SetGroupMuteAll)

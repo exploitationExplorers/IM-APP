@@ -44,7 +44,7 @@ func (s *retentionStoreStub) Retry(_ context.Context, _ repository.RetentionJob,
 
 type retentionProviderStub struct{ err error }
 
-func (p retentionProviderStub) Snapshot(context.Context, string) (media.RetentionSnapshot, error) {
+func (p retentionProviderStub) Snapshot(_ context.Context, _ string, _ media.RetentionPolicy) (media.RetentionSnapshot, error) {
 	return media.RetentionSnapshot{Complete: true}, p.err
 }
 

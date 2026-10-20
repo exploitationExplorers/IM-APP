@@ -26,6 +26,13 @@ export namespace AdminGroups {
     maxMembers: number;
     reason: string;
   }
+
+  export interface ReqUpdateRetentionBody {
+    retentionMaxMessages?: number | null;
+    retentionKeepHours?: number | null;
+    usePlatformDefault?: boolean;
+    reason: string;
+  }
 }
 
 const GROUPS_BASE = "/admin/v1/groups";
@@ -40,6 +47,10 @@ export const getGroupMembersApi = (id: string, params: { page?: number; size?: n
 
 export const postGroupMemberLimitApi = (body: AdminGroups.ReqUpdateMemberLimitBody) => {
   return http.post<{ ok: boolean }>("/admin/v1/group-member-limits/update", body, { loading: false });
+};
+
+export const putGroupRetentionApi = (id: string, body: AdminGroups.ReqUpdateRetentionBody) => {
+  return http.put<{ ok: boolean }>(`${GROUPS_BASE}/${id}/retention`, body, { loading: false });
 };
 
 export const postGroupRecallMessageApi = (id: string, messageId: string, body: AdminGroups.ReqRecallMessageBody) => {

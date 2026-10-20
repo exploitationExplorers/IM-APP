@@ -23,7 +23,7 @@ func preview(input io.Reader, output io.Writer) error {
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return fmt.Errorf("invalid snapshot fields")
 	}
-	plan, err := media.PlanGroupRetention(snapshot)
+	plan, err := media.PlanGroupRetention(snapshot, media.DefaultRetentionPolicy())
 	if err != nil {
 		return err
 	}

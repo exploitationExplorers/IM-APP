@@ -23,7 +23,11 @@ type RetentionPlanningStore interface {
 // classified history. SDK caches, allocated maxSeq and ordinary paged search do
 // not meet this contract. visibility_only installs the private pinned adapter.
 type RetentionSnapshotProvider interface {
-	Snapshot(context.Context, string) (media.RetentionSnapshot, error)
+	Snapshot(context.Context, string, media.RetentionPolicy) (media.RetentionSnapshot, error)
+}
+
+type RetentionPolicyResolver interface {
+	EffectiveRetentionPolicy(context.Context, string) (media.RetentionPolicy, error)
 }
 
 type GroupRetentionScheduler struct{ Store RetentionPlanningStore }
@@ -72,7 +76,13 @@ func (s *GroupRetentionScheduler) PlanNext(ctx context.Context, provider Retenti
 	}
 	workCtx, cancel := context.WithTimeout(ctx, repository.RetentionLeaseTTL/2)
 	defer cancel()
-	snapshot, err := provider.Snapshot(workCtx, job.GroupID)
+	policy := media.DefaultRetentionPolicy()
+	if resolver, ok := s.Store.(RetentionPolicyResolver); ok {
+		if p, perr := resolver.EffectiveRetentionPolicy(workCtx, job.GroupID); perr == nil {
+			policy = p
+		}
+	}
+	snapshot, err := provider.Snapshot(workCtx, job.GroupID, policy)
 	code := "snapshot_unavailable"
 	if err == nil {
 		err = s.Store.SavePlan(workCtx, *job, snapshot)
