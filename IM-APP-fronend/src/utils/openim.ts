@@ -36,7 +36,7 @@ import {
   listThumbnailUrl,
 } from '@/utils/chatMedia'
 import { devLog, devWarn } from '@/utils/devLog'
-import { isApp } from '@/utils/platform'
+import { isAndroid, isApp } from '@/utils/platform'
 import { isOSSStorageUrl } from '@/utils/storage-url'
 import type { PlusResolveLocalFile } from '@/types/plus-io'
 import { preserveForwardMedia } from '@/api/forward'
@@ -3133,11 +3133,12 @@ function quotedMessageOf(item: MessageItem): MessageItem | undefined {
 function normalizeQuoteElem(
   item: MessageItem,
 ): { text?: string; quoteMessage?: MessageItem } | undefined {
-  let raw: unknown = (item as { quoteElem?: unknown }).quoteElem
+  const bag = item as MessageItem & Record<string, unknown>
+  let raw: unknown = bag.quoteElem ?? bag.QuoteElem
   if (raw == null && typeof item.content === 'string' && item.content.startsWith('{')) {
     try {
-      const parsed = JSON.parse(item.content) as { quoteElem?: unknown }
-      raw = parsed.quoteElem
+      const parsed = JSON.parse(item.content) as Record<string, unknown>
+      raw = parsed.quoteElem ?? parsed.QuoteElem
     } catch {
       /* content 不是带 quoteElem 的 JSON */
     }
@@ -3218,26 +3219,37 @@ function fileDisplayNameOf(item: MessageItem, url: string): string {
   return seg || '文件'
 }
 
-function extractContent(item: MessageItem): string {
+/** App 原生桥偶发把 *Elem 编成 JSON 字符串，或只用 PascalCase */
+function textLikeElemOf(
+  item: MessageItem,
+  camel: 'textElem' | 'atTextElem',
+  pascal: 'TextElem' | 'AtTextElem',
+): Record<string, unknown> | undefined {
   const raw = item as MessageItem & Record<string, unknown>
-  const textElem = (raw.textElem ?? raw.TextElem) as
-    | { content?: string; Content?: string }
-    | undefined
-  const atElem = (raw.atTextElem ?? raw.AtTextElem) as
-    | { text?: string; Text?: string }
-    | undefined
+  let value: unknown = raw[camel] ?? raw[pascal]
+  if (typeof value === 'string' && value.trim().startsWith('{')) {
+    try {
+      value = JSON.parse(value) as unknown
+    } catch {
+      return undefined
+    }
+  }
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+}
+
+function extractContent(item: MessageItem): string {
+  const textElem = textLikeElemOf(item, 'textElem', 'TextElem')
+  const atElem = textLikeElemOf(item, 'atTextElem', 'AtTextElem')
   switch (Number(item.contentType)) {
     case MessageType.TextMessage:
       return (
-        textElem?.content ||
-        textElem?.Content ||
+        pickString(textElem || {}, ['content', 'Content']) ||
         item.textElem?.content ||
         jsonContentField(item.content, 'content')
       )
     case MessageType.AtTextMessage:
       return (
-        atElem?.text ||
-        atElem?.Text ||
+        pickString(atElem || {}, ['text', 'Text']) ||
         item.atTextElem?.text ||
         jsonContentField(item.content, 'text')
       )
@@ -3386,8 +3398,19 @@ export interface LocalMessageSearchHit {
 }
 
 /**
+ * 业务侧统一用从 1 开始的页码；转成各端 SDK 约定。
+ * Android 原生文档首页从 0；iOS / H5 WASM 从 1。传错首页会整页空，表现为「有时搜不到」。
+ */
+function toSdkSearchPageIndex(oneBasedPage: number): number {
+  const page = Number.isFinite(oneBasedPage) && oneBasedPage > 0 ? Math.trunc(oneBasedPage) : 1
+  if (isApp() && isAndroid()) return page - 1
+  return page
+}
+
+/**
  * 搜本机已同步的聊天记录。conversationID 空 = 全局搜所有会话。
  * App 原生桥结果字段可能是 PascalCase，这里统一归一。
+ * 本地索引查询本身很快，不要在这里 waitForSync，否则同步事件丢失时会空等数秒。
  */
 export async function searchLocalMessages(params: {
   keyword: string
@@ -3397,6 +3420,7 @@ export async function searchLocalMessages(params: {
 }): Promise<LocalMessageSearchHit[]> {
   const keyword = params.keyword.trim()
   if (!keyword) return []
+  const oneBasedPage = params.pageIndex ?? 1
   const payload = {
     conversationID: params.conversationID || '',
     keywordList: [keyword],
@@ -3409,13 +3433,15 @@ export async function searchLocalMessages(params: {
       : [MessageType.TextMessage, MessageType.AtTextMessage, MessageType.QuoteMessage],
     searchTimePosition: 0,
     searchTimePeriod: 0,
-    pageIndex: params.pageIndex ?? 1,
+    pageIndex: toSdkSearchPageIndex(oneBasedPage),
     count: params.count ?? 100,
   }
   try {
     const res = await imCall<unknown>(IMMethods.SearchLocalMessages, payload)
     const hits = normalizeLocalMessageSearchResult(res)
-    await groupRetention.sync(hits.map((hit) => hit.conversationID))
+    const ids = hits.map((hit) => hit.conversationID)
+    // 保留策略用本地缓存即可，后台刷新，不挡搜索首屏
+    if (ids.length) void groupRetention.sync(ids)
     return hits.flatMap((hit) => {
       const messages = groupRetention.filter(hit.conversationID, hit.messages)
       if (!messages.length) return []
@@ -3426,6 +3452,53 @@ export async function searchLocalMessages(params: {
     // H5 / 旧基座偶发无此方法：回退为空，调用方仍可用标题/摘要过滤
     return []
   }
+}
+
+/** 对标微信：进搜索页后台预热本地库；搜索本身不阻塞等预热 */
+const localHistoryWarm = new Map<string, Promise<MessageItem[]>>()
+const localHistoryReady = new Map<string, MessageItem[]>()
+
+/**
+ * 把指定会话近期历史拉进本地库（后台用）。群搜场景默认拉 500 条足够覆盖百级会话。
+ */
+export function ensureLocalConversationHistory(
+  conversationID: string,
+  maxCount = 500,
+): Promise<MessageItem[]> {
+  if (!conversationID) return Promise.resolve([])
+  const cached = localHistoryReady.get(conversationID)
+  if (cached) return Promise.resolve(cached)
+  const existing = localHistoryWarm.get(conversationID)
+  if (existing) return existing
+  const task = (async () => {
+    // 最多等 800ms：有同步就蹭一下，没有也立刻拉本地/历史，避免搜索链路空等 8 秒
+    await waitForSync(800)
+    try {
+      return await collectHistoryMessages(conversationID, maxCount)
+    } catch {
+      return collectHistoryMessages(conversationID, maxCount).catch(() => [] as MessageItem[])
+    }
+  })()
+  localHistoryWarm.set(conversationID, task)
+  void task.then(
+    (messages) => {
+      localHistoryWarm.delete(conversationID)
+      if (messages.length) {
+        localHistoryReady.set(conversationID, messages)
+        setTimeout(() => {
+          if (localHistoryReady.get(conversationID) === messages) localHistoryReady.delete(conversationID)
+        }, 60_000)
+      }
+    },
+    () => {
+      localHistoryWarm.delete(conversationID)
+    },
+  )
+  return task
+}
+
+function peekLocalConversationHistory(conversationID: string): MessageItem[] {
+  return localHistoryReady.get(conversationID) || []
 }
 
 function normalizeLocalMessageSearchResult(res: unknown): LocalMessageSearchHit[] {
@@ -3471,7 +3544,8 @@ function searchableTextOf(item: MessageItem): string {
 
 /**
  * 指定会话内搜出全部命中（新→旧），对齐「每条消息一行」。
- * SDK 本地索引经常只回最新一条、或漏掉未建索引的消息，所以再按历史分页补扫。
+ * 对标微信：首屏只打本地 SearchLocalMessages（毫秒级）；预热好的列表做内存补扫。
+ * 仅当本地索引为空时，才短等预热补一轮，避免「为了稳」把每次搜索拖到数秒。
  */
 export async function searchConversationMessages(
   conversationID: string,
@@ -3483,36 +3557,59 @@ export async function searchConversationMessages(
   const remember = (item: MessageItem) => {
     if (item?.clientMsgID) byId.set(item.clientMsgID, item)
   }
-
-  const pageSize = 100
-  for (let page = 1; page <= 30; page++) {
-    const hits = await searchLocalMessages({
-      keyword,
-      conversationID,
-      count: pageSize,
-      pageIndex: page,
-    })
-    const conv =
-      hits.find((h) => h.conversationID === conversationID) ||
-      (hits.length === 1 ? hits[0] : undefined)
-    const batch = conv?.messages || []
-    if (!batch.length) break
-    const before = byId.size
-    for (const item of batch) {
-      const text = searchableTextOf(item)
-      if (text && text.toLowerCase().includes(key)) remember(item)
-    }
-    if (byId.size === before) break
-    const total = Number(conv?.messageCount || 0)
-    if (total > 0 && byId.size >= total) break
-    // 本页不满，但 SDK 报的命中数还没拿齐时继续翻页（有的端一页只回最新一条）
-    if (batch.length < pageSize && (total <= 0 || byId.size >= total)) break
+  const matchesKeyword = (item: MessageItem) => {
+    const text = searchableTextOf(item)
+    return !!text && text.toLowerCase().includes(key)
   }
 
-  const history = await collectHistoryMessages(conversationID, 4000).catch(() => [] as MessageItem[])
-  for (const item of history) {
-    const text = searchableTextOf(item)
-    if (text && text.toLowerCase().includes(key)) remember(item)
+  // 后台预热，不 await；已就绪则立刻内存补扫
+  void ensureLocalConversationHistory(conversationID)
+
+  const pageSize = 100
+  const pullSdkPages = async () => {
+    for (let page = 1; page <= 30; page++) {
+      const hits = await searchLocalMessages({
+        keyword,
+        conversationID,
+        count: pageSize,
+        pageIndex: page,
+      })
+      const conv =
+        hits.find((h) => h.conversationID === conversationID) ||
+        (hits.length === 1 ? hits[0] : undefined)
+      const batch = conv?.messages || []
+      if (!batch.length) break
+      const before = byId.size
+      for (const item of batch) {
+        // SDK 已按关键词命中；App 偶发抽不出正文时仍保留，避免二次过滤把结果洗成空
+        if (!searchableTextOf(item) || matchesKeyword(item)) remember(item)
+      }
+      if (byId.size === before) break
+      const total = Number(conv?.messageCount || 0)
+      if (total > 0 && byId.size >= total) break
+      if (batch.length < pageSize && (total <= 0 || byId.size >= total)) break
+    }
+  }
+
+  await pullSdkPages()
+
+  for (const item of peekLocalConversationHistory(conversationID)) {
+    if (matchesKeyword(item)) remember(item)
+  }
+
+  // 索引空且预热还没好：最多再等 1.2s 补扫一次，而不是空等 8s
+  if (!byId.size) {
+    const warm = localHistoryWarm.get(conversationID)
+    if (warm) {
+      const history = await Promise.race([
+        warm,
+        new Promise<MessageItem[]>((resolve) => setTimeout(() => resolve([]), 1200)),
+      ])
+      for (const item of history) {
+        if (matchesKeyword(item)) remember(item)
+      }
+      if (!byId.size) await pullSdkPages()
+    }
   }
 
   return [...byId.values()].sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))

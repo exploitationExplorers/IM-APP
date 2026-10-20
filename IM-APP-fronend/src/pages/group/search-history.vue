@@ -4,6 +4,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import type { MessageItem } from 'openim-uniapp-polyfill'
 import {
   businessUserIdFromIM,
+  ensureLocalConversationHistory,
   messageSearchPreview,
   resolveGroupConversationID,
   searchConversationMessages,
@@ -40,6 +41,8 @@ onLoad(async (query) => {
   try {
     await contactStore.ensureRemarkIndex().catch(() => undefined)
     conversationId.value = await resolveGroupConversationID(groupId.value)
+    // 对标微信：进搜索页先把该群历史落到本地，输入时只搜本地库
+    void ensureLocalConversationHistory(conversationId.value)
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载失败', icon: 'none' })
   }
@@ -70,12 +73,15 @@ async function runSearch(raw: string) {
 watch([keyword, conversationId], () => {
   if (searchTimer) clearTimeout(searchTimer)
   const text = keyword.value.trim()
-  if (!text || !conversationId.value) {
-    if (!text) {
-      searchSeq += 1
-      results.value = []
-      loading.value = false
-    }
+  if (!text) {
+    searchSeq += 1
+    results.value = []
+    loading.value = false
+    return
+  }
+  // 会话 ID 还在 resolve 时先显示「搜索中」，避免误报「未找到」；ID 就绪后 watch 会再跑
+  if (!conversationId.value) {
+    loading.value = true
     return
   }
   searchTimer = setTimeout(() => {
