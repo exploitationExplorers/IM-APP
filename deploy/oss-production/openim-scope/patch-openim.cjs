@@ -8,6 +8,13 @@ const thirdHash = 'fe90471531db01cafe42f33ba9b7c2ec4eb21de3ddb2cf110c2daeba35386
 const s3Hash = '251ede021211dd4ada70bd63d61517bd803bb64a4fac095c35adb4778d0db7ae'
 const hash = b => crypto.createHash('sha256').update(b).digest('hex')
 
+// 单独导出，供 patch-openim.test.cjs 做跨文件契约校验：
+// openim-retention/patch-object-gc.cjs 用 `once(s, '\to, err = scopedoss.New(', ...)`
+// 锚定这段文本，改这里必须同步改那边，否则 GC 补丁会直接抛"锚点变了"。
+const SCOPED_NEW = `\to, err = scopedoss.New(o, os.Getenv("IM_APP_OSS_PREFIX"), os.Getenv("IM_APP_CHAT_CDN_BASE"), false)
+\tif err != nil { return err }
+\tuserConn, err :=`
+
 function transformThird(source) {
   if (hash(source) !== thirdHash) throw new Error('Requires unmodified pinned third.go')
   return source.toString('utf8')
@@ -16,9 +23,10 @@ function transformThird(source) {
 \t\treturn fmt.Errorf("production OSS build requires explicit environment, engine and prefix")
 \t}
 \tmgocli, err :=`)
-    .replace('\tuserConn, err :=', `\to, err = scopedoss.New(o, os.Getenv("IM_APP_OSS_PREFIX"), false)
-\tif err != nil { return err }
-\tuserConn, err :=`)
+    // 第 3 个参数是聊天桶的 CDN 基址，来自环境变量 IM_APP_CHAT_CDN_BASE。
+    // 留空即走 scopedoss 的回退分支（签名直连 OSS），行为与不打这个补丁时一致，
+    // 所以不配该变量也不会让 openim-rpc-third 起不来。
+    .replace('\tuserConn, err :=', SCOPED_NEW)
 }
 function transformS3(source) {
   if (hash(source) !== s3Hash) throw new Error('Requires unmodified pinned third/s3.go')
@@ -49,5 +57,5 @@ function apply(root) {
   fs.writeFileSync(third, a); fs.writeFileSync(s3, b)
   execFileSync('gofmt', ['-w', third, s3])
 }
-module.exports = { apply, transformThird, transformS3 }
+module.exports = { apply, transformThird, transformS3, SCOPED_NEW }
 if (require.main === module) apply(process.argv[2])

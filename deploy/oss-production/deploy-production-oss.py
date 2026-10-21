@@ -19,6 +19,11 @@ import urllib.request
 import uuid
 
 ORIGIN = "https://www.xn--jprz53bj9s.com"
+# 聊天桶的 CDN 基址。留空 = 关闭，OpenIM 的 AccessURL 会逐字节回退到「签名直连 OSS」
+# （也就是 2026-10-21 之前的线上行为），不会有任何可见变化。
+# 要启用时，在部署机上先 export IM_APP_CHAT_CDN_BASE=https://oss-chat.whs188.xin 再跑本脚本。
+# 必须是干净的 HTTPS 源站：不能带路径 / 查询串 / fragment / 凭据（scopedoss 会校验并拒绝）。
+CHAT_CDN_BASE = os.environ.get("IM_APP_CHAT_CDN_BASE", "").strip()
 STORES = {
     "chat": ("yikeliao-188-hk-test", "https://oss-chat-test.xn--jprz53bj9s.com", "im-app-production/chat/"),
     "business": ("yikeliao-188-business-hk-test", "https://oss-business-test.xn--jprz53bj9s.com", "im-app-production/business/"),
@@ -280,7 +285,7 @@ def deploy(root):
                    OSS_PUBLIC_BASE_URL="", OSS_MEDIA_PROXY_URL=ORIGIN + "/api/v1/public/oss-media", OSS_MEDIA_SIGNING_KEY=secrets["media_signing_key"])
     third_path = private / "openim-rpc-third.yml"
     b.write_private(third_path, patch_third_config(b.read(["exec", details["openim-api"]["Id"], "cat", "/openim-server/config/openim-rpc-third.yml"]), secrets))
-    openim_env = dict(b.settings(details["openim-api"]), IM_APP_ENV="oss-production", IM_APP_OSS_PREFIX=STORES["chat"][2])
+    openim_env = dict(b.settings(details["openim-api"]), IM_APP_ENV="oss-production", IM_APP_OSS_PREFIX=STORES["chat"][2], IM_APP_CHAT_CDN_BASE=CHAT_CDN_BASE)
     # Explicitly override object-related legacy env keys already present.
     for key in list(openim_env):
         if key.endswith("OBJECT_ENABLE"):

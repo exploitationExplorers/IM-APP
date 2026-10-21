@@ -50,7 +50,8 @@ def verify(root, d):
             api_env = env
             if any(env.get(key) != value for key, value in {'APP_ENV': 'oss-production', 'MIGRATIONS_MODE': 'verify', 'SEED_DEMO': 'false', 'STORAGE_PROVIDER': 'oss'}.items()):
                 raise d.Failed('DEPLOYED_API_SETTINGS_CHANGED')
-        elif env.get('IM_APP_ENV') != 'oss-production' or env.get('IM_APP_OSS_PREFIX') != d.STORES['chat'][2]:
+        elif env.get('IM_APP_ENV') != 'oss-production' or env.get('IM_APP_OSS_PREFIX') != d.STORES['chat'][2] \
+                or env.get('IM_APP_CHAT_CDN_BASE', '') != d.CHAT_CDN_BASE:
             raise d.Failed('DEPLOYED_OPENIM_SETTINGS_CHANGED')
     d.api_health()
     print('step=verify_openim_signed_upload_complete_and_read', flush=True)
