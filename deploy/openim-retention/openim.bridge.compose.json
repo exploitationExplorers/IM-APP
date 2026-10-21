@@ -10,7 +10,8 @@
         "IM_APP_MEDIA_GC_SCHEDULE_ENABLED": "true",
         "IM_APP_RETENTION_BODY_PURGE_ENABLED": "false",
         "IM_APP_RETENTION_BODY_PURGE_GROUP_IDS": "",
-        "IM_APP_RETENTION_BODY_PURGE_ACK": ""
+        "IM_APP_RETENTION_BODY_PURGE_ACK": "",
+        "IM_APP_CHAT_CDN_BASE": "${IM_APP_CHAT_CDN_BASE:-}"
       }
     }
   }

@@ -181,6 +181,11 @@ services:
       OSS_MEDIA_PROXY_URL: ${OSS_MEDIA_PROXY_URL:-}
       OSS_MEDIA_SIGNING_KEY: ${OSS_MEDIA_SIGNING_KEY:-}
       MEDIA_SOURCE_URL_PREFIXES: ${MEDIA_SOURCE_URL_PREFIXES:-}
+      # 转发/收藏下载前，把会过期的签名直连地址换成不过期的 CDN 地址。
+      # 规则形如 "https://源前缀->https://CDN前缀"；留空 = 不改写（默认）。
+      # ★ CDN 目标前缀必须同时出现在 MEDIA_SOURCE_URL_PREFIXES 白名单里，
+      #   否则改写后的地址会被拒绝下载（fail closed）。
+      MEDIA_CDN_REWRITES: ${MEDIA_CDN_REWRITES:-}
       GROUP_RETENTION_MODE: ${GROUP_RETENTION_MODE:-visibility_only}
       GROUP_RETENTION_ADAPTER_URL: ${GROUP_RETENTION_ADAPTER_URL:-}
       GROUP_RETENTION_ADAPTER_KEY: ${GROUP_RETENTION_ADAPTER_KEY:-}

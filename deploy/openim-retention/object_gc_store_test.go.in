@@ -49,7 +49,9 @@ func TestIMAppRetentionGCStoreFenceIntegration(t *testing.T) {
 	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
 	_, _ = db.Collection(gc.ControlCollection).InsertOne(ctx, bson.M{"_id": gc.Protocol, "active": true})
 	raw := &gcRaw{}
-	scoped, err := scopedoss.New(raw, gc.PhysicalPrefix, false)
+	// 第 3 参是聊天桶 CDN 基址；留空 = 不启用 CDN，本测试走上游签名直链。
+	// 生产路径由 patch-openim.cjs 注入 os.Getenv("IM_APP_CHAT_CDN_BASE")。
+	scoped, err := scopedoss.New(raw, gc.PhysicalPrefix, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

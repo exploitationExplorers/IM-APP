@@ -113,8 +113,13 @@ if docker exec "$OPENIM" true >/dev/null 2>&1; then
   bucket_url="$(printf '%s\n' "$cfg" | sed -n 's/.*bucketURL:[[:space:]]*"\?\([^"]*\)"\?.*/\1/p' | head -1)"
   public_read="$(printf '%s\n' "$cfg" | sed -n 's/.*publicRead:[[:space:]]*//p' | head -1)"
   info "bucketURL=$bucket_url publicRead=$public_read"
-  if [[ "$bucket_url" == *whs188.xin* ]]; then
+  # 只有「CDN 域名」不能当 bucketURL（CDN 不转发 PUT -> 上传挂）；
+  # 网关域名 oss-chat-gw.whs188.xin 是允许的：它按方法分流，写请求透传 OSS、读请求 302 到 CDN。
+  # 详见 docs/聊天桶CDN接入-nginx网关.md
+  if [[ "$bucket_url" == *"${CHAT_CDN_HOST:-oss-chat.whs188.xin}"* ]]; then
     fail "bucketURL points at the CDN domain -> chat upload breaks, roll back"
+  elif [[ "$bucket_url" == *"${CHAT_GW_HOST:-oss-chat-gw.whs188.xin}"* ]]; then
+    pass "bucketURL uses the gateway domain (writes bypass to OSS, reads 302 to CDN)"
   elif [[ -n "$bucket_url" ]]; then
     pass "bucketURL keeps the OSS custom domain (chat uploads use it for signing)"
   else
