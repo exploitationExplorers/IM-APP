@@ -14,10 +14,13 @@ func TestPreviewProducesOnlyReadOnlyPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	var result struct {
-		Mode       string
+		Mode       string          `json:"mode"`
+		Kept       []int64         `json:"keptSeqs"`
 		Candidates []struct{ Seq int64 }
 	}
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Mode != "preview_only" || len(result.Candidates) != 1 || result.Candidates[0].Seq != 2 {
+	// Over-age but under default 3000 quota → union keeps it (不足条数也保存).
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Mode != "preview_only" ||
+		len(result.Candidates) != 0 || len(result.Kept) != 1 || result.Kept[0] != 2 {
 		t.Fatalf("bad output: %s", out.String())
 	}
 	for _, invalid := range []string{`{}`, input + `{}`, `{"messages":`} {
