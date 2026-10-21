@@ -192,7 +192,9 @@ curl -s -D - -o /dev/null "https://oss-chat.<域名>/<同上>" | grep -iE 'serve
 - 尝试：`bucketURL` → `https://oss-chat.whs188.xin` + `publicRead: true`。结果 **App 发图失败**（Network 里没有任何 `oss-chat` 请求）→ 已回滚为 `bucketURL=https://oss-chat-test.易可聊.com`、`publicRead: false`。
 - 根因：OpenIM v3.8.3 的 `object.oss.bucketURL` **同时充当上传签名域名 + 展示域名**，改成 CDN 域名后上传 PUT 被打到 CDN（CDN 不转发 PUT）。且该版本 `publicRead` 行为不可靠（官方 issue #2598 同款）。
 - 收益判断：chat 下载**本来就直连 OSS**，只有 302 经过 OpenIM，**CDN 收益远小于 business**（business 原来走 `oss-media` 代理，吃 ECS 带宽，已修）。
-- 📌 **结论：chat 侧 CDN 列为二期**，三个备选：① 升级 OpenIM 看是否拆分了上传/展示域名 ② 改 OpenIM 源码 ③ nginx 层改造。CDN 域名 `oss-chat.whs188.xin` 配置保留，二期可直接启用。
+- 📌 **结论（2026-10-21 更新）**：一期已选定「nginx 网关」路线落地 —— **签名上传继续走 OSS，对外访问统一走 CDN**，详见 `docs/聊天桶CDN接入-nginx网关.md`（配置 `deploy/nginx/oss-chat-gateway.conf`、巡检 `deploy/verify-chat-gateway.sh`）。
+- 收益重估：截图实测聊天桶当月 **170.93 GB / 154 万次请求**（几乎全是香港桶外网流出，≈1 元/GB → 月百元级），比业务桶 68 GB 大得多，**聊天桶才是流量成本大头**，一期收益 ≈ 65%。
+- 二期仍备三个选项：① 升级 OpenIM 看是否已拆分上传/展示域名 ② 改 OpenIM 源码彻底拆分 ③ 保持 nginx 网关。
 
 ### 11.4 补充约束（踩过的坑）
 
