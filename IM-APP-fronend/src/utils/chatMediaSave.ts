@@ -179,21 +179,34 @@ function cachedPreviewFile(url: string): string {
  * H5/App share an on-demand viewer with persistent cache, decode/error deadline,
  * retry, pinch zoom and saving. Mini-programs keep the platform's native preview.
  */
-export async function previewImagesWithSave(urls: string[], current?: string, thumbnails: string[] = []): Promise<void> {
+export async function previewImagesWithSave(
+  urls: string[],
+  current?: string,
+  thumbnails: string[] = [],
+  originals: string[] = [],
+): Promise<void> {
   const items = urls
-    .map((u, i) => ({ url: playableMediaUrl((u || '').trim()), thumbnail: playableMediaUrl(thumbnails[i] || '') }))
+    .map((u, i) => ({
+      url: playableMediaUrl((u || '').trim()),
+      thumbnail: playableMediaUrl(thumbnails[i] || ''),
+      original: playableMediaUrl((originals[i] || '').trim()),
+    }))
     .filter((item) => item.url)
   const list = items.map((item) => item.url)
   if (!list.length) return
   const cur = playableMediaUrl((current || '').trim())
   const currentUrl = cur && list.includes(cur) ? cur : list[0]
   if (isAppPlatform() || typeof document !== 'undefined') {
-    const session = createImagePreviewSession({
+    const sessionData = {
       urls: list.map(cachedPreviewFile),
       current: list.indexOf(currentUrl),
       owner: previewCacheOwner(),
       thumbnails: items.map((item) => cachedPreviewFile(item.thumbnail)),
-    })
+      ...(items.some((item) => item.original)
+        ? { originals: items.map((item) => item.original) }
+        : {}),
+    }
+    const session = createImagePreviewSession(sessionData)
     await new Promise<void>((resolve) => {
       uni.navigateTo({
         url: `/pages/chat/image-viewer?session=${session}`,

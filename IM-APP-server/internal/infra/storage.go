@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	ErrObjectNotFound     = errors.New("storage object not found")
-	ErrStorageUnavailable = errors.New("storage unavailable")
-	ErrObjectKeyScope     = errors.New("object key outside configured scope")
+	ErrObjectNotFound      = errors.New("storage object not found")
+	ErrStorageUnavailable  = errors.New("storage unavailable")
+	ErrObjectKeyScope      = errors.New("object key outside configured scope")
+	ErrInvalidMediaVariant = errors.New("invalid media variant")
 )
 
 // ObjectStorage preserves the existing POST/PUT upload contract on both clients.

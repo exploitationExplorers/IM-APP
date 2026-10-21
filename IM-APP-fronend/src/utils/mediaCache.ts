@@ -1,5 +1,6 @@
 import { APP_CONFIG } from '@/config'
 import { deleteH5, readH5Meta, storeH5, writeH5Meta } from '@/utils/mediaCacheH5'
+import { cacheableChatMediaUrl, mediaCacheIdentity } from '@/utils/mediaCacheIdentity'
 import { isApp, isIOS } from '@/utils/platform'
 
 /**
@@ -56,6 +57,7 @@ export function pickCacheEvictions(
 type CacheRow = { path: string; rel: string; bytes: number; at: number }
 
 const rows = new Map<string, CacheRow>()
+const remoteUrls = new Map<string, string>()
 const skipped = new Set<string>()
 const listeners = new Map<string, Array<(path: string) => void>>()
 const queued = new Set<string>()
@@ -69,7 +71,7 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null
 
 export function peekMediaCache(url: string): string {
   if (!mediaCacheEnabled()) return ''
-  const row = rows.get(url.trim())
+  const row = rows.get(mediaCacheIdentity(cacheableChatMediaUrl(url) || url))
   return row?.path || ''
 }
 
@@ -79,7 +81,10 @@ export function warmMediaCache(): void {
 }
 
 export function mediaCacheHas(url: string): boolean {
-  return mediaCacheEnabled() && rows.has(url.trim())
+  return (
+    mediaCacheEnabled() &&
+    rows.has(mediaCacheIdentity(cacheableChatMediaUrl(url) || url))
+  )
 }
 
 /** 换会话：没开始的下载全部作废。等待方收到空地址，气泡自己退回远程图。 */
@@ -89,16 +94,18 @@ export function resetMediaCacheQueue(): void {
   backlog.length = 0
   queued.clear()
   waiting.clear()
-  for (const url of dropped) {
-    if (!inflight.has(url)) fail(url)
+  for (const key of dropped) {
+    remoteUrls.delete(key)
+    if (!inflight.has(key)) fail(key)
   }
 }
 
 export function forgetMediaCache(url: string): void {
-  const remote = url.trim()
-  const row = rows.get(remote)
-  rows.delete(remote)
-  skipped.delete(remote)
+  const key = mediaCacheIdentity(cacheableChatMediaUrl(url) || url)
+  const row = rows.get(key)
+  rows.delete(key)
+  remoteUrls.delete(key)
+  skipped.delete(key)
   if (!row) return
   revokeBlob(row.path)
   void removeStored(row.rel)
@@ -115,25 +122,27 @@ export function requestMediaCache(
   options: { background?: boolean } = {},
 ): boolean {
   if (!mediaCacheEnabled()) return false
-  const remote = url.trim()
-  if (!/^https?:\/\//i.test(remote) || skipped.has(remote)) return false
-  const hit = rows.get(remote)
+  const remote = cacheableChatMediaUrl(url)
+  const key = mediaCacheIdentity(remote)
+  if (!key || !/^https?:\/\//i.test(remote) || skipped.has(key)) return false
+  remoteUrls.set(key, remote)
+  const hit = rows.get(key)
   if (hit?.path) {
     hit.at = Date.now()
     scheduleFlush()
     onReady(hit.path)
     return true
   }
-  const list = listeners.get(remote) || []
+  const list = listeners.get(key) || []
   list.push(onReady)
-  listeners.set(remote, list)
+  listeners.set(key, list)
   void ensureReady().then(() => {
-    const loaded = rows.get(remote)
+    const loaded = rows.get(key)
     if (loaded?.path) {
-      deliver(remote, loaded.path)
+      deliver(key, loaded.path)
       return
     }
-    enqueue(remote, !!options.background)
+    enqueue(key, !!options.background)
   })
   return true
 }
@@ -166,33 +175,33 @@ export function awaitMediaCache(url: string, timeoutMs = 30000): Promise<string>
   })
 }
 
-function deliver(url: string, path: string): void {
-  const list = listeners.get(url) || []
-  listeners.delete(url)
-  queued.delete(url)
+function deliver(key: string, path: string): void {
+  const list = listeners.get(key) || []
+  listeners.delete(key)
+  queued.delete(key)
   for (const fn of list) fn(path)
 }
 
-function fail(url: string): void {
-  deliver(url, '')
+function fail(key: string): void {
+  deliver(key, '')
 }
 
-function dropFrom(list: string[], url: string): void {
-  const at = list.lastIndexOf(url)
+function dropFrom(list: string[], key: string): void {
+  const at = list.lastIndexOf(key)
   if (at >= 0) list.splice(at, 1)
 }
 
-function enqueue(url: string, background: boolean): void {
-  if (inflight.has(url) || rows.get(url)?.path) return
+function enqueue(key: string, background: boolean): void {
+  if (inflight.has(key) || rows.get(key)?.path) return
   if (background) {
-    if (queued.has(url) || waiting.has(url)) return
-    waiting.add(url)
-    backlog.push(url)
+    if (queued.has(key) || waiting.has(key)) return
+    waiting.add(key)
+    backlog.push(key)
   } else {
-    if (waiting.delete(url)) dropFrom(backlog, url)
-    if (queued.has(url)) dropFrom(order, url)
-    queued.add(url)
-    order.push(url)
+    if (waiting.delete(key)) dropFrom(backlog, key)
+    if (queued.has(key)) dropFrom(order, key)
+    queued.add(key)
+    order.push(key)
   }
   pump()
 }
@@ -201,22 +210,27 @@ function enqueue(url: string, background: boolean): void {
 function pump(): void {
   const limit = isIOS() ? 4 : 6
   while (inflight.size < limit) {
-    let url = order.pop()
+    let key = order.pop()
     let background = false
-    if (url) {
-      queued.delete(url)
+    if (key) {
+      queued.delete(key)
     } else {
       if (backgroundInflight.size >= BACKGROUND_SLOTS) return
-      url = backlog.pop()
-      if (!url) return
-      waiting.delete(url)
+      key = backlog.pop()
+      if (!key) return
+      waiting.delete(key)
       background = true
     }
-    if (!listeners.has(url)) continue
-    const target = url
+    if (!listeners.has(key)) continue
+    const target = key
+    const remote = remoteUrls.get(target) || ''
+    if (!remote) {
+      fail(target)
+      continue
+    }
     inflight.add(target)
     if (background) backgroundInflight.add(target)
-    void withDeadline(storeRemote(target))
+    void withDeadline(storeRemote(target, remote))
       .then((result) => finishStore(target, result))
       .catch(() => finishStore(target, { ok: false, skip: true }))
   }
@@ -242,40 +256,43 @@ function withDeadline(task: Promise<StoreResult>): Promise<StoreResult> {
 }
 
 function finishStore(
-  url: string,
+  key: string,
   result: { ok: true; path: string; rel: string; bytes: number } | { ok: false; skip: boolean },
 ): void {
-  inflight.delete(url)
-  backgroundInflight.delete(url)
+  inflight.delete(key)
+  backgroundInflight.delete(key)
   if (!result.ok) {
-    if (result.skip) skipped.add(url)
-    fail(url)
+    if (result.skip) skipped.add(key)
+    remoteUrls.delete(key)
+    fail(key)
     pump()
     return
   }
-  remember(url, result)
-  deliver(url, result.path)
+  remember(key, result)
+  deliver(key, result.path)
   pump()
 }
 
 function remember(
-  url: string,
+  key: string,
   result: { path: string; rel: string; bytes: number },
 ): void {
   const victims = pickCacheEvictions(snapshotRows(), result.bytes)
   for (const victim of victims) {
     const old = rows.get(victim)
     rows.delete(victim)
+    remoteUrls.delete(victim)
     if (!old) continue
     revokeBlob(old.path)
     void removeStored(old.rel)
   }
-  rows.set(url, { path: result.path, rel: result.rel, bytes: result.bytes, at: Date.now() })
+  remoteUrls.delete(key)
+  rows.set(key, { path: result.path, rel: result.rel, bytes: result.bytes, at: Date.now() })
   scheduleFlush()
 }
 
 function snapshotRows(): Array<{ url: string; bytes: number; at: number }> {
-  return [...rows.entries()].map(([url, row]) => ({ url, bytes: row.bytes, at: row.at }))
+  return [...rows.entries()].map(([key, row]) => ({ url: key, bytes: row.bytes, at: row.at }))
 }
 
 function ensureReady(): Promise<void> {
@@ -332,10 +349,11 @@ async function writeIndex(): Promise<void> {
 }
 
 async function storeRemote(
+  key: string,
   url: string,
 ): Promise<{ ok: true; path: string; rel: string; bytes: number } | { ok: false; skip: boolean }> {
-  if (isApp()) return storeApp(url)
-  return storeH5(url)
+  if (isApp()) return storeApp(key, url)
+  return storeH5(key, url, rows.get(key)?.rel || '')
 }
 
 async function removeStored(rel: string): Promise<void> {
@@ -424,13 +442,14 @@ function fileBytes(path: string): Promise<number> {
 }
 
 async function storeApp(
+  key: string,
   url: string,
 ): Promise<{ ok: true; path: string; rel: string; bytes: number } | { ok: false; skip: boolean }> {
   const temp = await downloadTemp(url)
   if (!temp) return { ok: false, skip: false }
   const bytes = await fileBytes(temp)
   if (!mediaCacheAcceptsSize(bytes)) return { ok: false, skip: true }
-  const name = `${mediaCacheKey(url)}.${cacheFileExt(url)}`
+  const name = `${mediaCacheKey(key)}.${cacheFileExt(url)}`
   const rel = `${DIR_REL}/${name}`
   const dir = await cacheDir()
   const src = await resolveLocal(temp)
@@ -482,13 +501,13 @@ async function loadAppIndex(): Promise<void> {
 function applyIndex(text: string): void {
   const parsed = JSON.parse(text) as { items?: Array<{ url?: string; rel?: string; bytes?: number; at?: number }> }
   for (const item of parsed.items || []) {
-    const url = String(item.url || '')
+    const key = mediaCacheIdentity(String(item.url || ''))
     const rel = String(item.rel || '')
     const bytes = Number(item.bytes) || 0
-    if (!url || !rel || !mediaCacheAcceptsSize(bytes)) continue
+    if (!key || !rel || !mediaCacheAcceptsSize(bytes)) continue
     const path = playableLocal(rel)
     if (!path) continue
-    rows.set(url, { path, rel, bytes, at: Number(item.at) || 0 })
+    rows.set(key, { path, rel, bytes, at: Number(item.at) || 0 })
   }
 }
 
@@ -525,8 +544,8 @@ async function writeAppIndex(): Promise<void> {
 }
 
 function indexItems(): Array<{ url: string; rel: string; bytes: number; at: number }> {
-  return [...rows.entries()].map(([url, row]) => ({
-    url,
+  return [...rows.entries()].map(([key, row]) => ({
+    url: key,
     rel: row.rel,
     bytes: row.bytes,
     at: row.at,
@@ -588,8 +607,9 @@ function removeAppFile(rel: string): Promise<void> {
 async function loadH5Index(): Promise<void> {
   const items = await readH5Meta()
   for (const item of items) {
-    if (!item.url || !mediaCacheAcceptsSize(item.bytes)) continue
-    rows.set(item.url, { path: '', rel: item.rel, bytes: item.bytes, at: item.at })
+    const key = mediaCacheIdentity(item.url)
+    if (!key || !mediaCacheAcceptsSize(item.bytes)) continue
+    rows.set(key, { path: '', rel: item.rel, bytes: item.bytes, at: item.at })
   }
 }
 

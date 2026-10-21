@@ -125,18 +125,20 @@ paths:
     get:
       operationId: resolvePrivateOSSMedia
       summary: 稳定 capability URL 解析到短期 OSS GET
-      description: 持有链接即可读，不是会话成员授权。不要记录完整 token。
+      description: 持有链接即可读，不是会话成员授权。不要记录完整 token。variant 只允许 list/preview/preview-mobile/avatar，服务端固定图片处理规格，不接受任意 x-oss-process。
       security: []
       parameters:
         - {name: key, in: query, required: true, schema: {type: string}}
         - {name: token, in: query, required: true, schema: {type: string}}
+        - {name: variant, in: query, required: false, schema: {type: string, enum: [list, preview, preview-mobile, avatar]}, description: list=360px WebP q60；preview=1280px WebP q75；preview-mobile=960px WebP q72；avatar=128px WebP q70；非图片忽略}
       responses:
         '302':
-          description: 不使用 JSON envelope；签名 GET 有效 10 分钟
+          description: 不使用 JSON envelope；签名 GET 有效 10 分钟，图片处理参数参与签名
           headers:
             Location: {schema: {type: string}}
             Cache-Control: {schema: {type: string, example: 'private, no-store'}}
             Referrer-Policy: {schema: {type: string, example: no-referrer}}
+        '400': {description: 非法 variant；只允许 list、preview、preview-mobile 或 avatar}
         '404': {description: 无效或越界的 key/token}
         '503': {description: OSS 解析未配置}
   /api/v1/admin/app-releases/uploads:

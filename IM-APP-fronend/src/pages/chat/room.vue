@@ -260,7 +260,15 @@ function openImagePreview(message: ChatMessage) {
   if (!current) return
   const list = urls.length ? urls : [current]
   const thumbnails = imageMessages.map((m) => playableMediaUrl(listThumbnailUrl(m.content || m.sourceUrl || '')))
-  void previewImagesWithSave(list, list.includes(current) ? current : list[0], thumbnails)
+  const originals = imageMessages.map((m) =>
+    playableMediaUrl((m.sourceUrl || m.content || '').trim()),
+  )
+  void previewImagesWithSave(
+    list,
+    list.includes(current) ? current : list[0],
+    thumbnails,
+    originals,
+  )
 }
 
 watch(

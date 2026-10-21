@@ -81,35 +81,63 @@ export function writeH5Meta(items: H5MetaRow[]): Promise<void> {
   )
 }
 
-export async function storeH5(url: string): Promise<H5CacheHit | H5CacheMiss> {
+/**
+ * identity 是忽略临时签名参数后的稳定缓存键；exactUrl 才是本次真实的下载地址。
+ * legacyKey 兼容升级前用完整签名 URL 写入的 IndexedDB 记录。
+ */
+export async function storeH5(
+  identity: string,
+  exactUrl: string,
+  legacyKey = '',
+): Promise<H5CacheHit | H5CacheMiss> {
   const db = await openH5()
-  const existing = await idbGet<Blob>(db, H5_BLOB, url)
-  if (existing && acceptsFile(existing.size)) {
+  try {
+    const current = await idbGet<Blob>(db, H5_BLOB, identity)
+    if (current) {
+      if (acceptsFile(current.size)) {
+        return { ok: true, path: URL.createObjectURL(current), rel: identity, bytes: current.size }
+      }
+      await idbDelete(db, H5_BLOB, identity)
+      return { ok: false, skip: true }
+    }
+
+    if (legacyKey && legacyKey !== identity) {
+      const legacy = await idbGet<Blob>(db, H5_BLOB, legacyKey)
+      if (legacy) {
+        if (!acceptsFile(legacy.size)) {
+          await idbDelete(db, H5_BLOB, legacyKey)
+          return { ok: false, skip: true }
+        }
+        await idbPut(db, H5_BLOB, legacy, identity)
+        await idbDelete(db, H5_BLOB, legacyKey)
+        return { ok: true, path: URL.createObjectURL(legacy), rel: identity, bytes: legacy.size }
+      }
+    }
+
+    const fetched = await fetchBlob(exactUrl)
+    if (!fetched.ok) return fetched
+    await idbPut(db, H5_BLOB, fetched.blob, identity)
+    return {
+      ok: true,
+      path: URL.createObjectURL(fetched.blob),
+      rel: identity,
+      bytes: fetched.blob.size,
+    }
+  } finally {
     db.close()
-    return { ok: true, path: URL.createObjectURL(existing), rel: url, bytes: existing.size }
   }
-  const fetched = await fetchBlob(url)
-  if (!fetched.ok) {
-    db.close()
-    return fetched
-  }
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(H5_BLOB, 'readwrite')
-    tx.objectStore(H5_BLOB).put(fetched.blob, url)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
-  db.close()
-  return { ok: true, path: URL.createObjectURL(fetched.blob), rel: url, bytes: fetched.blob.size }
 }
 
-export function deleteH5(url: string): Promise<void> {
+export function deleteH5(key: string, legacyKey = ''): Promise<void> {
   return openH5().then(
     (db) =>
       new Promise((resolve) => {
         const tx = db.transaction([H5_META, H5_BLOB], 'readwrite')
-        tx.objectStore(H5_META).delete(url)
-        tx.objectStore(H5_BLOB).delete(url)
+        const keys = legacyKey && legacyKey !== key ? [key, legacyKey] : [key]
+        for (const item of keys) {
+          tx.objectStore(H5_META).delete(item)
+          tx.objectStore(H5_BLOB).delete(item)
+        }
         tx.oncomplete = () => {
           db.close()
           resolve()
@@ -128,6 +156,24 @@ function idbGet<T>(db: IDBDatabase, storeName: string, key: string): Promise<T |
     const req = tx.objectStore(storeName).get(key)
     req.onsuccess = () => resolve(req.result as T | undefined)
     req.onerror = () => resolve(undefined)
+  })
+}
+
+function idbPut<T>(db: IDBDatabase, storeName: string, value: T, key: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite')
+    tx.objectStore(storeName).put(value, key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+function idbDelete(db: IDBDatabase, storeName: string, key: string): Promise<void> {
+  return new Promise((resolve) => {
+    const tx = db.transaction(storeName, 'readwrite')
+    tx.objectStore(storeName).delete(key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => resolve()
   })
 }
 

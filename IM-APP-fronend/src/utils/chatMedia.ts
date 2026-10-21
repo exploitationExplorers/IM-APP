@@ -12,6 +12,7 @@ export {
   h5PublicMediaUrl,
   listThumbnailUrl,
   previewThumbnailUrl,
+  avatarThumbnailUrl,
   toAbsFileUrl,
   playableMediaUrl,
   imagePreviewUrlOf,

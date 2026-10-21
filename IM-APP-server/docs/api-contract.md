@@ -70,9 +70,9 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 
 ### GET `/api/v1/public/oss-media`
 
-私有业务 OSS 桶的稳定读取入口。Query：`key`、`token`，均为服务端生成的媒体 URL 中的原值，无需 JWT。该 token 是指定 bucket/key 的 HMAC capability，持有链接即可读，不代表会话成员权限校验。
+私有业务 OSS 桶的稳定读取入口。Query：`key`、`token`，均为服务端生成的媒体 URL 中的原值，无需 JWT。可选 `variant=list|preview|preview-mobile|avatar` 仅用于图片：`list` 固定输出 `360px`、`q=60` 的 WebP，`preview` 固定输出 `1280px`、`q=75` 的 WebP，`preview-mobile` 固定输出 `960px`、`q=72` 的 WebP，`avatar` 固定输出 `128px`、`q=70` 的 WebP；不传 `variant` 时读取原对象，视频、语音和文件忽略该参数。服务端只接受这四个固定值，禁止客户端透传任意 `x-oss-process`。该 token 是指定 bucket/key 的 HMAC capability，持有链接即可读，不代表会话成员权限校验。
 
-成功返回 HTTP **302**，`Location` 为 10 分钟有效的 OSS 签名 GET；`Cache-Control: private, no-store`，`Referrer-Policy: no-referrer`。无效/缺失 token 或越界 key 返回 404，解析服务未配置返回 503。这是裸 HTTP 响应，不使用统一 JSON envelope。媒体签名 key 必须稳定持久化，不能随部署随机变化；日志不得泄露完整 token。
+成功返回 HTTP **302**，`Location` 为 10 分钟有效的 OSS 签名 GET（图片处理参数参与签名）；`Cache-Control: private, no-store`，`Referrer-Policy: no-referrer`。无效/缺失 token 或越界 key 返回 404，非法 variant 返回 400，解析服务未配置返回 503。这是裸 HTTP 响应，不使用统一 JSON envelope。媒体签名 key 必须稳定持久化，不能随部署随机变化；日志不得泄露完整 token。
 
 增量机器契约及独立测试请求见 `openapi-oss.yaml`、`oss-storage.postman_collection.json`。
 

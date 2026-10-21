@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { fetchGroups } from '@/api/contact'
 import { APP_CONFIG } from '@/config'
 import type { GroupPreview } from '@/types'
+import { avatarThumbnailUrl } from '@/utils/chatMediaUrl'
 
 const props = defineProps<{
   modelValue: boolean
@@ -137,7 +138,7 @@ function goCreate() {
           >
             <image
               class="groups-panel-avatar"
-              :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
+              :src="avatarThumbnailUrl(g.avatar || APP_CONFIG.defaultGroupAvatarUrl)"
               mode="aspectFill"
             />
             <text class="groups-panel-name">

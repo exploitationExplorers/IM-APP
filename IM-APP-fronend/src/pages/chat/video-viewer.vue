@@ -17,6 +17,7 @@ const messageId = ref('')
 const inlineContent = ref('')
 const senderNickname = ref('')
 const createdAt = ref('')
+const playbackRequested = ref(false)
 
 /** 用 px 固定三段布局，避免 H5 下 rpx / flex 把图标撑满屏 */
 const layout = ref({
@@ -132,10 +133,29 @@ function onVideoError() {
   uni.showToast({ title: '视频无法播放', icon: 'none' })
 }
 
+/** 进入页面只显示封面；用户明确点击后才绑定 video src，避免自动拉取整段视频。 */
+function requestVideoPlayback() {
+  if (!videoUrl.value) return
+  playbackRequested.value = true
+}
+
 // #ifdef H5
 let h5VideoEl: HTMLVideoElement | null = null
 
+function unmountH5Video() {
+  if (!h5VideoEl) return
+  h5VideoEl.pause()
+  h5VideoEl.removeAttribute('src')
+  h5VideoEl.load()
+  h5VideoEl.remove()
+  h5VideoEl = null
+}
+
 function mountH5Video(url: string, poster: string) {
+  if (!playbackRequested.value || !url) {
+    unmountH5Video()
+    return
+  }
   const host = document.querySelector('.player-host') as HTMLElement | null
   if (!host) return
   if (!h5VideoEl) {
@@ -143,17 +163,12 @@ function mountH5Video(url: string, poster: string) {
     h5VideoEl.controls = true
     h5VideoEl.playsInline = true
     h5VideoEl.setAttribute('webkit-playsinline', 'true')
-    h5VideoEl.preload = 'auto'
+    h5VideoEl.preload = 'metadata'
     h5VideoEl.style.cssText =
       'width:100%;height:100%;object-fit:contain;background:#000;display:block;max-width:100%;max-height:100%;'
     host.appendChild(h5VideoEl)
   }
   h5VideoEl.poster = poster
-  if (!url) {
-    h5VideoEl.removeAttribute('src')
-    h5VideoEl.load()
-    return
-  }
   if (h5VideoEl.src !== url) {
     h5VideoEl.src = url
     h5VideoEl.load()
@@ -162,21 +177,14 @@ function mountH5Video(url: string, poster: string) {
 }
 
 watch(
-  [videoUrl, videoPoster],
+  [videoUrl, videoPoster, playbackRequested],
   ([url, poster]) => {
     void nextTick(() => mountH5Video(url, poster))
   },
   { immediate: true },
 )
 
-onUnload(() => {
-  if (h5VideoEl) {
-    h5VideoEl.pause()
-    h5VideoEl.removeAttribute('src')
-    h5VideoEl.remove()
-    h5VideoEl = null
-  }
-})
+onUnload(unmountH5Video)
 // #endif
 </script>
 
@@ -250,9 +258,24 @@ onUnload(() => {
       class="player-host"
       :style="{ height: `${layout.playerH}px` }"
     >
+      <view
+        v-if="videoUrl && !playbackRequested"
+        class="video-poster-wrap"
+        @tap="requestVideoPlayback"
+      >
+        <image
+          v-if="videoPoster"
+          class="video-poster"
+          :src="videoPoster"
+          mode="aspectFit"
+        />
+        <view class="play-button">
+          <view class="play-triangle" />
+        </view>
+      </view>
       <!-- #ifndef H5 -->
       <video
-        v-if="videoUrl"
+        v-if="videoUrl && playbackRequested"
         class="app-player"
         :style="{ width: '100%', height: `${layout.playerH}px` }"
         :src="videoUrl"
@@ -438,6 +461,45 @@ onUnload(() => {
   transform: translate(-50%, -50%);
   color: rgba(255, 255, 255, 0.7);
   font-size: 14px;
+}
+
+.video-poster-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-poster {
+  width: 100%;
+  height: 100%;
+}
+
+.play-button {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 72px;
+  height: 72px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.42);
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.play-triangle {
+  width: 0;
+  height: 0;
+  margin-left: 7px;
+  border-top: 15px solid transparent;
+  border-bottom: 15px solid transparent;
+  border-left: 24px solid #fff;
 }
 
 .bottom-bar {

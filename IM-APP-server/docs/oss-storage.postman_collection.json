@@ -193,11 +193,11 @@
       }
     },
     {
-      "name": "私有媒体解析",
+      "name": "私有媒体列表图解析",
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/v1/public/oss-media?key={{mediaKey}}&token={{mediaToken}}"
+        "url": "{{baseUrl}}/api/v1/public/oss-media?key={{mediaKey}}&token={{mediaToken}}&variant=list"
       }
     },
     {

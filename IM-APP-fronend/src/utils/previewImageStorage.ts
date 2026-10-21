@@ -377,6 +377,7 @@ function webStorage(): PreviewStorage {
         return undefined
       return {
         path: URL.createObjectURL(row.blob),
+        blob: row.blob,
         bytes: row.blob.size,
         at: row.at,
         source: 'disk',

@@ -13,7 +13,11 @@ vi.mock('@/utils/mediaCache', () => ({
   peekMediaCache: (url: string) => cacheHits.get(url) || '',
 }))
 import { imagePreviewUrlOf, previewImagesWithSave } from '@/utils/chatMedia'
-import { createImagePreviewSession, takeImagePreviewSession } from '@/utils/imagePreviewSession'
+import {
+  createImagePreviewSession,
+  imagePreviewSaveSource,
+  takeImagePreviewSession,
+} from '@/utils/imagePreviewSession'
 const preview = vi.fn()
 const navigate = vi.fn((options) => options.success())
 const toast = vi.fn()
@@ -50,6 +54,27 @@ describe('image preview platform contract', () => {
       expect(preview).not.toHaveBeenCalled()
     },
   )
+  it('keeps originals in the session and only uses them for saving', async () => {
+    platform.app = true
+    const originals = ['https://images.example/original-a.jpg', 'https://images.example/original-b.jpg']
+    await previewImagesWithSave(urls, urls[1], ['thumb1', 'thumb2'], originals)
+    const session = takeImagePreviewSession(navigate.mock.calls[0][0].url.split('session=')[1])
+    expect(session).toEqual({
+      urls,
+      current: 1,
+      owner: 'public',
+      thumbnails: ['thumb1', 'thumb2'],
+      originals,
+    })
+    expect(imagePreviewSaveSource(session, 0, 'file:///preview-a.jpg')).toBe(originals[0])
+    expect(imagePreviewSaveSource(session, 1, 'file:///preview-b.jpg')).toBe(originals[1])
+  })
+  it('falls back to the ready preview file when no original was supplied', () => {
+    const session = { urls, current: 0, owner: 'public', thumbnails: [] }
+    expect(imagePreviewSaveSource(session, 0, 'file:///preview-a.jpg')).toBe('file:///preview-a.jpg')
+    expect(imagePreviewSaveSource(session, 1)).toBe(urls[1])
+    expect(imagePreviewSaveSource(undefined)).toBe('')
+  })
   it('preserves native mini-program preview and exact signed URLs', async () => {
     await previewImagesWithSave(urls, urls[1])
     expect(preview).toHaveBeenCalledWith({ urls, current: urls[1] })
@@ -103,6 +128,25 @@ describe('imagePreviewUrlOf', () => {
     })
     expect(url).toContain('/object/u1/origin.jpg')
     expect(url).toContain('width=1280')
+  })
+
+  it('uses the desktop preview variant for stable OSS media', () => {
+    const url = imagePreviewUrlOf({
+      sourceUrl:
+        'https://www.example.com/api/v1/public/oss-media?key=oss-test%2Fchat%2Fa.jpg&token=stable-token',
+    })
+    const parsed = new URL(url)
+    expect(parsed.pathname).toBe('/api/v1/public/oss-media')
+    expect(parsed.searchParams.get('variant')).toBe('preview')
+  })
+
+  it('uses the mobile preview variant in the App', () => {
+    platform.app = true
+    const url = imagePreviewUrlOf({
+      sourceUrl:
+        'https://www.example.com/api/v1/public/oss-media?key=oss-test%2Fchat%2Fa.jpg&token=stable-token',
+    })
+    expect(new URL(url).searchParams.get('variant')).toBe('preview-mobile')
   })
 
   it('falls back to content for old messages without a separate original', () => {

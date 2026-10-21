@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { Conversation } from '@/types'
 import { formatRelativeTime } from '@/utils/format'
 import { useChatStore } from '@/stores/chat'
+import { useAvatarThumbnail } from '@/composables/useAvatarThumbnail'
 
 const props = defineProps<{
   item: Conversation
@@ -82,6 +83,10 @@ function onRowClick(e: Event) {
 }
 
 const chatStore = useChatStore()
+const { src: avatarSrc, onError: onAvatarError } = useAvatarThumbnail(
+  () => props.item.avatar,
+  '/static/avatar-1.png',
+)
 const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
 /** 列表预览压成单行，避免长文/换行把会话行撑开（对齐参考站省略号） */
 const previewText = computed(() =>
@@ -120,8 +125,9 @@ const lastFailed = computed(() => {
     <view class="avatar-wrap">
       <image
         class="avatar"
-        :src="item.avatar || '/static/avatar-1.png'"
+        :src="avatarSrc"
         mode="aspectFill"
+        @error="onAvatarError"
       />
       <image
         v-if="item.pinned"

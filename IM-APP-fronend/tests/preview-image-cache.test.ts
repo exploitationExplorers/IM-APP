@@ -9,6 +9,7 @@ import {
   previewImageDebug,
 } from '@/utils/previewImageCache'
 import type { PreviewAsset, PreviewStorage } from '@/utils/previewImageStorage'
+import { mediaCacheLegacyKey, previewMediaCacheKey } from '@/utils/mediaCacheIdentity'
 
 const url = 'https://images.example/a?Signature=a%2Bb%3D&Expires=123'
 const row = (): PreviewAsset => ({ path: 'saved/a', bytes: 100, at: Date.now(), source: 'network' })
@@ -35,32 +36,41 @@ function fixture() {
   }
   return { storage, disk, cache: new PreviewImageCache(storage) }
 }
-afterEach(() => vi.useRealTimers())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 describe('persistent preview cache (all channels)', () => {
   it('coalesces concurrent downloads, reuses memory, and survives a new cache instance', async () => {
-    const { cache, storage } = fixture()
+    const { cache, storage, disk } = fixture()
     await Promise.all([cache.get(url, 'a'), cache.get(url, 'a')])
     await cache.get(url, 'a')
     await new PreviewImageCache(storage).get(url, 'a')
     expect(storage.download).toHaveBeenCalledTimes(1)
     expect(storage.write).toHaveBeenCalledTimes(1)
+    expect([...disk.keys()]).toEqual([previewMediaCacheKey('a', url)])
   })
-  it('separates owners and exact signatures/query ordering', async () => {
+  it('reuses rotating signatures but separates owners and business query', async () => {
     const { cache, storage } = fixture()
     for (const [source, owner] of [
       [url, 'a'],
       [url, 'b'],
       [url.replace('a%2Bb', 'different'), 'a'],
       [url + '&x=1', 'a'],
+      [url + '&x=2&x=1', 'a'],
+      [url + '&x=1&x=2', 'a'],
     ])
       await cache.get(source, owner)
     expect(storage.download).toHaveBeenCalledTimes(4)
     expect(storage.download).toHaveBeenNthCalledWith(1, url)
+    expect(storage.download).toHaveBeenNthCalledWith(2, url)
+    expect(storage.download).toHaveBeenNthCalledWith(3, url + '&x=1')
+    expect(storage.download).toHaveBeenNthCalledWith(4, url + '&x=2&x=1')
   })
   it.each(['missing', 'expired', 'invalid'])('redownloads a %s disk file', async (kind) => {
     const { cache, storage, disk } = fixture()
-    disk.set(JSON.stringify(['a', url]), {
+    disk.set(mediaCacheLegacyKey('a', url), {
       ...row(),
       at: kind === 'expired' ? Date.now() - PREVIEW_CACHE_TTL : Date.now(),
     })
@@ -98,7 +108,20 @@ describe('persistent preview cache (all channels)', () => {
   it('passes local App paths through without download or album permissions', async () => {
     const { cache, storage } = fixture()
     await expect(cache.get('_doc/test.jpg', 'a')).resolves.toHaveProperty('source', 'local')
+    await expect(cache.get('/static/logo.png', 'a')).resolves.toHaveProperty('source', 'local')
     expect(storage.download).not.toHaveBeenCalled()
+  })
+  it('downloads H5 relative chat media through its same-origin absolute URL', async () => {
+    vi.stubGlobal('location', { protocol: 'https:', origin: 'https://www.example.com' })
+    const { cache, storage, disk } = fixture()
+    const relative = '/object/chat/a.jpg?type=image&width=1280&format=webp'
+    const absolute = 'https://www.example.com/object/chat/a.jpg?type=image&width=1280&format=webp'
+    await cache.get(relative, 'a')
+    expect(storage.download).toHaveBeenCalledWith(absolute)
+    expect([...disk.keys()]).toEqual([previewMediaCacheKey('a', absolute)])
+
+    await cache.forget(relative, 'a')
+    expect(disk.size).toBe(0)
   })
   it.each(['clear', 'forget'])(
     '%s invalidates an in-flight download before it can repopulate disk',
@@ -147,7 +170,7 @@ describe('persistent preview cache (all channels)', () => {
   })
   it('a stale disk validation cannot delete a fresh retry result', async () => {
     const { cache, storage, disk } = fixture()
-    const key = JSON.stringify(['a', url])
+    const key = mediaCacheLegacyKey('a', url)
     disk.set(key, row())
     let finish!: (valid: boolean) => void
     vi.mocked(storage.valid).mockImplementationOnce(
@@ -163,12 +186,12 @@ describe('persistent preview cache (all channels)', () => {
     await cache.get(url, 'a')
     finish(false)
     await rejected
-    expect(disk.has(key)).toBe(true)
-    expect(storage.remove).toHaveBeenCalledTimes(1)
+    expect(disk.has(previewMediaCacheKey('a', url))).toBe(true)
+    expect(storage.remove).toHaveBeenCalledTimes(2)
   })
   it('limits memory and releases evicted assets', async () => {
     const { cache, storage } = fixture()
-    for (let i = 0; i < 66; i++) await cache.get(url + i, 'a')
+    for (let i = 0; i < 66; i++) await cache.get(`${url}&i=${i}`, 'a')
     expect(storage.release).toHaveBeenCalledTimes(2)
   })
 })
