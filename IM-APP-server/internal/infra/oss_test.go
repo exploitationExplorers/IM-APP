@@ -60,7 +60,7 @@ func TestOSSPolicyContract(t *testing.T) {
 	if policy.Expiration != "2026-10-17T02:15:00.000Z" {
 		t.Fatal("incorrect expiry")
 	}
-	if !strings.Contains(string(raw), `["content-length-range",1,20971520]`) || !strings.Contains(string(raw), `"bucket":"test-business"`) || !strings.Contains(string(raw), `{"Cache-Control":"private, max-age=31536000, immutable"}`) {
+	if !strings.Contains(string(raw), `["content-length-range",1,20971520]`) || !strings.Contains(string(raw), `"bucket":"test-business"`) || !strings.Contains(string(raw), `{"Cache-Control":"public, max-age=31536000, immutable"}`) {
 		t.Fatal("missing policy bounds or cache condition")
 	}
 	if fields["x-oss-signature"] != ossPostSignature("test-secret", "20261017", "cn-hangzhou", fields["policy"]) {

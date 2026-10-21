@@ -157,7 +157,7 @@ func main() {
 	mediaGuard := &repository.MediaGuard{DB: pool}
 	mediaArchive := infra.NewArchive(storageClient, infra.SourcePrefixes(cfg.MediaSourcePrefixes,
 		cfg.OpenIM.PublicAPIURL, cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL,
-		cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket))
+		cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket)).WithCDNRewrites(cfg.MediaCDNRewrites)
 	var mediaProtection *infra.MediaProtection
 	if cfg.MediaGCReferenceGuardEnabled {
 		mediaProtection, err = infra.NewMediaProtection(cfg.GroupRetentionAdapterURL, cfg.GroupRetentionAdapterKey)

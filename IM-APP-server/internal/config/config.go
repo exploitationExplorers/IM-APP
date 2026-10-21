@@ -36,6 +36,7 @@ type Config struct {
 	SMS                          SMSConfig
 	CORSAllowOrigins             []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
 	MediaSourcePrefixes          []string
+	MediaCDNRewrites             []string // "https://源前缀->https://CDN前缀"，转发/收藏下载前把会过期的签名地址换成 CDN 地址
 	GroupRetentionMode           string
 	GroupRetentionAdapterURL     string
 	GroupRetentionAdapterKey     string
@@ -131,6 +132,7 @@ func Load() Config {
 		FavoriteArchiveWorkerEnabled: getenvBool("FAVORITE_ARCHIVE_WORKER_ENABLED", false),
 		MediaGCReferenceGuardEnabled: getenvBool("MEDIA_GC_REFERENCE_GUARD_ENABLED", getenv("APP_ENV", "") == "oss-production"),
 		MediaSourcePrefixes:          splitCSV(getenv("MEDIA_SOURCE_URL_PREFIXES", "")),
+		MediaCDNRewrites:             splitCSV(getenv("MEDIA_CDN_REWRITES", "")),
 		AppEnvironment:               strings.TrimSpace(getenv("APP_ENV", "")),
 		StorageProvider:              storageProvider(getenv("STORAGE_PROVIDER", "oss")),
 		MigrationsMode:               strings.ToLower(strings.TrimSpace(getenv("MIGRATIONS_MODE", "auto"))),

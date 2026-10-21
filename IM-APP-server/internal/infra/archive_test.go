@@ -80,6 +80,66 @@ func TestArchiveIndependentCopyAndIdempotence(t *testing.T) {
 	}
 }
 
+const (
+	testSignedSourcePrefix = "https://oss-chat.example/im-app-production/chat/"
+	testCDNTargetPrefix    = "https://chat-cdn.example/im-app-production/chat/"
+	testCDNRule            = testSignedSourcePrefix + "->" + testCDNTargetPrefix
+)
+
+func TestArchiveCDNRewriteDropsExpiredSignature(t *testing.T) {
+	store := &archiveStore{objects: map[string][]byte{}}
+	a := NewArchive(&Storage{Current: store}, nil).WithCDNRewrites([]string{testCDNRule})
+
+	signed := testSignedSourcePrefix + "managed-v1/a.jpg?OSSAccessKeyId=k&Expires=1&Signature=s"
+	if got, want := a.cdnSource(signed), testCDNTargetPrefix+"managed-v1/a.jpg"; got != want {
+		t.Fatalf("expired signed url not rewritten:\n got=%q\nwant=%q", got, want)
+	}
+
+	// 未命中规则的地址必须逐字节保持原样：换桶、换路径、缺对象名都不能部分改写。
+	for _, raw := range []string{
+		"https://other.example/im-app-production/chat/managed-v1/a.jpg?Signature=s",
+		testSignedSourcePrefix[:len(testSignedSourcePrefix)-4] + "business/doc/a.jpg?Signature=s",
+		testSignedSourcePrefix, // 只有前缀，没有对象名
+		"/im-app-production/chat/managed-v1/a.jpg?Signature=s",
+	} {
+		if got := a.cdnSource(raw); got != raw {
+			t.Fatalf("unexpected rewrite of %q -> %q", raw, got)
+		}
+	}
+
+	// 规则格式错误同样只能保持原样，绝不能猜。
+	bad := NewArchive(&Storage{Current: store}, nil).
+		WithCDNRewrites([]string{"broken-rule", "->https://x/", "https://y/->"})
+	if got := bad.cdnSource(signed); got != signed {
+		t.Fatalf("malformed rule rewrote the url: %q", got)
+	}
+
+	// 未配置规则时行为与改动前完全一致。
+	plain := NewArchive(&Storage{Current: store}, nil)
+	if got := plain.cdnSource(signed); got != signed {
+		t.Fatalf("rewrite applied without any rule: %q", got)
+	}
+}
+
+func TestArchiveCDNRewriteStaysInsideAllowlist(t *testing.T) {
+	store := &archiveStore{objects: map[string][]byte{}}
+	signed := testSignedSourcePrefix + "managed-v1/a.jpg?OSSAccessKeyId=k&Expires=1&Signature=s"
+
+	// 目标 CDN 前缀在白名单内：改写后仍可通过，旧地址因此能被归档。
+	ok := NewArchive(&Storage{Current: store}, []string{testSignedSourcePrefix, testCDNTargetPrefix}).
+		WithCDNRewrites([]string{testCDNRule})
+	if !ok.allowed(ok.cdnSource(signed)) {
+		t.Fatal("CDN target inside the allowlist must stay fetchable")
+	}
+
+	// 目标 CDN 前缀漏配：不允许悄悄放行到未知主机，必须拒绝而不是继续下载。
+	missing := NewArchive(&Storage{Current: store}, []string{testSignedSourcePrefix}).
+		WithCDNRewrites([]string{testCDNRule})
+	if missing.allowed(missing.cdnSource(signed)) {
+		t.Fatal("rewrote source into a host outside the allowlist")
+	}
+}
+
 func TestForwardArchiveSeparateFromFavoritesAndSource(t *testing.T) {
 	a, s := newTestArchive()
 	content := `{"quoteMessage":{"ContentType":102,"PictureElem":{"SourcePicture":{"Url":"https://chat.example/chat/a"},"SnapshotPicture":{"Url":"https://chat.example/chat/b"}}},"text":"https://untrusted.example/keep-as-text"}`

@@ -67,7 +67,8 @@ func run() error {
 			return fmt.Errorf("invalid archive storage configuration")
 		}
 		svc.Media = infra.NewArchive(storage, infra.SourcePrefixes(cfg.MediaSourcePrefixes, cfg.OpenIM.PublicAPIURL,
-			cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL, cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket))
+			cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL, cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket)).
+			WithCDNRewrites(cfg.MediaCDNRewrites)
 	}
 	encoder := json.NewEncoder(os.Stdout)
 	processed, failures := 0, 0

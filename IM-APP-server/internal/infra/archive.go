@@ -28,8 +28,44 @@ var ErrArchive = errors.New("媒体副本保存失败，请稍后重试")
 type Archive struct {
 	Storage    *Storage
 	Prefixes   []string
+	CDNRewrites []string
 	BeforeCopy func(context.Context, string) error
 	client     *http.Client
+}
+
+// WithCDNRewrites 注册媒体来源的 CDN 改写规则，留空表示不改写。
+func (a *Archive) WithCDNRewrites(rules []string) *Archive {
+	a.CDNRewrites = append([]string{}, rules...)
+	return a
+}
+
+// cdnSource 把带签名的对象存储直连地址改写成 CDN 地址，并剥掉整段签名参数。
+//
+// OpenIM 给历史消息里的媒体地址签的是 7 天有效期，过期后转发/收藏再去下载
+// 只会拿到 403。CDN 侧已开启私有 Bucket 回源，无需签名即可读取同一个私有
+// 对象，因此换成 CDN 地址后旧消息也能继续归档，且地址稳定不过期。
+// 规则形如 "https://源前缀->https://CDN前缀"；未命中任何规则时返回原地址。
+func (a *Archive) cdnSource(raw string) string {
+	for _, rule := range a.CDNRewrites {
+		from, to, ok := strings.Cut(rule, "->")
+		if !ok || from == "" || to == "" {
+			continue
+		}
+		if !strings.HasPrefix(raw, from) {
+			continue
+		}
+		rest := strings.TrimPrefix(raw, from)
+		// 签名只属于源地址。带过去会让 CDN 把签名当成查询参数，
+		// 既污染缓存键，又让地址重新变得会过期。
+		if i := strings.Index(rest, "?"); i >= 0 {
+			rest = rest[:i]
+		}
+		if rest == "" {
+			return raw
+		}
+		return to + rest
+	}
+	return raw
 }
 
 func NewArchive(storage *Storage, prefixes []string) *Archive {
@@ -165,7 +201,13 @@ func (a *Archive) preserve(ctx context.Context, namespace, userID, messageID, co
 }
 
 func (a *Archive) copy(ctx context.Context, namespace, userID, messageID, source string, limit int64) (string, int64, error) {
-	if !validStorageKey(userID) || strings.Contains(userID, "/") || !a.allowed(source) || limit <= 0 {
+	if !validStorageKey(userID) || strings.Contains(userID, "/") || limit <= 0 || !a.allowed(source) {
+		return "", 0, ErrArchive
+	}
+	// 历史消息里的签名地址会过期，下载前先改写成不会过期的 CDN 地址。
+	// 改写结果必须同样落在白名单内：改写只能换前缀，不能把下载地址带出受信任范围。
+	source = a.cdnSource(source)
+	if !a.allowed(source) {
 		return "", 0, ErrArchive
 	}
 	if a.BeforeCopy != nil {
