@@ -23,6 +23,16 @@
 #   REDEPLOY_SOURCE      directory holding IM-APP-server sources (default ../IM-APP-server)
 #   REDEPLOY_COMPOSE_DIR directory holding docker-compose.yml (default the script's own dir)
 
+# This file must keep LF endings. Windows editors and some upload tools convert
+# CRLF, and bash then reads a stray CR into the last word of every line, which
+# surfaces as cryptic errors such as "invalid option name ... pipefail".
+# Every line below ends in a comment so a stray CR lands harmlessly in it.
+if LC_ALL=C grep -q "$(printf '\r')" "$0"; then #
+  printf '\nFATAL: %s has CRLF line endings.\n' "$0" >&2 #
+  printf 'Fix it with:  sed -i "s/\\r$//" %s\n\n' "$0" >&2 #
+  exit 1 #
+fi #
+
 set -euo pipefail
 
 SELF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
