@@ -40,6 +40,21 @@ describe('storage URL compatibility', () => {
     expect(h5PublicMediaUrl('https://legacy.example/openim/bucket/a.jpg?x=1'))
       .toBe('https://test.example/openim/bucket/a.jpg?x=1')
   })
+
+  it.each([
+    'https://oss-chat.whs188.xin/im-app-production/chat/a.jpg?x-oss-process=image/resize,w_360',
+    'https://oss-chat-test.xn--jprz53bj9s.com/oss-test/chat/a.jpg',
+    'https://oss-business.whs188.xin/im-app-production/business/a.jpg',
+    'https://oss-business-test.xn--jprz53bj9s.com/oss-test/business/a.jpg',
+  ])('recognizes and preserves known CDN URLs: %s', (url) => {
+    expect(isOSSStorageUrl(url)).toBe(true)
+    expect(h5PublicMediaUrl(url)).toBe(url)
+  })
+
+  it('does not treat lookalike CDN hosts as OSS storage hosts', () => {
+    const url = 'https://oss-chat.whs188.xin.evil.example/im-app-production/chat/a.jpg'
+    expect(isOSSStorageUrl(url)).toBe(false)
+  })
 })
 
 describe('H5 storage POST', () => {

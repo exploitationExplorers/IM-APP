@@ -11,7 +11,7 @@ describe('avatarThumbnailUrl', () => {
 
   it('adds a 128px WebP process to unsigned public avatar URLs', () => {
     const url = avatarThumbnailUrl(
-      'https://business.example/oss-test/business/avatars/2026/a.jpg?versionId=1',
+      'https://oss-business.whs188.xin/im-app-production/business/avatars/2026/a.jpg?versionId=1',
     )
     const parsed = new URL(url)
     expect(parsed.searchParams.get('versionId')).toBe('1')
@@ -37,17 +37,21 @@ describe('avatarThumbnailUrl', () => {
 
   it('does not retry an existing OSS process or process video and non-avatar URLs', () => {
     const processed =
-      'https://business.example/oss-test/business/avatars/a.jpg?x-oss-process=image/resize,w_64'
+      'https://oss-business.whs188.xin/im-app-production/business/avatars/a.jpg?x-oss-process=image/resize,w_64'
     expect(avatarThumbnailUrl(processed)).toBe(processed)
-    const video = 'https://business.example/oss-test/business/avatars/a.mp4'
+    const video = 'https://oss-business.whs188.xin/im-app-production/business/avatars/a.mp4'
     expect(avatarThumbnailUrl(video)).toBe(video)
-    const other = 'https://business.example/oss-test/business/images/a.jpg'
+    const other = 'https://oss-business.whs188.xin/im-app-production/business/images/a.jpg'
     expect(avatarThumbnailUrl(other)).toBe(other)
+    const chatCdn = 'https://oss-chat.whs188.xin/im-app-production/chat/avatars/a.jpg'
+    expect(avatarThumbnailUrl(chatCdn)).toBe(chatCdn)
+    const unknownCdn = 'https://cdn.example/im-app-production/business/avatars/a.jpg'
+    expect(avatarThumbnailUrl(unknownCdn)).toBe(unknownCdn)
   })
 
   it('is idempotent and leaves empty values untouched', () => {
     const once = avatarThumbnailUrl(
-      'https://business.example/oss-test/business/avatars/a.jpg',
+      'https://oss-business.whs188.xin/im-app-production/business/avatars/a.jpg',
     )
     expect(avatarThumbnailUrl(once)).toBe(once)
     expect(avatarThumbnailUrl('')).toBe('')

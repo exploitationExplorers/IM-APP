@@ -1,5 +1,6 @@
 import { APP_CONFIG } from '@/config'
 import { isAppPlatform } from '@/utils/platform'
+import { isBusinessCDNHost, isChatCDNHost, isPermanentChatCDNHost } from '@/utils/storage-hosts'
 import { isOSSStorageUrl } from '@/utils/storage-url'
 
 export function isRemoteMediaUrl(path: string): boolean {
@@ -111,7 +112,11 @@ function logicalChatKeyFromOSS(raw: string): string {
   try {
     const parsed = new URL(raw)
     const query = parsed.searchParams
-    if (!hasStorageSignature(query)) return ''
+    // 只有「无签名」和「真 CDN 域名」这两种地址能长期直接用，不必还原重签。
+    // 注意不能用 isChatCDNHost：那个集合为了追加 x-oss-process 也收了签名直连域名
+    // oss-chat-test.*，而那里的地址 7 天就过期 —— 一旦在这里被当成永不过期跳过，
+    // 老消息里的图就再也显示不出来（403）。
+    if (!hasStorageSignature(query) || isPermanentChatCDNHost(parsed.hostname)) return ''
     const pathname = decodePathname(parsed.pathname).replace(/^\/+/, '')
     for (const prefix of CHAT_OBJECT_PREFIXES) {
       if (pathname.startsWith(prefix)) return pathname.slice(prefix.length)
@@ -182,8 +187,8 @@ function withStableOSSMediaVariant(url: string, variant: OSSMediaVariant): strin
 }
 
 /**
- * 业务桶直链（含 CDN 加速域名）没有可保护的隐藏 key，直接让 OSS 实时出图即可，
- * 避免 CDN 域名切换后列表和预览退回原图。聊天地址带签名或未知前缀一律保持原样。
+ * 只有已知 CDN 域名与对应桶前缀同时匹配时才追加图片处理参数。
+ * 聊天地址带签名、未知域名或跨桶路径一律保持原样，避免把业务域名误用于聊天对象。
  */
 function withPublicImageProcess(url: string, variant: OSSMediaVariant): string {
   const raw = (url || '').trim()
@@ -193,7 +198,15 @@ function withPublicImageProcess(url: string, variant: OSSMediaVariant): string {
     if (hasStorageSignature(parsed.searchParams)) return raw
     if (parsed.searchParams.has('x-oss-process')) return raw
     const pathname = decodePathname(parsed.pathname).replace(/^\/+/, '')
-    if (!BUSINESS_OBJECT_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return raw
+    const knownBusinessObject =
+      isBusinessCDNHost(parsed.hostname) &&
+      BUSINESS_OBJECT_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+    const knownPublicObject =
+      variant === 'avatar'
+        ? knownBusinessObject
+        : (isChatCDNHost(parsed.hostname) && CHAT_OBJECT_PREFIXES.some((prefix) => pathname.startsWith(prefix))) ||
+          knownBusinessObject
+    if (!knownPublicObject) return raw
     if (!OSS_IMAGE_EXTENSIONS.test(pathname)) return raw
     parsed.searchParams.set('x-oss-process', PUBLIC_IMAGE_PROCESSES[variant])
     return parsed.toString()
@@ -291,6 +304,9 @@ export function avatarThumbnailUrl(url: string): string {
       if (limited !== raw) return limited
     }
     if (!/\/avatars\//i.test(parsed.pathname)) return raw
+    // Absolute URLs may only use the known business CDN. Root-relative avatar
+    // paths retain the same-origin behavior used by legacy deployments.
+    if (absolute) return raw
     if (NON_IMAGE_MEDIA_EXTENSIONS.test(parsed.pathname)) return raw
     if (parsed.searchParams.has('x-oss-process')) return raw
     parsed.searchParams.set('x-oss-process', PUBLIC_IMAGE_PROCESSES.avatar)

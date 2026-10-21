@@ -127,6 +127,31 @@ describe('listThumbnailUrl', () => {
     expect(parsed.searchParams.get('format')).toBe('webp')
   })
 
+  // 2026-10-22 踩坑：CHAT_CDN_HOSTS 为了能追加 x-oss-process，把签名直连域名
+  // oss-chat-test.* 和真 CDN 域名塞进了同一个集合。logicalChatKeyFromOSS 复用它
+  // 做「是否永不过期」的判断后，老消息里的签名地址被当成 CDN 跳过还原，
+  // 签名一过期就 403，老图永远显示不出来。
+  // 下面两条锁定两种域名必须区别对待，别再把它们合并回同一个判断。
+  it.each([
+    'https://oss-chat-test.xn--jprz53bj9s.com/im-app-production/chat/2026/a.jpg?OSSAccessKeyId=fake&Expires=1&Signature=a%2Bb%3D',
+    'https://oss-chat-test.xn--jprz53bj9s.com/oss-test/chat/2026/a.jpg?x-oss-signature=a%2Bb',
+  ])('签名直连域名上的老图还原成 /object/ 重新签名：%s', (source) => {
+    const result = listThumbnailUrl(source)
+    const parsed = new URL(result, 'https://app.example')
+    expect(parsed.pathname).toBe('/object/2026/a.jpg')
+    expect(parsed.searchParams.has('Expires')).toBe(false)
+    expect(parsed.searchParams.has('Signature')).toBe(false)
+    expect(parsed.searchParams.has('x-oss-signature')).toBe(false)
+  })
+
+  it('真 CDN 域名上的无签名地址不回退到 /object/', () => {
+    const url = 'https://oss-chat.whs188.xin/im-app-production/chat/2026/a.jpg'
+    const result = listThumbnailUrl(url)
+    // 地址无签名、不会过期，直接让 OSS 实时出图即可，无需重新签名。
+    expect(result.startsWith('https://oss-chat.whs188.xin/')).toBe(true)
+    expect(result).not.toContain('/object/')
+  })
+
   it('保留聊天逻辑 key 的目录、中文和空格编码', () => {
     const result = listThumbnailUrl(
       'https://bucket.oss-cn-hongkong.aliyuncs.com/oss-test/chat/中文/空 格.jpg?x-oss-signature=test',
@@ -162,6 +187,44 @@ describe('listThumbnailUrl', () => {
       'https://bucket.oss-cn-hongkong.aliyuncs.com/oss-test/chat/clip.mp4?x-oss-signature=a%2Bb%2F'
     expect(listThumbnailUrl(url)).toBe(url)
     expect(previewThumbnailUrl(url)).toBe(url)
+  })
+
+  it.each([
+    ['生产', 'https://oss-chat.whs188.xin/im-app-production/chat/2026/a.jpg'],
+    ['测试', 'https://oss-chat-test.xn--jprz53bj9s.com/oss-test/chat/2026/a.jpg'],
+  ])('聊天 %s CDN 图片列表使用 360 WebP 处理', (_environment, source) => {
+    const url = listThumbnailUrl(source)
+    expect(new URL(url).searchParams.get('x-oss-process')).toBe(
+      'image/resize,w_360/quality,q_60/format,webp',
+    )
+    expect(listThumbnailUrl(url)).toBe(url)
+  })
+
+  it.each([
+    [390, 'image/resize,w_960/quality,q_72/format,webp'],
+    [1440, 'image/resize,w_1280/quality,q_75/format,webp'],
+  ])('聊天 CDN 图片在 %ipx 视口使用预览规格', (width, process) => {
+    vi.stubGlobal('window', { innerWidth: width })
+    const url = previewThumbnailUrl(
+      'https://oss-chat.whs188.xin/im-app-production/chat/2026/a.jpg',
+    )
+    expect(new URL(url).searchParams.get('x-oss-process')).toBe(process)
+  })
+
+  it('签名聊天 CDN 地址不追加处理参数且保持原样', () => {
+    const source =
+      'https://oss-chat.whs188.xin/im-app-production/chat/2026/a.jpg?x-oss-signature=a%2Bb'
+    expect(listThumbnailUrl(source)).toBe(source)
+    expect(previewThumbnailUrl(source)).toBe(source)
+  })
+
+  it.each([
+    'https://oss-business.whs188.xin/im-app-production/chat/2026/a.jpg',
+    'https://oss-chat.whs188.xin/im-app-production/business/images/a.jpg',
+    'https://cdn.example/im-app-production/chat/2026/a.jpg',
+    'https://oss-chat.whs188.xin.evil.example/im-app-production/chat/2026/a.jpg',
+  ])('不处理跨桶、未知域名或仿冒域名的 CDN 地址：%s', (source) => {
+    expect(listThumbnailUrl(source)).toBe(source)
   })
 
   it('业务桶 CDN 直链列表并入 360 WebP 处理参数', () => {
