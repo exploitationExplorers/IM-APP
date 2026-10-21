@@ -14,10 +14,14 @@ func TestPreviewProducesOnlyReadOnlyPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	var result struct {
-		Mode       string
-		Candidates []struct{ Seq int64 }
+		Mode       string   `json:"mode"`
+		Kept       []int64  `json:"keptSeqs"`
+		Candidates []struct{ Seq int64 } `json:"candidates"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Mode != "preview_only" || len(result.Candidates) != 1 || result.Candidates[0].Seq != 2 {
+	// Default rule is (last 3 days) union (last 3000 visible), so one
+	// over-age message is retained because the group is far below quota.
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Mode != "preview_only" ||
+		len(result.Kept) != 1 || result.Kept[0] != 2 || len(result.Candidates) != 0 {
 		t.Fatalf("bad output: %s", out.String())
 	}
 	for _, invalid := range []string{`{}`, input + `{}`, `{"messages":`} {

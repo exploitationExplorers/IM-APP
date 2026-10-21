@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -20,7 +21,19 @@ import (
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
 
-const MaxFormUploadBytes int64 = 20 << 20
+const (
+	MaxFormUploadBytes           int64 = 20 << 20
+	ossImageListProcess                = "image/resize,w_360/quality,q_60/format,webp"
+	ossImagePreviewProcess             = "image/resize,w_1280/quality,q_75/format,webp"
+	ossImagePreviewMobileProcess       = "image/resize,w_960/quality,q_72/format,webp"
+	ossImageAvatarProcess              = "image/resize,w_128/quality,q_70/format,webp"
+	// Must stay `public`: Aliyun CDN treats Cache-Control private/no-cache/no-store
+	// as "do not cache" with a higher priority than any console cache rule, so a
+	// private directive here would push every request back to origin and undo the
+	// CDN cost saving. Objects are immutable because keys are random UUIDs and
+	// uploads set x-oss-forbid-overwrite.
+	ossObjectCacheControl = "public, max-age=31536000, immutable"
+)
 
 type OSS struct {
 	cfg                config.OSSConfig
@@ -72,7 +85,8 @@ func NewOSS(cfg config.OSSConfig) (*OSS, error) {
 	// Public signing must use the exact host the client will contact, never a CDN
 	// rewrite of a URL signed for an internal endpoint.
 	signConfig := oss.LoadDefaultConfig().WithRegion(cfg.Region).WithEndpoint(cfg.PublicUploadURL).
-		WithUseCName(true).WithCredentialsProvider(creds).WithSignatureVersion(oss.SignatureVersionV4)
+		WithUseCName(true).WithCredentialsProvider(creds).WithSignatureVersion(oss.SignatureVersionV4).
+		WithAdditionalHeaders([]string{"Cache-Control"})
 	return &OSS{cfg: cfg, client: oss.NewClient(clientConfig), signClient: oss.NewClient(signConfig), now: time.Now}, nil
 }
 
@@ -128,12 +142,48 @@ func (o *OSS) mediaToken(key string) string {
 }
 
 // ResolveMedia is a stable capability URL, preserving existing public-link
-// semantics. It is not conversation-membership authorization.
-func (o *OSS) ResolveMedia(ctx context.Context, key, token string) (string, error) {
+// semantics. It is not conversation-membership authorization. Variants are a
+// closed server-side allowlist so clients cannot request arbitrary OSS work.
+func (o *OSS) ResolveMedia(ctx context.Context, key, token, variant string) (string, error) {
 	if !o.accepts(key) || o.cfg.MediaSigningKey == "" || !hmac.Equal([]byte(token), []byte(o.mediaToken(key))) {
 		return "", ErrObjectKeyScope
 	}
-	return o.PresignGet(ctx, key, 10*time.Minute)
+	process, err := ossImageProcess(key, variant)
+	if err != nil {
+		return "", err
+	}
+	return o.presignGet(ctx, key, process, 10*time.Minute)
+}
+
+func ossImageProcess(key, variant string) (string, error) {
+	var process string
+	switch variant {
+	case "":
+		return "", nil
+	case "list":
+		process = ossImageListProcess
+	case "preview":
+		process = ossImagePreviewProcess
+	case "preview-mobile":
+		process = ossImagePreviewMobileProcess
+	case "avatar":
+		process = ossImageAvatarProcess
+	default:
+		return "", ErrInvalidMediaVariant
+	}
+	if !isOSSImageKey(key) {
+		return "", nil
+	}
+	return process, nil
+}
+
+func isOSSImageKey(key string) bool {
+	switch strings.ToLower(path.Ext(key)) {
+	case ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff", ".heic", ".heif", ".avif":
+		return true
+	default:
+		return false
+	}
 }
 
 func validOSSExpiry(expiry time.Duration) bool { return expiry > 0 && expiry <= time.Hour }
@@ -154,6 +204,7 @@ func (o *OSS) PresignPost(ctx context.Context, key, contentType string, expiry t
 	date := now.Format("20060102")
 	fields := map[string]string{
 		"key": key, "success_action_status": "204", "x-oss-forbid-overwrite": "true",
+		"Cache-Control":           ossObjectCacheControl,
 		"x-oss-signature-version": "OSS4-HMAC-SHA256",
 		"x-oss-credential":        o.cfg.AccessKeyID + "/" + date + "/" + o.cfg.Region + "/oss/aliyun_v4_request",
 		"x-oss-date":              now.Format("20060102T150405Z"),
@@ -206,7 +257,8 @@ func (o *OSS) PresignPutUpload(ctx context.Context, key, contentType string, exp
 	if !validOSSExpiry(expiry) {
 		return "", nil, storageConfigError("upload expiry")
 	}
-	request := &oss.PutObjectRequest{Bucket: oss.Ptr(o.cfg.Bucket), Key: oss.Ptr(key), ForbidOverwrite: oss.Ptr("true")}
+	request := &oss.PutObjectRequest{Bucket: oss.Ptr(o.cfg.Bucket), Key: oss.Ptr(key), ForbidOverwrite: oss.Ptr("true"),
+		CacheControl: oss.Ptr(ossObjectCacheControl)}
 	if contentType != "" {
 		request.ContentType = oss.Ptr(contentType)
 	}
@@ -218,13 +270,21 @@ func (o *OSS) PresignPutUpload(ctx context.Context, key, contentType string, exp
 }
 
 func (o *OSS) PresignGet(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	return o.presignGet(ctx, key, "", expiry)
+}
+
+func (o *OSS) presignGet(ctx context.Context, key, process string, expiry time.Duration) (string, error) {
 	if !o.accepts(key) {
 		return "", ErrObjectKeyScope
 	}
 	if !validOSSExpiry(expiry) {
 		return "", storageConfigError("download expiry")
 	}
-	result, err := o.signClient.Presign(ctx, &oss.GetObjectRequest{Bucket: oss.Ptr(o.cfg.Bucket), Key: oss.Ptr(key)}, oss.PresignExpires(expiry))
+	request := &oss.GetObjectRequest{Bucket: oss.Ptr(o.cfg.Bucket), Key: oss.Ptr(key)}
+	if process != "" {
+		request.Process = oss.Ptr(process)
+	}
+	result, err := o.signClient.Presign(ctx, request, oss.PresignExpires(expiry))
 	if err != nil {
 		return "", err
 	}
@@ -239,7 +299,7 @@ func (o *OSS) PutObject(ctx context.Context, key string, body io.Reader, size in
 		return storageConfigError("object size")
 	}
 	_, err := o.client.PutObject(ctx, &oss.PutObjectRequest{Bucket: oss.Ptr(o.cfg.Bucket), Key: oss.Ptr(key), Body: body,
-		ContentLength: oss.Ptr(size), ContentType: oss.Ptr(contentType), ForbidOverwrite: oss.Ptr("true")})
+		ContentLength: oss.Ptr(size), ContentType: oss.Ptr(contentType), CacheControl: oss.Ptr(ossObjectCacheControl), ForbidOverwrite: oss.Ptr("true")})
 	return err
 }
 
@@ -267,6 +327,6 @@ func (o *OSS) putArchive(ctx context.Context, key string, body io.Reader, size i
 		return ErrObjectKeyScope
 	}
 	_, err := o.client.PutObject(ctx, &oss.PutObjectRequest{Bucket: oss.Ptr(o.cfg.Bucket), Key: oss.Ptr(key), Body: body,
-		ContentLength: oss.Ptr(size), ContentType: oss.Ptr(contentType), ForbidOverwrite: oss.Ptr("true")})
+		ContentLength: oss.Ptr(size), ContentType: oss.Ptr(contentType), CacheControl: oss.Ptr(ossObjectCacheControl), ForbidOverwrite: oss.Ptr("true")})
 	return err
 }

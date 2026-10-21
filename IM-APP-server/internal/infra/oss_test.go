@@ -40,7 +40,7 @@ func TestOSSPolicyContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u != "https://test-business.oss-cn-hangzhou.aliyuncs.com" || fields["key"] != key || fields["success_action_status"] != "204" || fields["x-oss-forbid-overwrite"] != "true" {
+	if u != "https://test-business.oss-cn-hangzhou.aliyuncs.com" || fields["key"] != key || fields["success_action_status"] != "204" || fields["x-oss-forbid-overwrite"] != "true" || fields["Cache-Control"] != ossObjectCacheControl {
 		t.Fatalf("invalid POST contract")
 	}
 	if fields["x-oss-credential"] != "test-id/20261017/cn-hangzhou/oss/aliyun_v4_request" || fields["x-oss-date"] != "20261017T020000Z" || fields["Content-Type"] != "image/jpeg" {
@@ -60,8 +60,8 @@ func TestOSSPolicyContract(t *testing.T) {
 	if policy.Expiration != "2026-10-17T02:15:00.000Z" {
 		t.Fatal("incorrect expiry")
 	}
-	if !strings.Contains(string(raw), `["content-length-range",1,20971520]`) || !strings.Contains(string(raw), `"bucket":"test-business"`) {
-		t.Fatal("missing policy bounds")
+	if !strings.Contains(string(raw), `["content-length-range",1,20971520]`) || !strings.Contains(string(raw), `"bucket":"test-business"`) || !strings.Contains(string(raw), `{"Cache-Control":"private, max-age=31536000, immutable"}`) {
+		t.Fatal("missing policy bounds or cache condition")
 	}
 	if fields["x-oss-signature"] != ossPostSignature("test-secret", "20261017", "cn-hangzhou", fields["policy"]) {
 		t.Fatal("signature not bound to policy")
@@ -96,7 +96,7 @@ func TestOSSPresignedPutKeepsPublicHostAndRequiredHeaders(t *testing.T) {
 	if u.Query().Get("x-oss-signature-version") != "OSS4-HMAC-SHA256" || u.Query().Get("x-oss-signature") == "" {
 		t.Fatal("missing v4 signature")
 	}
-	found, contentTypeFound := false, false
+	found, contentTypeFound, cacheControlFound := false, false, false
 	for k, v := range headers {
 		if strings.EqualFold(k, "x-oss-forbid-overwrite") && v == "true" {
 			found = true
@@ -104,12 +104,18 @@ func TestOSSPresignedPutKeepsPublicHostAndRequiredHeaders(t *testing.T) {
 		if strings.EqualFold(k, "Content-Type") && v == "application/zip" {
 			contentTypeFound = true
 		}
+		if strings.EqualFold(k, "Cache-Control") && v == ossObjectCacheControl {
+			cacheControlFound = true
+		}
 	}
 	if !found {
 		t.Fatal("PUT must return its signed overwrite-protection header")
 	}
 	if !contentTypeFound {
 		t.Fatal("PUT must preserve the declared package Content-Type in signed headers")
+	}
+	if !cacheControlFound {
+		t.Fatal("PUT must preserve the long-lived object cache policy in signed headers")
 	}
 }
 
@@ -121,17 +127,94 @@ func TestOSSPrivateMediaStableAndScoped(t *testing.T) {
 		t.Fatal("stored URLs must be stable")
 	}
 	u, _ := url.Parse(stable)
-	signed, err := o.ResolveMedia(context.Background(), key, u.Query().Get("token"))
+	signed, err := o.ResolveMedia(context.Background(), key, u.Query().Get("token"), "")
 	if err != nil || !strings.Contains(signed, "x-oss-signature=") {
 		t.Fatalf("private resolution failed: %v", err)
 	}
 	for _, invalid := range []string{"uploads/production.jpg", key + "x", "oss-test/business/../production.jpg"} {
-		if _, err := o.ResolveMedia(context.Background(), invalid, u.Query().Get("token")); !errors.Is(err, ErrObjectKeyScope) {
+		if _, err := o.ResolveMedia(context.Background(), invalid, u.Query().Get("token"), ""); !errors.Is(err, ErrObjectKeyScope) {
 			t.Fatal("token/key scope bypass")
 		}
 	}
-	if _, err := o.ResolveMedia(context.Background(), key, "invalid"); !errors.Is(err, ErrObjectKeyScope) {
+	if _, err := o.ResolveMedia(context.Background(), key, "invalid", ""); !errors.Is(err, ErrObjectKeyScope) {
 		t.Fatal("invalid token accepted")
+	}
+}
+
+func TestOSSImageVariantsAreFixedAndSigned(t *testing.T) {
+	o := testOSS(t)
+	key, _ := o.NewKey("chat/a.jpg")
+	stable, _ := url.Parse(o.FileURL(key))
+	token := stable.Query().Get("token")
+
+	original, err := o.ResolveMedia(context.Background(), key, token, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := o.ResolveMedia(context.Background(), key, token, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := o.ResolveMedia(context.Background(), key, token, "preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mobilePreview, err := o.ResolveMedia(context.Background(), key, token, "preview-mobile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	avatar, err := o.ResolveMedia(context.Background(), key, token, "avatar")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalURL, _ := url.Parse(original)
+	listURL, _ := url.Parse(list)
+	previewURL, _ := url.Parse(preview)
+	mobilePreviewURL, _ := url.Parse(mobilePreview)
+	avatarURL, _ := url.Parse(avatar)
+	if originalURL.Query().Has("x-oss-process") {
+		t.Fatal("original variant must not force image processing")
+	}
+	if listURL.Query().Get("x-oss-process") != ossImageListProcess {
+		t.Fatalf("list process = %q", listURL.Query().Get("x-oss-process"))
+	}
+	if previewURL.Query().Get("x-oss-process") != ossImagePreviewProcess {
+		t.Fatalf("preview process = %q", previewURL.Query().Get("x-oss-process"))
+	}
+	if mobilePreviewURL.Query().Get("x-oss-process") != ossImagePreviewMobileProcess {
+		t.Fatalf("mobile preview process = %q", mobilePreviewURL.Query().Get("x-oss-process"))
+	}
+	if avatarURL.Query().Get("x-oss-process") != ossImageAvatarProcess {
+		t.Fatalf("avatar process = %q", avatarURL.Query().Get("x-oss-process"))
+	}
+	for name, signed := range map[string]string{"list": list, "preview": preview, "preview-mobile": mobilePreview, "avatar": avatar} {
+		if signed == "" || !strings.Contains(signed, "x-oss-signature=") {
+			t.Fatalf("%s variant is not signed", name)
+		}
+	}
+	signatures := map[string]string{
+		listURL.Query().Get("x-oss-signature"):          "list",
+		previewURL.Query().Get("x-oss-signature"):       "preview",
+		mobilePreviewURL.Query().Get("x-oss-signature"): "preview-mobile",
+		avatarURL.Query().Get("x-oss-signature"):        "avatar",
+	}
+	if len(signatures) != 4 {
+		t.Fatal("each image process must have a distinct signature")
+	}
+	if _, err := o.ResolveMedia(context.Background(), key, token, "arbitrary"); !errors.Is(err, ErrInvalidMediaVariant) {
+		t.Fatal("arbitrary image processing variant accepted")
+	}
+
+	videoKey, _ := o.NewKey("chat/a.mp4")
+	videoStable, _ := url.Parse(o.FileURL(videoKey))
+	video, err := o.ResolveMedia(context.Background(), videoKey, videoStable.Query().Get("token"), "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	videoURL, _ := url.Parse(video)
+	if videoURL.Query().Has("x-oss-process") {
+		t.Fatal("non-image object received image processing")
 	}
 }
 
@@ -192,10 +275,17 @@ func TestOSSArchivePutIsScopedAndKeepsOrdinaryUploadLimit(t *testing.T) {
 		WithHttpClient(&http.Client{Transport: storageRoundTripper(func(r *http.Request) (*http.Response, error) {
 			calls++
 			if r.Header.Get("x-oss-forbid-overwrite") != "true" {
-				t.Fatal("archive can overwrite existing object")
+				t.Fatal("object write can overwrite existing content")
 			}
-			if r.ContentLength != MaxFormUploadBytes+1 {
-				t.Fatal("archive size contract lost")
+			if r.Header.Get("Cache-Control") != ossObjectCacheControl {
+				t.Fatal("object write lost the long-lived cache policy")
+			}
+			wantLength := MaxFormUploadBytes + 1
+			if calls == 3 {
+				wantLength = 1
+			}
+			if r.ContentLength != wantLength {
+				t.Fatalf("object size contract lost: %d", r.ContentLength)
 			}
 			return &http.Response{StatusCode: 200, Header: http.Header{"x-oss-request-id": {"test"}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 		})}))
@@ -207,6 +297,13 @@ func TestOSSArchivePutIsScopedAndKeepsOrdinaryUploadLimit(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatal("archive not written")
+	}
+	ordinaryKey, _ := o.NewKey("uploads/user/ordinary.jpg")
+	if err := o.PutObject(context.Background(), ordinaryKey, strings.NewReader("x"), 1, "image/jpeg"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 {
+		t.Fatal("ordinary upload not written")
 	}
 	key, _ := o.NewKey("favorites/user/message/sha256")
 	for _, size := range []int64{0, -1, MaxArchiveBytes + 1} {
@@ -223,7 +320,7 @@ func TestOSSArchivePutIsScopedAndKeepsOrdinaryUploadLimit(t *testing.T) {
 	if err := o.PutObject(context.Background(), key, strings.NewReader("x"), MaxFormUploadBytes+1, "image/jpeg"); err == nil {
 		t.Fatal("ordinary 20 MiB upload limit relaxed")
 	}
-	if calls != 2 {
+	if calls != 3 {
 		t.Fatal("invalid archive or client upload reached OSS")
 	}
 }
