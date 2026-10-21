@@ -115,7 +115,8 @@ if docker exec "$OPENIM" true >/dev/null 2>&1; then
   info "bucketURL=$bucket_url publicRead=$public_read"
   # 只有「CDN 域名」不能当 bucketURL（CDN 不转发 PUT -> 上传挂）；
   # 网关域名 oss-chat-gw.whs188.xin 是允许的：它按方法分流，写请求透传 OSS、读请求 302 到 CDN。
-  # 详见 docs/聊天桶CDN接入-nginx网关.md
+  # 注：网关是历史备选方案，一期最终走的是「CDN 私有回源」（见 docs/聊天桶CDN-方案B上线手册.md）。
+  # 这里保留网关判读分支，是因为线上 ECS 可能仍部署着网关，巡检不应把它误报成故障。
   if [[ "$bucket_url" == *"${CHAT_CDN_HOST:-oss-chat.whs188.xin}"* ]]; then
     fail "bucketURL points at the CDN domain -> chat upload breaks, roll back"
   elif [[ "$bucket_url" == *"${CHAT_GW_HOST:-oss-chat-gw.whs188.xin}"* ]]; then
