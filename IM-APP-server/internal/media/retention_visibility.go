@@ -32,7 +32,8 @@ func RetentionMinSeq(plan RetentionPlan) (int64, error) {
 		boundary = min(boundary, seq)
 	}
 	for _, candidate := range plan.Candidates {
-		if candidate.Seq <= plan.OverCountThrough || candidate.Seq >= boundary || (!candidate.OverAge && !candidate.OverCount) {
+		// Candidates must be both over-age and over-count (union keep rule).
+		if candidate.Seq <= plan.OverCountThrough || candidate.Seq >= boundary || !candidate.OverAge || !candidate.OverCount {
 			return 0, ErrRetentionNonPrefix
 		}
 	}

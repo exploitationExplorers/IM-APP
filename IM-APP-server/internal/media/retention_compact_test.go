@@ -3,11 +3,19 @@ package media
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestRetentionCountProvenPrefix(t *testing.T) {
 	quota := GroupRetentionCount
-	full := retentionSnapshot(21000)
+	full := retentionSnapshot(quota + 500)
+	cutoff := full.ServerTime.Add(-GroupRetentionWindow)
+	// Make the older tail both over-age and over-count so compact proof is valid.
+	for i := range full.Messages {
+		if i < 500 {
+			full.Messages[i].SendTime = cutoff.Add(-time.Hour)
+		}
+	}
 	expected, err := planDefault(full)
 	if err != nil {
 		t.Fatal(err)

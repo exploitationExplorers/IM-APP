@@ -14,10 +14,10 @@ const emit = defineEmits<{
 }>();
 
 const usePlatformDefault = ref(props.retentionMaxMessages == null && props.retentionKeepHours == null);
-const maxMessages = ref(props.retentionMaxMessages ?? 1500);
-const keepHours = ref(props.retentionKeepHours ?? 168);
-const platformMax = ref(1500);
-const platformHours = ref(168);
+const maxMessages = ref(props.retentionMaxMessages ?? 3000);
+const keepHours = ref(props.retentionKeepHours ?? 72);
+const platformMax = ref(3000);
+const platformHours = ref(72);
 const reason = ref("");
 const saving = ref(false);
 
@@ -33,8 +33,8 @@ watch(
 onMounted(async () => {
   try {
     const limits = (await getSystemLimitsApi()).data;
-    platformMax.value = limits?.groupRetentionMaxMessages ?? 1500;
-    platformHours.value = limits?.groupRetentionHours ?? 168;
+    platformMax.value = limits?.groupRetentionMaxMessages ?? 3000;
+    platformHours.value = limits?.groupRetentionHours ?? 72;
     if (usePlatformDefault.value) {
       maxMessages.value = platformMax.value;
       keepHours.value = platformHours.value;

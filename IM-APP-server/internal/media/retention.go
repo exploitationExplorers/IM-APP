@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	GroupRetentionWindow = 7 * 24 * time.Hour
-	GroupRetentionCount  = 1500
+	// Customer rule: keep (last 3 days) ∪ (last 3000 visible). Delete only when both exceeded.
+	GroupRetentionWindow = 3 * 24 * time.Hour
+	GroupRetentionCount  = 3000
 	// Hard clamps for admin / per-group overrides.
 	GroupRetentionCountMin  = 1
 	GroupRetentionCountMax  = 20000
@@ -106,7 +107,9 @@ type RetentionPlan struct {
 }
 
 // PlanGroupRetention is deterministic and read-only. It counts actual visible
-// messages rather than subtracting MaxMessages from maxSeq. Neither caller input
+// messages rather than subtracting MaxMessages from maxSeq. A row is kept when
+// it is inside the time window OR inside the newest MaxMessages (union); it is
+// a removal candidate only when both OverAge and OverCount. Neither caller input
 // nor this output may be used as an authorization to delete objects or messages.
 func PlanGroupRetention(snapshot RetentionSnapshot, policy RetentionPolicy) (RetentionPlan, error) {
 	policy = NormalizeRetentionPolicy(policy)
@@ -148,7 +151,7 @@ func PlanGroupRetention(snapshot RetentionSnapshot, policy RetentionPolicy) (Ret
 	sort.Slice(visible, func(i, j int) bool { return visible[i].Seq > visible[j].Seq })
 	for rank, message := range visible {
 		candidate := RetentionCandidate{Seq: message.Seq, OverAge: message.SendTime.Before(plan.Cutoff), OverCount: rank >= policy.MaxMessages}
-		if candidate.OverAge || candidate.OverCount {
+		if candidate.OverAge && candidate.OverCount {
 			plan.Candidates = append(plan.Candidates, candidate)
 		} else {
 			plan.Kept = append(plan.Kept, message.Seq)

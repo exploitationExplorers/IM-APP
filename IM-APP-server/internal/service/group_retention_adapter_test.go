@@ -99,7 +99,7 @@ func TestRetentionAdapterProtocolAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := repository.RetentionApplication{GroupID: group, Plan: media.RetentionPlan{Mode: "preview_only", SnapshotID: receipt, ConversationID: conversation,
-		Watermark: 2, Kept: []int64{2}, Candidates: []media.RetentionCandidate{{Seq: 1, OverAge: true}}}}
+		Watermark: 2, Kept: []int64{2}, Candidates: []media.RetentionCandidate{{Seq: 1, OverAge: true, OverCount: true}}}}
 	if err := a.ApplyPrefix(ctx, job, 2); err != nil {
 		t.Fatal(err)
 	}

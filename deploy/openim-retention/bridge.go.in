@@ -225,9 +225,11 @@ func (b *imAppRetentionBridge) snapshot(ctx context.Context, groupID string, pol
 		Messages: make([]rules.RetentionMessage, 0)}
 	var table model.MsgDocModel
 	visible, scanned := 0, 0
-	// Descend only until MaxMessages visible rows are proven. This makes a
-	// million-message group's first run bounded without loading/deleting its
-	// old history. Hidden controls never count. Pending holes in this tail retry.
+	cutoff := result.ServerTime.Add(-policy.Window)
+	// Union keep: rows inside the window stay even past MaxMessages. Only after
+	// MaxMessages visible are proven AND the current visible row is already past
+	// the window may lower seqs be summarized as OverCountThrough. Pending holes
+	// in this scanned tail still retry. Hidden controls never count.
 	for last := watermark; last >= start; {
 		var doc model.MsgDocModel
 		if err := b.db.Collection(model.MsgTableName).FindOne(ctx, bson.M{"doc_id": table.GetDocID(conversationID, last)}).Decode(&doc); err != nil { return rules.RetentionSnapshot{}, errIMAppSnapshot }
@@ -240,10 +242,12 @@ func (b *imAppRetentionBridge) snapshot(ctx context.Context, groupID string, pol
 			row, err := imAppClassify(doc.Msg[index], groupID, n)
 			if err != nil { return rules.RetentionSnapshot{}, err }
 			result.Messages = append(result.Messages, row)
-			if row.Visibility == "visible" { visible++ }
-			if visible == policy.MaxMessages && n > start {
-				result.OverCountThrough = n-1
-				break
+			if row.Visibility == "visible" {
+				visible++
+				if visible >= policy.MaxMessages && row.SendTime.Before(cutoff) && n > start {
+					result.OverCountThrough = n - 1
+					break
+				}
 			}
 		}
 		if result.OverCountThrough > 0 { break }

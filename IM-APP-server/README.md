@@ -29,7 +29,7 @@ go run ./cmd/server
 
 `.env` 从工作目录读取，已存在的进程环境变量优先。`.env.example` 默认 `127.0.0.1:5433`，对应 docker compose 的端口映射；直连本机原生 PostgreSQL 时改回 `5432`。
 
-群历史保留默认 `GROUP_RETENTION_MODE=visibility_only`：每天按每群最近 168 小时、最多 1500 条真实可见消息做逻辑清理（条数/小时可在管理后台配置，可按群覆盖），未指定群时默认全群。启动前须配置已部署的私有桥 `GROUP_RETENTION_ADAPTER_URL` 和独立的 `GROUP_RETENTION_ADAPTER_KEY`，并按 `../deploy/openim-retention/README.md` 完成迁移和 OpenIM 更新；缺失配置会明确报错。仅本地 API/OSS 冒烟、尚无私有桥时，须显式设 `GROUP_RETENTION_MODE=off`，不会自动伪装成已启用。已有进程/Compose 的 `off` 也会继续覆盖默认值。Mongo 正文清理和 OSS 原文件删除不会因此开启。
+群历史保留默认 `GROUP_RETENTION_MODE=visibility_only`：每天按每群「最近 72 小时 ∪ 最近 3000 条」真实可见消息取并集保留，仅两者都超限才逻辑清理（条数/小时可在管理后台配置，可按群覆盖），未指定群时默认全群。启动前须配置已部署的私有桥 `GROUP_RETENTION_ADAPTER_URL` 和独立的 `GROUP_RETENTION_ADAPTER_KEY`，并按 `../deploy/openim-retention/README.md` 完成迁移和 OpenIM 更新；缺失配置会明确报错。仅本地 API/OSS 冒烟、尚无私有桥时，须显式设 `GROUP_RETENTION_MODE=off`，不会自动伪装成已启用。已有进程/Compose 的 `off` 也会继续覆盖默认值。Mongo 正文清理和 OSS 原文件删除不会因此开启。
 
 聊天要能用，`.env` 里这四项必须填：`OPENIM_API_URL`（后端调 OpenIM 的地址）、`OPENIM_SECRET`、`OPENIM_PUBLIC_API_URL` 与 `OPENIM_PUBLIC_WS_URL`（下发给客户端，前端不再自行配置）。任一为空时 `POST /api/v1/im/token` 返回 503。
 

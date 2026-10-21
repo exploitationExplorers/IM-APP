@@ -141,7 +141,7 @@ func defaultLimits() *models.SystemLimits {
 	return &models.SystemLimits{
 		MaxFileSizeMB: 20, MaxGroupMembers: 2000, DefaultGroupMaxMembers: 2000,
 		RecallWindowSec: 120, MaxForwardTargets: 10000, MaxNicknameLen: 32,
-		GroupRetentionMaxMessages: 1500, GroupRetentionHours: 168,
+		GroupRetentionMaxMessages: 3000, GroupRetentionHours: 72,
 	}
 }
 
@@ -152,10 +152,10 @@ func (r *OpsRepo) GetSystemLimits(ctx context.Context) (*models.SystemLimits, er
 		_ = json.Unmarshal([]byte(raw), l)
 	}
 	if l.GroupRetentionMaxMessages <= 0 {
-		l.GroupRetentionMaxMessages = 1500
+		l.GroupRetentionMaxMessages = 3000
 	}
 	if l.GroupRetentionHours <= 0 {
-		l.GroupRetentionHours = 168
+		l.GroupRetentionHours = 72
 	}
 	return l, nil
 }
