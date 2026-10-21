@@ -2,7 +2,11 @@
 import { computed, ref, shallowRef, onMounted, onBeforeUnmount } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import PreviewImageSlide from '@/components/PreviewImageSlide.vue'
-import { takeImagePreviewSession, type ImagePreviewSession } from '@/utils/imagePreviewSession'
+import {
+  imagePreviewSaveSource,
+  takeImagePreviewSession,
+  type ImagePreviewSession,
+} from '@/utils/imagePreviewSession'
 import { saveImageToDevice } from '@/utils/chatMedia'
 import { safeBack } from '@/utils/nav'
 import { getStatusBarHeight } from '@/utils/status-bar'
@@ -14,6 +18,12 @@ const zoomed = shallowRef(false)
 const saving = shallowRef(false)
 const top = getStatusBarHeight() + 10
 const count = computed(() => session.value?.urls.length || 0)
+
+function saveSource(index: number): string {
+  return imagePreviewSaveSource(session.value, index, readyPaths.value[index])
+}
+
+const canSave = computed(() => !!saveSource(current.value) && !saving.value)
 
 onLoad((query) => {
   session.value = takeImagePreviewSession(String(query?.session || ''))
@@ -31,7 +41,7 @@ function move(delta: number) {
 }
 
 function saveMenu() {
-  if (!readyPaths.value[current.value]) return
+  if (!saveSource(current.value)) return
   uni.showActionSheet({
     itemList: ['保存图片'],
     success: ({ tapIndex }) => {
@@ -51,7 +61,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', keydown))
 // #endif
 
 async function save() {
-  const path = readyPaths.value[current.value]
+  const path = saveSource(current.value)
   if (!path || saving.value) return
   saving.value = true
   try {
@@ -74,8 +84,8 @@ async function save() {
       <text class="viewer-counter">{{ count ? `${current + 1} / ${count}` : '图片预览' }}</text>
       <button
         class="viewer-control"
-        :disabled="!readyPaths[current] || saving"
-        :aria-disabled="!readyPaths[current] || saving"
+        :disabled="!canSave"
+        :aria-disabled="!canSave"
         @click="save"
       >
         保存

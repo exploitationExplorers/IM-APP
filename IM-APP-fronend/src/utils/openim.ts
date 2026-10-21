@@ -2783,7 +2783,12 @@ export function toChatMessage(rawItem: MessageItem): ChatMessage {
   const displayContent = imageMeta?.displayUrl || content
   const imageFallbacks =
     type === 'image'
-      ? pictureRemoteCandidates(item).filter((u) => u !== displayContent)
+      ? pictureRemoteCandidates(item)
+          .map((url) => listThumbnailUrl(url))
+          .filter(
+            (url, index, all) =>
+              url !== displayContent && all.indexOf(url) === index,
+          )
       : []
   return {
     id: item.clientMsgID,
@@ -3463,8 +3468,9 @@ export async function searchLocalMessages(params: {
     const res = await imCall<unknown>(IMMethods.SearchLocalMessages, payload)
     const hits = normalizeLocalMessageSearchResult(res)
     const ids = hits.map((hit) => hit.conversationID)
-    // 保留策略用本地缓存即可，后台刷新，不挡搜索首屏
-    if (ids.length) void groupRetention.sync(ids)
+    // 保留状态未加载时必须先同步，否则搜索结果会短暂暴露已过期消息。
+    // 私聊不会触发网络请求；群聊只在本地状态超过刷新周期时请求一次。
+    if (ids.length) await groupRetention.sync(ids)
     return hits.flatMap((hit) => {
       const messages = groupRetention.filter(hit.conversationID, hit.messages)
       if (!messages.length) return []

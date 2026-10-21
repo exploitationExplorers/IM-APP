@@ -6,6 +6,7 @@
  */
 import { computed } from 'vue'
 import { APP_CONFIG } from '@/config'
+import { avatarThumbnailUrl } from '@/utils/chatMediaUrl'
 
 export interface AtMentionMember {
   id: string
@@ -92,7 +93,7 @@ const filtered = computed(() => {
       >
         <image
           class="at-avatar"
-          :src="m.avatar || APP_CONFIG.defaultAvatarUrl"
+          :src="avatarThumbnailUrl(m.avatar || APP_CONFIG.defaultAvatarUrl)"
           mode="aspectFill"
         />
         <text class="at-name">

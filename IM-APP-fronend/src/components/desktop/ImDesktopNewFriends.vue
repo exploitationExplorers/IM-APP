@@ -5,6 +5,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import { useContactStore } from '@/stores/contact'
 import { APP_CONFIG } from '@/config'
 import { formatRelativeTime } from '@/utils/format'
+import { avatarThumbnailUrl } from '@/utils/chatMediaUrl'
 import type { FriendRequest } from '@/types'
 
 const PAGE_SIZE = 20
@@ -130,7 +131,7 @@ function loadMore() {
           >
             <image
               class="avatar"
-              :src="item.fromUser.avatar || APP_CONFIG.defaultAvatarUrl"
+              :src="avatarThumbnailUrl(item.fromUser.avatar || APP_CONFIG.defaultAvatarUrl)"
               mode="aspectFill"
             />
             <view class="meta">
@@ -172,7 +173,7 @@ function loadMore() {
           >
             <image
               class="avatar"
-              :src="item.fromUser.avatar || APP_CONFIG.defaultAvatarUrl"
+              :src="avatarThumbnailUrl(item.fromUser.avatar || APP_CONFIG.defaultAvatarUrl)"
               mode="aspectFill"
             />
             <view class="meta">

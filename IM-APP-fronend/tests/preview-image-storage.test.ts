@@ -8,6 +8,7 @@ vi.mock('@/utils/request', () => ({
 }))
 import { createPreviewStorage, PREVIEW_IMAGE_INDEX_KEY } from '@/utils/previewImageStorage'
 import { PreviewImageCache } from '@/utils/previewImageCache'
+import { previewMediaCacheKey } from '@/utils/mediaCacheIdentity'
 import { clearAppCache, clearSessionStorage } from '@/utils/app-cache'
 
 const source = 'https://images.example/a?Signature=a%2Bb%3D'
@@ -56,7 +57,7 @@ describe('native preview persistence', () => {
     expect(api.downloadFile.mock.calls[0][0].url).toBe(source)
     expect(api.saveFile).toHaveBeenCalledTimes(1)
     expect(Object.keys(settings.get(PREVIEW_IMAGE_INDEX_KEY) as object)).toEqual([
-      JSON.stringify(['a', source]),
+      previewMediaCacheKey('a', source),
     ])
   })
   it('redownloads if the OS removed a saved file', async () => {
@@ -101,11 +102,12 @@ describe('native preview persistence', () => {
     )
     expect(api.saveFile).not.toHaveBeenCalled()
   })
-  it('rejects corrupt images before persistence', async () => {
+  it('lets the native image viewer reject an undecodable temp file without persisting it', async () => {
     api.getImageInfo.mockImplementation((o) => o.fail())
-    await expect(new PreviewImageCache(createPreviewStorage()).get(source, 'a')).rejects.toThrow(
-      '格式不受支持',
-    )
+    await expect(new PreviewImageCache(createPreviewStorage()).get(source, 'a')).resolves.toMatchObject({
+      path: 'temp/a',
+      source: 'network',
+    })
     expect(api.saveFile).not.toHaveBeenCalled()
   })
   it('aborts stalled downloads after 15 seconds', async () => {

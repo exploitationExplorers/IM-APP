@@ -60,9 +60,11 @@ function releaseImageLoad() {
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, imagePreviewUrlOf, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
-import { forgetMediaCache, peekMediaCache, prefetchMediaCache, requestMediaCache } from '@/utils/mediaCache'
+import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl, avatarThumbnailUrl } from '@/utils/chatMedia'
+import { forgetMediaCache, peekMediaCache, requestMediaCache } from '@/utils/mediaCache'
+import { cacheableChatMediaUrl } from '@/utils/mediaCacheIdentity'
 import { isAppPlatform } from '@/utils/platform'
+import { useAvatarThumbnail } from '@/composables/useAvatarThumbnail'
 import { formatMeridiemClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 import { soundMetaOf } from '@/utils/openim'
 
@@ -84,15 +86,15 @@ const props = defineProps<{
   selecting?: boolean
 }>()
 
-/** 头像加载失败（死链/空对象）时切换到业务侧兜底头像，避免一直显示灰色占位 */
+/** 头像按缩略图、原图、默认头像三级回退，避免死链长期显示灰色占位。 */
 const isH5 = uni.getSystemInfoSync().uniPlatform === 'web'
-const avatarSrc = ref(sanitizeDisplayUrl(props.avatar) || props.avatar)
-
-watch(
-  () => props.avatar,
-  (v) => {
-    avatarSrc.value = sanitizeDisplayUrl(v) || props.fallbackAvatar || v
+const defaultAvatar = props.fallbackAvatar || APP_CONFIG.defaultAvatarUrl
+const { src: avatarSrc, onError: onAvatarError } = useAvatarThumbnail(
+  () => {
+    const sanitized = sanitizeDisplayUrl(props.avatar)
+    return sanitized || props.fallbackAvatar || props.avatar
   },
+  defaultAvatar,
 )
 
 function sanitizeDisplayUrl(url: string): string {
@@ -102,12 +104,6 @@ function sanitizeDisplayUrl(url: string): string {
   // H5 浏览器无法加载 App 本地路径
   if (isH5 && looksLikeLocalFilePath(t)) return ''
   return t
-}
-
-function onAvatarError() {
-  if (props.fallbackAvatar && avatarSrc.value !== props.fallbackAvatar) {
-    avatarSrc.value = props.fallbackAvatar
-  }
 }
 
 const showNickname = computed(() => !props.mine && !!props.nickname)
@@ -214,9 +210,10 @@ const groupInviteTitle = computed(() => {
 /** H5 不能加载 App 本地路径；无远程头像时用默认群头像 */
 const groupInviteAvatar = computed(() => {
   const url = (groupInviteMeta.value?.groupAvatar || '').trim()
-  if (isRemoteMediaUrl(url)) return url
+  if (isRemoteMediaUrl(url)) return avatarThumbnailUrl(url)
   return APP_CONFIG.defaultGroupAvatarUrl
 })
+const cardAvatar = computed(() => avatarThumbnailUrl(cardMeta.value?.avatar || APP_CONFIG.defaultAvatarUrl))
 
 function onApplyGroupInvite() {
   if (groupInviteMeta.value) emit('groupInviteApply', groupInviteMeta.value)
@@ -780,11 +777,23 @@ onUnmounted(() => {
   finishImageSlot()
 })
 
-/** 归一化媒体地址：网络/blob 原样；App 本地路径仅在 App 端转 file://；H5 绝不拼 file:// */
+/** H5 的聊天 OSS 稳定入口是同源相对地址，必须允许直接交给浏览器加载。 */
+function isDisplayableChatImageUrl(value: string): boolean {
+  const url = value.trim()
+  if (!url) return false
+  if (isRemoteMediaUrl(url)) return true
+  return (
+    isH5 &&
+    (url.startsWith('/object/') ||
+      url.startsWith('/api/v1/public/oss-media?'))
+  )
+}
+
+/** 归一化媒体地址：网络/blob 原样；H5 聊天入口保留同源相对地址；App 本地路径转 file://。 */
 function toPlayableMediaUrl(path: string): string {
   if (!path) return ''
-  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:')) {
-    return playableMediaUrl(path)
+  if (isDisplayableChatImageUrl(path)) {
+    return isRemoteMediaUrl(path) ? playableMediaUrl(path) : path
   }
   if (isH5) {
     // 浏览器禁止加载 file:// 与设备本地路径，返回空避免控制台报错
@@ -801,15 +810,15 @@ function toPlayableMediaUrl(path: string): string {
 }
 
 /**
- * 图片气泡的候选地址。先缩略图，再原图，加载失败才降级。
- * H5 只用远程 URL；App 在没有远程地址时退回本地路径，供发送中预览。
+ * 图片气泡的候选地址。先缩略图，再缩略图兼容候选，加载失败才降级。
+ * H5 也允许聊天 OSS 的同源相对入口；App 在没有远程地址时退回本地路径。
  */
 const imageSrcCandidates = computed(() => {
   if (props.message.type !== 'image') return []
   const list: string[] = []
   const push = (value: string) => {
     const url = value.trim()
-    if (!url || !(isRemoteMediaUrl(url) || url.startsWith('blob:'))) return
+    if (!isDisplayableChatImageUrl(url)) return
     if (!list.includes(url)) list.push(url)
   }
   push(props.message.thumbUrl || '')
@@ -847,24 +856,30 @@ function bindCachedMedia(
   current: () => number,
   apply: (path: string, hold: boolean, late: boolean) => void,
 ) {
-  if (!remote || !isRemoteMediaUrl(remote)) {
+  if (!isDisplayableChatImageUrl(remote)) {
     apply('', false, false)
     return
   }
-  const hit = peekMediaCache(remote)
+  // H5 聊天入口是相对路径，但 302 后的签名地址不稳定，必须转成同源绝对地址进 IndexedDB。
+  const cacheUrl = cacheableChatMediaUrl(remote)
+  if (!cacheUrl || !/^https?:\/\//i.test(cacheUrl)) {
+    apply(remote, false, false)
+    return
+  }
+  const hit = peekMediaCache(cacheUrl)
   if (hit) {
     apply(hit, false, false)
     return
   }
   let settled = false
-  const pending = requestMediaCache(remote, (path) => {
+  const pending = requestMediaCache(cacheUrl, (path) => {
     settled = true
     if (current() === token) apply(path, false, true)
   })
   if (!settled) apply('', pending, false)
 }
 
-/** 图片气泡展示地址：H5 只用远程 URL */
+/** 图片气泡展示地址：H5 支持远程和聊天 OSS 同源相对入口 */
 const imageDisplaySrc = computed(() => {
   const list = imageSrcCandidates.value
   const raw = list[imageFallbackIndex.value] || list[0] || ''
@@ -895,7 +910,7 @@ function beginImageLoad() {
     return
   }
   const src = imageDisplaySrc.value
-  if (!src || !isRemoteMediaUrl(src) || !isAppPlatform()) {
+  if (!src || !isDisplayableChatImageUrl(src) || !isAppPlatform()) {
     imageSrcReady.value = true
     return
   }
@@ -912,7 +927,7 @@ function beginImageLoad() {
 
 const shownImageSrc = computed(() => {
   if (cachedImageSrc.value) return cachedImageSrc.value
-  if (!imageSrcReady.value && isRemoteMediaUrl(imageDisplaySrc.value)) return ''
+  if (!imageSrcReady.value && isDisplayableChatImageUrl(imageDisplaySrc.value)) return ''
   return holdImageForCache.value ? '' : imageDisplaySrc.value
 })
 
@@ -949,13 +964,6 @@ watch(imageDisplaySrc, () => beginImageLoad(), { immediate: true })
 watch(shownImageSrc, () => {
   imagePainted.value = false
   imageLoadFailed.value = false
-})
-
-// 小图出来后，在后台把点开用的中图也下到本地，点开时直接读文件（H5 预览另有按需加载，不预取）
-watch(cachedImageSrc, (path) => {
-  if (!path || !isAppPlatform() || props.message.type !== 'image') return
-  const preview = imagePreviewUrlOf(props.message)
-  if (preview && preview !== imageDisplaySrc.value) prefetchMediaCache(preview)
 })
 
 watch(
@@ -1068,7 +1076,7 @@ function measureMediaSize(src: string) {
   }
   naturalSize.value = null
   // 网络图的尺寸等 @load。App 的 getImageInfo 会把整张图再下一次，进群会更慢。
-  if (isRemoteMediaUrl(src)) return
+  if (isDisplayableChatImageUrl(src)) return
   measureQueue.push(() => {
     uni.getImageInfo({
       src,
@@ -1278,7 +1286,7 @@ function openLink(url: string) {
           <view class="card-head">
             <image
               class="card-avatar"
-              :src="cardMeta?.avatar || APP_CONFIG.defaultAvatarUrl"
+              :src="cardAvatar"
               mode="aspectFill"
             />
             <text class="card-name">

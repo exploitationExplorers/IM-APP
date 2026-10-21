@@ -395,6 +395,40 @@ function normalizePictureElem(elem: unknown): unknown {
   return { sourcePath: '', sourcePicture: source, bigPicture: big, snapshotPicture: snapshot }
 }
 
+/**
+ * 转发的源图和大图必须保留原图，快照只需承担会话里的 360px 展示。
+ * 输入可能来自 App 冻结对象，因此始终返回新的纯数据对象。
+ */
+export function withForwardImageOriginal(
+  snapshot: ForwardMessageSnapshot,
+  originalUrl: string,
+  displayUrl = '',
+): ForwardMessageSnapshot {
+  if (snapshot.contentType !== MESSAGE_TYPE.Picture) return snapshot
+  const original = String(originalUrl || '').trim()
+  if (!original) return snapshot
+  const normalized = asObject(normalizePictureElem(snapshot.content))
+  if (!normalized) return snapshot
+  const source = asObject(normalized.sourcePicture) as PictureInfo | undefined
+  const big = asObject(normalized.bigPicture) as PictureInfo | undefined
+  const display = asObject(normalized.snapshotPicture) as PictureInfo | undefined
+  const sourceBase = source ?? big ?? display ?? {}
+  const bigBase = big ?? sourceBase
+  const displayBase = display ?? sourceBase
+  const fallbackType = firstPictureType([sourceBase, bigBase, displayBase])
+  const withUrl = (pic: PictureInfo, url: string) =>
+    withPictureType({ ...pic, url }, fallbackType)
+  return {
+    contentType: snapshot.contentType,
+    content: {
+      sourcePath: '',
+      sourcePicture: withUrl(sourceBase, original),
+      bigPicture: withUrl(bigBase, original),
+      snapshotPicture: withUrl(displayBase, String(displayUrl || original).trim() || original),
+    },
+  }
+}
+
 export function createIdempotencyKey(): string {
   const cryptoObj = globalThis.crypto
   if (cryptoObj && typeof cryptoObj.randomUUID === 'function') return cryptoObj.randomUUID()

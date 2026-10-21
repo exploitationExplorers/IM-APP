@@ -7,6 +7,7 @@ import { APP_CONFIG } from '@/config'
 import { muteGroupMember, removeGroupMember, unmuteGroupMember } from '@/api/group'
 import { MUTE_OPTIONS } from '@/constants/mute'
 import type { GroupMember, GroupMemberMuteResult } from '@/types'
+import { avatarThumbnailUrl } from '@/utils/chatMediaUrl'
 
 const props = defineProps<{
   modelValue: boolean
@@ -69,7 +70,7 @@ const isOwner = computed(() => {
 
 const canManage = computed(() => isOwner.value || myRole.value === 'admin')
 const groupName = computed(() => groupDetail.value?.name || '群聊')
-const groupAvatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
+const groupAvatar = computed(() => avatarThumbnailUrl(groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl))
 const groupPublicId = computed(() => groupDetail.value?.id || props.groupId)
 const memberCount = computed(
   () => memberList.value.length || groupDetail.value?.memberCount || 0,
@@ -142,9 +143,9 @@ function roleBadge(member: GroupMember) {
 function memberAvatar(member: GroupMember) {
   const me = userStore.profile
   if (me && sameUserId(member.id, me.id)) {
-    return member.avatar || me.avatar || APP_CONFIG.defaultAvatarUrl
+    return avatarThumbnailUrl(member.avatar || me.avatar || APP_CONFIG.defaultAvatarUrl)
   }
-  return member.avatar || APP_CONFIG.defaultAvatarUrl
+  return avatarThumbnailUrl(member.avatar || APP_CONFIG.defaultAvatarUrl)
 }
 
 const canEditGroupId = computed(

@@ -1,3 +1,5 @@
+import { APP_CONFIG } from '@/config'
+import { isAppPlatform } from '@/utils/platform'
 import { isOSSStorageUrl } from '@/utils/storage-url'
 
 export function isRemoteMediaUrl(path: string): boolean {
@@ -67,38 +69,235 @@ export function h5PublicMediaUrl(path: string): string {
   return path
 }
 
+const OSS_MEDIA_PATH = '/api/v1/public/oss-media'
+const OSS_IMAGE_EXTENSIONS = /\.(?:jpe?g|png|webp|bmp|gif|tiff?|heic|heif|avif)$/i
+const NON_IMAGE_MEDIA_EXTENSIONS = /\.(?:mp4|mov|m4v|webm|mkv|avi|aac|m4a|mp3|wav|ogg|flac|pdf|zip|rar|7z|docx?|xlsx?|pptx?)$/i
+const CHAT_OBJECT_PREFIXES = ['im-app-production/chat/', 'oss-test/chat/']
+const BUSINESS_OBJECT_PREFIXES = ['im-app-production/business/', 'oss-test/business/']
+
+// Mirrors IM-APP-server internal/infra/oss.go so the browser and the stable
+// proxy ask OSS for the same bytes. The quality attribute must stay explicit:
+// `image/resize,w_128/q_70/format,webp` is rejected with 400 InvalidArgument.
+const PUBLIC_IMAGE_PROCESSES = {
+  list: 'image/resize,w_360/quality,q_60/format,webp',
+  preview: 'image/resize,w_1280/quality,q_75/format,webp',
+  'preview-mobile': 'image/resize,w_960/quality,q_72/format,webp',
+  avatar: 'image/resize,w_128/quality,q_70/format,webp',
+} as const
+
+function decodePathname(pathname: string): string {
+  return pathname
+    .split('/')
+    .map((part) => {
+      try {
+        return decodeURIComponent(part)
+      } catch {
+        return part
+      }
+    })
+    .join('/')
+}
+
+/** 签名 URL 的路径包含 OSS 物理前缀；OpenIM `/object/` 只接受物理前缀后的逻辑 key。 */
+function hasStorageSignature(query: URLSearchParams): boolean {
+  return (
+    query.has('x-oss-signature') ||
+    query.has('X-Amz-Signature') ||
+    (query.has('OSSAccessKeyId') && query.has('Signature'))
+  )
+}
+
+function logicalChatKeyFromOSS(raw: string): string {
+  try {
+    const parsed = new URL(raw)
+    const query = parsed.searchParams
+    if (!hasStorageSignature(query)) return ''
+    const pathname = decodePathname(parsed.pathname).replace(/^\/+/, '')
+    for (const prefix of CHAT_OBJECT_PREFIXES) {
+      if (pathname.startsWith(prefix)) return pathname.slice(prefix.length)
+    }
+  } catch {
+    /* not an absolute URL */
+  }
+  return ''
+}
+
 /**
- * OpenIM `/object/` 按宽高框等比出图。签名直链不能改参数，否则签名失效。
- * 已经带 type=image 时仍覆盖宽高，方便列表 360、预览 1280 共用同一条地址。
+ * H5 走当前站点同源 /object；App/小程序从业务 API 地址推导后端绝对地址。
+ * APP_CONFIG 在 H5 已是 /api/v1，因此结果保持为 /object/... 相对路径。
  */
-function withObjectThumbnail(url: string, edge: number): string {
+function openIMObjectBaseURL(): string {
+  const configured = String(APP_CONFIG.apiBaseUrl || '').trim()
+  if (!/^https?:\/\//i.test(configured)) return ''
+  try {
+    const parsed = new URL(configured)
+    parsed.pathname = parsed.pathname.replace(/\/api\/v1\/?$/i, '').replace(/\/+$/, '')
+    parsed.search = ''
+    parsed.hash = ''
+    return `${parsed.origin}${parsed.pathname === '/' ? '' : parsed.pathname}`
+  } catch {
+    return ''
+  }
+}
+
+function openIMObjectURL(logicalKey: string, edge: number): string {
+  const key = logicalKey
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/')
+  if (!key) return ''
+  const query = new URLSearchParams({
+    type: 'image',
+    width: String(edge),
+    height: String(edge),
+    format: 'webp',
+  })
+  return `${openIMObjectBaseURL()}/object/${key}?${query.toString()}`
+}
+
+type OSSMediaVariant = 'list' | 'preview' | 'preview-mobile' | 'avatar'
+
+/**
+ * 稳定 OSS 媒体入口由服务端固定处理规格；只允许白名单中的规格，不能把任意
+ * x-oss-process 暴露给客户端。视频、语音和文件保持原地址。
+ */
+function withStableOSSMediaVariant(url: string, variant: OSSMediaVariant): string {
   const raw = (url || '').trim()
-  if (!raw || isOSSStorageUrl(raw) || /[?&](X-Amz-Signature|Signature)=/i.test(raw)) return raw
+  if (!raw) return raw
+  const absolute = /^https?:\/\//i.test(raw)
+  const rootRelative = raw.startsWith('/')
+  if (!absolute && !rootRelative) return raw
+  try {
+    const parsed = new URL(raw, 'https://relative.invalid')
+    if (parsed.pathname !== OSS_MEDIA_PATH) return raw
+    const key = parsed.searchParams.get('key') || ''
+    if (!parsed.searchParams.get('token') || !OSS_IMAGE_EXTENSIONS.test(key)) return raw
+    parsed.searchParams.set('variant', variant)
+    return absolute ? parsed.toString() : `${parsed.pathname}${parsed.search}${parsed.hash}`
+  } catch {
+    return raw
+  }
+}
+
+/**
+ * 业务桶直链（含 CDN 加速域名）没有可保护的隐藏 key，直接让 OSS 实时出图即可，
+ * 避免 CDN 域名切换后列表和预览退回原图。聊天地址带签名或未知前缀一律保持原样。
+ */
+function withPublicImageProcess(url: string, variant: OSSMediaVariant): string {
+  const raw = (url || '').trim()
   if (!/^https?:\/\//i.test(raw)) return raw
   try {
     const parsed = new URL(raw)
-    const path = parsed.pathname
-    if (/\.(mp4|mov|m4v|webm|mkv|aac|m4a|mp3)(\?|$)/i.test(path)) return raw
-    if (!path.startsWith('/object/')) return raw
-    parsed.searchParams.set('type', 'image')
-    parsed.searchParams.set('width', String(edge))
-    parsed.searchParams.set('height', String(edge))
+    if (hasStorageSignature(parsed.searchParams)) return raw
+    if (parsed.searchParams.has('x-oss-process')) return raw
+    const pathname = decodePathname(parsed.pathname).replace(/^\/+/, '')
+    if (!BUSINESS_OBJECT_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return raw
+    if (!OSS_IMAGE_EXTENSIONS.test(pathname)) return raw
+    parsed.searchParams.set('x-oss-process', PUBLIC_IMAGE_PROCESSES[variant])
     return parsed.toString()
   } catch {
     return raw
   }
 }
 
-/** 列表气泡用的缩略图。OpenIM 按宽高框等比缩小，不是把图拉成正方形。 */
-export function listThumbnailUrl(url: string): string {
+/**
+ * 聊天 OSS 原图先转成稳定的 OpenIM 图片处理入口。签名参数只属于原始 OSS
+ * 地址，不能带到 `/object/`；OpenIM 会按逻辑 key 重新签名并让 OSS 实时出图。
+ * 业务桶之外的直链保持原地址。
+ */
+function withObjectThumbnail(url: string, edge: number): string {
   const raw = (url || '').trim()
-  if (/[?&]type=image\b/i.test(raw)) return raw
-  return withObjectThumbnail(raw, 360)
+  if (!raw) return raw
+
+  const logicalKey = logicalChatKeyFromOSS(raw)
+  if (logicalKey && !NON_IMAGE_MEDIA_EXTENSIONS.test(logicalKey)) {
+    return openIMObjectURL(logicalKey, edge) || raw
+  }
+
+  const absolute = /^https?:\/\//i.test(raw)
+  const rootRelativeObject = raw.startsWith('/object/')
+  if (!absolute && !rootRelativeObject) return raw
+  try {
+    const parsed = absolute ? new URL(raw) : new URL(raw, 'https://relative.invalid')
+    if (!parsed.pathname.startsWith('/object/')) return raw
+    if (NON_IMAGE_MEDIA_EXTENSIONS.test(parsed.pathname)) return raw
+    // 任意签名直链都不能再加查询参数，否则 OSS 签名立即失效。
+    if (hasStorageSignature(parsed.searchParams)) return raw
+    parsed.searchParams.set('type', 'image')
+    parsed.searchParams.set('width', String(edge))
+    parsed.searchParams.set('height', String(edge))
+    parsed.searchParams.set('format', 'webp')
+    return absolute ? parsed.toString() : `${parsed.pathname}${parsed.search}`
+  } catch {
+    return raw
+  }
 }
 
-/** 点开看的中图。比列表小图清楚，但不要把未压缩原图交给系统预览。 */
+/** 列表气泡用的缩略图。聊天 OSS 固定为 360px WebP，旧 OpenIM 地址仍走宽高参数。 */
+export function listThumbnailUrl(url: string): string {
+  const raw = (url || '').trim()
+  const stable = withStableOSSMediaVariant(raw, 'list')
+  if (stable !== raw) return stable
+  const object = withObjectThumbnail(raw, 360)
+  if (object !== raw) return object
+  return withPublicImageProcess(raw, 'list')
+}
+
+function isMobileViewport(): boolean {
+  if (isAppPlatform()) return true
+  if (typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth > 0) {
+    return window.innerWidth <= 768
+  }
+  try {
+    const width = Number(uni.getSystemInfoSync().windowWidth || 0)
+    return width > 0 && width <= 768
+  } catch {
+    return false
+  }
+}
+
+/** 点开看的中图。手机固定 960px、桌面 1280px，原图只用于保存、收藏和转发。 */
 export function previewThumbnailUrl(url: string): string {
-  return withObjectThumbnail(url, 1280)
+  const mobile = isMobileViewport()
+  const edge = mobile ? 960 : 1280
+  const variant = mobile ? 'preview-mobile' : 'preview'
+  const stable = withStableOSSMediaVariant(url, variant)
+  if (stable !== url) return stable
+  const object = withObjectThumbnail(url, edge)
+  if (object !== url) return object
+  return withPublicImageProcess(url, variant)
+}
+
+/**
+ * 高频头像使用 128px WebP；签名 OSS 地址不能追加处理参数，必须保持字节级不变。
+ * 没有签名的公开业务桶头像可以直接让 OSS 实时缩图。
+ */
+export function avatarThumbnailUrl(url: string): string {
+  const raw = (url || '').trim()
+  if (!raw) return raw
+  const stable = withStableOSSMediaVariant(raw, 'avatar')
+  if (stable !== raw) return stable
+
+  const absolute = /^https?:\/\//i.test(raw)
+  const rootRelative = raw.startsWith('/')
+  if (!absolute && !rootRelative) return raw
+  try {
+    const parsed = new URL(raw, 'https://relative.invalid')
+    if (hasStorageSignature(parsed.searchParams)) return raw
+    if (/\/avatars\//i.test(parsed.pathname) && !NON_IMAGE_MEDIA_EXTENSIONS.test(parsed.pathname)) {
+      const limited = withPublicImageProcess(raw, 'avatar')
+      if (limited !== raw) return limited
+    }
+    if (!/\/avatars\//i.test(parsed.pathname)) return raw
+    if (NON_IMAGE_MEDIA_EXTENSIONS.test(parsed.pathname)) return raw
+    if (parsed.searchParams.has('x-oss-process')) return raw
+    parsed.searchParams.set('x-oss-process', PUBLIC_IMAGE_PROCESSES.avatar)
+    return absolute ? parsed.toString() : `${parsed.pathname}${parsed.search}${parsed.hash}`
+  } catch {
+    return raw
+  }
 }
 
 /**

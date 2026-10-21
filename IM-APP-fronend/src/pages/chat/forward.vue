@@ -9,10 +9,16 @@ import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
 import { useForwardStore } from '@/stores/forward'
 import type { ContactTagItem, Conversation, FriendForwardPlan } from '@/types'
-import { snapshotFromMessage, mergeVideoSnapshotFromChatContent, patchVideoSnapshotCover, videoSnapshotNeedsRemoteCover } from '@/utils/forwardSnapshot'
+import {
+  mergeVideoSnapshotFromChatContent,
+  patchVideoSnapshotCover,
+  snapshotFromMessage,
+  videoSnapshotNeedsRemoteCover,
+  withForwardImageOriginal,
+} from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
 import { businessUserIdFromIM, ensureIMLogin, imUserId, uploadLocalImageForForward, extractVideoCoverForForward } from '@/utils/openim'
-import { captureVideoPosterFromUrl, parseVideoMeta } from '@/utils/chatMedia'
+import { captureVideoPosterFromUrl, listThumbnailUrl, parseVideoMeta } from '@/utils/chatMedia'
 import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
@@ -371,6 +377,14 @@ async function buildSources() {
 
       if (chatMsg?.type === 'video') {
         snapshot = mergeVideoSnapshotFromChatContent(snapshot, chatMsg.content)
+      }
+
+      if (chatMsg?.type === 'image') {
+        snapshot = withForwardImageOriginal(
+          snapshot,
+          chatMsg.sourceUrl || chatMsg.content || '',
+          listThumbnailUrl(chatMsg.content || chatMsg.sourceUrl || ''),
+        )
       }
 
       if (videoSnapshotNeedsRemoteCover(snapshot)) {
