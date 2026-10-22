@@ -1029,6 +1029,24 @@ function isDatabaseClosedError(err: unknown): boolean {
 }
 
 /**
+ * 本地库写不进去。除了「库被关掉」，SQLite 写不了 journal/WAL、文件保护生效、
+ * 目录不可写时都报 `attempt to write a readonly database`——线上实测这一类才是
+ * 主流（10005 + InsertMessage failed），所以两句话都要认，否则重开流程救不回来。
+ */
+export function isLocalDatabaseWriteError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err || '')
+  return (
+    isDatabaseClosedError(err) ||
+    /readonly database/i.test(text) ||
+    /disk i\/o error/i.test(text) ||
+    (/insertmessage/i.test(text) && /failed/i.test(text))
+  )
+}
+
+/** 本地库写失败时给用户的可行动提示，别再弹干巴巴的「发送失败」。 */
+const LOCAL_WRITE_FAILURE_MESSAGE = '本地存储写入失败，请检查手机存储空间后重试'
+
+/**
  * 新装的壳或刚重连时，本地库还没初始化完就拉历史，
  * SDK 会把 10004 包在 10005 里抛出来。先退避再重登，避免把原文弹给用户。
  */
@@ -1323,7 +1341,7 @@ async function sendCreatedMessage(
       }
       if (epoch !== loginEpoch) break
       // 库已经关了，原地重试还是 GetGroups database is closed。先重开再发这一条。
-      if (!reopenedDatabase && attempt < attempts - 1 && isDatabaseClosedError(err)) {
+      if (!reopenedDatabase && attempt < attempts - 1 && isLocalDatabaseWriteError(err)) {
         reopenedDatabase = true
         try {
           await reopenClosedSdkDatabase()
@@ -1350,6 +1368,8 @@ async function sendCreatedMessage(
     if (isApp()) reportAppNativeSendFailure(params, message.clientMsgID, failure)
     else reportTargetSendFailure(target, message, 'send', 'send_failed', failure.message)
   }
+  // 上报保留原始错误便于排查；给用户看的换成可行动提示，别让他对着「发送失败」发呆。
+  if (isLocalDatabaseWriteError(failure)) failure.message = LOCAL_WRITE_FAILURE_MESSAGE
   throw failure
 }
 

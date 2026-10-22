@@ -42,6 +42,7 @@ import {
   searchLocalMessages,
   findLocalMessage,
   toConversation,
+  isLocalDatabaseWriteError,
 } from '@/utils/openim'
 import { groupRetention } from '@/utils/groupRetention'
 
@@ -385,5 +386,33 @@ describe('native message sending with read-only bridge results', () => {
     expect(mocks.asyncApi.mock.calls[1][0]).toBe(IMMethods.SendMessage)
     expect(mocks.asyncApi.mock.calls[1][2].message).toBe(original)
     expect(mocks.sendMessage).not.toHaveBeenCalled()
+  })
+})
+
+describe('isLocalDatabaseWriteError（本地库写不进去，需重开库后重发）', () => {
+  it('认得线上实际报的 readonly database 原文', () => {
+    const real =
+      'error *errors.withStack not implement CodeError: InsertMessage failed: attempt to write a readonly database（sendMessage errCode=10005）'
+    expect(isLocalDatabaseWriteError(new Error(real))).toBe(true)
+    expect(isLocalDatabaseWriteError(real)).toBe(true)
+  })
+
+  // 单独锁 readonly：线上原文同时含 InsertMessage，只测它会漏掉这条规则。
+  it('只报 readonly 也认（不依赖 InsertMessage 关键词）', () => {
+    expect(isLocalDatabaseWriteError(new Error('attempt to write a readonly database'))).toBe(true)
+    expect(isLocalDatabaseWriteError(new Error('disk I/O error'))).toBe(true)
+  })
+
+  it('认得库被关掉的 database is closed', () => {
+    expect(isLocalDatabaseWriteError(new Error('GetGroups failed: database is closed'))).toBe(true)
+  })
+
+  it('不把断线、好友关系等无关错误当成库问题', () => {
+    expect(
+      isLocalDatabaseWriteError(new Error('network error, ws not connected (sendMessageNotOss errCode=10000)')),
+    ).toBe(false)
+    expect(isLocalDatabaseWriteError(new Error('5001 not_friend'))).toBe(false)
+    expect(isLocalDatabaseWriteError(undefined)).toBe(false)
+    expect(isLocalDatabaseWriteError(new Error('发送超时'))).toBe(false)
   })
 })
