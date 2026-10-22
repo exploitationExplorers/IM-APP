@@ -279,6 +279,8 @@ onMounted(async () => {
 
 .classic-content {
   height: calc(100% - 55px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .classic-content :deep(.el-aside) {
@@ -326,12 +328,18 @@ onMounted(async () => {
 .classic-main {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .classic-main :deep(.el-main) {
   box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
   padding: 10px 12px;
   overflow-x: hidden;
+  overflow-y: auto;
   background-color: var(--el-bg-color-page);
 }
 

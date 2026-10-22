@@ -674,13 +674,17 @@ watch(activeDetailTab, () => {
 </template>
 
 <style scoped lang="scss">
-.table-box,
-.table-main {
+.table-box {
   display: flex;
-  flex: 1;
   flex-direction: column;
   width: 100%;
-  height: 100%;
+  min-height: 100%;
+}
+
+.table-main {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
 }
 
 .table-search {

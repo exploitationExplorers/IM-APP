@@ -131,6 +131,31 @@ let loginPromise: Promise<string> | null = null
 /** 退出登录时递增，作废进行中的 IM 登录，避免旧账号登录完成后把会话写回来 */
 let loginEpoch = 0
 let boundAccessToken = ''
+/** Logout/Login 串行执行。并发 Logout 会把 SQLite 关掉，发送里的 GetGroups 就报 database is closed */
+let sessionChain: Promise<void> = Promise.resolve()
+let sessionDepth = 0
+/** 本地库已经关掉时，下一次登录不能走「状态仍是已登录就跳过 Login」 */
+let forceNextLogin = false
+/** 同一用户进程内只 InitSDK 一次。重复 InitSDK 会把正在用的本地库关掉 */
+let appSdkReadyUserId = ''
+let closedDbRecovery: Promise<void> | null = null
+
+function enqueueSession<T>(task: () => Promise<T>): Promise<T> {
+  if (sessionDepth > 0) return task()
+  const run = sessionChain.then(async () => {
+    sessionDepth += 1
+    try {
+      return await task()
+    } finally {
+      sessionDepth -= 1
+    }
+  })
+  sessionChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
 
 /**
  * SDK 是否已真正连上 OpenIM 服务端。
@@ -707,29 +732,36 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
   await synced
 }
 
+async function initAppSdk(imToken: IMTokenResult): Promise<void> {
+  if (!isApp()) return
+  if (appSdkReadyUserId === imToken.userId) return
+  const dataDir = await getAppSdkDataDir(imToken.userId)
+  await imCall(IMMethods.InitSDK, {
+    platformID: imToken.platform,
+    apiAddr: imToken.apiAddr,
+    wsAddr: imToken.wsAddr,
+    dataDir,
+    logLevel: APP_SDK_LOG_LEVEL,
+    isLogStandardOutput: APP_SDK_LOG_STDOUT,
+  })
+  appSdkReadyUserId = imToken.userId
+}
+
 async function doLogin(): Promise<string> {
   const epoch = loginEpoch
+  const force = forceNextLogin
+  forceNextLogin = false
   const imToken: IMTokenResult = await fetchIMToken(currentPlatformId())
   if (epoch !== loginEpoch) {
     throw new Error('已退出登录')
   }
 
-  if (isApp()) {
-    const dataDir = await getAppSdkDataDir(imToken.userId)
-    await imCall(IMMethods.InitSDK, {
-      platformID: imToken.platform,
-      apiAddr: imToken.apiAddr,
-      wsAddr: imToken.wsAddr,
-      dataDir,
-      logLevel: APP_SDK_LOG_LEVEL,
-      isLogStandardOutput: APP_SDK_LOG_STDOUT,
-    })
-  }
+  await initAppSdk(imToken)
 
   const status = await getSdkLoginStatus()
   if (status === LoginStatus.Logged) {
     const loggedUserId = await getSdkLoginUserId()
-    if (loggedUserId === imToken.userId) {
+    if (!force && loggedUserId === imToken.userId) {
       // 已经登录就先读本地库，进群不用干等本轮同步。
       // 同步结束会走 OnSyncServerFinish，再把离线期间的新消息补进当前房间。
       if (epoch !== loginEpoch) {
@@ -737,6 +769,7 @@ async function doLogin(): Promise<string> {
       }
       return rememberLogin(imToken)
     }
+    // 换号，或库已关闭但状态仍是已登录：先 Logout，Login 才会重新打开 SQLite。
     await imCall(IMMethods.Logout).catch(() => undefined)
   }
 
@@ -748,26 +781,43 @@ async function doLogin(): Promise<string> {
   return rememberLogin(imToken)
 }
 
-/** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
-export async function ensureIMLogin(): Promise<string> {
-  if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
+/**
+ * 同一业务账号、IM token 未过期、SDK 还没登出时直接复用。
+ * 断线不能在这里 Logout：Logout 会关 SQLite，紧接着的发送会在 GetGroups 上报 database is closed。
+ */
+async function reuseLiveSession(): Promise<string | null> {
   const businessToken = getToken()
-  if (
-    imUserId.value &&
-    Date.now() < tokenExpireAt &&
-    connected &&
-    businessToken &&
-    businessToken === boundAccessToken
-  ) {
-    const logged = await getSdkLoginUserId()
-    if (!logged || logged === imUserId.value) {
-      return imUserId.value
+  const sameAccount = !!imUserId.value && !!businessToken && businessToken === boundAccessToken
+  if (!sameAccount || Date.now() >= tokenExpireAt) return null
+  const logged = await getSdkLoginUserId()
+  if (logged && logged !== imUserId.value) return null
+  if (connected) return imUserId.value
+  try {
+    const status = await imCall<LoginStatus>(IMMethods.GetLoginStatus)
+    if (status !== LoginStatus.Logout) return imUserId.value
+  } catch {
+    // 状态接口失败不代表库已关闭，这里 Logout 会把还开着的库关掉。
+    return imUserId.value
+  }
+  return null
+}
+
+async function reloginSession(): Promise<string> {
+  if (!forceNextLogin) {
+    const reused = await reuseLiveSession()
+    if (reused) return reused
+  }
+  const businessToken = getToken()
+  if (imUserId.value || connected || boundAccessToken) {
+    const switchingAccount = !businessToken || (boundAccessToken !== '' && businessToken !== boundAccessToken)
+    if (switchingAccount) {
+      invalidatePendingLogin()
+      appSdkReadyUserId = ''
+    } else {
+      // 同一账号换 IM token，不要增加 loginEpoch，进行中的发送还要重试。
+      resetLoginCache()
     }
-    resetLoginCache()
-  } else if (imUserId.value || connected || boundAccessToken) {
-    invalidatePendingLogin()
     await forceSdkLogout().catch(() => undefined)
-    resetLoginCache()
   }
   const epoch = loginEpoch
   if (!loginPromise) {
@@ -777,16 +827,42 @@ export async function ensureIMLogin(): Promise<string> {
   }
   try {
     const userId = await loginPromise
-    if (epoch !== loginEpoch) {
-      return ensureIMLogin()
-    }
+    if (epoch !== loginEpoch) return ensureIMLogin()
     return userId
   } catch (e) {
-    if (epoch !== loginEpoch) {
-      return ensureIMLogin()
-    }
+    if (epoch !== loginEpoch) return ensureIMLogin()
     throw e
   }
+}
+
+/**
+ * 发送打到已关闭的本地库时，Logout 再 Login 重新打开。
+ * 不增加 loginEpoch，同一条消息可以接着发。
+ */
+function reopenClosedSdkDatabase(): Promise<void> {
+  if (!closedDbRecovery) {
+    const epoch = loginEpoch
+    closedDbRecovery = enqueueSession(async () => {
+      if (epoch !== loginEpoch) return
+      if (loginPromise) await loginPromise.catch(() => undefined)
+      if (epoch !== loginEpoch) return
+      forceNextLogin = true
+      await reloginSession()
+    }).finally(() => {
+      closedDbRecovery = null
+    })
+  }
+  return closedDbRecovery
+}
+
+/** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
+export async function ensureIMLogin(): Promise<string> {
+  if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
+  if (!forceNextLogin) {
+    const reused = await reuseLiveSession()
+    if (reused) return reused
+  }
+  return enqueueSession(() => reloginSession())
 }
 
 /**
@@ -841,15 +917,18 @@ export async function initOpenIM(): Promise<void> {
 }
 
 export async function logoutOpenIM(): Promise<void> {
-  invalidatePendingLogin()
-  // 刷新后内存会话为空，但 H5 WASM 仍可能是 Logged；必须 Logout，
-  // 否则下次 doLogin 走 Logged 捷径、本地库不触发完整同步。
-  try {
-    await withTimeout(forceSdkLogout(), 3000)
-  } catch {
-    // 本地必须清掉，避免下一个账号读到上一个号的会话库
-  }
-  resetLoginCache()
+  await enqueueSession(async () => {
+    invalidatePendingLogin()
+    appSdkReadyUserId = ''
+    // 刷新后内存会话为空，但 H5 WASM 仍可能是 Logged；必须 Logout，
+    // 否则下次 doLogin 走 Logged 捷径、本地库不触发完整同步。
+    try {
+      await withTimeout(forceSdkLogout(), 3000)
+    } catch {
+      // 本地必须清掉，避免下一个账号读到上一个号的会话库
+    }
+    resetLoginCache()
+  })
 }
 
 /** 手动重连：重新取 token 再登录，用于「重新选线」 */
@@ -885,7 +964,13 @@ function parseEventData<T>(payload: Record<string, unknown>): T {
 // ---------------------------------------------------------------------------
 
 export async function getConversationList(offset = 0, count = 200): Promise<ConversationItem[]> {
-  return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+  try {
+    return await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+  } catch (e) {
+    if (!isDatabaseClosedError(e)) throw e
+    await reopenClosedSdkDatabase()
+    return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+  }
 }
 
 /**
@@ -937,6 +1022,12 @@ function isSdkResourceNotReady(err: unknown): boolean {
   return text.includes('10004') || text.includes('10005')
 }
 
+/** OpenIM 把已关闭的 SQLite 包成 errCode=10005，原文里带 database is closed */
+function isDatabaseClosedError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err || '')
+  return /database is closed/i.test(text)
+}
+
 /**
  * 新装的壳或刚重连时，本地库还没初始化完就拉历史，
  * SDK 会把 10004 包在 10005 里抛出来。先退避再重登，避免把原文弹给用户。
@@ -961,8 +1052,19 @@ async function callHistoryWhenReady(
       return await run()
     } catch (e) {
       lastErr = e
-      if (!isSdkResourceNotReady(e) || attempt === 3) break
+      if (isDatabaseClosedError(e) || !isSdkResourceNotReady(e) || attempt === 3) break
       await new Promise((r) => setTimeout(r, 300 * 2 ** attempt))
+    }
+  }
+  if (isDatabaseClosedError(lastErr)) {
+    try {
+      await reopenClosedSdkDatabase()
+      return await run()
+    } catch (e) {
+      if (isDatabaseClosedError(e) || isSdkResourceNotReady(e)) {
+        throw new Error('聊天记录还在同步，请稍后再试')
+      }
+      throw e
     }
   }
   if (!isSdkResourceNotReady(lastErr)) throw lastErr
@@ -1200,6 +1302,7 @@ async function sendCreatedMessage(
   const attempts = (options.timeoutMs ?? 0) >= 60000 ? 2 : 4
   const epoch = loginEpoch
   let lastErr: unknown
+  let reopenedDatabase = false
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (epoch !== loginEpoch) break
     try {
@@ -1217,6 +1320,19 @@ async function sendCreatedMessage(
       // 超时/断线后同一条重试，SDK 常回 10204：对面其实已收到，按成功处理
       if (isDuplicateSendError(err)) {
         return { ...message, status: MessageStatus.Succeed }
+      }
+      if (epoch !== loginEpoch) break
+      // 库已经关了，原地重试还是 GetGroups database is closed。先重开再发这一条。
+      if (!reopenedDatabase && attempt < attempts - 1 && isDatabaseClosedError(err)) {
+        reopenedDatabase = true
+        try {
+          await reopenClosedSdkDatabase()
+        } catch (recoverErr) {
+          lastErr = recoverErr instanceof Error ? recoverErr : lastErr
+          break
+        }
+        if (epoch !== loginEpoch) break
+        continue
       }
       if (code !== undefined && DISCONNECT_CODES.has(code)) connected = false
       const canRetry =
