@@ -4,7 +4,7 @@ import { createImagePreviewSession } from '@/utils/imagePreviewSession'
 import { previewCacheOwner } from '@/utils/previewImageCache'
 import type { PlusGallerySave } from '@/types/plus-io'
 import { downloadRemoteFile } from '@/utils/chatMediaDownload'
-import { playableMediaUrl, toAbsFileUrl } from '@/utils/chatMediaUrl'
+import { originalImageUrl, playableMediaUrl, toAbsFileUrl } from '@/utils/chatMediaUrl'
 import { parseVideoMeta } from '@/utils/chatMediaVideo'
 
 function isAndroidApp(): boolean {
@@ -102,7 +102,9 @@ export async function saveVideoToDevice(content: string): Promise<void> {
  * H5：优先 blob 下载，CORS 失败再直链。
  */
 export async function saveImageToDevice(url: string): Promise<void> {
-  const src = playableMediaUrl((url || '').trim())
+  // 保存必须回到原图：预览/列表 URL 上的处理参数（x-oss-process、/object/ 的
+  // format=webp）产出的是 WebP，iOS 相册拒存（PHPhotosErrorDomain 3302）。
+  const src = playableMediaUrl(originalImageUrl((url || '').trim()))
   if (!src) throw new Error('图片地址不存在')
 
   // #ifdef APP-PLUS

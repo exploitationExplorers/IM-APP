@@ -4,6 +4,7 @@ const config = vi.hoisted(() => ({ apiBaseUrl: '/api/v1' }))
 vi.mock('@/config', () => ({ APP_CONFIG: config }))
 
 import { listThumbnailUrl, previewThumbnailUrl } from '@/utils/chatMedia'
+import { originalImageUrl } from '@/utils/chatMediaUrl'
 import { mediaCacheIdentity } from '@/utils/mediaCacheIdentity'
 
 const signedChatUrls = [
@@ -257,5 +258,33 @@ describe('listThumbnailUrl', () => {
     const b =
       'https://bucket.oss-cn-hongkong.aliyuncs.com/oss-test/chat/a.jpg?x-oss-credential=new&x-oss-signature=b'
     expect(mediaCacheIdentity(a)).toBe(mediaCacheIdentity(b))
+  })
+})
+
+describe('originalImageUrl（保存用原图，iOS 相册拒存 WebP）', () => {
+  it('剥掉 CDN 直链上的 x-oss-process，保留其它参数', () => {
+    const url =
+      'https://oss-chat.whs188.xin/im-app-production/chat/managed-v1/a.jpg?x-oss-process=image/resize,c_1280,h_1280,format,webp&v=2'
+    expect(originalImageUrl(url)).toBe(
+      'https://oss-chat.whs188.xin/im-app-production/chat/managed-v1/a.jpg?v=2',
+    )
+  })
+
+  it('剥掉 /object/ 变体上的 type/width/height/format', () => {
+    expect(
+      originalImageUrl('/object/2026/a.jpg?type=image&width=960&height=960&format=webp'),
+    ).toBe('/object/2026/a.jpg')
+  })
+
+  it('签名地址字节级不动，哪怕带了处理参数样式', () => {
+    const url =
+      'https://bucket.oss-cn-hongkong.aliyuncs.com/oss-test/chat/a.jpg?OSSAccessKeyId=fake&Signature=a%2Bb&Expires=1'
+    expect(originalImageUrl(url)).toBe(url)
+  })
+
+  it('没有处理参数的地址原样返回', () => {
+    const url = 'https://oss-chat.whs188.xin/im-app-production/chat/managed-v1/a.jpg'
+    expect(originalImageUrl(url)).toBe(url)
+    expect(originalImageUrl('')).toBe('')
   })
 })

@@ -284,6 +284,37 @@ export function previewThumbnailUrl(url: string): string {
 }
 
 /**
+ * 保存用的原图地址。预览/列表 URL 上的实时处理参数只服务于显示：
+ * x-oss-process 出来的结果和 /object/ 的 format=webp 都是 WebP，
+ * iOS 相册拒存 WebP（PHPhotosErrorDomain 3302），保存必须回到原图。
+ * 签名地址本身没有处理参数，保持字节级不变。
+ */
+export function originalImageUrl(url: string): string {
+  const raw = (url || '').trim()
+  if (!raw) return raw
+  const hasProcess = /[?&]x-oss-process=/.test(raw)
+  const isObjectVariant = /\/object\//.test(raw) && /[?&](type|width|height|format)=/.test(raw)
+  if (!hasProcess && !isObjectVariant) return raw
+  let parsed: URL
+  try {
+    parsed = new URL(raw, 'https://relative.invalid')
+  } catch {
+    return raw
+  }
+  if (hasStorageSignature(parsed.searchParams)) return raw
+  parsed.searchParams.delete('x-oss-process')
+  if (parsed.pathname.includes('/object/')) {
+    parsed.searchParams.delete('type')
+    parsed.searchParams.delete('width')
+    parsed.searchParams.delete('height')
+    parsed.searchParams.delete('format')
+  }
+  const out = parsed.toString()
+  const base = 'https://relative.invalid'
+  return out.startsWith(`${base}/`) ? out.slice(base.length) : out
+}
+
+/**
  * 高频头像使用 128px WebP；签名 OSS 地址不能追加处理参数，必须保持字节级不变。
  * 没有签名的公开业务桶头像可以直接让 OSS 实时缩图。
  */
