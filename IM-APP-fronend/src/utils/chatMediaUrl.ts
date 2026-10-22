@@ -294,7 +294,9 @@ export function originalImageUrl(url: string): string {
   if (!raw) return raw
   const hasProcess = /[?&]x-oss-process=/.test(raw)
   const isObjectVariant = /\/object\//.test(raw) && /[?&](type|width|height|format)=/.test(raw)
-  if (!hasProcess && !isObjectVariant) return raw
+  // 预览走 oss-media?variant=preview-mobile，响应是 WebP。去掉 variant 才是原图。
+  const isOssMediaVariant = raw.includes(OSS_MEDIA_PATH) && /[?&]variant=/.test(raw)
+  if (!hasProcess && !isObjectVariant && !isOssMediaVariant) return raw
   let parsed: URL
   try {
     parsed = new URL(raw, 'https://relative.invalid')
@@ -303,6 +305,7 @@ export function originalImageUrl(url: string): string {
   }
   if (hasStorageSignature(parsed.searchParams)) return raw
   parsed.searchParams.delete('x-oss-process')
+  parsed.searchParams.delete('variant')
   if (parsed.pathname.includes('/object/')) {
     parsed.searchParams.delete('type')
     parsed.searchParams.delete('width')

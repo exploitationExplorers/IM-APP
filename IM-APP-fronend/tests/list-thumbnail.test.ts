@@ -287,4 +287,12 @@ describe('originalImageUrl（保存用原图，iOS 相册拒存 WebP）', () => 
     expect(originalImageUrl(url)).toBe(url)
     expect(originalImageUrl('')).toBe('')
   })
+
+  it('去掉 oss-media 的预览 variant，避免把 WebP 交给 iOS 相册', () => {
+    const url =
+      'https://oss-business.whs188.xin/api/v1/public/oss-media?key=im-app-production%2Fchat%2Fa.jpg&token=abc&variant=preview-mobile'
+    expect(originalImageUrl(url)).toBe(
+      'https://oss-business.whs188.xin/api/v1/public/oss-media?key=im-app-production%2Fchat%2Fa.jpg&token=abc',
+    )
+  })
 })

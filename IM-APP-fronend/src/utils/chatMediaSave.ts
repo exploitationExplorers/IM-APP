@@ -1,5 +1,5 @@
 import { peekMediaCache } from '@/utils/mediaCache'
-import { isAndroid, isAppPlatform } from '@/utils/platform'
+import { isAndroid, isAppPlatform, isIOS } from '@/utils/platform'
 import { createImagePreviewSession } from '@/utils/imagePreviewSession'
 import { previewCacheOwner } from '@/utils/previewImageCache'
 import type { PlusGallerySave } from '@/types/plus-io'
@@ -59,6 +59,164 @@ function isAlbumPermissionError(msg: string): boolean {
   return /auth|permission|deny|authorize|no permission|权限/i.test(msg || '')
 }
 
+function albumSaveError(msg: string): Error {
+  if (isAlbumPermissionError(msg)) return new Error('请在系统设置中允许相册权限')
+  if (/3302|PHPhotosError/i.test(msg)) return new Error('无法写入相册，请稍后重试')
+  return new Error(msg || '保存图片失败')
+}
+
+function zipErrorMessage(err: unknown): string {
+  if (typeof err === 'string') return err
+  if (err && typeof err === 'object' && 'message' in err) {
+    return String((err as { message?: string }).message || '')
+  }
+  return ''
+}
+
+/**
+ * 写到 _doc/xxx.jpg 再交给相册。
+ * uni.compressImage 的临时路径在 iOS 上经常是 /var 或无后缀文件，
+ * saveImageToPhotosAlbum 会把它报成 PHPhotosError 3302。
+ */
+function docRelativePath(path: string, fallback: string): string {
+  const target = (path || '').trim()
+  return /^_(doc|documents|downloads)\//.test(target) ? target : fallback
+}
+
+function zipToDocJpeg(src: string, dst: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const zip = (
+      plus as
+        | {
+            zip?: {
+              compressImage?: (
+                options: { src: string; dst: string; overwrite?: boolean; format?: string; quality?: number },
+                success: (event?: { target?: string }) => void,
+                fail?: (err: unknown) => void,
+              ) => void
+            }
+          }
+        | undefined
+    )?.zip
+    if (typeof zip?.compressImage !== 'function') {
+      reject(new Error('保存图片失败'))
+      return
+    }
+    zip.compressImage(
+      { src, dst, overwrite: true, format: 'jpg', quality: 92 },
+      (event) => resolve(docRelativePath(event?.target || '', dst)),
+      (err) => reject(new Error(zipErrorMessage(err) || '保存图片失败')),
+    )
+  })
+}
+
+function bitmapToDocJpeg(src: string, dst: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const BitmapCtor = plus?.nativeObj?.Bitmap
+    if (!BitmapCtor) {
+      reject(new Error('保存图片失败'))
+      return
+    }
+    const bitmap = new BitmapCtor(`album_${Date.now()}`) as PlusNativeObjBitmap & {
+      load: (path: string, success: () => void, fail: (err: unknown) => void) => void
+    }
+    const recycle = () => {
+      try {
+        bitmap.clear()
+      } catch {
+        /* 位图已经释放 */
+      }
+    }
+    bitmap.load(
+      src,
+      () => {
+        bitmap.save(
+          dst,
+          { overwrite: true, format: 'jpg', quality: 92 },
+          () => {
+            recycle()
+            resolve(dst)
+          },
+          (err) => {
+            recycle()
+            reject(new Error(zipErrorMessage(err) || '保存图片失败'))
+          },
+        )
+      },
+      (err) => {
+        recycle()
+        reject(new Error(zipErrorMessage(err) || '保存图片失败'))
+      },
+    )
+  })
+}
+
+async function writeIosAlbumJpeg(localPath: string): Promise<string> {
+  const dst = `_doc/album_${Date.now()}.jpg`
+  const sources = [localPath]
+  const stripped = localPath.replace(/^file:\/\//, '')
+  if (stripped && stripped !== localPath) sources.push(stripped)
+  let lastErr: unknown
+  for (const src of sources) {
+    try {
+      return await zipToDocJpeg(src, dst)
+    } catch (err) {
+      lastErr = err
+    }
+    try {
+      return await bitmapToDocJpeg(src, dst)
+    } catch (err) {
+      lastErr = err
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('保存图片失败')
+}
+
+async function saveIosAlbumJpeg(localPath: string): Promise<void> {
+  const dst = await writeIosAlbumJpeg(localPath)
+  try {
+    await saveLocalImageViaGallery(dst)
+  } catch (err) {
+    try {
+      await saveViaPhotosAlbum(dst)
+    } catch (fallbackErr) {
+      const msg = (fallbackErr as Error)?.message || (err as Error)?.message || ''
+      throw albumSaveError(msg)
+    }
+  }
+}
+
+function saveViaPhotosAlbum(filePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    uni.saveImageToPhotosAlbum({
+      filePath,
+      success: () => resolve(),
+      fail: (err) => reject(new Error(err.errMsg || '保存图片失败')),
+    })
+  })
+}
+
+async function saveAppImageFile(filePath: string): Promise<void> {
+  const absolute = toAbsFileUrl(filePath).replace(/^file:\/\//, '')
+  const paths = absolute && absolute !== filePath ? [filePath, absolute] : [filePath]
+  let last = ''
+  for (const path of paths) {
+    try {
+      await saveViaPhotosAlbum(path)
+      return
+    } catch (err) {
+      last = (err as Error)?.message || last
+      try {
+        await saveLocalImageViaGallery(path)
+        return
+      } catch (fallbackErr) {
+        last = (fallbackErr as Error)?.message || last
+      }
+    }
+  }
+  throw albumSaveError(last)
+}
+
 /** App 保存到系统相册；H5 使用浏览器下载，供同一长按菜单复用。 */
 export async function saveVideoToDevice(content: string): Promise<void> {
   const { url } = parseVideoMeta(content)
@@ -110,23 +268,12 @@ export async function saveImageToDevice(url: string): Promise<void> {
   // #ifdef APP-PLUS
   await requestAndroidSaveAlbumPermission()
   const filePath = /^https?:\/\//i.test(src) ? await downloadRemoteFile(src) : src
-  try {
-    await new Promise<void>((resolve, reject) => {
-      uni.saveImageToPhotosAlbum({
-        filePath,
-        success: () => resolve(),
-        fail: (err) => reject(new Error(err.errMsg || '保存图片失败')),
-      })
-    })
-  } catch (err) {
-    const msg = (err as Error)?.message || ''
-    try {
-      await saveLocalImageViaGallery(filePath)
-    } catch (fallbackErr) {
-      const denied = isAlbumPermissionError(msg) || isAlbumPermissionError((fallbackErr as Error)?.message || '')
-      throw new Error(denied ? '请在系统设置中允许相册权限' : msg || '保存图片失败')
-    }
+  // iOS 只收 _doc 下带 .jpg 后缀的文件。临时路径和无后缀 WebP 都会 3302。
+  if (isIOS()) {
+    await saveIosAlbumJpeg(filePath)
+    return
   }
+  await saveAppImageFile(filePath)
   return
   // #endif
 
