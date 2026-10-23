@@ -392,9 +392,19 @@ function plainNativeRecord(obj: Record<string, unknown>): Record<string, unknown
 }
 
 function copyNativeCreatedMessage(raw: unknown): MessageItem {
-  const obj = unwrapRawMessage(raw)
+  let obj = unwrapRawMessage(raw)
+  // 部分基座把创建结果再包一层 message / Message
+  if (obj && !pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])) {
+    const nested = unwrapRawMessage(obj.message ?? obj.Message)
+    if (nested) obj = nested
+  }
   const clientMsgID = obj && pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
-  const contentType = Number(obj?.contentType ?? obj?.ContentType ?? 0)
+  let contentType = Number(obj?.contentType ?? obj?.ContentType ?? 0)
+  // 个别基座创建引用消息只带回 quoteElem，不带 contentType
+  if ((!Number.isFinite(contentType) || contentType <= 0) && obj) {
+    if (obj.quoteElem != null || obj.QuoteElem != null) contentType = MessageType.QuoteMessage
+    else if (obj.textElem != null || obj.TextElem != null) contentType = MessageType.TextMessage
+  }
   if (!obj || !clientMsgID || !Number.isFinite(contentType) || contentType <= 0) {
     throw new Error('原生 SDK 创建消息结果无效')
   }
@@ -1160,11 +1170,23 @@ export async function sendQuoteMessage(
   const protectedQuote = await protectReferencedMedia(quote)
   // SDK 的 createQuoteMessage 要求 message 是被引用消息的 JSON 字符串（QuoteMsgParams.message: string），
   // 直接传对象会被 JSON.parse 隐式转成 "[object Object]" 而报 errCode=10006。
-  const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
-    text,
-    message: JSON.stringify(protectedQuote),
-  })
-  return sendCreatedMessage(target, message)
+  try {
+    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
+      text,
+      message: JSON.stringify(protectedQuote),
+    })
+    return sendCreatedMessage(target, message)
+  } catch (e) {
+    // 媒体保护改写后个别基座创建失败：回退原消息再试（纯文本引用最常见）
+    const msg = (e as Error)?.message || ''
+    if (!msg.includes('创建消息结果无效')) throw e
+    if (protectedQuote === quote) throw e
+    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
+      text,
+      message: JSON.stringify(cloneMessageForNativeQuote(quote)),
+    })
+    return sendCreatedMessage(target, message)
+  }
 }
 
 export async function sendForwardMessage(target: IMTarget, source: MessageItem): Promise<MessageItem> {
@@ -1179,9 +1201,21 @@ export async function sendForwardMessage(target: IMTarget, source: MessageItem):
   })
 }
 
+/** 原生 CreateQuoteMessage 吃的是原消息 JSON；勿改写 content/textElem 形态 */
+function cloneMessageForNativeQuote(source: MessageItem): MessageItem {
+  try {
+    return JSON.parse(JSON.stringify(source)) as MessageItem
+  } catch {
+    return { ...source }
+  }
+}
+
 async function protectReferencedMedia(source: MessageItem): Promise<MessageItem> {
   const snapshot = snapshotFromMessage(source)
-  if (!mayContainForwardMedia(snapshot.contentType)) return withForwardSnapshot(source, snapshot)
+  // 纯文本（101）等没有远程媒体：不能走 withForwardSnapshot。
+  // 它会把 content 改成 JSON 字符串并重写 *Elem，部分 App 基座 CreateQuoteMessage 会直接返回空结果，
+  // 表现为「原生 SDK 创建消息结果无效」（引用文字之前好好的就是被这步改坏的）。
+  if (!mayContainForwardMedia(snapshot.contentType)) return cloneMessageForNativeQuote(source)
   const protectedSnapshot = await preserveForwardMedia(snapshot)
   if (protectedSnapshot.contentType !== snapshot.contentType) throw new Error('转发媒体保存结果无效')
   return withForwardSnapshot(source, protectedSnapshot)
@@ -3602,36 +3636,57 @@ export async function searchLocalMessages(params: {
 /** 对标微信：进搜索页后台预热本地库；搜索本身不阻塞等预热 */
 const localHistoryWarm = new Map<string, Promise<MessageItem[]>>()
 const localHistoryReady = new Map<string, MessageItem[]>()
+/** 上次预热已拉到会话尽头（条数 < 目标），避免短会话反复重拉 */
+const localHistoryExhausted = new Set<string>()
 
 /**
- * 把指定会话近期历史拉进本地库（后台用）。群搜场景默认拉 500 条足够覆盖百级会话。
+ * 与群可见保留量对齐（服务端 GroupRetentionCount≈3000）。
+ * 曾经默认只预热 500 条：活跃群大约一两小时，客户就会反馈「早的搜不到」。
+ */
+const SEARCH_HISTORY_CAP = 3000
+/** 首屏 / 每一屏期望命中数：先出最近的，其余靠上滑加载更多 */
+const SEARCH_RESULT_PAGE_SIZE = 30
+/** 每次加载更多最多再扫多少条历史（按消息条数，不是命中数） */
+const SEARCH_HISTORY_SCAN_BATCH = 250
+
+/**
+ * 把指定会话历史拉进本地库（后台用）。默认拉满保留上限，供本地索引与补扫。
+ * 已有缓存且条数够用 / 已确认拉尽则直接复用；否则加深，避免卡在旧的 500 条上限。
  */
 export function ensureLocalConversationHistory(
   conversationID: string,
-  maxCount = 500,
+  maxCount = SEARCH_HISTORY_CAP,
 ): Promise<MessageItem[]> {
   if (!conversationID) return Promise.resolve([])
+  const target = Math.max(1, Math.trunc(maxCount) || SEARCH_HISTORY_CAP)
   const cached = localHistoryReady.get(conversationID)
-  if (cached) return Promise.resolve(cached)
+  if (cached && (cached.length >= target || localHistoryExhausted.has(conversationID))) {
+    return Promise.resolve(cached)
+  }
   const existing = localHistoryWarm.get(conversationID)
   if (existing) return existing
   const task = (async () => {
     // 最多等 800ms：有同步就蹭一下，没有也立刻拉本地/历史，避免搜索链路空等 8 秒
     await waitForSync(800)
     try {
-      return await collectHistoryMessages(conversationID, maxCount)
+      return await collectHistoryMessages(conversationID, target)
     } catch {
-      return collectHistoryMessages(conversationID, maxCount).catch(() => [] as MessageItem[])
+      return collectHistoryMessages(conversationID, target).catch(() => [] as MessageItem[])
     }
   })()
   localHistoryWarm.set(conversationID, task)
   void task.then(
     (messages) => {
       localHistoryWarm.delete(conversationID)
+      if (messages.length < target) localHistoryExhausted.add(conversationID)
+      else localHistoryExhausted.delete(conversationID)
       if (messages.length) {
         localHistoryReady.set(conversationID, messages)
         setTimeout(() => {
-          if (localHistoryReady.get(conversationID) === messages) localHistoryReady.delete(conversationID)
+          if (localHistoryReady.get(conversationID) === messages) {
+            localHistoryReady.delete(conversationID)
+            localHistoryExhausted.delete(conversationID)
+          }
         }, 60_000)
       }
     },
@@ -3687,77 +3742,249 @@ function searchableTextOf(item: MessageItem): string {
   return plainSearchText(item.content)
 }
 
+function matchesSearchKeyword(item: MessageItem, keyLower: string): boolean {
+  const text = searchableTextOf(item)
+  return !!text && text.toLowerCase().includes(keyLower)
+}
+
+/** SDK 已按关键词命中；App 偶发抽不出正文时仍保留，避免二次过滤洗成空 */
+function acceptSdkSearchHit(item: MessageItem, keyLower: string): boolean {
+  const text = searchableTextOf(item)
+  return !text || text.toLowerCase().includes(keyLower)
+}
+
+/** 会话内关键词搜索游标：首屏 → 上滑加载更多 */
+export interface ConversationMessageSearchCursor {
+  sdkPage: number
+  sdkDone: boolean
+  historyStartId: string
+  historyDone: boolean
+  seenIds: string[]
+  /** 本页扫到但超出 limit 的命中，留给下一屏，避免翻页漏结果 */
+  pending: MessageItem[]
+}
+
+export interface ConversationMessageSearchPage {
+  messages: MessageItem[]
+  cursor: ConversationMessageSearchCursor
+  hasMore: boolean
+}
+
+function emptySearchCursor(): ConversationMessageSearchCursor {
+  return {
+    sdkPage: 1,
+    sdkDone: false,
+    historyStartId: '',
+    historyDone: false,
+    seenIds: [],
+    pending: [],
+  }
+}
+
 /**
- * 指定会话内搜出全部命中（新→旧），对齐「每条消息一行」。
- * 对标微信：首屏只打本地 SearchLocalMessages（毫秒级）；预热好的列表做内存补扫。
- * 仅当本地索引为空时，才短等预热补一轮，避免「为了稳」把每次搜索拖到数秒。
+ * 对标微信：先出最近命中（本地索引，毫秒级），上滑再向更早历史翻页补扫。
+ * 活跃群本地索引往往只有近几小时；不翻历史就会表现为「早的搜不到」。
+ */
+export async function searchConversationMessagesPage(params: {
+  conversationID: string
+  keyword: string
+  cursor?: ConversationMessageSearchCursor | null
+  limit?: number
+  /** 本轮最多扫多少条历史；会话列表搜索宜小，避免「加载更多」卡住 */
+  historyScanBatch?: number
+}): Promise<ConversationMessageSearchPage> {
+  const conversationID = params.conversationID
+  const rawKeyword = params.keyword.trim()
+  const key = rawKeyword.toLowerCase()
+  const limit =
+    Number.isFinite(params.limit) && (params.limit as number) > 0
+      ? Math.trunc(params.limit as number)
+      : SEARCH_RESULT_PAGE_SIZE
+  const historyScanBatch =
+    Number.isFinite(params.historyScanBatch) && (params.historyScanBatch as number) > 0
+      ? Math.trunc(params.historyScanBatch as number)
+      : SEARCH_HISTORY_SCAN_BATCH
+  const isFirstPage = !params.cursor
+  const cursor: ConversationMessageSearchCursor = params.cursor
+    ? {
+        sdkPage: params.cursor.sdkPage,
+        sdkDone: params.cursor.sdkDone,
+        historyStartId: params.cursor.historyStartId,
+        historyDone: params.cursor.historyDone,
+        seenIds: [...params.cursor.seenIds],
+        pending: [...params.cursor.pending],
+      }
+    : emptySearchCursor()
+
+  if (!conversationID || !key) {
+    return { messages: [], cursor, hasMore: false }
+  }
+
+  // 后台拉满保留上限，不挡首屏；已预热的可立刻内存补扫
+  if (isFirstPage) void ensureLocalConversationHistory(conversationID, SEARCH_HISTORY_CAP)
+
+  const seen = new Set(cursor.seenIds)
+  const pending = cursor.pending.filter((item) => {
+    if (!item?.clientMsgID || seen.has(item.clientMsgID)) return false
+    seen.add(item.clientMsgID)
+    return true
+  })
+  const out: MessageItem[] = []
+
+  const takePending = () => {
+    while (out.length < limit && pending.length) {
+      out.push(pending.shift() as MessageItem)
+    }
+  }
+  takePending()
+
+  /** 命中先入队，再按 limit 吐出，避免一页内多余命中被游标跳过 */
+  const enqueue = (item: MessageItem, fromSdk: boolean) => {
+    if (!item?.clientMsgID || seen.has(item.clientMsgID)) return false
+    if (fromSdk ? !acceptSdkSearchHit(item, key) : !matchesSearchKeyword(item, key)) return false
+    seen.add(item.clientMsgID)
+    if (out.length < limit) out.push(item)
+    else pending.push(item)
+    return true
+  }
+
+  const sdkPageSize = 100
+  while (!cursor.sdkDone && out.length < limit && !pending.length) {
+    const hits = await searchLocalMessages({
+      keyword: rawKeyword,
+      conversationID,
+      count: sdkPageSize,
+      pageIndex: cursor.sdkPage,
+    })
+    const conv =
+      hits.find((h) => h.conversationID === conversationID) ||
+      (hits.length === 1 ? hits[0] : undefined)
+    const batch = conv?.messages || []
+    if (!batch.length) {
+      cursor.sdkDone = true
+      break
+    }
+    let added = 0
+    for (const item of batch) {
+      if (enqueue(item, true)) added += 1
+    }
+    cursor.sdkPage += 1
+    const total = Number(conv?.messageCount || 0)
+    if (total > 0 && seen.size >= total) cursor.sdkDone = true
+    else if (batch.length < sdkPageSize) cursor.sdkDone = true
+    else if (!added) cursor.sdkDone = true
+  }
+  takePending()
+
+  if (isFirstPage) {
+    for (const item of peekLocalConversationHistory(conversationID)) {
+      enqueue(item, false)
+    }
+    takePending()
+    // 索引空且预热还没好：最多再等 1.2s 补扫一次
+    if (!out.length && !pending.length) {
+      const warm = localHistoryWarm.get(conversationID)
+      if (warm) {
+        const history = await Promise.race([
+          warm,
+          new Promise<MessageItem[]>((resolve) => setTimeout(() => resolve([]), 1200)),
+        ])
+        for (const item of history) enqueue(item, false)
+        takePending()
+        if (!out.length && !pending.length && !cursor.sdkDone) {
+          cursor.sdkPage = 1
+          cursor.sdkDone = false
+          const hits = await searchLocalMessages({
+            keyword: rawKeyword,
+            conversationID,
+            count: sdkPageSize,
+            pageIndex: 1,
+          })
+          const conv =
+            hits.find((h) => h.conversationID === conversationID) ||
+            (hits.length === 1 ? hits[0] : undefined)
+          for (const item of conv?.messages || []) enqueue(item, true)
+          takePending()
+          cursor.sdkPage = 2
+          if (!(conv?.messages || []).length) cursor.sdkDone = true
+        }
+      }
+    }
+  }
+
+  // 首屏未凑满，或上滑加载更多：向更早历史扫关键词（会把消息拉进本地库）
+  const shouldScanHistory =
+    !cursor.historyDone &&
+    !pending.length &&
+    (!isFirstPage || out.length < limit)
+  if (shouldScanHistory) {
+    let scanned = 0
+    while (
+      !cursor.historyDone &&
+      out.length < limit &&
+      !pending.length &&
+      scanned < historyScanBatch
+    ) {
+      const { messageList, isEnd } = await getHistoryMessages(
+        conversationID,
+        50,
+        cursor.historyStartId,
+      )
+      if (!messageList.length) {
+        cursor.historyDone = true
+        break
+      }
+      const ordered = [...messageList].sort(
+        (a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0),
+      )
+      for (const item of ordered) enqueue(item, false)
+      takePending()
+      scanned += messageList.length
+      const next = oldestClientMsgID(messageList)
+      if (!next || next === cursor.historyStartId) {
+        cursor.historyDone = true
+        break
+      }
+      cursor.historyStartId = next
+      if (isEnd) {
+        cursor.historyDone = true
+        break
+      }
+    }
+  }
+
+  out.sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
+  pending.sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
+  cursor.pending = pending
+  cursor.seenIds = [...seen]
+  // 本地索引耗尽后仍可能有更早历史；队列里还有待展示命中时也算还有更多
+  const hasMore = pending.length > 0 || !cursor.sdkDone || !cursor.historyDone
+  return { messages: out, cursor, hasMore }
+}
+
+/**
+ * 一次性取会话内命中（内部按页拉取）。页面展示请用 searchConversationMessagesPage。
  */
 export async function searchConversationMessages(
   conversationID: string,
   keyword: string,
 ): Promise<MessageItem[]> {
-  const key = keyword.trim().toLowerCase()
-  if (!conversationID || !key) return []
-  const byId = new Map<string, MessageItem>()
-  const remember = (item: MessageItem) => {
-    if (item?.clientMsgID) byId.set(item.clientMsgID, item)
+  const all: MessageItem[] = []
+  let cursor: ConversationMessageSearchCursor | null = null
+  let hasMore = true
+  for (let i = 0; i < 40 && hasMore; i++) {
+    const page: ConversationMessageSearchPage = await searchConversationMessagesPage({
+      conversationID,
+      keyword,
+      cursor,
+      limit: SEARCH_RESULT_PAGE_SIZE,
+    })
+    all.push(...page.messages)
+    cursor = page.cursor
+    hasMore = page.hasMore
+    if (!page.messages.length && !hasMore) break
   }
-  const matchesKeyword = (item: MessageItem) => {
-    const text = searchableTextOf(item)
-    return !!text && text.toLowerCase().includes(key)
-  }
-
-  // 后台预热，不 await；已就绪则立刻内存补扫
-  void ensureLocalConversationHistory(conversationID)
-
-  const pageSize = 100
-  const pullSdkPages = async () => {
-    for (let page = 1; page <= 30; page++) {
-      const hits = await searchLocalMessages({
-        keyword,
-        conversationID,
-        count: pageSize,
-        pageIndex: page,
-      })
-      const conv =
-        hits.find((h) => h.conversationID === conversationID) ||
-        (hits.length === 1 ? hits[0] : undefined)
-      const batch = conv?.messages || []
-      if (!batch.length) break
-      const before = byId.size
-      for (const item of batch) {
-        // SDK 已按关键词命中；App 偶发抽不出正文时仍保留，避免二次过滤把结果洗成空
-        if (!searchableTextOf(item) || matchesKeyword(item)) remember(item)
-      }
-      if (byId.size === before) break
-      const total = Number(conv?.messageCount || 0)
-      if (total > 0 && byId.size >= total) break
-      if (batch.length < pageSize && (total <= 0 || byId.size >= total)) break
-    }
-  }
-
-  await pullSdkPages()
-
-  for (const item of peekLocalConversationHistory(conversationID)) {
-    if (matchesKeyword(item)) remember(item)
-  }
-
-  // 索引空且预热还没好：最多再等 1.2s 补扫一次，而不是空等 8s
-  if (!byId.size) {
-    const warm = localHistoryWarm.get(conversationID)
-    if (warm) {
-      const history = await Promise.race([
-        warm,
-        new Promise<MessageItem[]>((resolve) => setTimeout(() => resolve([]), 1200)),
-      ])
-      for (const item of history) {
-        if (matchesKeyword(item)) remember(item)
-      }
-      if (!byId.size) await pullSdkPages()
-    }
-  }
-
-  return [...byId.values()].sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
+  return all
 }
 
 function groupIdFromConversationId(conversationId: string): string {

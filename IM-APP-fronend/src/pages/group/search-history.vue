@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onReachBottom } from '@dcloudio/uni-app'
 import type { MessageItem } from 'openim-uniapp-polyfill'
 import {
   businessUserIdFromIM,
   ensureLocalConversationHistory,
   messageSearchPreview,
   resolveGroupConversationID,
-  searchConversationMessages,
+  searchConversationMessagesPage,
+  type ConversationMessageSearchCursor,
 } from '@/utils/openim'
 import { formatFavoriteDay, formatClock } from '@/utils/format'
 import ImNavBar from '@/components/ImNavBar.vue'
@@ -20,7 +21,10 @@ const groupTitle = ref('')
 const conversationId = ref('')
 const keyword = ref('')
 const loading = ref(false)
+const loadingMore = ref(false)
+const hasMore = ref(false)
 const results = ref<MessageItem[]>([])
+let searchCursor: ConversationMessageSearchCursor | null = null
 let searchSeq = 0
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -41,7 +45,7 @@ onLoad(async (query) => {
   try {
     await contactStore.ensureRemarkIndex().catch(() => undefined)
     conversationId.value = await resolveGroupConversationID(groupId.value)
-    // 对标微信：进搜索页先把该群历史落到本地，输入时只搜本地库
+    // 对标微信：进搜索页先把该群历史落到本地（后台），输入时先出最近命中
     void ensureLocalConversationHistory(conversationId.value)
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '加载失败', icon: 'none' })
@@ -51,24 +55,82 @@ onLoad(async (query) => {
 async function runSearch(raw: string) {
   const text = raw.trim()
   const seq = ++searchSeq
+  searchCursor = null
+  hasMore.value = false
   if (!text || !conversationId.value) {
     results.value = []
     loading.value = false
+    loadingMore.value = false
     return
   }
   loading.value = true
+  loadingMore.value = false
   try {
-    const hits = await searchConversationMessages(conversationId.value, text)
+    const page = await searchConversationMessagesPage({
+      conversationID: conversationId.value,
+      keyword: text,
+    })
     if (seq !== searchSeq) return
-    results.value = hits
+    results.value = page.messages
+    searchCursor = page.cursor
+    hasMore.value = page.hasMore
   } catch (e) {
     if (seq !== searchSeq) return
     results.value = []
+    searchCursor = null
+    hasMore.value = false
     uni.showToast({ title: (e as Error)?.message || '搜索失败', icon: 'none' })
   } finally {
     if (seq === searchSeq) loading.value = false
   }
 }
+
+/** 上滑加载更早的命中：继续翻本地索引 / 历史，不重头搜 */
+async function loadMore() {
+  const text = keyword.value.trim()
+  if (
+    !text ||
+    !conversationId.value ||
+    !searchCursor ||
+    !hasMore.value ||
+    loading.value ||
+    loadingMore.value
+  ) {
+    return
+  }
+  const seq = searchSeq
+  loadingMore.value = true
+  try {
+    const page = await searchConversationMessagesPage({
+      conversationID: conversationId.value,
+      keyword: text,
+      cursor: searchCursor,
+    })
+    if (seq !== searchSeq) return
+    if (page.messages.length) {
+      const seen = new Set(results.value.map((m) => m.clientMsgID))
+      const merged = results.value.slice()
+      for (const item of page.messages) {
+        if (!item.clientMsgID || seen.has(item.clientMsgID)) continue
+        seen.add(item.clientMsgID)
+        merged.push(item)
+      }
+      merged.sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
+      results.value = merged
+    }
+    searchCursor = page.cursor
+    hasMore.value = page.hasMore
+  } catch (e) {
+    if (seq !== searchSeq) return
+    uni.showToast({ title: (e as Error)?.message || '加载更多失败', icon: 'none' })
+  } finally {
+    if (seq === searchSeq) loadingMore.value = false
+  }
+}
+
+onReachBottom(() => {
+  void loadMore()
+})
 
 watch([keyword, conversationId], () => {
   if (searchTimer) clearTimeout(searchTimer)
@@ -76,7 +138,10 @@ watch([keyword, conversationId], () => {
   if (!text) {
     searchSeq += 1
     results.value = []
+    searchCursor = null
+    hasMore.value = false
     loading.value = false
+    loadingMore.value = false
     return
   }
   // 会话 ID 还在 resolve 时先显示「搜索中」，避免误报「未找到」；ID 就绪后 watch 会再跑
@@ -174,6 +239,25 @@ function openResult(item: MessageItem) {
       >
         未找到相关记录
       </view>
+      <view
+        v-else-if="loadingMore"
+        class="footer"
+      >
+        加载更多…
+      </view>
+      <view
+        v-else-if="hasMore"
+        class="footer"
+        @click="loadMore"
+      >
+        上拉加载更多
+      </view>
+      <view
+        v-else
+        class="footer"
+      >
+        没有更多了
+      </view>
     </view>
   </view>
 </template>
@@ -245,5 +329,12 @@ function openResult(item: MessageItem) {
   color: #9aa0ad;
   font-size: 26rpx;
   padding: 80rpx 0;
+}
+
+.footer {
+  text-align: center;
+  color: #9aa0ad;
+  font-size: 24rpx;
+  padding: 28rpx 0 12rpx;
 }
 </style>

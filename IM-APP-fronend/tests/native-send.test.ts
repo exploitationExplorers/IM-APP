@@ -212,6 +212,32 @@ describe.each([true, false])('protected media sends (native=%s)', (app) => {
     if (app) expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
     else expect(mocks.asyncApi.mock.calls[1][0]).toBe(IMMethods.SendMessage)
   })
+
+  it('quotes plain text without rewriting content/textElem for the native SDK', async () => {
+    const created = { clientMsgID: 'quote-text', contentType: 114, status: 1 }
+    mocks.asyncApi.mockResolvedValueOnce(created).mockResolvedValueOnce({ ...created, status: 2 })
+    const textSource = Object.freeze({
+      clientMsgID: 'src-text',
+      contentType: 101,
+      sendID: 'sender',
+      senderNickname: '团子',
+      textElem: Object.freeze({ content: '只有你' }),
+      TextElem: Object.freeze({ Content: '只有你' }),
+    }) as MessageItem
+    await expect(sendQuoteMessage(group, '能信吗', textSource)).resolves.toMatchObject({
+      clientMsgID: 'quote-text',
+    })
+    expect(mocks.preserveForwardMedia).not.toHaveBeenCalled()
+    const params = mocks.asyncApi.mock.calls[0][2] as { text: string; message: string }
+    expect(params.text).toBe('能信吗')
+    const parsed = JSON.parse(params.message) as Record<string, unknown>
+    expect(parsed.textElem).toEqual({ content: '只有你' })
+    expect(parsed.TextElem).toEqual({ Content: '只有你' })
+    // 不能被 withForwardSnapshot 改成统一的 {"content":"..."} 字符串，否则部分基座创建结果为空
+    expect(typeof parsed.content === 'string' && (parsed.content as string).startsWith('{')).toBe(
+      false,
+    )
+  })
 })
 afterEach(() => vi.unstubAllGlobals())
 

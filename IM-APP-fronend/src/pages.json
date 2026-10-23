@@ -357,7 +357,8 @@
       "path": "pages/group/search-history",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "搜索聊天记录"
+        "navigationBarTitleText": "搜索聊天记录",
+        "onReachBottomDistance": 120
       }
     },
     {
