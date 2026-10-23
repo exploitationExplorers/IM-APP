@@ -1039,9 +1039,12 @@ function isDatabaseClosedError(err: unknown): boolean {
 }
 
 /**
- * 本地库写不进去。除了「库被关掉」，SQLite 写不了 journal/WAL、文件保护生效、
- * 目录不可写时都报 `attempt to write a readonly database`——线上实测这一类才是
- * 主流（10005 + InsertMessage failed），所以两句话都要认，否则重开流程救不回来。
+ * 本地库不可用，需要 Logout→Login 重开。
+ * 覆盖几类线上原文（都常被包成 10005 / 10006）：
+ * - database is closed
+ * - attempt to write a readonly database（journal/WAL、文件保护）
+ * - initDB / unable to open database / no such file（目录在、.db 丢了或还没建好）
+ * - InsertMessage failed
  */
 export function isLocalDatabaseWriteError(err: unknown): boolean {
   const text = err instanceof Error ? err.message : String(err || '')
@@ -1049,6 +1052,9 @@ export function isLocalDatabaseWriteError(err: unknown): boolean {
     isDatabaseClosedError(err) ||
     /readonly database/i.test(text) ||
     /disk i\/o error/i.test(text) ||
+    /init\s*database|initdb failed|open db failed/i.test(text) ||
+    /unable to open database file/i.test(text) ||
+    /no such file or directory/i.test(text) ||
     (/insertmessage/i.test(text) && /failed/i.test(text))
   )
 }
@@ -1185,23 +1191,27 @@ export async function sendQuoteMessage(
   text: string,
   quote: MessageItem,
 ): Promise<MessageItem> {
-  const protectedQuote = await protectReferencedMedia(quote)
+  // App：CreateQuoteMessage 对 withForwardSnapshot 改写后的体极敏感（文字、图片都是）。
+  // 同会话引用用清洗后的原消息创建；媒体副本保护只留给转发。
+  // H5：仍走媒体副本保护，避免签名图过期后引用预览挂掉。
+  const quoteForCreate = isApp()
+    ? sanitizeMessageForNativeQuote(quote)
+    : await protectReferencedMedia(quote)
   // SDK 的 createQuoteMessage 要求 message 是被引用消息的 JSON 字符串（QuoteMsgParams.message: string），
   // 直接传对象会被 JSON.parse 隐式转成 "[object Object]" 而报 errCode=10006。
   try {
     const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
       text,
-      message: JSON.stringify(protectedQuote),
+      message: JSON.stringify(quoteForCreate),
     })
     return sendCreatedMessage(target, message)
   } catch (e) {
-    // 媒体保护改写后个别基座创建失败：回退原消息再试（纯文本引用最常见）
     const msg = (e as Error)?.message || ''
     if (!msg.includes('创建消息结果无效')) throw e
-    if (protectedQuote === quote) throw e
+    // 再试一次：最小字段集（仅身份 + 类型 + 远程预览），避开基座解析整包 PictureElem 失败
     const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
       text,
-      message: JSON.stringify(cloneMessageForNativeQuote(quote)),
+      message: JSON.stringify(minimalMessageForNativeQuote(quote)),
     })
     return sendCreatedMessage(target, message)
   }
@@ -1226,6 +1236,115 @@ function cloneMessageForNativeQuote(source: MessageItem): MessageItem {
   } catch {
     return { ...source }
   }
+}
+
+function isRemoteHttpUrl(value: unknown): boolean {
+  return typeof value === 'string' && /^https?:\/\//i.test(value.trim())
+}
+
+/** 清掉本机临时路径，只留 http(s)，避免 iOS CreateQuoteMessage 因死链路径返回空结果 */
+function clearLocalPathFields(obj: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = obj[key]
+    if (typeof value !== 'string' || !value) continue
+    if (isRemoteHttpUrl(value)) continue
+    obj[key] = ''
+  }
+}
+
+function sanitizeMediaElem(raw: unknown): void {
+  if (!raw || typeof raw !== 'object') return
+  const elem = raw as Record<string, unknown>
+  clearLocalPathFields(elem, [
+    'sourcePath',
+    'SourcePath',
+    'soundPath',
+    'SoundPath',
+    'filePath',
+    'FilePath',
+    'videoPath',
+    'VideoPath',
+    'snapshotPath',
+    'SnapshotPath',
+  ])
+}
+
+function sanitizeMessageForNativeQuote(source: MessageItem): MessageItem {
+  const plain = cloneMessageForNativeQuote(source)
+  const bag = plain as unknown as Record<string, unknown>
+  sanitizeMediaElem(bag.pictureElem ?? bag.PictureElem)
+  sanitizeMediaElem(bag.soundElem ?? bag.SoundElem)
+  sanitizeMediaElem(bag.videoElem ?? bag.VideoElem)
+  sanitizeMediaElem(bag.fileElem ?? bag.FileElem)
+  return plain
+}
+
+/** 创建仍失败时的兜底：只带身份与类型，图片只留一张远程缩略图 URL */
+function minimalMessageForNativeQuote(source: MessageItem): MessageItem {
+  const plain = sanitizeMessageForNativeQuote(source)
+  const bag = plain as unknown as Record<string, unknown>
+  const contentType = Number(bag.contentType ?? bag.ContentType ?? 0)
+  const base: Record<string, unknown> = {
+    clientMsgID: pickString(bag, ['clientMsgID', 'ClientMsgID', 'clientMsgId']),
+    serverMsgID: pickString(bag, ['serverMsgID', 'ServerMsgID']),
+    sendID: pickString(bag, ['sendID', 'SendID']),
+    recvID: pickString(bag, ['recvID', 'RecvID']),
+    groupID: pickString(bag, ['groupID', 'GroupID']),
+    senderNickname: pickString(bag, ['senderNickname', 'SenderNickname']),
+    senderFaceUrl: pickString(bag, ['senderFaceUrl', 'SenderFaceUrl']),
+    contentType,
+    ContentType: contentType,
+    sessionType: Number(bag.sessionType ?? bag.SessionType ?? 0),
+    sendTime: Number(bag.sendTime ?? bag.SendTime ?? 0),
+    createTime: Number(bag.createTime ?? bag.CreateTime ?? 0),
+  }
+  if (contentType === MessageType.TextMessage || contentType === MessageType.AtTextMessage) {
+    const text =
+      pickString(
+        (bag.textElem as Record<string, unknown>) ||
+          (bag.TextElem as Record<string, unknown>) ||
+          {},
+        ['content', 'Content'],
+      ) ||
+      pickString(
+        (bag.atTextElem as Record<string, unknown>) ||
+          (bag.AtTextElem as Record<string, unknown>) ||
+          {},
+        ['text', 'Text'],
+      )
+    if (text) {
+      base.textElem = { content: text }
+      base.TextElem = { Content: text }
+    }
+    return base as unknown as MessageItem
+  }
+  if (contentType === MessageType.PictureMessage) {
+    const pic =
+      (bag.pictureElem as Record<string, unknown>) ||
+      (bag.PictureElem as Record<string, unknown>) ||
+      {}
+    const info =
+      (pic.sourcePicture as Record<string, unknown>) ||
+      (pic.SourcePicture as Record<string, unknown>) ||
+      (pic.snapshotPicture as Record<string, unknown>) ||
+      (pic.SnapshotPicture as Record<string, unknown>) ||
+      {}
+    const url =
+      pickString(info, ['url', 'Url', 'URL']) ||
+      pickString(pic, ['sourcePath', 'SourcePath'])
+    if (isRemoteHttpUrl(url)) {
+      const picture = { url, type: pickString(info, ['type', 'Type']) || 'image/jpeg' }
+      base.pictureElem = {
+        sourcePath: '',
+        sourcePicture: picture,
+        bigPicture: picture,
+        snapshotPicture: picture,
+      }
+      base.PictureElem = base.pictureElem
+    }
+    return base as unknown as MessageItem
+  }
+  return plain
 }
 
 async function protectReferencedMedia(source: MessageItem): Promise<MessageItem> {

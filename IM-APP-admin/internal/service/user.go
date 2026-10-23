@@ -40,12 +40,11 @@ func (s *DataService) ListUserForwardTasks(ctx context.Context, id string, page,
 	return s.Repo.ListUserForwardTasks(ctx, id, size, (page-1)*size)
 }
 
-// SetRestriction 设置登录/发信限制：方案 A —— 调 server（server 登录/发消息强制检查）
+// SetRestriction 设置登录/发信限制。
+// 与 server 共用 PostgreSQL 的 user_restrictions；登录/发消息时由 server 读表强制检查。
+// 直接写库（带管理员 UUID），避免只走内部 HTTP 时因空 operator_id 等导致静默失败。
 func (s *DataService) SetRestriction(ctx context.Context, id, restrType string, req models.RestrictionRequest, operatorID string) error {
-	_, err := callServerInternal(ctx, s.ServerBaseURL, s.ServerInternalKey,
-		"/internal/admin/users/"+id+"/restriction",
-		map[string]any{"type": restrType, "banned": *req.Banned, "until": req.Until, "reason": req.Reason})
-	return err
+	return s.Repo.SetRestriction(ctx, id, restrType, *req.Banned, req.Until, req.Reason, operatorID)
 }
 
 // BanUser 封禁/解封用户：方案 A —— 调 server（改状态 + 撤销会话 + 强制生效），本地写状态审计
