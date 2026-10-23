@@ -367,8 +367,15 @@ export const useChatStore = defineStore('chat', () => {
     }
   })
 
+  /** 底部/侧栏总未读：免打扰会话（recvMsgOpt=1/2）不计入，避免红点继续提示 */
   const totalUnread = computed(() =>
-    conversations.value.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
+    conversations.value.reduce((sum, c) => {
+      const opt = c.recvMsgOpt
+      if (opt === MessageReceiveOptType.NotReceive || opt === MessageReceiveOptType.NotNotify) {
+        return sum
+      }
+      return sum + (c.unreadCount || 0)
+    }, 0),
   )
 
   function rememberRaw(item: MessageItem) {

@@ -101,6 +101,8 @@ const isOnline = computed(
     !!props.item.peerUserId &&
     chatStore.isPeerOnline(props.item.peerUserId),
 )
+/** 免打扰时不再用红色 [有人@我] / [有新公告] 强提醒，只保留普通预览文案 */
+const visibleHighlightTags = computed(() => (isMuted.value ? [] : props.item.highlightTags || []))
 /** 会话本地最后一条消息是否发送失败：是则列表预览显示感叹号 */
 const lastFailed = computed(() => {
   const list = chatStore.messagesMap[props.item.id] || []
@@ -164,7 +166,7 @@ const lastFailed = computed(() => {
             mode="aspectFit"
           />
           <text
-            v-for="tag in item.highlightTags"
+            v-for="tag in visibleHighlightTags"
             :key="tag"
             class="tag"
           >
@@ -174,8 +176,13 @@ const lastFailed = computed(() => {
             {{ previewText }}
           </view>
         </view>
+        <!-- 免打扰：微信式灰点，不显示数字、不用红标；普通会话仍用红标数字 -->
         <view
-          v-if="item.unreadCount > 0"
+          v-if="item.unreadCount > 0 && isMuted"
+          class="badge badge-muted"
+        />
+        <view
+          v-else-if="item.unreadCount > 0"
           class="badge"
         >
           <text class="badge-text">
@@ -340,6 +347,17 @@ const lastFailed = computed(() => {
   align-items: center;
   justify-content: center;
   margin-left: 12rpx;
+  flex-shrink: 0;
+}
+
+/** 免打扰未读：灰色小圆点，避免再当成强提醒 */
+.badge-muted {
+  min-width: 16rpx;
+  width: 16rpx;
+  height: 16rpx;
+  padding: 0;
+  background: #c0c4cc;
+  border-radius: 50%;
 }
 
 .badge-text {
