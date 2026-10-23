@@ -168,7 +168,7 @@ describe.each([true, false])('protected media sends (native=%s)', (app) => {
     }
   })
 
-  it('protects quoted media while keeping the SDK quote JSON-string contract', async () => {
+  it('quotes media without App rewrite; H5 still preserves a durable copy', async () => {
     mocks.preserveForwardMedia.mockResolvedValue({
       contentType: 102,
       content: { sourcePicture: { url: savedURL } },
@@ -177,27 +177,36 @@ describe.each([true, false])('protected media sends (native=%s)', (app) => {
     mocks.asyncApi.mockResolvedValueOnce(created).mockResolvedValueOnce({ ...created, status: 2 })
     await expect(sendQuoteMessage(group, 'reply', source)).resolves.toMatchObject({ status: 2 })
     expect(mocks.asyncApi.mock.calls[0][0]).toBe(IMMethods.CreateQuoteMessage)
-    const params = mocks.asyncApi.mock.calls[0][2]
+    const params = mocks.asyncApi.mock.calls[0][2] as { text: string; message: string }
     expect(params.text).toBe('reply')
     expect(typeof params.message).toBe('string')
-    expect(params.message).toContain(savedURL)
-    expect(params.message).not.toContain('chat.example')
+    if (app) {
+      // App 引用不走 withForwardSnapshot，避免 iOS「原生 SDK 创建消息结果无效」
+      expect(mocks.preserveForwardMedia).not.toHaveBeenCalled()
+      expect(params.message).toContain(oldURL)
+    } else {
+      expect(mocks.preserveForwardMedia).toHaveBeenCalled()
+      expect(params.message).toContain(savedURL)
+      expect(params.message).not.toContain('chat.example')
+    }
   })
 
-  it.each(['forward', 'quote'])(
-    'does not invoke the SDK when %s preservation fails',
-    async (kind) => {
-      mocks.preserveForwardMedia.mockRejectedValue(new Error('副本保存失败'))
-      const send =
-        kind === 'forward'
-          ? sendForwardMessage(group, source)
-          : sendQuoteMessage(group, 'reply', source)
-      await expect(send).rejects.toThrow('副本保存失败')
-      expect(mocks.asyncApi).not.toHaveBeenCalled()
-      expect(mocks.sendMessage).not.toHaveBeenCalled()
-      expect(mocks.sendMessageNotOss).not.toHaveBeenCalled()
-    },
-  )
+  it('does not invoke the SDK when forward preservation fails', async () => {
+    mocks.preserveForwardMedia.mockRejectedValue(new Error('副本保存失败'))
+    await expect(sendForwardMessage(group, source)).rejects.toThrow('副本保存失败')
+    expect(mocks.asyncApi).not.toHaveBeenCalled()
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.sendMessageNotOss).not.toHaveBeenCalled()
+  })
+
+  it('App quote still creates when media preservation would fail', async () => {
+    if (!app) return
+    mocks.preserveForwardMedia.mockRejectedValue(new Error('副本保存失败'))
+    const created = Object.freeze({ clientMsgID: 'quote-test', contentType: 114, status: 1 })
+    mocks.asyncApi.mockResolvedValueOnce(created).mockResolvedValueOnce({ ...created, status: 2 })
+    await expect(sendQuoteMessage(group, 'reply', source)).resolves.toMatchObject({ status: 2 })
+    expect(mocks.preserveForwardMedia).not.toHaveBeenCalled()
+  })
 
   it('keeps text-only forwarding independent of the preservation service', async () => {
     const created = { clientMsgID: 'text-forward', contentType: 101, status: 1 }
@@ -479,6 +488,13 @@ describe('isLocalDatabaseWriteError（本地库写不进去，需重开库后重
 
   it('认得库被关掉的 database is closed', () => {
     expect(isLocalDatabaseWriteError(new Error('GetGroups failed: database is closed'))).toBe(true)
+  })
+
+  it('认得 initDB / 库文件不存在（管理后台中午那批失败原文）', () => {
+    const real =
+      'error *errors.withStack not implement CodeError: init database initDB failed /var/mobile/.../doc/openim/xxx/: open db failed .../OpenIM_v3_xxx.db: unable to open database file: no such file or directory: 10006 Internal SDK error (login errCode=10005)'
+    expect(isLocalDatabaseWriteError(new Error(real))).toBe(true)
+    expect(isLocalDatabaseWriteError(new Error('open db failed: no such file or directory'))).toBe(true)
   })
 
   it('不把断线、好友关系等无关错误当成库问题', () => {
