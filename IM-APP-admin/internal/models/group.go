@@ -25,6 +25,9 @@ type AppGroupDetail struct {
 	DissolvedAt          *time.Time `json:"dissolvedAt,omitempty"`        // 解散时间
 	DissolvedByAdminId   string     `json:"dissolvedByAdminId,omitempty"` // 解散操作管理员ID
 	DissolveReason       string     `json:"dissolveReason,omitempty"`     // 解散原因
+	// 群消息保留覆盖：nil = 使用平台 system.limits 默认
+	RetentionMaxMessages *int `json:"retentionMaxMessages,omitempty"`
+	RetentionKeepHours   *int `json:"retentionKeepHours,omitempty"`
 }
 
 type AppGroupMember struct {
@@ -57,6 +60,14 @@ type UpdateGroupMemberLimitRequest struct {
 	GroupID    string `json:"groupId" binding:"required"`
 	MaxMembers int    `json:"maxMembers" binding:"required"`
 	Reason     string `json:"reason" binding:"required"`
+}
+
+// UpdateGroupRetentionRequest 按群覆盖消息保留；字段传 null 表示恢复平台默认。
+type UpdateGroupRetentionRequest struct {
+	RetentionMaxMessages *int   `json:"retentionMaxMessages"`
+	RetentionKeepHours   *int   `json:"retentionKeepHours"`
+	UsePlatformDefault   bool   `json:"usePlatformDefault"`
+	Reason               string `json:"reason" binding:"required"`
 }
 
 type AdminRecallRequest struct {

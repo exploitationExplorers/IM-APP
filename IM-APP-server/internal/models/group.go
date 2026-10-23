@@ -70,6 +70,12 @@ type RemoveGroupMemberReq struct {
 	DeleteMessages bool `json:"deleteMessages"`
 }
 
+// PurgeGroupMemberMessagesReq 为所有人删除某成员在群内的全部消息；成员可已退群。
+type PurgeGroupMemberMessagesReq struct {
+	GroupID      string `json:"groupId"`
+	MemberUserID string `json:"memberUserId"`
+}
+
 type CreateGroupReq struct {
 	Name      string   `json:"name"`
 	MemberIDs []string `json:"memberIds"`

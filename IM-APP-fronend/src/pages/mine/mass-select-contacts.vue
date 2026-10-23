@@ -178,65 +178,161 @@ function onConfirm() {
 
 <template>
   <view class="page">
-    <ImNavBar title="选择联系人" @back="goBack">
+    <ImNavBar
+      title="选择联系人"
+      @back="goBack"
+    >
       <template #right>
-        <view class="confirm-btn" :class="{ disabled: selectedCount === 0 }" @click="onConfirm">
+        <view
+          class="confirm-btn"
+          :class="{ disabled: selectedCount === 0 }"
+          @click="onConfirm"
+        >
           {{ confirmLabel }}
         </view>
       </template>
     </ImNavBar>
 
     <view class="selected-bar">
-      <text class="selected-label">{{ selectedLabel }}</text>
+      <text class="selected-label">
+        {{ selectedLabel }}
+      </text>
     </view>
 
-    <scroll-view scroll-x class="selected-scroll" show-scrollbar="false">
+    <scroll-view
+      scroll-x
+      class="selected-scroll"
+      show-scrollbar="false"
+    >
       <view class="selected-row">
-        <view v-for="s in selected" :key="s.id" class="sel-item">
+        <view
+          v-for="s in selected"
+          :key="s.id"
+          class="sel-item"
+        >
           <view class="sel-avatar-wrap">
-            <image class="sel-avatar" :src="s.avatar" mode="aspectFill" />
-            <view class="sel-close" @click.stop="removeSelected(s.id)">×</view>
+            <image
+              class="sel-avatar"
+              :src="s.avatar"
+              mode="aspectFill"
+            />
+            <view
+              class="sel-close"
+              @click.stop="removeSelected(s.id)"
+            >
+              ×
+            </view>
           </view>
-          <text class="sel-name">{{ s.name }}</text>
+          <text class="sel-name">
+            {{ s.name }}
+          </text>
         </view>
       </view>
     </scroll-view>
 
     <view class="search">
       <view class="search-box">
-        <text class="search-icon">🔍</text>
+        <text class="search-icon">
+          🔍
+        </text>
         <input
           v-model="keyword"
           class="search-input"
           placeholder="搜索"
           placeholder-style="color:#B0B0B0"
-        />
+        >
       </view>
     </view>
 
     <view class="tabs">
-      <view class="tab" :class="{ active: active === 'recent' }" @click="active = 'recent'">最近聊天</view>
-      <view class="tab" :class="{ active: active === 'contacts' }" @click="active = 'contacts'">联系人</view>
-      <view class="tab" :class="{ active: active === 'groups' }" @click="active = 'groups'">群组</view>
-      <view class="tab" :class="{ active: active === 'tags' }" @click="active = 'tags'">标签</view>
-    </view>
-
-    <view class="select-all" @click="toggleSelectAll">
-      <text class="select-all-text">全选</text>
-      <view class="select-all-icon" :class="{ on: allSelectedInView }">
-        <text v-if="allSelectedInView" class="select-all-tick">✓</text>
+      <view
+        class="tab"
+        :class="{ active: active === 'recent' }"
+        @click="active = 'recent'"
+      >
+        最近聊天
+      </view>
+      <view
+        class="tab"
+        :class="{ active: active === 'contacts' }"
+        @click="active = 'contacts'"
+      >
+        联系人
+      </view>
+      <view
+        class="tab"
+        :class="{ active: active === 'groups' }"
+        @click="active = 'groups'"
+      >
+        群组
+      </view>
+      <view
+        class="tab"
+        :class="{ active: active === 'tags' }"
+        @click="active = 'tags'"
+      >
+        标签
       </view>
     </view>
 
-    <scroll-view scroll-y class="list" :lower-threshold="80" @scrolltolower="loadMore">
-      <view v-for="item in currentList" :key="item.id" class="row" @click="toggle(item)">
-        <image class="avatar" :src="item.avatar" mode="aspectFill" />
-        <text class="name">{{ item.name }}</text>
-        <view class="check" :class="{ on: isSelected(item) }">
-          <text v-if="isSelected(item)" class="check-tick">✓</text>
+    <view
+      class="select-all"
+      @click="toggleSelectAll"
+    >
+      <text class="select-all-text">
+        全选
+      </text>
+      <view
+        class="select-all-icon"
+        :class="{ on: allSelectedInView }"
+      >
+        <text
+          v-if="allSelectedInView"
+          class="select-all-tick"
+        >
+          ✓
+        </text>
+      </view>
+    </view>
+
+    <scroll-view
+      scroll-y
+      class="list"
+      :lower-threshold="80"
+      @scrolltolower="loadMore"
+    >
+      <view
+        v-for="item in currentList"
+        :key="item.id"
+        class="row"
+        @click="toggle(item)"
+      >
+        <image
+          class="avatar"
+          :src="item.avatar"
+          mode="aspectFill"
+        />
+        <text class="name">
+          {{ item.name }}
+        </text>
+        <view
+          class="check"
+          :class="{ on: isSelected(item) }"
+        >
+          <text
+            v-if="isSelected(item)"
+            class="check-tick"
+          >
+            ✓
+          </text>
         </view>
       </view>
-      <view v-if="!currentList.length" class="empty">暂无数据</view>
+      <view
+        v-if="!currentList.length"
+        class="empty"
+      >
+        暂无数据
+      </view>
     </scroll-view>
   </view>
 </template>

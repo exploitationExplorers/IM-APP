@@ -28,6 +28,14 @@ function formatContentType(value?: number | null): string {
   return CONTENT_TYPE_MAP[value] ?? `其他(${value})`;
 }
 
+function formatTime(value?: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 // 失败码 → 中文：服务端拦截码 + 客户端上报码（扩展）
 const FAIL_CODE_LABEL_MAP: Record<string, string> = {
   // 服务端 beforeSend 拦截
@@ -291,7 +299,9 @@ onMounted(() => {
           </div>
 
           <el-table v-loading="recordLoading" :data="records" style="width: 100%">
-            <el-table-column prop="createdAt" label="时间" min-width="180" />
+            <el-table-column label="时间" min-width="190">
+              <template #default="{ row }"><span class="time-text">{{ formatTime(row.createdAt) }}</span></template>
+            </el-table-column>
             <el-table-column label="发送方" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">{{ nameWithId(row.senderNickname, row.senderImId) }}</template>
             </el-table-column>
@@ -385,7 +395,9 @@ onMounted(() => {
           </div>
 
           <el-table v-loading="failureLoading" :data="failures" style="width: 100%">
-            <el-table-column prop="createdAt" label="时间" min-width="180" />
+            <el-table-column label="时间" min-width="190">
+              <template #default="{ row }"><span class="time-text">{{ formatTime(row.createdAt) }}</span></template>
+            </el-table-column>
             <el-table-column label="发送方" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">{{ nameWithId(row.senderNickname, row.senderImId) }}</template>
             </el-table-column>
@@ -439,5 +451,9 @@ onMounted(() => {
   margin-top: 2px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.time-text {
+  white-space: nowrap;
 }
 </style>

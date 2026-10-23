@@ -65,10 +65,20 @@ async function onJoin() {
 
 <template>
   <view class="page">
-    <ImNavBar title="添加群聊" @back="goBack">
+    <ImNavBar
+      title="添加群聊"
+      @back="goBack"
+    >
       <template #right>
-        <view class="nav-btn" @click="goScan">
-          <image class="nav-icon" src="/static/icons/icon-scan.svg" mode="aspectFit" />
+        <view
+          class="nav-btn"
+          @click="goScan"
+        >
+          <image
+            class="nav-icon"
+            src="/static/icons/icon-scan.svg"
+            mode="aspectFit"
+          />
         </view>
       </template>
     </ImNavBar>
@@ -76,21 +86,27 @@ async function onJoin() {
     <view class="search-wrap">
       <view class="search-box">
         <input
-          class="search-input"
           v-model="groupId"
+          class="search-input"
           type="text"
           maxlength="28"
           placeholder="输入群号，如 qun_xxxx"
           placeholder-class="search-ph"
           confirm-type="done"
           @confirm="onJoin"
-        />
+        >
       </view>
-      <text class="hint">输入对方群资料里的群号（qun_ 开头）。右上角仍可扫群二维码。</text>
+      <text class="hint">
+        输入对方群资料里的群号（qun_ 开头）。右上角仍可扫群二维码。
+      </text>
     </view>
 
     <view class="footer">
-      <view class="primary-btn" :class="{ disabled: submitting }" @click="onJoin">
+      <view
+        class="primary-btn"
+        :class="{ disabled: submitting }"
+        @click="onJoin"
+      >
         {{ submitting ? '加入中...' : '加入群聊' }}
       </view>
     </view>

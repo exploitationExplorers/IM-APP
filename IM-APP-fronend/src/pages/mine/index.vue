@@ -54,55 +54,108 @@ function onLogout() {
 
 <template>
   <view :class="isDesktop ? 'im-desktop-workspace' : 'page'">
-    <ImDesktopSidebar v-if="isDesktop" current="mine" />
+    <ImDesktopSidebar
+      v-if="isDesktop"
+      current="mine"
+    />
 
     <view :class="isDesktop ? 'im-desktop-main page' : ''">
-    <view class="mine-header">
-        <view class="mine-hero-card" :style="{ paddingTop: heroPadTop }">
-        <view class="mine-profile">
-          <view class="mine-avatar-ring">
-            <image class="mine-avatar" :src="avatarSrc" mode="aspectFill" />
+      <view class="mine-header">
+        <view
+          class="mine-hero-card"
+          :style="{ paddingTop: heroPadTop }"
+        >
+          <view class="mine-profile">
+            <view class="mine-avatar-ring">
+              <image
+                class="mine-avatar"
+                :src="avatarSrc"
+                mode="aspectFill"
+              />
+            </view>
+            <text class="mine-nickname">
+              {{ nickname }}
+            </text>
           </view>
-          <text class="mine-nickname">{{ nickname }}</text>
+
+          <view class="mine-actions">
+            <view
+              class="mine-action-btn"
+              @click="go('/pages/mine/profile')"
+            >
+              <image
+                class="mine-action-icon"
+                src="/static/mine/icon-edit.svg"
+                mode="aspectFit"
+              />
+            </view>
+            <view
+              class="mine-action-btn"
+              @click="go('/pages/mine/qrcode')"
+            >
+              <image
+                class="mine-action-icon"
+                src="/static/mine/icon-qrcode.svg"
+                mode="aspectFit"
+              />
+            </view>
+          </view>
         </view>
 
-        <view class="mine-actions">
-          <view class="mine-action-btn" @click="go('/pages/mine/profile')">
-            <image class="mine-action-icon" src="/static/mine/icon-edit.svg" mode="aspectFit" />
-          </view>
-          <view class="mine-action-btn" @click="go('/pages/mine/qrcode')">
-            <image class="mine-action-icon" src="/static/mine/icon-qrcode.svg" mode="aspectFit" />
+        <view
+          class="mine-nav"
+          :style="{ paddingTop: isDesktop ? '0px' : statusBarHeight + 'px' }"
+        >
+          <view class="mine-nav-row">
+            <text class="mine-nav-title">
+              个人中心
+            </text>
+            <view class="mine-nav-spacer" />
           </view>
         </view>
       </view>
 
-      <view class="mine-nav" :style="{ paddingTop: isDesktop ? '0px' : statusBarHeight + 'px' }">
-        <view class="mine-nav-row">
-          <text class="mine-nav-title">个人中心</text>
-          <view class="mine-nav-spacer" />
+      <view class="menu-card">
+        <view
+          v-for="m in menus"
+          :key="m.title"
+          class="menu-item"
+          @click="go(m.url)"
+        >
+          <image
+            class="menu-icon"
+            :src="m.icon"
+            mode="aspectFit"
+          />
+          <text class="menu-text">
+            {{ m.title }}
+          </text>
+          <image
+            class="arrow"
+            src="/static/mine/icon-chevron.svg"
+            mode="aspectFit"
+          />
         </view>
       </view>
-    </view>
 
-    <view class="menu-card">
       <view
-        v-for="m in menus"
-        :key="m.title"
-        class="menu-item"
-        @click="go(m.url)"
+        class="logout"
+        @click="onLogout"
       >
-        <image class="menu-icon" :src="m.icon" mode="aspectFit" />
-        <text class="menu-text">{{ m.title }}</text>
-        <image class="arrow" src="/static/mine/icon-chevron.svg" mode="aspectFit" />
+        <image
+          class="logout-icon"
+          src="/static/mine/icon-logout.svg"
+          mode="aspectFit"
+        />
+        <text class="logout-text">
+          退出
+        </text>
       </view>
-    </view>
 
-    <view class="logout" @click="onLogout">
-      <image class="logout-icon" src="/static/mine/icon-logout.svg" mode="aspectFit" />
-      <text class="logout-text">退出</text>
-    </view>
-
-    <ImTabBar v-if="!isDesktop" current="mine" />
+      <ImTabBar
+        v-if="!isDesktop"
+        current="mine"
+      />
     </view>
   </view>
 </template>

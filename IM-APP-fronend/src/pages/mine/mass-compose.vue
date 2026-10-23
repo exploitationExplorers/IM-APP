@@ -67,19 +67,35 @@ defineExpose({
 
 <template>
   <view class="page">
-    <ImNavBar title="群发" @back="goBack" />
+    <ImNavBar
+      title="群发"
+      @back="goBack"
+    />
 
-    <view class="targets" @click="goEditTargets">
-      <text class="targets-tip">你将发送消息给</text>
+    <view
+      class="targets"
+      @click="goEditTargets"
+    >
+      <text class="targets-tip">
+        你将发送消息给
+      </text>
       <view class="targets-row">
-        <text class="targets-names">{{ targetsText }}</text>
-        <text class="targets-arrow">›</text>
+        <text class="targets-names">
+          {{ targetsText }}
+        </text>
+        <text class="targets-arrow">
+          ›
+        </text>
       </view>
     </view>
 
-    <view class="space"></view>
+    <view class="space" />
 
-    <ImMessageComposer placeholder="输入消息" @submit="mockSend" @open-favorites="goFavorites" />
+    <ImMessageComposer
+      placeholder="输入消息"
+      @submit="mockSend"
+      @open-favorites="goFavorites"
+    />
   </view>
 </template>
 

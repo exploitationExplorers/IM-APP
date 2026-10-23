@@ -133,22 +133,52 @@ onUnload(() => {
 
 <template>
   <view class="page">
-    <view id="h5-scan-camera" class="camera-feed" />
-    <view class="back-btn" @click="goBack">
-      <image class="back-icon" src="/static/icons/icon-back-white.svg" mode="aspectFit" />
+    <view
+      id="h5-scan-camera"
+      class="camera-feed"
+    />
+    <view
+      class="back-btn"
+      @click="goBack"
+    >
+      <image
+        class="back-icon"
+        src="/static/icons/icon-back-white.svg"
+        mode="aspectFit"
+      />
     </view>
     <view class="scan-area">
       <view class="scan-frame" />
-      <text class="hint">将二维码放入框内，即可自动扫描</text>
+      <text class="hint">
+        将二维码放入框内，即可自动扫描
+      </text>
     </view>
     <view class="actions">
-      <view class="action" @click="goMyQrcode">
-        <image class="action-icon" src="/static/icons/icon-qrcode-white.svg" mode="aspectFit" />
-        <text class="action-text">我的二维码</text>
+      <view
+        class="action"
+        @click="goMyQrcode"
+      >
+        <image
+          class="action-icon"
+          src="/static/icons/icon-qrcode-white.svg"
+          mode="aspectFit"
+        />
+        <text class="action-text">
+          我的二维码
+        </text>
       </view>
-      <view class="action" @click="chooseFromAlbum">
-        <image class="action-icon" src="/static/icons/icon-album-white.svg" mode="aspectFit" />
-        <text class="action-text">从相册选取</text>
+      <view
+        class="action"
+        @click="chooseFromAlbum"
+      >
+        <image
+          class="action-icon"
+          src="/static/icons/icon-album-white.svg"
+          mode="aspectFit"
+        />
+        <text class="action-text">
+          从相册选取
+        </text>
       </view>
     </view>
   </view>

@@ -7,6 +7,7 @@ import { APP_CONFIG } from '@/config'
 import { muteGroupMember, removeGroupMember, unmuteGroupMember } from '@/api/group'
 import { MUTE_OPTIONS } from '@/constants/mute'
 import type { GroupMember, GroupMemberMuteResult } from '@/types'
+import { avatarThumbnailUrl } from '@/utils/chatMediaUrl'
 
 const props = defineProps<{
   modelValue: boolean
@@ -69,7 +70,7 @@ const isOwner = computed(() => {
 
 const canManage = computed(() => isOwner.value || myRole.value === 'admin')
 const groupName = computed(() => groupDetail.value?.name || '群聊')
-const groupAvatar = computed(() => groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl)
+const groupAvatar = computed(() => avatarThumbnailUrl(groupDetail.value?.avatar || APP_CONFIG.defaultGroupAvatarUrl))
 const groupPublicId = computed(() => groupDetail.value?.id || props.groupId)
 const memberCount = computed(
   () => memberList.value.length || groupDetail.value?.memberCount || 0,
@@ -142,9 +143,9 @@ function roleBadge(member: GroupMember) {
 function memberAvatar(member: GroupMember) {
   const me = userStore.profile
   if (me && sameUserId(member.id, me.id)) {
-    return member.avatar || me.avatar || APP_CONFIG.defaultAvatarUrl
+    return avatarThumbnailUrl(member.avatar || me.avatar || APP_CONFIG.defaultAvatarUrl)
   }
-  return member.avatar || APP_CONFIG.defaultAvatarUrl
+  return avatarThumbnailUrl(member.avatar || APP_CONFIG.defaultAvatarUrl)
 }
 
 const canEditGroupId = computed(
@@ -313,56 +314,125 @@ function goAnnouncement() {
 </script>
 
 <template>
-  <view v-if="modelValue" class="group-info-layer">
-    <view class="group-info-backdrop" @click="close" />
+  <view
+    v-if="modelValue"
+    class="group-info-layer"
+  >
+    <view
+      class="group-info-backdrop"
+      @click="close"
+    />
 
     <!-- 对齐参考站：400×min-h-80vh 左侧浮层 shadow-modal -->
-    <view class="group-info-panel" @click.stop>
-      <view v-if="loading" class="group-info-loading">加载中…</view>
+    <view
+      class="group-info-panel"
+      @click.stop
+    >
+      <view
+        v-if="loading"
+        class="group-info-loading"
+      >
+        加载中…
+      </view>
 
       <template v-else>
-        <view class="group-info-head" @click="goFullDetail">
-          <image class="group-info-avatar" :src="groupAvatar" mode="aspectFill" />
+        <view
+          class="group-info-head"
+          @click="goFullDetail"
+        >
+          <image
+            class="group-info-avatar"
+            :src="groupAvatar"
+            mode="aspectFill"
+          />
           <view class="group-info-name-row">
-            <text class="group-info-name">{{ groupName }}</text>
-            <text class="group-info-chevron">›</text>
+            <text class="group-info-name">
+              {{ groupName }}
+            </text>
+            <text class="group-info-chevron">
+              ›
+            </text>
           </view>
         </view>
 
-        <view class="group-info-id-row" @click="canEditGroupId ? goEditGroupId() : undefined">
-          <text class="group-info-id-label">群号</text>
-          <text class="group-info-id-value">{{ groupPublicId }}</text>
-          <view class="group-info-copy" @click.stop="copyGroupId">
+        <view
+          class="group-info-id-row"
+          @click="canEditGroupId ? goEditGroupId() : undefined"
+        >
+          <text class="group-info-id-label">
+            群号
+          </text>
+          <text class="group-info-id-value">
+            {{ groupPublicId }}
+          </text>
+          <view
+            class="group-info-copy"
+            @click.stop="copyGroupId"
+          >
             <text>复制</text>
           </view>
-          <text v-if="canEditGroupId" class="group-info-id-edit">设置</text>
-          <text v-if="canEditGroupId" class="group-info-chevron">›</text>
+          <text
+            v-if="canEditGroupId"
+            class="group-info-id-edit"
+          >
+            设置
+          </text>
+          <text
+            v-if="canEditGroupId"
+            class="group-info-chevron"
+          >
+            ›
+          </text>
         </view>
 
         <view class="group-info-search">
-          <text class="group-info-search-icon">⌕</text>
+          <text class="group-info-search-icon">
+            ⌕
+          </text>
           <input
             v-model="keyword"
             class="group-info-search-input"
             type="text"
             placeholder="搜索成员"
             confirm-type="search"
-          />
+          >
         </view>
 
-        <view class="group-info-history" @click="goSearchHistory">
-          <text class="group-info-history-label">搜索聊天记录</text>
-          <text class="group-info-chevron">›</text>
+        <view
+          class="group-info-history"
+          @click="goSearchHistory"
+        >
+          <text class="group-info-history-label">
+            搜索聊天记录
+          </text>
+          <text class="group-info-chevron">
+            ›
+          </text>
         </view>
 
-        <view class="group-info-history" @click="goAnnouncement">
-          <text class="group-info-history-label">群公告</text>
-          <text class="group-info-chevron">›</text>
+        <view
+          class="group-info-history"
+          @click="goAnnouncement"
+        >
+          <text class="group-info-history-label">
+            群公告
+          </text>
+          <text class="group-info-chevron">
+            ›
+          </text>
         </view>
 
         <view class="group-info-members-head">
-          <text class="group-info-members-title">群成员 ({{ memberCount }})</text>
-          <text v-if="canManage" class="group-info-add" @click="goInvite">新增</text>
+          <text class="group-info-members-title">
+            群成员 ({{ memberCount }})
+          </text>
+          <text
+            v-if="canManage"
+            class="group-info-add"
+            @click="goInvite"
+          >
+            新增
+          </text>
         </view>
 
         <view class="group-info-members">
@@ -372,20 +442,48 @@ function goAnnouncement() {
             class="group-info-member"
             @click="openMember(m)"
           >
-            <image class="group-info-member-avatar" :src="memberAvatar(m)" mode="aspectFill" />
-            <text class="group-info-member-name">{{ displayName(m) }}</text>
-            <text v-if="roleBadge(m)" class="group-info-role">{{ roleBadge(m) }}</text>
-            <text v-if="m.isMuted" class="group-info-role group-info-muted-tag">已禁言</text>
-            <view v-if="canMute(m)" class="group-info-actions">
-              <view class="group-info-mute" @click.stop="onMute(m)">
+            <image
+              class="group-info-member-avatar"
+              :src="memberAvatar(m)"
+              mode="aspectFill"
+            />
+            <text class="group-info-member-name">
+              {{ displayName(m) }}
+            </text>
+            <text
+              v-if="roleBadge(m)"
+              class="group-info-role"
+            >
+              {{ roleBadge(m) }}
+            </text>
+            <text
+              v-if="m.isMuted"
+              class="group-info-role group-info-muted-tag"
+            >
+              已禁言
+            </text>
+            <view
+              v-if="canMute(m)"
+              class="group-info-actions"
+            >
+              <view
+                class="group-info-mute"
+                @click.stop="onMute(m)"
+              >
                 <text>{{ m.isMuted ? '解禁' : '禁言' }}</text>
               </view>
-              <view class="group-info-remove" @click.stop="onRemove(m)">
+              <view
+                class="group-info-remove"
+                @click.stop="onRemove(m)"
+              >
                 <text>移除</text>
               </view>
             </view>
           </view>
-          <view v-if="!filteredMembers.length" class="group-info-empty">
+          <view
+            v-if="!filteredMembers.length"
+            class="group-info-empty"
+          >
             {{ keyword.trim() ? '无匹配成员' : '暂无成员' }}
           </view>
         </view>

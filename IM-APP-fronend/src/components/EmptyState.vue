@@ -6,7 +6,9 @@ defineProps<{
 
 <template>
   <view class="empty">
-    <text class="empty-text">{{ text || '暂无内容' }}</text>
+    <text class="empty-text">
+      {{ text || '暂无内容' }}
+    </text>
   </view>
 </template>
 

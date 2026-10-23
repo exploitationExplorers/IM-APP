@@ -57,6 +57,9 @@ type SystemLimits struct {
 	RecallWindowSec        int `json:"recallWindowSec"`
 	MaxForwardTargets      int `json:"maxForwardTargets"`
 	MaxNicknameLen         int `json:"maxNicknameLen"`
+	// 群消息逻辑保留：真实可见消息条数 + 滚动小时窗口（可按群覆盖）
+	GroupRetentionMaxMessages int `json:"groupRetentionMaxMessages"`
+	GroupRetentionHours       int `json:"groupRetentionHours"`
 }
 
 type SystemLimitsRequest struct {

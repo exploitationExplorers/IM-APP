@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="renderer" content="webkit" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Cache-Control" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no"
+    />
+    <meta name="format-detection" content="telephone=no,email=no" />
+    <link rel="stylesheet" href="css/index.css" />
+    <title>易可聊</title>
+  </head>
+  <body>
+    <!-- 移动端（对齐参考站布局） -->
+    <div class="contain-page hidden">
+      <div class="hero">
+        <img class="hero-logo" src="images/logo.png" alt="易可聊" />
+        <div class="hero-meta">
+          <div class="hero-name">易可聊</div>
+          <div class="hero-stars">
+            <span class="stars">★★★★★</span>
+            <span class="score">4.9</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-row">
+        <button type="button" class="btn-install" id="install_btn">安装</button>
+        <button type="button" class="btn-trust" id="trust_btn">去信任</button>
+      </div>
+      <p class="install-tip">
+        安装前请删除此旧app，安装后点击‘去信任’，系统信任之后需要重启手机
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-item">
+          <div class="stat-icon like"></div>
+          <div class="stat-num">4.9</div>
+          <div class="stat-label">平均分</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-icon users"></div>
+          <div class="stat-num">9.8万</div>
+          <div class="stat-label">总评分次数</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-icon cloud"></div>
+          <div class="stat-num">100万+</div>
+          <div class="stat-label">总下载次数</div>
+        </div>
+      </div>
+
+      <div class="auth-card">
+        <div class="auth-title">【易可聊】苹果官方授权App</div>
+        <div class="auth-sub">
+          <span>Apple授权App</span>
+          <span class="auth-ver">V1.0.74</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">应用评分</h2>
+        <div class="rating-box">
+          <div class="rating-left">
+            <div class="rating-big">4.9</div>
+            <div class="rating-stars">★★★★★</div>
+          </div>
+          <div class="rating-right">
+            <div class="bar-row"><span>5</span><div class="bar"><i style="width:92%"></i></div></div>
+            <div class="bar-row"><span>4</span><div class="bar"><i style="width:5%"></i></div></div>
+            <div class="bar-row"><span>3</span><div class="bar"><i style="width:2%"></i></div></div>
+            <div class="bar-row"><span>2</span><div class="bar"><i style="width:1%"></i></div></div>
+            <div class="bar-row"><span>1</span><div class="bar"><i style="width:0%"></i></div></div>
+            <p class="rating-count">9.8万次评分</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">应用评价</h2>
+        <div class="review">
+          <div class="review-title">非常棒的APP，推荐！！</div>
+          <div class="review-user">Ronald</div>
+          <div class="review-stars">★★★★★</div>
+          <p class="review-body">
+            这个APP真的太好用了，应用流畅不卡顿，画面清晰，操作便捷，玩法丰富多样，朋友都在玩这个App，老铁们也可以试试看，真的是非常的不错，强烈推荐！！推荐！！！推荐！！！
+          </p>
+          <div class="review-date">2026/09/12</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">信息</h2>
+        <ul class="info-list">
+          <li><span>销售商</span><div>易可聊</div></li>
+          <li><span>大小</span><div>18.5 MB</div></li>
+          <li><span>兼容性</span><div>可在此 iPhone / Android 上使用</div></li>
+          <li><span>语言</span><div>简体中文</div></li>
+          <li><span>价格</span><div>免费</div></li>
+          <li><span>年龄分级</span><div>18+</div></li>
+        </ul>
+      </div>
+
+      <div class="disclaimer">
+        免责声明：本网站仅提供下载托管，App内容相关事项由开发者负责，与本网站无关。
+      </div>
+    </div>
+
+    <!-- PC：Logo + 二维码 -->
+    <div class="pc-box hidden">
+      <div class="pc-logo">
+        <img src="images/logo.png" alt="易可聊" />
+      </div>
+      <p>易可聊</p>
+      <div id="Dqcode"></div>
+      <div class="info">请使用手机扫描二维码打开下载页</div>
+    </div>
+
+    <!-- 微信内 iOS 提示 -->
+    <div id="weixin">
+      <div class="click_opacity"></div>
+      <div class="to_btn">
+        <span class="span1"><img src="images/click_btn.png" alt="" /></span>
+        <span class="span2"><em>1</em> 点击右上角 <img src="images/1.png" alt="" /> 打开菜单</span>
+        <span class="span2"><em>2</em> 选择 <img src="images/2.png" alt="" /> 用 Safari 打开下载</span>
+      </div>
+    </div>
+
+    <!-- 微信内 Android 提示 -->
+    <div id="weixin_an">
+      <div class="click_opacity"></div>
+      <div class="to_btn">
+        <span class="span1"><img src="images/click_btn.png" alt="" /></span>
+        <span class="span2"><em>1</em> 点击右上角 <img src="images/1.png" alt="" /> 打开菜单</span>
+        <span class="span2 android_open"><em>2</em> 选择 <img src="images/android.png" alt="" /> 在浏览器打开</span>
+      </div>
+    </div>
+
+    <!-- iOS 17+ 去信任引导 -->
+    <div id="trust_guide" class="modal hidden">
+      <div class="modal-mask" id="trust_guide_mask"></div>
+      <div class="modal-card">
+        <h3>如何信任</h3>
+        <ol>
+          <li>打开「设置」→「通用」</li>
+          <li>进入「VPN与设备管理」或「设备管理」</li>
+          <li>找到企业级应用描述文件，点「信任」</li>
+          <li>信任完成后重启手机再打开 App</li>
+        </ol>
+        <button type="button" class="btn-install" id="trust_guide_close">我知道了</button>
+      </div>
+    </div>
+
+    <script src="js/qrcode.min.js"></script>
+    <script src="js/download.js"></script>
+  </body>
+</html>

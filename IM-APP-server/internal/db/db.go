@@ -64,6 +64,19 @@ func RunMigrationsDir(ctx context.Context, pool *pgxpool.Pool, dir string) error
 	return nil
 }
 
+// RunStartupMigrations lets a production cutover avoid replaying historical SQL.
+// The caller must still run RequireColumns before serving any requests.
+func RunStartupMigrations(ctx context.Context, pool *pgxpool.Pool, dir, mode string) error {
+	switch mode {
+	case "verify":
+		return nil
+	case "", "auto":
+		return RunMigrationsDir(ctx, pool, dir)
+	default:
+		return fmt.Errorf("unknown migration mode %q", mode)
+	}
+}
+
 // RequireColumns prevents a new binary from serving traffic against an old
 // schema when its migration directory was not deployed with it.
 func RequireColumns(ctx context.Context, pool *pgxpool.Pool, required map[string][]string) error {

@@ -30,6 +30,11 @@ import {
   sameBusinessUserId,
 } from '@/utils/openim'
 import { pickLocalImages, requestAndroidAlbumPermission } from '@/utils/file-upload'
+import {
+  CHAT_RENDER_STEP as RENDER_STEP,
+  CHAT_RENDER_TAIL as RENDER_TAIL,
+} from '@/constants/chat'
+import { swallowError } from '@/utils/ignoreError'
 import { APP_CONFIG } from '@/config'
 import { useContactStore } from '@/stores/contact'
 import { fetchContact } from '@/api/contact'
@@ -51,7 +56,8 @@ import {
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { formatChatDayLabel, formatLastSeen, formatMeridiemClock, quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
-import { playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
+import { imagePreviewUrlOf, playableMediaUrl, previewImagesWithSave, listThumbnailUrl } from '@/utils/chatMedia'
+import { resetMediaCacheQueue } from '@/utils/mediaCache'
 import {
   isAnnouncementDismissed,
   rememberDismissedAnnouncement,
@@ -90,8 +96,8 @@ const statusBarHeight = getStatusBarHeight()
 const vvHeightPx = ref(0)
 const keyboardOpen = ref(false)
 
-const conversationId = ref('')
-const title = ref('聊天')
+const activeConversationId = ref('')
+const roomTitle = ref('聊天')
 const peerAvatar = ref(APP_CONFIG.defaultAvatarUrl)
 const chatType = ref<'private' | 'group'>('group')
 /** 业务侧的好友 / 群 ID，仅用于跳资料页 */
@@ -161,7 +167,7 @@ const recording = ref(false)
 const recordingSeconds = ref(0)
 const voiceDraft = ref<{ path: string; duration: number } | null>(null)
 
-let recorder: any = null
+let recorder: UniApp.RecorderManager | null = null
 let browserRecorder: { stream: MediaStream; mediaRecorder: MediaRecorder } | null = null
 let recordingTimer: ReturnType<typeof setInterval> | null = null
 
@@ -202,7 +208,7 @@ function isPurgedMessage(m: ChatMessage): boolean {
 
 const messages = computed(() =>
   collapseRepeatedGroupNameNotices(
-    (chatStore.messagesMap[conversationId.value] || [])
+    (chatStore.messagesMap[activeConversationId.value] || [])
       .filter(isVisibleMessage)
       .filter((m) => !isPurgedMessage(m)),
   ),
@@ -212,8 +218,6 @@ const messages = computed(() =>
  * 平时只挂载尾部气泡；上翻时按批往前扩（扩出来的在滚动远端，不影响视口）。
  * renderFromId 记「最早挂载的那条」，新消息进来不会把窗口顶部的气泡挤掉。
  */
-const RENDER_TAIL = 48
-const RENDER_STEP = 40
 const renderFromId = ref('')
 const renderMessages = computed(() => {
   const all = messages.value
@@ -246,21 +250,30 @@ watch(
   },
 )
 
-/** 按需拼会话图片预览列表（点开时才算，不绑到每条气泡 props） */
+/** 点开用 1280 中图。系统预览直接拉原图会黑屏，气泡里仍是小图。 */
 function openImagePreview(message: ChatMessage) {
-  const urls = messages.value
-    .filter((m) => m.type === 'image' && m.content)
-    .map((m) => playableMediaUrl(m.content.trim()))
-    .filter(Boolean)
-  const current = playableMediaUrl((message.content || '').trim())
+  const imageMessages = messages.value
+    .filter((m) => m.type === 'image' && (m.sourceUrl || m.content))
+    .filter((m) => imagePreviewUrlOf(m))
+  const urls = imageMessages.map(imagePreviewUrlOf)
+  const current = imagePreviewUrlOf(message)
   if (!current) return
   const list = urls.length ? urls : [current]
-  void previewImagesWithSave(list, list.includes(current) ? current : list[0])
+  const thumbnails = imageMessages.map((m) => playableMediaUrl(listThumbnailUrl(m.content || m.sourceUrl || '')))
+  const originals = imageMessages.map((m) =>
+    playableMediaUrl((m.sourceUrl || m.content || '').trim()),
+  )
+  void previewImagesWithSave(
+    list,
+    list.includes(current) ? current : list[0],
+    thumbnails,
+    originals,
+  )
 }
 
 watch(
   () => {
-    const list = chatStore.messagesMap[conversationId.value] || []
+    const list = chatStore.messagesMap[activeConversationId.value] || []
     // 带上 message.id：第二条公告正文不同时 key 会变；同正文双推也能靠 id 触发横幅刷新
     for (let i = list.length - 1; i >= 0; i--) {
       const m = list[i]
@@ -269,7 +282,8 @@ watch(
         key &&
         (key.startsWith('group-member:') ||
           key.startsWith('group-mute:') ||
-          key.startsWith('group-announce:'))
+          key.startsWith('group-announce:') ||
+          key.startsWith('group-purge:'))
       ) {
         return `${key}:${m.id}`
       }
@@ -281,17 +295,23 @@ watch(
     void refreshGroupMeta()
   },
 )
-// 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID
-// 用 ref 快照而不是 computed：避免 H5/热更新下 computed 与全局 ref 不同步导致 mine 判断失效
+// 消息里的 sendID 是 OpenIM 用户 ID，不是业务用户 ID。
+// 不用 computed 盯全局 ref：H5 热更新时 computed 会和 imUserId 脱节。
+// 登录完成后立刻写入，并在 imUserId 后续变化时跟上，避免历史先渲染、ID 后到，自己的消息停在左边。
 const myId = ref('')
+watch(imUserId, (id) => {
+  if (id) myId.value = id
+})
 const myAvatar = computed(() => userStore.profile?.avatar || APP_CONFIG.defaultAvatarUrl)
 const settingsStore = useChatSettingsStore()
 
 function isMine(message: ChatMessage): boolean {
-  if (myId.value && message.senderId === myId.value) return true
   // 发送中的占位消息一定属于自己，避免 myId 还没拿到时跑到左边
   if (message.status === 'sending') return true
-  return false
+  const me = myId.value || imUserId.value
+  if (!me || !message.senderId) return false
+  // 业务 UUID 和去掉横线的 OpenIM id 是同一个人，大小写也不稳定
+  return sameBusinessUserId(message.senderId, me)
 }
 
 /** 联系人 id → 资料，避免每条气泡 contacts.find 扫全表 */
@@ -370,9 +390,9 @@ function ownPendingGroupMessages(): ChatMessage[] {
 
 async function refreshGroupReadState(): Promise<void> {
   const pending = ownPendingGroupMessages()
-  if (!conversationId.value || pending.length === 0) return
+  if (!activeConversationId.value || pending.length === 0) return
   try {
-    const state = await fetchGroupReadState(conversationId.value)
+    const state = await fetchGroupReadState(activeConversationId.value)
     const maxSeq = Number(state.maxOtherReadSeq || 0)
     for (const message of messages.value) {
       if (isMine(message) && message.seq && message.seq <= maxSeq) message.groupHasRead = true
@@ -401,11 +421,11 @@ function stopGroupReadPolling(): void {
 }
 
 function scheduleGroupReadReport(): void {
-  if (chatType.value !== 'group' || !conversationId.value) return
+  if (chatType.value !== 'group' || !activeConversationId.value) return
   if (groupReadReportTimer) clearTimeout(groupReadReportTimer)
   groupReadReportTimer = setTimeout(() => {
     groupReadReportTimer = null
-    void reportGroupReadCursor(conversationId.value).catch(() => undefined)
+    void reportGroupReadCursor(activeConversationId.value).catch(swallowError('上报群已读失败'))
   }, 1000)
 }
 
@@ -487,13 +507,13 @@ function refreshPrivateTitle() {
   if (chatType.value !== 'private' || !businessId.value) return
   const remark = contactStore.remarkOf(businessId.value)
   if (remark) {
-    title.value = remark
+    roomTitle.value = remark
     return
   }
   const contact = contactStore.contacts.find(
     (c) => c.id === businessId.value || sameBusinessUserId(c.id, businessId.value),
   )
-  if (contact?.nickname) title.value = contact.nickname
+  if (contact?.nickname) roomTitle.value = contact.nickname
 }
 
 watch(
@@ -524,7 +544,7 @@ const showAnnouncementBanner = computed(() => {
   void announcementDismissEpoch.value
   const text = announcementText.value.trim()
   if (!text) return false
-  return !isAnnouncementDismissed(imUserId.value || myId.value, conversationId.value, text)
+  return !isAnnouncementDismissed(imUserId.value || myId.value, activeConversationId.value, text)
 })
 
 const blockTip = computed(() => {
@@ -561,7 +581,7 @@ async function checkMuteStatus() {
 }
 
 const actions = useChatMessageActions({
-  conversationId,
+  conversationId: activeConversationId,
   chatType,
   businessId,
   myId,
@@ -571,8 +591,8 @@ const actions = useChatMessageActions({
   publicAtNameOf,
   isMine,
   visibleMessages: messages,
-  conversationTitle: title,
-  peerDisplayName: title,
+  conversationTitle: roomTitle,
+  peerDisplayName: roomTitle,
   memberMeta: memberMetaMap,
   onMuteChanged: () => {
     void refreshGroupMeta()
@@ -581,7 +601,7 @@ const actions = useChatMessageActions({
 })
 
 const pinnedMessage = computed(
-  () => chatStore.conversations.find((c) => c.id === conversationId.value)?.pinnedMessage || null,
+  () => chatStore.conversations.find((c) => c.id === activeConversationId.value)?.pinnedMessage || null,
 )
 const dismissedPinId = ref('')
 const visiblePinnedBanner = computed(() => {
@@ -634,11 +654,11 @@ function scrollToMessage(id: string) {
 
 /** 点击引用块：翻历史定位并滚到原消息（与搜索跳转共用 locateMessage） */
 async function onQuoteClick(clientMsgId: string) {
-  if (!conversationId.value || !clientMsgId) return
+  if (!activeConversationId.value || !clientMsgId) return
   stickToBottom.value = false
   uni.showLoading({ title: '定位中…', mask: true })
   try {
-    const found = await chatStore.locateMessage(conversationId.value, clientMsgId)
+    const found = await chatStore.locateMessage(activeConversationId.value, clientMsgId)
     await nextTick()
     if (found) {
       scrollToMessage(clientMsgId)
@@ -663,7 +683,7 @@ async function dismissPinnedBanner() {
   if (!pin) return
   if (pin.scope === 'self') {
     try {
-      await chatStore.unpinChatMessage(conversationId.value, false)
+      await chatStore.unpinChatMessage(activeConversationId.value, false)
     } catch (e) {
       uni.showToast({ title: (e as Error)?.message || '取消置顶失败', icon: 'none' })
     }
@@ -674,7 +694,7 @@ async function dismissPinnedBanner() {
     chatType.value === 'private' || myRole.value === 'owner' || myRole.value === 'admin'
   if (canUnpinShared) {
     try {
-      await chatStore.unpinChatMessage(conversationId.value, true)
+      await chatStore.unpinChatMessage(activeConversationId.value, true)
     } catch (e) {
       uni.showToast({ title: (e as Error)?.message || '取消置顶失败', icon: 'none' })
     }
@@ -733,7 +753,7 @@ onUnload(() => {
   }
   chatStore.setOnIncomingForDissolve(null)
   chatStore.setOnGroupUnavailable(null)
-  chatStore.trimConversationMemory(conversationId.value)
+  chatStore.trimConversationMemory(activeConversationId.value)
 })
 
 /**
@@ -773,7 +793,7 @@ function exitUnavailableGroupRoom() {
  */
 function handleIncomingForDissolve(message: { conversationId?: string; notificationKind?: string }) {
   if (chatType.value !== 'group') return
-  if (message.conversationId !== conversationId.value) return
+  if (message.conversationId !== activeConversationId.value) return
   if (message.notificationKind !== 'dissolved') return
   exitDissolvedRoom()
 }
@@ -781,7 +801,7 @@ chatStore.setOnIncomingForDissolve(handleIncomingForDissolve)
 
 function handleGroupUnavailable(payload: { conversationId: string }) {
   if (chatType.value !== 'group') return
-  if (payload.conversationId !== conversationId.value) return
+  if (payload.conversationId !== activeConversationId.value) return
   exitUnavailableGroupRoom()
 }
 chatStore.setOnGroupUnavailable(handleGroupUnavailable)
@@ -789,7 +809,14 @@ chatStore.setOnGroupUnavailable(handleGroupUnavailable)
 // 把当前会话报备给 store。
 // 桌面端（H5 三栏布局）本组件是内嵌的、不是页面，页面级 onShow/onHide 不触发，
 // 「回到前台补拉当前会话」只能由 chatStore.resyncAfterResume 代劳。
-watch(conversationId, (id) => chatStore.setActiveConversation(id), { immediate: true })
+watch(
+  activeConversationId,
+  (id) => {
+    resetMediaCacheQueue()
+    chatStore.setActiveConversation(id)
+  },
+  { immediate: true },
+)
 
 /** onShow 重拉群详情发现已解散（如 App 后台期间群被解散）时，同样提示并退出 */
 watch(groupDissolved, (dissolved) => {
@@ -845,11 +872,20 @@ onMounted(() => {
   })
 })
 
+/** SDK 资源未就绪时原文含 errCode / withStack，不直接展示 */
+function roomOpenErrorText(e: unknown): string {
+  const message = e instanceof Error ? e.message : ''
+  if (!message || /errCode=|withStack|not load resource|10004|10005/.test(message)) {
+    return '聊天记录还在同步，请稍后再试'
+  }
+  return message
+}
+
 async function bootstrapRoom(query: Record<string, string | undefined>) {
   roomExited = false
   roomFirstMessagesMarked = false
   perfMarkStart('chat:room-first-messages')
-  title.value = decodeURIComponent(String(query?.title || '聊天'))
+  roomTitle.value = decodeURIComponent(String(query?.title || '聊天'))
   peerAvatar.value = decodeURIComponent(String(query?.avatar || APP_CONFIG.defaultAvatarUrl))
   chatType.value = String(query?.type || 'group') === 'private' ? 'private' : 'group'
   businessId.value = String(query?.targetId || '')
@@ -860,9 +896,12 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 
   try {
     const convIdHint = String(query?.conversationId || '')
-    if (convIdHint) conversationId.value = convIdHint
+    if (convIdHint) activeConversationId.value = convIdHint
 
     await ensureIMLogin()
+    // 必须在拉历史之前写上。本地库很快时，消息会先于 enterConversation 画出来，
+    // 此时 myId 仍为空，自己的气泡会落在左边，App 滚动列表不一定会再改位置。
+    if (imUserId.value) myId.value = imUserId.value
 
     const enterTask = (async () => {
       perfMarkStart('chat:room-enter-conversation')
@@ -877,8 +916,9 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 
     const loadTask = (async () => {
       if (convIdHint) {
-        return chatStore.loadMessages(convIdHint).catch((e: any) => {
-          if (chatType.value === 'group' && e?.message?.includes('10006')) {
+        return chatStore.loadMessages(convIdHint).catch((e: unknown) => {
+          const message = e instanceof Error ? e.message : ''
+          if (chatType.value === 'group' && message.includes('10006')) {
             exitDissolvedRoom()
             return
           }
@@ -886,8 +926,9 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
         })
       }
       const conv = await enterTask
-      return chatStore.loadMessages(conv.id).catch((e: any) => {
-        if (chatType.value === 'group' && e?.message?.includes('10006')) {
+      return chatStore.loadMessages(conv.id).catch((e: unknown) => {
+        const message = e instanceof Error ? e.message : ''
+        if (chatType.value === 'group' && message.includes('10006')) {
           exitDissolvedRoom()
           return
         }
@@ -918,8 +959,8 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 
     const conv = await enterTask
     convRef.value = conv
-    conversationId.value = conv.id
-    if (!query?.title) title.value = conv.title
+    activeConversationId.value = conv.id
+    if (!query?.title) roomTitle.value = conv.title
 
     myId.value = imUserId.value
     if (!myId.value) {
@@ -979,7 +1020,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     }
   } catch (e) {
     console.error('[chat] 打开会话失败', e)
-    uni.showToast({ title: (e as Error)?.message || '会话打开失败', icon: 'none', duration: 4000 })
+    uni.showToast({ title: roomOpenErrorText(e), icon: 'none', duration: 2500 })
   }
 }
 
@@ -990,7 +1031,7 @@ let loadingMore = false
  */
 async function onReachOldest() {
   if (revealOlderMessages()) return
-  const convId = conversationId.value
+  const convId = activeConversationId.value
   if (!convId || loadingMore) return
   loadingMore = true
   loadingOlder.value = true
@@ -999,7 +1040,7 @@ async function onReachOldest() {
     for (let i = 0; i < 3; i++) {
       const before = messages.value.length
       const added = await chatStore.loadMoreMessages(convId)
-      if (convId !== conversationId.value) return
+      if (convId !== activeConversationId.value) return
       if (!added) break
       if (messages.value.length > before) {
         renderAllMessages()
@@ -1162,7 +1203,7 @@ async function onSend() {
   try {
     if (actions.quote.value) {
       await chatStore.sendQuote(
-        conversationId.value,
+        activeConversationId.value,
         text,
         actions.quote.value.id,
         imUserId.value || myId.value,
@@ -1170,13 +1211,13 @@ async function onSend() {
       actions.clearQuote()
     } else if (pendingAt.length > 0) {
       await chatStore.sendAtText(
-        conversationId.value,
+        activeConversationId.value,
         text,
         imUserId.value || myId.value,
         pendingAt,
       )
     } else {
-      await chatStore.sendText(conversationId.value, text, imUserId.value || myId.value)
+      await chatStore.sendText(activeConversationId.value, text, imUserId.value || myId.value)
     }
     await nextTick()
     // 发送成功后再清一次：防止回车键后续事件把字写回输入框
@@ -1306,12 +1347,13 @@ function clipboardImageFiles(data: DataTransfer | null): File[] {
 }
 
 /** H5/PC：粘贴图片先确认，避免「粘贴完自己就发出去」 */
-function onWindowPaste(e: ClipboardEvent) {
+function onWindowPaste(e: Event) {
+  const event = e as ClipboardEvent
   if (!isH5ComposerPlatform() || composerBlocked.value || voiceMode.value) return
-  if (!composerPasteTarget(e.target)) return
-  const files = clipboardImageFiles(e.clipboardData).slice(0, MAX_PICK_COUNT)
+  if (!composerPasteTarget(event.target)) return
+  const files = clipboardImageFiles(event.clipboardData).slice(0, MAX_PICK_COUNT)
   if (!files.length) return
-  e.preventDefault()
+  event.preventDefault()
   const tip = files.length === 1 ? '发送这张图片？' : `发送这 ${files.length} 张图片？`
   void uni
     .showModal({
@@ -1326,34 +1368,17 @@ function onWindowPaste(e: ClipboardEvent) {
 }
 
 async function sendPastedImages(files: File[]) {
-  if (!conversationId.value) {
+  if (!activeConversationId.value) {
     uni.showToast({ title: '会话未就绪', icon: 'none' })
     return
   }
-  let failed = 0
-  let firstReason = ''
-  for (const file of files) {
+  const jobs = files.map((file) => {
     const path = URL.createObjectURL(file)
-    let sent = false
-    try {
-      await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
-      sent = true
-      await nextTick()
-      scrollToBottom(true)
-    } catch (e) {
-      failed++
-      if (!firstReason) firstReason = sendFailReason(e)
-    } finally {
-      // 失败气泡还指着这块本地图，重发要能再读到
-      if (sent) URL.revokeObjectURL(path)
-    }
-  }
-  if (failed) {
-    uni.showToast({
-      title: firstReason ? `${failed} 张图片发送失败：${firstReason}` : `${failed} 张图片发送失败`,
-      icon: 'none',
-    })
-  }
+    return chatStore.prepareOutgoingImage(activeConversationId.value, path, imUserId.value || myId.value)
+  })
+  await nextTick()
+  scrollToBottom(true)
+  await sendImageJobs(jobs, (path) => URL.revokeObjectURL(path))
 }
 
 onUnmounted(() => {
@@ -1434,16 +1459,16 @@ function onRetry(m: ChatMessage) {
 
 /** 重发失败的文本/图片/语音/文件消息：按原类型重新发送，成功后移除旧的失败气泡 */
 async function doRetry(m: ChatMessage) {
-  if (!conversationId.value) return
+  if (!activeConversationId.value) return
   const senderId = imUserId.value || myId.value
   try {
     if (m.type === 'text') {
-      await chatStore.sendText(conversationId.value, m.content, senderId)
+      await chatStore.sendText(activeConversationId.value, m.content, senderId)
     } else if (m.type === 'image') {
       if (/^(https?|blob|file):/.test(m.content)) {
-        await chatStore.sendImageUrl(conversationId.value, m.content, senderId)
+        await chatStore.sendImageUrl(activeConversationId.value, m.content, senderId)
       } else {
-        await chatStore.sendImage(conversationId.value, m.content, senderId)
+        await chatStore.sendImage(activeConversationId.value, m.content, senderId)
       }
     } else if (m.type === 'voice') {
       let path = ''
@@ -1455,10 +1480,10 @@ async function doRetry(m: ChatMessage) {
       } catch {
         path = m.content
       }
-      if (path) await chatStore.sendVoice(conversationId.value, path, duration, senderId)
+      if (path) await chatStore.sendVoice(activeConversationId.value, path, duration, senderId)
     } else if (m.type === 'file') {
       const name = m.content.split(/[\\/]/).filter(Boolean).pop() || '文件'
-      await chatStore.sendFile(conversationId.value, m.content, name, senderId)
+      await chatStore.sendFile(activeConversationId.value, m.content, name, senderId)
     } else if (m.type === 'video') {
       let path = m.content
       let duration = 0
@@ -1471,9 +1496,9 @@ async function doRetry(m: ChatMessage) {
       } catch {
         /* 旧失败气泡可能直接存路径 */
       }
-      if (path) await chatStore.sendVideo(conversationId.value, path, senderId, duration, snapshot)
+      if (path) await chatStore.sendVideo(activeConversationId.value, path, senderId, duration, snapshot)
     }
-    await chatStore.removeLocal(conversationId.value, m.id).catch(() => undefined)
+    await chatStore.removeLocal(activeConversationId.value, m.id).catch(() => undefined)
     await nextTick()
     scrollToBottom(true)
   } catch (e) {
@@ -1813,7 +1838,7 @@ function openFriendDetailModal(userId: string) {
 }
 
 function copyHeaderTitle() {
-  const name = String(title.value || '').trim()
+  const name = String(roomTitle.value || '').trim()
   if (!name) return
   uni.setClipboardData({
     data: name,
@@ -1936,10 +1961,10 @@ function openAnnouncement() {
 async function dismissAnnouncementBanner() {
   const text = announcementText.value.trim()
   if (text) {
-    rememberDismissedAnnouncement(imUserId.value || myId.value, conversationId.value, text)
+    rememberDismissedAnnouncement(imUserId.value || myId.value, activeConversationId.value, text)
   }
   announcementDismissEpoch.value += 1
-  await chatStore.dismissGroupAnnouncement(conversationId.value)
+  await chatStore.dismissGroupAnnouncement(activeConversationId.value)
 }
 
 async function onAvatarClick(message: ChatMessage) {
@@ -2028,7 +2053,11 @@ async function onGroupInviteApply(invite: GroupInvitePayload) {
 
 function requestAudioPermission(): Promise<boolean> {
   return new Promise((resolve) => {
-    const authorize = (uni as any).authorize
+    const authorize = (
+      uni as unknown as {
+        authorize?: (options: { scope: string; success: () => void; fail: () => void }) => void
+      }
+    ).authorize
     if (typeof authorize === 'function') {
       authorize({
         scope: 'scope.record',
@@ -2128,8 +2157,8 @@ async function startVoiceRecord() {
     (window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1') &&
     (
       (!!navigator.mediaDevices?.getUserMedia && typeof window.MediaRecorder !== 'undefined') ||
-      !!(navigator as any).getUserMedia ||
-      !!(navigator as any).webkitGetUserMedia
+      !!(navigator as Navigator & { getUserMedia?: unknown; webkitGetUserMedia?: unknown }).getUserMedia ||
+      !!(navigator as Navigator & { getUserMedia?: unknown; webkitGetUserMedia?: unknown }).webkitGetUserMedia
     )
 
   if (!canUseBrowserRecorder) {
@@ -2184,7 +2213,6 @@ async function startVoiceRecord() {
     }
 
     browserRecorder = { stream, mediaRecorder }
-    recorder = mediaRecorder
     mediaRecorder.start()
     recordingTimer = setInterval(() => {
       recordingSeconds.value += 1
@@ -2248,7 +2276,7 @@ async function sendVoiceDraft() {
 
   try {
     await chatStore.sendVoice(
-      conversationId.value,
+      activeConversationId.value,
       draft.path,
       draft.duration,
       imUserId.value || myId.value,
@@ -2286,7 +2314,7 @@ async function onStickerSelect(url: string) {
   if (!url || composerBlocked.value) return
   showEmojiPanel.value = false
   try {
-    await chatStore.sendImageUrl(conversationId.value, url, imUserId.value || myId.value)
+    await chatStore.sendImageUrl(activeConversationId.value, url, imUserId.value || myId.value)
     await nextTick()
     scrollToBottom(true)
   } catch (e) {
@@ -2308,7 +2336,7 @@ const MAX_PICK_COUNT = 20
 
 function onPlayVideo(message: ChatMessage) {
   uni.navigateTo({
-    url: `/pages/chat/video-viewer?conversationId=${encodeURIComponent(conversationId.value)}&messageId=${encodeURIComponent(message.id)}&content=${encodeURIComponent(message.content)}&senderNickname=${encodeURIComponent(message.senderNickname || '')}&createdAt=${encodeURIComponent(message.createdAt)}`,
+    url: `/pages/chat/video-viewer?conversationId=${encodeURIComponent(activeConversationId.value)}&messageId=${encodeURIComponent(message.id)}&content=${encodeURIComponent(message.content)}&senderNickname=${encodeURIComponent(message.senderNickname || '')}&createdAt=${encodeURIComponent(message.createdAt)}`,
   })
 }
 
@@ -2333,24 +2361,32 @@ function afterPlusClosed(run: () => void) {
   setTimeout(run, 320)
 }
 
-async function sendPickedImagePaths(paths: string[]) {
-  const list = paths.filter(Boolean).slice(0, MAX_PICK_COUNT)
-  if (!list.length) {
-    uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
-    return
-  }
+async function sendImageJobs(
+  jobs: Array<{ conversationId: string; filePath: string; placeholder: ChatMessage }>,
+  revokePath?: (filePath: string) => void,
+) {
   let failed = 0
   let firstReason = ''
-  for (const path of list) {
-    try {
-      await chatStore.sendImage(conversationId.value, path, imUserId.value || myId.value)
-      await nextTick()
-      scrollToBottom(true)
-    } catch (e) {
-      failed++
-      if (!firstReason) firstReason = sendFailReason(e)
+  const queue = [...jobs]
+  const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
+    while (queue.length) {
+      const job = queue.shift()
+      if (!job) return
+      let sent = false
+      try {
+        await chatStore.deliverOutgoingImage(job)
+        sent = true
+        await nextTick()
+        scrollToBottom(true)
+      } catch (e) {
+        failed += 1
+        if (!firstReason) firstReason = sendFailReason(e)
+      } finally {
+        if (sent) revokePath?.(job.filePath)
+      }
     }
-  }
+  })
+  await Promise.all(workers)
   if (failed) {
     uni.showToast({
       title: firstReason ? `${failed} 张图片发送失败：${firstReason}` : `${failed} 张图片发送失败`,
@@ -2359,10 +2395,24 @@ async function sendPickedImagePaths(paths: string[]) {
   }
 }
 
+async function sendPickedImagePaths(paths: string[]) {
+  const list = paths.filter(Boolean).slice(0, MAX_PICK_COUNT)
+  if (!list.length) {
+    uni.showToast({ title: '未获取到图片，请重试', icon: 'none' })
+    return
+  }
+  const jobs = list.map((path) =>
+    chatStore.prepareOutgoingImage(activeConversationId.value, path, imUserId.value || myId.value),
+  )
+  await nextTick()
+  scrollToBottom(true)
+  await sendImageJobs(jobs)
+}
+
 /** 相册多选：一次最多 20 张；华为走 pickLocalImages 的 gallery 兜底 */
 function pickImage() {
   afterPlusClosed(() => {
-    void pickLocalImages({ count: MAX_PICK_COUNT, sourceType: ['album'] })
+    void pickLocalImages({ count: MAX_PICK_COUNT, sourceType: ['album'], materialize: false })
       .then((paths) => sendPickedImagePaths(paths))
       .catch((e) => {
         if (String((e as Error)?.message || '') === 'cancel') return
@@ -2377,7 +2427,7 @@ function pickImage() {
 /** 相机拍照即发（与相册同一套 pickLocalImages，含权限/路径兜底） */
 function pickCamera() {
   afterPlusClosed(() => {
-    void pickLocalImages({ count: 1, sourceType: ['camera'] })
+    void pickLocalImages({ count: 1, sourceType: ['camera'], materialize: false })
       .then((paths) => sendPickedImagePaths(paths))
       .catch((e) => {
         if (String((e as Error)?.message || '') === 'cancel') return
@@ -2409,7 +2459,7 @@ function pickVideo() {
           let sent = false
           try {
             await chatStore.sendVideo(
-              conversationId.value,
+              activeConversationId.value,
               path,
               imUserId.value || myId.value,
               Number(picked.duration || 0),
@@ -2437,7 +2487,7 @@ function pickCard() {
     return
   }
   uni.navigateTo({
-    url: `/pages/chat/card-picker?conversationId=${encodeURIComponent(conversationId.value)}&title=${encodeURIComponent(title.value)}`,
+    url: `/pages/chat/card-picker?conversationId=${encodeURIComponent(activeConversationId.value)}&title=${encodeURIComponent(roomTitle.value)}`,
   })
 }
 
@@ -2452,9 +2502,9 @@ async function pickFile() {
       try {
         const asImage = isLikelyChatImage(file.name) || isLikelyChatImage(file.path)
         if (asImage) {
-          await chatStore.sendImage(conversationId.value, file.path, imUserId.value || myId.value)
+          await chatStore.sendImage(activeConversationId.value, file.path, imUserId.value || myId.value)
         } else {
-          await chatStore.sendFile(conversationId.value, file.path, file.name, imUserId.value || myId.value)
+          await chatStore.sendFile(activeConversationId.value, file.path, file.name, imUserId.value || myId.value)
         }
         await nextTick()
         scrollToBottom(true)
@@ -2482,7 +2532,7 @@ async function pickFile() {
 function pickFavorite() {
   showPlusPanel.value = false
   uni.navigateTo({
-    url: `/pages/chat/favorite-picker?conversationId=${encodeURIComponent(conversationId.value)}&title=${encodeURIComponent(title.value)}`,
+    url: `/pages/chat/favorite-picker?conversationId=${encodeURIComponent(activeConversationId.value)}&title=${encodeURIComponent(roomTitle.value)}`,
   })
 }
 </script>
@@ -2497,22 +2547,47 @@ function pickFavorite() {
       class="chat-header"
       :style="{ paddingTop: embedded ? '0px' : statusBarHeight + 'px' }"
     >
-      <view v-if="!embedded" class="back-btn" @click="goBack">‹</view>
+      <view
+        v-if="!embedded"
+        class="back-btn"
+        @click="goBack"
+      >
+        ‹
+      </view>
       <!-- <text v-if="chatType === 'group' && memberCount > 0" class="member-count">{{ memberCount }}</text> -->
-      <view class="header-title" @click="goToProfile" @longpress.stop="copyHeaderTitle">
-        <text class="header-title-text" selectable>{{ title }}</text>
-        <text v-if="presenceText" class="header-presence">{{ presenceText }}</text>
+      <view
+        class="header-title"
+        @click="goToProfile"
+        @longpress.stop="copyHeaderTitle"
+      >
+        <text
+          class="header-title-text"
+          selectable
+        >
+          {{ roomTitle }}
+        </text>
+        <text
+          v-if="presenceText"
+          class="header-presence"
+        >
+          {{ presenceText }}
+        </text>
       </view>
       <view class="header-icon-wrap">
-        <view class="header-icon" @click.stop="onHeaderMoreClick">⋯</view>
+        <view
+          class="header-icon"
+          @click.stop="onHeaderMoreClick"
+        >
+          ⋯
+        </view>
       </view>
     </view>
 
     <ImDesktopGroupMenu
-      v-if="embedded && chatType === 'group' && businessId && conversationId"
+      v-if="embedded && chatType === 'group' && businessId && activeConversationId"
       v-model="showGroupMenu"
       :group-id="businessId"
-      :conversation-id="conversationId"
+      :conversation-id="activeConversationId"
       @open-friend="openFriendDetailModal"
     />
 
@@ -2522,19 +2597,49 @@ function pickFavorite() {
       :contact-id="friendDetailId"
     />
 
-    <view v-if="showAnnouncementBanner" class="announce-bar">
-      <image class="announce-icon" src="/static/icons/icon-megaphone.svg" mode="aspectFit" />
-      <text class="announce-text" @click="openAnnouncement">{{ announcementText }}</text>
-      <text class="announce-dismiss" @click.stop="dismissAnnouncementBanner">不再提示</text>
+    <view
+      v-if="showAnnouncementBanner"
+      class="announce-bar"
+    >
+      <image
+        class="announce-icon"
+        src="/static/icons/icon-megaphone.svg"
+        mode="aspectFit"
+      />
+      <text
+        class="announce-text"
+        @click="openAnnouncement"
+      >
+        {{ announcementText }}
+      </text>
+      <text
+        class="announce-dismiss"
+        @click.stop="dismissAnnouncementBanner"
+      >
+        不再提示
+      </text>
     </view>
 
-    <view v-if="visiblePinnedBanner" class="pin-bar" @click="jumpToPinnedMessage">
+    <view
+      v-if="visiblePinnedBanner"
+      class="pin-bar"
+      @click="jumpToPinnedMessage"
+    >
       <view class="pin-bar-accent" />
       <view class="pin-bar-body">
-        <text class="pin-bar-label">置顶消息</text>
-        <text class="pin-bar-preview">{{ visiblePinnedBanner.preview || '消息' }}</text>
+        <text class="pin-bar-label">
+          置顶消息
+        </text>
+        <text class="pin-bar-preview">
+          {{ visiblePinnedBanner.preview || '消息' }}
+        </text>
       </view>
-      <text class="pin-bar-close" @click.stop="dismissPinnedBanner">×</text>
+      <text
+        class="pin-bar-close"
+        @click.stop="dismissPinnedBanner"
+      >
+        ×
+      </text>
     </view>
 
     <!-- 不开 scroll-with-animation：uni 的滚动动画是 transform 假动画 + 过渡结束才提交 scrollTop，
@@ -2551,26 +2656,52 @@ function pickFavorite() {
       @touchcancel="onMsgListTouchEnd"
     >
       <view class="msg-flip">
-        <view v-if="loadingOlder" class="msg-loading-older">
-          <text class="msg-loading-older-text">加载中…</text>
+        <view
+          v-if="loadingOlder"
+          class="msg-loading-older"
+        >
+          <text class="msg-loading-older-text">
+            加载中…
+          </text>
         </view>
         <view
           v-for="(m, msgIndex) in renderMessages"
           :id="`msg_${m.id}`"
-          :key="m.id"
+          :key="`${myId || 'pending'}-${m.id}`"
           class="msg-row"
           :class="{ selecting: actions.selecting.value, focused: focusedMsgId === m.id }"
           @click="actions.selecting.value ? actions.toggleSelect(m) : undefined"
         >
-          <view v-if="actions.selecting.value && m.type !== 'system'" class="msg-check" :class="{ on: actions.selectedIds.value.has(m.id) }">
-            <text v-if="actions.selectedIds.value.has(m.id)">✓</text>
+          <view
+            v-if="actions.selecting.value && m.type !== 'system'"
+            class="msg-check"
+            :class="{ on: actions.selectedIds.value.has(m.id) }"
+          >
+            <text v-if="actions.selectedIds.value.has(m.id)">
+              ✓
+            </text>
           </view>
-          <view v-if="dayLabelOf(m, msgIndex)" class="day-chip">
-            <text class="day-chip-text">{{ dayLabelOf(m, msgIndex) }}</text>
+          <view
+            v-if="dayLabelOf(m, msgIndex)"
+            class="day-chip"
+          >
+            <text class="day-chip-text">
+              {{ dayLabelOf(m, msgIndex) }}
+            </text>
           </view>
-          <view v-if="m.type === 'system'" class="sys-tip">
-            <text class="sys-tip-text">{{ systemTextOf(m) }}</text>
-            <text v-if="systemClockOf(m)" class="sys-tip-time">{{ systemClockOf(m) }}</text>
+          <view
+            v-if="m.type === 'system'"
+            class="sys-tip"
+          >
+            <text class="sys-tip-text">
+              {{ systemTextOf(m) }}
+            </text>
+            <text
+              v-if="systemClockOf(m)"
+              class="sys-tip-time"
+            >
+              {{ systemClockOf(m) }}
+            </text>
           </view>
           <ChatBubble
             v-else
@@ -2598,9 +2729,19 @@ function pickFavorite() {
       </view>
     </scroll-view>
 
-    <view v-if="!stickToBottom" class="jump-bottom" @click.stop="jumpToBottom">↓</view>
+    <view
+      v-if="!stickToBottom"
+      class="jump-bottom"
+      @click.stop="jumpToBottom"
+    >
+      ↓
+    </view>
 
-    <view v-if="actions.selecting.value" class="composer" :class="{ 'safe-bottom': !keyboardOpen }">
+    <view
+      v-if="actions.selecting.value"
+      class="composer"
+      :class="{ 'safe-bottom': !keyboardOpen }"
+    >
       <ImMessageSelectBar
         :count="actions.selectedCount.value"
         :mode="actions.selectMode.value"
@@ -2611,7 +2752,11 @@ function pickFavorite() {
         @revoke="actions.onSelectRevoke"
       />
     </view>
-    <view v-else class="composer" :class="{ 'safe-bottom': !keyboardOpen }">
+    <view
+      v-else
+      class="composer"
+      :class="{ 'safe-bottom': !keyboardOpen }"
+    >
       <ImQuoteBar
         v-if="actions.quote.value"
         :nickname="nicknameOf(actions.quote.value) || actions.quote.value.senderNickname || '我'"
@@ -2619,108 +2764,213 @@ function pickFavorite() {
         :text="quoteSummaryOf(actions.quote.value.type, actions.quote.value.content)"
         @close="actions.clearQuote"
       />
-      <view v-if="composerBlocked" class="composer-blocked">
-        <text class="composer-blocked-tip">🔇 {{ blockTip }}</text>
-        <view class="mute-check-btn" :class="{ checking: checkingMute }" @click="checkMuteStatus">
+      <view
+        v-if="composerBlocked"
+        class="composer-blocked"
+      >
+        <text class="composer-blocked-tip">
+          🔇 {{ blockTip }}
+        </text>
+        <view
+          class="mute-check-btn"
+          :class="{ checking: checkingMute }"
+          @click="checkMuteStatus"
+        >
           {{ checkingMute ? '检查中…' : '检查禁言状态' }}
         </view>
       </view>
 
       <template v-else>
-      <!-- @ 提及面板：贴在输入栏上方（对齐参考站） -->
-      <ImAtMentionPanel
-        v-if="chatType === 'group'"
-        :visible="atMentionVisible"
-        :can-at-all="canAtAll"
-        :keyword="atMentionKeyword"
-        :members="atMentionMembers"
-        :loading="atMentionLoading"
-        @close="closeAtMention"
-        @select-all="onAtMentionSelectAll"
-        @select="onAtMentionSelect"
-      />
+        <!-- @ 提及面板：贴在输入栏上方（对齐参考站） -->
+        <ImAtMentionPanel
+          v-if="chatType === 'group'"
+          :visible="atMentionVisible"
+          :can-at-all="canAtAll"
+          :keyword="atMentionKeyword"
+          :members="atMentionMembers"
+          :loading="atMentionLoading"
+          @close="closeAtMention"
+          @select-all="onAtMentionSelectAll"
+          @select="onAtMentionSelect"
+        />
 
-      <view v-if="voiceMode" class="voice-bar">
-        <view class="voice-trash" @click="cancelVoiceDraft">🗑</view>
-
-        <view class="voice-middle" @click="recording ? stopVoiceRecord() : undefined">
-          <view class="record-dot" :class="{ active: recording }"></view>
-          <text class="record-time">{{ formatDuration(recordingSeconds) }}</text>
-        </view>
-
-        <view class="voice-actions">
-          <view class="send-gray-btn" @click="recording ? stopVoiceRecord() : sendVoiceDraft()">
-            <text>{{ recording ? '结束' : '发送' }}</text>
+        <view
+          v-if="voiceMode"
+          class="voice-bar"
+        >
+          <view
+            class="voice-trash"
+            @click="cancelVoiceDraft"
+          >
+            🗑
           </view>
-          <view class="send-icon-btn" @click="sendVoiceDraft">↑</view>
-        </view>
-      </view>
 
-      <view v-else class="composer-row">
-        <view class="tool" @click="startVoiceRecord">
-          <image class="tool-icon" src="/static/icon-mic.png" mode="aspectFit" />
+          <view
+            class="voice-middle"
+            @click="recording ? stopVoiceRecord() : undefined"
+          >
+            <view
+              class="record-dot"
+              :class="{ active: recording }"
+            />
+            <text class="record-time">
+              {{ formatDuration(recordingSeconds) }}
+            </text>
+          </view>
+
+          <view class="voice-actions">
+            <view
+              class="send-gray-btn"
+              @click="recording ? stopVoiceRecord() : sendVoiceDraft()"
+            >
+              <text>{{ recording ? '结束' : '发送' }}</text>
+            </view>
+            <view
+              class="send-icon-btn"
+              @click="sendVoiceDraft"
+            >
+              ↑
+            </view>
+          </view>
         </view>
-        <view class="input-wrap">
-          <textarea
-            ref="inputRef"
-            class="input"
-            v-model="input"
-            :focus="composerFocusFlag"
-            :maxlength="-1"
-            :auto-height="true"
-            :confirm-type="composerConfirmType"
-            :show-confirm-bar="false"
-            :disable-default-padding="true"
-            :hold-keyboard="true"
-            :adjust-position="!isH5ComposerPlatform()"
-            placeholder="输入消息"
-            placeholder-style="color:#B0B0B0"
-            :cursor-spacing="20"
-            @input="syncAtMentionFromInput"
-            @confirm="onConfirmSend"
-            @blur="composerFocusFlag = false"
-          />
-          <text class="emoji" @click="onEmoji">☺</text>
+
+        <view
+          v-else
+          class="composer-row"
+        >
+          <view
+            class="tool"
+            @click="startVoiceRecord"
+          >
+            <image
+              class="tool-icon"
+              src="/static/icon-mic.png"
+              mode="aspectFit"
+            />
+          </view>
+          <view class="input-wrap">
+            <textarea
+              ref="inputRef"
+              v-model="input"
+              class="input"
+              :focus="composerFocusFlag"
+              :maxlength="-1"
+              :auto-height="true"
+              :confirm-type="composerConfirmType"
+              :show-confirm-bar="false"
+              :disable-default-padding="true"
+              :hold-keyboard="true"
+              :adjust-position="!isH5ComposerPlatform()"
+              placeholder="输入消息"
+              placeholder-style="color:#B0B0B0"
+              :cursor-spacing="20"
+              @input="syncAtMentionFromInput"
+              @confirm="onConfirmSend"
+              @blur="composerFocusFlag = false"
+            />
+            <text
+              class="emoji"
+              @click="onEmoji"
+            >
+              ☺
+            </text>
+          </view>
+          <view
+            class="tool"
+            @click="onPlus"
+          >
+            ＋
+          </view>
+          <view
+            v-if="hasInput"
+            class="send-btn"
+            @tap.stop="onSend"
+          >
+            传送
+          </view>
         </view>
-        <view class="tool" @click="onPlus">＋</view>
-        <view v-if="hasInput" class="send-btn" @tap.stop="onSend">传送</view>
-      </view>
       </template>
 
-      <view v-if="showPlusPanel && !composerBlocked" class="plus-panel">
-        <view class="plus-item" @click="pickCamera">
+      <view
+        v-if="showPlusPanel && !composerBlocked"
+        class="plus-panel"
+      >
+        <view
+          class="plus-item"
+          @click="pickCamera"
+        >
           <view class="plus-icon">
-            <image class="plus-icon-img" src="/static/icon-camera.png" mode="aspectFit" />
+            <image
+              class="plus-icon-img"
+              src="/static/icon-camera.png"
+              mode="aspectFit"
+            />
           </view>
           <text>相机</text>
         </view>
-        <view class="plus-item" @click="pickImage">
+        <view
+          class="plus-item"
+          @click="pickImage"
+        >
           <view class="plus-icon">
-            <image class="plus-icon-img" src="/static/icon-photo.png" mode="aspectFit" />
+            <image
+              class="plus-icon-img"
+              src="/static/icon-photo.png"
+              mode="aspectFit"
+            />
           </view>
           <text>照片</text>
         </view>
-        <view class="plus-item" @click="pickVideo">
+        <view
+          class="plus-item"
+          @click="pickVideo"
+        >
           <view class="plus-icon">
-            <image class="plus-icon-img" src="/static/icon-video.svg" mode="aspectFit" />
+            <image
+              class="plus-icon-img"
+              src="/static/icon-video.svg"
+              mode="aspectFit"
+            />
           </view>
           <text>视频</text>
         </view>
-        <view v-if="chatType !== 'group'" class="plus-item" @click="pickCard">
+        <view
+          v-if="chatType !== 'group'"
+          class="plus-item"
+          @click="pickCard"
+        >
           <view class="plus-icon">
-            <image class="plus-icon-img" src="/static/icon-card.png" mode="aspectFit" />
+            <image
+              class="plus-icon-img"
+              src="/static/icon-card.png"
+              mode="aspectFit"
+            />
           </view>
           <text>名片</text>
         </view>
-        <view class="plus-item" @click="pickFile">
+        <view
+          class="plus-item"
+          @click="pickFile"
+        >
           <view class="plus-icon">
-            <image class="plus-icon-img" src="/static/icon-file.png" mode="aspectFit" />
+            <image
+              class="plus-icon-img"
+              src="/static/icon-file.png"
+              mode="aspectFit"
+            />
           </view>
           <text>文件</text>
         </view>
-        <view class="plus-item" @click="pickFavorite">
+        <view
+          class="plus-item"
+          @click="pickFavorite"
+        >
           <view class="plus-icon">
-            <image class="plus-icon-img" src="/static/icon-favorite.png" mode="aspectFit" />
+            <image
+              class="plus-icon-img"
+              src="/static/icon-favorite.png"
+              mode="aspectFit"
+            />
           </view>
           <text>收藏</text>
         </view>

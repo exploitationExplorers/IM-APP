@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { test } from 'vitest'
 
 import {
   parseVideoMeta,
@@ -8,9 +8,9 @@ import {
   isUsableVideoPoster,
   mergeVideoContent,
   videoPosterUrlFromContent,
-} from '../src/utils/chatMedia.ts'
+} from '../src/utils/chatMedia'
 
-const { snapshotFromMessage } = await import('../src/utils/forwardSnapshot.ts')
+import { snapshotFromMessage } from '../src/utils/forwardSnapshot'
 const VIDEO_MESSAGE = 104
 
 test('截帧位置避开首帧且不会越过视频结尾', () => {
@@ -23,9 +23,17 @@ test('截帧位置避开首帧且不会越过视频结尾', () => {
 test('解析 App 原生 PascalCase 视频和封面字段', () => {
   assert.deepEqual(
     parseVideoMeta({
-      VideoElem: JSON.stringify({ VideoUrl: 'https://cdn.example/video.mp4', SnapshotUrl: 'https://cdn.example/cover.jpg', Duration: 8 }),
+      VideoElem: JSON.stringify({
+        VideoUrl: 'https://cdn.example/video.mp4',
+        SnapshotUrl: 'https://cdn.example/cover.jpg',
+        Duration: 8,
+      }),
     }),
-    { url: 'https://cdn.example/video.mp4', snapshotUrl: 'https://cdn.example/cover.jpg', duration: 8 },
+    {
+      url: 'https://cdn.example/video.mp4',
+      snapshotUrl: 'https://cdn.example/cover.jpg',
+      duration: 8,
+    },
   )
 })
 
@@ -70,7 +78,10 @@ test('转发优先远程封面，忽略发送端本地 snapshotPath', () => {
       snapshotHeight: 640,
     },
   } as never)
-  assert.equal((snapshot.content as { snapshotUrl: string }).snapshotUrl, 'https://cdn.example/a.jpg')
+  assert.equal(
+    (snapshot.content as { snapshotUrl: string }).snapshotUrl,
+    'https://cdn.example/a.jpg',
+  )
   assert.equal((snapshot.content as { videoSize: number }).videoSize, 1024)
 })
 
@@ -88,7 +99,12 @@ test('解析时优先远程封面 URL', () => {
 
 test('没有远程或本地视频地址时拒绝转发', () => {
   assert.throws(
-    () => snapshotFromMessage({ contentType: VIDEO_MESSAGE, clientMsgID: 'empty', content: '{}' } as never),
+    () =>
+      snapshotFromMessage({
+        contentType: VIDEO_MESSAGE,
+        clientMsgID: 'empty',
+        content: '{}',
+      } as never),
     /视频地址不存在/,
   )
 })
@@ -167,5 +183,8 @@ test('播放页使用消息封面作为视频缓冲首屏', () => {
     videoPosterUrlFromContent(JSON.stringify({ snapshotUrl: 'https://cdn.example/a.jpg' })),
     'https://cdn.example/a.jpg',
   )
-  assert.equal(videoPosterUrlFromContent(JSON.stringify({ snapshotUrl: 'https://cdn.example/a.mp4' })), '')
+  assert.equal(
+    videoPosterUrlFromContent(JSON.stringify({ snapshotUrl: 'https://cdn.example/a.mp4' })),
+    '',
+  )
 })

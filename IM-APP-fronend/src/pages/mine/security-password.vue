@@ -65,18 +65,24 @@ function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar :title="navTitle" @back="goBack" />
+    <ImNavBar
+      :title="navTitle"
+      @back="goBack"
+    />
 
     <view class="body">
       <view class="input-box">
         <input
+          v-model="newPassword"
           class="input"
           :password="!showNew"
           placeholder="请输入新密码"
           placeholder-class="input-placeholder"
-          v-model="newPassword"
-        />
-        <view class="eye-btn" @click="showNew = !showNew">
+        >
+        <view
+          class="eye-btn"
+          @click="showNew = !showNew"
+        >
           <image
             class="eye-icon"
             :src="showNew ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
@@ -87,13 +93,16 @@ function onSubmit() {
 
       <view class="input-box">
         <input
+          v-model="confirmPassword"
           class="input"
           :password="!showConfirm"
           placeholder="请再次输入新密码"
           placeholder-class="input-placeholder"
-          v-model="confirmPassword"
-        />
-        <view class="eye-btn" @click="showConfirm = !showConfirm">
+        >
+        <view
+          class="eye-btn"
+          @click="showConfirm = !showConfirm"
+        >
           <image
             class="eye-icon"
             :src="showConfirm ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"

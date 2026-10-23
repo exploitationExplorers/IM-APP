@@ -5,8 +5,8 @@ import { MessageType } from 'openim-uniapp-polyfill'
 import type { MessageItem } from 'openim-uniapp-polyfill'
 import EmptyState from '@/components/EmptyState.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
-import { collectHistoryMessages, resolveGroupConversationID } from '@/utils/openim'
-import { parseVideoMeta, playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
+import { collectHistoryMessages, resolveGroupConversationID, toChatMessage } from '@/utils/openim'
+import { imagePreviewUrlOf, listThumbnailUrl, parseVideoMeta, playableMediaUrl, previewImagesWithSave } from '@/utils/chatMedia'
 
 type MediaTab = 'all' | 'image' | 'video' | 'file'
 
@@ -14,6 +14,8 @@ interface MediaItem {
   id: string
   kind: 'image' | 'video' | 'file'
   url: string
+  original: string
+  preview: string
   thumb: string
   name: string
 }
@@ -58,40 +60,43 @@ function goBack() {
 
 function toMedia(item: MessageItem): MediaItem | null {
   if (item.contentType === MessageType.PictureMessage) {
-    const url =
-      item.pictureElem?.sourcePicture?.url ||
-      item.pictureElem?.snapshotPicture?.url ||
-      item.pictureElem?.sourcePath ||
-      ''
-    if (!url) return null
+    const chat = toChatMessage(item)
+    const original = playableMediaUrl(chat.sourceUrl || chat.content || '')
+    if (!original) return null
     return {
       id: item.clientMsgID,
       kind: 'image',
-      url,
-      thumb: item.pictureElem?.snapshotPicture?.url || url,
+      url: original,
+      original,
+      preview: imagePreviewUrlOf(chat) || original,
+      thumb: playableMediaUrl(listThumbnailUrl(original)),
       name: '',
     }
   }
   if (item.contentType === MessageType.VideoMessage) {
     const meta = parseVideoMeta(item)
-    const url = meta.url
-    const thumb = meta.snapshotUrl || url
+    const url = playableMediaUrl(meta.url)
+    const thumb = playableMediaUrl(meta.snapshotUrl || meta.url)
     if (!url && !thumb) return null
     return {
       id: item.clientMsgID,
       kind: 'video',
       url,
+      original: '',
+      preview: '',
       thumb,
       name: '',
     }
   }
   if (item.contentType === MessageType.FileMessage) {
-    const url = item.fileElem?.sourceUrl || ''
+    const url = playableMediaUrl(item.fileElem?.sourceUrl || '')
     if (!url) return null
     return {
       id: item.clientMsgID,
       kind: 'file',
       url,
+      original: '',
+      preview: '',
       thumb: '',
       name: item.fileElem?.fileName || '文件',
     }
@@ -101,10 +106,11 @@ function toMedia(item: MessageItem): MediaItem | null {
 
 function onPreview(item: MediaItem) {
   if (item.kind === 'image') {
-    const urls = visible.value
-      .filter((row) => row.kind === 'image')
-      .map((row) => playableMediaUrl(row.url))
-    void previewImagesWithSave(urls, playableMediaUrl(item.url))
+    const images = visible.value.filter((row) => row.kind === 'image')
+    const previews = images.map((row) => row.preview)
+    const thumbnails = images.map((row) => row.thumb)
+    const originals = images.map((row) => row.original)
+    void previewImagesWithSave(previews, item.preview, thumbnails, originals)
     return
   }
   if (item.kind === 'video' && item.url) {
@@ -125,7 +131,10 @@ function onPreview(item: MediaItem) {
 
 <template>
   <view class="page">
-    <ImNavBar title="图片与视频" @back="goBack" />
+    <ImNavBar
+      title="图片与视频"
+      @back="goBack"
+    />
 
     <view class="tabs">
       <view
@@ -139,19 +148,49 @@ function onPreview(item: MediaItem) {
       </view>
     </view>
 
-    <view v-if="tab !== 'file'" class="grid">
-      <view v-for="item in visible" :key="item.id" class="cell" @click="onPreview(item)">
-        <image class="thumb" :src="playableMediaUrl(item.thumb || item.url)" mode="aspectFill" />
-        <view v-if="item.kind === 'video'" class="play">▶</view>
+    <view
+      v-if="tab !== 'file'"
+      class="grid"
+    >
+      <view
+        v-for="item in visible"
+        :key="item.id"
+        class="cell"
+        @click="onPreview(item)"
+      >
+        <image
+          class="thumb"
+          :src="item.thumb"
+          mode="aspectFill"
+        />
+        <view
+          v-if="item.kind === 'video'"
+          class="play"
+        >
+          ▶
+        </view>
       </view>
     </view>
-    <view v-else class="files">
-      <view v-for="item in visible" :key="item.id" class="file-row" @click="onPreview(item)">
-        <text class="file-name">{{ item.name }}</text>
+    <view
+      v-else
+      class="files"
+    >
+      <view
+        v-for="item in visible"
+        :key="item.id"
+        class="file-row"
+        @click="onPreview(item)"
+      >
+        <text class="file-name">
+          {{ item.name }}
+        </text>
       </view>
     </view>
 
-    <EmptyState v-if="!loading && !visible.length" text="暂无图片和视频" />
+    <EmptyState
+      v-if="!loading && !visible.length"
+      text="暂无图片和视频"
+    />
   </view>
 </template>
 

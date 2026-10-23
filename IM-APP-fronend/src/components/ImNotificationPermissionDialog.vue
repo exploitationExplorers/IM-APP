@@ -65,16 +65,37 @@ function onCancel() {
 </script>
 
 <template>
-  <view v-if="visible" class="npd-mask" @touchmove.stop.prevent>
-    <view class="npd-card" @click.stop>
-      <text class="npd-title">请在以下选择是否接收通知</text>
-      <text class="npd-desc">接收通知可以让您在应用程式关闭的情况下，仍然接收到新消息的通知。</text>
+  <view
+    v-if="visible"
+    class="npd-mask"
+    @touchmove.stop.prevent
+  >
+    <view
+      class="npd-card"
+      @click.stop
+    >
+      <text class="npd-title">
+        请在以下选择是否接收通知
+      </text>
+      <text class="npd-desc">
+        接收通知可以让您在应用程式关闭的情况下，仍然接收到新消息的通知。
+      </text>
       <view class="npd-actions">
-        <view class="npd-cancel" @click="onCancel">
-          <text class="npd-cancel-text">取消</text>
+        <view
+          class="npd-cancel"
+          @click="onCancel"
+        >
+          <text class="npd-cancel-text">
+            取消
+          </text>
         </view>
-        <view class="npd-confirm" @click="onConfirm">
-          <text class="npd-confirm-text">确认</text>
+        <view
+          class="npd-confirm"
+          @click="onConfirm"
+        >
+          <text class="npd-confirm-text">
+            确认
+          </text>
         </view>
       </view>
     </view>

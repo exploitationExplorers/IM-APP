@@ -6,6 +6,7 @@
  */
 import { computed } from 'vue'
 import { APP_CONFIG } from '@/config'
+import { avatarThumbnailUrl } from '@/utils/chatMediaUrl'
 
 export interface AtMentionMember {
   id: string
@@ -42,24 +43,48 @@ const filtered = computed(() => {
 </script>
 
 <template>
-  <view v-if="visible" class="at-panel">
+  <view
+    v-if="visible"
+    class="at-panel"
+  >
     <!-- 顶栏：群主/管理员显示「所有人」+ 关闭；普通成员仅关闭 -->
-    <view class="at-header" :class="{ 'at-header--all': canAtAll }">
+    <view
+      class="at-header"
+      :class="{ 'at-header--all': canAtAll }"
+    >
       <view
         v-if="canAtAll"
         class="at-all-left"
         @click="emit('selectAll')"
       >
         <view class="at-all-icon-wrap">
-          <image class="at-all-icon" src="/static/icons/menu-group.svg" mode="aspectFit" />
+          <image
+            class="at-all-icon"
+            src="/static/icons/menu-group.svg"
+            mode="aspectFit"
+          />
         </view>
-        <text class="at-all-label">所有人</text>
+        <text class="at-all-label">
+          所有人
+        </text>
       </view>
-      <view v-else class="at-header-spacer" />
-      <text class="at-close" @click.stop="emit('close')">×</text>
+      <view
+        v-else
+        class="at-header-spacer"
+      />
+      <text
+        class="at-close"
+        @click.stop="emit('close')"
+      >
+        ×
+      </text>
     </view>
 
-    <scroll-view scroll-y class="at-list" :show-scrollbar="true">
+    <scroll-view
+      scroll-y
+      class="at-list"
+      :show-scrollbar="true"
+    >
       <view
         v-for="m in filtered"
         :key="m.id"
@@ -68,16 +93,28 @@ const filtered = computed(() => {
       >
         <image
           class="at-avatar"
-          :src="m.avatar || APP_CONFIG.defaultAvatarUrl"
+          :src="avatarThumbnailUrl(m.avatar || APP_CONFIG.defaultAvatarUrl)"
           mode="aspectFill"
         />
-        <text class="at-name">{{ m.name }}</text>
+        <text class="at-name">
+          {{ m.name }}
+        </text>
       </view>
-      <view v-if="loading && !filtered.length" class="at-empty">
-        <text class="at-empty-text">成员加载中…</text>
+      <view
+        v-if="loading && !filtered.length"
+        class="at-empty"
+      >
+        <text class="at-empty-text">
+          成员加载中…
+        </text>
       </view>
-      <view v-else-if="!filtered.length" class="at-empty">
-        <text class="at-empty-text">无匹配成员</text>
+      <view
+        v-else-if="!filtered.length"
+        class="at-empty"
+      >
+        <text class="at-empty-text">
+          无匹配成员
+        </text>
       </view>
     </scroll-view>
   </view>

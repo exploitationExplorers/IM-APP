@@ -594,11 +594,11 @@ function pickFavorite() {
   emit('openFavorites')
 }
 
-function getRecorder() {
-  let manager: any = null
+function getRecorder(): UniApp.RecorderManager | null {
+  let manager: UniApp.RecorderManager | null = null
   // H5 的 uni.getRecorderManager 只是打印 not supported 的桩
   // #ifndef H5
-  const anyUni = uni as unknown as { getRecorderManager?: () => any }
+  const anyUni = uni as unknown as { getRecorderManager?: () => UniApp.RecorderManager }
   if (typeof anyUni.getRecorderManager === 'function') manager = anyUni.getRecorderManager()
   // #endif
   return manager
@@ -637,25 +637,46 @@ function stopRecord() {
 
 <template>
   <view class="composer safe-bottom">
-    <view v-if="panelVisible" class="mask" @click="closePanel"></view>
+    <view
+      v-if="panelVisible"
+      class="mask"
+      @click="closePanel"
+    />
     <view class="row">
-      <view class="icon-btn" @click="toggleVoiceMode">
-        <image class="icon-btn-img" src="/static/icon-mic.png" mode="aspectFit" />
+      <view
+        class="icon-btn"
+        @click="toggleVoiceMode"
+      >
+        <image
+          class="icon-btn-img"
+          src="/static/icon-mic.png"
+          mode="aspectFit"
+        />
       </view>
 
       <view class="center">
-        <view v-if="voiceMode" class="hold-wrap">
+        <view
+          v-if="voiceMode"
+          class="hold-wrap"
+        >
           <view
             class="hold-btn"
             @touchstart="startRecord"
             @touchend="stopRecord"
             @touchcancel="stopRecord"
           >
-            <text v-if="recording">松开 结束</text>
-            <text v-else>按住 说话</text>
+            <text v-if="recording">
+              松开 结束
+            </text>
+            <text v-else>
+              按住 说话
+            </text>
           </view>
         </view>
-        <view v-else class="input-wrap">
+        <view
+          v-else
+          class="input-wrap"
+        >
           <input
             v-model="input"
             class="input"
@@ -664,64 +685,153 @@ function stopRecord() {
             :confirm-type="confirmType"
             placeholder-style="color:#B0B0B0"
             @confirm="onConfirmSend"
-          />
-          <view class="icon-btn emoji" @click.stop="toggleEmojiPanel">☺</view>
+          >
+          <view
+            class="icon-btn emoji"
+            @click.stop="toggleEmojiPanel"
+          >
+            ☺
+          </view>
         </view>
       </view>
 
-      <view class="icon-btn" @click.stop="togglePlusPanel">{{ plusButtonText }}</view>
+      <view
+        class="icon-btn"
+        @click.stop="togglePlusPanel"
+      >
+        {{ plusButtonText }}
+      </view>
 
-      <view v-if="canSend" class="send-btn" @click="onSendText">传送</view>
+      <view
+        v-if="canSend"
+        class="send-btn"
+        @click="onSendText"
+      >
+        传送
+      </view>
     </view>
 
-    <view v-if="panelVisible" class="panel" @click.stop>
-      <scroll-view scroll-y class="panel-body" show-scrollbar="false">
-        <view v-if="panelType === 'plus'" class="plus-panel">
+    <view
+      v-if="panelVisible"
+      class="panel"
+      @click.stop
+    >
+      <scroll-view
+        scroll-y
+        class="panel-body"
+        show-scrollbar="false"
+      >
+        <view
+          v-if="panelType === 'plus'"
+          class="plus-panel"
+        >
           <view class="grid">
-            <view class="grid-item" @click="pickImages">
+            <view
+              class="grid-item"
+              @click="pickImages"
+            >
               <view class="grid-icon">
-                <image class="grid-icon-img" src="/static/icon-photo.png" mode="aspectFit" />
+                <image
+                  class="grid-icon-img"
+                  src="/static/icon-photo.png"
+                  mode="aspectFit"
+                />
               </view>
-              <text class="grid-text">照片</text>
+              <text class="grid-text">
+                照片
+              </text>
             </view>
-            <view class="grid-item" @click="pickFile">
+            <view
+              class="grid-item"
+              @click="pickFile"
+            >
               <view class="grid-icon">
-                <image class="grid-icon-img" src="/static/icon-file.png" mode="aspectFit" />
+                <image
+                  class="grid-icon-img"
+                  src="/static/icon-file.png"
+                  mode="aspectFit"
+                />
               </view>
-              <text class="grid-text">文件</text>
+              <text class="grid-text">
+                文件
+              </text>
             </view>
-            <view class="grid-item" @click="pickFavorite">
+            <view
+              class="grid-item"
+              @click="pickFavorite"
+            >
               <view class="grid-icon">
-                <image class="grid-icon-img" src="/static/icon-favorite.png" mode="aspectFit" />
+                <image
+                  class="grid-icon-img"
+                  src="/static/icon-favorite.png"
+                  mode="aspectFit"
+                />
               </view>
-              <text class="grid-text">收藏</text>
+              <text class="grid-text">
+                收藏
+              </text>
             </view>
           </view>
         </view>
 
-        <view v-else class="emoji-wrap">
+        <view
+          v-else
+          class="emoji-wrap"
+        >
           <view class="emoji-tabs">
-            <view class="emoji-tab" :class="{ active: emojiTab === 'emoji' }" @click="emojiTab = 'emoji'">
-              <text class="emoji-tab-icon">☺</text>
+            <view
+              class="emoji-tab"
+              :class="{ active: emojiTab === 'emoji' }"
+              @click="emojiTab = 'emoji'"
+            >
+              <text class="emoji-tab-icon">
+                ☺
+              </text>
             </view>
-            <view class="emoji-tab" :class="{ active: emojiTab === 'favorite' }" @click="emojiTab = 'favorite'">
-              <text class="emoji-tab-icon">❤️</text>
+            <view
+              class="emoji-tab"
+              :class="{ active: emojiTab === 'favorite' }"
+              @click="emojiTab = 'favorite'"
+            >
+              <text class="emoji-tab-icon">
+                ❤️
+              </text>
             </view>
           </view>
 
-          <view v-if="emojiTab === 'emoji'" class="emoji-panel">
+          <view
+            v-if="emojiTab === 'emoji'"
+            class="emoji-panel"
+          >
             <view class="emoji-grid">
-              <view v-for="e in emojis" :key="e" class="emoji-item" @click="insertEmoji(e)">
-                <text class="emoji-char">{{ e }}</text>
+              <view
+                v-for="e in emojis"
+                :key="e"
+                class="emoji-item"
+                @click="insertEmoji(e)"
+              >
+                <text class="emoji-char">
+                  {{ e }}
+                </text>
               </view>
             </view>
           </view>
 
-          <view v-else class="fav-panel">
+          <view
+            v-else
+            class="fav-panel"
+          >
             <view class="grid">
-              <view class="grid-item" @click="goMyEmotions">
-                <view class="grid-icon">🐯</view>
-                <text class="grid-text">我的表情</text>
+              <view
+                class="grid-item"
+                @click="goMyEmotions"
+              >
+                <view class="grid-icon">
+                  🐯
+                </view>
+                <text class="grid-text">
+                  我的表情
+                </text>
               </view>
             </view>
           </view>

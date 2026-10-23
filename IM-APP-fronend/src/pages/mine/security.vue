@@ -72,20 +72,34 @@ async function onNext() {
 </script>
 
 <template>
-  <view v-if="!checking" class="page">
-    <ImNavBar title="安全" @back="goBack" />
+  <view
+    v-if="!checking"
+    class="page"
+  >
+    <ImNavBar
+      title="安全"
+      @back="goBack"
+    />
 
     <view class="body">
       <view class="phone-block">
-        <text class="field-label">手机号码</text>
-        <text class="field-value">{{ phoneDisplay }}</text>
+        <text class="field-label">
+          手机号码
+        </text>
+        <text class="field-value">
+          {{ phoneDisplay }}
+        </text>
       </view>
 
       <view class="divider" />
 
       <view class="password-block">
-        <text class="section-title">修改密码</text>
-        <text class="field-label">旧密码</text>
+        <text class="section-title">
+          修改密码
+        </text>
+        <text class="field-label">
+          旧密码
+        </text>
         <view class="input-box">
           <input
             class="input"
@@ -94,8 +108,11 @@ async function onNext() {
             placeholder="请输入旧密码"
             placeholder-style="color:#626E8D"
             @input="onOldPasswordInput"
-          />
-          <view class="eye-btn" @click="showOldPassword = !showOldPassword">
+          >
+          <view
+            class="eye-btn"
+            @click="showOldPassword = !showOldPassword"
+          >
             <image
               class="eye-icon"
               :src="showOldPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
@@ -117,7 +134,10 @@ async function onNext() {
       </button>
     </view>
 
-    <ImSuccessToast :visible="successVisible" @close="successVisible = false" />
+    <ImSuccessToast
+      :visible="successVisible"
+      @close="successVisible = false"
+    />
   </view>
 </template>
 

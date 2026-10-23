@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = withDefaults(
+withDefaults(
   defineProps<{
     visible: boolean
     title: string
@@ -34,16 +34,41 @@ function onConfirm() {
 </script>
 
 <template>
-  <view v-if="visible" class="icd-mask" @touchmove.stop.prevent>
-    <view class="icd-card" @click.stop>
-      <text class="icd-title">{{ title }}</text>
-      <text v-if="content" class="icd-content">{{ content }}</text>
+  <view
+    v-if="visible"
+    class="icd-mask"
+    @touchmove.stop.prevent
+  >
+    <view
+      class="icd-card"
+      @click.stop
+    >
+      <text class="icd-title">
+        {{ title }}
+      </text>
+      <text
+        v-if="content"
+        class="icd-content"
+      >
+        {{ content }}
+      </text>
       <view class="icd-actions">
-        <view v-if="showCancel" class="icd-cancel" @click="onCancel">
-          <text class="icd-cancel-text">{{ cancelText }}</text>
+        <view
+          v-if="showCancel"
+          class="icd-cancel"
+          @click="onCancel"
+        >
+          <text class="icd-cancel-text">
+            {{ cancelText }}
+          </text>
         </view>
-        <view class="icd-confirm" @click="onConfirm">
-          <text class="icd-confirm-text">{{ confirmText }}</text>
+        <view
+          class="icd-confirm"
+          @click="onConfirm"
+        >
+          <text class="icd-confirm-text">
+            {{ confirmText }}
+          </text>
         </view>
       </view>
     </view>

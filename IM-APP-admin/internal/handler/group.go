@@ -45,6 +45,20 @@ func (h *DataHandler) UpdateGroupMemberLimit(c *gin.Context) {
 	response.OK(c, gin.H{"ok": true})
 }
 
+func (h *DataHandler) UpdateGroupRetention(c *gin.Context) {
+	var req models.UpdateGroupRetentionRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+		response.BadRequest(c, "必须填写原因")
+		return
+	}
+	if err := h.Data.UpdateGroupRetention(c.Request.Context(), c.Param("id"), req); err != nil {
+		response.FailErr(c, http.StatusBadRequest, "设置失败", err)
+		return
+	}
+	c.Set("auditReason", req.Reason)
+	response.OK(c, gin.H{"ok": true})
+}
+
 func (h *DataHandler) ListGroupMembers(c *gin.Context) {
 	page, size := pageParams(c)
 	list, total, err := h.Data.ListGroupMembers(c.Request.Context(), c.Param("id"), c.Query("keyword"), page, size)

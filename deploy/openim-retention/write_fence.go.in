@@ -1,0 +1,125 @@
+package mgo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
+	"github.com/openimsdk/tools/db/mongoutil"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+// This fence belongs to the SAME Mongo document as the slots. A read of a
+// conversation boundary before an ordinary write is insufficient: a delayed
+// Kafka delivery could otherwise recreate content after the purge passed it.
+const imAppPurgedSlots = "im_app_purged_slots"
+
+var imAppPurgeDocID = regexp.MustCompile(`^sg_[0-9a-f]{32}:(0|[1-9][0-9]*)$`)
+
+func (m *MsgMgo) imAppRetentionGuardedWrite(ctx context.Context, docID string, index int64, filter, update bson.M) (*mongo.UpdateResult, error) {
+	if index < 0 || index >= 100 {
+		return nil, errors.New("invalid message slot")
+	}
+	filter["$or"] = bson.A{bson.M{imAppPurgedSlots: bson.M{"$exists": false}}, bson.M{imAppPurgedSlots: bson.M{"$type": "number", "$lte": index}}}
+	result, err := m.coll.UpdateOne(ctx, filter, update)
+	if err != nil || result.MatchedCount != 0 {
+		return result, err
+	}
+	var fence bson.M
+	err = m.coll.FindOne(ctx, bson.M{"doc_id": docID}, options.FindOne().SetProjection(bson.M{imAppPurgedSlots: 1})).Decode(&fence)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return result, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	value, exists := fence[imAppPurgedSlots]
+	// Concurrent transfer or the purge's initial skeleton insertion may have
+	// created an ordinary unfenced document after the first update missed it.
+	// Let the existing duplicate-key retry perform the atomic update again.
+	if !exists {
+		return result, nil
+	}
+	slots, valid := value.(int64)
+	if valid && slots > index && slots <= 100 {
+		// Matched but intentionally unchanged. Returning zero would make the
+		// upstream controller retry Create/duplicate-key forever on old replay.
+		return &mongo.UpdateResult{MatchedCount: 1}, nil
+	}
+	// A malformed fence or an unexpected concurrently changed document must
+	// fail instead of entering the controller's Create/duplicate retry loop.
+	return nil, errors.New("message write fence unavailable")
+}
+
+func imAppEmptySlots() []*model.MsgInfoModel {
+	rows := make([]*model.MsgInfoModel, 100)
+	for i := range rows {
+		rows[i] = &model.MsgInfoModel{DelList: []string{}}
+	}
+	return rows
+}
+
+// IMAppRetentionPurgeDoc clears a prefix WITHOUT $pull, DeleteOne or changing
+// seq-to-index layout. Missing documents also receive a durable empty skeleton,
+// so a delayed first insert cannot recreate already-expired content.
+// Caller MUST verify a grace-aged applied receipt and durable min_seq first.
+// No OSS/MinIO calls, object mappings, other conversations or media are touched.
+func IMAppRetentionPurgeDoc(ctx context.Context, db *mongo.Database, docID string, slots int64) error {
+	if !imAppPurgeDocID.MatchString(docID) || slots < 1 || slots > 100 {
+		return errors.New("invalid group purge document")
+	}
+	suffix := docID[36:]
+	n, err := strconv.ParseInt(suffix, 10, 64)
+	if err != nil || n > ((1<<53)-1)/100 {
+		return errors.New("invalid group purge index")
+	}
+	coll := db.Collection(model.MsgTableName)
+	_, err = coll.UpdateOne(ctx, bson.M{"doc_id": docID}, bson.M{"$setOnInsert": bson.M{"doc_id": docID, "msgs": imAppEmptySlots()}}, options.Update().SetUpsert(true))
+	// Another purge/transfer may win the unique doc_id insert. It is now safe
+	// to operate on that existing document, never to replace its retained tail.
+	if err != nil && !mongo.IsDuplicateKeyError(err) {
+		return err
+	}
+	fields := bson.M{}
+	checks := bson.A{bson.M{"$eq": bson.A{bson.M{"$size": bson.M{"$ifNull": bson.A{"$msgs", bson.A{}}}}, 100}}}
+	for index := int64(0); index < slots; index++ {
+		fields[fmt.Sprintf("msgs.%d", index)] = &model.MsgInfoModel{DelList: []string{}}
+		checks = append(checks, bson.M{"$let": bson.M{
+			"vars": bson.M{"slot": bson.M{"$arrayElemAt": bson.A{"$msgs", index}}},
+			"in": bson.M{"$or": bson.A{
+				bson.M{"$eq": bson.A{bson.M{"$ifNull": bson.A{"$$slot.msg", nil}}, nil}},
+				bson.M{"$and": bson.A{
+					bson.M{"$eq": bson.A{"$$slot.msg.seq", n*100 + index + 1}},
+					bson.M{"$eq": bson.A{"$$slot.msg.group_id", docID[3:35]}},
+					bson.M{"$eq": bson.A{"$$slot.msg.session_type", 3}},
+				}},
+			}},
+		}})
+	}
+	// A corrupted/foreign slot or nonstandard layout is not deletion authority.
+	// Check identity AND scrub in the same atomic write, not a scan-then-delete.
+	filter := bson.M{"doc_id": docID, "$expr": bson.M{"$and": checks}}
+	result, err := coll.UpdateOne(ctx, filter, bson.M{"$set": fields, "$max": bson.M{imAppPurgedSlots: slots}})
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount != 1 {
+		return errors.New("purge document disappeared")
+	}
+	return nil
+}
+
+func (m *MsgMgo) imAppRetentionDeleteDoc(ctx context.Context, docID string) error {
+	// Even an existing administrative destruction path must not discard a
+	// tombstone and allow delayed transfer to recreate its old message bytes.
+	_, err := m.coll.UpdateOne(ctx, bson.M{"doc_id": docID, imAppPurgedSlots: bson.M{"$exists": true}}, bson.M{"$set": bson.M{"msgs": imAppEmptySlots()}})
+	if err != nil {
+		return err
+	}
+	return mongoutil.DeleteOne(ctx, m.coll, bson.M{"doc_id": docID, imAppPurgedSlots: bson.M{"$exists": false}})
+}

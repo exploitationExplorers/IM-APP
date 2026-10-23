@@ -1,45 +1,77 @@
 <template>
   <view class="page">
-    <ImNavBar title="通知设置" @back="backToChatHome" />
+    <ImNavBar
+      title="通知设置"
+      @back="backToChatHome"
+    />
     <view class="setting-item">
       <view class="setting-content">
-        <text class="setting-title">消息免打扰</text>
+        <text class="setting-title">
+          消息免打扰
+        </text>
       </view>
-          <ImSwitch :modelValue="noDisturb" @change="onNoDisturbChange" />
+      <ImSwitch
+        :model-value="noDisturb"
+        @change="onNoDisturbChange"
+      />
     </view>
 
     <template v-if="!noDisturb">
-      <view class="section-title section-title-first">应用未打开时</view>
-
-      <view class="setting-item">
-        <view class="setting-content">
-          <text class="setting-title">新消息通知</text>
-        </view>
-          <ImSwitch :modelValue="message" @change="onMessageChange" />
+      <view class="section-title section-title-first">
+        应用未打开时
       </view>
 
       <view class="setting-item">
         <view class="setting-content">
-          <text class="setting-title">语音邀请</text>
+          <text class="setting-title">
+            新消息通知
+          </text>
         </view>
-          <ImSwitch :modelValue="voice" @change="onVoiceChange" />
+        <ImSwitch
+          :model-value="message"
+          @change="onMessageChange"
+        />
       </view>
-
-      <view class="section-title section-title-second">应用打开时</view>
 
       <view class="setting-item">
         <view class="setting-content">
-          <text class="setting-title">声音</text>
+          <text class="setting-title">
+            语音邀请
+          </text>
         </view>
-          <ImSwitch :modelValue="sound" @change="onSoundChange" />
+        <ImSwitch
+          :model-value="voice"
+          @change="onVoiceChange"
+        />
+      </view>
+
+      <view class="section-title section-title-second">
+        应用打开时
+      </view>
+
+      <view class="setting-item">
+        <view class="setting-content">
+          <text class="setting-title">
+            声音
+          </text>
+        </view>
+        <ImSwitch
+          :model-value="sound"
+          @change="onSoundChange"
+        />
       </view>
 
       <!-- #ifdef APP-ANDROID -->
       <view class="setting-item">
         <view class="setting-content">
-          <text class="setting-title">震动</text>
+          <text class="setting-title">
+            震动
+          </text>
         </view>
-          <ImSwitch :modelValue="vibration" @change="onVibrationChange" />
+        <ImSwitch
+          :model-value="vibration"
+          @change="onVibrationChange"
+        />
       </view>
       <!-- #endif -->
     </template>

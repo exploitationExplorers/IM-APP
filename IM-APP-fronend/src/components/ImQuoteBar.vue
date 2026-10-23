@@ -17,12 +17,25 @@ const fallbackThumb = APP_CONFIG.defaultAvatarUrl
 
 <template>
   <view class="quote-bar">
-    <image class="quote-thumb" :src="thumb || fallbackThumb" mode="aspectFill" />
+    <image
+      class="quote-thumb"
+      :src="thumb || fallbackThumb"
+      mode="aspectFill"
+    />
     <view class="quote-main">
-      <text class="quote-name">{{ nickname }}</text>
-      <text class="quote-text">{{ text }}</text>
+      <text class="quote-name">
+        {{ nickname }}
+      </text>
+      <text class="quote-text">
+        {{ text }}
+      </text>
     </view>
-    <view class="quote-close" @click="emit('close')">×</view>
+    <view
+      class="quote-close"
+      @click="emit('close')"
+    >
+      ×
+    </view>
   </view>
 </template>
 

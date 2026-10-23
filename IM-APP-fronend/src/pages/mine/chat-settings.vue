@@ -43,22 +43,49 @@ function goEmotions() {
 
 <template>
   <view class="page">
-    <ImNavBar title="聊天设置" @back="backToChatHome" />
+    <ImNavBar
+      title="聊天设置"
+      @back="backToChatHome"
+    />
     <view class="cell">
-      <text class="label">回车键送出消息</text>
+      <text class="label">
+        回车键送出消息
+      </text>
       <!-- 不用原生 switch：部分端会在 checked 绑定时误发 change，把已开状态冲成关 -->
-      <ImSwitch :model-value="enterToSend" @change="onEnterChange" />
+      <ImSwitch
+        :model-value="enterToSend"
+        @change="onEnterChange"
+      />
     </view>
-    <view class="cell" @click="goMassAssistant">
-      <text class="label">群发助手</text>
-      <text class="arrow">›</text>
+    <view
+      class="cell"
+      @click="goMassAssistant"
+    >
+      <text class="label">
+        群发助手
+      </text>
+      <text class="arrow">
+        ›
+      </text>
     </view>
-    <view class="cell" @click="goEmotions">
-      <text class="label">我的表情</text>
-      <text class="arrow">›</text>
+    <view
+      class="cell"
+      @click="goEmotions"
+    >
+      <text class="label">
+        我的表情
+      </text>
+      <text class="arrow">
+        ›
+      </text>
     </view>
-    <view class="cell" @click="onClear">
-      <text class="label">清除聊天记录</text>
+    <view
+      class="cell"
+      @click="onClear"
+    >
+      <text class="label">
+        清除聊天记录
+      </text>
     </view>
   </view>
 </template>

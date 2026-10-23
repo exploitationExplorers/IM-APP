@@ -82,7 +82,10 @@ async function onConfirm() {
 
 <template>
   <view class="page">
-    <ImNavBar title="设置聊天号" @back="goBack" />
+    <ImNavBar
+      title="设置聊天号"
+      @back="goBack"
+    />
 
     <view class="form">
       <view class="input-row">
@@ -95,22 +98,39 @@ async function onConfirm() {
           placeholder-style="color:#636E86"
           :focus="true"
           @input="onChatIdInput"
-        />
-        <view v-if="chatId" class="clear-btn" @click="clearChatId">
-          <text class="clear-icon">×</text>
+        >
+        <view
+          v-if="chatId"
+          class="clear-btn"
+          @click="clearChatId"
+        >
+          <text class="clear-icon">
+            ×
+          </text>
         </view>
       </view>
       <view class="meta">
-        <text class="hint" :class="{ warn: chatId && !looksValid }">
+        <text
+          class="hint"
+          :class="{ warn: chatId && !looksValid }"
+        >
           {{ CHAT_ID_MIN }}-{{ CHAT_ID_MAX }} 位，字母开头，只能用字母和数字
         </text>
-        <text class="count">{{ chatIdCount }}/{{ CHAT_ID_MAX }}</text>
+        <text class="count">
+          {{ chatIdCount }}/{{ CHAT_ID_MAX }}
+        </text>
       </view>
 
       <view class="tips">
-        <text class="tip-line">· 聊天号是别人搜索你时用的号码，好友看不到你的手机号</text>
-        <text class="tip-line">· 大小写会按输入保留，搜索时不区分大小写</text>
-        <text class="tip-line">· 只能修改一次，改完就不能再改了，请谨慎设置</text>
+        <text class="tip-line">
+          · 聊天号是别人搜索你时用的号码，好友看不到你的手机号
+        </text>
+        <text class="tip-line">
+          · 大小写会按输入保留，搜索时不区分大小写
+        </text>
+        <text class="tip-line">
+          · 只能修改一次，改完就不能再改了，请谨慎设置
+        </text>
       </view>
     </view>
 

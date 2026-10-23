@@ -22,6 +22,10 @@ func (s *DataService) UpdateGroupMemberLimit(ctx context.Context, req models.Upd
 	})
 }
 
+func (s *DataService) UpdateGroupRetention(ctx context.Context, id string, req models.UpdateGroupRetentionRequest) error {
+	return s.Repo.UpdateGroupRetention(ctx, id, req)
+}
+
 func (s *DataService) ListGroupMembers(ctx context.Context, id, keyword string, page, size int) ([]models.AppGroupMember, int64, error) {
 	return s.Repo.ListGroupMembers(ctx, id, keyword, size, (page-1)*size)
 }

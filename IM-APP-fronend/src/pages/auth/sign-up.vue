@@ -62,39 +62,53 @@ function goPrivacy() {
 <template>
   <view class="auth-page">
     <view class="auth-inner is-sign-up">
-      <view class="auth-top-back" @click="goBack">
-        <text class="auth-top-back-icon">‹</text>
+      <view
+        class="auth-top-back"
+        @click="goBack"
+      >
+        <text class="auth-top-back-icon">
+          ‹
+        </text>
       </view>
 
-      <image class="auth-logo is-sign-up" src="/static/logo/logo.png" mode="heightFix" />
-      <view class="auth-title">注册</view>
+      <image
+        class="auth-logo is-sign-up"
+        src="/static/logo/logo.png"
+        mode="heightFix"
+      />
+      <view class="auth-title">
+        注册
+      </view>
 
       <view class="auth-form">
         <view class="auth-row">
           <ImCountryPicker v-model="countryCode" />
           <view class="auth-input-box">
             <input
+              v-model="phone"
               class="auth-input"
               type="number"
               maxlength="15"
               :placeholder="findCountryByDialCode(countryCode).placeholder"
               placeholder-style="color:#636E86"
-              v-model="phone"
-            />
+            >
           </view>
         </view>
 
         <view class="auth-row">
           <view class="auth-input-box">
             <input
+              v-model="code"
               class="auth-input"
               type="number"
               maxlength="6"
               placeholder="请输入验证码"
               placeholder-style="color:#636E86"
-              v-model="code"
-            />
-            <text class="auth-sms-btn" @click="onSendCode">
+            >
+            <text
+              class="auth-sms-btn"
+              @click="onSendCode"
+            >
               {{ countdown > 0 ? `${countdown}s` : '获取验证码' }}
             </text>
           </view>
@@ -103,13 +117,16 @@ function goPrivacy() {
         <view class="auth-row">
           <view class="auth-input-box is-join">
             <input
+              v-model="password"
               class="auth-input"
               :password="!showPassword"
               placeholder="设置登录密码（至少 6 位）"
               placeholder-style="color:#636E86"
-              v-model="password"
-            />
-            <view class="auth-eye-btn" @click="showPassword = !showPassword">
+            >
+            <view
+              class="auth-eye-btn"
+              @click="showPassword = !showPassword"
+            >
               <image
                 class="auth-eye-icon"
                 :src="showPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
@@ -122,13 +139,16 @@ function goPrivacy() {
         <view class="auth-row">
           <view class="auth-input-box is-join">
             <input
+              v-model="passwordConfirm"
               class="auth-input"
               :password="!showPasswordConfirm"
               placeholder="再次确认密码"
               placeholder-style="color:#636E86"
-              v-model="passwordConfirm"
-            />
-            <view class="auth-eye-btn" @click="showPasswordConfirm = !showPasswordConfirm">
+            >
+            <view
+              class="auth-eye-btn"
+              @click="showPasswordConfirm = !showPasswordConfirm"
+            >
               <image
                 class="auth-eye-icon"
                 :src="showPasswordConfirm ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
@@ -140,14 +160,30 @@ function goPrivacy() {
 
         <view class="auth-spacer" />
 
-        <button class="auth-primary-btn" :loading="loading" @click="onRegister">注册</button>
+        <button
+          class="auth-primary-btn"
+          :loading="loading"
+          @click="onRegister"
+        >
+          注册
+        </button>
       </view>
 
       <view class="auth-agree">
         <text>点击注册代表您已阅读并同意</text>
         <view class="auth-agree-links">
-          <text class="auth-agree-link" @click="goAgreement">用户协议</text>
-          <text class="auth-agree-link" @click="goPrivacy">隐私权政策</text>
+          <text
+            class="auth-agree-link"
+            @click="goAgreement"
+          >
+            用户协议
+          </text>
+          <text
+            class="auth-agree-link"
+            @click="goPrivacy"
+          >
+            隐私权政策
+          </text>
         </view>
       </view>
     </view>

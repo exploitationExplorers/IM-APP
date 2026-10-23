@@ -75,18 +75,42 @@ function goBlacklist() {
 
 <template>
   <view class="page">
-    <ImNavBar title="隐私" @back="backToChatHome" />
+    <ImNavBar
+      title="隐私"
+      @back="backToChatHome"
+    />
     <view class="cell">
-      <text class="label">加我为好友需验证</text>
-      <switch :checked="friendVerify" color="#0A2FC2" @change="onFriendVerify" style="transform:scale(0.8)" />
+      <text class="label">
+        加我为好友需验证
+      </text>
+      <switch
+        :checked="friendVerify"
+        color="#0A2FC2"
+        style="transform:scale(0.8)"
+        @change="onFriendVerify"
+      />
     </view>
     <view class="cell">
-      <text class="label">邀请我加入群聊需验证</text>
-      <switch :checked="groupInviteVerify" color="#0A2FC2" @change="onGroupInviteVerify" style="transform:scale(0.8)" />
+      <text class="label">
+        邀请我加入群聊需验证
+      </text>
+      <switch
+        :checked="groupInviteVerify"
+        color="#0A2FC2"
+        style="transform:scale(0.8)"
+        @change="onGroupInviteVerify"
+      />
     </view>
-    <view class="cell" @click="goBlacklist">
-      <text class="label">黑名单</text>
-      <text class="arrow">›</text>
+    <view
+      class="cell"
+      @click="goBlacklist"
+    >
+      <text class="label">
+        黑名单
+      </text>
+      <text class="arrow">
+        ›
+      </text>
     </view>
   </view>
 </template>

@@ -188,10 +188,16 @@ async function onCreate() {
 </script>
 
 <template>
-  <view class="page" @click="showSort = false">
+  <view
+    class="page"
+    @click="showSort = false"
+  >
     <!-- Step 1: 选择联络人 -->
     <template v-if="step === 'select'">
-      <ImNavBar title="选择联络人" @back="goBack">
+      <ImNavBar
+        title="选择联络人"
+        @back="goBack"
+      >
         <template #right>
           <view
             class="confirm-btn"
@@ -203,93 +209,154 @@ async function onCreate() {
         </template>
       </ImNavBar>
 
-      <view v-if="selectedCount > 0" class="chips">
+      <view
+        v-if="selectedCount > 0"
+        class="chips"
+      >
         <view
           v-for="c in selectedContacts"
           :key="c.id"
           class="chip"
           @click.stop="removeSelected(c.id)"
         >
-          <image class="chip-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-          <text class="chip-name">{{ contactDisplayName(c) }}</text>
+          <image
+            class="chip-avatar"
+            :src="contactAvatar(c.avatar)"
+            mode="aspectFill"
+          />
+          <text class="chip-name">
+            {{ contactDisplayName(c) }}
+          </text>
         </view>
       </view>
 
       <view class="search-wrap">
         <view class="search-box">
-          <text class="search-glyph">⌕</text>
+          <text class="search-glyph">
+            ⌕
+          </text>
           <input
-            class="search-input"
             v-model="keyword"
+            class="search-input"
             placeholder="搜索"
             placeholder-class="search-ph"
-          />
+          >
         </view>
       </view>
 
       <view class="section-head">
-        <text class="section-count">联络人 ({{ filteredContacts.length }})</text>
-        <view class="sort-wrap" @click.stop="showSort = !showSort">
-          <text class="sort">{{ sortLabel }}</text>
-          <image class="sort-caret" src="/static/icons/icon-caret.svg" mode="aspectFit" />
-          <view v-if="showSort" class="sort-menu">
+        <text class="section-count">
+          联络人 ({{ filteredContacts.length }})
+        </text>
+        <view
+          class="sort-wrap"
+          @click.stop="showSort = !showSort"
+        >
+          <text class="sort">
+            {{ sortLabel }}
+          </text>
+          <image
+            class="sort-caret"
+            src="/static/icons/icon-caret.svg"
+            mode="aspectFit"
+          />
+          <view
+            v-if="showSort"
+            class="sort-menu"
+          >
             <view
               class="sort-item"
               :class="{ active: sortKey === 'recent' }"
               @click="setSort('recent')"
-            >最近加入(默认)</view>
+            >
+              最近加入(默认)
+            </view>
             <view
               class="sort-item"
               :class="{ active: sortKey === 'name' }"
               @click="setSort('name')"
-            >名字</view>
+            >
+              名字
+            </view>
             <view
               class="sort-item"
               :class="{ active: sortKey === 'chat' }"
               @click="setSort('chat')"
-            >最近聊天</view>
+            >
+              最近聊天
+            </view>
           </view>
         </view>
       </view>
 
-      <scroll-view scroll-y class="list" :lower-threshold="80" @scrolltolower="contactStore.loadMoreContacts">
+      <scroll-view
+        scroll-y
+        class="list"
+        :lower-threshold="80"
+        @scrolltolower="contactStore.loadMoreContacts"
+      >
         <view
           v-for="c in filteredContacts"
           :key="c.id"
           class="row"
           @click="toggle(c)"
         >
-          <image class="avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-          <text class="name">{{ contactDisplayName(c) }}</text>
-          <view class="check" :class="{ on: isSelected(c.id) }" />
+          <image
+            class="avatar"
+            :src="contactAvatar(c.avatar)"
+            mode="aspectFill"
+          />
+          <text class="name">
+            {{ contactDisplayName(c) }}
+          </text>
+          <view
+            class="check"
+            :class="{ on: isSelected(c.id) }"
+          />
         </view>
       </scroll-view>
     </template>
 
     <!-- Step 2: 创建群聊 -->
     <template v-else>
-      <ImNavBar title="创建群聊" @back="goBack" />
+      <ImNavBar
+        title="创建群聊"
+        @back="goBack"
+      />
 
-      <scroll-view scroll-y class="create-body">
+      <scroll-view
+        scroll-y
+        class="create-body"
+      >
         <view class="avatar-picker">
-          <image class="group-avatar" :src="APP_CONFIG.defaultGroupAvatarUrl" mode="aspectFit" />
+          <image
+            class="group-avatar"
+            :src="APP_CONFIG.defaultGroupAvatarUrl"
+            mode="aspectFit"
+          />
         </view>
 
         <view class="name-field">
           <input
-            class="name-input"
             v-model="groupName"
+            class="name-input"
             maxlength="50"
             placeholder="请输入群名称"
             placeholder-class="search-ph"
-          />
+          >
           <view class="name-meta">
-            <text class="name-hint">群组名称最多 50 个字</text>
-            <text class="name-count">{{ nameLen }}/50</text>
+            <text class="name-hint">
+              群组名称最多 50 个字
+            </text>
+            <text class="name-count">
+              {{ nameLen }}/50
+            </text>
           </view>
         </view>
 
-        <text class="members-title">群成员 ({{ selectedCount + 1 }})</text>
+        <text class="members-title">
+          群成员 ({{ selectedCount + 1 }})
+        </text>
         <view class="members">
           <view class="member">
             <image
@@ -297,17 +364,35 @@ async function onCreate() {
               :src="myAvatar"
               mode="aspectFill"
             />
-            <text class="member-name">{{ userStore.profile?.nickname || '我' }}</text>
+            <text class="member-name">
+              {{ userStore.profile?.nickname || '我' }}
+            </text>
           </view>
-          <view v-for="c in selectedContacts" :key="c.id" class="member">
-            <image class="member-avatar" :src="contactAvatar(c.avatar)" mode="aspectFill" />
-            <text class="member-name">{{ contactDisplayName(c) }}</text>
+          <view
+            v-for="c in selectedContacts"
+            :key="c.id"
+            class="member"
+          >
+            <image
+              class="member-avatar"
+              :src="contactAvatar(c.avatar)"
+              mode="aspectFill"
+            />
+            <text class="member-name">
+              {{ contactDisplayName(c) }}
+            </text>
           </view>
         </view>
       </scroll-view>
 
       <view class="footer">
-        <view class="primary-btn" :class="{ disabled: loading }" @click="onCreate">创建</view>
+        <view
+          class="primary-btn"
+          :class="{ disabled: loading }"
+          @click="onCreate"
+        >
+          创建
+        </view>
       </view>
     </template>
   </view>

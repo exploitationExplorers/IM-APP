@@ -55,20 +55,40 @@ async function onToggleMute(v: boolean) {
 
 <template>
   <view class="page">
-    <ImNavBar title="群组管理" @back="goBack" />
+    <ImNavBar
+      title="群组管理"
+      @back="goBack"
+    />
 
     <view class="card">
-      <view class="row" @click="goToAdmins">
-        <text class="label">群组管理员</text>
-        <text class="arrow">›</text>
+      <view
+        class="row"
+        @click="goToAdmins"
+      >
+        <text class="label">
+          群组管理员
+        </text>
+        <text class="arrow">
+          ›
+        </text>
       </view>
       <view class="row">
-        <text class="label">禁止群成员互加好友</text>
-        <ImSwitch :model-value="forbidAddFriend" @change="onToggleForbidAdd" />
+        <text class="label">
+          禁止群成员互加好友
+        </text>
+        <ImSwitch
+          :model-value="forbidAddFriend"
+          @change="onToggleForbidAdd"
+        />
       </view>
       <view class="row last">
-        <text class="label">全员禁言</text>
-        <ImSwitch :model-value="allMuted" @change="onToggleMute" />
+        <text class="label">
+          全员禁言
+        </text>
+        <ImSwitch
+          :model-value="allMuted"
+          @change="onToggleMute"
+        />
       </view>
     </view>
   </view>

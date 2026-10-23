@@ -1,0 +1,297 @@
+package msg
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	rules "github.com/openimsdk/open-im-server/v3/internal/imappretention"
+	gc "github.com/openimsdk/open-im-server/v3/internal/imappgc"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
+	"github.com/openimsdk/protocol/constant"
+	pbmsg "github.com/openimsdk/protocol/msg"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+const imAppRetentionProtocol = "im-app-retention-visibility-v2"
+const imAppRetentionMaxSnapshot = 20000
+const imAppRetentionReceipts = "im_app_retention_receipts_v1"
+var imAppGroupID = regexp.MustCompile(`^[0-9a-f]{32}$`)
+var imAppReceiptID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+var errIMAppSnapshot = errors.New("incomplete or unsupported persisted group history")
+
+type imAppRetentionBridge struct { server *msgServer; db *mongo.Database; key string; bodyPurgeGroups map[string]bool }
+type imAppReceipt struct {
+	ID string `bson:"_id"`
+	ConversationID string `bson:"conversation_id"`
+	Boundary int64 `bson:"boundary"`
+	Expires time.Time `bson:"expires_at"`
+}
+
+// No listener or metadata collection exists unless the operator explicitly
+// configures BOTH variables. Never publish this port or proxy it through Nginx.
+func startIMAppRetention(ctx context.Context, server *msgServer, db *mongo.Database) error {
+	addr, key := os.Getenv("IM_APP_RETENTION_LISTEN"), os.Getenv("IM_APP_RETENTION_KEY")
+	scope, err := imAppBodyPurgeEnvironment()
+	if err != nil { return err }
+	if addr == "" && key == "" {
+		if len(scope) != 0 { return errors.New("body purge requires private retention bridge") }
+		return nil
+	}
+	if len(key) < 32 || strings.ContainsAny(key, "\r\n") { return errors.New("retention bridge requires a separate >=32-byte key") }
+	if _, _, err := net.SplitHostPort(addr); err != nil { return errors.New("invalid private retention listen address") }
+	indexCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err = db.Collection(imAppRetentionReceipts).Indexes().CreateOne(indexCtx, mongo.IndexModel{
+		Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0),
+	})
+	if err != nil { return errors.New("retention receipt index unavailable") }
+	listener, err := net.Listen("tcp", addr)
+	if err != nil { return errors.New("private retention listener unavailable") }
+	bridge := &imAppRetentionBridge{server: server, db: db, key: key, bodyPurgeGroups:scope}
+	httpServer := &http.Server{Handler: bridge, ReadHeaderTimeout: 5*time.Second, ReadTimeout: 10*time.Second, WriteTimeout: 55*time.Second, IdleTimeout: 30*time.Second, MaxHeaderBytes: 8192}
+	go func() { <-ctx.Done(); _ = httpServer.Close() }()
+	go func() { _ = httpServer.Serve(listener) }()
+	if len(scope) != 0 { go bridge.bodyPurgeLoop(ctx) }
+	return nil
+}
+
+func imAppJSON(w http.ResponseWriter, value any) { w.Header().Set("Content-Type", "application/json"); _ = json.NewEncoder(w).Encode(value) }
+
+func (b *imAppRetentionBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+b.key)) != 1 || len(b.key) < 32 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized); return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	if r.Method == "GET" && r.ContentLength != 0 { http.Error(w, "invalid request", 400); return }
+	switch {
+	case r.Method == "POST" && r.URL.Path == "/internal/media-gc/protect" && r.URL.RawQuery == "":
+		if !gc.Enabled() { http.Error(w,"reference guard unavailable",503); return }
+		if r.Header.Get("Content-Type") != "application/json" { http.Error(w,"JSON required",400); return }
+		var req struct { Content string `json:"content"` }
+		decoder := json.NewDecoder(http.MaxBytesReader(w,r.Body,8<<20)); decoder.DisallowUnknownFields()
+		if decoder.Decode(&req)!=nil || decoder.Decode(new(any))!=io.EOF {http.Error(w,"invalid request",400);return}
+		if err:=gc.Protect(ctx,b.db,req.Content,nil);err!=nil {http.Error(w,"media reference unavailable",409);return}
+		imAppJSON(w,map[string]string{"protocol":gc.Protocol})
+	case r.Method == "GET" && r.URL.Path == "/internal/retention/capabilities" && r.URL.RawQuery == "":
+		purge := "off"; if len(b.bodyPurgeGroups) != 0 { purge = "mongo_bodies_only" }
+		imAppJSON(w, map[string]string{"protocol": imAppRetentionProtocol, "mode": "visibility_only", "bodyPurge":purge, "objectPurge":"off"})
+	case r.Method == "GET" && r.URL.Path == "/internal/retention/snapshot":
+		q, err := netQuery(r)
+		if err != nil { http.Error(w, "invalid request", 400); return }
+		snapshot, err := b.snapshot(ctx, q.groupID, q.policy)
+		if err != nil { http.Error(w, "snapshot unavailable", 503); return }
+		imAppJSON(w, snapshot)
+	case r.Method == "POST" && r.URL.Path == "/internal/retention/apply" && r.URL.RawQuery == "":
+		if r.Header.Get("Content-Type") != "application/json" { http.Error(w, "JSON required", 400); return }
+		var req struct {
+			SnapshotID string `json:"snapshotId"`
+			ConversationID string `json:"conversationId"`
+			MinVisibleSeq int64 `json:"minVisibleSeq"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)); decoder.DisallowUnknownFields()
+		if decoder.Decode(&req) != nil || decoder.Decode(new(any)) != io.EOF || !imAppReceiptID.MatchString(req.SnapshotID) ||
+			!strings.HasPrefix(req.ConversationID, "sg_") || !imAppGroupID.MatchString(strings.TrimPrefix(req.ConversationID, "sg_")) || req.MinVisibleSeq <= 0 || req.MinVisibleSeq >= 1<<53 {
+			http.Error(w, "invalid request", 400); return
+		}
+		if err := b.apply(ctx, req.SnapshotID, req.ConversationID, req.MinVisibleSeq); err != nil { http.Error(w, "apply unavailable", 503); return }
+		imAppJSON(w, map[string]any{"protocol": imAppRetentionProtocol, "conversationId": req.ConversationID, "minVisibleSeq": req.MinVisibleSeq})
+	default: http.NotFound(w, r)
+	}
+}
+
+type imAppSnapshotQuery struct {
+	groupID string
+	policy  rules.RetentionPolicy
+}
+
+func netQuery(r *http.Request) (imAppSnapshotQuery, error) {
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil || len(q["groupId"]) != 1 || !imAppGroupID.MatchString(q.Get("groupId")) {
+		return imAppSnapshotQuery{}, errIMAppSnapshot
+	}
+	for key := range q {
+		if key != "groupId" && key != "maxMessages" && key != "keepHours" {
+			return imAppSnapshotQuery{}, errIMAppSnapshot
+		}
+	}
+	policy := rules.DefaultRetentionPolicy()
+	if raw := q.Get("maxMessages"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return imAppSnapshotQuery{}, errIMAppSnapshot
+		}
+		policy.MaxMessages = n
+	}
+	if raw := q.Get("keepHours"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return imAppSnapshotQuery{}, errIMAppSnapshot
+		}
+		policy.Window = time.Duration(n) * time.Hour
+	}
+	return imAppSnapshotQuery{groupID: q.Get("groupId"), policy: rules.NormalizeRetentionPolicy(policy)}, nil
+}
+
+func imAppUUID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil { return "", err }
+	raw[6] = raw[6]&0x0f | 0x40; raw[8] = raw[8]&0x3f | 0x80
+	s := hex.EncodeToString(raw[:]); return s[:8]+"-"+s[8:12]+"-"+s[12:16]+"-"+s[16:20]+"-"+s[20:], nil
+}
+
+// Only classified, actually persisted slots are evidence. A missing slot in
+// the retained tail is NOT a committed hole: transfer may still be in flight.
+// Once MaxMessages actual visible rows are proven, all lower seqs are over
+// count even if they contain pending slots. Never use reserved max_seq as this proof.
+func imAppClassify(info *model.MsgInfoModel, groupID string, seq int64) (rules.RetentionMessage, error) {
+	if info == nil || info.Msg == nil { return rules.RetentionMessage{}, errIMAppSnapshot }
+	m := info.Msg
+	if m.Seq != seq || m.SessionType != constant.ReadGroupChatType || m.GroupID != groupID { return rules.RetentionMessage{}, errIMAppSnapshot }
+	visibility := "visible"
+	switch m.ContentType {
+	case constant.Text, constant.Picture, constant.Voice, constant.Video, constant.File, constant.AtText,
+		constant.Merger, constant.Card, constant.Location, constant.Custom, constant.Quote, constant.AdvancedText, constant.MarkdownText,
+		constant.GroupCreatedNotification, constant.GroupInfoSetNotification, constant.MemberQuitNotification,
+		constant.GroupOwnerTransferredNotification, constant.MemberKickedNotification, constant.MemberInvitedNotification,
+		constant.MemberEnterNotification, constant.GroupDismissedNotification, constant.GroupMemberMutedNotification,
+		constant.GroupMemberCancelMutedNotification, constant.GroupMutedNotification, constant.GroupCancelMutedNotification,
+		constant.GroupMemberSetToAdminNotification, constant.GroupMemberSetToOrdinaryUserNotification,
+		constant.GroupInfoSetAnnouncementNotification, constant.GroupInfoSetNameNotification, constant.MsgRevokeNotification:
+	case constant.Typing, constant.CustomNotTriggerConversation, constant.CustomOnlineOnly,
+		constant.ReactionMessageModifier, constant.ReactionMessageDeleter, constant.GroupMemberInfoSetNotification,
+		constant.JoinGroupApplicationNotification, constant.GroupApplicationAcceptedNotification, constant.GroupApplicationRejectedNotification,
+		constant.ConversationChangeNotification, constant.ConversationPrivateChatNotification, constant.ConversationUnreadNotification,
+		constant.ClearConversationNotification, constant.ConversationDeleteNotification, constant.DeleteMsgsNotification, constant.HasReadReceipt:
+		visibility = "hidden"
+	default: return rules.RetentionMessage{}, errIMAppSnapshot
+	}
+	if m.Status == constant.MsgStatusHasDeleted { visibility = "hidden" }
+	if history, ok := m.Options[constant.IsHistory]; ok && !history { visibility = "hidden" }
+	if m.ContentType == constant.Custom && imAppPinControl(m.Content) { visibility = "hidden" }
+	if visibility == "visible" && m.SendTime <= 0 { return rules.RetentionMessage{}, errIMAppSnapshot }
+	return rules.RetentionMessage{Seq: seq, SendTime: time.UnixMilli(m.SendTime).UTC(), Visibility: visibility}, nil
+}
+
+// Match the app's messagePinPayloadOf contract, including native casing. Pin
+// synchronization is not a displayed message and must not consume the keep quota.
+func imAppPinControl(content string) bool {
+	var outer map[string]json.RawMessage
+	if len(content) > 128*1024 || json.Unmarshal([]byte(content), &outer) != nil { return false }
+	data := outer["data"]; if len(data) == 0 { data = outer["Data"] }
+	var text string
+	if json.Unmarshal(data, &text) == nil { data = json.RawMessage(text) }
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(data, &payload) != nil { return false }
+	field := func(a, b string) string {
+		value := payload[a]; if len(value) == 0 { value = payload[b] }
+		var s string; _ = json.Unmarshal(value, &s); return s
+	}
+	if field("businessKey", "BusinessKey") != "message_pin" { return false }
+	return strings.ToLower(field("action", "Action")) == "unpin" || strings.TrimSpace(field("clientMsgID", "ClientMsgID")) != ""
+}
+
+func (b *imAppRetentionBridge) snapshot(ctx context.Context, groupID string, policy rules.RetentionPolicy) (rules.RetentionSnapshot, error) {
+	policy = rules.NormalizeRetentionPolicy(policy)
+	conversationID := "sg_"+groupID
+	watermark, err := b.server.MsgDatabase.GetMaxSeq(ctx, conversationID)
+	if err != nil || watermark < 0 || watermark >= 1<<53 { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+	var hello struct { LocalTime time.Time `bson:"localTime"` }
+	if err := b.db.RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).Decode(&hello); err != nil || hello.LocalTime.IsZero() { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+	var seq struct { MinSeq int64 `bson:"min_seq"` }
+	err = b.db.Collection(database.SeqConversationName).FindOne(ctx, bson.M{"conversation_id": conversationID}).Decode(&seq)
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+	start := max(seq.MinSeq, 1)
+	if watermark < start-1 { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+	result := rules.RetentionSnapshot{ConversationID: conversationID, SessionType: "group", ServerTime: hello.LocalTime.UTC(), Watermark: watermark,
+		Messages: make([]rules.RetentionMessage, 0)}
+	var table model.MsgDocModel
+	visible, scanned := 0, 0
+	cutoff := result.ServerTime.Add(-policy.Window)
+	// Union keep: rows inside the window stay even past MaxMessages. Only after
+	// MaxMessages visible are proven AND the current visible row is already past
+	// the window may lower seqs be summarized as OverCountThrough. Pending holes
+	// in this scanned tail still retry. Hidden controls never count.
+	for last := watermark; last >= start; {
+		var doc model.MsgDocModel
+		if err := b.db.Collection(model.MsgTableName).FindOne(ctx, bson.M{"doc_id": table.GetDocID(conversationID, last)}).Decode(&doc); err != nil { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+		first := max(start, (last-1)/100*100+1)
+		for n := last; n >= first; n-- {
+			scanned++
+			if scanned > imAppRetentionMaxSnapshot { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+			index := table.GetMsgIndex(n)
+			if index >= int64(len(doc.Msg)) { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+			row, err := imAppClassify(doc.Msg[index], groupID, n)
+			if err != nil { return rules.RetentionSnapshot{}, err }
+			result.Messages = append(result.Messages, row)
+			if row.Visibility == "visible" {
+				visible++
+				if visible >= policy.MaxMessages && row.SendTime.Before(cutoff) && n > start {
+					result.OverCountThrough = n - 1
+					break
+				}
+			}
+		}
+		if result.OverCountThrough > 0 { break }
+		last = first-1
+	}
+	result.Complete = true
+	result.SnapshotID, err = imAppUUID()
+	if err != nil { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+	plan, err := rules.PlanGroupRetention(result, policy)
+	if err != nil { return rules.RetentionSnapshot{}, err }
+	boundary, err := rules.RetentionMinSeq(plan)
+	// A non-prefix plan is still a valid read-only preview; never issue apply
+	// authority for it. The application worker will record it as blocked.
+	if err != nil { boundary = 0 }
+	_, err = b.db.Collection(imAppRetentionReceipts).InsertOne(ctx, imAppReceipt{ID: result.SnapshotID, ConversationID: conversationID, Boundary: boundary, Expires: hello.LocalTime.Add(30*24*time.Hour)})
+	if err != nil { return rules.RetentionSnapshot{}, errIMAppSnapshot }
+	return result, nil
+}
+
+func (b *imAppRetentionBridge) apply(ctx context.Context, receiptID, conversationID string, boundary int64) error {
+	var receipt imAppReceipt
+	if err := b.db.Collection(imAppRetentionReceipts).FindOne(ctx, bson.M{"_id": receiptID, "conversation_id": conversationID}).Decode(&receipt); err != nil { return errIMAppSnapshot }
+	if receipt.Boundary <= 0 || receipt.Boundary != boundary { return errIMAppSnapshot }
+	// TTL deletion is asynchronous, not an authorization check. Use Mongo time,
+	// not an application host clock, to reject receipts after their validity.
+	var hello struct { LocalTime time.Time `bson:"localTime"` }
+	if err := b.db.RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).Decode(&hello); err != nil || hello.LocalTime.IsZero() || !receipt.Expires.After(hello.LocalTime) { return errIMAppSnapshot }
+	// SetMinSeq persists Mongo's monotonic $max BEFORE invalidating Redis. A
+	// timeout is safe to retry. No message bodies, quote targets or media are
+	// removed. Native clients additionally consume the business visibility API.
+	if err := b.server.MsgDatabase.SetMinSeq(ctx, conversationID, boundary); err != nil { return err }
+	return b.markBodyPurgeReceipt(ctx,receiptID)
+}
+
+func (m *msgServer) clampIMAppRetentionRead(ctx context.Context, resp *pbmsg.GetConversationsHasReadAndMaxSeqResp) error {
+	ids := make([]string, 0, len(resp.Seqs))
+	for id := range resp.Seqs { if strings.HasPrefix(id, "sg_") { ids = append(ids, id) } }
+	if len(ids) == 0 { return nil }
+	reader, ok := m.MsgDatabase.(interface { IMAppRetentionMinSeqs(context.Context, []string) (map[string]int64, error) })
+	if !ok { return fmt.Errorf("retention-aware message database required") }
+	minimums, err := reader.IMAppRetentionMinSeqs(ctx, ids)
+	if err != nil { return err }
+	for id, minSeq := range minimums {
+		if seqs := resp.Seqs[id]; seqs != nil && minSeq > 0 { seqs.HasReadSeq = max(seqs.HasReadSeq, min(minSeq-1, seqs.MaxSeq)) }
+	}
+	return nil
+}

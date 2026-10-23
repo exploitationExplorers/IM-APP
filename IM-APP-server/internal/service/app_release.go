@@ -31,7 +31,7 @@ const (
 
 type AppReleaseService struct {
 	Releases *repository.AppReleaseRepo
-	MinIO    *infra.MinIO
+	Storage  *infra.Storage
 }
 
 func (s *AppReleaseService) Check(ctx context.Context, platform, channel string, nativeVersion, wgtVersion int) (models.AppReleaseCheckResult, error) {
@@ -83,7 +83,7 @@ func (s *AppReleaseService) Check(ctx context.Context, platform, channel string,
 }
 
 func (s *AppReleaseService) CreateUpload(ctx context.Context, req models.CreateAppReleaseUploadRequest) (models.AppReleaseUploadResult, error) {
-	if s.MinIO == nil || !s.MinIO.Available() {
+	if !s.Storage.Available() {
 		return models.AppReleaseUploadResult{}, ErrAppReleaseStorage
 	}
 	platform, ok := normalizeAppPlatform(req.Platform)
@@ -95,20 +95,27 @@ func (s *AppReleaseService) CreateUpload(ctx context.Context, req models.CreateA
 		return models.AppReleaseUploadResult{}, ErrInvalidAppRelease
 	}
 	objectKey := fmt.Sprintf("app-releases/%s/%s%s", platform, uuid.NewString(), ext)
-	uploadURL, err := s.MinIO.PresignPut(ctx, objectKey, contentTypeForPackage(packageType), time.Duration(appReleaseUploadExpirySec)*time.Second)
+	store := s.Storage.Current
+	objectKey, err := store.NewKey(objectKey)
+	if err != nil {
+		return models.AppReleaseUploadResult{}, ErrInvalidAppRelease
+	}
+	uploadURL, headers, err := store.PresignPutUpload(ctx, objectKey, contentTypeForPackage(packageType), time.Duration(appReleaseUploadExpirySec)*time.Second)
 	if err != nil {
 		return models.AppReleaseUploadResult{}, err
 	}
 	return models.AppReleaseUploadResult{
-		UploadURL: uploadURL,
-		ObjectKey: objectKey,
-		FileURL:   s.MinIO.FileURL(objectKey),
-		ExpiresIn: appReleaseUploadExpirySec,
+		UploadURL:       uploadURL,
+		ObjectKey:       objectKey,
+		FileURL:         store.FileURL(objectKey),
+		ExpiresIn:       appReleaseUploadExpirySec,
+		Headers:         headers,
+		StorageProvider: store.Provider(),
 	}, nil
 }
 
 func (s *AppReleaseService) Publish(ctx context.Context, req models.PublishAppReleaseRequest) (models.AppRelease, error) {
-	if s.MinIO == nil || !s.MinIO.Available() {
+	if s.Storage == nil {
 		return models.AppRelease{}, ErrAppReleaseStorage
 	}
 	platform, ok := normalizeAppPlatform(req.Platform)
@@ -132,12 +139,18 @@ func (s *AppReleaseService) Publish(ctx context.Context, req models.PublishAppRe
 		return models.AppRelease{}, ErrInvalidAppRelease
 	}
 	objectKey := strings.TrimSpace(req.ObjectKey)
-	if !strings.HasPrefix(objectKey, "app-releases/") || strings.Contains(objectKey, "..") {
-		return models.AppRelease{}, ErrInvalidAppRelease
+	store, err := s.Storage.ForReleaseKey(objectKey)
+	if err != nil {
+		if errors.Is(err, infra.ErrObjectKeyScope) {
+			return models.AppRelease{}, ErrInvalidAppRelease
+		}
+		return models.AppRelease{}, ErrAppReleaseStorage
 	}
-
-	info, ok := s.MinIO.ObjectStat(ctx, objectKey)
-	if !ok || info.Size <= 0 || info.Size > maxAppReleaseUploadBytes {
+	info, err := store.Stat(ctx, objectKey)
+	if err != nil && !errors.Is(err, infra.ErrObjectNotFound) {
+		return models.AppRelease{}, ErrAppReleaseStorage
+	}
+	if err != nil || info.Size <= 0 || info.Size > maxAppReleaseUploadBytes {
 		return models.AppRelease{}, ErrAppReleaseObjectMissing
 	}
 
@@ -172,7 +185,7 @@ func (s *AppReleaseService) Publish(ctx context.Context, req models.PublishAppRe
 		VersionCode:      req.VersionCode,
 		PackageType:      packageType,
 		MinNativeVersion: minNative,
-		DownloadURL:      s.MinIO.FileURL(objectKey),
+		DownloadURL:      store.FileURL(objectKey),
 		ObjectKey:        objectKey,
 		Changelog:        changelog,
 		ForceUpdate:      req.ForceUpdate,
@@ -209,10 +222,12 @@ func (s *AppReleaseService) List(ctx context.Context, platform, channel string, 
 
 func (s *AppReleaseService) toCheckResult(ctx context.Context, item models.AppRelease, updateType models.AppUpdateType) models.AppReleaseCheckResult {
 	downloadURL := item.DownloadURL
-	if s.MinIO != nil && s.MinIO.Available() && item.ObjectKey != "" {
-		if u := s.MinIO.FileURL(item.ObjectKey); u != "" {
+	// Never rewrite a legacy MinIO release into the active OSS bucket (or vice
+	// versa). Keep its persisted stable URL across provider switches.
+	if s.Storage.Available() && s.Storage.Current.Provider() == "minio" && item.ObjectKey != "" && strings.HasPrefix(item.ObjectKey, "app-releases/") {
+		if u := s.Storage.Current.FileURL(item.ObjectKey); u != "" {
 			downloadURL = u
-		} else if signed, err := s.MinIO.PresignGet(ctx, item.ObjectKey, time.Hour); err == nil && signed != "" {
+		} else if signed, err := s.Storage.Current.PresignGet(ctx, item.ObjectKey, time.Hour); err == nil && signed != "" {
 			downloadURL = signed
 		}
 	}
@@ -243,6 +258,8 @@ func normalizeAppChannel(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", string(models.AppChannelTest):
 		return string(models.AppChannelTest), true
+	case string(models.AppChannelCanary):
+		return string(models.AppChannelCanary), true
 	case string(models.AppChannelProd):
 		return string(models.AppChannelProd), true
 	default:

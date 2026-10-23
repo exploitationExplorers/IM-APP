@@ -83,18 +83,35 @@ function skipLater() {
 <template>
   <view class="auth-page onboarding-page">
     <view class="onboarding-inner">
-      <text class="onboarding-title">还差一步！</text>
-      <text class="onboarding-subtitle">请输入你的个人资料，以完成注册流程</text>
+      <text class="onboarding-title">
+        还差一步！
+      </text>
+      <text class="onboarding-subtitle">
+        请输入你的个人资料，以完成注册流程
+      </text>
 
-      <view class="avatar-picker" @click="chooseAvatar">
-        <image class="avatar-image" :src="avatarSrc" mode="aspectFill" />
+      <view
+        class="avatar-picker"
+        @click="chooseAvatar"
+      >
+        <image
+          class="avatar-image"
+          :src="avatarSrc"
+          mode="aspectFill"
+        />
         <view class="avatar-badge">
-          <image class="avatar-badge-icon" src="/static/auth/icon-camera.svg" mode="aspectFit" />
+          <image
+            class="avatar-badge-icon"
+            src="/static/auth/icon-camera.svg"
+            mode="aspectFit"
+          />
         </view>
       </view>
 
       <view class="nickname-block">
-        <text class="nickname-label">请输入昵称</text>
+        <text class="nickname-label">
+          请输入昵称
+        </text>
         <view class="nickname-input-box">
           <input
             class="nickname-input"
@@ -103,11 +120,15 @@ function skipLater() {
             placeholder="用户昵称"
             placeholder-style="color:#636E86"
             @input="onNicknameInput"
-          />
+          >
         </view>
         <view class="nickname-meta">
-          <text class="nickname-hint">昵称最多 {{ NICKNAME_MAX }} 个字</text>
-          <text class="nickname-count">{{ nicknameCount }}/{{ NICKNAME_MAX }}</text>
+          <text class="nickname-hint">
+            昵称最多 {{ NICKNAME_MAX }} 个字
+          </text>
+          <text class="nickname-count">
+            {{ nicknameCount }}/{{ NICKNAME_MAX }}
+          </text>
         </view>
       </view>
 
@@ -123,7 +144,12 @@ function skipLater() {
         立即加入
       </button>
 
-      <text class="onboarding-skip" @click="skipLater">可稍后在个人页面设定头像和昵称</text>
+      <text
+        class="onboarding-skip"
+        @click="skipLater"
+      >
+        可稍后在个人页面设定头像和昵称
+      </text>
     </view>
   </view>
 </template>

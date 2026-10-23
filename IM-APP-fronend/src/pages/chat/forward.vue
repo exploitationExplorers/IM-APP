@@ -9,10 +9,16 @@ import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
 import { useForwardStore } from '@/stores/forward'
 import type { ContactTagItem, Conversation, FriendForwardPlan } from '@/types'
-import { snapshotFromMessage, mergeVideoSnapshotFromChatContent, patchVideoSnapshotCover, videoSnapshotNeedsRemoteCover } from '@/utils/forwardSnapshot'
+import {
+  mergeVideoSnapshotFromChatContent,
+  patchVideoSnapshotCover,
+  snapshotFromMessage,
+  videoSnapshotNeedsRemoteCover,
+  withForwardImageOriginal,
+} from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
 import { businessUserIdFromIM, ensureIMLogin, imUserId, uploadLocalImageForForward, extractVideoCoverForForward } from '@/utils/openim'
-import { captureVideoPosterFromUrl, parseVideoMeta } from '@/utils/chatMedia'
+import { captureVideoPosterFromUrl, listThumbnailUrl, parseVideoMeta } from '@/utils/chatMedia'
 import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
@@ -373,6 +379,14 @@ async function buildSources() {
         snapshot = mergeVideoSnapshotFromChatContent(snapshot, chatMsg.content)
       }
 
+      if (chatMsg?.type === 'image') {
+        snapshot = withForwardImageOriginal(
+          snapshot,
+          chatMsg.sourceUrl || chatMsg.content || '',
+          listThumbnailUrl(chatMsg.content || chatMsg.sourceUrl || ''),
+        )
+      }
+
       if (videoSnapshotNeedsRemoteCover(snapshot)) {
         const meta = parseVideoMeta(
           (snapshot.content as { videoUrl?: string })?.videoUrl || chatMsg?.content || '',
@@ -549,43 +563,121 @@ function goBack() {
 
 <template>
   <view class="page">
-    <ImNavBar title="转发给" @back="goBack">
+    <ImNavBar
+      title="转发给"
+      @back="goBack"
+    >
       <template #right>
-        <view class="send" :class="{ disabled: selectedCount === 0 || sending }" @click="onSend">传送</view>
+        <view
+          class="send"
+          :class="{ disabled: selectedCount === 0 || sending }"
+          @click="onSend"
+        >
+          传送
+        </view>
       </template>
     </ImNavBar>
 
     <view class="search">
-      <input v-model="keyword" class="search-input" placeholder="搜索" placeholder-style="color:#B0B0B0" />
+      <input
+        v-model="keyword"
+        class="search-input"
+        placeholder="搜索"
+        placeholder-style="color:#B0B0B0"
+      >
     </view>
 
     <view class="tabs">
-      <view class="tab" :class="{ active: active === 'recent' }" @click="active = 'recent'">最近聊天</view>
-      <view class="tab" :class="{ active: active === 'contacts' }" @click="active = 'contacts'">联络人</view>
-      <view class="tab" :class="{ active: active === 'groups' }" @click="active = 'groups'">群组</view>
-      <view class="tab" :class="{ active: active === 'tags' }" @click="active = 'tags'">标签</view>
-    </view>
-
-    <view v-if="active === 'contacts'" class="section-head">
-      <text class="section-title">联络人 ({{ contactStore.contactTotal }})</text>
-    </view>
-
-    <view class="select-all" @click="toggleSelectAll">
-      <text>全选</text>
-      <view class="check" :class="{ on: allSelectedInView }">
-        <text v-if="allSelectedInView">✓</text>
+      <view
+        class="tab"
+        :class="{ active: active === 'recent' }"
+        @click="active = 'recent'"
+      >
+        最近聊天
+      </view>
+      <view
+        class="tab"
+        :class="{ active: active === 'contacts' }"
+        @click="active = 'contacts'"
+      >
+        联络人
+      </view>
+      <view
+        class="tab"
+        :class="{ active: active === 'groups' }"
+        @click="active = 'groups'"
+      >
+        群组
+      </view>
+      <view
+        class="tab"
+        :class="{ active: active === 'tags' }"
+        @click="active = 'tags'"
+      >
+        标签
       </view>
     </view>
 
-    <scroll-view scroll-y class="list" :lower-threshold="120" @scrolltolower="loadMore" @scroll="onListScroll">
-      <view v-for="item in currentList" :key="item.id" class="row" @click="toggle(item)">
-        <image class="avatar" :src="item.avatar" mode="aspectFill" />
-        <text class="name">{{ item.name }}</text>
-        <view class="check" :class="{ on: isSelected(item) }">
-          <text v-if="isSelected(item)">✓</text>
+    <view
+      v-if="active === 'contacts'"
+      class="section-head"
+    >
+      <text class="section-title">
+        联络人 ({{ contactStore.contactTotal }})
+      </text>
+    </view>
+
+    <view
+      class="select-all"
+      @click="toggleSelectAll"
+    >
+      <text>全选</text>
+      <view
+        class="check"
+        :class="{ on: allSelectedInView }"
+      >
+        <text v-if="allSelectedInView">
+          ✓
+        </text>
+      </view>
+    </view>
+
+    <scroll-view
+      scroll-y
+      class="list"
+      :lower-threshold="120"
+      @scrolltolower="loadMore"
+      @scroll="onListScroll"
+    >
+      <view
+        v-for="item in currentList"
+        :key="item.id"
+        class="row"
+        @click="toggle(item)"
+      >
+        <image
+          class="avatar"
+          :src="item.avatar"
+          mode="aspectFill"
+        />
+        <text class="name">
+          {{ item.name }}
+        </text>
+        <view
+          class="check"
+          :class="{ on: isSelected(item) }"
+        >
+          <text v-if="isSelected(item)">
+            ✓
+          </text>
         </view>
       </view>
-      <view v-if="!currentList.length" class="empty">暂无数据</view>
+      <view
+        v-if="!currentList.length"
+        class="empty"
+      >
+        暂无数据
+      </view>
     </scroll-view>
   </view>
 </template>

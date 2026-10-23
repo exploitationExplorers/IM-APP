@@ -173,19 +173,36 @@ onShow(() => {
 
 <template>
   <view class="page">
-    <ImNavBar title="我的表情" @back="goBack">
+    <ImNavBar
+      title="我的表情"
+      @back="goBack"
+    >
       <template #right>
-        <view class="edit-btn" :class="{ 'cancel-btn': isEditMode }" @click="toggleEdit">
+        <view
+          class="edit-btn"
+          :class="{ 'cancel-btn': isEditMode }"
+          @click="toggleEdit"
+        >
           {{ isEditMode ? '取消' : '编辑' }}
         </view>
       </template>
     </ImNavBar>
 
-    <scroll-view scroll-y class="content" :class="{ 'has-bottom-bar': isEditMode }">
+    <scroll-view
+      scroll-y
+      class="content"
+      :class="{ 'has-bottom-bar': isEditMode }"
+    >
       <view class="grid-container">
-        <view v-if="!isEditMode" class="emotion-item add-btn-wrap" @click="onUpload">
+        <view
+          v-if="!isEditMode"
+          class="emotion-item add-btn-wrap"
+          @click="onUpload"
+        >
           <view class="add-btn">
-            <text class="add-icon">+</text>
+            <text class="add-icon">
+              +
+            </text>
           </view>
         </view>
 
@@ -195,18 +212,38 @@ onShow(() => {
           class="emotion-item"
           @click="onEmotionClick(item)"
         >
-          <image class="emotion-img" :src="playableMediaUrl(item.url)" mode="aspectFill" />
-          <view v-if="isEditMode" class="checkbox-wrap">
-            <view class="checkbox" :class="{ checked: selectedIds.includes(item.id) }">
-              <view v-if="selectedIds.includes(item.id)" class="check-mark"></view>
+          <image
+            class="emotion-img"
+            :src="playableMediaUrl(item.url)"
+            mode="aspectFill"
+          />
+          <view
+            v-if="isEditMode"
+            class="checkbox-wrap"
+          >
+            <view
+              class="checkbox"
+              :class="{ checked: selectedIds.includes(item.id) }"
+            >
+              <view
+                v-if="selectedIds.includes(item.id)"
+                class="check-mark"
+              />
             </view>
           </view>
         </view>
       </view>
     </scroll-view>
 
-    <view v-if="isEditMode" class="bottom-bar">
-      <view class="delete-btn" :class="{ active: hasSelected }" @click="onDelete">
+    <view
+      v-if="isEditMode"
+      class="bottom-bar"
+    >
+      <view
+        class="delete-btn"
+        :class="{ active: hasSelected }"
+        @click="onDelete"
+      >
         删除
       </view>
     </view>

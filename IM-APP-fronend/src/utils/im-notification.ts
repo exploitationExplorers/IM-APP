@@ -37,6 +37,13 @@ export const FRIEND_CONNECTED_TEXT = '你们已成为好友，现在可以开始
 /** 新群欢迎语（OpenIM 群创建通知文案；历史 imAdmin 文本气泡也会归一成系统消息） */
 export const GROUP_CREATED_WELCOME_TEXT = '新群创建成功，一起来聊天吧'
 
+/** 服务端 groupPurgeTipText 生成的 imAdmin 文本：群主/管理员为所有人删除了某成员的全部消息 */
+const GROUP_PURGE_TIP_PATTERN = /^(群主|管理员)清除了「.+」的全部消息$/
+
+export function isGroupPurgeTipText(text: string): boolean {
+  return GROUP_PURGE_TIP_PATTERN.test(text.trim())
+}
+
 interface NoticeUser {
   userID?: string
   nickname?: string

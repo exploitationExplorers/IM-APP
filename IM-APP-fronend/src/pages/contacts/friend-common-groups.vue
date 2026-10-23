@@ -58,11 +58,27 @@ function openGroup(g: GroupPreview) {
 
 <template>
   <view class="page">
-    <ImNavBar title="共同群组" @back="goBack" />
+    <ImNavBar
+      title="共同群组"
+      @back="goBack"
+    />
 
-    <scroll-view scroll-y class="list">
-      <view v-if="loading && !groups.length" class="hint">加载中…</view>
-      <view v-else-if="!groups.length" class="hint">暂无共同群组</view>
+    <scroll-view
+      scroll-y
+      class="list"
+    >
+      <view
+        v-if="loading && !groups.length"
+        class="hint"
+      >
+        加载中…
+      </view>
+      <view
+        v-else-if="!groups.length"
+        class="hint"
+      >
+        暂无共同群组
+      </view>
       <view
         v-for="g in groups"
         :key="g.id"
@@ -74,8 +90,14 @@ function openGroup(g: GroupPreview) {
           :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
           mode="aspectFill"
         />
-        <text class="name">{{ g.name }}</text>
-        <image class="chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+        <text class="name">
+          {{ g.name }}
+        </text>
+        <image
+          class="chevron"
+          src="/static/icons/icon-chevron.svg"
+          mode="aspectFit"
+        />
       </view>
     </scroll-view>
   </view>

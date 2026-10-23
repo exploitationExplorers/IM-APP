@@ -15,7 +15,7 @@ type FileObject struct {
 }
 
 type CreateUploadRequest struct {
-	Purpose     string `json:"purpose"` // avatar|image|voice|file|sticker
+	Purpose     string `json:"purpose" binding:"required,oneof=avatar image voice file sticker"`
 	FileName    string `json:"fileName"`
 	ContentType string `json:"contentType"`
 	Size        int64  `json:"size"`
@@ -35,4 +35,12 @@ type UploadInitResult struct {
 type CompleteUploadRequest struct {
 	FileID string `json:"fileId"`
 	ETag   string `json:"etag,omitempty"`
+}
+
+// PendingFile is internal metadata, not a new client API contract.
+type PendingFile struct {
+	ObjectKey       string
+	StorageProvider string
+	StorageBucket   string
+	Size            int64
 }

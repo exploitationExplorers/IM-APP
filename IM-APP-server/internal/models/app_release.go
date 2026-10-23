@@ -18,8 +18,10 @@ const (
 type AppReleaseChannel string
 
 const (
-	AppChannelTest AppReleaseChannel = "test"
-	AppChannelProd AppReleaseChannel = "prod"
+	// 内部真机壳。客户现有测试包不会拉这个渠道。
+	AppChannelCanary AppReleaseChannel = "canary"
+	AppChannelTest   AppReleaseChannel = "test"
+	AppChannelProd   AppReleaseChannel = "prod"
 )
 
 type AppUpdateType string
@@ -64,10 +66,12 @@ type CreateAppReleaseUploadRequest struct {
 }
 
 type AppReleaseUploadResult struct {
-	UploadURL string `json:"uploadUrl"`
-	ObjectKey string `json:"objectKey"`
-	FileURL   string `json:"fileUrl"`
-	ExpiresIn int    `json:"expiresIn"`
+	UploadURL       string            `json:"uploadUrl"`
+	ObjectKey       string            `json:"objectKey"`
+	FileURL         string            `json:"fileUrl"`
+	ExpiresIn       int               `json:"expiresIn"`
+	Headers         map[string]string `json:"headers,omitempty"`
+	StorageProvider string            `json:"storageProvider,omitempty"`
 }
 
 type PublishAppReleaseRequest struct {

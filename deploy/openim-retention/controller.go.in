@@ -1,0 +1,15 @@
+package controller
+
+import "context"
+
+// The RPC response uses the same authoritative bound as history pulls. This
+// adjusts expired unread prefixes without writing a smaller per-user read seq.
+func (db *commonMsgDatabase) IMAppRetentionMinSeqs(ctx context.Context, ids []string) (map[string]int64, error) {
+	result := make(map[string]int64, len(ids))
+	for _, id := range ids {
+		seq, err := db.seqConversation.GetMinSeq(ctx, id)
+		if err != nil { return nil, err }
+		result[id] = seq
+	}
+	return result, nil
+}

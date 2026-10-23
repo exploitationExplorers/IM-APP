@@ -22,8 +22,17 @@ import { getStatusBarHeight } from '@/utils/status-bar'
 import { isDissolvedGroupConversationPreview, isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-notification'
 import { setConversationRecvOpt } from '@/utils/openim'
 import { resolveIMGroupByIM } from '@/api/im'
-import { messageSearchPreview, searchLocalMessages } from '@/utils/openim'
+import {
+  ensureLocalConversationHistory,
+  messageSearchPreview,
+  searchConversationMessagesPage,
+  searchLocalMessages,
+  type ConversationMessageSearchCursor,
+} from '@/utils/openim'
 import type { MessageItem } from 'openim-uniapp-polyfill'
+
+type MessageHitRow = { preview: string; clientMsgId: string; sendTime: number }
+type MessageHitBucket = { messages: MessageHitRow[] }
 
 useAuthGuard()
 useTabBar()
@@ -36,11 +45,27 @@ const contactStore = useContactStore()
 const groupStore = useGroupStore()
 const keyword = ref('')
 /** 关键词命中：同一会话里的每一条都保留，不能只留最新一条 */
-const messageHitMeta = ref<
-  Map<string, { messages: Array<{ preview: string; clientMsgId: string; sendTime: number }> }>
->(new Map())
+const messageHitMeta = ref<Map<string, MessageHitBucket>>(new Map())
+/** 对标微信：首屏先出最近命中，上滑再挖更早历史 */
+const messageSearchHasMore = ref(false)
+const messageSearchLoadingMore = ref(false)
 let messageSearchSeq = 0
 let messageSearchTimer: ReturnType<typeof setTimeout> | null = null
+/** 全局 SearchLocalMessages 翻页 */
+let globalSdkPage = 1
+let globalSdkDone = false
+/** 候选会话：标题命中 / 已有消息命中，加载更多时向历史补扫 */
+let digQueue: string[] = []
+const digCursors = new Map<string, ConversationMessageSearchCursor>()
+const digDone = new Set<string>()
+/** 连续空挖次数：关键词很稀时避免一直转圈 */
+const digEmptyStreak = new Map<string, number>()
+/**
+ * 列表不满一屏时 scrolltolower 会立刻连打，必须先有一次真实上滑再允许触底加载。
+ * 底部「点击加载更多」不走这个开关。
+ */
+let searchScrollArmed = false
+let searchLoadCooldownUntil = 0
 const showAddMenu = ref(false)
 const showReadMenu = ref(false)
 const showFilter = ref(false)
@@ -203,51 +228,252 @@ function hitPreviewOf(item: MessageItem, fallback = ''): string {
   return truncateSearchPreview(messageSearchPreview(item) || fallback)
 }
 
+function resetMessageSearchCursor() {
+  globalSdkPage = 1
+  globalSdkDone = false
+  digQueue = []
+  digCursors.clear()
+  digDone.clear()
+  digEmptyStreak.clear()
+  searchScrollArmed = false
+  searchLoadCooldownUntil = 0
+  messageSearchHasMore.value = false
+  messageSearchLoadingMore.value = false
+}
+
+function hitCountOf(map: Map<string, MessageHitBucket>): number {
+  let n = 0
+  for (const bucket of map.values()) n += bucket.messages.length
+  return n
+}
+
+function mergeLocalSearchHits(
+  map: Map<string, MessageHitBucket>,
+  hits: Awaited<ReturnType<typeof searchLocalMessages>>,
+): number {
+  let added = 0
+  for (const hit of hits) {
+    if (!hit.conversationID) continue
+    const bucket = map.get(hit.conversationID) || { messages: [] }
+    const seen = new Set(bucket.messages.map((m) => m.clientMsgId))
+    const batch = hit.messages.length ? hit.messages : []
+    for (const item of batch) {
+      if (!item.clientMsgID || seen.has(item.clientMsgID)) continue
+      seen.add(item.clientMsgID)
+      bucket.messages.push({
+        preview: hitPreviewOf(item, hit.preview),
+        clientMsgId: item.clientMsgID,
+        sendTime: Number(item.sendTime || 0),
+      })
+      added += 1
+    }
+    if (!batch.length && hit.clientMsgID && !seen.has(hit.clientMsgID)) {
+      bucket.messages.push({
+        preview: truncateSearchPreview(hit.preview),
+        clientMsgId: hit.clientMsgID,
+        sendTime: 0,
+      })
+      added += 1
+    }
+    bucket.messages.sort((a, b) => b.sendTime - a.sendTime)
+    map.set(hit.conversationID, bucket)
+  }
+  return added
+}
+
+function mergeConversationHits(
+  map: Map<string, MessageHitBucket>,
+  conversationID: string,
+  messages: MessageItem[],
+): number {
+  if (!conversationID || !messages.length) return 0
+  const bucket = map.get(conversationID) || { messages: [] }
+  const seen = new Set(bucket.messages.map((m) => m.clientMsgId))
+  let added = 0
+  for (const item of messages) {
+    if (!item.clientMsgID || seen.has(item.clientMsgID)) continue
+    seen.add(item.clientMsgID)
+    bucket.messages.push({
+      preview: hitPreviewOf(item),
+      clientMsgId: item.clientMsgID,
+      sendTime: Number(item.sendTime || 0),
+    })
+    added += 1
+  }
+  if (added) {
+    bucket.messages.sort((a, b) => b.sendTime - a.sendTime)
+    map.set(conversationID, bucket)
+  }
+  return added
+}
+
+/** 标题 / 摘要命中 + 已有消息命中的会话，都作为「加载更多」补扫对象 */
+function rebuildDigQueue(keywordText: string, map: Map<string, MessageHitBucket>) {
+  const k = keywordText.trim().toLowerCase()
+  const ids = new Set<string>(map.keys())
+  for (const c of chatStore.conversations) {
+    if (
+      c.title.toLowerCase().includes(k) ||
+      c.lastMessage.toLowerCase().includes(k)
+    ) {
+      ids.add(c.id)
+    }
+  }
+  digQueue = [...ids]
+  for (const id of digQueue) {
+    if (digCursors.has(id) || digDone.has(id)) continue
+    const existing = map.get(id)?.messages || []
+    // 全局索引已扫过的命中写进 seen，后续只挖更早历史，避免重复打 SDK
+    digCursors.set(id, {
+      sdkPage: 1,
+      sdkDone: true,
+      historyStartId: '',
+      historyDone: false,
+      seenIds: existing.map((m) => m.clientMsgId).filter(Boolean),
+      pending: [],
+    })
+    void ensureLocalConversationHistory(id)
+  }
+}
+
+function refreshMessageSearchHasMore() {
+  messageSearchHasMore.value =
+    !globalSdkDone || digQueue.some((id) => !digDone.has(id))
+}
+
+/**
+ * 首屏：只打全局本地索引（毫秒级），先把最近命中摊开。
+ * 更早记录靠上滑 loadMoreMessageSearch 按会话翻历史。
+ */
 async function runMessageSearch(raw: string) {
   const k = raw.trim()
   const seq = ++messageSearchSeq
+  resetMessageSearchCursor()
   if (!k) {
     messageHitMeta.value = new Map()
     return
   }
-  const map = new Map<string, { messages: Array<{ preview: string; clientMsgId: string; sendTime: number }> }>()
-  for (let page = 1; page <= 10; page++) {
-    const hits = await searchLocalMessages({ keyword: k, count: 100, pageIndex: page })
+  const map = new Map<string, MessageHitBucket>()
+  // 首屏最多 3 页本地索引，够填一屏；其余留给上滑
+  for (let i = 0; i < 3 && !globalSdkDone; i++) {
+    const hits = await searchLocalMessages({
+      keyword: k,
+      count: 100,
+      pageIndex: globalSdkPage,
+    })
     if (seq !== messageSearchSeq) return
-    if (!hits.length) break
-    let added = 0
-    for (const hit of hits) {
-      if (!hit.conversationID) continue
-      const bucket = map.get(hit.conversationID) || { messages: [] }
-      const seen = new Set(bucket.messages.map((m) => m.clientMsgId))
-      const batch = hit.messages.length
-        ? hit.messages
-        : []
-      for (const item of batch) {
-        if (!item.clientMsgID || seen.has(item.clientMsgID)) continue
-        seen.add(item.clientMsgID)
-        bucket.messages.push({
-          preview: hitPreviewOf(item, hit.preview),
-          clientMsgId: item.clientMsgID,
-          sendTime: Number(item.sendTime || 0),
-        })
-        added += 1
-      }
-      if (!batch.length && hit.clientMsgID && !seen.has(hit.clientMsgID)) {
-        bucket.messages.push({
-          preview: truncateSearchPreview(hit.preview),
-          clientMsgId: hit.clientMsgID,
-          sendTime: 0,
-        })
-        added += 1
-      }
-      bucket.messages.sort((a, b) => b.sendTime - a.sendTime)
-      map.set(hit.conversationID, bucket)
+    if (!hits.length) {
+      globalSdkDone = true
+      break
     }
-    if (!added) break
+    const added = mergeLocalSearchHits(map, hits)
+    globalSdkPage += 1
+    if (!added) {
+      globalSdkDone = true
+      break
+    }
+    if (hitCountOf(map) >= 40) break
   }
   if (seq !== messageSearchSeq) return
+  rebuildDigQueue(k, map)
   messageHitMeta.value = map
+  refreshMessageSearchHasMore()
+}
+
+/**
+ * 一轮只干有限的活：先翻全局索引，再最多挖 1 个会话的一小段历史。
+ * 禁止自动连挖——否则结果不满一屏时触底会一直停在「加载更多…」。
+ */
+async function loadMoreMessageSearch() {
+  const k = keyword.value.trim()
+  if (
+    !k ||
+    !messageSearchHasMore.value ||
+    messageSearchLoadingMore.value ||
+    Date.now() < searchLoadCooldownUntil
+  ) {
+    return
+  }
+  const seq = messageSearchSeq
+  messageSearchLoadingMore.value = true
+  try {
+    const map = new Map(messageHitMeta.value)
+    let gained = 0
+
+    if (!globalSdkDone) {
+      for (let i = 0; i < 2 && !globalSdkDone; i++) {
+        const hits = await searchLocalMessages({
+          keyword: k,
+          count: 100,
+          pageIndex: globalSdkPage,
+        })
+        if (seq !== messageSearchSeq) return
+        if (!hits.length) {
+          globalSdkDone = true
+          break
+        }
+        const added = mergeLocalSearchHits(map, hits)
+        globalSdkPage += 1
+        gained += added
+        if (!added) {
+          globalSdkDone = true
+          break
+        }
+      }
+      rebuildDigQueue(k, map)
+    }
+
+    if (gained < 15) {
+      const id = digQueue.find((cid) => !digDone.has(cid) && digCursors.has(cid))
+      if (id) {
+        const cursor = digCursors.get(id)!
+        // 同步已展示命中，避免历史补扫重复入列
+        const seenIds = new Set(cursor.seenIds)
+        for (const row of map.get(id)?.messages || []) {
+          if (row.clientMsgId) seenIds.add(row.clientMsgId)
+        }
+        cursor.seenIds = [...seenIds]
+        const page = await searchConversationMessagesPage({
+          conversationID: id,
+          keyword: k,
+          cursor,
+          limit: 15,
+          historyScanBatch: 100,
+        })
+        if (seq !== messageSearchSeq) return
+        const added = mergeConversationHits(map, id, page.messages)
+        gained += added
+        digCursors.set(id, page.cursor)
+        if (!page.hasMore) {
+          digDone.add(id)
+          digEmptyStreak.delete(id)
+        } else if (!added) {
+          const streak = (digEmptyStreak.get(id) || 0) + 1
+          digEmptyStreak.set(id, streak)
+          // 连续多轮空挖：先换下一个会话，避免死磕同一会话转圈
+          if (streak >= 3) {
+            digDone.add(id)
+            digEmptyStreak.delete(id)
+          }
+        } else {
+          digEmptyStreak.set(id, 0)
+        }
+      }
+    }
+
+    if (seq !== messageSearchSeq) return
+    messageHitMeta.value = map
+    refreshMessageSearchHasMore()
+  } catch (e) {
+    if (seq !== messageSearchSeq) return
+    uni.showToast({ title: (e as Error)?.message || '加载更多失败', icon: 'none' })
+  } finally {
+    // 仅清理本轮；换关键词后 seq 已变，不能把新一轮的 loading 误清掉
+    if (seq === messageSearchSeq) {
+      messageSearchLoadingMore.value = false
+      searchLoadCooldownUntil = Date.now() + 500
+    }
+  }
 }
 
 watch(keyword, (value) => {
@@ -255,6 +481,7 @@ watch(keyword, (value) => {
   const k = value.trim()
   if (!k) {
     messageSearchSeq += 1
+    resetMessageSearchCursor()
     messageHitMeta.value = new Map()
     return
   }
@@ -312,6 +539,8 @@ async function reloadConversations() {
     await chatStore.loadConversations()
   } catch (e) {
     const message = (e as Error)?.message || '会话加载失败'
+    // 登录过期由 request 层 reLaunch 登录页，这里不再挡在聊天页只弹 toast
+    if (message.includes('登录已过期') || message.includes('未登录')) return
     if (message.includes('自定义调试基座')) {
       uni.showModal({ title: '无法连接聊天', content: message, showCancel: false })
       return
@@ -428,8 +657,24 @@ function closeMenus() {
   convMenu.value = null
 }
 
-function onListScroll() {
+function onListScroll(e?: { detail?: { scrollTop?: number } }) {
   if (convMenu.value) convMenu.value = null
+  // 只有用户真的滑过列表，才允许触底加载，避免短列表一进来就卡在「加载更多…」
+  if (keyword.value.trim() && Number(e?.detail?.scrollTop || 0) > 40) {
+    searchScrollArmed = true
+  }
+}
+
+function onSearchScrollToLower() {
+  if (!keyword.value.trim() || !searchScrollArmed) return
+  void loadMoreMessageSearch()
+}
+
+/** 底部点击：不依赖上滑武装，短列表也能手动加载 */
+function onSearchFooterLoadMore() {
+  if (!keyword.value.trim()) return
+  searchScrollArmed = true
+  void loadMoreMessageSearch()
 }
 
 function onConvMenu(payload: { item: Conversation; x: number; y: number }) {
@@ -593,7 +838,10 @@ watchEffect(() => {
     :class="isDesktop ? 'im-desktop-workspace' : 'page'"
     @click="closeMenus"
   >
-    <ImDesktopSidebar v-if="isDesktop" current="chat" />
+    <ImDesktopSidebar
+      v-if="isDesktop"
+      current="chat"
+    />
 
     <view
       :class="isDesktop ? 'im-desktop-list-column page-desktop-list' : ''"
@@ -605,59 +853,120 @@ watchEffect(() => {
         :style="isDesktop ? undefined : { paddingTop: statusBarHeight + 'px' }"
       >
         <view class="header-row">
-          <text class="title">聊天</text>
+          <text class="title">
+            聊天
+          </text>
           <view class="header-actions">
-          <view class="add-wrap" @click.stop="onReadMenu">
-            <text class="icon-more">⋯</text>
-            <view v-if="showReadMenu" class="popup-menu">
-              <view class="popup-item" @click="onMarkAllRead">
-                <text>全部已读</text>
+            <view
+              class="add-wrap"
+              @click.stop="onReadMenu"
+            >
+              <text class="icon-more">
+                ⋯
+              </text>
+              <view
+                v-if="showReadMenu"
+                class="popup-menu"
+              >
+                <view
+                  class="popup-item"
+                  @click="onMarkAllRead"
+                >
+                  <text>全部已读</text>
+                </view>
               </view>
             </view>
-          </view>
-          <view class="add-wrap" @click.stop="onAdd">
-            <image class="icon-plus" src="/static/icons/icon-plus.svg" mode="aspectFit" />
-            <view v-if="showAddMenu" class="popup-menu">
-              <view class="popup-item" @click="go('/pages/contacts/add-friend')">
-                <image class="popup-icon" src="/static/icons/menu-add-friend.svg" mode="aspectFit" />
-                <text>添加朋友</text>
-              </view>
-              <view class="popup-item" @click="goAddGroup">
-                <image class="popup-icon" src="/static/icons/menu-add-group.svg" mode="aspectFit" />
-                <text>添加群聊</text>
-              </view>
-              <view class="popup-item" @click="go('/pages/group/create')">
-                <image class="popup-icon" src="/static/icons/menu-create-group.svg" mode="aspectFit" />
-                <text>创建群聊</text>
+            <view
+              class="add-wrap"
+              @click.stop="onAdd"
+            >
+              <image
+                class="icon-plus"
+                src="/static/icons/icon-plus.svg"
+                mode="aspectFit"
+              />
+              <view
+                v-if="showAddMenu"
+                class="popup-menu"
+              >
+                <view
+                  class="popup-item"
+                  @click="go('/pages/contacts/add-friend')"
+                >
+                  <image
+                    class="popup-icon"
+                    src="/static/icons/menu-add-friend.svg"
+                    mode="aspectFit"
+                  />
+                  <text>添加朋友</text>
+                </view>
+                <view
+                  class="popup-item"
+                  @click="goAddGroup"
+                >
+                  <image
+                    class="popup-icon"
+                    src="/static/icons/menu-add-group.svg"
+                    mode="aspectFit"
+                  />
+                  <text>添加群聊</text>
+                </view>
+                <view
+                  class="popup-item"
+                  @click="go('/pages/group/create')"
+                >
+                  <image
+                    class="popup-icon"
+                    src="/static/icons/menu-create-group.svg"
+                    mode="aspectFit"
+                  />
+                  <text>创建群聊</text>
+                </view>
               </view>
             </view>
-          </view>
           </view>
         </view>
       </view>
 
-      <AppSearchBar v-model="keyword" placeholder="搜索聊天 / 关键词" />
+      <AppSearchBar
+        v-model="keyword"
+        placeholder="搜索聊天 / 关键词"
+      />
 
       <view class="filter-row">
         <view
           v-if="chatStore.totalUnread > 0"
           class="mark-all"
           @click.stop="onMarkAllRead"
-        >全部已读</view>
-        <view class="filter-wrap" @click.stop="showFilter = !showFilter">
-          <text class="filter">{{ filterLabel }}</text>
+        >
+          全部已读
+        </view>
+        <view
+          class="filter-wrap"
+          @click.stop="showFilter = !showFilter"
+        >
+          <text class="filter">
+            {{ filterLabel }}
+          </text>
           <view class="filter-caret" />
-          <view v-if="showFilter" class="popup-menu filter-menu">
+          <view
+            v-if="showFilter"
+            class="popup-menu filter-menu"
+          >
             <view
               class="popup-item"
               :class="{ active: filterKey === 'all' }"
               @click="setFilter('all')"
-            >全部</view>
+            >
+              全部
+            </view>
             <view
               class="popup-item"
               :class="{ active: filterKey === 'unread' }"
               @click="setFilter('unread')"
-            >未读</view>
+            >
+              未读
+            </view>
           </view>
         </view>
       </view>
@@ -668,8 +977,10 @@ watchEffect(() => {
         refresher-enabled
         refresher-default-style="black"
         :refresher-triggered="refreshing"
+        lower-threshold="120"
         @refresherrefresh="onRefresherRefresh"
         @scroll="onListScroll"
+        @scrolltolower="onSearchScrollToLower"
       >
         <template v-if="keyword.trim()">
           <ConversationItem
@@ -679,6 +990,25 @@ watchEffect(() => {
             :selected="isDesktop && selectedConv?.id === row.item.id && selectedClientMsgId === row.clientMsgId"
             @click="openSearchRow(row)"
           />
+          <view
+            v-if="messageSearchLoadingMore"
+            class="search-footer"
+          >
+            加载中…
+          </view>
+          <view
+            v-else-if="messageSearchHasMore && searchRows.length"
+            class="search-footer"
+            @click="onSearchFooterLoadMore"
+          >
+            点击或上拉加载更多
+          </view>
+          <view
+            v-else-if="searchRows.length && !messageSearchHasMore"
+            class="search-footer"
+          >
+            没有更多了
+          </view>
         </template>
         <template v-else-if="isDesktop">
           <ConversationItem
@@ -723,7 +1053,12 @@ watchEffect(() => {
             </template>
           </ImSwipeActionItem>
         </uni-swipe-action>
-        <view v-if="keyword.trim() ? !searchRows.length : !filtered.length" class="empty">{{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}</view>
+        <view
+          v-if="keyword.trim() ? !searchRows.length : !filtered.length"
+          class="empty"
+        >
+          {{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}
+        </view>
       </scroll-view>
     </view>
 
@@ -733,7 +1068,10 @@ watchEffect(() => {
       @start="onResizeStart"
     />
 
-    <view v-if="isDesktop" class="im-desktop-room-column">
+    <view
+      v-if="isDesktop"
+      class="im-desktop-room-column"
+    >
       <ChatRoom
         v-if="selectedConv"
         :key="selectedConv.id + (selectedClientMsgId ? `:${selectedClientMsgId}` : '')"
@@ -746,10 +1084,18 @@ watchEffect(() => {
         @close="clearSelectedConv"
         @dissolved="clearSelectedConv"
       />
-      <view v-else class="im-desktop-room-empty">选择一个会话开始聊天</view>
+      <view
+        v-else
+        class="im-desktop-room-empty"
+      >
+        选择一个会话开始聊天
+      </view>
     </view>
 
-    <ImTabBar v-if="!isDesktop" current="chat" />
+    <ImTabBar
+      v-if="!isDesktop"
+      current="chat"
+    />
     <ImNotificationPermissionDialog />
 
     <view
@@ -759,14 +1105,30 @@ watchEffect(() => {
       @click.stop
       @contextmenu.prevent.stop
     >
-      <view class="conv-menu-item" @click="onMenuPin">
+      <view
+        class="conv-menu-item"
+        @click="onMenuPin"
+      >
         {{ convMenu.item.pinned ? '取消置顶' : '置顶' }}
       </view>
-      <view class="conv-menu-item" @click="onMenuMute">
+      <view
+        class="conv-menu-item"
+        @click="onMenuMute"
+      >
         {{ convMenuMuted ? '取消免打扰' : '免打扰' }}
       </view>
-      <view class="conv-menu-item" @click="onMenuRead">已读</view>
-      <view class="conv-menu-item" @click="onMenuDelete">删除</view>
+      <view
+        class="conv-menu-item"
+        @click="onMenuRead"
+      >
+        已读
+      </view>
+      <view
+        class="conv-menu-item"
+        @click="onMenuDelete"
+      >
+        删除
+      </view>
     </view>
   </view>
 </template>
@@ -931,6 +1293,13 @@ watchEffect(() => {
   color: #212121;
   padding: 80rpx 40rpx;
   font-size: 32rpx;
+}
+
+.search-footer {
+  text-align: center;
+  color: #9aa0ad;
+  font-size: 24rpx;
+  padding: 28rpx 0 40rpx;
 }
 
 .swipe-actions {

@@ -1,0 +1,181 @@
+package msg
+
+import (
+	"context"
+	"errors"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	rules "github.com/openimsdk/open-im-server/v3/internal/imappretention"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/controller"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache/cachekey"
+	redisCache "github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache/redis"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database/mgo"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
+	"github.com/openimsdk/protocol/constant"
+	pbmsg "github.com/openimsdk/protocol/msg"
+	"github.com/openimsdk/protocol/sdkws"
+	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+func TestIMAppRetentionClassification(t *testing.T) {
+	group := strings.Repeat("a", 32)
+	info := &model.MsgInfoModel{Msg: &model.MsgDataModel{Seq: 1, SessionType: 3, GroupID: group, ContentType: constant.Text, SendTime: time.Now().UnixMilli()}}
+	row, err := imAppClassify(info, group, 1)
+	if err != nil || row.Visibility != "visible" { t.Fatal("text not counted") }
+	info.Msg.ContentType = constant.GroupInfoSetAnnouncementNotification
+	row, err = imAppClassify(info, group, 1)
+	if err != nil || row.Visibility != "visible" { t.Fatal("displayed notice not counted") }
+	info.Msg.ContentType = constant.HasReadReceipt
+	row, err = imAppClassify(info, group, 1)
+	if err != nil || row.Visibility != "hidden" { t.Fatal("control counted as visible") }
+	info.Msg.ContentType = constant.Custom
+	info.Msg.Content = `{"Data":"{\"BusinessKey\":\"message_pin\",\"ClientMsgID\":\"old-msg\"}"}`
+	row, err = imAppClassify(info, group, 1)
+	if err != nil || row.Visibility != "hidden" { t.Fatal("native pin synchronization consumed visible quota") }
+	info.Msg.Content = `{"data":"{\"businessKey\":\"group_invite\"}"}`
+	row, err = imAppClassify(info, group, 1)
+	if err != nil || row.Visibility != "visible" { t.Fatal("visible custom invite was hidden") }
+	for _, mutate := range []func(){func(){ info.Msg = nil }, func(){ info.Msg = &model.MsgDataModel{Seq: 1, SessionType: 1} },
+		func(){ info.Msg = &model.MsgDataModel{Seq: 1, SessionType: 3, GroupID: group, ContentType: 999999} }} {
+		mutate(); if _, err := imAppClassify(info, group, 1); err == nil { t.Fatal("incomplete/foreign/unknown slot accepted") }
+	}
+}
+
+func TestIMAppRetentionHTTPGate(t *testing.T) {
+	b := &imAppRetentionBridge{key: strings.Repeat("x", 32)}
+	for _, test := range []struct { method, path, auth, body string; code int }{
+		{"GET", "/internal/retention/capabilities", "", "", 401},
+		{"GET", "/internal/retention/capabilities", "wrong", "", 401},
+		{"GET", "/internal/retention/capabilities", "Bearer "+b.key, "", 200},
+		{"GET", "/internal/retention/capabilities?x=y", "Bearer "+b.key, "", 404},
+		{"GET", "/internal/retention/snapshot?groupId=bad", "Bearer "+b.key, "", 400},
+		{"GET", "/internal/retention/snapshot?groupId="+strings.Repeat("a",32)+"&bad=%xx", "Bearer "+b.key, "", 400},
+		{"GET", "/internal/retention/snapshot?groupId="+strings.Repeat("a", 32)+"&groupId="+strings.Repeat("b",32), "Bearer "+b.key, "", 400},
+		{"GET", "/internal/retention/capabilities", "Bearer "+b.key, "{}", 400},
+		{"POST", "/internal/retention/apply", "Bearer "+b.key, `{"snapshotId":"forged"}`, 400},
+		{"POST", "/internal/retention/apply", "Bearer "+b.key, `{"extra":1}`, 400},
+	} {
+		r := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body)); r.Header.Set("Authorization", test.auth); r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder(); b.ServeHTTP(w, r)
+		if w.Code != test.code || w.Header().Get("Cache-Control") != "private, no-store" { t.Fatalf("%s: got %d, want %d", test.path, w.Code, test.code) }
+	}
+}
+
+type imAppRetentionDBStub struct {
+	controller.CommonMsgDatabase
+	seq database.SeqConversation
+	cached cache.SeqConversationCache
+	watermark int64
+	minimums map[string]int64
+}
+func (s *imAppRetentionDBStub) GetMaxSeq(context.Context, string) (int64, error) { return s.watermark, nil }
+func (s *imAppRetentionDBStub) SetMinSeq(ctx context.Context, id string, seq int64) error { if s.cached != nil { return s.cached.SetMinSeq(ctx,id,seq) }; return s.seq.SetMinSeq(ctx, id, seq) }
+func (s *imAppRetentionDBStub) IMAppRetentionMinSeqs(context.Context, []string) (map[string]int64, error) { return s.minimums, nil }
+
+func TestIMAppRetentionUnreadClamp(t *testing.T) {
+	id := "sg_"+strings.Repeat("a", 32)
+	m := &msgServer{MsgDatabase: &imAppRetentionDBStub{minimums: map[string]int64{id: 501}}}
+	resp := &pbmsg.GetConversationsHasReadAndMaxSeqResp{Seqs: map[string]*pbmsg.Seqs{id: {HasReadSeq: 4, MaxSeq: 550}, "si_a_b": {HasReadSeq: 1, MaxSeq: 999}}}
+	if err := m.clampIMAppRetentionRead(context.Background(), resp); err != nil { t.Fatal(err) }
+	if resp.Seqs[id].HasReadSeq != 500 || resp.Seqs["si_a_b"].HasReadSeq != 1 { t.Fatal("expired unread not clamped or single chat changed") }
+	resp.Seqs[id].HasReadSeq = 520
+	_ = m.clampIMAppRetentionRead(context.Background(), resp)
+	if resp.Seqs[id].HasReadSeq != 520 { t.Fatal("regressed member read cursor") }
+}
+
+// The runner creates a new loopback-only disposable MongoDB. This test refuses
+// arbitrary connection strings, never reads .env, and drops ONLY its fresh DB.
+func TestIMAppRetentionMongoIntegration(t *testing.T) {
+	uri := os.Getenv("IM_APP_RETENTION_TEST_MONGO")
+	if uri == "" { t.Skip("use the isolated integration runner") }
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "mongodb" || u.Hostname() != "127.0.0.1" || u.Path != "/imapp_retention_integration" || os.Getenv("IM_APP_RETENTION_TEST_ALLOW_INIT") != "1" { t.Fatal("requires explicit disposable localhost MongoDB") }
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second); defer cancel()
+	redisURL := os.Getenv("IM_APP_RETENTION_TEST_REDIS")
+	ru, err := url.Parse(redisURL)
+	if err != nil || ru.Scheme != "redis" || ru.Hostname() != "127.0.0.1" || ru.Path != "/0" || ru.User != nil || ru.RawQuery != "" { t.Fatal("requires explicit disposable localhost Redis") }
+	ro, err := redis.ParseURL(redisURL); if err != nil { t.Fatal(err) }
+	rdb := redis.NewClient(ro); defer rdb.Close()
+	if n, err := rdb.DBSize(ctx).Result(); err != nil || n != 0 { t.Fatal("Redis is not empty; refusing test initialization") }
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri)); if err != nil { t.Fatal(err) }; defer client.Disconnect(context.Background())
+	db := client.Database("imapp_retention_integration")
+	collections, err := db.ListCollectionNames(ctx, bson.M{}); if err != nil || len(collections) != 0 { t.Fatal("database is not empty; refusing initialization") }
+	defer db.Drop(context.Background())
+	seq, err := mgo.NewSeqConversationMongo(db); if err != nil { t.Fatal(err) }
+	group, conversation := strings.Repeat("a",32), "sg_"+strings.Repeat("a",32)
+	cache := redisCache.NewSeqConversationCacheRedis(rdb,seq)
+	stub := &imAppRetentionDBStub{seq: seq, cached:cache, watermark: 503}
+	b := &imAppRetentionBridge{server: &msgServer{MsgDatabase: stub}, db: db}
+	if _, err := seq.Malloc(ctx, conversation, 1000); err != nil { t.Fatal(err) }
+	if minimum, err := cache.GetMinSeq(ctx,conversation); err != nil || minimum != 0 { t.Fatal("could not warm old cached minimum", err) }
+	for first := int64(1); first <= 503; first += 100 {
+		doc := model.MsgDocModel{DocID: new(model.MsgDocModel).GetDocID(conversation, first), Msg: make([]*model.MsgInfoModel,100)}
+		for n := first; n <= min(first+99, 503); n++ { doc.Msg[(n-1)%100] = &model.MsgInfoModel{Msg: &model.MsgDataModel{
+			Seq:n, GroupID:group, SessionType:3, ContentType:constant.Text, SendTime:time.Now().Add(-time.Hour).UnixMilli(), Content:"original content must remain"}} }
+		if _, err := db.Collection(model.MsgTableName).InsertOne(ctx, doc); err != nil { t.Fatal(err) }
+	}
+	// Integration cases below pin MaxMessages=500 so the 503-seq fixture still proves a compact prefix.
+	legacy := rules.RetentionPolicy{MaxMessages: 500, Window: rules.GroupRetentionWindow}
+	snapshot, err := b.snapshot(ctx, group, legacy); if err != nil { t.Fatal(err) }
+	if !snapshot.Complete || snapshot.Watermark != 503 || len(snapshot.Messages) != 500 || snapshot.OverCountThrough != 3 { t.Fatal("snapshot used reservation instead of persisted tail proof") }
+	if err := b.apply(ctx, snapshot.SnapshotID, conversation, 5); !errors.Is(err, errIMAppSnapshot) { t.Fatal("forged boundary accepted") }
+	if err := b.apply(ctx, snapshot.SnapshotID, "sg_"+strings.Repeat("b",32), 4); err == nil { t.Fatal("cross-group receipt accepted") }
+	for range 2 { if err := b.apply(ctx, snapshot.SnapshotID, conversation, 4); err != nil { t.Fatal(err) } }
+	if minimum, err := cache.GetMinSeq(ctx,conversation); err != nil || minimum != 4 { t.Fatal("ACK did not invalidate actual Redis/rocks minimum", err) }
+	if minSeq, err := seq.GetMinSeq(ctx, conversation); err != nil || minSeq != 4 { t.Fatal("bound not durable") }
+	if _, err := seq.Malloc(ctx, conversation, 1000); err != nil { t.Fatal(err) }
+	if err := seq.SetMinSeq(ctx, conversation, 2); err != nil { t.Fatal(err) }
+	if minSeq, _ := seq.GetMinSeq(ctx, conversation); minSeq != 4 { t.Fatal("reservation or stale apply resurrected history") }
+	// Exercise the actual transfer allocator after losing only this group's
+	// allocation cache. Never FLUSH a Redis database or modify unrelated keys.
+	if err := rdb.Del(ctx,cachekey.GetMallocSeqKey(conversation)).Err(); err != nil { t.Fatal(err) }
+	if _, err := cache.Malloc(ctx,conversation,1); err != nil { t.Fatal(err) }
+	if minimum, err := seq.GetMinSeq(ctx,conversation); err != nil || minimum != 4 { t.Fatal("real allocator reset durable minimum", err) }
+	if minimum, err := cache.GetMinSeq(ctx,conversation); err != nil || minimum != 4 { t.Fatal("cache refill regressed visible history", err) }
+	snapshot2, err := b.snapshot(ctx, group, legacy); if err != nil || len(snapshot2.Messages) != 500 { t.Fatal("new snapshot did not respect durable prefix", err) }
+	// Actual Mongo aggregation must filter before count and pagination. Simply
+	// removing a page's rows afterwards would make the first page empty and the
+	// total include hidden history. A single-chat source remains searchable.
+	messages, err := mgo.NewMsgMongo(db); if err != nil { t.Fatal(err) }
+	for page, wantFirst := range []int64{4, 14} {
+		total, rows, err := messages.SearchMessage(ctx, &pbmsg.SearchMessageReq{RecvID: group, Pagination: &sdkws.RequestPagination{PageNumber:int32(page+1), ShowNumber:10}})
+		if err != nil || total != 500 || len(rows) != 10 || rows[0].Msg.Seq != wantFirst { t.Fatalf("search bounds/pagination: total=%d rows=%d err=%v", total, len(rows), err) }
+	}
+	single := model.MsgDocModel{DocID:"si_a_b:0", Msg:[]*model.MsgInfoModel{{Msg:&model.MsgDataModel{Seq:1, SessionType:1, RecvID:"single-receiver", ContentType:constant.Text, SendTime:time.Now().UnixMilli()}}}}
+	if _, err := db.Collection(model.MsgTableName).InsertOne(ctx, single); err != nil { t.Fatal(err) }
+	total, rows, err := messages.SearchMessage(ctx, &pbmsg.SearchMessageReq{RecvID:"single-receiver", Pagination:&sdkws.RequestPagination{PageNumber:1,ShowNumber:10}})
+	if err != nil || total != 1 || len(rows) != 1 { t.Fatal("group retention damaged single-chat search", err) }
+	var original model.MsgDocModel
+	if err := db.Collection(model.MsgTableName).FindOne(ctx, bson.M{"doc_id": conversation+":0"}).Decode(&original); err != nil || original.Msg[0].Msg.Content == "" { t.Fatal("source for legacy references was deleted") }
+	// A single pending persistence hole must prevent issuing a complete receipt.
+	_, _ = db.Collection(model.MsgTableName).UpdateOne(ctx, bson.M{"doc_id": conversation+":4"}, bson.M{"$set": bson.M{"msgs.9.msg": nil}})
+	if _, err := b.snapshot(ctx, group, legacy); err == nil { t.Fatal("unpersisted slot treated as committed gap") }
+	if _, err := b.snapshot(ctx, strings.Repeat("c",32), legacy); err == nil { t.Fatal("foreign group slots accepted") }
+	// TTL indexes may delete late. Expiry must still reject stale authority.
+	_, _ = db.Collection(imAppRetentionReceipts).UpdateOne(ctx, bson.M{"_id": snapshot.SnapshotID}, bson.M{"$set": bson.M{"expires_at": time.Now().Add(-time.Hour)}})
+	if err := b.apply(ctx, snapshot.SnapshotID, conversation, 4); err == nil { t.Fatal("expired receipt accepted before TTL deletion") }
+	// A very large initial group needs only its newest proven visible tail.
+	// Unread older holes do not matter: >=500 later visible rows already exist.
+	largeGroup := strings.Repeat("d",32)
+	largeID := "sg_"+largeGroup
+	stub.watermark = 1000500
+	for first := int64(1000001); first <= stub.watermark; first += 100 {
+		doc := model.MsgDocModel{DocID: new(model.MsgDocModel).GetDocID(largeID, first), Msg: make([]*model.MsgInfoModel,100)}
+		for n := first; n < first+100; n++ { doc.Msg[(n-1)%100] = &model.MsgInfoModel{Msg: &model.MsgDataModel{
+			Seq:n, GroupID:largeGroup, SessionType:3, ContentType:constant.Text, SendTime:time.Now().Add(-time.Hour).UnixMilli()}} }
+		if _, err := db.Collection(model.MsgTableName).InsertOne(ctx, doc); err != nil { t.Fatal(err) }
+	}
+	large, err := b.snapshot(ctx, largeGroup, legacy)
+	if err != nil || len(large.Messages) != 500 || large.OverCountThrough != 1000000 { t.Fatal("large history failed bounded tail proof", err) }
+	if err := b.apply(ctx, large.SnapshotID, largeID, 1000001); err != nil { t.Fatal("large group's proven prefix not applied", err) }
+}

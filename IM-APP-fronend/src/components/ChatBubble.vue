@@ -16,13 +16,55 @@ function pumpMeasureQueue() {
     job()
   }
 }
+
+/** App 进群时一屏图片一起下，手机会空很久。只放行最新的几张，下完再补后面的。 */
+const IMAGE_LOAD_SLOTS = 3
+let imageSlotsUsed = 0
+type ImageLoadWaiter = { run: () => void; cancelled: boolean }
+const imageLoadWaiters: ImageLoadWaiter[] = []
+let imageLoadTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleImageLoads() {
+  if (imageLoadTimer != null) return
+  imageLoadTimer = setTimeout(() => {
+    imageLoadTimer = null
+    pumpImageLoads()
+  }, 0)
+}
+
+function pumpImageLoads() {
+  while (imageSlotsUsed < IMAGE_LOAD_SLOTS && imageLoadWaiters.length) {
+    const waiter = imageLoadWaiters.pop()
+    if (!waiter || waiter.cancelled) continue
+    imageSlotsUsed += 1
+    waiter.run()
+  }
+}
+
+function acquireImageLoad(run: () => void): () => void {
+  const waiter: ImageLoadWaiter = { run, cancelled: false }
+  imageLoadWaiters.push(waiter)
+  scheduleImageLoads()
+  return () => {
+    waiter.cancelled = true
+  }
+}
+
+function releaseImageLoad() {
+  imageSlotsUsed = Math.max(0, imageSlotsUsed - 1)
+  scheduleImageLoads()
+}
 </script>
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
 import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
-import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl } from '@/utils/chatMedia'
+import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl, avatarThumbnailUrl } from '@/utils/chatMedia'
+import { forgetMediaCache, peekMediaCache, requestMediaCache } from '@/utils/mediaCache'
+import { cacheableChatMediaUrl } from '@/utils/mediaCacheIdentity'
+import { isAppPlatform } from '@/utils/platform'
+import { useAvatarThumbnail } from '@/composables/useAvatarThumbnail'
 import { formatMeridiemClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 import { soundMetaOf } from '@/utils/openim'
 
@@ -44,15 +86,15 @@ const props = defineProps<{
   selecting?: boolean
 }>()
 
-/** 头像加载失败（死链/空对象）时切换到业务侧兜底头像，避免一直显示灰色占位 */
+/** 头像按缩略图、原图、默认头像三级回退，避免死链长期显示灰色占位。 */
 const isH5 = uni.getSystemInfoSync().uniPlatform === 'web'
-const avatarSrc = ref(sanitizeDisplayUrl(props.avatar) || props.avatar)
-
-watch(
-  () => props.avatar,
-  (v) => {
-    avatarSrc.value = sanitizeDisplayUrl(v) || props.fallbackAvatar || v
+const defaultAvatar = props.fallbackAvatar || APP_CONFIG.defaultAvatarUrl
+const { src: avatarSrc, onError: onAvatarError } = useAvatarThumbnail(
+  () => {
+    const sanitized = sanitizeDisplayUrl(props.avatar)
+    return sanitized || props.fallbackAvatar || props.avatar
   },
+  defaultAvatar,
 )
 
 function sanitizeDisplayUrl(url: string): string {
@@ -62,12 +104,6 @@ function sanitizeDisplayUrl(url: string): string {
   // H5 浏览器无法加载 App 本地路径
   if (isH5 && looksLikeLocalFilePath(t)) return ''
   return t
-}
-
-function onAvatarError() {
-  if (props.fallbackAvatar && avatarSrc.value !== props.fallbackAvatar) {
-    avatarSrc.value = props.fallbackAvatar
-  }
 }
 
 const showNickname = computed(() => !props.mine && !!props.nickname)
@@ -174,9 +210,10 @@ const groupInviteTitle = computed(() => {
 /** H5 不能加载 App 本地路径；无远程头像时用默认群头像 */
 const groupInviteAvatar = computed(() => {
   const url = (groupInviteMeta.value?.groupAvatar || '').trim()
-  if (isRemoteMediaUrl(url)) return url
+  if (isRemoteMediaUrl(url)) return avatarThumbnailUrl(url)
   return APP_CONFIG.defaultGroupAvatarUrl
 })
+const cardAvatar = computed(() => avatarThumbnailUrl(cardMeta.value?.avatar || APP_CONFIG.defaultAvatarUrl))
 
 function onApplyGroupInvite() {
   if (groupInviteMeta.value) emit('groupInviteApply', groupInviteMeta.value)
@@ -193,7 +230,7 @@ function onRetry() {
 }
 
 /**
- * 点按图片：多选只通知外层勾选；否则预览。
+ * 点按图片：多选只通知外层勾选；缩略图未画出前拦截预览（避免点开空白/无效图）。
  */
 function onImageBubbleClick() {
   if (props.selecting) {
@@ -201,6 +238,7 @@ function onImageBubbleClick() {
     return
   }
   if (props.message.type !== 'image') return
+  if (!canOpenImagePreview.value) return
   if (props.previewUrls?.length) {
     const urls = props.previewUrls.map((url) => toPlayableMediaUrl((url || '').trim())).filter(Boolean)
     const shown = imageDisplaySrc.value || toPlayableMediaUrl(props.message.content || '')
@@ -268,6 +306,11 @@ watch(
 )
 
 function onVideoPosterError() {
+  if (cachedVideoSrc.value) {
+    forgetMediaCache(videoPoster.value)
+    cachedVideoSrc.value = ''
+    return
+  }
   videoPosterFailed.value = true
   // 不在列表里为失败封面拉整段视频截帧，避免滚动时打爆网络/主线程
 }
@@ -729,13 +772,28 @@ function playVoiceH5(src: string) {
 onUnmounted(() => {
   if (activeVoiceStopper === stopVoice) activeVoiceStopper = null
   stopVoice()
+  imageDisposed = true
+  cancelImageWait()
+  finishImageSlot()
 })
 
-/** 归一化媒体地址：网络/blob 原样；App 本地路径仅在 App 端转 file://；H5 绝不拼 file:// */
+/** H5 的聊天 OSS 稳定入口是同源相对地址，必须允许直接交给浏览器加载。 */
+function isDisplayableChatImageUrl(value: string): boolean {
+  const url = value.trim()
+  if (!url) return false
+  if (isRemoteMediaUrl(url)) return true
+  return (
+    isH5 &&
+    (url.startsWith('/object/') ||
+      url.startsWith('/api/v1/public/oss-media?'))
+  )
+}
+
+/** 归一化媒体地址：网络/blob 原样；H5 聊天入口保留同源相对地址；App 本地路径转 file://。 */
 function toPlayableMediaUrl(path: string): string {
   if (!path) return ''
-  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:')) {
-    return playableMediaUrl(path)
+  if (isDisplayableChatImageUrl(path)) {
+    return isRemoteMediaUrl(path) ? playableMediaUrl(path) : path
   }
   if (isH5) {
     // 浏览器禁止加载 file:// 与设备本地路径，返回空避免控制台报错
@@ -752,17 +810,18 @@ function toPlayableMediaUrl(path: string): string {
 }
 
 /**
- * 图片气泡的候选地址，按优先级排列（原图 → 缩略图 …）。
- * H5 只用远程 URL；App 在没有远程地址时退回本地路径，供发送中预览。
+ * 图片气泡的候选地址。先缩略图，再缩略图兼容候选，加载失败才降级。
+ * H5 也允许聊天 OSS 的同源相对入口；App 在没有远程地址时退回本地路径。
  */
 const imageSrcCandidates = computed(() => {
   if (props.message.type !== 'image') return []
   const list: string[] = []
   const push = (value: string) => {
     const url = value.trim()
-    if (!url || !(isRemoteMediaUrl(url) || url.startsWith('blob:'))) return
+    if (!isDisplayableChatImageUrl(url)) return
     if (!list.includes(url)) list.push(url)
   }
+  push(props.message.thumbUrl || '')
   push(props.message.content || '')
   for (const url of props.message.imageFallbacks || []) push(url)
   if (list.length) return list
@@ -775,30 +834,194 @@ const imageSrcCandidates = computed(() => {
  * 这里记下降级到第几个候选，加载失败就顺次重试缩略图等备用地址。
  */
 const imageFallbackIndex = ref(0)
+const cachedImageSrc = ref('')
+const cachedVideoSrc = ref('')
+const holdImageForCache = ref(false)
+const holdVideoForCache = ref(false)
+let imageCacheToken = 0
+let videoCacheToken = 0
+
 watch(imageSrcCandidates, () => {
   imageFallbackIndex.value = 0
 })
 
-/** 图片气泡展示地址：H5 只用远程 URL */
+/**
+ * 缓存在下载时先不给 <image> 远程地址，否则同一张图下两遍（WebView 一遍、缓存一遍），
+ * 而且 /object/ 每次 302 到新签名地址，WebView 那一遍永远进不了 HTTP 缓存。
+ * 缓存下载失败（late 且 path 为空）才退回远程地址。
+ */
+function bindCachedMedia(
+  remote: string,
+  token: number,
+  current: () => number,
+  apply: (path: string, hold: boolean, late: boolean) => void,
+) {
+  if (!isDisplayableChatImageUrl(remote)) {
+    apply('', false, false)
+    return
+  }
+  // H5 聊天入口是相对路径，但 302 后的签名地址不稳定，必须转成同源绝对地址进 IndexedDB。
+  const cacheUrl = cacheableChatMediaUrl(remote)
+  if (!cacheUrl || !/^https?:\/\//i.test(cacheUrl)) {
+    apply(remote, false, false)
+    return
+  }
+  const hit = peekMediaCache(cacheUrl)
+  if (hit) {
+    apply(hit, false, false)
+    return
+  }
+  let settled = false
+  const pending = requestMediaCache(cacheUrl, (path) => {
+    settled = true
+    if (current() === token) apply(path, false, true)
+  })
+  if (!settled) apply('', pending, false)
+}
+
+/** 图片气泡展示地址：H5 支持远程和聊天 OSS 同源相对入口 */
 const imageDisplaySrc = computed(() => {
   const list = imageSrcCandidates.value
   const raw = list[imageFallbackIndex.value] || list[0] || ''
   return raw ? toPlayableMediaUrl(raw) : ''
 })
 
+/** App 上先占位，轮到这条再给 src，避免进群时几十张大图一起挤占网络 */
+const imageSrcReady = ref(!isAppPlatform())
+let imageSlotHeld = false
+let cancelImageWait = () => {}
+let imageSlotTimer: ReturnType<typeof setTimeout> | null = null
+let imageDisposed = false
+
+function finishImageSlot() {
+  if (imageSlotTimer) {
+    clearTimeout(imageSlotTimer)
+    imageSlotTimer = null
+  }
+  if (!imageSlotHeld) return
+  imageSlotHeld = false
+  releaseImageLoad()
+}
+
+function beginImageLoad() {
+  if (imageSrcReady.value || imageSlotHeld || imageDisposed || holdImageForCache.value) return
+  if (cachedImageSrc.value) {
+    imageSrcReady.value = true
+    return
+  }
+  const src = imageDisplaySrc.value
+  if (!src || !isDisplayableChatImageUrl(src) || !isAppPlatform()) {
+    imageSrcReady.value = true
+    return
+  }
+  cancelImageWait = acquireImageLoad(() => {
+    if (imageDisposed) {
+      releaseImageLoad()
+      return
+    }
+    imageSlotHeld = true
+    imageSrcReady.value = true
+    imageSlotTimer = setTimeout(() => finishImageSlot(), 12000)
+  })
+}
+
+const shownImageSrc = computed(() => {
+  if (cachedImageSrc.value) return cachedImageSrc.value
+  if (!imageSrcReady.value && isDisplayableChatImageUrl(imageDisplaySrc.value)) return ''
+  return holdImageForCache.value ? '' : imageDisplaySrc.value
+})
+
+/** 缩略图是否已真正画出；未画出前转圈并禁止点开预览 */
+const imagePainted = ref(false)
+const imageLoadFailed = ref(false)
+const imageBubbleLoading = computed(
+  () => props.message.type === 'image' && !imagePainted.value && !imageLoadFailed.value,
+)
+const canOpenImagePreview = computed(
+  () => imageLoadFailed.value || (!!shownImageSrc.value && imagePainted.value),
+)
+
+const shownVideoPoster = computed(() => {
+  if (cachedVideoSrc.value) return cachedVideoSrc.value
+  return holdVideoForCache.value ? '' : videoPoster.value
+})
+
+watch(
+  imageDisplaySrc,
+  (src) => {
+    const token = ++imageCacheToken
+    bindCachedMedia(src, token, () => imageCacheToken, (path, hold, late) => {
+      cachedImageSrc.value = path
+      holdImageForCache.value = hold
+      if (late && !path) beginImageLoad()
+    })
+  },
+  { immediate: true },
+)
+
+watch(imageDisplaySrc, () => beginImageLoad(), { immediate: true })
+
+watch(shownImageSrc, () => {
+  imagePainted.value = false
+  imageLoadFailed.value = false
+})
+
+watch(
+  videoPoster,
+  (src) => {
+    const token = ++videoCacheToken
+    bindCachedMedia(src, token, () => videoCacheToken, (path, hold) => {
+      cachedVideoSrc.value = path
+      holdVideoForCache.value = hold
+    })
+  },
+  { immediate: true },
+)
+
+function onImageLoad(event: unknown) {
+  finishImageSlot()
+  if (props.message.type === 'image') {
+    imagePainted.value = true
+    imageLoadFailed.value = false
+  }
+  if (knownMediaSize() || naturalSize.value) return
+  const detail = (event as { detail?: { width?: number; height?: number } } | undefined)?.detail
+  const width = Number(detail?.width) || 0
+  const height = Number(detail?.height) || 0
+  if (!width || !height) return
+  const size = { width, height }
+  const src = mediaSrc.value
+  if (src) {
+    if (naturalSizeCache.size > 500) naturalSizeCache.clear()
+    naturalSizeCache.set(src, size)
+  }
+  naturalSize.value = size
+  naturalSizeFailed.value = false
+}
+
 function onImageError() {
+  if (cachedImageSrc.value) {
+    forgetMediaCache(imageDisplaySrc.value)
+    cachedImageSrc.value = ''
+    beginImageLoad()
+    return
+  }
   if (imageFallbackIndex.value + 1 < imageSrcCandidates.value.length) {
     imageFallbackIndex.value += 1
+    return
   }
+  imageLoadFailed.value = true
+  imagePainted.value = false
+  finishImageSlot()
 }
 
 /**
  * 图片 / 视频封面的展示尺寸。
  *
- * 不能直接用 mode="widthFix" + CSS max-height：H5 下 uni-image 把 widthFix 渲染成
- * background-size:100% 100%，外层高度由 JS 按原图比例算好，再被 max-height 截断，
- * 于是图片纵向被压扁（竖图、长截图最明显；App 原生同样会被截断）。这里自己量出原图
- * 尺寸，按比例缩进上限框，再用 scaleToFill 精确铺满这个等比例盒子，既不变形也不裁切。
+ * 盒子按原图比例缩进上限框。显示用 aspectFit（微信气泡同款）：
+ * 比例对得上时铺满，对不上时留边，不会把像素拉变形。
+ * 不要再用 scaleToFill，也不要在 CSS 里另写死 width / max-height，
+ * 否则安卓、鸿蒙会只改一边，竖图被拉扁。
  */
 const MEDIA_BOX = { width: 280, height: 360 }
 /** 尺寸没量出来前的占位框（4:3，与图片占位一致） */
@@ -818,16 +1041,29 @@ const naturalSizeFailed = ref(false)
 
 /** 当前气泡要展示的媒体：图片消息是本体，视频消息是封面 */
 const mediaSrc = computed(() => {
-  if (props.message.type === 'image') return imageDisplaySrc.value
-  if (props.message.type === 'video') return videoPoster.value
+  if (props.message.type === 'image') return shownImageSrc.value
+  if (props.message.type === 'video') return shownVideoPoster.value
   return ''
 })
 
+function knownMediaSize(): { width: number; height: number } | null {
+  const width = Number(props.message.width) || 0
+  const height = Number(props.message.height) || 0
+  if (width > 0 && height > 0) return { width, height }
+  return null
+}
+
 /**
- * 量原图尺寸。H5 的 getImageInfo 只是 new Image() 读 naturalWidth/Height，
- * 不读像素、不要求 CORS，MinIO 直链也能拿到。入队限流，避免列表同时打爆。
+ * 量原图尺寸。消息里已经带了宽高就直接用，不再 getImageInfo。
+ * App 对网络图的 getImageInfo 会先把整张图下载到临时目录，和 <image> 各下一次。
  */
 function measureMediaSize(src: string) {
+  const known = knownMediaSize()
+  if (known) {
+    naturalSize.value = known
+    naturalSizeFailed.value = false
+    return
+  }
   naturalSizeFailed.value = false
   if (!src) {
     naturalSize.value = null
@@ -839,6 +1075,8 @@ function measureMediaSize(src: string) {
     return
   }
   naturalSize.value = null
+  // 网络图的尺寸等 @load。App 的 getImageInfo 会把整张图再下一次，进群会更慢。
+  if (isDisplayableChatImageUrl(src)) return
   measureQueue.push(() => {
     uni.getImageInfo({
       src,
@@ -849,11 +1087,11 @@ function measureMediaSize(src: string) {
           if (naturalSizeCache.size > 500) naturalSizeCache.clear()
           const size = { width, height }
           naturalSizeCache.set(src, size)
-          if (mediaSrc.value === src) naturalSize.value = size
+          if (mediaSrc.value === src && !knownMediaSize()) naturalSize.value = size
         }
       },
       fail: () => {
-        if (mediaSrc.value === src) naturalSizeFailed.value = true
+        if (mediaSrc.value === src && !knownMediaSize()) naturalSizeFailed.value = true
       },
       complete: () => {
         measureActive -= 1
@@ -864,7 +1102,11 @@ function measureMediaSize(src: string) {
   pumpMeasureQueue()
 }
 
-watch(mediaSrc, (src) => measureMediaSize(src), { immediate: true })
+watch(
+  () => [mediaSrc.value, props.message.width, props.message.height] as const,
+  ([src]) => measureMediaSize(src),
+  { immediate: true },
+)
 
 /** 等比例缩进上限框后的展示尺寸（小图按旧行为放大到 280rpx 宽） */
 const mediaBoxStyle = computed(() => {
@@ -880,12 +1122,12 @@ const mediaBoxStyle = computed(() => {
 })
 
 /**
- * 量到尺寸后用 scaleToFill 精确铺满等比例盒子（盒子比例＝原图比例，不会变形）；
- * 还没量到时用 aspectFill 裁切撑满占位框（同样不变形）；量失败则退回 aspectFit 保证整图可见。
+ * 始终等比。占位阶段还没有真实宽高时，aspectFill 只裁切占位框，不拉像素；
+ * 量到尺寸后盒子已经是原图比例，aspectFit 铺满且不再变形。
  */
 const mediaMode = computed(() => {
-  if (naturalSize.value) return 'scaleToFill'
-  return naturalSizeFailed.value ? 'aspectFit' : 'aspectFill'
+  if (naturalSize.value || naturalSizeFailed.value) return 'aspectFit'
+  return 'aspectFill'
 })
 
 function openLink(url: string) {
@@ -903,7 +1145,10 @@ function openLink(url: string) {
 </script>
 
 <template>
-  <view class="row" :class="{ mine }">
+  <view
+    class="row"
+    :class="{ mine }"
+  >
     <image
       v-if="!mine"
       class="avatar"
@@ -915,19 +1160,36 @@ function openLink(url: string) {
       @error="onAvatarError"
     />
     <view class="content-wrap">
-      <view v-if="showNameRow" class="name-row">
+      <view
+        v-if="showNameRow"
+        class="name-row"
+      >
         <text
           v-if="showNickname"
           class="nickname"
           selectable
           @longpress.stop="copyNickname"
-        >{{ nickname }}</text>
-        <text v-if="roleBadgeText" class="role-badge" :class="`role-${role}`">{{ roleBadgeText }}</text>
+        >
+          {{ nickname }}
+        </text>
+        <text
+          v-if="roleBadgeText"
+          class="role-badge"
+          :class="`role-${role}`"
+        >
+          {{ roleBadgeText }}
+        </text>
       </view>
       <view class="bubble-line">
         <!-- 发送失败：红色感叹号显示在气泡前面，点击重发 -->
-        <view v-if="mine && message.status === 'failed'" class="retry-flag" @click.stop="onRetry">
-          <text class="retry-icon">!</text>
+        <view
+          v-if="mine && message.status === 'failed'"
+          class="retry-flag"
+          @click.stop="onRetry"
+        >
+          <text class="retry-icon">
+            !
+          </text>
         </view>
         <view
           v-if="message.type === 'image'"
@@ -936,154 +1198,218 @@ function openLink(url: string) {
           @longpress="onLongPress"
           @contextmenu.prevent="onContextMenu"
         >
-        <image
-          v-if="imageDisplaySrc"
-          class="msg-image"
-          :style="mediaBoxStyle"
-          :src="imageDisplaySrc"
-          :mode="mediaMode"
-          @error="onImageError"
-        />
-        <view v-else class="msg-image image-placeholder" />
-      </view>
-      <view
-        v-else-if="message.type === 'video'"
-        class="bubble image-bubble video-bubble"
-        @click="onVideoClick"
-        @longpress="onLongPress"
-        @contextmenu.prevent="onContextMenu"
-      >
-        <image
-          v-if="videoPoster"
-          class="msg-image"
-          :style="mediaBoxStyle"
-          :src="videoPoster"
-          :mode="mediaMode"
-          @error="onVideoPosterError"
-        />
-        <view v-else class="msg-image video-poster-placeholder" />
-        <view class="video-play">
-          <text class="video-play-icon">▶</text>
-        </view>
-        <text v-if="videoDurationLabel" class="video-duration">{{ videoDurationLabel }}</text>
-      </view>
-      <view
-        v-else-if="message.type === 'voice'"
-        class="bubble voice-bubble"
-        :class="[mine ? 'bubble-mine voice-mine' : 'bubble-other voice-other', { playing: playing }]"
-        :style="voiceBubbleStyle"
-        @click="playVoice"
-        @longpress="onLongPress"
-        @contextmenu.prevent="onContextMenu"
-      >
-        <view class="voice-inner">
-          <view class="voice-play-icon"></view>
-          <view class="voice-wave">
-            <view
-              v-for="(h, i) in waveBars"
-              :key="i"
-              class="voice-bar"
-              :class="{ played: i < playedBars }"
-              :style="{ height: `${h}rpx` }"
-            ></view>
-          </view>
-          <text class="voice-duration">{{ formatVoiceDuration(voiceMeta?.duration || 0) }}</text>
-        </view>
-      </view>
-      <view
-        v-else-if="message.type === 'card'"
-        class="bubble card-bubble"
-        @click="onViewCard"
-        @longpress="onLongPress"
-        @contextmenu.prevent="onContextMenu"
-      >
-        <view class="card-head">
           <image
-            class="card-avatar"
-            :src="cardMeta?.avatar || APP_CONFIG.defaultAvatarUrl"
-            mode="aspectFill"
+            v-if="shownImageSrc"
+            class="msg-image"
+            :style="mediaBoxStyle"
+            :src="shownImageSrc"
+            :mode="mediaMode"
+            @load="onImageLoad"
+            @error="onImageError"
           />
-          <text class="card-name">{{ cardMeta?.nickname || '好友名片' }}</text>
-        </view>
-        <view class="card-divider"></view>
-        <view class="card-foot">
-          <text class="card-view">查看</text>
-        </view>
-      </view>
-      <view
-        v-else-if="message.type === 'groupInvite'"
-        class="bubble group-invite-bubble"
-        @longpress="onLongPress"
-        @contextmenu.prevent="onContextMenu"
-      >
-        <image
-          class="gi-avatar"
-          :src="groupInviteAvatar"
-          mode="aspectFill"
-        />
-        <text class="gi-title">{{ groupInviteTitle }}</text>
-        <text class="gi-desc">邀请你加入群聊</text>
-        <text class="gi-action" @click.stop="onApplyGroupInvite">点击申请入群</text>
-      </view>
-      <view
-        v-else-if="message.type === 'file'"
-        class="bubble file-bubble"
-        :class="mine ? 'bubble-mine' : 'bubble-other'"
-        @click="openFile"
-        @longpress="onLongPress"
-        @contextmenu.prevent="onContextMenu"
-      >
-        <view class="file-inner">
-          <view class="file-icon">📁</view>
-          <view class="file-meta">
-            <text class="file-name">{{ fileName }}</text>
-            <text class="file-sub">文件</text>
+          <view
+            v-else
+            class="msg-image image-placeholder"
+            :style="mediaBoxStyle"
+          />
+          <view
+            v-if="imageBubbleLoading"
+            class="image-loading"
+          >
+            <view class="image-spinner" />
           </view>
         </view>
-      </view>
-      <view
-        v-else
-        class="bubble"
-        :class="[mine ? 'bubble-mine' : 'bubble-other', { 'bubble-text-selecting': textSelecting }]"
-        @longpress="onLongPress"
-        @contextmenu="onContextMenu"
-      >
         <view
-          v-if="message.quote"
-          class="quote-box"
-          :class="mine ? 'quote-mine' : 'quote-other'"
-          @click.stop="onQuoteClick"
+          v-else-if="message.type === 'video'"
+          class="bubble image-bubble video-bubble"
+          @click="onVideoClick"
+          @longpress="onLongPress"
+          @contextmenu.prevent="onContextMenu"
         >
           <image
-            class="quote-thumb"
-            :src="quoteThumbSrc(message.quote)"
-            mode="aspectFill"
+            v-if="shownVideoPoster"
+            class="msg-image"
+            :style="mediaBoxStyle"
+            :src="shownVideoPoster"
+            :mode="mediaMode"
+            @load="onImageLoad"
+            @error="onVideoPosterError"
           />
-          <view class="quote-meta">
-            <text class="quote-name">{{ message.quote.senderNickname }}</text>
-            <text class="quote-text">{{ quoteTextOf(message.quote) }}</text>
+          <view
+            v-else
+            class="msg-image video-poster-placeholder"
+          />
+          <view class="video-play">
+            <text class="video-play-icon">
+              ▶
+            </text>
+          </view>
+          <text
+            v-if="videoDurationLabel"
+            class="video-duration"
+          >
+            {{ videoDurationLabel }}
+          </text>
+        </view>
+        <view
+          v-else-if="message.type === 'voice'"
+          class="bubble voice-bubble"
+          :class="[mine ? 'bubble-mine voice-mine' : 'bubble-other voice-other', { playing: playing }]"
+          :style="voiceBubbleStyle"
+          @click="playVoice"
+          @longpress="onLongPress"
+          @contextmenu.prevent="onContextMenu"
+        >
+          <view class="voice-inner">
+            <view class="voice-play-icon" />
+            <view class="voice-wave">
+              <view
+                v-for="(h, i) in waveBars"
+                :key="i"
+                class="voice-bar"
+                :class="{ played: i < playedBars }"
+                :style="{ height: `${h}rpx` }"
+              />
+            </view>
+            <text class="voice-duration">
+              {{ formatVoiceDuration(voiceMeta?.duration || 0) }}
+            </text>
           </view>
         </view>
-        <text
-          v-for="(p, idx) in parts"
-          :key="idx"
-          :selectable="!!textSelecting || p.type === 'text'"
-          :user-select="!!textSelecting || p.type === 'text'"
-          :class="p.type === 'link' ? 'link' : 'text'"
-          @click="p.type === 'link' ? openLink(p.value) : undefined"
-        >{{ p.value }}</text>
-      </view>
+        <view
+          v-else-if="message.type === 'card'"
+          class="bubble card-bubble"
+          @click="onViewCard"
+          @longpress="onLongPress"
+          @contextmenu.prevent="onContextMenu"
+        >
+          <view class="card-head">
+            <image
+              class="card-avatar"
+              :src="cardAvatar"
+              mode="aspectFill"
+            />
+            <text class="card-name">
+              {{ cardMeta?.nickname || '好友名片' }}
+            </text>
+          </view>
+          <view class="card-divider" />
+          <view class="card-foot">
+            <text class="card-view">
+              查看
+            </text>
+          </view>
+        </view>
+        <view
+          v-else-if="message.type === 'groupInvite'"
+          class="bubble group-invite-bubble"
+          @longpress="onLongPress"
+          @contextmenu.prevent="onContextMenu"
+        >
+          <image
+            class="gi-avatar"
+            :src="groupInviteAvatar"
+            mode="aspectFill"
+          />
+          <text class="gi-title">
+            {{ groupInviteTitle }}
+          </text>
+          <text class="gi-desc">
+            邀请你加入群聊
+          </text>
+          <text
+            class="gi-action"
+            @click.stop="onApplyGroupInvite"
+          >
+            点击申请入群
+          </text>
+        </view>
+        <view
+          v-else-if="message.type === 'file'"
+          class="bubble file-bubble"
+          :class="mine ? 'bubble-mine' : 'bubble-other'"
+          @click="openFile"
+          @longpress="onLongPress"
+          @contextmenu.prevent="onContextMenu"
+        >
+          <view class="file-inner">
+            <view class="file-icon">
+              📁
+            </view>
+            <view class="file-meta">
+              <text class="file-name">
+                {{ fileName }}
+              </text>
+              <text class="file-sub">
+                文件
+              </text>
+            </view>
+          </view>
+        </view>
+        <view
+          v-else
+          class="bubble"
+          :class="[mine ? 'bubble-mine' : 'bubble-other', { 'bubble-text-selecting': textSelecting }]"
+          @longpress="onLongPress"
+          @contextmenu="onContextMenu"
+        >
+          <view
+            v-if="message.quote"
+            class="quote-box"
+            :class="mine ? 'quote-mine' : 'quote-other'"
+            @click.stop="onQuoteClick"
+          >
+            <image
+              class="quote-thumb"
+              :src="quoteThumbSrc(message.quote)"
+              mode="aspectFill"
+            />
+            <view class="quote-meta">
+              <text class="quote-name">
+                {{ message.quote.senderNickname }}
+              </text>
+              <text class="quote-text">
+                {{ quoteTextOf(message.quote) }}
+              </text>
+            </view>
+          </view>
+          <text
+            v-for="(p, idx) in parts"
+            :key="idx"
+            :selectable="!!textSelecting || p.type === 'text'"
+            :user-select="!!textSelecting || p.type === 'text'"
+            :class="p.type === 'link' ? 'link' : 'text'"
+            @click="p.type === 'link' ? openLink(p.value) : undefined"
+          >
+            {{ p.value }}
+          </text>
+        </view>
       </view>
       <view class="meta-row">
         <!-- 私聊已读标识（微信式钩）：未读单钩 / 已读双钩，放在时间前面 -->
-        <view v-if="readState" class="read-flag" :class="{ read: readState === 'read' }">
-          <view class="tick first"></view>
-          <view v-if="readState === 'read'" class="tick second"></view>
+        <view
+          v-if="readState"
+          class="read-flag"
+          :class="{ read: readState === 'read' }"
+        >
+          <view class="tick first" />
+          <view
+            v-if="readState === 'read'"
+            class="tick second"
+          />
         </view>
-        <text class="time">{{ timeText }}</text>
+        <text class="time">
+          {{ timeText }}
+        </text>
       </view>
     </view>
-    <image v-if="mine" class="avatar" :src="avatarSrc" mode="aspectFill" @error="onAvatarError" />
+    <image
+      v-if="mine"
+      class="avatar"
+      :src="avatarSrc"
+      mode="aspectFill"
+      @error="onAvatarError"
+    />
   </view>
 </template>
 
@@ -1195,17 +1521,16 @@ function openLink(url: string) {
 }
 
 .image-bubble {
+  position: relative;
   padding: 0;
   background: transparent;
   overflow: hidden;
 }
 
 .msg-image {
-  width: 280rpx;
-  max-width: 56vw;
-  max-height: 360rpx;
   border-radius: 12rpx;
   display: block;
+  background: #e8e8e8;
 }
 
 .image-placeholder {
@@ -1214,6 +1539,31 @@ function openLink(url: string) {
   min-height: 180rpx;
   background: #e8e8e8;
   border-radius: 12rpx;
+}
+
+.image-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(232, 232, 232, 0.55);
+  pointer-events: none;
+}
+
+.image-spinner {
+  width: 48rpx;
+  height: 48rpx;
+  border: 6rpx solid rgba(0, 0, 0, 0.12);
+  border-top-color: rgba(0, 0, 0, 0.45);
+  border-radius: 50%;
+  animation: image-spin 0.75s linear infinite;
+}
+
+@keyframes image-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /** 尺寸交给封面图自己撑（可能比 280rpx 窄，比如竖屏视频），播放键才居中对得上 */

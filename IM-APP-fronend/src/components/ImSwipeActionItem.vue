@@ -32,8 +32,14 @@ function onChange(open: string) {
 </script>
 
 <template>
-  <uni-swipe-action-item :show="show" @change="onChange">
-    <ConversationItem :item="item" @click="onItemClick" />
+  <uni-swipe-action-item
+    :show="show"
+    @change="onChange"
+  >
+    <ConversationItem
+      :item="item"
+      @click="onItemClick"
+    />
     <template #right>
       <view class="swipe-btn-wrap">
         <slot name="right" />

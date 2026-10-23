@@ -46,6 +46,7 @@ type ForwardTask struct {
 	SourceServerMsgID    string                 `json:"sourceServerMsgId,omitempty"`
 	SourceMessageID      string                 `json:"sourceMessageId,omitempty"`
 	SourceSnapshot       ForwardMessageSnapshot `json:"sourceSnapshot"`
+	MediaArchived        bool                   `json:"-"`
 	Selector             ForwardSelector        `json:"selector"`
 	IdempotencyKey       string                 `json:"idempotencyKey"`
 	Status               string                 `json:"status"`

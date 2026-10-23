@@ -264,6 +264,16 @@
             "description": "群主昵称",
             "type": "string"
           },
+          "retentionMaxMessages": {
+            "description": "群消息保留条数覆盖；空表示用平台默认",
+            "type": "integer",
+            "nullable": true
+          },
+          "retentionKeepHours": {
+            "description": "群消息保留小时覆盖；空表示用平台默认",
+            "type": "integer",
+            "nullable": true
+          },
           "status": {
             "description": "normal|banned|dismissed|muted（可选值：normal=正常, banned=已封禁, dismissed=已解散, muted=全员禁言）",
             "enum": [
@@ -1754,12 +1764,24 @@
             "description": "单群成员数上限",
             "type": "integer"
           },
+          "defaultGroupMaxMembers": {
+            "description": "新建群默认人数上限",
+            "type": "integer"
+          },
           "maxNicknameLen": {
             "description": "昵称最大长度",
             "type": "integer"
           },
           "recallWindowSec": {
             "description": "消息撤回时间窗(秒)",
+            "type": "integer"
+          },
+          "groupRetentionMaxMessages": {
+            "description": "群消息保留条数默认（真实可见消息）",
+            "type": "integer"
+          },
+          "groupRetentionHours": {
+            "description": "群消息保留小时默认",
             "type": "integer"
           }
         },
@@ -5387,6 +5409,77 @@
           }
         },
         "summary": "解散违规群（高风险，需原因）",
+        "tags": [
+          "群组管理"
+        ]
+      }
+    },
+    "/api/admin/v1/groups/{id}/retention": {
+      "put": {
+        "description": "设置群消息保留策略（条数/小时覆盖，或恢复平台默认）。接口路径：/api/admin/v1/groups/:id/retention",
+        "operationId": "PUT_api_admin_v1_groups_{id}_retention",
+        "parameters": [
+          {
+            "description": "资源 ID（UUID）",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "retentionMaxMessages": {
+                    "description": "保留条数；与 usePlatformDefault=false 时必填",
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "retentionKeepHours": {
+                    "description": "保留小时；与 usePlatformDefault=false 时必填",
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "usePlatformDefault": {
+                    "description": "true 时清空覆盖，改用平台默认",
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "description": "操作原因",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "成功"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "未登录或登录已过期"
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "500": {
+            "description": "服务异常"
+          }
+        },
+        "summary": "设置群消息保留策略",
         "tags": [
           "群组管理"
         ]

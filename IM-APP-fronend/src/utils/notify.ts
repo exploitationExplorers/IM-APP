@@ -10,15 +10,9 @@
  * 提示音资源：/static/sound/message.wav
  */
 
-const SOUND_SRC = '/static/sound/message.wav'
+import { isAppPlatform } from '@/utils/platform'
 
-function isAppPlatform(): boolean {
-  try {
-    return uni.getSystemInfoSync().uniPlatform === 'app'
-  } catch {
-    return false
-  }
-}
+const SOUND_SRC = '/static/sound/message.wav'
 
 let audioCtx: AudioContext | null = null
 
@@ -60,7 +54,7 @@ function beepByWebAudio(): boolean {
 
 /** App 端用原生音频上下文播放 static 资源 */
 function playByInnerAudio(): boolean {
-  const inner = (uni as unknown as { createInnerAudioContext?: () => any }).createInnerAudioContext
+  const inner = (uni as unknown as { createInnerAudioContext?: () => UniApp.InnerAudioContext }).createInnerAudioContext
   if (typeof inner !== 'function') return false
   try {
     const ctx = inner()

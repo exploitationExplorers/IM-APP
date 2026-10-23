@@ -247,8 +247,14 @@ export function isAuthFailureError(err: unknown): boolean {
 function handleAuthExpired() {
   clearToken()
   authExpiredHandler?.()
+  // 已经在登录页时不再 toast / reLaunch：覆盖安装残留的过期 token 会让多个后台
+  // 请求接连 401，每次都重建登录页，键盘收起、输入被打断（华为真机实测）。
+  const pages = getCurrentPages()
+  const current = pages[pages.length - 1]
+  if (current && `/${current.route}` === '/pages/auth/sign-in') return
   if (authRedirectScheduled) return
   authRedirectScheduled = true
+  uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
   uni.reLaunch({
     url: '/pages/auth/sign-in',
     complete: () => {
@@ -367,8 +373,10 @@ export async function request<T>(options: RequestOptions, retried = false): Prom
       }
       throw new Error(retriedRes.body?.message || `请求失败(${retriedRes.statusCode})`)
     } catch (e) {
-      if (isAuthFailureError(e)) throw e
+      // refresh 失败（含服务端「登录已过期，请重新登录」）必须清会话并跳登录。
+      // 以前对 isAuthFailureError 直接 rethrow，页面只 toast、用户得手动退出。
       handleAuthExpired()
+      if (isAuthFailureError(e)) throw e
       throw new Error('未登录或登录已过期')
     }
   }
@@ -377,6 +385,12 @@ export async function request<T>(options: RequestOptions, retried = false): Prom
     // 登录、注册这些接口本身就不带登录态，401 是密码错误、封禁这类业务失败
     if (options.auth === false) {
       throw new Error(body?.message || `请求失败(${statusCode})`)
+    }
+    // 请求本身就没带上 token（无登录态）被 401：不是「会话过期」。
+    // 静默按业务失败抛出，交给 auth guard 处理；否则登录页上任何残留请求
+    // 都会触发「登录已过期」toast + reLaunch 循环，登录页被反复重建。
+    if (!getToken()) {
+      throw new Error('未登录或登录已过期')
     }
     handleAuthExpired()
     throw new Error('未登录或登录已过期')

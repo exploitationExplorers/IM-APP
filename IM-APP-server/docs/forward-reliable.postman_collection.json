@@ -10,6 +10,22 @@
   ],
   "item": [
     {
+      "name": "Preserve media before SDK forwarding or quoting",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/forward-media/preserve",
+        "description": "Only sourceSnapshot belongs in JSON. Replace the source URL with an existing permitted application media URL. On success send the returned data snapshot; on 503 stop and retry, never send the original URL. This request copies a file but does not send messages.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sourceSnapshot\": {\n    \"contentType\": 102,\n    \"content\": {\n      \"sourcePicture\": {\"url\": \"https://chat.example.com/app/chat/example.jpg\", \"type\": \"image/jpeg\"}\n    }\n  }\n}"
+        }
+      }
+    },
+    {
       "name": "Queue reliable forward batch",
       "request": {
         "method": "POST",

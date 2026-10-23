@@ -16,7 +16,10 @@ function goBack() {
 
 <template>
   <view class="page">
-    <ImNavBar title="退出群并删除对话" @back="goBack" />
+    <ImNavBar
+      title="退出群并删除对话"
+      @back="goBack"
+    />
 
     <view class="empty">
       <text>退出群功能待实现</text>

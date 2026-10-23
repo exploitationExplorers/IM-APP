@@ -1,0 +1,490 @@
+// Package imappgc owns ONLY newly fenced media. Legacy objects are never
+// inferred to be garbage from their age or absence in one database scan.
+package imappgc
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/url"
+	"os"
+	"regexp"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+const Namespace = "managed-v1/"
+const PhysicalPrefix = "im-app-production/chat/"
+const Collection = "im_app_media_gc_v1"
+const ControlCollection = "im_app_media_gc_control_v1"
+const Protocol = "im-app-media-gc-v1"
+
+// Upstream can issue seven-day capabilities. Never delete while an old upload
+// signature may still recreate the physical key. Quarantine is additional.
+const UploadGrace = 8 * 24 * time.Hour
+const Quarantine = 24 * time.Hour
+const MaxClaims = 512
+
+var ErrProtected = errors.New("media is expired or cannot be safely reclaimed")
+var bound atomic.Pointer[mongo.Database]
+var safeKey = regexp.MustCompile(`^managed-v1/openim/(data/hash/[0-9a-f]{32}|(direct|temp)/[A-Za-z0-9_./-]+)$`)
+var groupID = regexp.MustCompile(`^[0-9a-f]{32}$`)
+var urlToken = regexp.MustCompile(`(?i:https?)://[^\s<>"'\\]+|/object/[^\s<>"'\\]+|/?im-app-production/chat/[^\s<>"'\\]+|managed-v1/openim/[^\s<>"'\\]+`)
+
+func Enabled() bool { return os.Getenv("IM_APP_MEDIA_GC_REFERENCES") == "true" }
+func Bind(db *mongo.Database) {
+	if Enabled() {
+		bound.Store(db)
+	}
+}
+func Database() *mongo.Database { return bound.Load() }
+func Managed(key string) bool {
+	if !safeKey.MatchString(key) || strings.ContainsAny(key, "%\\?#:\x00\r\n") {
+		return false
+	}
+	for _, p := range strings.Split(key, "/") {
+		if p == "" || p == "." || p == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+type Claim struct {
+	Group   string `bson:"group"`
+	Sender  string `bson:"sender"`
+	Message string `bson:"message"`
+}
+type Record struct {
+	Key         string    `bson:"_id"`
+	State       string    `bson:"state"`
+	Version     int64     `bson:"version"`
+	Permanent   bool      `bson:"permanent"`
+	Claims      []Claim   `bson:"claims"`
+	HoldUntil   time.Time `bson:"hold_until"`
+	CandidateAt time.Time `bson:"candidate_at"`
+	AttemptAt   time.Time `bson:"attempt_at"`
+	Size        int64     `bson:"size"`
+}
+
+func Clock(ctx context.Context, db *mongo.Database) (time.Time, error) {
+	if db == nil {
+		return time.Time{}, ErrProtected
+	}
+	var v struct {
+		Now time.Time `bson:"localTime"`
+	}
+	err := db.RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).Decode(&v)
+	if err != nil || v.Now.IsZero() {
+		return time.Time{}, ErrProtected
+	}
+	return v.Now, nil
+}
+func Ready(ctx context.Context, db *mongo.Database) bool {
+	if db == nil {
+		return false
+	}
+	var control struct {
+		Active bool `bson:"active"`
+	}
+	return db.Collection(ControlCollection).FindOne(ctx, bson.M{"_id": Protocol}).Decode(&control) == nil && control.Active
+}
+func Setup(ctx context.Context, db *mongo.Database) error {
+	_, err := db.Collection(Collection).Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "state", Value: 1}, {Key: "attempt_at", Value: 1}}})
+	return err
+}
+
+// BeginWrite is called BEFORE every signed upload, multipart completion and
+// server-side copy. A deleted content hash may be uploaded again, but a sealed
+// key cannot be reused until the previous deletion has completed durably.
+func BeginWrite(ctx context.Context, db *mongo.Database, key string) error {
+	if !Managed(key) {
+		return nil
+	}
+	if db == nil {
+		return ErrProtected
+	}
+	c := db.Collection(Collection)
+	_, err := c.UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$setOnInsert": bson.M{
+		"state": "open", "version": int64(0), "claims": []Claim{}, "permanent": !Ready(ctx, db),
+	}}, options.Update().SetUpsert(true))
+	if err != nil {
+		return ErrProtected
+	}
+	reopened := bson.M{"$eq": bson.A{"$state", "deleted"}}
+	result, err := c.UpdateOne(ctx, bson.M{"_id": key, "state": bson.M{"$in": bson.A{"open", "deleted"}}}, mongo.Pipeline{
+		{{Key: "$set", Value: bson.M{
+			"claims":    bson.M{"$cond": bson.A{reopened, bson.A{}, "$claims"}},
+			"permanent": bson.M{"$cond": bson.A{reopened, !Ready(ctx, db), "$permanent"}},
+			"state":     "open", "version": bson.M{"$add": bson.A{"$version", 1}},
+			"hold_until":   bson.M{"$add": bson.A{"$$NOW", UploadGrace.Milliseconds()}},
+			"candidate_at": "$$REMOVE", "deleted_at": "$$REMOVE",
+		}}},
+	})
+	if err != nil || result.MatchedCount != 1 {
+		return ErrProtected
+	}
+	return nil
+}
+
+// Touch never reopens a tombstone. Cached dedup results and old form-complete
+// requests therefore cannot publish a link to a deleted object.
+func Touch(ctx context.Context, db *mongo.Database, key string, size int64, permanent bool) error {
+	if !Managed(key) {
+		return nil
+	}
+	if db == nil {
+		return ErrProtected
+	}
+	set := bson.M{"size": size, "version": bson.M{"$add": bson.A{"$version", 1}},
+		"candidate_at": "$$REMOVE", "hold_until": bson.M{"$add": bson.A{"$$NOW", UploadGrace.Milliseconds()}},
+	}
+	if permanent {
+		set["permanent"] = true
+	}
+	r, err := db.Collection(Collection).UpdateOne(ctx, bson.M{"_id": key, "state": "open"}, mongo.Pipeline{{{Key: "$set", Value: set}}})
+	if err != nil || r.MatchedCount != 1 {
+		return ErrProtected
+	}
+	return nil
+}
+
+// Resolve is deliberately conservative: traverse all JSON strings, including
+// PascalCase fields and JSON-encoded native quote/merge snapshots. Unknown URL
+// hosts can only cause extra protection, never broaden the deletion prefix.
+func Resolve(ctx context.Context, db *mongo.Database, raw string) ([]string, error) {
+	if len(raw) > 8<<20 {
+		return nil, ErrProtected
+	}
+	seen := map[string]bool{}
+	var walk func(string, int) error
+	walk = func(text string, depth int) error {
+		if depth > 24 {
+			return ErrProtected
+		}
+		var value any
+		if json.Unmarshal([]byte(text), &value) == nil {
+			var values func(any) error
+			values = func(v any) error {
+				switch v := v.(type) {
+				case string:
+					return walk(v, depth+1)
+				case map[string]any:
+					for k, x := range v {
+						if err := walk(k, depth+1); err != nil {
+							return err
+						}
+						if err := values(x); err != nil {
+							return err
+						}
+					}
+				case []any:
+					for _, x := range v {
+						if err := values(x); err != nil {
+							return err
+						}
+					}
+				}
+				return nil
+			}
+			if err := values(value); err != nil {
+				return err
+			}
+		}
+		for _, token := range urlToken.FindAllString(text, -1) {
+			u, err := url.Parse(token)
+			if err != nil {
+				return ErrProtected
+			}
+			p := u.Path
+			if Managed(strings.TrimPrefix(p, "/")) {
+				seen[strings.TrimPrefix(p, "/")] = true
+			}
+			if i := strings.Index(p, PhysicalPrefix); i >= 0 {
+				key := p[i+len(PhysicalPrefix):]
+				if Managed(key) {
+					seen[key] = true
+				}
+			}
+			if i := strings.Index(p, "/object/"); i >= 0 {
+				if db == nil {
+					return ErrProtected
+				}
+				name := strings.TrimPrefix(p[i+len("/object/"):], "/")
+				var obj struct {
+					Key string `bson:"key"`
+				}
+				err := db.Collection("s3").FindOne(ctx, bson.M{"name": name}).Decode(&obj)
+				if errors.Is(err, mongo.ErrNoDocuments) {
+					continue
+				} // An unknown/broken legacy link cannot reference a managed mapping.
+				if err != nil {
+					return ErrProtected
+				}
+				if Managed(obj.Key) {
+					seen[obj.Key] = true
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(raw, 0); err != nil {
+		return nil, err
+	}
+	if len(seen) > 128 {
+		return nil, ErrProtected
+	}
+	keys := make([]string, 0, len(seen))
+	for key := range seen {
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+func ProtectValue(ctx context.Context, db *mongo.Database, value any) error {
+	if !Enabled() {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return ErrProtected
+	}
+	return Protect(ctx, db, string(raw), nil)
+}
+
+func Protect(ctx context.Context, db *mongo.Database, raw string, claim *Claim) error {
+	keys, err := Resolve(ctx, db, raw)
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		permanent := claim == nil || !groupID.MatchString(claim.Group) || claim.Sender == "" || claim.Message == ""
+		update := bson.M{"$inc": bson.M{"version": 1}, "$unset": bson.M{"candidate_at": ""}}
+		if permanent {
+			update["$set"] = bson.M{"permanent": true}
+		} else {
+			update["$addToSet"] = bson.M{"claims": *claim}
+		}
+		filter := bson.M{"_id": key, "state": "open"}
+		// Never grow a document until Mongo rejects normal sends. Popular media
+		// crosses a conservative permanent-retention threshold instead.
+		if !permanent {
+			filter["claims.511"] = bson.M{"$exists": false}
+		}
+		r, err := db.Collection(Collection).UpdateOne(ctx, filter, update)
+		if err != nil {
+			return ErrProtected
+		}
+		if r.MatchedCount == 0 && !permanent {
+			r, err = db.Collection(Collection).UpdateOne(ctx, bson.M{"_id": key, "state": "open"}, bson.M{
+				"$set": bson.M{"permanent": true}, "$inc": bson.M{"version": 1}, "$unset": bson.M{"candidate_at": ""},
+			})
+		}
+		if err != nil || r.MatchedCount != 1 {
+			return ErrProtected
+		}
+	}
+	return nil
+}
+
+// Reclaimable requires every successful ingress claim to be found in durable
+// message storage, strictly below an ACKed monotonic group boundary. In-flight,
+// failed, missing, already-body-purged or ambiguous claims leak rather than lose
+// data. A group ID, file age, max_seq-500 or an absent URL is NOT evidence.
+func Reclaimable(ctx context.Context, db *mongo.Database, rec Record, now time.Time) bool {
+	if !Managed(rec.Key) || rec.State != "open" || rec.Permanent || !rec.HoldUntil.Before(now) {
+		return false
+	}
+	for _, claim := range rec.Claims {
+		if !groupID.MatchString(claim.Group) || claim.Sender == "" || claim.Message == "" {
+			return false
+		}
+		id := "sg_" + claim.Group
+		var seq struct {
+			Minimum int64 `bson:"min_seq"`
+		}
+		if db.Collection("seq").FindOne(ctx, bson.M{"conversation_id": id}).Decode(&seq) != nil || seq.Minimum <= 1 {
+			return false
+		}
+		var receipt bson.M
+		if db.Collection("im_app_retention_receipts_v1").FindOne(ctx, bson.M{
+			"conversation_id": id, "boundary": bson.M{"$lte": seq.Minimum, "$gt": 1},
+			"applied_at": bson.M{"$lte": now.Add(-Quarantine)},
+		}, options.FindOne().SetSort(bson.D{{Key: "boundary", Value: -1}})).Decode(&receipt) != nil {
+			return false
+		}
+		boundary, ok := receipt["boundary"].(int64)
+		if !ok {
+			if v, yes := receipt["boundary"].(int32); yes {
+				boundary = int64(v)
+			} else {
+				return false
+			}
+		}
+		cursor, err := db.Collection("msg").Find(ctx, bson.M{
+			"doc_id": bson.M{"$regex": "^" + regexp.QuoteMeta(id) + ":"},
+			"msgs":   bson.M{"$elemMatch": bson.M{"msg.client_msg_id": claim.Message, "msg.send_id": claim.Sender}},
+		}, options.Find().SetLimit(4).SetMaxTime(2*time.Second))
+		if err != nil {
+			return false
+		}
+		found := false
+		safe := true
+		docs := 0
+		for cursor.Next(ctx) {
+			docs++
+			if docs > 3 {
+				safe = false
+				break
+			} // Truncation is NOT proof that every copy expired.
+			var doc struct {
+				Messages []struct {
+					Msg *struct {
+						ID      string `bson:"client_msg_id"`
+						Sender  string `bson:"send_id"`
+						Group   string `bson:"group_id"`
+						Session int32  `bson:"session_type"`
+						Seq     int64  `bson:"seq"`
+					} `bson:"msg"`
+				} `bson:"msgs"`
+			}
+			if cursor.Decode(&doc) != nil {
+				safe = false
+				break
+			}
+			for _, item := range doc.Messages {
+				m := item.Msg
+				if m != nil && m.ID == claim.Message && m.Sender == claim.Sender {
+					found = true
+					if m.Group != claim.Group || m.Session != 3 || m.Seq <= 0 || m.Seq >= boundary {
+						safe = false
+					}
+				}
+			}
+		}
+		if cursor.Err() != nil {
+			safe = false
+		}
+		cursor.Close(ctx)
+		if !safe || !found {
+			return false
+		}
+	}
+	return true
+}
+
+type Deleter interface {
+	Delete(context.Context, string) (int64, error)
+}
+type Stats struct {
+	Scanned     int   `json:"scanned"`
+	Quarantined int   `json:"quarantined"`
+	Deleted     int   `json:"deleted"`
+	Bytes       int64 `json:"deletedBytes"`
+	Deferred    int   `json:"deferred"`
+}
+
+func Run(ctx context.Context, db *mongo.Database, deleter Deleter, dryRun bool) (Stats, error) {
+	var stats Stats
+	if !Ready(ctx, db) {
+		return stats, ErrProtected
+	}
+	now, err := Clock(ctx, db)
+	if err != nil {
+		return stats, err
+	}
+	c := db.Collection(Collection)
+	cur, err := c.Find(ctx, bson.M{"state": bson.M{"$in": bson.A{"open", "deleting"}}, "permanent": bson.M{"$ne": true}, "hold_until": bson.M{"$lt": now}},
+		options.Find().SetSort(bson.D{{Key: "attempt_at", Value: 1}, {Key: "_id", Value: 1}}).SetLimit(50))
+	if err != nil {
+		return stats, ErrProtected
+	}
+	defer cur.Close(ctx)
+	for cur.Next(ctx) {
+		var rec Record
+		if cur.Decode(&rec) != nil {
+			return stats, ErrProtected
+		}
+		stats.Scanned++
+		if !Managed(rec.Key) {
+			stats.Deferred++
+			continue
+		}
+		if !dryRun {
+			if _, err := c.UpdateOne(ctx, bson.M{"_id": rec.Key}, bson.M{"$currentDate": bson.M{"attempt_at": true}}); err != nil {
+				return stats, ErrProtected
+			}
+		}
+		if rec.State == "open" {
+			if !Reclaimable(ctx, db, rec, now) {
+				stats.Deferred++
+				continue
+			}
+			filter := bson.M{"_id": rec.Key, "state": "open", "version": rec.Version, "permanent": false}
+			if rec.CandidateAt.IsZero() {
+				stats.Quarantined++
+				if !dryRun {
+					if _, err := c.UpdateOne(ctx, filter, bson.M{"$currentDate": bson.M{"candidate_at": true}}); err != nil {
+						return stats, ErrProtected
+					}
+				}
+				continue
+			}
+			if rec.CandidateAt.After(now.Add(-Quarantine)) {
+				stats.Deferred++
+				continue
+			}
+			if dryRun {
+				stats.Quarantined++
+				continue
+			}
+			// Atomic seal competes with ALL reference registrations and upload
+			// writers on this very document. A two-scan scheme alone is unsafe.
+			r, err := c.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"state": "deleting"}})
+			if err != nil {
+				return stats, ErrProtected
+			}
+			if r.MatchedCount != 1 {
+				stats.Deferred++
+				continue
+			}
+		}
+		if dryRun {
+			stats.Quarantined++
+			continue
+		}
+		// Only one worker may execute DELETE. A crash/uncertain request leaves
+		// a sealed key for an operator-assisted retry, not an expiring lease
+		// which could let a paused worker delete a new upload generation.
+		r, err := c.UpdateOne(ctx, bson.M{"_id": rec.Key, "state": "deleting", "version": rec.Version, "delete_started": bson.M{"$ne": true}},
+			bson.M{"$set": bson.M{"delete_started": true}, "$currentDate": bson.M{"delete_started_at": true}})
+		if err != nil {
+			return stats, ErrProtected
+		}
+		if r.MatchedCount != 1 {
+			stats.Deferred++
+			continue
+		}
+		size, err := deleter.Delete(ctx, rec.Key)
+		if err != nil {
+			stats.Deferred++
+			continue
+		}
+		r, err = c.UpdateOne(ctx, bson.M{"_id": rec.Key, "state": "deleting", "version": rec.Version}, bson.M{
+			"$set": bson.M{"state": "deleted", "deleted_bytes": size}, "$unset": bson.M{"delete_started": ""}, "$currentDate": bson.M{"deleted_at": true},
+		})
+		if err != nil || r.MatchedCount != 1 {
+			return stats, ErrProtected
+		}
+		stats.Deleted++
+		stats.Bytes += size
+	}
+	if cur.Err() != nil {
+		return stats, ErrProtected
+	}
+	return stats, nil
+}

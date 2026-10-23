@@ -1,0 +1,15 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["oss:GetObject", "oss:PutObject", "oss:ListParts"],
+      "Resource": ["acs:oss:*:*:yikeliao-188-hk-test/oss-test/chat/*"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["oss:GetObject", "oss:PutObject"],
+      "Resource": ["acs:oss:*:*:yikeliao-188-business-hk-test/oss-test/business/*"]
+    }
+  ]
+}

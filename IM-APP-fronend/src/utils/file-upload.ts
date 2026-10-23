@@ -1,21 +1,14 @@
 import { completeUpload, createUploadTask } from '@/api/file'
 import type { UploadPurpose } from '@/types'
-import { h5PublicMediaUrl } from '@/utils/chatMedia'
+import { awaitMediaCache } from '@/utils/mediaCache'
+import { isAppPlatform } from '@/utils/platform'
+import { postStorageBytes as postBytes, postStorageLocalFile as postLocalFile } from '@/utils/storage-upload'
 
 interface ImageBytes {
   bytes: ArrayBuffer
   fileName: string
   contentType: string
   size: number
-}
-
-/** App WebView 也有 fetch，但不能用来读 file:// / _doc 本地图。 */
-function isAppPlatform(): boolean {
-  try {
-    return uni.getSystemInfoSync().uniPlatform === 'app'
-  } catch {
-    return false
-  }
 }
 
 function guessContentType(fileName: string): string {
@@ -130,6 +123,19 @@ function isHuaweiLikeDevice(): boolean {
 
 function isContentUri(path: string): boolean {
   return /^content:\/\//i.test(path || '')
+}
+
+/** 本轮已经压过的本地图。发图链路再遇到同一路径就直接用，避免二次 compressImage。 */
+const preparedChatImagePaths = new Set<string>()
+
+export function isPreparedChatImage(path: string): boolean {
+  return preparedChatImagePaths.has(String(path || '').trim())
+}
+
+function rememberPreparedChatImage(path: string): string {
+  const value = String(path || '').trim()
+  if (value) preparedChatImagePaths.add(value)
+  return path
 }
 
 function isSandboxLocalPath(path: string): boolean {
@@ -300,10 +306,27 @@ function copyViaPlusIoToDoc(srcPath: string): Promise<string> {
  * 把相册/相机路径收成应用可读的本地文件。
  * 鸿蒙 4 的 content:// 不能直接压图、上传、交给 OpenIM，必须先落到沙盒。
  */
+function looksLikeWebpPath(path: string): boolean {
+  return /\.webp(\?|#|$)/i.test(path || '')
+}
+
+/** WebP 原样上传易触发 OpenIM Content-Type 签名不一致；尽量落到 jpg。 */
+async function ensureAppChatJpeg(path: string): Promise<string> {
+  if (!looksLikeWebpPath(path) && !/\.hei[cf](\?|#|$)/i.test(path || '')) return path
+  try {
+    const jpeg = await saveViaNativeBitmap(path)
+    if (jpeg) return jpeg
+  } catch (e) {
+    console.warn('[image] WebP/HEIC 转 jpg 失败', (e as Error)?.message || e)
+  }
+  return path
+}
+
 export async function materializeAppLocalImage(srcPath: string): Promise<string> {
   const path = String(srcPath || '').trim()
   if (!path) throw new Error('未获取到图片，请重试')
   if (!isAppPlatform()) return path
+  if (isPreparedChatImage(path)) return path
 
   const tryCompress = async (input: string) => {
     const compressed = await compressLocalImage(input)
@@ -316,17 +339,21 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
     const size = await probeLocalFileSize(path)
     if (size > 0) {
       const compressed = await tryCompress(path)
-      return compressed || path
+      const next = await ensureAppChatJpeg(compressed || path)
+      return rememberPreparedChatImage(next)
     }
   }
 
   const compressed = await tryCompress(path)
-  if (compressed) return compressed
+  if (compressed) {
+    const next = await ensureAppChatJpeg(compressed)
+    return rememberPreparedChatImage(next)
+  }
 
   try {
     const viaBitmap = await saveViaNativeBitmap(path)
     const again = await tryCompress(viaBitmap)
-    return again || viaBitmap
+    return rememberPreparedChatImage(again || viaBitmap)
   } catch (e) {
     console.warn('[image] Bitmap 落盘失败', (e as Error)?.message || e)
   }
@@ -334,7 +361,8 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
   try {
     const copied = await copyViaPlusIoToDoc(path)
     const again = await tryCompress(copied)
-    return again || copied
+    const next = await ensureAppChatJpeg(again || copied)
+    return rememberPreparedChatImage(next)
   } catch (e) {
     console.warn('[image] plus.io 拷贝失败', (e as Error)?.message || e)
   }
@@ -345,7 +373,8 @@ export async function materializeAppLocalImage(srcPath: string): Promise<string>
         isContentUri(path) ? path : toAppFileUrl(path),
       )
       const again = await tryCompress(viaAndroid)
-      return again || viaAndroid
+      const next = await ensureAppChatJpeg(again || viaAndroid)
+      return rememberPreparedChatImage(next)
     } catch (e) {
       console.warn('[image] ContentResolver 拷贝失败', (e as Error)?.message || e)
     }
@@ -436,11 +465,18 @@ async function materializePickedPaths(paths: string[]): Promise<string[]> {
 export async function pickLocalImages(opts?: {
   count?: number
   sourceType?: Array<'album' | 'camera'>
+  /**
+   * 聊天发图传 false：选完立刻把原路径交回去做占位气泡，
+   * 压缩留到发送时做一次。头像等入口保持默认，选完再物化。
+   */
+  materialize?: boolean
 }): Promise<string[]> {
   // 聊天发资料图一次最多 20；其它入口仍可传更小的 count
   const count = Math.max(1, Math.min(20, opts?.count ?? 1))
   const sourceType = opts?.sourceType?.length ? opts.sourceType : (['album'] as Array<'album' | 'camera'>)
   await requestAndroidAlbumPermission()
+  const settle = (picked: string[]) =>
+    opts?.materialize === false ? Promise.resolve(picked.filter(Boolean)) : materializePickedPaths(picked)
 
   const huaweiLike = isAppPlatform() && isHuaweiLikeDevice()
   let paths: string[] = []
@@ -452,7 +488,7 @@ export async function pickLocalImages(opts?: {
       paths = await pickViaPlusGallery({ count, system: false })
       if (paths.length) {
         try {
-          return await materializePickedPaths(paths)
+          return await settle(paths)
         } catch (e) {
           console.warn('[image] gallery 路径物化失败，继续兜底', (e as Error)?.message || e)
           paths = []
@@ -477,7 +513,7 @@ export async function pickLocalImages(opts?: {
 
   if (paths.length) {
     try {
-      return await materializePickedPaths(paths)
+      return await settle(paths)
     } catch (e) {
       // 物化失败再试 gallery，不要把坏路径交给上传
       console.warn('[image] chooseImage 路径不可用，改走 gallery', (e as Error)?.message || e)
@@ -500,13 +536,13 @@ export async function pickLocalImages(opts?: {
 
   try {
     paths = await pickViaPlusGallery({ count, system: false })
-    if (paths.length) return materializePickedPaths(paths)
+    if (paths.length) return settle(paths)
   } catch (e) {
     if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
   }
   try {
     paths = await pickViaPlusGallery({ count, system: true })
-    if (paths.length) return materializePickedPaths(paths)
+    if (paths.length) return settle(paths)
   } catch (e) {
     if (isPickCancelError(e) || String((e as Error)?.message) === 'cancel') throw new Error('cancel')
     throw e instanceof Error ? e : new Error('无法打开相册，请检查相册权限')
@@ -550,20 +586,107 @@ function toAppFileUrl(path: string): string {
   }
 }
 
-function downloadToTemp(url: string): Promise<string> {
+function downloadToTemp(url: string, timeoutMs = 30000): Promise<string> {
   return new Promise((resolve, reject) => {
-    uni.downloadFile({
-      url,
-      success: (res) => {
-        if (res.statusCode === 200 && res.tempFilePath) {
-          resolve(res.tempFilePath)
-          return
-        }
-        reject(new Error('下载图片失败'))
-      },
-      fail: () => reject(new Error('下载图片失败')),
-    })
+    let settled = false
+    const finish = (err?: Error, path?: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (err) reject(err)
+      else resolve(path!)
+    }
+    const timer = setTimeout(() => finish(new Error('下载图片超时')), Math.max(3000, timeoutMs))
+    try {
+      uni.downloadFile({
+        url,
+        success: (res) => {
+          if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath) {
+            finish(undefined, res.tempFilePath)
+            return
+          }
+          finish(new Error('下载图片失败'))
+        },
+        fail: () => finish(new Error('下载图片失败')),
+      })
+    } catch {
+      finish(new Error('下载图片失败'))
+    }
   })
+}
+
+/** 按文件头识别类型，避免临时路径无后缀时被当成 jpeg（GIF 会变静态）。 */
+function sniffImageMeta(bytes: ArrayBuffer): { contentType: string; ext: string } | null {
+  const head = new Uint8Array(bytes.slice(0, 16))
+  if (head.length >= 6 && head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) {
+    return { contentType: 'image/gif', ext: 'gif' }
+  }
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
+    return { contentType: 'image/jpeg', ext: 'jpg' }
+  }
+  if (
+    head.length >= 8 &&
+    head[0] === 0x89 &&
+    head[1] === 0x50 &&
+    head[2] === 0x4e &&
+    head[3] === 0x47
+  ) {
+    return { contentType: 'image/png', ext: 'png' }
+  }
+  if (
+    head.length >= 12 &&
+    head[0] === 0x52 &&
+    head[1] === 0x49 &&
+    head[2] === 0x46 &&
+    head[3] === 0x46 &&
+    head[8] === 0x57 &&
+    head[9] === 0x45 &&
+    head[10] === 0x42 &&
+    head[11] === 0x50
+  ) {
+    return { contentType: 'image/webp', ext: 'webp' }
+  }
+  return null
+}
+
+function withStickerMeta(fileName: string, contentType: string, bytes: ArrayBuffer): {
+  fileName: string
+  contentType: string
+} {
+  const sniffed = sniffImageMeta(bytes)
+  const type = (sniffed?.contentType || contentType || guessContentType(fileName) || '').toLowerCase()
+  const ext = sniffed?.ext || (type === 'image/jpeg' || type === 'image/jpg' ? 'jpg' : type.replace(/^image\//, ''))
+  if (type.startsWith('image/') && !type.includes('heic') && !type.includes('heif') && ext) {
+    const base = (fileName || 'sticker').replace(/\.[^.]+$/i, '') || 'sticker'
+    return {
+      fileName: `${base}.${ext}`,
+      contentType: type === 'image/jpg' ? 'image/jpeg' : type,
+    }
+  }
+  return forceAvatarJpegMeta(fileName, type)
+}
+
+async function resolveStickerSource(path: string): Promise<string> {
+  const src = String(path || '').trim()
+  if (!src) throw new Error('请选择表情图片')
+  if (src.startsWith('blob:') || src.startsWith('file://') || src.startsWith('content://')) return src
+  if (!/^https?:\/\//i.test(src)) return src
+  // 与群聊气泡同一套媒体缓存（含 OSS 302），避免 iOS 直连下载挂死
+  const cached = await awaitMediaCache(src, 30000)
+  if (cached) return cached
+  if (!isAppPlatform()) return src
+  return downloadToTemp(src, 30000)
+}
+
+async function loadStickerBytes(sourcePath: string): Promise<ImageBytes> {
+  const raw = await loadImageBytes(sourcePath)
+  const meta = withStickerMeta(raw.fileName, raw.contentType, raw.bytes)
+  return {
+    bytes: raw.bytes,
+    fileName: meta.fileName,
+    contentType: meta.contentType,
+    size: raw.bytes.byteLength,
+  }
 }
 
 function readAppFile(filePath: string, fallbackName = 'avatar.jpg'): Promise<ImageBytes> {
@@ -656,23 +779,6 @@ async function loadImageBytes(localPath?: string, remoteUrl?: string): Promise<I
   throw new Error('请选择头像')
 }
 
-async function postBytes(
-  formUrl: string,
-  formData: Record<string, string>,
-  bytes: ArrayBuffer,
-  fileName: string,
-  contentType: string,
-): Promise<void> {
-  if (typeof fetch !== 'function' || typeof FormData === 'undefined' || typeof Blob === 'undefined') {
-    throw new Error('当前环境不支持文件上传')
-  }
-  const body = new FormData()
-  Object.entries(formData).forEach(([key, value]) => body.append(key, value))
-  body.append('file', new Blob([bytes], { type: contentType }), fileName)
-  const res = await fetch(h5PublicMediaUrl(formUrl), { method: 'POST', body })
-  if (!res.ok) throw new Error(`上传失败(${res.status})`)
-}
-
 async function uploadViaTask(
   purpose: UploadPurpose,
   image: ImageBytes,
@@ -690,7 +796,7 @@ async function uploadViaTask(
   if (!init.formUrl || !init.formData) {
     throw new Error('当前环境不支持文件上传')
   }
-  await postBytes(init.formUrl, init.formData, image.bytes, image.fileName, image.contentType)
+  await postBytes(init.formUrl, init.formData, image)
   const file = await completeUpload(fileId)
   return file.id
 }
@@ -729,29 +835,6 @@ function getLocalFileMeta(filePath: string): Promise<{ fileName: string; content
           fail,
         )
       },
-    })
-  })
-}
-
-function postLocalFile(
-  formUrl: string,
-  filePath: string,
-  formData: Record<string, string>,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    uni.uploadFile({
-      url: formUrl,
-      filePath,
-      name: 'file',
-      formData,
-      success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve()
-          return
-        }
-        reject(new Error(`上传失败(${res.statusCode})`))
-      },
-      fail: (err) => reject(new Error(err.errMsg || '上传失败')),
     })
   })
 }
@@ -822,12 +905,23 @@ export async function uploadAvatarFile(file: File): Promise<string> {
   })
 }
 
+/**
+ * 可原样上传的类型。不含 webp：OpenIM OSS 预签名常按 application/octet-stream，
+ * Web SDK 再补 image/webp 会 403（浏览器常报成跨域）；部分 App WebView 预览也不稳。
+ * GIF 保留动画；PNG/JPEG 走原图。
+ */
 function isReadyImageType(type: string): boolean {
-  return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' || type === 'image/webp' || type === 'image/gif'
+  return type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png' || type === 'image/gif'
+}
+
+function isWebpLike(type: string, fileName: string): boolean {
+  const t = (type || '').toLowerCase()
+  const n = (fileName || '').toLowerCase()
+  return t.includes('webp') || n.endsWith('.webp')
 }
 
 /**
- * H5：HEIC / 超大图 / 空 type 压成 jpeg，聊天发图与换头像共用。
+ * H5：HEIC / WebP / 超大图 / 空 type 压成 jpeg，聊天发图与换头像共用。
  * App 无 document 时原样返回（走原生压缩路径）。
  */
 export async function prepareImageFile(
@@ -838,7 +932,8 @@ export async function prepareImageFile(
   const edge = opts?.edge ?? 1280
   const fileName = opts?.fileName || 'image.jpg'
   const type = (file.type || '').toLowerCase()
-  if (isReadyImageType(type) && file.size > 0 && file.size <= maxBytes) return file
+  const mustJpeg = isWebpLike(type, file.name) || type.includes('heic') || type.includes('heif')
+  if (!mustJpeg && isReadyImageType(type) && file.size > 0 && file.size <= maxBytes) return file
   if (typeof document === 'undefined') return file
   const url = URL.createObjectURL(file)
   try {
@@ -862,10 +957,11 @@ export async function prepareImageFile(
     ctx.drawImage(img, 0, 0, width, height)
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86))
     if (!blob) throw new Error('无法读取这张图片，请换一张')
+    const jpegName = `${(fileName || 'image.jpg').replace(/\.[^.]+$/i, '') || 'image'}.jpg`
     if (typeof File !== 'undefined') {
-      return new File([blob], fileName, { type: 'image/jpeg' })
+      return new File([blob], jpegName, { type: 'image/jpeg' })
     }
-    return Object.assign(blob, { name: fileName, lastModified: Date.now() }) as File
+    return Object.assign(blob, { name: jpegName, lastModified: Date.now() }) as File
   } finally {
     URL.revokeObjectURL(url)
   }
@@ -889,16 +985,22 @@ export async function uploadReportImage(localPath: string): Promise<string> {
   return uploadViaTask('image', await loadImageBytes(localPath))
 }
 
-/** 上传自定义表情并返回 fileId */
+/**
+ * 上传自定义表情并返回 fileId。
+ * 不走 materialize/compress：那条链路会压成 jpeg，GIF 动图会变成静态。
+ * 远程图先走聊天媒体缓存（与群聊图同一套 OSS），再原样字节上传 purpose=sticker。
+ */
 export async function uploadSticker(localPath: string): Promise<string> {
-  if (isAppPlatform()) {
-    const local = await materializeAppLocalImage(localPath)
-    try {
-      return await uploadViaNativeFile('sticker', local)
-    } catch (e) {
-      console.warn('[image] 表情直传失败，改走读字节', (e as Error)?.message || e)
-      return uploadViaTask('sticker', await loadImageBytes(local))
-    }
+  const source = await resolveStickerSource(localPath)
+  // HEIC 仍需转 jpeg；其余格式（含 gif）保持原字节
+  const lower = source.toLowerCase()
+  const maybeHeic = lower.includes('.heic') || lower.includes('.heif')
+  const local = maybeHeic && isAppPlatform() ? await materializeAppLocalImage(source) : source
+  try {
+    return await uploadViaTask('sticker', await loadStickerBytes(local))
+  } catch (e) {
+    if (!isAppPlatform() || /^https?:\/\//i.test(local) || local.startsWith('blob:')) throw e
+    console.warn('[image] 表情读字节失败，改走原生直传', (e as Error)?.message || e)
+    return uploadViaNativeFile('sticker', local)
   }
-  return uploadViaTask('sticker', await loadImageBytes(localPath))
 }

@@ -1,0 +1,445 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "IM private retention bridge",
+    "version": "visibility-v2-managed-gc-v1",
+    "description": "Private network only. Port 19093 logical retention + permanent reference registration; port 19094 guarded managed-v1 object GC. Existing retention capabilities describe ONLY the logical bridge. Physical deletion never sweeps legacy keys. Mongo body purge stays OFF."
+  },
+  "servers": [
+    {
+      "url": "http://openim-api:19093",
+      "description": "Replace with the private service name; never expose publicly"
+    }
+  ],
+  "security": [
+    {
+      "PrivateRetentionKey": []
+    }
+  ],
+  "paths": {
+    "/internal/retention/capabilities": {
+      "get": {
+        "summary": "Read protocol capabilities; no body or query parameters",
+        "responses": {
+          "200": {
+            "description": "Compatible private bridge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "protocol",
+                    "mode",
+                    "bodyPurge",
+                    "objectPurge"
+                  ],
+                  "properties": {
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "im-app-retention-visibility-v2"
+                      ]
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "visibility_only"
+                      ]
+                    },
+                    "bodyPurge": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "mongo_bodies_only"
+                      ],
+                      "description": "Optional separate worker; explicit operator gates and 24-hour grace. Not enabled by API requests."
+                    },
+                    "objectPurge": {
+                      "type": "string",
+                      "enum": [
+                        "off"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unexpected GET body"
+          },
+          "401": {
+            "description": "Missing/invalid private key"
+          },
+          "404": {
+            "description": "Invalid path or extra query"
+          }
+        }
+      }
+    },
+    "/internal/retention/snapshot": {
+      "get": {
+        "summary": "Read classified persisted tail and create an expiring prefix receipt; GET body forbidden",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "groupId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fixed watermark and Mongo server time; no bodies, URLs or tokens. overCountThrough is valid only with at least 500 actual visible rows after it. complete applies to all history not covered by that proof.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid/missing/duplicate/extra query or GET body"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Incomplete/unsupported persisted tail, storage failure or deadline; no apply authority granted"
+          }
+        }
+      }
+    },
+    "/internal/retention/apply": {
+      "post": {
+        "summary": "Advance monotonic group visibility using the exact private receipt; no query parameters",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "snapshotId",
+                  "conversationId",
+                  "minVisibleSeq"
+                ],
+                "properties": {
+                  "snapshotId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Unexpired UUID v4 from snapshot"
+                  },
+                  "conversationId": {
+                    "type": "string",
+                    "pattern": "^sg_[0-9a-f]{32}$"
+                  },
+                  "minVisibleSeq": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Durable visibility ACK and first Mongo-server applied_at timestamp; safe to retry without extending grace. This request does not delete messages or files. A separately gated Mongo-body worker may later scrub expired slots.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "protocol",
+                    "conversationId",
+                    "minVisibleSeq"
+                  ],
+                  "properties": {
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "im-app-retention-visibility-v2"
+                      ]
+                    },
+                    "conversationId": {
+                      "type": "string"
+                    },
+                    "minVisibleSeq": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON/media type/fields; body capped at 4096 bytes"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "404": {
+            "description": "Query/path not allowed"
+          },
+          "503": {
+            "description": "Missing/expired/foreign receipt, mismatched boundary, persistence/cache invalidation failure or deadline; retry only with same valid receipt"
+          }
+        }
+      }
+    },
+    "/internal/media-gc/protect": {
+      "post": {
+        "summary": "Permanently pin resolved managed objects BEFORE business writes/archive copies",
+        "responses": {
+          "200": {
+            "description": "Operation completed"
+          },
+          "400": {
+            "description": "Invalid JSON/body/query"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Fail closed; no unsafe fallback"
+          },
+          "409": {
+            "description": "Managed object is expired, sealed or protection is unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "maxLength": 4194304
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/media-gc/status": {
+      "get": {
+        "summary": "Read active/schedule/counts/last batch; no body or query",
+        "responses": {
+          "200": {
+            "description": "Operation completed"
+          },
+          "400": {
+            "description": "Invalid JSON/body/query"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Fail closed; no unsafe fallback"
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "http://openim-api:19094",
+          "description": "Container-private only; never publish"
+        }
+      ]
+    },
+    "/internal/media-gc/configure": {
+      "post": {
+        "summary": "Enable after all-writer verification and private OSS probe, or pause GC without removing reference fences",
+        "responses": {
+          "200": {
+            "description": "Operation completed"
+          },
+          "400": {
+            "description": "Invalid JSON/body/query"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Fail closed; no unsafe fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "active"
+                ],
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "http://openim-api:19094",
+          "description": "Container-private only; never publish"
+        }
+      ]
+    },
+    "/internal/media-gc/run": {
+      "post": {
+        "summary": "One bounded batch, max 50; dryRun true does not mutate GC/OSS state",
+        "responses": {
+          "200": {
+            "description": "Operation completed"
+          },
+          "400": {
+            "description": "Invalid JSON/body/query"
+          },
+          "401": {
+            "description": "Invalid private key"
+          },
+          "503": {
+            "description": "Fail closed; no unsafe fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "dryRun"
+                ],
+                "properties": {
+                  "dryRun": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "servers": [
+        {
+          "url": "http://openim-api:19094",
+          "description": "Container-private only; never publish"
+        }
+      ]
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "PrivateRetentionKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Separate private random key >=32 bytes. Never save actual key in collection/Git."
+      }
+    },
+    "schemas": {
+      "Snapshot": {
+        "type": "object",
+        "required": [
+          "snapshotId",
+          "conversationId",
+          "sessionType",
+          "serverTime",
+          "committedWatermark",
+          "complete",
+          "messages"
+        ],
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "pattern": "^sg_[0-9a-f]{32}$"
+          },
+          "sessionType": {
+            "type": "string",
+            "enum": [
+              "group"
+            ]
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "committedWatermark": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "complete": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "overCountThrough": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Optional count-proven summarized prefix, not a count of deleted messages"
+          },
+          "messages": {
+            "type": "array",
+            "maxItems": 20000,
+            "items": {
+              "type": "object",
+              "required": [
+                "seq",
+                "sendTime",
+                "visibility"
+              ],
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1
+                },
+                "sendTime": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "visibility": {
+                  "type": "string",
+                  "enum": [
+                    "visible",
+                    "hidden"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

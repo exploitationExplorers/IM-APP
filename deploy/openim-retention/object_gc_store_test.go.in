@@ -1,0 +1,82 @@
+package third
+
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	gc "github.com/openimsdk/open-im-server/v3/internal/imappgc"
+	"github.com/openimsdk/tools/s3"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	scopedoss "im-app-openim-oss-production-scope"
+)
+
+type gcRaw struct {
+	s3.Interface
+	wrote, deleted string
+	checks         int
+}
+
+func (s *gcRaw) Engine() string                           { return "ali-oss" }
+func (s *gcRaw) IMAppGCCheck(context.Context, bool) error { s.checks++; return nil }
+func (s *gcRaw) PresignedPutObject(_ context.Context, k string, _ time.Duration, _ *s3.PutOption) (*s3.PresignedPutResult, error) {
+	s.wrote = k
+	return &s3.PresignedPutResult{}, nil
+}
+func (s *gcRaw) StatObject(_ context.Context, k string) (*s3.ObjectInfo, error) {
+	return &s3.ObjectInfo{Key: k, Size: 321}, nil
+}
+func (s *gcRaw) DeleteObject(_ context.Context, k string) error { s.deleted = k; return nil }
+func TestIMAppRetentionGCStoreFenceIntegration(t *testing.T) {
+	uri := os.Getenv("IM_APP_RETENTION_TEST_MONGO")
+	if uri == "" || os.Getenv("IM_APP_RETENTION_TEST_ALLOW_INIT") != "1" {
+		t.Skip("disposable Mongo required")
+	}
+	if !strings.HasPrefix(uri, "mongodb://127.0.0.1:") {
+		t.Fatal("loopback only")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := client.Database("imapp_gc_third_store")
+	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
+	_, _ = db.Collection(gc.ControlCollection).InsertOne(ctx, bson.M{"_id": gc.Protocol, "active": true})
+	raw := &gcRaw{}
+	// 第 3 参是聊天桶 CDN 基址；留空 = 不启用 CDN，本测试走上游签名直链。
+	// 生产路径由 patch-openim.cjs 注入 os.Getenv("IM_APP_CHAT_CDN_BASE")。
+	scoped, err := scopedoss.New(raw, gc.PhysicalPrefix, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &imAppGCStore{Interface: scoped, raw: raw, db: db}
+	key := gc.Namespace + "openim/data/hash/" + strings.Repeat("e", 32)
+	if _, err := s.PresignedPutObject(ctx, key, 7*24*time.Hour, nil); err != nil || raw.wrote != gc.PhysicalPrefix+key {
+		t.Fatal("signed writer not scoped", err)
+	}
+	if _, err := s.PresignedPutObject(ctx, key, 8*24*time.Hour, nil); err == nil {
+		t.Fatal("signature outlives upload grace")
+	}
+	if _, err := s.Delete(ctx, key); err == nil || raw.deleted != "" {
+		t.Fatal("unsealed object deleted")
+	}
+	_, _ = db.Collection(gc.Collection).UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$set": bson.M{"state": "deleting", "delete_started": true}})
+	if _, err := s.PresignedPutObject(ctx, key, time.Hour, nil); err == nil {
+		t.Fatal("upload bypasses deletion fence")
+	}
+	if _, err := s.StatObject(ctx, key); err == nil {
+		t.Fatal("sealed object served from stat cache")
+	}
+	if n, err := s.Delete(ctx, key); err != nil || n != 321 || raw.deleted != gc.PhysicalPrefix+key || raw.checks < 1 {
+		t.Fatal("physical prefix/check not enforced", n, err)
+	}
+	if _, err := s.Delete(ctx, "openim/data/hash/"+strings.Repeat("e", 32)); err == nil {
+		t.Fatal("legacy delete allowed")
+	}
+}

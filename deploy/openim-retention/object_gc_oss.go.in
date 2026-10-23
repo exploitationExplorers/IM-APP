@@ -1,0 +1,37 @@
+package oss
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"strings"
+
+	ali "github.com/aliyun/aliyun-oss-go-sdk/oss"
+)
+
+// Called only through the private operator API and sealed-object deleter.
+// Versioned/suspended buckets can retain charged versions after DELETE, so
+// they require a separate reviewed version policy and are NOT supported here.
+func (o *OSS) IMAppGCCheck(ctx context.Context, probe bool) error {
+	v, err := o.bucket.Client.GetBucketVersioning(o.bucket.BucketName, ali.WithContext(ctx))
+	if err != nil || v.Status != "" {
+		return errors.New("GC requires readable, never-versioned chat bucket")
+	}
+	if !probe {
+		return nil
+	}
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return errors.New("probe ID unavailable")
+	}
+	key := "im-app-production/chat/managed-v1/openim/temp/gc-probe/" + hex.EncodeToString(id[:])
+	// Only this fresh, locally generated zero-byte sentinel is deleted here.
+	if err := o.bucket.PutObject(key, strings.NewReader(""), ali.WithContext(ctx)); err != nil {
+		return errors.New("GC probe write denied")
+	}
+	if err := o.bucket.DeleteObject(key, ali.WithContext(ctx)); err != nil {
+		return errors.New("GC probe delete denied")
+	}
+	return nil
+}

@@ -1,0 +1,32 @@
+package mgo
+
+import (
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
+	"go.mongodb.org/mongo-driver/bson"
+)
+
+// Filter before pagination/counting, not after an admin search page is built.
+// Join once per document (at most 50 documents/upstream scan batch), using the
+// indexed conversation_id. Source and embedded quote bodies stay intact.
+func imAppRetentionSearchPipeline(pipeline bson.A) bson.A {
+	result := make(bson.A, 0, len(pipeline)+4)
+	for _, raw := range pipeline {
+		stage := raw.(bson.M)
+		if project, ok := stage["$project"].(bson.M); ok && project["msgs"] != nil {
+			result = append(result,
+				bson.M{"$set": bson.M{"_im_app_conversation": bson.M{"$arrayElemAt": bson.A{bson.M{"$split": bson.A{"$doc_id", ":"}}, 0}}}},
+				bson.M{"$lookup": bson.M{"from": database.SeqConversationName, "localField": "_im_app_conversation", "foreignField": "conversation_id", "as": "_im_app_bounds"}},
+				bson.M{"$set": bson.M{"_im_app_min": bson.M{"$ifNull": bson.A{bson.M{"$arrayElemAt": bson.A{"$_im_app_bounds.min_seq", 0}}, int64(0)}}}},
+			)
+			project["_im_app_min"] = 1
+		}
+		result = append(result, stage)
+		if stage["$unwind"] == "$msgs" {
+			result = append(result, bson.M{"$match": bson.M{"$expr": bson.M{"$or": bson.A{
+				bson.M{"$ne": bson.A{"$msgs.msg.session_type", 3}},
+				bson.M{"$gte": bson.A{"$msgs.msg.seq", "$_im_app_min"}},
+			}}}})
+		}
+	}
+	return result
+}

@@ -19,7 +19,13 @@ import { useContactStore } from '@/stores/contact'
 import type { ChatMessage, Conversation, ConversationPinnedMessage, MessageType as AppMessageType } from '@/types'
 import { looksLikeImageUrl, quoteSummaryOf, quoteThumbOf, resolveQuoteType } from '@/utils/format'
 import { uploadVoiceViaApi } from '@/utils/mediaApi'
-import { formatIMNotification, imNotificationEventKey, notificationKindOf, GROUP_CREATED_WELCOME_TEXT } from '@/utils/im-notification'
+import {
+  formatIMNotification,
+  imNotificationEventKey,
+  isGroupPurgeTipText,
+  notificationKindOf,
+  GROUP_CREATED_WELCOME_TEXT,
+} from '@/utils/im-notification'
 import { effectiveGroupAtType, GroupAtType, highlightTagsOf } from '@/utils/group-announcement'
 import {
   parseVideoMeta,
@@ -27,8 +33,15 @@ import {
   downloadRemoteVideoForCover,
   preferRemoteMediaUrl,
   isRemoteMediaUrl,
+  listThumbnailUrl,
 } from '@/utils/chatMedia'
 import { devLog, devWarn } from '@/utils/devLog'
+import { isAndroid, isApp } from '@/utils/platform'
+import { isOSSStorageUrl } from '@/utils/storage-url'
+import type { PlusResolveLocalFile } from '@/types/plus-io'
+import { preserveForwardMedia } from '@/api/forward'
+import { mayContainForwardMedia, snapshotFromMessage, withForwardSnapshot } from '@/utils/forwardSnapshot'
+import { groupRetention, retentionSeq } from '@/utils/groupRetention'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
 const H5_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 5 // Warn : Silent
@@ -51,15 +64,12 @@ const env = (import.meta as ImportMeta & { env: Record<string, string> }).env
 /** OpenIM：同一 SDK 实例上重复 Login 会返回这个错误，语义是已登录而不是失败 */
 const LOGIN_REPEAT_CODE = 10102
 
-/** app 端走原生插件，web / 小程序端走 @openim/client-sdk，两者初始化方式不同 */
-const isAppPlatform = uni.getSystemInfoSync().uniPlatform === 'app'
-
 /** 标准运行基座不含第三方原生插件，App 聊天必须用包含 OpenIM 的自定义调试基座 */
 const APP_NATIVE_PLUGIN_MISSING =
   'App 端缺少 OpenIM 原生插件，请用自定义调试基座运行'
 
 function hasAppNativeIMSDK(): boolean {
-  if (!isAppPlatform) return true
+  if (!isApp()) return true
   try {
     const sdk = uni.requireNativePlugin('Tuoyun-OpenIMSDK') as { initSDK?: unknown } | null
     return typeof sdk?.initSDK === 'function'
@@ -121,6 +131,31 @@ let loginPromise: Promise<string> | null = null
 /** 退出登录时递增，作废进行中的 IM 登录，避免旧账号登录完成后把会话写回来 */
 let loginEpoch = 0
 let boundAccessToken = ''
+/** Logout/Login 串行执行。并发 Logout 会把 SQLite 关掉，发送里的 GetGroups 就报 database is closed */
+let sessionChain: Promise<void> = Promise.resolve()
+let sessionDepth = 0
+/** 本地库已经关掉时，下一次登录不能走「状态仍是已登录就跳过 Login」 */
+let forceNextLogin = false
+/** 同一用户进程内只 InitSDK 一次。重复 InitSDK 会把正在用的本地库关掉 */
+let appSdkReadyUserId = ''
+let closedDbRecovery: Promise<void> | null = null
+
+function enqueueSession<T>(task: () => Promise<T>): Promise<T> {
+  if (sessionDepth > 0) return task()
+  const run = sessionChain.then(async () => {
+    sessionDepth += 1
+    try {
+      return await task()
+    } finally {
+      sessionDepth -= 1
+    }
+  })
+  sessionChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
 
 /**
  * SDK 是否已真正连上 OpenIM 服务端。
@@ -168,6 +203,7 @@ function waitToRetrySend(attempt: number, epoch: number): Promise<boolean> {
  */
 function resetLoginCache() {
   imUserId.value = ''
+  groupRetention.setOwner('')
   tokenExpireAt = 0
   connected = false
   serverSyncReady = false
@@ -219,7 +255,7 @@ export function shouldUseOpenIM(): boolean {
 }
 
 function currentPlatformId(): number {
-  if (!isAppPlatform) return Platform.Web
+  if (!isApp()) return Platform.Web
   return uni.getSystemInfoSync().platform === 'ios' ? Platform.iOS : Platform.Android
 }
 
@@ -318,9 +354,71 @@ async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
   if (raw && typeof raw === 'object' && 'errCode' in raw) {
     const envelope = raw as { errCode: number; errMsg?: string; data?: T }
     if (envelope.errCode !== 0) throw toIMError(envelope, method)
-    if ('data' in envelope) return envelope.data as T
+    if ('data' in envelope) raw = envelope.data
+  }
+  // iOS 创建消息可能返回 JSON 字符串或只读桥接对象，不能直接补写属性。
+  // 在所有 createXxxMessage 的出口解析并复制，图片/视频等后续加工也使用普通对象。
+  if (isApp() && /^create.*Message/.test(method)) {
+    return copyNativeCreatedMessage(raw) as T
   }
   return raw as T
+}
+
+/** iOS 桥接对象是只读的，展开复制会抛 Attempted to assign to readonly property。先变成普通 JSON。 */
+function plainNativeRecord(obj: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(JSON.stringify(obj))
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    /* 不能整体序列化时再逐字段读 */
+  }
+  const plain: Record<string, unknown> = {}
+  let keys: string[] = []
+  try {
+    keys = Object.keys(obj)
+  } catch {
+    keys = []
+  }
+  for (const key of keys) {
+    try {
+      plain[key] = obj[key]
+    } catch {
+      /* 单个只读字段跳过 */
+    }
+  }
+  return plain
+}
+
+function copyNativeCreatedMessage(raw: unknown): MessageItem {
+  let obj = unwrapRawMessage(raw)
+  // 部分基座把创建结果再包一层 message / Message
+  if (obj && !pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])) {
+    const nested = unwrapRawMessage(obj.message ?? obj.Message)
+    if (nested) obj = nested
+  }
+  const clientMsgID = obj && pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
+  let contentType = Number(obj?.contentType ?? obj?.ContentType ?? 0)
+  // 个别基座创建引用消息只带回 quoteElem，不带 contentType
+  if ((!Number.isFinite(contentType) || contentType <= 0) && obj) {
+    if (obj.quoteElem != null || obj.QuoteElem != null) contentType = MessageType.QuoteMessage
+    else if (obj.textElem != null || obj.TextElem != null) contentType = MessageType.TextMessage
+  }
+  if (!obj || !clientMsgID || !Number.isFinite(contentType) || contentType <= 0) {
+    throw new Error('原生 SDK 创建消息结果无效')
+  }
+  // 保留完整媒体元素及原生扩展字段，不用展示层的归一化逻辑裁剪待发消息。
+  const plain = plainNativeRecord(obj)
+  return {
+    ...plain,
+    clientMsgID,
+    contentType,
+    groupID: pickString(obj, ['groupID', 'GroupID']),
+    recvID: pickString(obj, ['recvID', 'RecvID']),
+    sessionType: Number(obj.sessionType ?? obj.SessionType ?? 0),
+    status: messageStatusOf(obj),
+  } as MessageItem
 }
 
 /**
@@ -471,6 +569,7 @@ async function getSdkLoginUserId(): Promise<string> {
 
 function rememberLogin(imToken: IMTokenResult): string {
   imUserId.value = imToken.userId
+  groupRetention.setOwner(imToken.userId)
   tokenExpireAt = Date.now() + Math.max(0, imToken.expireSec - 300) * 1000
   connected = true // 登录 + 同步已成功，视为已连上服务端
   boundAccessToken = getToken()
@@ -551,6 +650,7 @@ function h5SdkAddr(raw: string, kind: 'api' | 'ws'): string {
  */
 function rewriteH5StorageUrl(raw: string): string {
   // #ifdef H5
+  if (isOSSStorageUrl(raw)) return raw
   if (typeof location !== 'undefined' && location.host && raw) {
     try {
       const url = new URL(raw, location.href)
@@ -589,6 +689,7 @@ function installH5StorageProxy(): void {
     }
     if (typeof Request !== 'undefined' && input instanceof Request) {
       const next = rewriteH5StorageUrl(input.url)
+      // eslint-disable-next-line max-lines
       if (next !== input.url) return rawFetch(new Request(next, input), init)
     }
     return rawFetch(input, init)
@@ -641,37 +742,44 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
   await synced
 }
 
+async function initAppSdk(imToken: IMTokenResult): Promise<void> {
+  if (!isApp()) return
+  if (appSdkReadyUserId === imToken.userId) return
+  const dataDir = await getAppSdkDataDir(imToken.userId)
+  await imCall(IMMethods.InitSDK, {
+    platformID: imToken.platform,
+    apiAddr: imToken.apiAddr,
+    wsAddr: imToken.wsAddr,
+    dataDir,
+    logLevel: APP_SDK_LOG_LEVEL,
+    isLogStandardOutput: APP_SDK_LOG_STDOUT,
+  })
+  appSdkReadyUserId = imToken.userId
+}
+
 async function doLogin(): Promise<string> {
   const epoch = loginEpoch
+  const force = forceNextLogin
+  forceNextLogin = false
   const imToken: IMTokenResult = await fetchIMToken(currentPlatformId())
   if (epoch !== loginEpoch) {
     throw new Error('已退出登录')
   }
 
-  if (isAppPlatform) {
-    const dataDir = await getAppSdkDataDir(imToken.userId)
-    await imCall(IMMethods.InitSDK, {
-      platformID: imToken.platform,
-      apiAddr: imToken.apiAddr,
-      wsAddr: imToken.wsAddr,
-      dataDir,
-      logLevel: APP_SDK_LOG_LEVEL,
-      isLogStandardOutput: APP_SDK_LOG_STDOUT,
-    })
-  }
+  await initAppSdk(imToken)
 
   const status = await getSdkLoginStatus()
   if (status === LoginStatus.Logged) {
     const loggedUserId = await getSdkLoginUserId()
-    if (loggedUserId === imToken.userId) {
-      // H5 WASM 刷新后常直接 Logged，本地库仍是离线前快照。
-      // 必须等本轮同步结束，否则随后拉会话/历史会漏掉离线消息。
-      await waitForSync(15000)
+    if (!force && loggedUserId === imToken.userId) {
+      // 已经登录就先读本地库，进群不用干等本轮同步。
+      // 同步结束会走 OnSyncServerFinish，再把离线期间的新消息补进当前房间。
       if (epoch !== loginEpoch) {
         throw new Error('已退出登录')
       }
       return rememberLogin(imToken)
     }
+    // 换号，或库已关闭但状态仍是已登录：先 Logout，Login 才会重新打开 SQLite。
     await imCall(IMMethods.Logout).catch(() => undefined)
   }
 
@@ -683,26 +791,43 @@ async function doLogin(): Promise<string> {
   return rememberLogin(imToken)
 }
 
-/** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
-export async function ensureIMLogin(): Promise<string> {
-  if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
+/**
+ * 同一业务账号、IM token 未过期、SDK 还没登出时直接复用。
+ * 断线不能在这里 Logout：Logout 会关 SQLite，紧接着的发送会在 GetGroups 上报 database is closed。
+ */
+async function reuseLiveSession(): Promise<string | null> {
   const businessToken = getToken()
-  if (
-    imUserId.value &&
-    Date.now() < tokenExpireAt &&
-    connected &&
-    businessToken &&
-    businessToken === boundAccessToken
-  ) {
-    const logged = await getSdkLoginUserId()
-    if (!logged || logged === imUserId.value) {
-      return imUserId.value
+  const sameAccount = !!imUserId.value && !!businessToken && businessToken === boundAccessToken
+  if (!sameAccount || Date.now() >= tokenExpireAt) return null
+  const logged = await getSdkLoginUserId()
+  if (logged && logged !== imUserId.value) return null
+  if (connected) return imUserId.value
+  try {
+    const status = await imCall<LoginStatus>(IMMethods.GetLoginStatus)
+    if (status !== LoginStatus.Logout) return imUserId.value
+  } catch {
+    // 状态接口失败不代表库已关闭，这里 Logout 会把还开着的库关掉。
+    return imUserId.value
+  }
+  return null
+}
+
+async function reloginSession(): Promise<string> {
+  if (!forceNextLogin) {
+    const reused = await reuseLiveSession()
+    if (reused) return reused
+  }
+  const businessToken = getToken()
+  if (imUserId.value || connected || boundAccessToken) {
+    const switchingAccount = !businessToken || (boundAccessToken !== '' && businessToken !== boundAccessToken)
+    if (switchingAccount) {
+      invalidatePendingLogin()
+      appSdkReadyUserId = ''
+    } else {
+      // 同一账号换 IM token，不要增加 loginEpoch，进行中的发送还要重试。
+      resetLoginCache()
     }
-    resetLoginCache()
-  } else if (imUserId.value || connected || boundAccessToken) {
-    invalidatePendingLogin()
     await forceSdkLogout().catch(() => undefined)
-    resetLoginCache()
   }
   const epoch = loginEpoch
   if (!loginPromise) {
@@ -712,16 +837,42 @@ export async function ensureIMLogin(): Promise<string> {
   }
   try {
     const userId = await loginPromise
-    if (epoch !== loginEpoch) {
-      return ensureIMLogin()
-    }
+    if (epoch !== loginEpoch) return ensureIMLogin()
     return userId
   } catch (e) {
-    if (epoch !== loginEpoch) {
-      return ensureIMLogin()
-    }
+    if (epoch !== loginEpoch) return ensureIMLogin()
     throw e
   }
+}
+
+/**
+ * 发送打到已关闭的本地库时，Logout 再 Login 重新打开。
+ * 不增加 loginEpoch，同一条消息可以接着发。
+ */
+function reopenClosedSdkDatabase(): Promise<void> {
+  if (!closedDbRecovery) {
+    const epoch = loginEpoch
+    closedDbRecovery = enqueueSession(async () => {
+      if (epoch !== loginEpoch) return
+      if (loginPromise) await loginPromise.catch(() => undefined)
+      if (epoch !== loginEpoch) return
+      forceNextLogin = true
+      await reloginSession()
+    }).finally(() => {
+      closedDbRecovery = null
+    })
+  }
+  return closedDbRecovery
+}
+
+/** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
+export async function ensureIMLogin(): Promise<string> {
+  if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
+  if (!forceNextLogin) {
+    const reused = await reuseLiveSession()
+    if (reused) return reused
+  }
+  return enqueueSession(() => reloginSession())
 }
 
 /**
@@ -776,15 +927,18 @@ export async function initOpenIM(): Promise<void> {
 }
 
 export async function logoutOpenIM(): Promise<void> {
-  invalidatePendingLogin()
-  // 刷新后内存会话为空，但 H5 WASM 仍可能是 Logged；必须 Logout，
-  // 否则下次 doLogin 走 Logged 捷径、本地库不触发完整同步。
-  try {
-    await withTimeout(forceSdkLogout(), 3000)
-  } catch {
-    // 本地必须清掉，避免下一个账号读到上一个号的会话库
-  }
-  resetLoginCache()
+  await enqueueSession(async () => {
+    invalidatePendingLogin()
+    appSdkReadyUserId = ''
+    // 刷新后内存会话为空，但 H5 WASM 仍可能是 Logged；必须 Logout，
+    // 否则下次 doLogin 走 Logged 捷径、本地库不触发完整同步。
+    try {
+      await withTimeout(forceSdkLogout(), 3000)
+    } catch {
+      // 本地必须清掉，避免下一个账号读到上一个号的会话库
+    }
+    resetLoginCache()
+  })
 }
 
 /** 手动重连：重新取 token 再登录，用于「重新选线」 */
@@ -820,7 +974,13 @@ function parseEventData<T>(payload: Record<string, unknown>): T {
 // ---------------------------------------------------------------------------
 
 export async function getConversationList(offset = 0, count = 200): Promise<ConversationItem[]> {
-  return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+  try {
+    return await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+  } catch (e) {
+    if (!isDatabaseClosedError(e)) throw e
+    await reopenClosedSdkDatabase()
+    return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+  }
 }
 
 /**
@@ -866,19 +1026,96 @@ export async function getOneConversation(
   throw lastErr instanceof Error ? lastErr : new Error('getOneConversation 重试/重登后仍失败')
 }
 
+function isSdkResourceNotReady(err: unknown): boolean {
+  if (err instanceof IMCallError && (err.code === 10004 || err.code === 10005)) return true
+  const text = err instanceof Error ? err.message : String(err || '')
+  return text.includes('10004') || text.includes('10005')
+}
+
+/** OpenIM 把已关闭的 SQLite 包成 errCode=10005，原文里带 database is closed */
+function isDatabaseClosedError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err || '')
+  return /database is closed/i.test(text)
+}
+
+/**
+ * 本地库写不进去。除了「库被关掉」，SQLite 写不了 journal/WAL、文件保护生效、
+ * 目录不可写时都报 `attempt to write a readonly database`——线上实测这一类才是
+ * 主流（10005 + InsertMessage failed），所以两句话都要认，否则重开流程救不回来。
+ */
+export function isLocalDatabaseWriteError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err || '')
+  return (
+    isDatabaseClosedError(err) ||
+    /readonly database/i.test(text) ||
+    /disk i\/o error/i.test(text) ||
+    (/insertmessage/i.test(text) && /failed/i.test(text))
+  )
+}
+
+/** 本地库写失败时给用户的可行动提示，别再弹干巴巴的「发送失败」。 */
+const LOCAL_WRITE_FAILURE_MESSAGE = '本地存储写入失败，请检查手机存储空间后重试'
+
+/**
+ * 新装的壳或刚重连时，本地库还没初始化完就拉历史，
+ * SDK 会把 10004 包在 10005 里抛出来。先退避再重登，避免把原文弹给用户。
+ */
+async function callHistoryWhenReady(
+  conversationID: string,
+  count: number,
+  startClientMsgID: string,
+): Promise<{ messageList: MessageItem[]; isEnd: boolean }> {
+  const run = () =>
+    imCall<unknown>(IMMethods.GetAdvancedHistoryMessageList, {
+      conversationID,
+      count,
+      startClientMsgID: startClientMsgID || '',
+      lastMinSeq: 0,
+      viewType: ViewType.History,
+    }).then(normalizeHistoryResult)
+
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= 3; attempt++) {
+    try {
+      return await run()
+    } catch (e) {
+      lastErr = e
+      if (isDatabaseClosedError(e) || !isSdkResourceNotReady(e) || attempt === 3) break
+      await new Promise((r) => setTimeout(r, 300 * 2 ** attempt))
+    }
+  }
+  if (isDatabaseClosedError(lastErr)) {
+    try {
+      await reopenClosedSdkDatabase()
+      return await run()
+    } catch (e) {
+      if (isDatabaseClosedError(e) || isSdkResourceNotReady(e)) {
+        throw new Error('聊天记录还在同步，请稍后再试')
+      }
+      throw e
+    }
+  }
+  if (!isSdkResourceNotReady(lastErr)) throw lastErr
+  resetLoginCache()
+  await ensureIMLogin()
+  await waitForSync(5000)
+  try {
+    return await run()
+  } catch (e) {
+    if (isSdkResourceNotReady(e)) throw new Error('聊天记录还在同步，请稍后再试')
+    throw e
+  }
+}
+
 export async function getHistoryMessages(
   conversationID: string,
   count = 20,
   startClientMsgID = '',
 ): Promise<{ messageList: MessageItem[]; isEnd: boolean }> {
-  const res = await imCall<unknown>(IMMethods.GetAdvancedHistoryMessageList, {
-    conversationID,
-    count,
-    startClientMsgID: startClientMsgID || '',
-    lastMinSeq: 0,
-    viewType: ViewType.History,
-  })
-  return normalizeHistoryResult(res)
+  await groupRetention.sync([conversationID])
+  const result = await callHistoryWhenReady(conversationID, count, startClientMsgID)
+  const filtered = groupRetention.filter(conversationID, result.messageList)
+  return { messageList: filtered, isEnd: result.isEnd || filtered.length < result.messageList.length }
 }
 
 /** 从新到旧分页拉出会话历史，供搜索 / 媒体页使用 */
@@ -916,7 +1153,7 @@ export async function clearConversationMessages(conversationID: string): Promise
   // H5 client-sdk 没有 clearConversationAndDeleteAllMsg；调用不存在的方法会在
   // SDK 代理层抛出 "Cannot read properties of undefined (reading 'apply')"。
   // App 原生插件则继续使用已经验证可用的 ClearConversationAndDeleteAllMsg。
-  const method = isAppPlatform
+  const method = isApp()
     ? IMMethods.ClearConversationAndDeleteAllMsg
     : IMMethods.DeleteConversationAndDeleteAllMsg
   await imCall(method, conversationID)
@@ -948,20 +1185,58 @@ export async function sendQuoteMessage(
   text: string,
   quote: MessageItem,
 ): Promise<MessageItem> {
+  const protectedQuote = await protectReferencedMedia(quote)
   // SDK 的 createQuoteMessage 要求 message 是被引用消息的 JSON 字符串（QuoteMsgParams.message: string），
   // 直接传对象会被 JSON.parse 隐式转成 "[object Object]" 而报 errCode=10006。
-  const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
-    text,
-    message: JSON.stringify(quote),
-  })
-  return sendCreatedMessage(target, message)
+  try {
+    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
+      text,
+      message: JSON.stringify(protectedQuote),
+    })
+    return sendCreatedMessage(target, message)
+  } catch (e) {
+    // 媒体保护改写后个别基座创建失败：回退原消息再试（纯文本引用最常见）
+    const msg = (e as Error)?.message || ''
+    if (!msg.includes('创建消息结果无效')) throw e
+    if (protectedQuote === quote) throw e
+    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
+      text,
+      message: JSON.stringify(cloneMessageForNativeQuote(quote)),
+    })
+    return sendCreatedMessage(target, message)
+  }
 }
 
 export async function sendForwardMessage(target: IMTarget, source: MessageItem): Promise<MessageItem> {
-  const message = await imCall<MessageItem>(IMMethods.CreateForwardMessage, {
-    message: source,
+  const protectedSource = await protectReferencedMedia(source)
+  // H5 client-sdk expects MessageItem directly; the native plugin takes { message }.
+  const message = await imCall<MessageItem>(
+    IMMethods.CreateForwardMessage,
+    isApp() ? { message: protectedSource } : protectedSource,
+  )
+  return sendCreatedMessage(target, message, {
+    alreadyUploaded: mayContainForwardMedia(protectedSource.contentType),
   })
-  return sendCreatedMessage(target, message)
+}
+
+/** 原生 CreateQuoteMessage 吃的是原消息 JSON；勿改写 content/textElem 形态 */
+function cloneMessageForNativeQuote(source: MessageItem): MessageItem {
+  try {
+    return JSON.parse(JSON.stringify(source)) as MessageItem
+  } catch {
+    return { ...source }
+  }
+}
+
+async function protectReferencedMedia(source: MessageItem): Promise<MessageItem> {
+  const snapshot = snapshotFromMessage(source)
+  // 纯文本（101）等没有远程媒体：不能走 withForwardSnapshot。
+  // 它会把 content 改成 JSON 字符串并重写 *Elem，部分 App 基座 CreateQuoteMessage 会直接返回空结果，
+  // 表现为「原生 SDK 创建消息结果无效」（引用文字之前好好的就是被这步改坏的）。
+  if (!mayContainForwardMedia(snapshot.contentType)) return cloneMessageForNativeQuote(source)
+  const protectedSnapshot = await preserveForwardMedia(snapshot)
+  if (protectedSnapshot.contentType !== snapshot.contentType) throw new Error('转发媒体保存结果无效')
+  return withForwardSnapshot(source, protectedSnapshot)
 }
 
 export async function sendAtTextMessage(
@@ -1052,11 +1327,15 @@ async function sendCreatedMessage(
   if (target.sessionType === SessionType.Single && !recvID) {
     recvID = peerIdFromSingleConversation(target.conversationId, imUserId.value)
   }
-  // 安卓原生有时只读消息体上的 id，参数里有、消息上没有就会把这部分人的消息拒掉
-  if (isAppPlatform) {
-    if (groupID && !message.groupID) message.groupID = groupID
-    if (recvID && !message.recvID) message.recvID = recvID
-    if ((groupID || recvID) && !message.sessionType) message.sessionType = target.sessionType
+  // 安卓原生有时只读消息体上的 id；iOS 桥返回值可能只读，补字段必须新建发送对象。
+  if (isApp()) {
+    const plain = plainNativeRecord(message as unknown as Record<string, unknown>) as unknown as MessageItem
+    message = {
+      ...plain,
+      ...(groupID && !plain.groupID ? { groupID } : {}),
+      ...(recvID && !plain.recvID ? { recvID } : {}),
+      ...((groupID || recvID) && !plain.sessionType ? { sessionType: target.sessionType } : {}),
+    }
   }
   const params = {
     recvID,
@@ -1075,10 +1354,11 @@ async function sendCreatedMessage(
   const attempts = (options.timeoutMs ?? 0) >= 60000 ? 2 : 4
   const epoch = loginEpoch
   let lastErr: unknown
+  let reopenedDatabase = false
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (epoch !== loginEpoch) break
     try {
-      if (isAppPlatform) {
+      if (isApp()) {
         return await sendOnAppNative(method, params, message.clientMsgID, perAttemptTimeout, false)
       }
       const sent = await imCall<unknown>(method, params)
@@ -1093,6 +1373,19 @@ async function sendCreatedMessage(
       if (isDuplicateSendError(err)) {
         return { ...message, status: MessageStatus.Succeed }
       }
+      if (epoch !== loginEpoch) break
+      // 库已经关了，原地重试还是 GetGroups database is closed。先重开再发这一条。
+      if (!reopenedDatabase && attempt < attempts - 1 && isLocalDatabaseWriteError(err)) {
+        reopenedDatabase = true
+        try {
+          await reopenClosedSdkDatabase()
+        } catch (recoverErr) {
+          lastErr = recoverErr instanceof Error ? recoverErr : lastErr
+          break
+        }
+        if (epoch !== loginEpoch) break
+        continue
+      }
       if (code !== undefined && DISCONNECT_CODES.has(code)) connected = false
       const canRetry =
         attempt < attempts - 1 &&
@@ -1106,9 +1399,11 @@ async function sendCreatedMessage(
   }
   const failure = lastErr instanceof Error ? lastErr : new Error('发送失败')
   if (epoch === loginEpoch) {
-    if (isAppPlatform) reportAppNativeSendFailure(params, message.clientMsgID, failure)
+    if (isApp()) reportAppNativeSendFailure(params, message.clientMsgID, failure)
     else reportTargetSendFailure(target, message, 'send', 'send_failed', failure.message)
   }
+  // 上报保留原始错误便于排查；给用户看的换成可行动提示，别让他对着「发送失败」发呆。
+  if (isLocalDatabaseWriteError(failure)) failure.message = LOCAL_WRITE_FAILURE_MESSAGE
   throw failure
 }
 
@@ -1403,7 +1698,9 @@ function copyAppImageToDoc(srcPath: string): Promise<string> {
  */
 async function prepareAppChatImagePath(filePath: string): Promise<string> {
   try {
-    const { materializeAppLocalImage } = await import('@/utils/file-upload')
+    const { isPreparedChatImage, materializeAppLocalImage } = await import('@/utils/file-upload')
+    // 选图阶段已经物化过的路径不要再压一次；content:// 仍会走进 materialize
+    if (isPreparedChatImage(filePath)) return filePath
     return await materializeAppLocalImage(filePath)
   } catch (e) {
     console.warn('[image] materialize 失败，走旧压缩/拷贝', (e as Error)?.message || e)
@@ -1419,45 +1716,247 @@ async function prepareAppChatImagePath(filePath: string): Promise<string> {
   }
 }
 
+/** 列表缩略图长边。只影响新发出的图，旧消息仍用消息里已有的地址。 */
+const CHAT_THUMB_EDGE = 360
+
+interface ChatThumb {
+  url: string
+  width: number
+  height: number
+}
+
+/** 长边收到 edge 以内，短边按原比例走。微信缩略图也是这样，只改一边会在安卓/鸿蒙上拉变形。 */
+function fitLongEdge(width: number, height: number, edge: number): { width: number; height: number } {
+  const long = Math.max(width, height)
+  if (width <= 0 || height <= 0 || long <= 0) return { width: 0, height: 0 }
+  const scale = Math.min(1, edge / long)
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  }
+}
+
+function sameImageAspect(
+  a: { width: number; height: number },
+  b: { width: number; height: number },
+): boolean {
+  if (a.width <= 0 || a.height <= 0 || b.width <= 0 || b.height <= 0) return false
+  const left = a.width / a.height
+  const right = b.width / b.height
+  return Math.abs(left - right) / right < 0.04
+}
+
+/**
+ * 缩略图宽高一起传给 compressImage。
+ * 只传 compressedWidth 时，安卓和鸿蒙会把高度也收成这个值，或保持原高度只改宽度，气泡再用 scaleToFill 一铺就变形。
+ * 压完再量一次成品；比例和目标差太多就丢掉，列表退回原图。
+ */
+function compressChatThumbnail(
+  localPath: string,
+): Promise<{ path: string; width: number; height: number } | null> {
+  return imageSizeOf(localPath).then((origin) => {
+    const target = fitLongEdge(origin.width, origin.height, CHAT_THUMB_EDGE)
+    if (!target.width || !target.height) return null
+    if (origin.width <= CHAT_THUMB_EDGE && origin.height <= CHAT_THUMB_EDGE) return null
+    return new Promise((resolve) => {
+      const compress = uni.compressImage as (options: {
+        src: string
+        quality?: number
+        compressedWidth?: number
+        compressedHeight?: number
+        success?: (res: { tempFilePath?: string }) => void
+        fail?: () => void
+      }) => void
+      compress({
+        src: localPath,
+        quality: 55,
+        compressedWidth: target.width,
+        compressedHeight: target.height,
+        success: (res) => {
+          const next = res.tempFilePath || ''
+          if (!next || next === localPath) {
+            resolve(null)
+            return
+          }
+          imageSizeOf(next)
+            .then((measured) => {
+              const size =
+                measured.width > 0 && measured.height > 0
+                  ? measured
+                  : target
+              if (!sameImageAspect(size, target)) {
+                resolve(null)
+                return
+              }
+              resolve({ path: next, width: size.width, height: size.height })
+            })
+            .catch(() => resolve(null))
+        },
+        fail: () => resolve(null),
+      })
+    })
+  })
+}
+
+/** 缩略图上传失败不影响原图发送。压完没有变小、或比例被压坏，就放弃，列表继续用原图。 */
+async function uploadChatThumbnail(localPath: string): Promise<ChatThumb | null> {
+  try {
+    const thumb = await compressChatThumbnail(localPath)
+    if (!thumb) return null
+    const thumbFull = toNativeFullPath(thumb.path)
+    const originFull = toNativeFullPath(localPath)
+    const [thumbBytes, originBytes] = await Promise.all([
+      nativeFileSize(thumbFull),
+      nativeFileSize(originFull),
+    ])
+    if (originBytes > 0 && thumbBytes >= originBytes * 0.85) return null
+    const uploaded = await uploadFileFromPath(thumbFull, `thumb_${Date.now()}.jpg`, 'image/jpeg')
+    return { url: uploaded.url, width: thumb.width, height: thumb.height }
+  } catch (e) {
+    console.warn('[image] 缩略图上传失败，列表继续用原图', (e as Error)?.message || e)
+    return null
+  }
+}
+
+function h5ThumbnailFile(file: File): Promise<{ file: File; width: number; height: number } | null> {
+  if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') {
+    return Promise.resolve(null)
+  }
+  return createImageBitmap(file)
+    .then(
+      (bitmap) =>
+        new Promise<{ file: File; width: number; height: number } | null>((resolve) => {
+          const scale = Math.min(1, CHAT_THUMB_EDGE / Math.max(bitmap.width, 1))
+          const width = Math.max(1, Math.round(bitmap.width * scale))
+          const height = Math.max(1, Math.round(bitmap.height * scale))
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            bitmap.close?.()
+            resolve(null)
+            return
+          }
+          ctx.drawImage(bitmap, 0, 0, width, height)
+          bitmap.close?.()
+          canvas.toBlob(
+            (blob) => {
+              if (!blob || blob.size >= file.size * 0.85) {
+                resolve(null)
+                return
+              }
+              resolve({
+                file: new File([blob], `thumb_${Date.now()}.jpg`, { type: 'image/jpeg' }),
+                width,
+                height,
+              })
+            },
+            'image/jpeg',
+            0.7,
+          )
+        }),
+    )
+    .catch(() => null)
+}
+
+/** 把宽高和独立缩略图写进待发消息。原图字段保持不动，SDK 仍按本地路径上传原图。 */
+function stampOutgoingPicture(
+  message: MessageItem,
+  size: { width: number; height: number },
+  thumb: ChatThumb | null,
+): MessageItem {
+  const elem = message.pictureElem
+  if (!elem?.sourcePicture || !elem.bigPicture || !elem.snapshotPicture) return message
+  const sized = <T extends { width?: number; height?: number }>(pic: T): T => ({
+    ...pic,
+    width: pic.width || size.width || 0,
+    height: pic.height || size.height || 0,
+  })
+  const snapshot = thumb?.url
+    ? {
+        ...elem.snapshotPicture,
+        uuid: elem.snapshotPicture.uuid || IMSDK.uuid(),
+        type: elem.snapshotPicture.type || 'image/jpeg',
+        size: elem.snapshotPicture.size || 0,
+        width: thumb.width || size.width || 0,
+        height: thumb.height || size.height || 0,
+        url: thumb.url,
+      }
+    : sized(elem.snapshotPicture)
+  return {
+    ...message,
+    pictureElem: {
+      ...elem,
+      sourcePicture: sized(elem.sourcePicture),
+      bigPicture: sized(elem.bigPicture),
+      snapshotPicture: snapshot,
+    },
+  }
+}
+
 /** App：FullPath 失败时压成 jpeg 再走 URL（华为 content URI / HEIC / 无后缀常见） */
-async function sendImageMessageViaUpload(target: IMTarget, filePath: string): Promise<MessageItem> {
-  const prepared = await prepareAppChatImagePath(filePath)
+async function sendImageMessageViaUpload(
+  target: IMTarget,
+  filePath: string,
+  preset?: { prepared?: boolean; thumb?: ChatThumb | null; size?: { width: number; height: number } },
+): Promise<MessageItem> {
+  const prepared = preset?.prepared ? filePath : await prepareAppChatImagePath(filePath)
   const fullPath = toNativeFullPath(prepared)
   const uploaded = await uploadFileFromPath(fullPath, `img_${Date.now()}.jpg`, 'image/jpeg')
-  const size = await imageSizeOf(prepared).catch(() => ({ width: 0, height: 0 }))
+  const size = preset?.size?.width ? preset.size : await imageSizeOf(prepared).catch(() => ({ width: 0, height: 0 }))
+  const thumb = preset?.thumb === undefined ? await uploadChatThumbnail(prepared) : preset.thumb
   const picture = {
     uuid: IMSDK.uuid(),
     type: 'image/jpeg',
     size: uploaded.size,
     url: uploaded.url,
-    ...size,
+    width: size.width,
+    height: size.height,
   }
+  const snapshot = thumb?.url
+    ? {
+        uuid: IMSDK.uuid(),
+        type: 'image/jpeg',
+        size: 0,
+        url: thumb.url,
+        width: thumb.width || size.width,
+        height: thumb.height || size.height,
+      }
+    : picture
   const message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
     sourcePath: uploaded.url,
     sourcePicture: picture,
     bigPicture: picture,
-    snapshotPicture: picture,
+    snapshotPicture: snapshot,
   })
-  return sendCreatedMessage(target, ensurePictureSourceUrl(message, uploaded.url), {
+  const drafted = stampOutgoingPicture(ensurePictureSourceUrl(message, uploaded.url), size, thumb)
+  return sendCreatedMessage(target, drafted, {
     alreadyUploaded: true,
   })
 }
 
 export async function sendImageMessage(target: IMTarget, filePath: string): Promise<MessageItem> {
   let message: MessageItem
-  if (isAppPlatform) {
+  if (isApp()) {
     // 先物化成可读本地文件，再 FullPath；华为 content:// 直接 FullPath 必挂
     const prepared = await prepareAppChatImagePath(filePath)
     const fullPath = toNativeFullPath(prepared)
+    const [thumb, size] = await Promise.all([
+      uploadChatThumbnail(prepared),
+      imageSizeOf(prepared).catch(() => ({ width: 0, height: 0 })),
+    ])
     try {
       message = await imCall<MessageItem>(IMMethods.CreateImageMessageFromFullPath, fullPath)
+      // 原图仍由 SDK 上传；缩略图已经是 http 地址，发送时不应再被当成本地文件重传
+      message = stampOutgoingPicture(message, size, thumb)
       return sendCreatedMessage(target, message, { alreadyUploaded: false })
     } catch (e) {
       console.warn('[image] FullPath 失败，改走压缩上传', (e as Error)?.message || e)
-      return sendImageMessageViaUpload(target, fullPath || prepared || filePath)
+      return sendImageMessageViaUpload(target, prepared, { prepared: true, thumb, size })
     }
   }
-  // H5：HEIC / 超大图先压 jpeg，避免 iPhone 粘贴/相册偶发发不出
+  // H5：HEIC / WebP / 超大图先压 jpeg；WebP 原样上传易触发 OSS Content-Type 签名不一致（表现像跨域）
   const { prepareImageFile } = await import('@/utils/file-upload')
   let file = await pathToFile(filePath)
   try {
@@ -1465,23 +1964,49 @@ export async function sendImageMessage(target: IMTarget, filePath: string): Prom
   } catch (e) {
     console.warn('[image] H5 预处理失败，尝试原图', (e as Error)?.message || e)
   }
-  const url = await uploadFile(file)
-  const size = await imageSizeOf(filePath)
+  if (/webp/i.test(file.type) || /\.webp$/i.test(file.name)) {
+    throw new Error('暂不支持直接发送 WebP，请换一张图片')
+  }
+  const [url, size, thumbFile] = await Promise.all([
+    uploadFile(file),
+    imageSizeOf(filePath),
+    h5ThumbnailFile(file),
+  ])
+  let thumb: ChatThumb | null = null
+  if (thumbFile) {
+    try {
+      thumb = { url: await uploadFile(thumbFile.file), width: thumbFile.width, height: thumbFile.height }
+    } catch (e) {
+      console.warn('[image] H5 缩略图上传失败，列表继续用原图', (e as Error)?.message || e)
+    }
+  }
   const picture = {
     uuid: IMSDK.uuid(),
     type: file.type || 'image/jpeg',
     size: file.size,
     url,
-    ...size,
+    width: size.width,
+    height: size.height,
   }
+  const snapshot = thumb?.url
+    ? {
+        uuid: IMSDK.uuid(),
+        type: 'image/jpeg',
+        size: thumbFile?.file.size || 0,
+        url: thumb.url,
+        width: thumb.width || size.width,
+        height: thumb.height || size.height,
+      }
+    : picture
   message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
     sourcePath: url,
     sourcePicture: picture,
     bigPicture: picture,
-    snapshotPicture: picture,
+    snapshotPicture: snapshot,
   })
-  // Create 回包偶发缺 pictureElem.url，气泡会空白；强制写回已上传地址
-  return sendCreatedMessage(target, ensurePictureSourceUrl(message, url), { alreadyUploaded: true })
+  // Create 回包偶发缺 pictureElem.url，气泡会空白；强制写回已上传地址，并保留独立缩略图
+  const drafted = stampOutgoingPicture(ensurePictureSourceUrl(message, url), size, thumb)
+  return sendCreatedMessage(target, drafted, { alreadyUploaded: true })
 }
 
 function videoDurationSeconds(duration: number): number {
@@ -1827,7 +2352,7 @@ export async function sendVideoMessage(
   snapshotPath = '',
 ): Promise<MessageItem> {
   const seconds = videoDurationSeconds(duration)
-  if (isAppPlatform) {
+  if (isApp()) {
     // 原生取帧插件对 chooseVideo 的原始临时路径兼容性最好，保存后的 _doc 路径作为后备。
     let snap = await snapshotOfVideo(filePath, snapshotPath, seconds)
     const saved = await persistTempMedia(filePath)
@@ -1941,7 +2466,7 @@ export async function sendVoiceMessage(
   duration: number,
 ): Promise<MessageItem> {
   const seconds = Math.max(1, Math.round(duration > 120 ? duration / 1000 : duration))
-  if (isAppPlatform) {
+  if (isApp()) {
     const soundPath = toNativeFullPath(filePath)
     let message: MessageItem
     try {
@@ -2041,7 +2566,7 @@ function nativeFileSize(fullPath: string): Promise<number> {
 function plusFileSize(fullPath: string): Promise<number> {
   return new Promise((resolve) => {
     try {
-      const io = plus?.io as { resolveLocalFileSystemURL?: Function } | undefined
+      const io = plus?.io as { resolveLocalFileSystemURL?: PlusResolveLocalFile } | undefined
       if (!io?.resolveLocalFileSystemURL) {
         resolve(0)
         return
@@ -2105,9 +2630,12 @@ async function dataUrlToFile(dataUrl: string, fileName: string): Promise<File> {
 }
 
 async function uploadFile(file: File): Promise<string> {
+  // 空 type 时浏览器/SDK 常补成 octet-stream 或按扩展名猜 MIME，与 OSS 预签名不一致会 403（表现像跨域）
+  const contentType =
+    (file.type || '').trim() || fileContentType(file.name) || 'application/octet-stream'
   const res = await imCall<{ url: string }>(IMMethods.UploadFile, {
     name: file.name,
-    contentType: file.type,
+    contentType,
     uuid: IMSDK.uuid(),
     file,
   })
@@ -2125,7 +2653,7 @@ export async function sendFileMessage(
   fileName: string,
 ): Promise<MessageItem> {
   const safeName = fileName.trim() || '文件'
-  if (isAppPlatform) {
+  if (isApp()) {
     const fullPath = toNativeFullPath(filePath)
     try {
       return await sendUploadedFileMessage(target, fullPath, safeName)
@@ -2237,7 +2765,7 @@ export async function sendImageUrlMessage(target: IMTarget, url: string): Promis
 export async function chooseLocalFiles(
   count = 1,
 ): Promise<Array<{ path: string; name: string }>> {
-  if (isAppPlatform) {
+  if (isApp()) {
     const path = await IMSDK.pickFile()
     if (!path) throw new Error('未选择文件')
     const idx = path.lastIndexOf('/')
@@ -2347,10 +2875,11 @@ function conversationBoolField(item: ConversationItem, camel: string, pascal: st
 
 export function toConversation(item: ConversationItem): Conversation {
   const raw = item as ConversationItem & Record<string, unknown>
+  const conversationID = String(raw.conversationID ?? raw.ConversationID ?? '')
   const conversationType = Number(raw.conversationType ?? raw.ConversationType ?? SessionType.Single)
   const isGroup = conversationType !== SessionType.Single
   const groupId =
-    String(raw.groupID ?? raw.GroupID ?? '') || groupIdFromConversationId(item.conversationID)
+    String(raw.groupID ?? raw.GroupID ?? '') || groupIdFromConversationId(conversationID)
   const remark = isGroup ? groupRemarkFromEx(conversationEx(item)) : ''
   const unreadCount = conversationNumericField(item, 'unreadCount', 'UnreadCount')
   const groupAtType = conversationNumericField(item, 'groupAtType', 'GroupAtType')
@@ -2360,7 +2889,8 @@ export function toConversation(item: ConversationItem): Conversation {
   const latestMsg = (raw.latestMsg ?? raw.LatestMsg) as ConversationItem['latestMsg']
   const latestMsgSendTime = Number(raw.latestMsgSendTime ?? raw.LatestMsgSendTime ?? 0)
   const recvMsgOpt = conversationNumericField(item, 'recvMsgOpt', 'RecvMsgOpt')
-  const conversationID = String(raw.conversationID ?? raw.ConversationID ?? item.conversationID)
+  const latest = coerceMessage(latestMsg)
+  const latestRemoved = groupRetention.removed(conversationID, latest)
   let userID = String(raw.userID ?? raw.UserID ?? '')
   // App 原生偶发不带 userID，备注覆盖和发消息都依赖 peer，从 si_ 会话 id 补回来
   if (!isGroup && !userID) {
@@ -2373,16 +2903,18 @@ export function toConversation(item: ConversationItem): Conversation {
     avatar:
       faceURL ||
       (isGroup ? APP_CONFIG.defaultGroupAvatarUrl : APP_CONFIG.defaultAvatarUrl),
-    lastMessage: summarize(latestMsg),
-    lastMessageAt: toISOTime(latestMsgSendTime),
-    unreadCount,
+    lastMessage: latestRemoved ? '' : summarize(latestMsg),
+    lastMessageAt: latestRemoved ? '' : toISOTime(latestMsgSendTime),
+    lastMessageSeq: retentionSeq(latest) || undefined,
+    lastMessageId: latest?.clientMsgID || undefined,
+    unreadCount: latestRemoved ? 0 : groupRetention.unread(conversationID, latest, unreadCount),
     pinned: conversationBoolField(item, 'isPinned', 'IsPinned'),
     pinnedMessage: pinnedMessageFromEx(conversationEx(item)),
     recvMsgOpt,
     peerUserId: userID || undefined,
     groupId: groupId || undefined,
-    groupAtType,
-    highlightTags: highlightTagsOf(atType, false),
+    groupAtType: latestRemoved ? 0 : groupAtType,
+    highlightTags: latestRemoved ? [] : highlightTagsOf(atType, false),
   }
 }
 
@@ -2408,19 +2940,25 @@ export function toChatMessage(rawItem: MessageItem): ChatMessage {
       content = JSON.stringify(invite)
     }
   }
+  const fromIMAdmin = item.sendID === 'imAdmin' || item.senderNickname === 'imAdmin'
   // 历史：建群欢迎语曾由 imAdmin 以文本气泡下发；归一为系统提示，避免假用户头像
-  if (
-    type === 'text' &&
-    content.trim() === GROUP_CREATED_WELCOME_TEXT &&
-    (item.sendID === 'imAdmin' || item.senderNickname === 'imAdmin')
-  ) {
+  if (type === 'text' && fromIMAdmin && content.trim() === GROUP_CREATED_WELCOME_TEXT) {
     type = 'system'
   }
-  // 图片：除首选的原图地址外，把其余候选（缩略图等）一并带上，
-  // 原图对象缺失/上传失败时气泡可以降级重试，而不是留一个空白框。
+  const isPurgeTip = type === 'text' && fromIMAdmin && isGroupPurgeTipText(content)
+  if (isPurgeTip) type = 'system'
+  // 图片：气泡优先缩略图。原图放进 fallback / sourceUrl，加载失败或点预览时再用。
+  const imageMeta = type === 'image' ? pictureMetaOf(item) : null
+  const videoSize = type === 'video' ? videoPosterSizeOf(item) : null
+  const displayContent = imageMeta?.displayUrl || content
   const imageFallbacks =
     type === 'image'
-      ? pictureRemoteCandidates(item).filter((u) => u !== content)
+      ? pictureRemoteCandidates(item)
+          .map((url) => listThumbnailUrl(url))
+          .filter(
+            (url, index, all) =>
+              url !== displayContent && all.indexOf(url) === index,
+          )
       : []
   return {
     id: item.clientMsgID,
@@ -2429,10 +2967,17 @@ export function toChatMessage(rawItem: MessageItem): ChatMessage {
     senderAvatar: item.senderFaceUrl || undefined,
     senderNickname: item.senderNickname || undefined,
     type,
-    content,
+    content: displayContent,
     imageFallbacks: imageFallbacks.length ? imageFallbacks : undefined,
+    thumbUrl: imageMeta?.thumbUrl,
+    sourceUrl: imageMeta?.sourceUrl,
+    width: imageMeta?.width || videoSize?.width,
+    height: imageMeta?.height || videoSize?.height,
     createdAt: toISOTime(item.sendTime),
-    systemEventKey: imNotificationEventKey(item) || undefined,
+    systemEventKey:
+      imNotificationEventKey(item) ||
+      (isPurgeTip ? `group-purge:${item.groupID || ''}:${item.clientMsgID}` : '') ||
+      undefined,
     notificationKind: notificationKind || undefined,
     quote: quotePreviewOf(item),
     hasRead: messageIsRead(item),
@@ -2679,6 +3224,64 @@ function pictureUrlOf(item: MessageItem): string {
   return local || candidates[0] || ''
 }
 
+function readPictureBox(picture: unknown): { url: string; width: number; height: number } {
+  if (!picture || typeof picture !== 'object') return { url: '', width: 0, height: 0 }
+  const obj = picture as Record<string, unknown>
+  const width = Number(obj.width ?? obj.Width ?? 0)
+  const height = Number(obj.height ?? obj.Height ?? 0)
+  return {
+    url: pickString(obj, ['url', 'Url', 'URL']),
+    width: Number.isFinite(width) ? width : 0,
+    height: Number.isFinite(height) ? height : 0,
+  }
+}
+
+/**
+ * 列表优先用和原图同比例的缩略图。点开走 1280 中图，保存和转发仍用原图。
+ * 旧消息三个地址相同时不假装有缩略图，但宽高仍然带上，避免气泡再下载一次只为量尺寸。
+ */
+function pictureMetaOf(item: MessageItem): {
+  displayUrl: string
+  thumbUrl?: string
+  sourceUrl?: string
+  width?: number
+  height?: number
+} {
+  const elem = item.pictureElem
+  const snap = readPictureBox(elem?.snapshotPicture)
+  const source = readPictureBox(elem?.sourcePicture)
+  const big = readPictureBox(elem?.bigPicture)
+  const sourceUrl = source.url || big.url
+  const distinctThumb = snap.url && snap.url !== sourceUrl ? snap.url : ''
+  const sourceBox = source.width > 0 && source.height > 0 ? source : big
+  // 只信和原图同一比例的缩略图。安卓/鸿蒙只压宽度时缩略图会被拉扁，这种直接显示原图。
+  const thumbTrustworthy =
+    !!distinctThumb &&
+    snap.width > 0 &&
+    snap.height > 0 &&
+    (sourceBox.width <= 0 || sourceBox.height <= 0 || sameImageAspect(snap, sourceBox))
+  const original = sourceUrl || pictureUrlOf(item)
+  // 旧消息缩略图和原图是同一个地址。列表改要 OpenIM 的等比小图，点开仍用原图。
+  const displayUrl = thumbTrustworthy ? distinctThumb : listThumbnailUrl(original)
+  const shown = thumbTrustworthy ? snap : sourceBox
+  const box = shown.width > 0 && shown.height > 0 ? shown : null
+  return {
+    displayUrl,
+    thumbUrl: displayUrl || undefined,
+    sourceUrl: original && original !== displayUrl ? original : undefined,
+    width: box ? box.width : undefined,
+    height: box ? box.height : undefined,
+  }
+}
+
+function videoPosterSizeOf(item: MessageItem): { width?: number; height?: number } {
+  const raw = item.videoElem as { snapshotWidth?: number; snapshotHeight?: number } | undefined
+  const width = Number(raw?.snapshotWidth) || 0
+  const height = Number(raw?.snapshotHeight) || 0
+  if (width > 0 && height > 0) return { width, height }
+  return {}
+}
+
 function quotePreviewOf(item: MessageItem): ChatMessage['quote'] {
   const quoted = quotedMessageOf(item)
   if (!quoted) return undefined
@@ -2706,11 +3309,12 @@ function quotedMessageOf(item: MessageItem): MessageItem | undefined {
 function normalizeQuoteElem(
   item: MessageItem,
 ): { text?: string; quoteMessage?: MessageItem } | undefined {
-  let raw: unknown = (item as { quoteElem?: unknown }).quoteElem
+  const bag = item as MessageItem & Record<string, unknown>
+  let raw: unknown = bag.quoteElem ?? bag.QuoteElem
   if (raw == null && typeof item.content === 'string' && item.content.startsWith('{')) {
     try {
-      const parsed = JSON.parse(item.content) as { quoteElem?: unknown }
-      raw = parsed.quoteElem
+      const parsed = JSON.parse(item.content) as Record<string, unknown>
+      raw = parsed.quoteElem ?? parsed.QuoteElem
     } catch {
       /* content 不是带 quoteElem 的 JSON */
     }
@@ -2791,99 +3395,132 @@ function fileDisplayNameOf(item: MessageItem, url: string): string {
   return seg || '文件'
 }
 
-function extractContent(item: MessageItem): string {
+/** App 原生桥偶发把 *Elem 编成 JSON 字符串，或只用 PascalCase */
+function textLikeElemOf(
+  item: MessageItem,
+  camel: 'textElem' | 'atTextElem',
+  pascal: 'TextElem' | 'AtTextElem',
+): Record<string, unknown> | undefined {
   const raw = item as MessageItem & Record<string, unknown>
-  const textElem = (raw.textElem ?? raw.TextElem) as
-    | { content?: string; Content?: string }
+  let value: unknown = raw[camel] ?? raw[pascal]
+  if (typeof value === 'string' && value.trim().startsWith('{')) {
+    try {
+      value = JSON.parse(value) as unknown
+    } catch {
+      return undefined
+    }
+  }
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+}
+
+function extractTextContent(item: MessageItem): string {
+  const textElem = textLikeElemOf(item, 'textElem', 'TextElem')
+  return (
+    pickString(textElem || {}, ['content', 'Content']) ||
+    item.textElem?.content ||
+    jsonContentField(item.content, 'content')
+  )
+}
+
+function extractAtTextContent(item: MessageItem): string {
+  const atElem = textLikeElemOf(item, 'atTextElem', 'AtTextElem')
+  return (
+    pickString(atElem || {}, ['text', 'Text']) ||
+    item.atTextElem?.text ||
+    jsonContentField(item.content, 'text')
+  )
+}
+
+function extractQuoteContent(item: MessageItem): string {
+  const elem = normalizeQuoteElem(item)
+  return elem?.text || item.quoteElem?.text || jsonContentField(item.content, 'text')
+}
+
+function extractVoiceContent(item: MessageItem): string {
+  const meta = soundMetaOf(item)
+  return JSON.stringify({ path: meta.path, duration: meta.duration })
+}
+
+function extractFileContent(item: MessageItem): string {
+  const url = fileSourceUrlOf(item)
+  const fileName = fileDisplayNameOf(item, url)
+  return url ? JSON.stringify({ url, fileName }) : fileName
+}
+
+function extractVideoContent(item: MessageItem): string {
+  const merged = parseVideoMeta(item)
+  const fromJson = parseVideoMeta(item.content)
+  // 气泡只保留可跨端访问的远程封面；发送端本地 snapshotPath 在接收端/App 历史里是死链，
+  // 写进 content 会让 H5 走截帧、App 却去加载坏图，表现为「H5 有封面、App 没有」。
+  const snap = preferRemoteMediaUrl(merged.snapshotUrl, fromJson.snapshotUrl)
+  return JSON.stringify({
+    url: preferRemoteMediaUrl(merged.url, fromJson.url),
+    snapshotUrl: isRemoteMediaUrl(snap) ? snap : '',
+    duration: merged.duration || fromJson.duration,
+  })
+}
+
+/** 名片 content：{userId, nickname, avatar}；业务 ID 优先读 ex，旧消息再从 OpenIM userID 反推 */
+function extractCardContent(item: MessageItem): string {
+  const card = item.cardElem
+  let userId = ''
+  try {
+    const ex = card?.ex ? (JSON.parse(card.ex) as { businessUserId?: string }) : null
+    userId = ex?.businessUserId || ''
+  } catch {
+    /* ex 不是 JSON 时走反推 */
+  }
+  if (!userId) userId = businessUserIdFromIM(card?.userID || '')
+  return JSON.stringify({
+    userId,
+    nickname: card?.nickname || '',
+    avatar: card?.faceURL || '',
+  })
+}
+
+function extractCustomContent(item: MessageItem): string {
+  const invite = parseGroupInvitePayload(customMessageDataOf(item))
+  if (invite) return JSON.stringify(invite)
+  const raw = item as MessageItem & Record<string, unknown>
+  const elem = (raw.customElem ?? raw.CustomElem) as
+    | { description?: string; Description?: string }
     | undefined
-  const atElem = (raw.atTextElem ?? raw.AtTextElem) as
-    | { text?: string; Text?: string }
-    | undefined
+  const desc =
+    (typeof elem?.description === 'string' && elem.description) ||
+    (typeof elem?.Description === 'string' && elem.Description) ||
+    jsonContentField(item.content, 'description') ||
+    ''
+  return desc || '[自定义消息]'
+}
+
+function extractFallbackContent(item: MessageItem): string {
+  // App 偶发 contentType 丢失，但 content 已是图片 URL
+  if (typeof item.content === 'string' && looksLikeImageUrl(item.content)) return item.content
+  return jsonPictureUrl(item.content) || formatIMNotification(item, resolveNoticeDisplayName)
+}
+
+function extractContent(item: MessageItem): string {
   switch (Number(item.contentType)) {
     case MessageType.TextMessage:
-      return (
-        textElem?.content ||
-        textElem?.Content ||
-        item.textElem?.content ||
-        jsonContentField(item.content, 'content')
-      )
+      return extractTextContent(item)
     case MessageType.AtTextMessage:
-      return (
-        atElem?.text ||
-        atElem?.Text ||
-        item.atTextElem?.text ||
-        jsonContentField(item.content, 'text')
-      )
-    case MessageType.QuoteMessage: {
-      const elem = normalizeQuoteElem(item)
-      return elem?.text || item.quoteElem?.text || jsonContentField(item.content, 'text')
-    }
+      return extractAtTextContent(item)
+    case MessageType.QuoteMessage:
+      return extractQuoteContent(item)
     case MessageType.PictureMessage:
       return pictureUrlOf(item)
-    case MessageType.VoiceMessage: {
-      const meta = soundMetaOf(item)
-      return JSON.stringify({
-        path: meta.path,
-        duration: meta.duration,
-      })
-    }
-    case MessageType.FileMessage: {
-      const url = fileSourceUrlOf(item)
-      const fileName = fileDisplayNameOf(item, url)
-      return url ? JSON.stringify({ url, fileName }) : fileName
-    }
-    case MessageType.VideoMessage: {
-      const merged = parseVideoMeta(item)
-      const fromJson = parseVideoMeta(item.content)
-      // 气泡只保留可跨端访问的远程封面；发送端本地 snapshotPath 在接收端/App 历史里是死链，
-      // 写进 content 会让 H5 走截帧、App 却去加载坏图，表现为「H5 有封面、App 没有」。
-      const snap = preferRemoteMediaUrl(merged.snapshotUrl, fromJson.snapshotUrl)
-      return JSON.stringify({
-        url: preferRemoteMediaUrl(merged.url, fromJson.url),
-        snapshotUrl: isRemoteMediaUrl(snap) ? snap : '',
-        duration: merged.duration || fromJson.duration,
-      })
-    }
-    case MessageType.CardMessage: {
-      // 名片：content 统一存 {userId, nickname, avatar}，userId 为业务 UUID。
-      // 发送时把业务 ID 冗余进 ex；旧消息没有 ex 则从 OpenIM userID 反推。
-      const card = item.cardElem
-      let userId = ''
-      try {
-        const ex = card?.ex ? (JSON.parse(card.ex) as { businessUserId?: string }) : null
-        userId = ex?.businessUserId || ''
-      } catch {
-        /* ex 不是 JSON 时走反推 */
-      }
-      if (!userId) userId = businessUserIdFromIM(card?.userID || '')
-      return JSON.stringify({
-        userId,
-        nickname: card?.nickname || '',
-        avatar: card?.faceURL || '',
-      })
-    }
-    case MessageType.CustomMessage: {
-      const dataStr = customMessageDataOf(item)
-      const invite = parseGroupInvitePayload(dataStr)
-      if (invite) return JSON.stringify(invite)
-      const raw = item as MessageItem & Record<string, unknown>
-      const elem = (raw.customElem ?? raw.CustomElem) as
-        | { description?: string; Description?: string }
-        | undefined
-      const desc =
-        (typeof elem?.description === 'string' && elem.description) ||
-        (typeof elem?.Description === 'string' && elem.Description) ||
-        jsonContentField(item.content, 'description') ||
-        ''
-      return desc || '[自定义消息]'
-    }
-    default: {
-      // App 偶发 contentType 丢失，但 content 已是图片 URL
-      if (typeof item.content === 'string' && looksLikeImageUrl(item.content)) return item.content
-      const pictureUrl = jsonPictureUrl(item.content)
-      if (pictureUrl) return pictureUrl
-      return formatIMNotification(item, resolveNoticeDisplayName)
-    }
+    case MessageType.VoiceMessage:
+      return extractVoiceContent(item)
+    case MessageType.FileMessage:
+      return extractFileContent(item)
+    case MessageType.VideoMessage:
+      return extractVideoContent(item)
+    case MessageType.CardMessage:
+      return extractCardContent(item)
+    case MessageType.CustomMessage:
+      return extractCustomContent(item)
+    default:
+      return extractFallbackContent(item)
   }
 }
 
@@ -2959,8 +3596,19 @@ export interface LocalMessageSearchHit {
 }
 
 /**
+ * 业务侧统一用从 1 开始的页码；转成各端 SDK 约定。
+ * Android 原生文档首页从 0；iOS / H5 WASM 从 1。传错首页会整页空，表现为「有时搜不到」。
+ */
+function toSdkSearchPageIndex(oneBasedPage: number): number {
+  const page = Number.isFinite(oneBasedPage) && oneBasedPage > 0 ? Math.trunc(oneBasedPage) : 1
+  if (isApp() && isAndroid()) return page - 1
+  return page
+}
+
+/**
  * 搜本机已同步的聊天记录。conversationID 空 = 全局搜所有会话。
  * App 原生桥结果字段可能是 PascalCase，这里统一归一。
+ * 本地索引查询本身很快，不要在这里 waitForSync，否则同步事件丢失时会空等数秒。
  */
 export async function searchLocalMessages(params: {
   keyword: string
@@ -2970,6 +3618,7 @@ export async function searchLocalMessages(params: {
 }): Promise<LocalMessageSearchHit[]> {
   const keyword = params.keyword.trim()
   if (!keyword) return []
+  const oneBasedPage = params.pageIndex ?? 1
   const payload = {
     conversationID: params.conversationID || '',
     keywordList: [keyword],
@@ -2977,21 +3626,99 @@ export async function searchLocalMessages(params: {
     senderUserIDList: [] as string[],
     // App：空列表才等于全部类型，指定文本类型时群消息对不上，搜索会一直空。
     // H5 WASM：空列表等于不搜任何类型，必须显式带上文本 / @ / 引用，否则「12」这种纯数字也没有结果。
-    messageTypeList: isAppPlatform
+    messageTypeList: isApp()
       ? ([] as number[])
       : [MessageType.TextMessage, MessageType.AtTextMessage, MessageType.QuoteMessage],
     searchTimePosition: 0,
     searchTimePeriod: 0,
-    pageIndex: params.pageIndex ?? 1,
+    pageIndex: toSdkSearchPageIndex(oneBasedPage),
     count: params.count ?? 100,
   }
   try {
     const res = await imCall<unknown>(IMMethods.SearchLocalMessages, payload)
-    return normalizeLocalMessageSearchResult(res)
+    const hits = normalizeLocalMessageSearchResult(res)
+    const ids = hits.map((hit) => hit.conversationID)
+    // 保留状态未加载时必须先同步，否则搜索结果会短暂暴露已过期消息。
+    // 私聊不会触发网络请求；群聊只在本地状态超过刷新周期时请求一次。
+    if (ids.length) await groupRetention.sync(ids)
+    return hits.flatMap((hit) => {
+      const messages = groupRetention.filter(hit.conversationID, hit.messages)
+      if (!messages.length) return []
+      return [{ ...hit, messages, messageCount: messages.length, clientMsgID: messages[0].clientMsgID,
+        preview: messageSearchPreview(messages[0]) }]
+    })
   } catch {
     // H5 / 旧基座偶发无此方法：回退为空，调用方仍可用标题/摘要过滤
     return []
   }
+}
+
+/** 对标微信：进搜索页后台预热本地库；搜索本身不阻塞等预热 */
+const localHistoryWarm = new Map<string, Promise<MessageItem[]>>()
+const localHistoryReady = new Map<string, MessageItem[]>()
+/** 上次预热已拉到会话尽头（条数 < 目标），避免短会话反复重拉 */
+const localHistoryExhausted = new Set<string>()
+
+/**
+ * 与群可见保留量对齐（服务端 GroupRetentionCount≈3000）。
+ * 曾经默认只预热 500 条：活跃群大约一两小时，客户就会反馈「早的搜不到」。
+ */
+const SEARCH_HISTORY_CAP = 3000
+/** 首屏 / 每一屏期望命中数：先出最近的，其余靠上滑加载更多 */
+const SEARCH_RESULT_PAGE_SIZE = 30
+/** 每次加载更多最多再扫多少条历史（按消息条数，不是命中数） */
+const SEARCH_HISTORY_SCAN_BATCH = 250
+
+/**
+ * 把指定会话历史拉进本地库（后台用）。默认拉满保留上限，供本地索引与补扫。
+ * 已有缓存且条数够用 / 已确认拉尽则直接复用；否则加深，避免卡在旧的 500 条上限。
+ */
+export function ensureLocalConversationHistory(
+  conversationID: string,
+  maxCount = SEARCH_HISTORY_CAP,
+): Promise<MessageItem[]> {
+  if (!conversationID) return Promise.resolve([])
+  const target = Math.max(1, Math.trunc(maxCount) || SEARCH_HISTORY_CAP)
+  const cached = localHistoryReady.get(conversationID)
+  if (cached && (cached.length >= target || localHistoryExhausted.has(conversationID))) {
+    return Promise.resolve(cached)
+  }
+  const existing = localHistoryWarm.get(conversationID)
+  if (existing) return existing
+  const task = (async () => {
+    // 最多等 800ms：有同步就蹭一下，没有也立刻拉本地/历史，避免搜索链路空等 8 秒
+    await waitForSync(800)
+    try {
+      return await collectHistoryMessages(conversationID, target)
+    } catch {
+      return collectHistoryMessages(conversationID, target).catch(() => [] as MessageItem[])
+    }
+  })()
+  localHistoryWarm.set(conversationID, task)
+  void task.then(
+    (messages) => {
+      localHistoryWarm.delete(conversationID)
+      if (messages.length < target) localHistoryExhausted.add(conversationID)
+      else localHistoryExhausted.delete(conversationID)
+      if (messages.length) {
+        localHistoryReady.set(conversationID, messages)
+        setTimeout(() => {
+          if (localHistoryReady.get(conversationID) === messages) {
+            localHistoryReady.delete(conversationID)
+            localHistoryExhausted.delete(conversationID)
+          }
+        }, 60_000)
+      }
+    },
+    () => {
+      localHistoryWarm.delete(conversationID)
+    },
+  )
+  return task
+}
+
+function peekLocalConversationHistory(conversationID: string): MessageItem[] {
+  return localHistoryReady.get(conversationID) || []
 }
 
 function normalizeLocalMessageSearchResult(res: unknown): LocalMessageSearchHit[] {
@@ -3035,53 +3762,249 @@ function searchableTextOf(item: MessageItem): string {
   return plainSearchText(item.content)
 }
 
+function matchesSearchKeyword(item: MessageItem, keyLower: string): boolean {
+  const text = searchableTextOf(item)
+  return !!text && text.toLowerCase().includes(keyLower)
+}
+
+/** SDK 已按关键词命中；App 偶发抽不出正文时仍保留，避免二次过滤洗成空 */
+function acceptSdkSearchHit(item: MessageItem, keyLower: string): boolean {
+  const text = searchableTextOf(item)
+  return !text || text.toLowerCase().includes(keyLower)
+}
+
+/** 会话内关键词搜索游标：首屏 → 上滑加载更多 */
+export interface ConversationMessageSearchCursor {
+  sdkPage: number
+  sdkDone: boolean
+  historyStartId: string
+  historyDone: boolean
+  seenIds: string[]
+  /** 本页扫到但超出 limit 的命中，留给下一屏，避免翻页漏结果 */
+  pending: MessageItem[]
+}
+
+export interface ConversationMessageSearchPage {
+  messages: MessageItem[]
+  cursor: ConversationMessageSearchCursor
+  hasMore: boolean
+}
+
+function emptySearchCursor(): ConversationMessageSearchCursor {
+  return {
+    sdkPage: 1,
+    sdkDone: false,
+    historyStartId: '',
+    historyDone: false,
+    seenIds: [],
+    pending: [],
+  }
+}
+
 /**
- * 指定会话内搜出全部命中（新→旧），对齐「每条消息一行」。
- * SDK 本地索引经常只回最新一条、或漏掉未建索引的消息，所以再按历史分页补扫。
+ * 对标微信：先出最近命中（本地索引，毫秒级），上滑再向更早历史翻页补扫。
+ * 活跃群本地索引往往只有近几小时；不翻历史就会表现为「早的搜不到」。
  */
-export async function searchConversationMessages(
-  conversationID: string,
-  keyword: string,
-): Promise<MessageItem[]> {
-  const key = keyword.trim().toLowerCase()
-  if (!conversationID || !key) return []
-  const byId = new Map<string, MessageItem>()
-  const remember = (item: MessageItem) => {
-    if (item?.clientMsgID) byId.set(item.clientMsgID, item)
+export async function searchConversationMessagesPage(params: {
+  conversationID: string
+  keyword: string
+  cursor?: ConversationMessageSearchCursor | null
+  limit?: number
+  /** 本轮最多扫多少条历史；会话列表搜索宜小，避免「加载更多」卡住 */
+  historyScanBatch?: number
+}): Promise<ConversationMessageSearchPage> {
+  const conversationID = params.conversationID
+  const rawKeyword = params.keyword.trim()
+  const key = rawKeyword.toLowerCase()
+  const limit =
+    Number.isFinite(params.limit) && (params.limit as number) > 0
+      ? Math.trunc(params.limit as number)
+      : SEARCH_RESULT_PAGE_SIZE
+  const historyScanBatch =
+    Number.isFinite(params.historyScanBatch) && (params.historyScanBatch as number) > 0
+      ? Math.trunc(params.historyScanBatch as number)
+      : SEARCH_HISTORY_SCAN_BATCH
+  const isFirstPage = !params.cursor
+  const cursor: ConversationMessageSearchCursor = params.cursor
+    ? {
+        sdkPage: params.cursor.sdkPage,
+        sdkDone: params.cursor.sdkDone,
+        historyStartId: params.cursor.historyStartId,
+        historyDone: params.cursor.historyDone,
+        seenIds: [...params.cursor.seenIds],
+        pending: [...params.cursor.pending],
+      }
+    : emptySearchCursor()
+
+  if (!conversationID || !key) {
+    return { messages: [], cursor, hasMore: false }
   }
 
-  const pageSize = 100
-  for (let page = 1; page <= 30; page++) {
+  // 后台拉满保留上限，不挡首屏；已预热的可立刻内存补扫
+  if (isFirstPage) void ensureLocalConversationHistory(conversationID, SEARCH_HISTORY_CAP)
+
+  const seen = new Set(cursor.seenIds)
+  const pending = cursor.pending.filter((item) => {
+    if (!item?.clientMsgID || seen.has(item.clientMsgID)) return false
+    seen.add(item.clientMsgID)
+    return true
+  })
+  const out: MessageItem[] = []
+
+  const takePending = () => {
+    while (out.length < limit && pending.length) {
+      out.push(pending.shift() as MessageItem)
+    }
+  }
+  takePending()
+
+  /** 命中先入队，再按 limit 吐出，避免一页内多余命中被游标跳过 */
+  const enqueue = (item: MessageItem, fromSdk: boolean) => {
+    if (!item?.clientMsgID || seen.has(item.clientMsgID)) return false
+    if (fromSdk ? !acceptSdkSearchHit(item, key) : !matchesSearchKeyword(item, key)) return false
+    seen.add(item.clientMsgID)
+    if (out.length < limit) out.push(item)
+    else pending.push(item)
+    return true
+  }
+
+  const sdkPageSize = 100
+  while (!cursor.sdkDone && out.length < limit && !pending.length) {
     const hits = await searchLocalMessages({
-      keyword,
+      keyword: rawKeyword,
       conversationID,
-      count: pageSize,
-      pageIndex: page,
+      count: sdkPageSize,
+      pageIndex: cursor.sdkPage,
     })
     const conv =
       hits.find((h) => h.conversationID === conversationID) ||
       (hits.length === 1 ? hits[0] : undefined)
     const batch = conv?.messages || []
-    if (!batch.length) break
-    const before = byId.size
-    for (const item of batch) {
-      const text = searchableTextOf(item)
-      if (text && text.toLowerCase().includes(key)) remember(item)
+    if (!batch.length) {
+      cursor.sdkDone = true
+      break
     }
-    if (byId.size === before) break
+    let added = 0
+    for (const item of batch) {
+      if (enqueue(item, true)) added += 1
+    }
+    cursor.sdkPage += 1
     const total = Number(conv?.messageCount || 0)
-    if (total > 0 && byId.size >= total) break
-    // 本页不满，但 SDK 报的命中数还没拿齐时继续翻页（有的端一页只回最新一条）
-    if (batch.length < pageSize && (total <= 0 || byId.size >= total)) break
+    if (total > 0 && seen.size >= total) cursor.sdkDone = true
+    else if (batch.length < sdkPageSize) cursor.sdkDone = true
+    else if (!added) cursor.sdkDone = true
+  }
+  takePending()
+
+  if (isFirstPage) {
+    for (const item of peekLocalConversationHistory(conversationID)) {
+      enqueue(item, false)
+    }
+    takePending()
+    // 索引空且预热还没好：最多再等 1.2s 补扫一次
+    if (!out.length && !pending.length) {
+      const warm = localHistoryWarm.get(conversationID)
+      if (warm) {
+        const history = await Promise.race([
+          warm,
+          new Promise<MessageItem[]>((resolve) => setTimeout(() => resolve([]), 1200)),
+        ])
+        for (const item of history) enqueue(item, false)
+        takePending()
+        if (!out.length && !pending.length && !cursor.sdkDone) {
+          cursor.sdkPage = 1
+          cursor.sdkDone = false
+          const hits = await searchLocalMessages({
+            keyword: rawKeyword,
+            conversationID,
+            count: sdkPageSize,
+            pageIndex: 1,
+          })
+          const conv =
+            hits.find((h) => h.conversationID === conversationID) ||
+            (hits.length === 1 ? hits[0] : undefined)
+          for (const item of conv?.messages || []) enqueue(item, true)
+          takePending()
+          cursor.sdkPage = 2
+          if (!(conv?.messages || []).length) cursor.sdkDone = true
+        }
+      }
+    }
   }
 
-  const history = await collectHistoryMessages(conversationID, 4000).catch(() => [] as MessageItem[])
-  for (const item of history) {
-    const text = searchableTextOf(item)
-    if (text && text.toLowerCase().includes(key)) remember(item)
+  // 首屏未凑满，或上滑加载更多：向更早历史扫关键词（会把消息拉进本地库）
+  const shouldScanHistory =
+    !cursor.historyDone &&
+    !pending.length &&
+    (!isFirstPage || out.length < limit)
+  if (shouldScanHistory) {
+    let scanned = 0
+    while (
+      !cursor.historyDone &&
+      out.length < limit &&
+      !pending.length &&
+      scanned < historyScanBatch
+    ) {
+      const { messageList, isEnd } = await getHistoryMessages(
+        conversationID,
+        50,
+        cursor.historyStartId,
+      )
+      if (!messageList.length) {
+        cursor.historyDone = true
+        break
+      }
+      const ordered = [...messageList].sort(
+        (a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0),
+      )
+      for (const item of ordered) enqueue(item, false)
+      takePending()
+      scanned += messageList.length
+      const next = oldestClientMsgID(messageList)
+      if (!next || next === cursor.historyStartId) {
+        cursor.historyDone = true
+        break
+      }
+      cursor.historyStartId = next
+      if (isEnd) {
+        cursor.historyDone = true
+        break
+      }
+    }
   }
 
-  return [...byId.values()].sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
+  out.sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
+  pending.sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
+  cursor.pending = pending
+  cursor.seenIds = [...seen]
+  // 本地索引耗尽后仍可能有更早历史；队列里还有待展示命中时也算还有更多
+  const hasMore = pending.length > 0 || !cursor.sdkDone || !cursor.historyDone
+  return { messages: out, cursor, hasMore }
+}
+
+/**
+ * 一次性取会话内命中（内部按页拉取）。页面展示请用 searchConversationMessagesPage。
+ */
+export async function searchConversationMessages(
+  conversationID: string,
+  keyword: string,
+): Promise<MessageItem[]> {
+  const all: MessageItem[] = []
+  let cursor: ConversationMessageSearchCursor | null = null
+  let hasMore = true
+  for (let i = 0; i < 40 && hasMore; i++) {
+    const page: ConversationMessageSearchPage = await searchConversationMessagesPage({
+      conversationID,
+      keyword,
+      cursor,
+      limit: SEARCH_RESULT_PAGE_SIZE,
+    })
+    all.push(...page.messages)
+    cursor = page.cursor
+    hasMore = page.hasMore
+    if (!page.messages.length && !hasMore) break
+  }
+  return all
 }
 
 function groupIdFromConversationId(conversationId: string): string {
@@ -3318,12 +4241,17 @@ export async function findLocalMessage(
   clientMsgID: string,
 ): Promise<MessageItem | null> {
   if (!conversationID || !clientMsgID) return null
+  await groupRetention.sync([conversationID])
   const tryCall = (params: unknown) => imCall<unknown>('findMessageList' as IMMethods, params)
+  const take = (res: unknown) => {
+    const item = parseFindMessageResult(res, clientMsgID)
+    return groupRetention.removed(conversationID, item) ? null : item
+  }
   try {
-    return parseFindMessageResult(await tryCall([{ conversationID, clientMsgIDList: [clientMsgID] }]), clientMsgID)
+    return take(await tryCall([{ conversationID, clientMsgIDList: [clientMsgID] }]))
   } catch {
     try {
-      return parseFindMessageResult(await tryCall({ conversationID, clientMsgIDList: [clientMsgID] }), clientMsgID)
+      return take(await tryCall({ conversationID, clientMsgIDList: [clientMsgID] }))
     } catch {
       return null
     }
@@ -3350,7 +4278,7 @@ export async function resolveMessageSeq(
   const immediate = take(cached)
   if (immediate) return immediate
 
-  const delays = isAppPlatform ? [0, 400, 1000] : [0]
+  const delays = isApp() ? [0, 400, 1000] : [0]
   for (const delay of delays) {
     if (delay) await sleep(delay)
     const found = take(await findLocalMessage(conversationID, clientMsgID))
@@ -3423,7 +4351,7 @@ export async function setConversationPin(conversationID: string, isPinned: boole
   try {
     await imCall('setConversation' as IMMethods, { conversationID, isPinned })
   } catch (first) {
-    if (!isAppPlatform) throw first
+    if (!isApp()) throw first
     await imCall('setConversation' as IMMethods, { conversationID, IsPinned: isPinned })
   }
 }
@@ -3612,7 +4540,7 @@ export async function resetConversationGroupAtType(conversationID: string): Prom
     conversationID,
     { conversationID, groupAtType: GroupAtType.AtNormal },
   ]
-  if (isAppPlatform) {
+  if (isApp()) {
     attempts.push({ conversationID, GroupAtType: GroupAtType.AtNormal })
   }
   for (const params of attempts) {
@@ -3623,7 +4551,7 @@ export async function resetConversationGroupAtType(conversationID: string): Prom
       /* 原生桥参数形态不一致，继续尝试 setConversation */
     }
   }
-  const setArgs = isAppPlatform
+  const setArgs = isApp()
     ? [
         { conversationID, groupAtType: GroupAtType.AtNormal },
         { conversationID, GroupAtType: GroupAtType.AtNormal },

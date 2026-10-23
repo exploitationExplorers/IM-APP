@@ -113,17 +113,26 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="检举原因" @back="goBack" />
+    <ImNavBar
+      title="检举原因"
+      @back="goBack"
+    />
 
     <view class="card">
-      <view class="card-title">检举原因</view>
+      <view class="card-title">
+        检举原因
+      </view>
       <view class="reason-box">
         <text>{{ reasonLabel }}</text>
       </view>
     </view>
 
     <view class="card">
-      <view class="card-title">违规描述<text class="required">*</text></view>
+      <view class="card-title">
+        违规描述<text class="required">
+          *
+        </text>
+      </view>
       <view class="desc-box">
         <textarea
           v-model="description"
@@ -132,24 +141,52 @@ async function onSubmit() {
           placeholder-class="placeholder"
           :maxlength="MAX_LEN"
         />
-        <text class="counter">{{ descLen }}/{{ MAX_LEN }}</text>
+        <text class="counter">
+          {{ descLen }}/{{ MAX_LEN }}
+        </text>
       </view>
     </view>
 
     <view class="card">
-      <view class="card-title">相关截图</view>
+      <view class="card-title">
+        相关截图
+      </view>
       <view class="images">
-        <view v-for="(img, i) in images" :key="`${i}-${img}`" class="thumb">
-          <image :src="img" class="thumb-img" mode="aspectFill" @click="previewImage(i)" />
-          <view class="thumb-del" @click.stop="removeImage(i)">×</view>
+        <view
+          v-for="(img, i) in images"
+          :key="`${i}-${img}`"
+          class="thumb"
+        >
+          <image
+            :src="img"
+            class="thumb-img"
+            mode="aspectFill"
+            @click="previewImage(i)"
+          />
+          <view
+            class="thumb-del"
+            @click.stop="removeImage(i)"
+          >
+            ×
+          </view>
         </view>
-        <view v-if="images.length < MAX_IMAGES" class="add" @click="addImages">
-          <text class="add-icon">+</text>
+        <view
+          v-if="images.length < MAX_IMAGES"
+          class="add"
+          @click="addImages"
+        >
+          <text class="add-icon">
+            +
+          </text>
         </view>
       </view>
     </view>
 
-    <view class="submit" :class="{ disabled: !canSubmit }" @click="onSubmit">
+    <view
+      class="submit"
+      :class="{ disabled: !canSubmit }"
+      @click="onSubmit"
+    >
       {{ submitting ? '送出中…' : '送出' }}
     </view>
   </view>

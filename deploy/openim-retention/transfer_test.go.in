@@ -1,0 +1,249 @@
+package controller
+
+import (
+	"context"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database/mgo"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
+	"github.com/openimsdk/protocol/constant"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+func TestIMAppRetentionTransferFenceIntegration(t *testing.T) {
+	uri := os.Getenv("IM_APP_RETENTION_TEST_MONGO")
+	if uri == "" {
+		t.Skip("use isolated integration runner")
+	}
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "mongodb" || u.Hostname() != "127.0.0.1" || u.Path != "/imapp_retention_integration" || u.User != nil || u.RawQuery != "" || os.Getenv("IM_APP_RETENTION_TEST_ALLOW_INIT") != "1" {
+		t.Fatal("requires disposable localhost Mongo")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database("imapp_retention_transfer_integration")
+	names, err := db.ListCollectionNames(ctx, bson.M{})
+	if err != nil || len(names) != 0 {
+		t.Fatal("requires fresh transfer test database")
+	}
+	defer db.Drop(context.Background())
+	messages, err := mgo.NewMsgMongo(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer := &msgTransferDatabase{msgDocDatabase: messages}
+	id := "sg_" + strings.Repeat("f", 32)
+	batch := func(start, end int64) []any {
+		values := make([]any, 0, end-start+1)
+		for seq := start; seq <= end; seq++ {
+			values = append(values, &model.MsgDataModel{Seq: seq, GroupID: strings.Repeat("f", 32), SessionType: 3, ContentType: constant.Text, Content: "original payload"})
+		}
+		return values
+	}
+	if err := transfer.BatchInsertBlock(ctx, id, batch(1, 203), updateKeyMsg, 1); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("full_and_partial_docs_reject_late_replay_without_infinite_duplicate_retry", func(t *testing.T) {
+		if err := mgo.IMAppRetentionPurgeDoc(ctx, db, id+":0", 100); err != nil {
+			t.Fatal(err)
+		}
+		if err := mgo.IMAppRetentionPurgeDoc(ctx, db, id+":1", 3); err != nil {
+			t.Fatal(err)
+		}
+		if err := transfer.BatchInsertBlock(ctx, id, batch(1, 203), updateKeyMsg, 1); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			suffix string
+			slots  int
+		}{{":0", 100}, {":1", 3}} {
+			row, err := messages.FindOneByDocID(ctx, id+c.suffix)
+			if err != nil || len(row.Msg) != 100 {
+				t.Fatal("bad layout", err)
+			}
+			for i := 0; i < c.slots; i++ {
+				if row.Msg[i] == nil || row.Msg[i].Msg != nil {
+					t.Fatal("expired message recreated")
+				}
+			}
+		}
+		row, _ := messages.FindOneByDocID(ctx, id+":1")
+		if row.Msg[3].Msg == nil || row.Msg[3].Msg.Seq != 104 {
+			t.Fatal("retained tail erased")
+		}
+		if err := transfer.BatchInsertBlock(ctx, id, []any{&model.RevokeModel{UserID: "admin", Time: 1}}, updateKeyRevoke, 1); err != nil {
+			t.Fatal(err)
+		}
+		row, _ = messages.FindOneByDocID(ctx, id+":0")
+		if row.Msg[0].Revoke != nil {
+			t.Fatal("late revoke metadata recreated")
+		}
+	})
+	t.Run("missing_doc_gets_fence_before_first_delivery", func(t *testing.T) {
+		if err := mgo.IMAppRetentionPurgeDoc(ctx, db, id+":3", 100); err != nil {
+			t.Fatal(err)
+		}
+		if err := transfer.BatchInsertBlock(ctx, id, batch(301, 400), updateKeyMsg, 301); err != nil {
+			t.Fatal(err)
+		}
+		row, err := messages.FindOneByDocID(ctx, id+":3")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, slot := range row.Msg {
+			if slot.Msg != nil {
+				t.Fatal("late first create resurrected content")
+			}
+		}
+	})
+	t.Run("destruction_does_not_remove_a_fence", func(t *testing.T) {
+		if err := messages.DeleteDoc(ctx, id+":0"); err != nil {
+			t.Fatal(err)
+		}
+		if err := transfer.BatchInsertBlock(ctx, id, batch(1, 100), updateKeyMsg, 1); err != nil {
+			t.Fatal(err)
+		}
+		row, err := messages.FindOneByDocID(ctx, id+":0")
+		if err != nil || row.Msg[0].Msg != nil {
+			t.Fatal("destruction removed tombstone", err)
+		}
+	})
+	t.Run("common_message_controller_also_honors_fence", func(t *testing.T) {
+		common := &commonMsgDatabase{msgDocDatabase: messages}
+		if err := common.batchInsertBlock(ctx, id, batch(1, 203), updateKeyMsg, 1); err != nil {
+			t.Fatal(err)
+		}
+		row, err := messages.FindOneByDocID(ctx, id+":0")
+		if err != nil || row.Msg[0].Msg != nil {
+			t.Fatal("common controller resurrected content", err)
+		}
+		row, err = messages.FindOneByDocID(ctx, id+":1")
+		if err != nil || row.Msg[2].Msg != nil || row.Msg[3].Msg == nil {
+			t.Fatal("common controller lost boundary", err)
+		}
+	})
+	t.Run("single_chat_and_invalid_scope", func(t *testing.T) {
+		for _, doc := range []string{"si_user_other:0", id + ":-1", id + ":01", id + ":9007199254740993"} {
+			if err := mgo.IMAppRetentionPurgeDoc(ctx, db, doc, 10); err == nil {
+				t.Fatal("unsafe document accepted")
+			}
+		}
+		for _, slots := range []int64{0, 101} {
+			if err := mgo.IMAppRetentionPurgeDoc(ctx, db, id+":0", slots); err == nil {
+				t.Fatal("unsafe slot count accepted")
+			}
+		}
+		if err := transfer.BatchInsertBlock(ctx, "si_user_other", batch(1, 2), updateKeyMsg, 1); err != nil {
+			t.Fatal(err)
+		}
+		row, err := messages.FindOneByDocID(ctx, "si_user_other:0")
+		if err != nil || row.Msg[0].Msg == nil {
+			t.Fatal("single chat writer broken", err)
+		}
+		if err := messages.DeleteDoc(ctx, "si_user_other:0"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := messages.FindOneByDocID(ctx, "si_user_other:0"); err == nil {
+			t.Fatal("ordinary destruction changed")
+		}
+	})
+	t.Run("concurrent_transfer_purge_and_replay", func(t *testing.T) {
+		values := batch(401, 500)
+		errors := make(chan error, 8)
+		var wg sync.WaitGroup
+		for worker := 0; worker < 8; worker++ {
+			wg.Add(1)
+			go func(worker int) {
+				defer wg.Done()
+				for repeat := 0; repeat < 5; repeat++ {
+					var err error
+					if worker%2 == 0 {
+						err = mgo.IMAppRetentionPurgeDoc(ctx, db, id+":4", 37)
+					} else {
+						err = transfer.BatchInsertBlock(ctx, id, values, updateKeyMsg, 401)
+					}
+					if err != nil {
+						errors <- err
+						return
+					}
+				}
+			}(worker)
+		}
+		wg.Wait()
+		close(errors)
+		for err := range errors {
+			t.Fatal(err)
+		}
+		if err := transfer.BatchInsertBlock(ctx, id, values, updateKeyMsg, 401); err != nil {
+			t.Fatal(err)
+		}
+		row, err := messages.FindOneByDocID(ctx, id+":4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, slot := range row.Msg {
+			if i < 37 && slot.Msg != nil {
+				t.Fatal("concurrent late replay resurrected content")
+			}
+			if i >= 37 && (slot.Msg == nil || slot.Msg.Seq != int64(401+i)) {
+				t.Fatal("retained concurrent tail lost")
+			}
+		}
+		// A smaller/stale purge is monotonic; it cannot weaken the fence.
+		if err := mgo.IMAppRetentionPurgeDoc(ctx, db, id+":4", 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := transfer.BatchInsertBlock(ctx, id, values, updateKeyMsg, 401); err != nil {
+			t.Fatal(err)
+		}
+		row, _ = messages.FindOneByDocID(ctx, id+":4")
+		if row.Msg[36].Msg != nil {
+			t.Fatal("stale purge weakened guard")
+		}
+	})
+	t.Run("malformed_fence_fails_without_duplicate_retry_loop", func(t *testing.T) {
+		if _, err := db.Collection(model.MsgTableName).UpdateOne(ctx, bson.M{"doc_id": id + ":4"}, bson.M{"$set": bson.M{"im_app_purged_slots": "invalid"}}); err != nil {
+			t.Fatal(err)
+		}
+		bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		err := transfer.BatchInsertBlock(bounded, id, batch(401, 401), updateKeyMsg, 401)
+		if err == nil || bounded.Err() != nil {
+			t.Fatal("malformed fence not rejected promptly", err)
+		}
+	})
+	t.Run("foreign_slot_and_short_layout_are_not_purge_authority", func(t *testing.T) {
+		if err := transfer.BatchInsertBlock(ctx, id, batch(501, 600), updateKeyMsg, 501); err != nil {
+			t.Fatal(err)
+		}
+		changed, err := db.Collection(model.MsgTableName).UpdateOne(ctx, bson.M{"doc_id": id + ":5"}, bson.M{"$set": bson.M{"msgs.0.msg.group_id": strings.Repeat("a", 32)}})
+		if err != nil || changed.MatchedCount != 1 {
+			t.Fatal(err)
+		}
+		if err := mgo.IMAppRetentionPurgeDoc(ctx, db, id+":5", 100); err == nil {
+			t.Fatal("foreign slot purged")
+		}
+		row, err := messages.FindOneByDocID(ctx, id+":5")
+		if err != nil || row.Msg[0].Msg == nil || row.Msg[99].Msg == nil {
+			t.Fatal("atomic validation allowed partial damage", err)
+		}
+		if err := messages.Create(ctx, &model.MsgDocModel{DocID: id + ":6", Msg: []*model.MsgInfoModel{{}}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := mgo.IMAppRetentionPurgeDoc(ctx, db, id+":6", 1); err == nil {
+			t.Fatal("nonstandard array layout accepted")
+		}
+	})
+}

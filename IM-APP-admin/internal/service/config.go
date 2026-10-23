@@ -66,8 +66,21 @@ func (s *OpsService) SaveSystemLimits(ctx context.Context, l *models.SystemLimit
 		l.DefaultGroupMaxMembers < 3 || l.DefaultGroupMaxMembers > l.MaxGroupMembers {
 		return errors.New("群人数配置必须满足 3 ≤ 新群默认上限 ≤ 平台上限 ≤ 技术安全上限")
 	}
+	if err := validateRetentionLimits(l.GroupRetentionMaxMessages, l.GroupRetentionHours); err != nil {
+		return err
+	}
 	l.GroupMemberHardLimit = 0
 	return s.Repo.SaveSystemLimits(ctx, l, operatorID)
+}
+
+func validateRetentionLimits(maxMessages, hours int) error {
+	if maxMessages < 1 || maxMessages > 20000 {
+		return errors.New("群消息保留条数须在 1～20000")
+	}
+	if hours < 1 || hours > 2160 {
+		return errors.New("群消息保留小时须在 1～2160（90 天）")
+	}
+	return nil
 }
 
 func (s *OpsService) GroupLimitImpact(ctx context.Context, limit int) (models.GroupLimitImpact, error) {
@@ -100,6 +113,9 @@ func (s *OpsService) PublishSystemLimits(ctx context.Context, operatorID string)
 	if l.MaxGroupMembers < 3 || l.MaxGroupMembers > s.groupMemberHardLimit() ||
 		l.DefaultGroupMaxMembers < 3 || l.DefaultGroupMaxMembers > l.MaxGroupMembers {
 		return errors.New("草稿群人数配置不合法，请先按当前技术安全上限重新保存草稿")
+	}
+	if err := validateRetentionLimits(l.GroupRetentionMaxMessages, l.GroupRetentionHours); err != nil {
+		return err
 	}
 	return s.Repo.PublishSystemLimits(ctx, operatorID)
 }

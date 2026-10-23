@@ -98,6 +98,16 @@
       }
     },
     {
+      "path": "pages/chat/image-viewer",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "图片",
+        "backgroundColor": "#080808",
+        "disableScroll": true,
+        "app-plus": { "background": "#080808" }
+      }
+    },
+    {
       "path": "pages/chat/video-viewer",
       "style": {
         "navigationStyle": "custom",
@@ -347,7 +357,8 @@
       "path": "pages/group/search-history",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "搜索聊天记录"
+        "navigationBarTitleText": "搜索聊天记录",
+        "onReachBottomDistance": 120
       }
     },
     {

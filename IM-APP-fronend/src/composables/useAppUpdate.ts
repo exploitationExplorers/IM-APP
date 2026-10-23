@@ -1,20 +1,13 @@
 import { checkAppRelease } from '@/api/app-release'
 import { APP_CONFIG } from '@/config'
 import type { AppReleaseCheckResult, AppReleaseLocalVersion } from '@/types'
+import { isAppPlatform } from '@/utils/platform'
 
 const AUTO_CHECK_INTERVAL_MS = 2 * 60 * 1000
 
 let checking = false
 let installing = false
 let lastAutoCheckAt = 0
-
-function isAppPlatform(): boolean {
-  try {
-    return uni.getSystemInfoSync().uniPlatform === 'app'
-  } catch {
-    return false
-  }
-}
 
 function whenRuntimeReady(): Promise<void> {
   if (!isAppPlatform() || plus?.runtime) return Promise.resolve()
@@ -160,6 +153,11 @@ async function applyRelease(release: AppReleaseCheckResult): Promise<void> {
 }
 
 export async function checkAndPromptAppUpdate(options: { manual?: boolean } = {}): Promise<boolean> {
+  // Resource builds for OSS verification must never install/publish an existing release.
+  if (APP_CONFIG.ossTest) {
+    if (options.manual) uni.showToast({ title: 'OSS 隔离测试包不执行热更新', icon: 'none' })
+    return false
+  }
   if (!isAppPlatform() || checking || installing) {
     if (!isAppPlatform() && options.manual) {
       uni.showToast({ title: '请在 App 内检查更新', icon: 'none' })
