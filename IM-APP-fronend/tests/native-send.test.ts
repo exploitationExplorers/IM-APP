@@ -251,6 +251,54 @@ describe.each([true, false])('protected media sends (native=%s)', (app) => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
+// 只针对 App 原生桥：H5 走 client-sdk，创建结果由 SDK 自己保证
+describe('quote creation on the App native bridge', () => {
+  const source = Object.freeze({
+    clientMsgID: 'source-native',
+    contentType: 102,
+    sendID: 'sender',
+    senderNickname: '团子',
+    pictureElem: Object.freeze({ sourcePicture: Object.freeze({ url: 'https://cdn/a.jpg' }) }),
+  }) as unknown as MessageItem
+
+  beforeEach(() => {
+    mocks.app = true
+    mocks.preserveForwardMedia.mockResolvedValue({
+      contentType: 102,
+      content: { sourcePicture: { url: 'https://cdn/a.jpg' } },
+    })
+  })
+
+  it('infers the content type from the elem when the native result omits contentType', async () => {
+    mocks.asyncApi.mockImplementation((method: unknown) =>
+      method === IMMethods.CreateQuoteMessage
+        ? Promise.resolve({ clientMsgID: 'quote-inferred', quoteElem: {} })
+        : Promise.resolve({ clientMsgID: 'skeleton', contentType: 101, status: 1 }),
+    )
+    await expect(sendQuoteMessage(group, 'reply', source)).resolves.toMatchObject({
+      clientMsgID: 'quote-inferred',
+      contentType: 114,
+    })
+  })
+
+  it('falls back to a text skeleton + quoteElem when CreateQuoteMessage always resolves empty', async () => {
+    mocks.asyncApi.mockImplementation((method: unknown) =>
+      method === IMMethods.CreateQuoteMessage
+        ? Promise.resolve({})
+        : Promise.resolve({ clientMsgID: 'skeleton', contentType: 101, status: 1 }),
+    )
+    const result = await sendQuoteMessage(group, 'reply', source)
+    const plain = result as unknown as Record<string, unknown>
+    expect(plain.contentType).toBe(114)
+    expect((plain.quoteElem as { text?: string } | undefined)?.text).toBe('reply')
+    const methods = mocks.asyncApi.mock.calls.map((call) => call[0] as unknown)
+    // 两次原生创建都失败后才降级，最后一次落在最基础的 CreateTextMessage
+    expect(methods.filter((m) => m === IMMethods.CreateQuoteMessage)).toHaveLength(2)
+    expect(methods).toContain(IMMethods.CreateTextMessage)
+  })
+})
+afterEach(() => vi.unstubAllGlobals())
+
 describe('native message sending with read-only bridge results', () => {
   it.each([group, peer])(
     'sends text without modifying the SDK message ($conversationId)',

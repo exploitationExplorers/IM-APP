@@ -41,6 +41,12 @@ import { isOSSStorageUrl } from '@/utils/storage-url'
 import type { PlusResolveLocalFile } from '@/types/plus-io'
 import { preserveForwardMedia } from '@/api/forward'
 import { mayContainForwardMedia, snapshotFromMessage, withForwardSnapshot } from '@/utils/forwardSnapshot'
+import {
+  describeNativeCreateResult,
+  inferNativeMessageType,
+  isNativeCreateResultError,
+  slimQuotedMessage,
+} from '@/utils/quotePayload'
 import { groupRetention, retentionSeq } from '@/utils/groupRetention'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
@@ -399,13 +405,11 @@ function copyNativeCreatedMessage(raw: unknown): MessageItem {
     if (nested) obj = nested
   }
   const clientMsgID = obj && pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
-  let contentType = Number(obj?.contentType ?? obj?.ContentType ?? 0)
-  // 个别基座创建引用消息只带回 quoteElem，不带 contentType
-  if ((!Number.isFinite(contentType) || contentType <= 0) && obj) {
-    if (obj.quoteElem != null || obj.QuoteElem != null) contentType = MessageType.QuoteMessage
-    else if (obj.textElem != null || obj.TextElem != null) contentType = MessageType.TextMessage
-  }
-  if (!obj || !clientMsgID || !Number.isFinite(contentType) || contentType <= 0) {
+  // 个别基座创建引用消息只带回 *Elem，不带 contentType（图片/视频/语音都遇到过）。
+  // 只认 quoteElem/textElem 会把这些全判成无效，必须按 elem 全量反推。
+  const contentType = obj ? inferNativeMessageType(obj) : 0
+  if (!obj || !clientMsgID || contentType <= 0) {
+    devWarn('[im] 原生创建消息结果无效', describeNativeCreateResult(raw))
     throw new Error('原生 SDK 创建消息结果无效')
   }
   // 保留完整媒体元素及原生扩展字段，不用展示层的归一化逻辑裁剪待发消息。
@@ -1199,22 +1203,58 @@ export async function sendQuoteMessage(
     : await protectReferencedMedia(quote)
   // SDK 的 createQuoteMessage 要求 message 是被引用消息的 JSON 字符串（QuoteMsgParams.message: string），
   // 直接传对象会被 JSON.parse 隐式转成 "[object Object]" 而报 errCode=10006。
+  const paramsOf = (source: MessageItem) => ({ text, message: JSON.stringify(source) })
+  // 1) 首选：清洗后的原消息（App）/ 媒体保护后的引用（H5 老图保命路径）
   try {
-    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
-      text,
-      message: JSON.stringify(quoteForCreate),
-    })
+    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, paramsOf(quoteForCreate))
     return sendCreatedMessage(target, message)
   } catch (e) {
-    const msg = (e as Error)?.message || ''
-    if (!msg.includes('创建消息结果无效')) throw e
-    // 再试一次：最小字段集（仅身份 + 类型 + 远程预览），避开基座解析整包 PictureElem 失败
-    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
-      text,
-      message: JSON.stringify(minimalMessageForNativeQuote(quote)),
-    })
-    return sendCreatedMessage(target, message)
+    if (!isNativeCreateResultError(e)) throw e
   }
+  // 2) 最小字段集：只带身份 + 类型 + 远程预览，避开基座解析整包 PictureElem 失败
+  try {
+    const message = await imCall<MessageItem>(
+      IMMethods.CreateQuoteMessage,
+      paramsOf(minimalMessageForNativeQuote(quote)),
+    )
+    return sendCreatedMessage(target, message)
+  } catch (e) {
+    if (!isNativeCreateResultError(e)) throw e
+  }
+  // 3) 回退原消息再试（部分 App 基座吃不下 withForwardSnapshot 改写后的结构）
+  try {
+    const message = await imCall<MessageItem>(
+      IMMethods.CreateQuoteMessage,
+      paramsOf(cloneMessageForNativeQuote(quote)),
+    )
+    return sendCreatedMessage(target, message)
+  } catch (e) {
+    if (!isNativeCreateResultError(e)) throw e
+    devWarn('[im] 原生 CreateQuoteMessage 不可用，降级为文本骨架 + quoteElem')
+  }
+  // 4) 彻底绕开原生 CreateQuoteMessage：用最基础的 createTextMessage 拿
+  //    SDK 生成的 clientMsgID 与会话字段，再挂 quoteElem。文字/图片/视频都走这条。
+  const message = await createQuoteFromTextMessage(text, quote)
+  return sendCreatedMessage(target, message)
+}
+
+/**
+ * 兜底构造引用消息：绕开原生 CreateQuoteMessage。
+ * 个别 iOS 基座对任何入参都 resolve 空结果，表现为「所有类型的引用都发不出去」；
+ * createTextMessage 是最基础的创建方法（普通文字消息依赖它，已验证可用），
+ * 用它拿骨架与 clientMsgID，再手动挂 quoteElem。
+ */
+async function createQuoteFromTextMessage(text: string, quote: MessageItem): Promise<MessageItem> {
+  const base = await imCall<MessageItem>(IMMethods.CreateTextMessage, text)
+  const plain = plainNativeRecord(base as unknown as Record<string, unknown>)
+  const quoted = slimQuotedMessage(quote)
+  return {
+    ...plain,
+    contentType: MessageType.QuoteMessage,
+    ContentType: MessageType.QuoteMessage,
+    quoteElem: { text, quoteMessage: quoted },
+    QuoteElem: { Text: text, QuoteMessage: quoted },
+  } as unknown as MessageItem
 }
 
 export async function sendForwardMessage(target: IMTarget, source: MessageItem): Promise<MessageItem> {
