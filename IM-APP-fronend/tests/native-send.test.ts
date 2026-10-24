@@ -292,8 +292,8 @@ describe('quote creation on the App native bridge', () => {
     expect(plain.contentType).toBe(114)
     expect((plain.quoteElem as { text?: string } | undefined)?.text).toBe('reply')
     const methods = mocks.asyncApi.mock.calls.map((call) => call[0] as unknown)
-    // 两次原生创建都失败后才降级，最后一次落在最基础的 CreateTextMessage
-    expect(methods.filter((m) => m === IMMethods.CreateQuoteMessage)).toHaveLength(2)
+    // 三级原生创建（清洗 -> 最小字段 -> 原消息）都失败后才降级，最后一次落在最基础的 CreateTextMessage
+    expect(methods.filter((m) => m === IMMethods.CreateQuoteMessage)).toHaveLength(3)
     expect(methods).toContain(IMMethods.CreateTextMessage)
   })
 })
