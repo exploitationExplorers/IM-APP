@@ -48,6 +48,7 @@ import {
   slimQuotedMessage,
 } from '@/utils/quotePayload'
 import { groupRetention, retentionSeq } from '@/utils/groupRetention'
+import { getAppSdkDataDir } from '@/utils/openimDataDir'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
 const H5_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 5 // Warn : Silent
@@ -263,85 +264,6 @@ export function shouldUseOpenIM(): boolean {
 function currentPlatformId(): number {
   if (!isApp()) return Platform.Web
   return uni.getSystemInfoSync().platform === 'ios' ? Platform.iOS : Platform.Android
-}
-
-/**
- * App 端 OpenIM 本地库目录。
- * uni.env.USER_DATA_PATH 是小程序字段，App 上为空，SDK 会把库建到 `/OpenIM_v3_xxx.db` 然后 10006。
- * 目录按 OpenIM 用户 ID 隔离，避免换号后读到上个账号的本地会话/消息库。
- */
-function getAppSdkDataDir(userId: string): Promise<string> {
-  const io = plus?.io
-  if (!io) {
-    return Promise.reject(new Error('当前 App 环境无法获取本地存储目录'))
-  }
-  const safeUserId = userId.replace(/[^0-9a-z_-]/gi, '') || 'default'
-
-  const fromUrl = (): string => {
-    const raw = io.convertLocalFileSystemURL(`_doc/openim/${safeUserId}/`) || ''
-    return raw.replace(/^file:\/\//, '')
-  }
-
-  return new Promise((resolve, reject) => {
-    const type = io.PRIVATE_DOC ?? 1
-    io.requestFileSystem(
-      type,
-      (fs) => {
-        const root = fs.root
-        if (!root) {
-          const fallback = fromUrl()
-          if (fallback && fallback !== '/') {
-            resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
-            return
-          }
-          reject(new Error('OpenIM 数据目录无效'))
-          return
-        }
-        root.getDirectory(
-          'openim',
-          { create: true },
-          (entry) => {
-            entry.getDirectory(
-              safeUserId,
-              { create: true },
-              (userEntry) => {
-                const path = (userEntry.fullPath || fromUrl()).replace(/^file:\/\//, '')
-                if (!path || path === '/') {
-                  reject(new Error('OpenIM 数据目录无效'))
-                  return
-                }
-                resolve(path.endsWith('/') ? path : `${path}/`)
-              },
-              (err) => {
-                const fallback = fromUrl()
-                if (fallback && fallback !== '/') {
-                  resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
-                  return
-                }
-                reject(err)
-              },
-            )
-          },
-          (err) => {
-            const fallback = fromUrl()
-            if (fallback && fallback !== '/') {
-              resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
-              return
-            }
-            reject(err)
-          },
-        )
-      },
-      (err) => {
-        const fallback = fromUrl()
-        if (fallback && fallback !== '/') {
-          resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
-          return
-        }
-        reject(err)
-      },
-    )
-  })
 }
 
 /**
@@ -718,7 +640,17 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
   } catch (e) {
     if (!isLoginRepeat(e)) {
       const msg = (e as Error)?.message || ''
-      if (msg.includes('10005') || msg.includes('10004')) {
+      if (isApp() && isLocalDatabaseWriteError(e)) {
+        // 目录丢失/路径失效时，只重试 Login 会继续使用同一坏路径；重新准备目录并初始化一次。
+        const epoch = loginEpoch
+        await forceSdkLogout()
+        if (epoch !== loginEpoch) throw new Error('已退出登录')
+        resetLoginCache()
+        appSdkReadyUserId = ''
+        await initAppSdk(imToken)
+        synced = waitForSync()
+        await imCall(IMMethods.Login, payload)
+      } else if (msg.includes('10005') || msg.includes('10004')) {
         await new Promise((r) => setTimeout(r, 400))
         synced = waitForSync()
         try {
@@ -748,9 +680,10 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
 
 async function initAppSdk(imToken: IMTokenResult): Promise<void> {
   if (!isApp()) return
+  // 即使同一进程已初始化，重新登录前也要补回可能丢失的目录。
+  const dataDir = await getAppSdkDataDir(imToken.userId, typeof plus === 'undefined' ? undefined : plus?.io)
   if (appSdkReadyUserId === imToken.userId) return
-  const dataDir = await getAppSdkDataDir(imToken.userId)
-  await imCall(IMMethods.InitSDK, {
+  const initialized = await imCall<unknown>(IMMethods.InitSDK, {
     platformID: imToken.platform,
     apiAddr: imToken.apiAddr,
     wsAddr: imToken.wsAddr,
@@ -758,6 +691,7 @@ async function initAppSdk(imToken: IMTokenResult): Promise<void> {
     logLevel: APP_SDK_LOG_LEVEL,
     isLogStandardOutput: APP_SDK_LOG_STDOUT,
   })
+  if (initialized === false) throw new Error('聊天 SDK 初始化失败，请关闭 App 后重新打开')
   appSdkReadyUserId = imToken.userId
 }
 
@@ -845,6 +779,12 @@ async function reloginSession(): Promise<string> {
     return userId
   } catch (e) {
     if (epoch !== loginEpoch) return ensureIMLogin()
+    if (isApp() && isLocalDatabaseWriteError(e)) {
+      appSdkReadyUserId = ''
+      resetLoginCache()
+      console.error('[im] database login recovery failed', e)
+      throw new Error('聊天本地数据库初始化失败，请检查手机可用空间后重新打开 App')
+    }
     throw e
   }
 }
@@ -981,7 +921,7 @@ export async function getConversationList(offset = 0, count = 200): Promise<Conv
   try {
     return await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
   } catch (e) {
-    if (!isDatabaseClosedError(e)) throw e
+    if (!isDatabaseClosedError(e) && !(isApp() && isLocalDatabaseWriteError(e))) throw e
     await reopenClosedSdkDatabase()
     return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
   }
