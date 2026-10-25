@@ -3,6 +3,8 @@ import { useChatSettingsStore } from '@/stores/chatSettings'
 import { getDeviceId } from '@/utils/device'
 import { getPushDeviceToken, getPushPlatform } from '@/utils/notification-permission'
 import { getToken } from '@/utils/request'
+import { APP_CONFIG } from '@/config'
+import { hasPrivacyConsent } from '@/utils/privacy-consent'
 
 const PUSH_TOKEN_KEY = 'im_push_device_token'
 
@@ -13,6 +15,8 @@ function savedToken(): string {
 
 /** 登录后或打开「新消息通知」时登记设备；未登录 / Redis 失败不打断主流程。 */
 export async function syncPushRegistration(): Promise<void> {
+  // APNs 尚未接通，商店包不申请权限或登记无效设备令牌。
+  if (APP_CONFIG.appStore || !hasPrivacyConsent()) return
   if (!getToken()) return
   const settings = useChatSettingsStore()
   if (!settings.message || settings.noDisturb) {
@@ -36,6 +40,7 @@ export async function syncPushRegistration(): Promise<void> {
 }
 
 export async function unregisterPushRegistration(): Promise<void> {
+  if (APP_CONFIG.appStore || !hasPrivacyConsent()) return
   const deviceToken = savedToken() || getDeviceId()
   if (!deviceToken || !getToken()) {
     uni.removeStorageSync(PUSH_TOKEN_KEY)

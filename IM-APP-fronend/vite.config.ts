@@ -3,6 +3,8 @@ import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { createRequire } from 'node:module'
+import { cpSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 // Also apply when an existing node_modules is reused without npm install.
 // Fail loudly on an SDK upgrade instead of silently restoring eager downloads.
@@ -32,9 +34,21 @@ function rewriteMediaRedirect(proxy: { on: (event: string, handler: (proxyRes: {
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
+  const appStore = process.env.UNI_CUSTOM_SCRIPT === 'ios-store'
+  if (appStore !== (mode === 'ios-store')) {
+    throw new Error('App Store builds must use the ios-store custom platform and ios-store mode together')
+  }
   const base = {
   plugins: [
     uni(),
+    appStore && {
+      name: 'ios-store-native-resources',
+      closeBundle() {
+        // DCloud 云打包从项目根 nativeResources/ios 合并原生隐私清单。
+        cpSync(fileURLToPath(new URL('./src/nativeResources', import.meta.url)),
+          resolve(process.env.UNI_OUTPUT_DIR || 'dist/build/ios-store', 'nativeResources'), { recursive: true })
+      },
+    },
     analyze &&
       visualizer({
         filename: 'dist/stats.html',
@@ -66,6 +80,10 @@ export default defineConfig(({ mode }) => {
   },
   resolve: {
     alias: [
+      ...(appStore ? [{
+        find: /^openim-uniapp-polyfill$/,
+        replacement: fileURLToPath(new URL('./src/utils/app-store-openim.ts', import.meta.url)),
+      }] : []),
       {
         // 见 src/utils/openim-protocol-shim.ts
         find: '@openim/protocol/lib/pb/sdkws/sdkws',

@@ -7,6 +7,12 @@ declare module '*.vue' {
 }
 
 interface ImportMetaEnv {
+  readonly VITE_DISTRIBUTION?: string
+  readonly VITE_APP_STORE_ID?: string
+  readonly VITE_PRIVACY_POLICY_URL?: string
+  readonly VITE_USER_AGREEMENT_URL?: string
+  readonly VITE_IM_API_URL?: string
+  readonly VITE_IM_WS_URL?: string
   readonly VITE_API_BASE_URL?: string
   /**
    * 热更新渠道，打进安装包后不能靠 wgt 修改。

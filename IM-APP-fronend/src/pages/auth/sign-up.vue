@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { APP_CONFIG } from '@/config'
 import ImCountryPicker from '@/components/ImCountryPicker.vue'
+import ImLegalConsent from '@/components/ImLegalConsent.vue'
 import { useSmsCode } from '@/composables/useSmsCode'
 import { findCountryByDialCode } from '@/constants/countries'
 
@@ -16,12 +17,21 @@ const passwordConfirm = ref('')
 const showPassword = ref(false)
 const showPasswordConfirm = ref(false)
 const loading = ref(false)
+const agreed = ref(false)
+
+function checkAgreement(): boolean {
+  if (agreed.value) return true
+  uni.showToast({ title: '请先阅读并同意用户协议与隐私政策', icon: 'none' })
+  return false
+}
 
 async function onSendCode() {
+  if (!checkAgreement()) return
   await send(countryCode.value, phone.value)
 }
 
 async function onRegister() {
+  if (!checkAgreement()) return
   if (!checkPhone(countryCode.value, phone.value)) return
   if (!code.value) {
     uni.showToast({ title: '请输入验证码', icon: 'none' })
@@ -50,13 +60,6 @@ function goBack() {
   uni.navigateBack({ fail: () => uni.redirectTo({ url: '/pages/auth/sign-in' }) })
 }
 
-function goAgreement() {
-  uni.navigateTo({ url: '/pages/auth/agreement' })
-}
-
-function goPrivacy() {
-  uni.navigateTo({ url: '/pages/auth/privacy' })
-}
 </script>
 
 <template>
@@ -158,6 +161,7 @@ function goPrivacy() {
           </view>
         </view>
 
+        <ImLegalConsent v-model="agreed" />
         <view class="auth-spacer" />
 
         <button
@@ -167,24 +171,6 @@ function goPrivacy() {
         >
           注册
         </button>
-      </view>
-
-      <view class="auth-agree">
-        <text>点击注册代表您已阅读并同意</text>
-        <view class="auth-agree-links">
-          <text
-            class="auth-agree-link"
-            @click="goAgreement"
-          >
-            用户协议
-          </text>
-          <text
-            class="auth-agree-link"
-            @click="goPrivacy"
-          >
-            隐私权政策
-          </text>
-        </view>
       </view>
     </view>
   </view>

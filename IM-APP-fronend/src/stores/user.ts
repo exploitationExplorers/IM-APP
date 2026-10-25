@@ -30,6 +30,8 @@ import { useContactStore } from '@/stores/contact'
 import { useGroupStore } from '@/stores/group'
 import { useMassSendStore } from '@/stores/massSend'
 import { perfColdStartDone } from '@/utils/perf'
+import { hasPrivacyConsent } from '@/utils/privacy-consent'
+import { clearOldPassword } from '@/utils/password-state'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(getToken())
@@ -59,6 +61,7 @@ export const useUserStore = defineStore('user', () => {
    * 已登录时同步 resolve，不产生任何等待。
    */
   function restoreSessionIfNeeded(): Promise<boolean> {
+    if (!hasPrivacyConsent()) return Promise.resolve(false)
     if (token.value) return Promise.resolve(true)
     // #ifdef H5
     // H5 的 localStorage 同步读写不存在竞态，不需要补救读取
@@ -168,6 +171,7 @@ export const useUserStore = defineStore('user', () => {
 
   /** 401 / 刷新失败时清内存会话，不跳转（跳转由 request 层统一处理） */
   function invalidateSession() {
+    clearOldPassword()
     token.value = ''
     refreshToken.value = ''
     profile.value = null
@@ -181,6 +185,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function logout() {
+    clearOldPassword()
     await unregisterPushRegistration().catch(() => undefined)
     try {
       if (refreshToken.value) {
@@ -237,6 +242,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function bootstrap() {
+    if (!hasPrivacyConsent()) return
     if (token.value.startsWith('mock_token_')) {
       token.value = ''
       refreshToken.value = ''

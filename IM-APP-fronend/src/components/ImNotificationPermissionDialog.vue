@@ -7,6 +7,8 @@ import {
   requestNotificationPermission,
 } from '@/utils/notification-permission'
 import { syncPushRegistration } from '@/utils/push-register'
+import { APP_CONFIG } from '@/config'
+import { hasPrivacyConsent } from '@/utils/privacy-consent'
 
 const visible = ref(false)
 const busy = ref(false)
@@ -20,6 +22,7 @@ function syncIfReady() {
 }
 
 function schedule() {
+  if (APP_CONFIG.appStore || !hasPrivacyConsent()) return
   const settings = useChatSettingsStore()
   settings.hydrate()
   if (settings.notificationPermissionAsked) {

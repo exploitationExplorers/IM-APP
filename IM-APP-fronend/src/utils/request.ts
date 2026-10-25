@@ -1,4 +1,6 @@
 import { APP_CONFIG } from '@/config'
+import { requirePrivacyConsent } from '@/utils/privacy-consent'
+import { requireSecureEndpoint } from '@/utils/app-store-network'
 import type { ApiResponse } from '@/types'
 import { getDeviceId } from '@/utils/device'
 
@@ -283,9 +285,11 @@ function appendQueryParams(url: string, data?: Record<string, unknown> | unknown
 }
 
 function rawRequest<T>(options: RequestOptions, tokenOverride?: string): Promise<RawResponse<T>> {
+  requirePrivacyConsent()
   const { url, method = 'GET', data, auth = true, header = {} } = options
   const token = tokenOverride ?? options.token ?? getToken()
   const baseUrl = url.startsWith('http') ? url : `${APP_CONFIG.apiBaseUrl}${url}`
+  if (APP_CONFIG.appStore) requireSecureEndpoint(baseUrl)
   const requestUrl = method === 'GET' ? appendQueryParams(baseUrl, data) : baseUrl
   const requestData = method === 'GET' ? undefined : (data as UniApp.RequestOptions['data'])
   return new Promise((resolve, reject) => {

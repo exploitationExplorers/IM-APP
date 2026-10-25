@@ -1,4 +1,5 @@
 import { APP_CONFIG } from '@/config'
+import { storeMediaUrl } from '@/utils/app-store-network'
 import { isAppPlatform } from '@/utils/platform'
 import { isBusinessCDNHost, isChatCDNHost, isPermanentChatCDNHost } from '@/utils/storage-hosts'
 import { isOSSStorageUrl } from '@/utils/storage-url'
@@ -38,6 +39,7 @@ export function preferRemoteMediaUrl(...candidates: string[]): string {
  * App 仍用原始地址。
  */
 export function h5PublicMediaUrl(path: string): string {
+  path = storeMediaUrl(path)
   // #ifdef H5
   // OSS signs the original host/key/query; legacy MinIO same-origin rules must
   // never rewrite it, even when a misconfigured upstream returns HTTP.
@@ -250,7 +252,7 @@ function withObjectThumbnail(url: string, edge: number): string {
 
 /** 列表气泡用的缩略图。聊天 OSS 固定为 360px WebP，旧 OpenIM 地址仍走宽高参数。 */
 export function listThumbnailUrl(url: string): string {
-  const raw = (url || '').trim()
+  const raw = storeMediaUrl((url || '').trim())
   const stable = withStableOSSMediaVariant(raw, 'list')
   if (stable !== raw) return stable
   const object = withObjectThumbnail(raw, 360)
@@ -273,6 +275,7 @@ function isMobileViewport(): boolean {
 
 /** 点开看的中图。手机固定 960px、桌面 1280px，原图只用于保存、收藏和转发。 */
 export function previewThumbnailUrl(url: string): string {
+  url = storeMediaUrl(url || '')
   const mobile = isMobileViewport()
   const edge = mobile ? 960 : 1280
   const variant = mobile ? 'preview-mobile' : 'preview'
@@ -290,7 +293,7 @@ export function previewThumbnailUrl(url: string): string {
  * 签名地址本身没有处理参数，保持字节级不变。
  */
 export function originalImageUrl(url: string): string {
-  const raw = (url || '').trim()
+  const raw = storeMediaUrl((url || '').trim())
   if (!raw) return raw
   const hasProcess = /[?&]x-oss-process=/.test(raw)
   const isObjectVariant = /\/object\//.test(raw) && /[?&](type|width|height|format)=/.test(raw)
@@ -322,7 +325,7 @@ export function originalImageUrl(url: string): string {
  * 没有签名的公开业务桶头像可以直接让 OSS 实时缩图。
  */
 export function avatarThumbnailUrl(url: string): string {
-  const raw = (url || '').trim()
+  const raw = storeMediaUrl((url || '').trim())
   if (!raw) return raw
   const stable = withStableOSSMediaVariant(raw, 'avatar')
   if (stable !== raw) return stable

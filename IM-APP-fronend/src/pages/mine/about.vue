@@ -44,6 +44,10 @@ function goBack() {
   }
   uni.redirectTo({ url: '/pages/mine/general' })
 }
+
+function openLegalDocument(kind: 'agreement' | 'privacy') {
+  uni.navigateTo({ url: `/pages/auth/${kind}` })
+}
 </script>
 
 <template>
@@ -70,7 +74,15 @@ function goBack() {
         @click="onCheckUpdate"
       >
         <text class="check-btn-text">
-          {{ checking ? '检查中...' : '检查更新' }}
+          {{ checking ? '检查中...' : APP_CONFIG.appStore ? '前往 App Store' : '检查更新' }}
+        </text>
+      </view>
+      <view class="legal-links">
+        <text @click="openLegalDocument('agreement')">
+          用户协议
+        </text>
+        <text @click="openLegalDocument('privacy')">
+          隐私政策
         </text>
       </view>
     </view>
@@ -131,6 +143,8 @@ $text: #212121;
   background: #0a2fc2;
   border-radius: 12rpx;
 }
+
+.legal-links { display: flex; gap: 32rpx; margin-top: 40rpx; font-size: 28rpx; color: #0a2fc2; }
 
 .check-btn:active {
   opacity: 0.85;

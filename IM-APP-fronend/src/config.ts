@@ -1,5 +1,6 @@
 const env = import.meta.env
 const ossTest = env.MODE === 'oss-test'
+const appStore = env.VITE_DISTRIBUTION === 'app-store'
 if (ossTest && env.VITE_API_BASE_URL !== 'https://localhost:18443/api/v1') {
   throw new Error('OSS test build requires the isolated local API; production fallback is forbidden')
 }
@@ -11,7 +12,7 @@ if (ossTest && env.VITE_API_BASE_URL !== 'https://localhost:18443/api/v1') {
  *        浏览器会判为混合内容直接拦掉（改 CORS 也救不了）。
  *  - App 原生：没有 origin 概念，相对路径无意义，必须用 .env 里的绝对地址。
  */
-let apiBaseUrl = env.VITE_API_BASE_URL || 'http://8.154.44.197/api/v1'
+let apiBaseUrl = env.VITE_API_BASE_URL || (appStore ? '' : 'http://8.154.44.197/api/v1')
 // #ifdef H5
 apiBaseUrl = '/api/v1'
 // #endif
@@ -23,7 +24,13 @@ function resolveUpdateChannel(raw: string | undefined): 'canary' | 'test' | 'pro
 
 export const APP_CONFIG = {
   ossTest,
-  appName: 'Chat',
+  appStore,
+  appStoreId: env.VITE_APP_STORE_ID || '',
+  privacyPolicyUrl: env.VITE_PRIVACY_POLICY_URL || '',
+  userAgreementUrl: env.VITE_USER_AGREEMENT_URL || '',
+  imApiUrl: env.VITE_IM_API_URL || '',
+  imWsUrl: env.VITE_IM_WS_URL || '',
+  appName: '易可聊',
   displayName: '易可聊',
   version: 'v1.0.0',
   apiBaseUrl,
@@ -38,7 +45,7 @@ export const APP_CONFIG = {
   defaultCountryCode: '+86',
   /** 参考站默认头像 */
   defaultAvatarUrl:
-    env.VITE_DEFAULT_AVATAR_URL || 'https://nxbf.yuntsy.com/contents/headimg.jpg',
+    env.VITE_DEFAULT_AVATAR_URL || '/static/avatar-default.svg',
   /** 群未设头像时的占位，形状与参考站一致（蓝底双气泡） */
   defaultGroupAvatarUrl: '/static/group-default.svg',
 }

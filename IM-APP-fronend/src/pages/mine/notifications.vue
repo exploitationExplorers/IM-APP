@@ -17,6 +17,7 @@
     </view>
 
     <template v-if="!noDisturb">
+      <!-- #ifndef APP-STORE -->
       <view class="section-title section-title-first">
         应用未打开时
       </view>
@@ -45,6 +46,7 @@
         />
       </view>
 
+      <!-- #endif -->
       <view class="section-title section-title-second">
         应用打开时
       </view>
@@ -84,6 +86,7 @@
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { APP_CONFIG } from '@/config'
 import ImNavBar from '@/components/ImNavBar.vue'
 import ImSwitch from '@/components/ImSwitch.vue'
 import { backToChatHome } from '@/utils/nav'
@@ -100,6 +103,7 @@ function onNoDisturbChange(value: boolean) {
 }
 
 function onMessageChange(value: boolean) {
+  if (APP_CONFIG.appStore) return
   settingsStore.setMessage(value)
   if (!value) {
     void unregisterPushRegistration()

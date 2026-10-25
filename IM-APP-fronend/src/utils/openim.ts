@@ -13,6 +13,7 @@ import IMSDK, {
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { UserOnlineState } from '@openim/client-sdk'
 import { APP_CONFIG } from '@/config'
+import { hasPrivacyConsent, requirePrivacyConsent } from '@/utils/privacy-consent'
 import { fetchIMToken, resolveIMGroup, reportSendFailure, type IMTokenResult } from '@/api/im'
 import { getToken } from '@/utils/request'
 import { useContactStore } from '@/stores/contact'
@@ -258,7 +259,7 @@ async function forceSdkLogout(): Promise<void> {
  * 只有显式设成 false 才会关闭聊天能力（用于排查问题）。
  */
 export function shouldUseOpenIM(): boolean {
-  return env.VITE_OPENIM_ENABLED !== 'false'
+  return hasPrivacyConsent() && env.VITE_OPENIM_ENABLED !== 'false'
 }
 
 function currentPlatformId(): number {
@@ -272,6 +273,7 @@ function currentPlatformId(): number {
  * 失败时 polyfill reject 的是 { errCode, errMsg } 裸对象，转成 Error 才能带到 UI。
  */
 async function imCall<T>(method: IMMethods, ...args: unknown[]): Promise<T> {
+  requirePrivacyConsent()
   assertAppNativeIMSDK()
   let raw: unknown
   try {

@@ -3,6 +3,7 @@ import { LOGIN_REMEMBER_KEYS } from '@/utils/login-phone'
 import { clearPreviewImageCache } from '@/utils/previewImageCache'
 import { PREVIEW_IMAGE_INDEX_KEY } from '@/utils/previewImageStorage'
 import { isRetentionStorageKey } from '@/utils/groupRetention'
+import { PRIVACY_CONSENT_KEY } from '@/utils/privacy-consent'
 
 const DEVICE_ID_KEY = 'im_device_id'
 /** 聊天偏好（回车发送等）：登出/清缓存都保留，否则每次登录都要重开开关 */
@@ -25,6 +26,7 @@ export function clearAppCache(): void {
   void clearPreviewImageCache().catch(() => undefined)
   const keep = new Set([
     PREVIEW_IMAGE_INDEX_KEY, // Removed by the async cache clearer after in-flight writes settle.
+    PRIVACY_CONSENT_KEY,
     'im_token',
     'im_refresh_token',
     AUTH_SLOTS_KEY,
@@ -48,6 +50,7 @@ export function clearSessionStorage(): void {
   void clearPreviewImageCache().catch(() => undefined)
   const keep = new Set([
     PREVIEW_IMAGE_INDEX_KEY,
+    PRIVACY_CONSENT_KEY,
     DEVICE_ID_KEY,
     AUTH_SLOTS_KEY,
     CHAT_SETTINGS_KEY,

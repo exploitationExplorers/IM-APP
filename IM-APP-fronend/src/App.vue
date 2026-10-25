@@ -10,15 +10,27 @@ import { getStatusBarHeight } from '@/utils/status-bar'
 import { getToken, setAuthExpiredHandler } from '@/utils/request'
 import { warmMediaCache } from '@/utils/mediaCache'
 import { initPerfMonitoring } from '@/utils/perf'
+import { hasPrivacyConsent } from '@/utils/privacy-consent'
+import { clearLoginPassword } from '@/utils/login-phone'
+import { clearOldPassword } from '@/utils/password-state'
+
+let servicesStarted = false
+function startServices() {
+  if (servicesStarted || !hasPrivacyConsent()) return
+  servicesStarted = true
+  initPerfMonitoring()
+  warmMediaCache()
+  useUserStore().bootstrap()
+}
 
 onLaunch(() => {
+  uni.$on('privacy-consent-accepted', startServices)
   setAuthExpiredHandler(() => {
     useUserStore().invalidateSession()
   })
-  initPerfMonitoring()
-  warmMediaCache()
-  const userStore = useUserStore()
-  userStore.bootstrap()
+  clearLoginPassword()
+  clearOldPassword()
+  startServices()
   // H5 没有 App 那套 CSS 变量注入；写上也不影响，App 端无 document 会跳过
   const height = `${getStatusBarHeight()}px`
   try {
@@ -28,7 +40,7 @@ onLaunch(() => {
   } catch {
     /* App 端由运行时注入 */
   }
-  void checkAndPromptAppUpdate()
+  if (hasPrivacyConsent()) void checkAndPromptAppUpdate()
 
   // H5：标签页切回前台时补拉一次。
   // 新消息只靠 OpenIM 推送进 UI，标签页被浏览器节流/断网期间漏掉的推送没有任何补拉机制，
@@ -37,6 +49,7 @@ onLaunch(() => {
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return
+      if (!hasPrivacyConsent()) return
       useChatSettingsStore().hydrate(true)
       if (getToken()) {
         void useChatStore().resyncAfterResume()
@@ -46,6 +59,11 @@ onLaunch(() => {
 })
 
 onShow(() => {
+  if (!hasPrivacyConsent()) {
+    void setupAppAuthGuard()
+    return
+  }
+  startServices()
   void setupAppAuthGuard()
   void checkAndPromptAppUpdate()
   // 回前台对齐聊天偏好（回车发送等），避免内存态被冲掉后开关自己变回去

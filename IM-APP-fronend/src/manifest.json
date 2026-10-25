@@ -54,8 +54,8 @@
             /* ios打包配置 */
             "ios" : {
                 "dSYMs" : false,
-                "UIBackgroundModes" : "audio",
                 "privacyDescription" : {
+                    "NSPhotoLibraryAddUsageDescription" : "用于将您主动保存的聊天图片和视频写入系统相册",
                     "NSCameraUsageDescription" : "用于拍照、拍摄视频以及扫描二维码",
                     "NSMicrophoneUsageDescription" : "用于录制语音消息与拍摄视频时采集声音",
                     "NSPhotoLibraryUsageDescription" : "用于从相册选择照片、视频或二维码"

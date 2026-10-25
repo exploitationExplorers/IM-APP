@@ -37,9 +37,11 @@ function onDisplayMode() {
   uni.showToast({ title: '暂仅支持行动版', icon: 'none' })
 }
 
+// #ifndef APP-STORE
 function onDebug() {
   uni.navigateTo({ url: '/pages/mine/debug' })
 }
+// #endif
 
 function openClearModal() {
   showClearModal.value = true
@@ -183,6 +185,7 @@ async function confirmReselectLine() {
         mode="aspectFit"
       />
     </view>
+    <!-- #ifndef APP-STORE -->
     <view
       class="cell"
       @click="onDebug"
@@ -196,6 +199,7 @@ async function confirmReselectLine() {
         mode="aspectFit"
       />
     </view>
+    <!-- #endif -->
 
     <view
       v-if="showClearModal"

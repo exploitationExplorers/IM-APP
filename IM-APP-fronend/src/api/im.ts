@@ -1,4 +1,6 @@
 import { request } from '@/utils/request'
+import { APP_CONFIG } from '@/config'
+import { requireSecureEndpoint } from '@/utils/app-store-network'
 
 export interface IMTokenResult {
   userId: string
@@ -43,11 +45,17 @@ export interface MessageRecallResult {
 }
 
 export async function fetchIMToken(platformId = 5): Promise<IMTokenResult> {
-  return request<IMTokenResult>({
+  const result = await request<IMTokenResult>({
     url: '/im/token',
     method: 'POST',
     data: { platformId },
   })
+  if (!APP_CONFIG.appStore) return result
+  return {
+    ...result,
+    apiAddr: requireSecureEndpoint(APP_CONFIG.imApiUrl),
+    wsAddr: requireSecureEndpoint(APP_CONFIG.imWsUrl, 'ws'),
+  }
 }
 
 /** 业务用户 ID → OpenIM 用户 ID，同时返回服务端的可聊天判定 */

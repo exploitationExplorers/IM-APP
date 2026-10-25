@@ -1,7 +1,9 @@
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
+import { hasPrivacyConsent } from '@/utils/privacy-consent'
 
 const PUBLIC_PAGES = [
+  '/pages/auth/consent',
   '/pages/download/index',
   '/pages/auth/sign-in',
   '/pages/auth/sign-up',
@@ -10,6 +12,14 @@ const PUBLIC_PAGES = [
   '/pages/auth/privacy',
 ]
 
+function redirectForConsent(route: string): boolean {
+  if (hasPrivacyConsent()) return false
+  if (!['/pages/auth/consent', '/pages/auth/privacy', '/pages/auth/agreement'].includes(route)) {
+    uni.reLaunch({ url: '/pages/auth/consent' })
+  }
+  return true
+}
+
 export function useAuthGuard() {
   const userStore = useUserStore()
 
@@ -17,6 +27,7 @@ export function useAuthGuard() {
     const pages = getCurrentPages()
     const current = pages[pages.length - 1]
     const route = current ? `/${current.route}` : ''
+    if (redirectForConsent(route)) return
     if (PUBLIC_PAGES.includes(route)) return
     // 冷启动时 storage 可能还没就绪，先等一次补救读取再判，避免误踢已登录用户
     if (await userStore.restoreSessionIfNeeded()) return
@@ -46,6 +57,7 @@ export async function setupAppAuthGuard() {
   const pages = getCurrentPages()
   const current = pages[pages.length - 1]
   const route = current ? `/${current.route}` : ''
+  if (redirectForConsent(route)) return
   if (!route && isH5DownloadEntry()) return
   if (PUBLIC_PAGES.includes(route)) return
   if (await userStore.restoreSessionIfNeeded()) return

@@ -2,6 +2,7 @@ import type { UserInfo } from '@/types'
 
 const HAS_PASSWORD_KEY = 'user_has_password'
 const OLD_PASSWORD_KEY = 'password_change_old'
+let pendingOldPassword = ''
 
 /** 是否已设置过登录密码（优先读接口字段，其次本地标记） */
 export function userHasPassword(profile?: UserInfo | null): boolean {
@@ -14,15 +15,17 @@ export function markUserHasPassword() {
 }
 
 export function stashOldPassword(password: string) {
-  uni.setStorageSync(OLD_PASSWORD_KEY, password)
+  uni.removeStorageSync(OLD_PASSWORD_KEY)
+  pendingOldPassword = password
 }
 
 export function consumeOldPassword(): string {
-  const value = uni.getStorageSync(OLD_PASSWORD_KEY) as string
-  if (value) uni.removeStorageSync(OLD_PASSWORD_KEY)
-  return value || ''
+  const value = pendingOldPassword
+  clearOldPassword()
+  return value
 }
 
 export function clearOldPassword() {
+  pendingOldPassword = ''
   uni.removeStorageSync(OLD_PASSWORD_KEY)
 }

@@ -6,6 +6,12 @@
     }
   },
   "pages": [
+    // #ifdef APP-STORE
+    {
+      "path": "pages/auth/consent",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "欢迎使用易可聊" }
+    },
+    // #endif
     // #ifdef H5
     {
       "path": "pages/download/index",
@@ -528,6 +534,7 @@
         "navigationBarTitleText": "我的表情"
       }
     },
+    // #ifndef APP-STORE
     {
       "path": "pages/mine/debug",
       "style": {
@@ -535,10 +542,11 @@
         "navigationBarTitleText": "调试资讯"
       }
     }
+    // #endif
   ],
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "Chat",
+    "navigationBarTitleText": "易可聊",
     "navigationBarBackgroundColor": "#FFFFFF",
     "backgroundColor": "#F5F6F8"
   },
