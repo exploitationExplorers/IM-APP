@@ -600,6 +600,16 @@ const actions = useChatMessageActions({
   onMuteChanged: () => {
     void refreshGroupMeta()
   },
+  onMessagesPurged: async (groupId, purge) => {
+    if (groupId !== businessId.value || chatType.value !== 'group') return
+    if (purge) {
+      const ts = Date.parse(purge.purgedAt)
+      if (purge.userId && Number.isFinite(ts)) {
+        purgedMap.value = { ...purgedMap.value, [purge.userId]: ts }
+      }
+    }
+    await loadMessagePurges(groupId)
+  },
   onRetry: (m) => onRetry(m),
 })
 
@@ -816,6 +826,7 @@ watch(
   activeConversationId,
   (id) => {
     resetMediaCacheQueue()
+    purgedMap.value = {}
     chatStore.setActiveConversation(id)
   },
   { immediate: true },
@@ -1583,10 +1594,11 @@ async function loadGroupMembersMeta(groupId: string): Promise<void> {
 async function loadMessagePurges(groupId: string): Promise<void> {
   try {
     const items = await fetchGroupMessagePurges(groupId)
-    const next: Record<string, number> = {}
+    if (groupId !== businessId.value || chatType.value !== 'group') return
+    const next: Record<string, number> = { ...purgedMap.value }
     for (const it of items) {
       const ts = Date.parse(it.purgedAt)
-      if (it.userId && Number.isFinite(ts)) next[it.userId] = ts
+      if (it.userId && Number.isFinite(ts)) next[it.userId] = Math.max(next[it.userId] || 0, ts)
     }
     purgedMap.value = next
   } catch {
