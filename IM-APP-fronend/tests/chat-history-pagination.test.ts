@@ -85,6 +85,36 @@ afterEach(() => {
 describe.each(['ios', 'android', 'h5'])('历史持续翻页（%s）', (platform) => {
   beforeEach(() => { mocks.platform = platform })
 
+  it('刷新最近一页时保留其他成员已经翻出的历史，仍可继续翻页', async () => {
+    seedHistory(800)
+    store.messagesMap[conversationId].forEach((m, i) => {
+      m.senderId = i % 2 ? 'member-a' : 'member-b'
+      m.createdAt = new Date(1792843200000 + i).toISOString()
+    })
+    mocks.history.mockResolvedValueOnce(historyPage(780))
+    await store.loadMessages(conversationId)
+    expect(store.messagesMap[conversationId]).toHaveLength(800)
+    expect(store.messagesMap[conversationId][0].id).toBe('msg-0')
+    expect(store.messagesMap[conversationId].filter(m => m.senderId === 'member-b')).toHaveLength(390)
+    mocks.history.mockResolvedValueOnce(historyPage(-20))
+    await store.loadMoreMessages(conversationId)
+    expect(mocks.history).toHaveBeenLastCalledWith(conversationId, 20, 'msg-0')
+    expect(store.messagesMap[conversationId]).toHaveLength(820)
+  })
+
+  it('刷新不恢复最近一页中已经被 SDK 删除的消息', async () => {
+    seedHistory(30)
+    store.messagesMap[conversationId].forEach((m, i) => {
+      m.createdAt = new Date(1792843200000 + i).toISOString()
+    })
+    const page = historyPage(10)
+    page.messageList = page.messageList.filter(m => m.clientMsgID !== 'msg-15')
+    mocks.history.mockResolvedValueOnce(page)
+    await store.loadMessages(conversationId)
+    expect(store.messagesMap[conversationId]).toHaveLength(29)
+    expect(store.messagesMap[conversationId].some(m => m.id === 'msg-15')).toBe(false)
+  })
+
   it.each([400, 800, 1200])('已有 %i 条消息后仍按最早消息继续翻页', async (count) => {
     seedHistory(count)
     mocks.history.mockResolvedValueOnce(historyPage(-20)).mockResolvedValueOnce(historyPage(-40))

@@ -78,12 +78,10 @@ function createActionParts(input: {
   })
   const kick = createKickActions({
     businessId: opts.businessId,
-    conversationId: opts.conversationId,
-    visibleMessages: opts.visibleMessages,
     onMuteChanged: opts.onMuteChanged,
     guardSenderInGroup: guards.guardSenderInGroup,
     confirm,
-    removeLocalMany: (conversationId, ids) => chatStore.removeLocalMany(conversationId, ids),
+    onMessagesPurged: opts.onMessagesPurged,
   })
   return { media, favorite, pin, revokeMessages, muteAt, kick, chatStore }
 }

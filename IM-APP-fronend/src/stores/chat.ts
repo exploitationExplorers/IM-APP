@@ -1131,10 +1131,10 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadMessages(conversationId: string) {
     perfMarkStart('chat:load-messages')
-    let existing = messagesMap.value[conversationId] || []
     perfMarkStart('chat:load-messages:sdk')
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
-    existing = groupRetention.filter(conversationId, existing)
+    // 请求期间可能收到新消息或翻页，合并时读取最新状态。
+    const existing = groupRetention.filter(conversationId, messagesMap.value[conversationId] || [])
     perfMarkEnd('chat:load-messages:sdk', `${messageList.length} msgs`)
     messageList.forEach(rememberRaw)
     const mapped = messageList
@@ -1152,12 +1152,18 @@ export const useChatStore = defineStore('chat', () => {
     const withRead = readIds.size
       ? mapped.map((m) => (m.hasRead || !readIds.has(m.id) ? m : { ...m, hasRead: true }))
       : mapped
+    const oldestTime = withRead.length ? Math.min(...withRead.map((m) => Date.parse(m.createdAt))) : NaN
+    const historyIds = new Set(withRead.map((m) => m.id))
+    const older = existing.filter((m) => !historyIds.has(m.id) && Date.parse(m.createdAt) < oldestTime)
+    const merged = mergeLocalPending([...older, ...withRead], existing)
+      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: groupRetention.filter(conversationId, mergeLocalPending(withRead, existing)),
+      [conversationId]: groupRetention.filter(conversationId, merged),
     }
-    historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
-    trimMessageWindow(conversationId)
+    // 最近一页的 isEnd 不能覆盖更早的翻页游标。
+    historyEnd.value = { ...historyEnd.value, [conversationId]: older.length ? !!historyEnd.value[conversationId] : isEnd }
+    if (conversationId !== activeConversationId) trimMessageWindow(conversationId)
     await markAsRead(conversationId)
     perfMarkEnd('chat:load-messages', conversationId)
   }
@@ -1824,6 +1830,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function removeLocal(conversationId: string, messageId: string) {
+    if (!conversationId || !messageId) return
     await deleteLocalMessage(conversationId, messageId).catch(() => undefined)
     const list = messagesMap.value[conversationId] || []
     messagesMap.value = {

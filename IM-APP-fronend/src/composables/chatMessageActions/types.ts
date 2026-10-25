@@ -1,5 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
-import type { ChatMessage, GroupRole } from '@/types'
+import type { ChatMessage, GroupRole, GroupMessagePurge } from '@/types'
 
 /** 气泡长按菜单项（勿从 .vue 具名导入：env.d.ts 的 *.vue 只暴露 default） */
 export interface MessageMenuItem {
@@ -33,6 +33,7 @@ export type ChatMessageActionsOpts = {
   memberMeta?: Ref<Record<string, MemberMeta>>
   /** 禁言/解禁成功后的回调（房间页用来刷新成员禁言状态） */
   onMuteChanged?: () => void
+  onMessagesPurged?: (groupId: string, purge?: GroupMessagePurge) => Promise<void>
   /** 私聊对方展示名，用于「为我和 xxx 置顶」文案 */
   peerDisplayName?: Ref<string>
   /** 发送失败气泡菜单「重新发送」 */
