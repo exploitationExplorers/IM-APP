@@ -1,0 +1,312 @@
+package imappgc
+
+import (
+	"context"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+func TestIMAppRetentionGCKeyScope(t *testing.T) {
+	for _, key := range []string{Namespace + "openim/data/hash/" + strings.Repeat("a", 32), Namespace + "openim/temp/2026/10/a.presigned", Namespace + "openim/direct/20261019/user/a.jpg"} {
+		if !Managed(key) {
+			t.Fatal("managed key rejected", key)
+		}
+	}
+	for _, key := range []string{"openim/data/hash/" + strings.Repeat("a", 32), "avatars/a", PhysicalPrefix + Namespace + "openim/direct/a", Namespace + "openim/direct/../a", Namespace + "openim/direct//a", Namespace + "openim/direct/%2e/a", Namespace + "openim/data/hash/not-md5"} {
+		if Managed(key) {
+			t.Fatal("unsafe key accepted", key)
+		}
+	}
+	key := Namespace + "openim/data/hash/" + strings.Repeat("b", 32)
+	for _, raw := range []string{
+		`{"url":"/` + PhysicalPrefix + key + `"}`,
+		`{"key":"` + key + `"}`,
+		`{"PictureElem":{"SourcePicture":{"Url":"https://oss-chat-test.xn--jprz53bj9s.com/` + PhysicalPrefix + key + `?Signature=redacted"}}}`,
+		`{"QuoteElem":{"QuoteMessage":{"Content":"{\"SourcePicture\":{\"Url\":\"https://oss-chat-test.xn--jprz53bj9s.com/` + PhysicalPrefix + key + `\"}}"}}}`,
+	} {
+		keys, err := Resolve(context.Background(), nil, raw)
+		if err != nil || len(keys) != 1 || keys[0] != key {
+			t.Fatal("native nested reference missed", keys, err)
+		}
+	}
+}
+
+type testDeleter struct {
+	calls   atomic.Int32
+	fail    bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (d *testDeleter) Delete(ctx context.Context, key string) (int64, error) {
+	d.calls.Add(1)
+	if d.entered != nil {
+		close(d.entered)
+		select {
+		case <-d.release:
+		case <-ctx.Done():
+			return 0, ErrProtected
+		}
+	}
+	if d.fail {
+		return 0, ErrProtected
+	}
+	return 123, nil
+}
+
+func gcTestDB(t *testing.T) *mongo.Database {
+	t.Helper()
+	uri := os.Getenv("IM_APP_RETENTION_TEST_MONGO")
+	if uri == "" || os.Getenv("IM_APP_RETENTION_TEST_ALLOW_INIT") != "1" {
+		t.Skip("requires disposable test MongoDB")
+	}
+	if !strings.HasPrefix(uri, "mongodb://127.0.0.1:") {
+		t.Fatal("loopback Mongo required")
+	}
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := client.Database("imapp_gc_" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")))
+	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
+	t.Setenv("IM_APP_MEDIA_GC_REFERENCES", "true")
+	_, err = db.Collection(ControlCollection).InsertOne(context.Background(), bson.M{"_id": Protocol, "active": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Setup(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+func seedGC(t *testing.T, db *mongo.Database, key string, claim *Claim) {
+	t.Helper()
+	ctx := context.Background()
+	if err := BeginWrite(ctx, db, key); err != nil {
+		t.Fatal(err)
+	}
+	if claim != nil {
+		if err := Protect(ctx, db, `{"Url":"https://chat.invalid/`+PhysicalPrefix+key+`"}`, claim); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := db.Collection(Collection).UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$set": bson.M{"hold_until": time.Now().Add(-10 * 24 * time.Hour), "candidate_at": time.Now().Add(-2 * 24 * time.Hour)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+func seedExpired(t *testing.T, db *mongo.Database, c Claim, seq int64) {
+	t.Helper()
+	ctx := context.Background()
+	id := "sg_" + c.Group
+	_, err := db.Collection("seq").InsertOne(ctx, bson.M{"conversation_id": id, "min_seq": int64(10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Collection("im_app_retention_receipts_v1").InsertOne(ctx, bson.M{"conversation_id": id, "boundary": int64(10), "applied_at": time.Now().Add(-48 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Collection("msg").InsertOne(ctx, bson.M{"doc_id": id + ":0", "msgs": bson.A{bson.M{"msg": bson.M{"group_id": c.Group, "session_type": 3, "send_id": c.Sender, "client_msg_id": c.Message, "seq": seq}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIMAppRetentionGCIntegration(t *testing.T) {
+	db := gcTestDB(t)
+	ctx := context.Background()
+	claim := Claim{Group: strings.Repeat("a", 32), Sender: "u", Message: "m"}
+	seedExpired(t, db, claim, 1)
+	key := Namespace + "openim/data/hash/" + strings.Repeat("a", 32)
+	seedGC(t, db, key, &claim)
+	d := &testDeleter{}
+	stats, err := Run(ctx, db, d, true)
+	if err != nil || stats.Deleted != 0 || d.calls.Load() != 0 {
+		t.Fatal("preview mutated storage", stats, err)
+	}
+	stats, err = Run(ctx, db, d, false)
+	if err != nil || stats.Deleted != 1 || stats.Bytes != 123 || d.calls.Load() != 1 {
+		t.Fatal("physical deletion failed", stats, err)
+	}
+	if Protect(ctx, db, `"https://chat.invalid/`+PhysicalPrefix+key+`"`, nil) == nil {
+		t.Fatal("old reference resurrected tombstone")
+	}
+	if err := BeginWrite(ctx, db, key); err != nil {
+		t.Fatal("reupload content hash unavailable", err)
+	}
+	var r Record
+	_ = db.Collection(Collection).FindOne(ctx, bson.M{"_id": key}).Decode(&r)
+	if len(r.Claims) != 0 || r.Permanent || !r.HoldUntil.After(time.Now().Add(7*24*time.Hour)) {
+		t.Fatal("new generation not isolated", r)
+	}
+	if err := Protect(ctx, db, `"https://chat.invalid/`+PhysicalPrefix+key+`"`, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = db.Collection(Collection).UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$set": bson.M{"hold_until": time.Now().Add(-10 * 24 * time.Hour), "candidate_at": time.Now().Add(-48 * time.Hour)}})
+	stats, err = Run(ctx, db, d, false)
+	if err != nil || stats.Deleted != 0 || d.calls.Load() != 1 {
+		t.Fatal("single/favorite/avatar pin deleted", stats, err)
+	}
+}
+
+func TestIMAppRetentionGCProtectsLiveAndMissingClaims(t *testing.T) {
+	db := gcTestDB(t)
+	ctx := context.Background()
+	c := Claim{Group: strings.Repeat("b", 32), Sender: "u", Message: "m"}
+	seedExpired(t, db, c, 10)
+	key := Namespace + "openim/data/hash/" + strings.Repeat("b", 32)
+	seedGC(t, db, key, &c)
+	d := &testDeleter{}
+	stats, err := Run(ctx, db, d, false)
+	if err != nil || stats.Deleted != 0 {
+		t.Fatal("live message deleted", stats, err)
+	}
+	_, _ = db.Collection("msg").DeleteMany(ctx, bson.M{})
+	stats, err = Run(ctx, db, d, false)
+	if err != nil || stats.Deleted != 0 {
+		t.Fatal("missing/in-flight/body-purged claim deleted", stats, err)
+	}
+	_, _ = db.Collection("s3").InsertOne(ctx, bson.M{"name": "u/a.jpg", "key": key, "engine": "ali-oss"})
+	if err := Protect(ctx, db, `{"VideoElem":{"SnapshotUrl":"https://app.invalid/object/u/a.jpg"}}`, nil); err != nil {
+		t.Fatal("logical object protection failed", err)
+	}
+	var r Record
+	_ = db.Collection(Collection).FindOne(ctx, bson.M{"_id": key}).Decode(&r)
+	if !r.Permanent {
+		t.Fatal("logical pin missed")
+	}
+}
+
+func TestIMAppRetentionGCQuarantineAndWriterRace(t *testing.T) {
+	db := gcTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	key := Namespace + "openim/data/hash/" + strings.Repeat("c", 32)
+	seedGC(t, db, key, nil)
+	_, _ = db.Collection(Collection).UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$unset": bson.M{"candidate_at": ""}})
+	d := &testDeleter{}
+	stats, err := Run(ctx, db, d, false)
+	if err != nil || stats.Quarantined != 1 || d.calls.Load() != 0 {
+		t.Fatal("quarantine skipped", stats, err)
+	}
+	if err := BeginWrite(ctx, db, key); err != nil {
+		t.Fatal(err)
+	}
+	var r Record
+	_ = db.Collection(Collection).FindOne(ctx, bson.M{"_id": key}).Decode(&r)
+	if !r.CandidateAt.IsZero() {
+		t.Fatal("upload failed to reset quarantine")
+	}
+	_, _ = db.Collection(Collection).UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$set": bson.M{"hold_until": time.Now().Add(-10 * 24 * time.Hour), "candidate_at": time.Now().Add(-48 * time.Hour)}})
+	blocking := &testDeleter{entered: make(chan struct{}), release: make(chan struct{})}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); _, _ = Run(ctx, db, blocking, false) }()
+	select {
+	case <-blocking.entered:
+	case <-ctx.Done():
+		t.Fatal("delete never reached fence")
+	}
+	if BeginWrite(ctx, db, key) == nil || Protect(ctx, db, `"https://chat.invalid/`+PhysicalPrefix+key+`"`, nil) == nil {
+		t.Error("new writer bypassed deletion seal")
+	}
+	_, err = Run(ctx, db, blocking, false)
+	if err != nil || blocking.calls.Load() != 1 {
+		t.Error("concurrent worker issued a second DELETE", err)
+	}
+	close(blocking.release)
+	wg.Wait()
+}
+
+func TestIMAppRetentionGCUncertainDeleteStaysSealed(t *testing.T) {
+	db := gcTestDB(t)
+	ctx := context.Background()
+	key := Namespace + "openim/temp/2026/file.presigned"
+	seedGC(t, db, key, nil)
+	d := &testDeleter{fail: true}
+	_, err := Run(ctx, db, d, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Run(ctx, db, d, false)
+	if err != nil || d.calls.Load() != 1 {
+		t.Fatal("uncertain delete replayed automatically", err)
+	}
+	if BeginWrite(ctx, db, key) == nil {
+		t.Fatal("uncertain deletion key reopened")
+	}
+}
+
+func TestIMAppRetentionGCAuthorityIntegration(t *testing.T) {
+	db := gcTestDB(t)
+	ctx := context.Background()
+	a := Claim{Group: strings.Repeat("a", 32), Sender: "u", Message: "a"}
+	b := Claim{Group: strings.Repeat("b", 32), Sender: "u", Message: "b"}
+	seedExpired(t, db, a, 1)
+	key := Namespace + "openim/data/hash/" + strings.Repeat("d", 32)
+	seedGC(t, db, key, &a)
+	raw := `{"VideoElem":{"VideoUrl":"https://chat.invalid/` + PhysicalPrefix + key + `"}}`
+	if err := Protect(ctx, db, raw, &b); err != nil {
+		t.Fatal(err)
+	}
+	read := func() Record {
+		var r Record
+		if db.Collection(Collection).FindOne(ctx, bson.M{"_id": key}).Decode(&r) != nil {
+			t.Fatal("record missing")
+		}
+		return r
+	}
+	now := time.Now()
+	if Reclaimable(ctx, db, read(), now) {
+		t.Fatal("a second group's in-flight claim was ignored")
+	}
+	seedExpired(t, db, b, 10)
+	if Reclaimable(ctx, db, read(), now) {
+		t.Fatal("another group's live message was ignored")
+	}
+	_, _ = db.Collection("msg").UpdateOne(ctx, bson.M{"doc_id": "sg_" + b.Group + ":0"}, bson.M{"$set": bson.M{"msgs.0.msg.seq": int64(1)}})
+	if !Reclaimable(ctx, db, read(), now) {
+		t.Fatal("all proven expired references should be reclaimable")
+	}
+	_, _ = db.Collection(Collection).UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$set": bson.M{"hold_until": now.Add(time.Hour)}})
+	if Reclaimable(ctx, db, read(), now) {
+		t.Fatal("upload grace bypassed")
+	}
+	_, _ = db.Collection(Collection).UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$set": bson.M{"hold_until": now.Add(-time.Hour)}})
+	_, _ = db.Collection("im_app_retention_receipts_v1").UpdateOne(ctx, bson.M{"conversation_id": "sg_" + b.Group}, bson.M{"$set": bson.M{"applied_at": now}})
+	if Reclaimable(ctx, db, read(), now) {
+		t.Fatal("fresh ACK bypassed grace")
+	}
+	_, _ = db.Collection("im_app_retention_receipts_v1").UpdateOne(ctx, bson.M{"conversation_id": "sg_" + b.Group}, bson.M{"$set": bson.M{"applied_at": now.Add(-48 * time.Hour)}})
+	for i := 1; i < 4; i++ {
+		_, err := db.Collection("msg").InsertOne(ctx, bson.M{"doc_id": "sg_" + a.Group + ":" + strings.Repeat("0", i+1), "msgs": bson.A{bson.M{"msg": bson.M{"group_id": a.Group, "session_type": 3, "send_id": a.Sender, "client_msg_id": a.Message, "seq": int64(1)}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if Reclaimable(ctx, db, read(), now) {
+		t.Fatal("a truncated/ambiguous result set was accepted as proof")
+	}
+	_, _ = db.Collection(ControlCollection).UpdateOne(ctx, bson.M{"_id": Protocol}, bson.M{"$set": bson.M{"active": false}})
+	unready := Namespace + "openim/temp/before-activation"
+	if err := BeginWrite(ctx, db, unready); err != nil {
+		t.Fatal(err)
+	}
+	var r Record
+	_ = db.Collection(Collection).FindOne(ctx, bson.M{"_id": unready}).Decode(&r)
+	if !r.Permanent {
+		t.Fatal("upload before activation was made deletable")
+	}
+	if err := Protect(ctx, db, `"https://old.invalid/object/missing-old-photo"`, nil); err != nil {
+		t.Fatal("a broken unrelated legacy link blocked the existing operation", err)
+	}
+}

@@ -374,16 +374,30 @@ async function onRemoveMember(member: GroupMember) {
 
 <template>
   <view class="page">
-    <ImNavBar title="群聊成员" @back="goBack">
+    <ImNavBar
+      title="群聊成员"
+      @back="goBack"
+    >
       <template #right>
-        <text class="action" :class="{ hidden: !canManage }" @click="goInvite">新增</text>
+        <text
+          class="action"
+          :class="{ hidden: !canManage }"
+          @click="goInvite"
+        >
+          新增
+        </text>
       </template>
     </ImNavBar>
 
-    <AppSearchBar v-model="keyword" placeholder="搜索" />
+    <AppSearchBar
+      v-model="keyword"
+      placeholder="搜索"
+    />
 
     <view class="section-head">
-      <text class="section-title">群成员 ({{ memberCountLabel }})</text>
+      <text class="section-title">
+        群成员 ({{ memberCountLabel }})
+      </text>
     </view>
 
     <scroll-view
@@ -394,52 +408,115 @@ async function onRemoveMember(member: GroupMember) {
       @scrolltolower="onReachListEnd"
       @scroll="onListScroll"
     >
-      <text v-if="loading" class="loading">加载中...</text>
+      <text
+        v-if="loading"
+        class="loading"
+      >
+        加载中...
+      </text>
       <view
         v-for="member in filteredMembers"
         :key="member.id"
         class="member-row"
         @click="openProfile(member)"
       >
-        <image class="avatar" :src="memberAvatar(member)" mode="aspectFill" />
+        <image
+          class="avatar"
+          :src="memberAvatar(member)"
+          mode="aspectFill"
+        />
         <view class="meta">
           <view class="name-line">
-            <text class="name" selectable @longpress.stop="copyName(member)">{{ displayName(member) }}</text>
+            <text
+              class="name"
+              selectable
+              @longpress.stop="copyName(member)"
+            >
+              {{ displayName(member) }}
+            </text>
             <view
               v-if="(member.role || '').toLowerCase() === 'owner'"
               class="badge badge-owner"
             >
-              <text class="badge-text">{{ roleBadgeText(member) }}</text>
+              <text class="badge-text">
+                {{ roleBadgeText(member) }}
+              </text>
             </view>
             <view
               v-else-if="(member.role || '').toLowerCase() === 'admin'"
               class="badge badge-admin"
             >
-              <text class="badge-text">{{ roleBadgeText(member) }}</text>
+              <text class="badge-text">
+                {{ roleBadgeText(member) }}
+              </text>
             </view>
-            <view v-else-if="member.isMuted" class="badge badge-muted">
-              <text class="badge-text">已禁言</text>
+            <view
+              v-else-if="member.isMuted"
+              class="badge badge-muted"
+            >
+              <text class="badge-text">
+                已禁言
+              </text>
             </view>
           </view>
           <text
             v-if="friendRemark(member) && member.nickname && friendRemark(member) !== member.nickname"
             class="origin-name"
-          >昵称：{{ member.nickname }}</text>
-          <text v-if="joinTimeText(member)" class="origin-name">{{ joinTimeText(member) }}</text>
+          >
+            昵称：{{ member.nickname }}
+          </text>
+          <text
+            v-if="joinTimeText(member)"
+            class="origin-name"
+          >
+            {{ joinTimeText(member) }}
+          </text>
         </view>
-        <view v-if="canActOn(member)" class="btn-actions">
-          <view class="btn-mute" @click.stop="member.isMuted ? onUnmute(member) : onMute(member)">
-            <text class="btn-text">{{ member.isMuted ? '解禁' : '禁言' }}</text>
+        <view
+          v-if="canActOn(member)"
+          class="btn-actions"
+        >
+          <view
+            class="btn-mute"
+            @click.stop="member.isMuted ? onUnmute(member) : onMute(member)"
+          >
+            <text class="btn-text">
+              {{ member.isMuted ? '解禁' : '禁言' }}
+            </text>
           </view>
-          <view class="btn-remove" @click.stop="onRemoveMember(member)">
-            <text class="btn-text">移除</text>
+          <view
+            class="btn-remove"
+            @click.stop="onRemoveMember(member)"
+          >
+            <text class="btn-text">
+              移除
+            </text>
           </view>
         </view>
       </view>
-      <text v-if="loadingAll" class="loading">正在加载全部成员以便搜索...</text>
-      <text v-else-if="loadingMore" class="loading">加载更多...</text>
-      <text v-else-if="!loading && hasMore && !keyword.trim()" class="loading more" @click="onReachListEnd">加载更多</text>
-      <text v-if="!loading && !filteredMembers.length" class="empty">
+      <text
+        v-if="loadingAll"
+        class="loading"
+      >
+        正在加载全部成员以便搜索...
+      </text>
+      <text
+        v-else-if="loadingMore"
+        class="loading"
+      >
+        加载更多...
+      </text>
+      <text
+        v-else-if="!loading && hasMore && !keyword.trim()"
+        class="loading more"
+        @click="onReachListEnd"
+      >
+        加载更多
+      </text>
+      <text
+        v-if="!loading && !filteredMembers.length"
+        class="empty"
+      >
         {{ keyword.trim() ? (loadingAll || hasMore ? '正在搜索全部成员...' : '未找到相关成员') : '暂无成员' }}
       </text>
     </scroll-view>

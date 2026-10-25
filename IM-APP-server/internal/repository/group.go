@@ -1226,10 +1226,12 @@ func (r *GroupRepo) ResolveQRCode(ctx context.Context, uid, token string) (model
 	_ = r.DB.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)`,
 		groupID, uid).Scan(&joined)
-	// 扫码入群视为群主私发邀请：未入群一律 nextAction=join，不受 joinMode/本人加群验证影响。
+	// 公开群扫码可直接加入；私密群（approval）只能提交申请，不能靠二维码绕过审核。
 	nextAction := "join"
 	if joined {
 		nextAction = "enter"
+	} else if joinMode == "approval" {
+		nextAction = "apply"
 	}
 	return models.GroupQRCodeResolveResult{
 		Group: g, Joined: joined, JoinMode: joinMode, NextAction: nextAction,
@@ -1237,7 +1239,6 @@ func (r *GroupRepo) ResolveQRCode(ctx context.Context, uid, token string) (model
 }
 
 func (r *GroupRepo) JoinByQRCode(ctx context.Context, uid, token, remark string) (models.JoinGroupByQRCodeResult, error) {
-	_ = remark // 扫码直接入群，不再走申请备注
 	resolved, err := r.ResolveQRCode(ctx, uid, token)
 	if err != nil {
 		return models.JoinGroupByQRCodeResult{}, err
@@ -1255,7 +1256,26 @@ func (r *GroupRepo) JoinByQRCode(ctx context.Context, uid, token, remark string)
 		_ = r.enqueueOwnerInviteMember(ctx, groupID, uid)
 		return models.JoinGroupByQRCodeResult{Action: "enter", Group: group}, nil
 	}
-	// 忽略 joinMode：二维码路径一律直接入群，并以群主身份同步 OpenIM。
+	if resolved.JoinMode == "approval" {
+		remark = strings.TrimSpace(remark)
+		if remark == "" {
+			remark = "扫码申请入群"
+		}
+		item, err := r.CreateJoinRequest(ctx, groupID, uid, remark)
+		if errors.Is(err, ErrAlreadyGroupMember) {
+			group, gerr := r.GetByID(ctx, groupID, uid)
+			if gerr != nil {
+				return models.JoinGroupByQRCodeResult{}, gerr
+			}
+			return models.JoinGroupByQRCodeResult{Action: "enter", Group: group}, nil
+		}
+		if err != nil {
+			return models.JoinGroupByQRCodeResult{}, err
+		}
+		return models.JoinGroupByQRCodeResult{
+			Action: "pending_approval", Group: resolved.Group, RequestID: item.ID,
+		}, nil
+	}
 	group, err := r.addMemberWithOperator(ctx, groupID, uid, "", false, "invite")
 	if err != nil {
 		return models.JoinGroupByQRCodeResult{}, err
@@ -1964,6 +1984,53 @@ func (r *GroupRepo) RemoveMember(ctx context.Context, groupID, uid, targetID str
 		return ErrForbidden
 	}
 	return r.removeMembership(ctx, groupID, targetID, "kick", uid, purgeMessages)
+}
+
+// PurgeMemberMessages 只记清理水位、不移出成员，返回目标昵称和操作者角色。
+// 用于成员已经自己退群（炸群后退出）的情况：removeMembership 要求目标仍在群里。
+// 权限与移出成员一致；已退群的目标按普通成员处理。
+func (r *GroupRepo) PurgeMemberMessages(ctx context.Context, groupID, uid, targetID string) (nickname, actorRole string, purgedAt time.Time, err error) {
+	if uid == targetID {
+		return "", "", purgedAt, ErrForbidden
+	}
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return "", "", purgedAt, err
+	}
+	defer tx.Rollback(ctx)
+	err = tx.QueryRow(ctx, `
+		SELECT gm.role FROM groups g JOIN group_members gm ON gm.group_id=g.id
+		WHERE g.id=$1::uuid AND gm.user_id=$2::uuid AND g.status='active'`,
+		groupID, uid).Scan(&actorRole)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && actorRole != "owner" && actorRole != "admin") {
+		return "", "", purgedAt, ErrForbidden
+	}
+	if err != nil {
+		return "", "", purgedAt, err
+	}
+	var targetRole string
+	err = tx.QueryRow(ctx, `
+		SELECT u.nickname,
+			COALESCE((SELECT gm.role FROM group_members gm WHERE gm.group_id=$1::uuid AND gm.user_id=u.id), 'member')
+		FROM users u WHERE u.id=$2::uuid`, groupID, targetID).Scan(&nickname, &targetRole)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", purgedAt, ErrIMTargetNotFound
+	}
+	if err != nil {
+		return "", "", purgedAt, err
+	}
+	if targetRole == "owner" || (actorRole == "admin" && targetRole == "admin") {
+		return "", "", purgedAt, ErrForbidden
+	}
+	// 与 removeMembership 相同：重复清理把水位往后推，盖住重新入群后新发的那段
+	err = tx.QueryRow(ctx, `
+		INSERT INTO group_message_purges (group_id, user_id) VALUES ($1::uuid, $2::uuid)
+		ON CONFLICT (group_id, user_id) DO UPDATE SET purged_at = NOW()
+		RETURNING purged_at`, groupID, targetID).Scan(&purgedAt)
+	if err != nil {
+		return "", "", purgedAt, err
+	}
+	return nickname, actorRole, purgedAt, tx.Commit(ctx)
 }
 
 // MessagePurges 返回群内被「移除并删除消息」清理过的成员及其水位时间。

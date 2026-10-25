@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { createSticker, fetchStickers, type StickerItem } from '@/api/sticker'
+import { createSticker, deleteStickers, fetchStickers, type StickerItem } from '@/api/sticker'
 import { playableMediaUrl } from '@/utils/chatMedia'
 import { uploadSticker } from '@/utils/file-upload'
 
@@ -60,6 +60,30 @@ function onSelectSticker(item: StickerItem) {
   emit('sticker', item.url)
 }
 
+const deletingId = ref('')
+
+function onDeleteSticker(item: StickerItem) {
+  if (!item.id || deletingId.value) return
+  uni.showModal({
+    title: '删除表情',
+    content: '确定删除这个表情吗？',
+    confirmColor: '#ff4d4f',
+    success: async (res) => {
+      if (!res.confirm) return
+      deletingId.value = item.id
+      try {
+        await deleteStickers([item.id])
+        stickers.value = stickers.value.filter((row) => row.id !== item.id)
+        uni.showToast({ title: '已删除', icon: 'none' })
+      } catch (e) {
+        uni.showToast({ title: (e as Error).message || '删除失败', icon: 'none' })
+      } finally {
+        deletingId.value = ''
+      }
+    },
+  })
+}
+
 function goManageEmotions() {
   emit('close')
   uni.navigateTo({ url: '/pages/mine/emotions' })
@@ -112,25 +136,64 @@ function closePanel() {
 <template>
   <view class="emoji-panel">
     <view class="tabs">
-      <view class="tab" :class="{ active: activeTab === 'emoji' }" @click="activeTab = 'emoji'">
-        <text class="tab-icon">☺</text>
+      <view
+        class="tab"
+        :class="{ active: activeTab === 'emoji' }"
+        @click="activeTab = 'emoji'"
+      >
+        <text class="tab-icon">
+          ☺
+        </text>
       </view>
-      <view class="tab" :class="{ active: activeTab === 'favorite' }" @click="activeTab = 'favorite'">
-        <text class="tab-icon">❤</text>
+      <view
+        class="tab"
+        :class="{ active: activeTab === 'favorite' }"
+        @click="activeTab = 'favorite'"
+      >
+        <text class="tab-icon">
+          ❤
+        </text>
       </view>
-      <view class="close-btn" @click="closePanel">×</view>
+      <view
+        class="close-btn"
+        @click="closePanel"
+      >
+        ×
+      </view>
     </view>
 
-    <scroll-view scroll-y class="panel-body" show-scrollbar="false">
-      <view v-if="activeTab === 'emoji'" class="emoji-grid">
-        <view v-for="item in emojiList" :key="item" class="emoji-item" @click="onSelectEmoji(item)">
-          <text class="emoji-char">{{ item }}</text>
+    <scroll-view
+      scroll-y
+      class="panel-body"
+      show-scrollbar="false"
+    >
+      <view
+        v-if="activeTab === 'emoji'"
+        class="emoji-grid"
+      >
+        <view
+          v-for="item in emojiList"
+          :key="item"
+          class="emoji-item"
+          @click="onSelectEmoji(item)"
+        >
+          <text class="emoji-char">
+            {{ item }}
+          </text>
         </view>
       </view>
 
-      <view v-else class="sticker-grid">
-        <view class="sticker-item add-item" @click="onAddSticker">
-          <text class="add-icon">+</text>
+      <view
+        v-else
+        class="sticker-grid"
+      >
+        <view
+          class="sticker-item add-item"
+          @click="onAddSticker"
+        >
+          <text class="add-icon">
+            +
+          </text>
         </view>
         <view
           v-for="item in stickers"
@@ -138,10 +201,28 @@ function closePanel() {
           class="sticker-item"
           @click="onSelectSticker(item)"
         >
-          <image class="sticker-img" :src="playableMediaUrl(item.url)" mode="aspectFill" />
+          <image
+            class="sticker-img"
+            :src="playableMediaUrl(item.url)"
+            mode="aspectFill"
+          />
+          <view
+            class="sticker-del"
+            @click.stop="onDeleteSticker(item)"
+          >
+            <text class="sticker-del-icon">
+              ×
+            </text>
+          </view>
         </view>
-        <view v-if="!loadingStickers && stickers.length === 0" class="sticker-hint" @click="goManageEmotions">
-          <text class="hint-text">点击 + 添加表情</text>
+        <view
+          v-if="!loadingStickers && stickers.length === 0"
+          class="sticker-hint"
+          @click="goManageEmotions"
+        >
+          <text class="hint-text">
+            点击 + 添加表情
+          </text>
         </view>
       </view>
     </scroll-view>
@@ -233,6 +314,7 @@ function closePanel() {
 }
 
 .sticker-item {
+  position: relative;
   width: 100%;
   aspect-ratio: 1;
   border-radius: 12rpx;
@@ -264,6 +346,26 @@ function closePanel() {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.sticker-del {
+  position: absolute;
+  top: 4rpx;
+  right: 4rpx;
+  z-index: 2;
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sticker-del-icon {
+  color: #fff;
+  font-size: 24rpx;
+  line-height: 1;
 }
 
 .sticker-hint {

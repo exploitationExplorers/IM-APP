@@ -63,28 +63,68 @@ async function onReject(item: GroupJoinRequestItem) {
 
 <template>
   <view class="page">
-    <ImNavBar title="入群申请" @back="goBack" />
+    <ImNavBar
+      title="入群申请"
+      @back="goBack"
+    />
 
     <view class="search-wrap">
       <view class="search-box">
-        <text class="search-icon">⌕</text>
-        <input class="search-input" v-model="keyword" placeholder="搜索" confirm-type="search" />
+        <text class="search-icon">
+          ⌕
+        </text>
+        <input
+          v-model="keyword"
+          class="search-input"
+          placeholder="搜索"
+          confirm-type="search"
+        >
       </view>
     </view>
 
-    <text class="section-title">近期请求</text>
+    <text class="section-title">
+      近期请求
+    </text>
 
-    <view v-for="item in filtered" :key="item.id" class="row">
+    <view
+      v-for="item in filtered"
+      :key="item.id"
+      class="row"
+    >
       <view class="main">
-        <image class="avatar" :src="item.applicant.avatar" mode="aspectFill" />
-        <text class="name">{{ item.applicant.nickname }}</text>
-        <text class="reject" @click="onReject(item)">拒绝</text>
-        <text class="accept" @click="onAccept(item)">接受</text>
+        <image
+          class="avatar"
+          :src="item.applicant.avatar"
+          mode="aspectFill"
+        />
+        <text class="name">
+          {{ item.applicant.nickname }}
+        </text>
+        <text
+          class="reject"
+          @click="onReject(item)"
+        >
+          拒绝
+        </text>
+        <text
+          class="accept"
+          @click="onAccept(item)"
+        >
+          接受
+        </text>
       </view>
-      <text v-if="item.remark" class="msg">{{ item.remark }}</text>
+      <text
+        v-if="item.remark"
+        class="msg"
+      >
+        {{ item.remark }}
+      </text>
     </view>
 
-    <EmptyState v-if="loaded && !filtered.length" text="暂无入群申请" />
+    <EmptyState
+      v-if="loaded && !filtered.length"
+      text="暂无入群申请"
+    />
   </view>
 </template>
 

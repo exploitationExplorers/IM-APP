@@ -14,6 +14,7 @@ import (
 	"im-app-server/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type GroupHandler struct {
@@ -556,6 +557,32 @@ func (h *GroupHandler) MessagePurges(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": items})
+}
+
+// PurgeMemberMessages 群主/管理员为所有人删除某成员在群内的全部消息，不要求对方仍在群里。
+func (h *GroupHandler) PurgeMemberMessages(c *gin.Context) {
+	var req models.PurgeGroupMemberMessagesReq
+	if err := bindBusinessJSON(c, &req); err != nil || req.GroupID == "" || req.MemberUserID == "" {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if _, err := uuid.Parse(req.MemberUserID); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	purgedAt, err := h.Svc.PurgeMemberMessages(c.Request.Context(), req.GroupID, middleware.UserID(c), req.MemberUserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, "无权限")
+		case errors.Is(err, repository.ErrIMTargetNotFound):
+			response.Fail(c, http.StatusNotFound, "用户不存在")
+		default:
+			response.Fail(c, http.StatusBadRequest, "操作失败")
+		}
+		return
+	}
+	response.OK(c, models.GroupMessagePurge{UserID: req.MemberUserID, PurgedAt: purgedAt})
 }
 
 func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {

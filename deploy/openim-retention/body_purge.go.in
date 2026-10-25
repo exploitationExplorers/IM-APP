@@ -1,0 +1,161 @@
+package msg
+
+import (
+	"context"
+	"errors"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database/mgo"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
+	"github.com/openimsdk/tools/log"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+const imAppBodyPurgeGrace = 24 * time.Hour
+const imAppBodyPurgeDocuments = 10
+const imAppBodyPurgeReceipts = 5
+
+// Deliberately independent from logical retention: no implicit all-groups
+// switch. Enable ONLY after EVERY writer has the slot fence and device gates
+// pass. The function parses configuration without connecting to any database.
+func imAppBodyPurgeConfig(enabled, groups, ack string) (map[string]bool, error) {
+	if enabled == "" || enabled == "false" {
+		if groups != "" || ack != "" {
+			return nil, errors.New("body purge scope supplied while disabled")
+		}
+		return nil, nil
+	}
+	if enabled != "true" || ack != "all-writers-patched-and-accepted" {
+		return nil, errors.New("body purge requires explicit writer acceptance")
+	}
+	values := strings.Split(groups, ",")
+	if len(values) > 100 {
+		return nil, errors.New("body purge supports at most 100 explicit groups")
+	}
+	scope := make(map[string]bool, len(values))
+	for _, group := range values {
+		if !imAppGroupID.MatchString(group) || scope["sg_"+group] {
+			return nil, errors.New("invalid or duplicate body purge group")
+		}
+		scope["sg_"+group] = true
+	}
+	return scope, nil
+}
+
+func imAppBodyPurgeEnvironment() (map[string]bool, error) {
+	return imAppBodyPurgeConfig(os.Getenv("IM_APP_RETENTION_BODY_PURGE_ENABLED"), os.Getenv("IM_APP_RETENTION_BODY_PURGE_GROUP_IDS"), os.Getenv("IM_APP_RETENTION_BODY_PURGE_ACK"))
+}
+
+func (b *imAppRetentionBridge) bodyPurgeLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run, cancel := context.WithTimeout(ctx, 45*time.Second)
+			err := b.bodyPurgeBatch(run)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				// Do not log raw DB errors, message content, URLs or credentials.
+				log.ZWarn(ctx, "retention body purge deferred", errors.New("batch incomplete; will retry"))
+			}
+		}
+	}
+}
+
+func (b *imAppRetentionBridge) bodyPurgeBatch(ctx context.Context) error {
+	if len(b.bodyPurgeGroups) == 0 {
+		return nil
+	}
+	var clock struct {
+		Now time.Time `bson:"localTime"`
+	}
+	if err := b.db.RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).Decode(&clock); err != nil || clock.Now.IsZero() {
+		return errIMAppSnapshot
+	}
+	ids := make([]string, 0, len(b.bodyPurgeGroups))
+	for id := range b.bodyPurgeGroups {
+		ids = append(ids, id)
+	}
+	cursor, err := b.db.Collection(imAppRetentionReceipts).Find(ctx, bson.M{
+		"conversation_id": bson.M{"$in": ids}, "boundary": bson.M{"$gt": 1},
+		"applied_at": bson.M{"$lte": clock.Now.Add(-imAppBodyPurgeGrace)}, "body_done": bson.M{"$ne": true},
+	}, options.Find().SetSort(bson.D{{Key: "body_attempted_at", Value: 1}, {Key: "_id", Value: 1}}).SetLimit(imAppBodyPurgeReceipts))
+	if err != nil {
+		return err
+	}
+	defer cursor.Close(ctx)
+	var failed bool
+	for cursor.Next(ctx) {
+		var receipt imAppReceipt
+		if cursor.Decode(&receipt) != nil {
+			failed = true
+			continue
+		}
+		if _, err := b.db.Collection(imAppRetentionReceipts).UpdateOne(ctx, bson.M{"_id": receipt.ID}, bson.M{"$currentDate": bson.M{"body_attempted_at": true}}); err != nil {
+			failed = true
+			continue
+		}
+		if err := b.purgeBodyReceipt(ctx, receipt); err != nil {
+			failed = true
+		}
+	}
+	if cursor.Err() != nil || failed {
+		return errors.New("body purge batch incomplete")
+	}
+	return nil
+}
+
+func (b *imAppRetentionBridge) purgeBodyReceipt(ctx context.Context, receipt imAppReceipt) error {
+	id := receipt.ConversationID
+	if !b.bodyPurgeGroups[id] || !imAppGroupID.MatchString(strings.TrimPrefix(id, "sg_")) || !strings.HasPrefix(id, "sg_") || receipt.Boundary <= 1 || receipt.Boundary >= 1<<53 {
+		return errIMAppSnapshot
+	}
+	var seq struct {
+		Minimum      int64 `bson:"min_seq"`
+		PurgedBefore int64 `bson:"im_app_body_purged_before"`
+	}
+	coll := b.db.Collection(database.SeqConversationName)
+	if err := coll.FindOne(ctx, bson.M{"conversation_id": id}).Decode(&seq); err != nil || seq.Minimum < receipt.Boundary {
+		return errIMAppSnapshot
+	}
+	next := max(seq.PurgedBefore, 1)
+	table := new(model.MsgDocModel)
+	for n := 0; n < imAppBodyPurgeDocuments && next < receipt.Boundary; n++ {
+		first := (next-1)/100*100 + 1
+		through := min(first+99, receipt.Boundary-1)
+		if err := mgo.IMAppRetentionPurgeDoc(ctx, b.db, table.GetDocID(id, next), through-first+1); err != nil {
+			return err
+		}
+		next = through + 1
+		// Progress is committed AFTER the per-document atomic fence+scrub.
+		// A crash before this write repeats a bounded idempotent batch. $max
+		// means competing/stale workers can never rewind progress.
+		result, err := coll.UpdateOne(ctx, bson.M{"conversation_id": id, "min_seq": bson.M{"$gte": receipt.Boundary}}, bson.M{"$max": bson.M{"im_app_body_purged_before": next}})
+		if err != nil {
+			return err
+		}
+		if result.MatchedCount != 1 {
+			return errIMAppSnapshot
+		}
+	}
+	if next >= receipt.Boundary {
+		_, err := b.db.Collection(imAppRetentionReceipts).UpdateOne(ctx, bson.M{"_id": receipt.ID, "conversation_id": id, "boundary": receipt.Boundary}, bson.M{"$set": bson.M{"body_done": true}, "$currentDate": bson.M{"body_done_at": true}})
+		return err
+	}
+	return nil
+}
+
+// Called only AFTER SetMinSeq persisted its monotonic boundary and invalidated
+// the read cache. Repeated apply must NOT extend grace indefinitely. Mongo's
+// clock timestamps the first ACK; no host clock or unsigned input grants purge.
+func (b *imAppRetentionBridge) markBodyPurgeReceipt(ctx context.Context, receiptID string) error {
+	_, err := b.db.Collection(imAppRetentionReceipts).UpdateOne(ctx, bson.M{"_id": receiptID, "applied_at": bson.M{"$exists": false}}, bson.M{"$currentDate": bson.M{"applied_at": true}})
+	return err
+}

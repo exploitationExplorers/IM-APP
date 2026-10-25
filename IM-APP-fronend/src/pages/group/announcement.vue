@@ -224,40 +224,85 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
 
 <template>
   <view class="page">
-    <ImNavBar title="群公告" @back="goBack" />
+    <ImNavBar
+      title="群公告"
+      @back="goBack"
+    />
 
-    <scroll-view scroll-y class="body" :show-scrollbar="false">
-      <view v-if="canEdit" class="form">
-        <text class="section-label">{{ editingId ? '编辑这一条' : '发布新公告' }}</text>
-        <text class="section-hint">最多 10 条，互不影响。改某一条请点下面的编辑，不会再复制出一条。</text>
+    <scroll-view
+      scroll-y
+      class="body"
+      :show-scrollbar="false"
+    >
+      <view
+        v-if="canEdit"
+        class="form"
+      >
+        <text class="section-label">
+          {{ editingId ? '编辑这一条' : '发布新公告' }}
+        </text>
+        <text class="section-hint">
+          最多 10 条，互不影响。改某一条请点下面的编辑，不会再复制出一条。
+        </text>
         <textarea
-          class="textarea"
           v-model="announcement"
+          class="textarea"
           :maxlength="ANNOUNCE_MAX"
           :placeholder="editingId ? '修改这条公告' : '请输入新的公告内容'"
           auto-height
         />
         <view class="meta">
-          <text class="count">{{ count }}/ {{ ANNOUNCE_MAX }}</text>
+          <text class="count">
+            {{ count }}/ {{ ANNOUNCE_MAX }}
+          </text>
         </view>
         <view class="images">
-          <view v-for="(img, i) in images" :key="`${img}-${i}`" class="thumb">
-            <image class="thumb-img" :src="img" mode="aspectFill" @click="previewImage(images, i)" />
-            <view class="thumb-del" @click.stop="removeImage(i)">
-              <text class="thumb-del-text">×</text>
+          <view
+            v-for="(img, i) in images"
+            :key="`${img}-${i}`"
+            class="thumb"
+          >
+            <image
+              class="thumb-img"
+              :src="img"
+              mode="aspectFill"
+              @click="previewImage(images, i)"
+            />
+            <view
+              class="thumb-del"
+              @click.stop="removeImage(i)"
+            >
+              <text class="thumb-del-text">
+                ×
+              </text>
             </view>
           </view>
-          <view v-if="images.length < MAX_IMAGES" class="add" @click="addImages">
-            <text class="add-icon">+</text>
-            <text class="add-label">图片</text>
+          <view
+            v-if="images.length < MAX_IMAGES"
+            class="add"
+            @click="addImages"
+          >
+            <text class="add-icon">
+              +
+            </text>
+            <text class="add-label">
+              图片
+            </text>
           </view>
         </view>
       </view>
 
       <view class="history-head">
-        <text class="history-title">已发布（{{ history.length }}/{{ MAX_ITEMS }}）</text>
+        <text class="history-title">
+          已发布（{{ history.length }}/{{ MAX_ITEMS }}）
+        </text>
       </view>
-      <view v-if="!history.length" class="history-empty">暂无群公告</view>
+      <view
+        v-if="!history.length"
+        class="history-empty"
+      >
+        暂无群公告
+      </view>
       <view
         v-for="(item, index) in history"
         :key="item.id"
@@ -265,11 +310,20 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
         :class="{ editing: editingId === item.id }"
       >
         <view class="history-meta">
-          <text class="history-author">{{ item.publisherName || '管理员' }}{{ index === 0 ? ' · 最新' : '' }}</text>
-          <text class="history-time">{{ historyTime(item) }}</text>
+          <text class="history-author">
+            {{ item.publisherName || '管理员' }}{{ index === 0 ? ' · 最新' : '' }}
+          </text>
+          <text class="history-time">
+            {{ historyTime(item) }}
+          </text>
         </view>
-        <text class="history-content">{{ item.content || '（仅图片）' }}</text>
-        <view v-if="historyImages(item).length" class="images readonly">
+        <text class="history-content">
+          {{ item.content || '（仅图片）' }}
+        </text>
+        <view
+          v-if="historyImages(item).length"
+          class="images readonly"
+        >
           <view
             v-for="(img, i) in historyImages(item)"
             :key="`${item.id}-${i}`"
@@ -283,16 +337,44 @@ function historyImages(item: GroupAnnouncementHistoryItem) {
             />
           </view>
         </view>
-        <view v-if="canEdit" class="history-actions">
-          <text class="history-action" @click="beginEdit(item)">编辑</text>
-          <text class="history-action danger" @click="onDelete(item)">删除</text>
+        <view
+          v-if="canEdit"
+          class="history-actions"
+        >
+          <text
+            class="history-action"
+            @click="beginEdit(item)"
+          >
+            编辑
+          </text>
+          <text
+            class="history-action danger"
+            @click="onDelete(item)"
+          >
+            删除
+          </text>
         </view>
       </view>
     </scroll-view>
 
-    <view v-if="canEdit" class="footer">
-      <view v-if="editingId" class="btn ghost" @click="resetComposer">取消</view>
-      <view class="btn" :class="{ disabled: !canSubmit }" @click="onSubmit">{{ editingId ? '保存' : '发布' }}</view>
+    <view
+      v-if="canEdit"
+      class="footer"
+    >
+      <view
+        v-if="editingId"
+        class="btn ghost"
+        @click="resetComposer"
+      >
+        取消
+      </view>
+      <view
+        class="btn"
+        :class="{ disabled: !canSubmit }"
+        @click="onSubmit"
+      >
+        {{ editingId ? '保存' : '发布' }}
+      </view>
     </view>
   </view>
 </template>

@@ -18,12 +18,24 @@ const statusBarHeight = getStatusBarHeight()
 </script>
 
 <template>
-  <view class="im-nav" :style="{ paddingTop: statusBarHeight + 'px' }">
+  <view
+    class="im-nav"
+    :style="{ paddingTop: statusBarHeight + 'px' }"
+  >
     <view class="im-nav-row">
-      <view class="im-nav-back" @click="emit('back')">
-        <image class="im-nav-back-icon" src="/static/icons/icon-back.svg" mode="aspectFit" />
+      <view
+        class="im-nav-back"
+        @click="emit('back')"
+      >
+        <image
+          class="im-nav-back-icon"
+          src="/static/icons/icon-back.svg"
+          mode="aspectFit"
+        />
       </view>
-      <text class="im-nav-title">{{ title }}</text>
+      <text class="im-nav-title">
+        {{ title }}
+      </text>
       <view class="im-nav-side">
         <slot name="right" />
       </view>

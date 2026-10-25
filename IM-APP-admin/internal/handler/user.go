@@ -140,7 +140,8 @@ func (h *DataHandler) setRestriction(c *gin.Context, restrType string) {
 		return
 	}
 	if err := h.Data.SetRestriction(c.Request.Context(), c.Param("id"), restrType, req, middleware.AdminID(c)); err != nil {
-		response.FailErr(c, http.StatusBadRequest, "操作失败", err)
+		// 把 server 返回的真实原因带回前端，便于排查（如 UUID/密钥/连通性）
+		response.FailErr(c, http.StatusBadRequest, "操作失败："+err.Error(), err)
 		return
 	}
 	c.Set("auditReason", req.Reason)

@@ -1,0 +1,6 @@
+{
+  "name": "im-app-oss-test-tools",
+  "private": true,
+  "scripts": { "test": "node --test *.test.cjs" },
+  "dependencies": { "yaml": "2.8.2" }
+}

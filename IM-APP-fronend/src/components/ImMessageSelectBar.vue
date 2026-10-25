@@ -16,8 +16,17 @@ const emit = defineEmits<{
 
 <template>
   <view class="bar safe-bottom">
-    <view class="btn ghost" @click="emit('cancel')">取消</view>
-    <view class="btn primary" :class="{ disabled: count === 0 }" @click="emit('forward')">
+    <view
+      class="btn ghost"
+      @click="emit('cancel')"
+    >
+      取消
+    </view>
+    <view
+      class="btn primary"
+      :class="{ disabled: count === 0 }"
+      @click="emit('forward')"
+    >
       转发({{ count }})
     </view>
     <view

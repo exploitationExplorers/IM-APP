@@ -14,16 +14,33 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <view v-if="visible" class="sheet-root" @touchmove.stop.prevent>
-    <view class="mask" @click="emit('cancel')" />
+  <view
+    v-if="visible"
+    class="sheet-root"
+    @touchmove.stop.prevent
+  >
+    <view
+      class="mask"
+      @click="emit('cancel')"
+    />
     <view class="panel safe-bottom">
       <view class="card">
-        <view class="btn" @click="emit('at')">
-          <text class="btn-text">@TA</text>
+        <view
+          class="btn"
+          @click="emit('at')"
+        >
+          <text class="btn-text">
+            @TA
+          </text>
         </view>
         <view class="divider" />
-        <view class="btn" @click="emit('cancel')">
-          <text class="btn-text">取消</text>
+        <view
+          class="btn"
+          @click="emit('cancel')"
+        >
+          <text class="btn-text">
+            取消
+          </text>
         </view>
       </view>
     </view>

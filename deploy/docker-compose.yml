@@ -7,15 +7,16 @@
 #   2b. 没有 nginx 容器 —— 宝塔的 nginx 占着 80 且会自动重启，交给它做入口
 #   3. 去掉 openim-docker_openim 这个旧网络，只用 im-app-openim-net
 #   4. postgres 用容器自带的（库名 imapp），不挂 001_init.sql 到 initdb ——
-#      建表只靠 api 自带的 migrations（读 /app/migrations，47 个 sql，
-#      全部 IF NOT EXISTS 幂等），单一来源，避免 initdb 和 runner 两套建表逻辑打架。
+#      现网默认 MIGRATIONS_MODE=verify，只核验结构；更新只执行审核后的增量 SQL。
+#      新空库初始化必须单独规划，不能让生产启动自动重跑整个历史 migrations。
 #      宿主上宝塔装的那个 PostgreSQL 与本栈无关，不要用它、也不用手动建库建表。
 #   5. 给 api 加 healthcheck，admin 用 service_healthy 等它 —— 见下方 ★ 说明
 #
 # 启动前必做（只需一次）：
 #   docker network create --subnet 172.20.0.0/16 im-app-openim-net
 #
-# 启动：docker compose -f deploy/docker-compose.yml up -d --build
+# 现有生产环境更新：bash deploy/production.sh inspect，后续按 deploy/PRODUCTION.md。
+# 禁止直接整栈 up --build；必须叠加原 OSS 私密 override 和本次增量配置。
 # ───────────────────────────────────────────────────────────────────────────
 
 name: im-app
@@ -136,7 +137,7 @@ services:
       - im_kafka_data:/var/lib/kafka/data
     restart: unless-stopped
 
-  # Go 主后端；启动时自动跑 IM-APP-server/migrations/（镜像内 /app/migrations）
+  # Go 主后端；现网 verify 模式只核验结构，不自动重跑历史 SQL。
   api:
     build: ../IM-APP-server
     container_name: im-app-api
@@ -164,6 +165,33 @@ services:
       start_period: 30s
     environment:
       HTTP_ADDR: ":8080"
+      # 变量模板/映射不包含真实凭据。现网 production.sh 会继续叠加原 OSS 私密配置。
+      APP_ENV: ${APP_ENV:-oss-production}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-oss}
+      MIGRATIONS_MODE: ${MIGRATIONS_MODE:-verify}
+      OSS_REGION: ${OSS_REGION:-cn-hongkong}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-https://oss-cn-hongkong.aliyuncs.com}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_SESSION_TOKEN: ${OSS_SESSION_TOKEN:-}
+      OSS_KEY_PREFIX: ${OSS_KEY_PREFIX:-im-app-production/business/}
+      OSS_PUBLIC_UPLOAD_URL: ${OSS_PUBLIC_UPLOAD_URL:-}
+      OSS_PUBLIC_BASE_URL: ${OSS_PUBLIC_BASE_URL:-}
+      OSS_MEDIA_PROXY_URL: ${OSS_MEDIA_PROXY_URL:-}
+      OSS_MEDIA_SIGNING_KEY: ${OSS_MEDIA_SIGNING_KEY:-}
+      MEDIA_SOURCE_URL_PREFIXES: ${MEDIA_SOURCE_URL_PREFIXES:-}
+      # 转发/收藏下载前，把会过期的签名直连地址换成不过期的 CDN 地址。
+      # 规则形如 "https://源前缀->https://CDN前缀"；留空 = 不改写（默认）。
+      # ★ CDN 目标前缀必须同时出现在 MEDIA_SOURCE_URL_PREFIXES 白名单里，
+      #   否则改写后的地址会被拒绝下载（fail closed）。
+      MEDIA_CDN_REWRITES: ${MEDIA_CDN_REWRITES:-}
+      GROUP_RETENTION_MODE: ${GROUP_RETENTION_MODE:-visibility_only}
+      GROUP_RETENTION_ADAPTER_URL: ${GROUP_RETENTION_ADAPTER_URL:-}
+      GROUP_RETENTION_ADAPTER_KEY: ${GROUP_RETENTION_ADAPTER_KEY:-}
+      GROUP_RETENTION_GROUP_IDS: ${GROUP_RETENTION_GROUP_IDS:-}
+      GROUP_RETENTION_ALL_GROUPS: ${GROUP_RETENTION_ALL_GROUPS:-true}
+      FAVORITE_ARCHIVE_WORKER_ENABLED: ${FAVORITE_ARCHIVE_WORKER_ENABLED:-false}
       DATABASE_URL: postgres://im:im123456@postgres:5432/imapp?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-im-local-dev-secret-change-me}
       DEV_SMS_CODE: ${DEV_SMS_CODE:-}

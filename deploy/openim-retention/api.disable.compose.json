@@ -1,0 +1,10 @@
+{
+  "services": {
+    "api": {
+      "environment": {
+        "GROUP_RETENTION_MODE": "off",
+        "MEDIA_GC_REFERENCE_GUARD_ENABLED": "true"
+      }
+    }
+  }
+}

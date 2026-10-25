@@ -48,14 +48,30 @@ function goBack() {
 
 <template>
   <view class="page">
-    <ImNavBar title="关于我们" @back="goBack" />
+    <ImNavBar
+      title="关于我们"
+      @back="goBack"
+    />
 
     <view class="content">
-      <image class="logo" src="/static/auth/icon-256.png" mode="aspectFit" />
-      <text class="name">{{ appName }}</text>
-      <text class="version">{{ versionText }}</text>
-      <view class="check-btn" @click="onCheckUpdate">
-        <text class="check-btn-text">{{ checking ? '检查中...' : '检查更新' }}</text>
+      <image
+        class="logo"
+        src="/static/auth/icon-256.png"
+        mode="aspectFit"
+      />
+      <text class="name">
+        {{ appName }}
+      </text>
+      <text class="version">
+        {{ versionText }}
+      </text>
+      <view
+        class="check-btn"
+        @click="onCheckUpdate"
+      >
+        <text class="check-btn-text">
+          {{ checking ? '检查中...' : '检查更新' }}
+        </text>
       </view>
     </view>
   </view>

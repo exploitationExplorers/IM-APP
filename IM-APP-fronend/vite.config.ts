@@ -2,11 +2,37 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
 import { visualizer } from 'rollup-plugin-visualizer'
+import { createRequire } from 'node:module'
+
+// Also apply when an existing node_modules is reused without npm install.
+// Fail loudly on an SDK upgrade instead of silently restoring eager downloads.
+if (process.env.UNI_PLATFORM === 'h5') {
+  createRequire(import.meta.url)('./scripts/fix-uni-h5-preview.cjs').ensureLazyPreview()
+}
 
 const analyze = process.env.ANALYZE === 'true'
+const mediaOrigin = 'http://8.154.44.197'
+
+/** 对象存储 302 到绝对地址时，改成同源路径，避免浏览器再跨域去拉原图。 */
+function rewriteMediaRedirect(proxy: { on: (event: string, handler: (proxyRes: { headers: Record<string, string | string[] | undefined> }) => void) => void }) {
+  proxy.on('proxyRes', (proxyRes) => {
+    const raw = proxyRes.headers.location
+    const loc = Array.isArray(raw) ? raw[0] : raw
+    if (!loc) return
+    try {
+      const url = new URL(loc, mediaOrigin)
+      if (/^\/(object|openim|minio|openim-api)\//.test(url.pathname)) {
+        proxyRes.headers.location = `${url.pathname}${url.search}`
+      }
+    } catch {
+      /* 保持上游跳转 */
+    }
+  })
+}
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const base = {
   plugins: [
     uni(),
     analyze &&
@@ -19,7 +45,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks(id) {
+        manualChunks(id: string) {
           // 不要把 openim-uniapp-polyfill / @openim/* 单独拆包：
           // H5 产物里该包在模块加载期会读 __uniConfig，独立 chunk 可能先于 uni 入口执行 → 白屏。
           if (id.includes('node_modules')) {
@@ -77,17 +103,26 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/openim/': {
-        target: 'http://8.154.44.197',
+        target: mediaOrigin,
         changeOrigin: true,
+        configure: rewriteMediaRedirect,
       },
       '/object/': {
-        target: 'http://8.154.44.197',
+        target: mediaOrigin,
         changeOrigin: true,
+        configure: rewriteMediaRedirect,
       },
       '/minio/': {
-        target: 'http://8.154.44.197',
+        target: mediaOrigin,
         changeOrigin: true,
+        configure: rewriteMediaRedirect,
       },
     },
   },
+  }
+  if (mode !== 'oss-test') return base
+  const { testFrontendConfig } = createRequire(import.meta.url)('../deploy/oss-test/frontend-vite.cjs')
+  const test = testFrontendConfig('client')
+  // Replace, never merge with production proxies. Keep the refactored app/plugin behavior.
+  return { ...base, ...test, build: { ...base.build, ...test.build } }
 })

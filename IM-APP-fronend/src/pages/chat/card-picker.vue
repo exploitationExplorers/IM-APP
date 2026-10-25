@@ -86,16 +86,35 @@ function goBack() {
 
 <template>
   <view class="page">
-    <ImNavBar title="选择好友" @back="goBack" />
+    <ImNavBar
+      title="选择好友"
+      @back="goBack"
+    />
 
-    <view v-if="conversationTitle" class="target-bar">
-      <text class="target-text">发送给：{{ conversationTitle }}</text>
+    <view
+      v-if="conversationTitle"
+      class="target-bar"
+    >
+      <text class="target-text">
+        发送给：{{ conversationTitle }}
+      </text>
     </view>
 
-    <AppSearchBar v-model="keyword" placeholder="搜索好友" />
+    <AppSearchBar
+      v-model="keyword"
+      placeholder="搜索好友"
+    />
 
-    <scroll-view scroll-y class="list">
-      <text v-if="loading" class="loading">加载中...</text>
+    <scroll-view
+      scroll-y
+      class="list"
+    >
+      <text
+        v-if="loading"
+        class="loading"
+      >
+        加载中...
+      </text>
       <view
         v-for="contact in filtered"
         :key="contact.id"
@@ -107,12 +126,24 @@ function goBack() {
           :src="contact.avatar || APP_CONFIG.defaultAvatarUrl"
           mode="aspectFill"
         />
-        <text class="name">{{ displayName(contact) }}</text>
-        <view class="pick-btn" :class="{ disabled: sending }">
-          <text class="pick-btn-text">{{ sending ? '发送中' : '发送' }}</text>
+        <text class="name">
+          {{ displayName(contact) }}
+        </text>
+        <view
+          class="pick-btn"
+          :class="{ disabled: sending }"
+        >
+          <text class="pick-btn-text">
+            {{ sending ? '发送中' : '发送' }}
+          </text>
         </view>
       </view>
-      <text v-if="!loading && !filtered.length" class="empty">暂无好友</text>
+      <text
+        v-if="!loading && !filtered.length"
+        class="empty"
+      >
+        暂无好友
+      </text>
     </scroll-view>
   </view>
 </template>

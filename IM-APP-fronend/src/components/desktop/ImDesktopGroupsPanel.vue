@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { fetchGroups } from '@/api/contact'
 import { APP_CONFIG } from '@/config'
 import type { GroupPreview } from '@/types'
+import { avatarThumbnailUrl } from '@/utils/chatMediaUrl'
 
 const props = defineProps<{
   modelValue: boolean
@@ -72,14 +73,32 @@ function goCreate() {
 </script>
 
 <template>
-  <view v-if="modelValue" class="groups-panel-layer">
-    <view class="groups-panel-backdrop" @click="close" />
+  <view
+    v-if="modelValue"
+    class="groups-panel-layer"
+  >
+    <view
+      class="groups-panel-backdrop"
+      @click="close"
+    />
 
-    <view class="groups-panel" @click.stop>
+    <view
+      class="groups-panel"
+      @click.stop
+    >
       <view class="groups-panel-header">
-        <text class="groups-panel-title">群聊天</text>
-        <view class="groups-panel-add" @click="goCreate">
-          <image class="groups-panel-add-icon" src="/static/icons/icon-plus.svg" mode="aspectFit" />
+        <text class="groups-panel-title">
+          群聊天
+        </text>
+        <view
+          class="groups-panel-add"
+          @click="goCreate"
+        >
+          <image
+            class="groups-panel-add-icon"
+            src="/static/icons/icon-plus.svg"
+            mode="aspectFit"
+          />
         </view>
       </view>
 
@@ -100,8 +119,16 @@ function goCreate() {
         </view>
       </view>
 
-      <scroll-view scroll-y class="groups-panel-body">
-        <view v-if="loading" class="groups-panel-status">加载中…</view>
+      <scroll-view
+        scroll-y
+        class="groups-panel-body"
+      >
+        <view
+          v-if="loading"
+          class="groups-panel-status"
+        >
+          加载中…
+        </view>
         <template v-else>
           <view
             v-for="g in visibleGroups"
@@ -111,18 +138,31 @@ function goCreate() {
           >
             <image
               class="groups-panel-avatar"
-              :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
+              :src="avatarThumbnailUrl(g.avatar || APP_CONFIG.defaultGroupAvatarUrl)"
               mode="aspectFill"
             />
-            <text class="groups-panel-name">{{ g.name }}</text>
+            <text class="groups-panel-name">
+              {{ g.name }}
+            </text>
             <text
               v-if="roleTagOf(g)"
               class="groups-panel-role"
               :class="roleTagClass(g)"
-            >{{ roleTagOf(g) }}</text>
-            <image class="groups-panel-arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+            >
+              {{ roleTagOf(g) }}
+            </text>
+            <image
+              class="groups-panel-arrow"
+              src="/static/icons/icon-chevron.svg"
+              mode="aspectFit"
+            />
           </view>
-          <view v-if="!visibleGroups.length" class="groups-panel-status">无群组</view>
+          <view
+            v-if="!visibleGroups.length"
+            class="groups-panel-status"
+          >
+            无群组
+          </view>
         </template>
       </scroll-view>
     </view>

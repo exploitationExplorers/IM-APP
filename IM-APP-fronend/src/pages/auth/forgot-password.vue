@@ -74,13 +74,29 @@ function goBack() {
 <template>
   <view class="auth-page">
     <view class="auth-inner">
-      <view class="auth-top-back" @click="goBack">
-        <text class="auth-top-back-icon">‹</text>
+      <view
+        class="auth-top-back"
+        @click="goBack"
+      >
+        <text class="auth-top-back-icon">
+          ‹
+        </text>
       </view>
 
-      <image class="auth-logo is-forgot" src="/static/logo/logo.png" mode="heightFix" />
-      <view class="auth-title">{{ step === 1 ? '忘记密码' : '设置新密码' }}</view>
-      <view v-if="step === 2" class="forgot-hint">验证码已发送至 {{ countryCode }} {{ phone }}</view>
+      <image
+        class="auth-logo is-forgot"
+        src="/static/logo/logo.png"
+        mode="heightFix"
+      />
+      <view class="auth-title">
+        {{ step === 1 ? '忘记密码' : '设置新密码' }}
+      </view>
+      <view
+        v-if="step === 2"
+        class="forgot-hint"
+      >
+        验证码已发送至 {{ countryCode }} {{ phone }}
+      </view>
 
       <view class="auth-form">
         <template v-if="step === 1">
@@ -88,27 +104,30 @@ function goBack() {
             <ImCountryPicker v-model="countryCode" />
             <view class="auth-input-box">
               <input
+                v-model="phone"
                 class="auth-input"
                 type="number"
                 maxlength="15"
                 :placeholder="findCountryByDialCode(countryCode).placeholder"
                 placeholder-style="color:#636E86"
-                v-model="phone"
-              />
+              >
             </view>
           </view>
 
           <view class="auth-row">
             <view class="auth-input-box">
               <input
+                v-model="code"
                 class="auth-input"
                 type="number"
                 maxlength="6"
                 placeholder="请输入验证码"
                 placeholder-style="color:#636E86"
-                v-model="code"
-              />
-              <text class="auth-sms-btn" @click="onSendCode">
+              >
+              <text
+                class="auth-sms-btn"
+                @click="onSendCode"
+              >
                 {{ countdown > 0 ? `${countdown}s` : '获取验证码' }}
               </text>
             </view>
@@ -116,20 +135,28 @@ function goBack() {
 
           <view class="auth-spacer" />
 
-          <button class="auth-primary-btn" @click="onNext">下一步</button>
+          <button
+            class="auth-primary-btn"
+            @click="onNext"
+          >
+            下一步
+          </button>
         </template>
 
         <template v-else>
           <view class="auth-row">
             <view class="auth-input-box is-join">
               <input
+                v-model="password"
                 class="auth-input"
                 :password="!showPassword"
                 placeholder="请输入新密码"
                 placeholder-style="color:#636E86"
-                v-model="password"
-              />
-              <view class="auth-eye-btn" @click="showPassword = !showPassword">
+              >
+              <view
+                class="auth-eye-btn"
+                @click="showPassword = !showPassword"
+              >
                 <image
                   class="auth-eye-icon"
                   :src="showPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
@@ -141,7 +168,13 @@ function goBack() {
 
           <view class="auth-spacer" />
 
-          <button class="auth-primary-btn" :loading="loading" @click="onSubmit">确认重置</button>
+          <button
+            class="auth-primary-btn"
+            :loading="loading"
+            @click="onSubmit"
+          >
+            确认重置
+          </button>
         </template>
       </view>
     </view>

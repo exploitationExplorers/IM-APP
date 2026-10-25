@@ -117,42 +117,103 @@ function renderTargets(r: (typeof list.value)[number]) {
 
 <template>
   <view class="page">
-    <ImNavBar title="群发助手" @back="goBack">
+    <ImNavBar
+      title="群发助手"
+      @back="goBack"
+    >
       <template #right>
-        <text class="edit-text" @click="toggleEdit">{{ editing ? '取消' : '编辑' }}</text>
+        <text
+          class="edit-text"
+          @click="toggleEdit"
+        >
+          {{ editing ? '取消' : '编辑' }}
+        </text>
       </template>
     </ImNavBar>
 
-    <view v-if="isEmpty" class="empty">
-      <text class="empty-text">暂无资料</text>
+    <view
+      v-if="isEmpty"
+      class="empty"
+    >
+      <text class="empty-text">
+        暂无资料
+      </text>
     </view>
 
-    <scroll-view v-else scroll-y class="list">
-      <view v-for="r in list" :key="r.id" class="record">
-        <view class="time">{{ formatTime(r.createdAt) }}</view>
-        <view class="row" @click="toggleSelect(r.id)">
-          <view class="card" :class="{ 'card-edit': editing }">
+    <scroll-view
+      v-else
+      scroll-y
+      class="list"
+    >
+      <view
+        v-for="r in list"
+        :key="r.id"
+        class="record"
+      >
+        <view class="time">
+          {{ formatTime(r.createdAt) }}
+        </view>
+        <view
+          class="row"
+          @click="toggleSelect(r.id)"
+        >
+          <view
+            class="card"
+            :class="{ 'card-edit': editing }"
+          >
             <view class="card-main">
-              <text class="msg">{{ renderSummary(r) }}</text>
+              <text class="msg">
+                {{ renderSummary(r) }}
+              </text>
               <view class="to">
-                <text class="to-label">已发送给</text>
-                <text class="to-names">{{ renderTargets(r) }}</text>
+                <text class="to-label">
+                  已发送给
+                </text>
+                <text class="to-names">
+                  {{ renderTargets(r) }}
+                </text>
               </view>
             </view>
-            <view class="again" :class="{ disabled: editing }" @click.stop="goSendAgain(r.id)">再发一条</view>
+            <view
+              class="again"
+              :class="{ disabled: editing }"
+              @click.stop="goSendAgain(r.id)"
+            >
+              再发一条
+            </view>
           </view>
-          <view v-if="editing" class="selector" :class="{ on: isSelected(r.id) }">
-            <text v-if="isSelected(r.id)" class="selector-tick">✓</text>
+          <view
+            v-if="editing"
+            class="selector"
+            :class="{ on: isSelected(r.id) }"
+          >
+            <text
+              v-if="isSelected(r.id)"
+              class="selector-tick"
+            >
+              ✓
+            </text>
           </view>
         </view>
       </view>
     </scroll-view>
 
-    <view v-if="!editing" class="bottom safe-bottom">
-      <view class="primary-btn" @click="goCreate">新建群发</view>
+    <view
+      v-if="!editing"
+      class="bottom safe-bottom"
+    >
+      <view
+        class="primary-btn"
+        @click="goCreate"
+      >
+        新建群发
+      </view>
     </view>
 
-    <view v-else class="delete-bar safe-bottom">
+    <view
+      v-else
+      class="delete-bar safe-bottom"
+    >
       <view
         class="delete-btn"
         :class="{ disabled: selectedCount === 0, active: selectedCount > 0 }"

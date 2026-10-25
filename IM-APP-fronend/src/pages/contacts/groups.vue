@@ -67,15 +67,24 @@ function goCreate() {
         class="tab"
         :class="{ active: tab === 'created' }"
         @click="tab = 'created'"
-      >我建立的</view>
+      >
+        我建立的
+      </view>
       <view
         class="tab"
         :class="{ active: tab === 'joined' }"
         @click="tab = 'joined'"
-      >我加入的</view>
+      >
+        我加入的
+      </view>
     </view>
 
-    <view v-if="loading" class="empty">加载中…</view>
+    <view
+      v-if="loading"
+      class="empty"
+    >
+      加载中…
+    </view>
     <template v-else>
       <view
         v-for="g in visibleGroups"
@@ -88,15 +97,40 @@ function goCreate() {
           :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
           mode="aspectFill"
         />
-        <text class="name">{{ g.name || '群聊' }}</text>
-        <text v-if="roleTagOf(g)" class="role-tag" :class="roleTagClass(g)">{{ roleTagOf(g) }}</text>
-        <text v-if="g.status === 'dismissed'" class="dissolved-tag">已解散</text>
-        <text class="arrow">›</text>
+        <text class="name">
+          {{ g.name || '群聊' }}
+        </text>
+        <text
+          v-if="roleTagOf(g)"
+          class="role-tag"
+          :class="roleTagClass(g)"
+        >
+          {{ roleTagOf(g) }}
+        </text>
+        <text
+          v-if="g.status === 'dismissed'"
+          class="dissolved-tag"
+        >
+          已解散
+        </text>
+        <text class="arrow">
+          ›
+        </text>
       </view>
 
-      <view v-if="!visibleGroups.length" class="empty">无群组</view>
+      <view
+        v-if="!visibleGroups.length"
+        class="empty"
+      >
+        无群组
+      </view>
     </template>
-    <view class="fab" @click="goCreate">＋</view>
+    <view
+      class="fab"
+      @click="goCreate"
+    >
+      ＋
+    </view>
   </view>
 </template>
 

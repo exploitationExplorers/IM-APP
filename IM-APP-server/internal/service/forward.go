@@ -15,6 +15,7 @@ import (
 
 	"im-app-server/internal/im"
 	"im-app-server/internal/infra"
+	"im-app-server/internal/media"
 	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
 
@@ -34,6 +35,7 @@ type ForwardService struct {
 	Repo   *repository.ForwardRepo
 	Client *im.Client
 	Kafka  *infra.KafkaProducer
+	Media  *ForwardMediaService
 }
 
 type CreateForwardInput struct {
@@ -155,8 +157,13 @@ func (s *ForwardService) Create(ctx context.Context, userID string, in CreateFor
 		return models.ForwardTask{}, err
 	}
 	// 相同幂等键若已进入执行阶段，直接返回原任务，不再次修改目标集合。
+	// 老的已完成任务不能因重试创建而重新下载；未发送目标由 worker 保护。
 	if task.Status != models.ForwardTaskDraft {
 		return task, nil
+	}
+	task, err = s.Media.EnsureTask(ctx, s.Repo, task)
+	if err != nil {
+		return models.ForwardTask{}, err
 	}
 	for start := 0; start < len(in.TargetUserIDs); start += maxForwardTargetWriteBatch {
 		end := min(start+maxForwardTargetWriteBatch, len(in.TargetUserIDs))
@@ -168,6 +175,9 @@ func (s *ForwardService) Create(ctx context.Context, userID string, in CreateFor
 }
 
 func validateForwardSnapshot(snapshot models.ForwardMessageSnapshot) error {
+	if len(snapshot.Content) > media.MaxContentBytes {
+		return fmt.Errorf("%w: sourceSnapshot.content is too large", ErrForwardInvalidRequest)
+	}
 	if snapshot.ContentType <= 0 {
 		return fmt.Errorf("%w: sourceSnapshot.contentType is required", ErrForwardInvalidRequest)
 	}
@@ -275,6 +285,13 @@ func (s *ForwardService) Submit(ctx context.Context, userID, taskID string) erro
 	if err := validateForwardTaskID(taskID); err != nil {
 		return err
 	}
+	task, err := s.Repo.GetTask(ctx, userID, taskID)
+	if err != nil {
+		return err
+	}
+	if _, err := s.Media.EnsureTask(ctx, s.Repo, task); err != nil {
+		return err
+	}
 	return s.Repo.SubmitTask(ctx, userID, taskID)
 }
 
@@ -373,6 +390,7 @@ func validForwardTargetStatus(status string) bool {
 type ForwardWorker struct {
 	Repo      *repository.ForwardRepo
 	Client    *im.Client
+	Media     *ForwardMediaService
 	Kafka     *infra.KafkaProducer
 	WorkerID  string
 	BatchSize int
@@ -687,6 +705,10 @@ func (w *ForwardWorker) processTarget(ctx context.Context, target models.Forward
 	}
 	if !eligible {
 		return w.Repo.MarkTargetFailed(ctx, target, reason, reason)
+	}
+	task, err = w.Media.EnsureTask(ctx, w.Repo, task)
+	if err != nil {
+		return w.retryOrFail(ctx, target, "media_preservation_failed", err)
 	}
 
 	senderIMID, err := im.UserIDFromBusinessID(task.UserID)

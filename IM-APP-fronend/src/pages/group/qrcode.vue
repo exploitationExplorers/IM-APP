@@ -111,22 +111,43 @@ async function onSave() {
 
 <template>
   <view class="page">
-    <ImNavBar title="群二维码" @back="goBack">
+    <ImNavBar
+      title="群二维码"
+      @back="goBack"
+    >
       <template #right>
-        <view class="nav-action" @click="onShare">
-          <image class="nav-action-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
+        <view
+          class="nav-action"
+          @click="onShare"
+        >
+          <image
+            class="nav-action-icon"
+            src="/static/icons/icon-share.svg"
+            mode="aspectFit"
+          />
         </view>
       </template>
     </ImNavBar>
 
     <view class="body">
       <view class="user-row">
-        <image class="avatar" :src="avatar || APP_CONFIG.defaultGroupAvatarUrl" mode="aspectFill" />
-        <text class="nickname">{{ groupName }}</text>
+        <image
+          class="avatar"
+          :src="avatar || APP_CONFIG.defaultGroupAvatarUrl"
+          mode="aspectFill"
+        />
+        <text class="nickname">
+          {{ groupName }}
+        </text>
       </view>
 
       <view class="qr-wrap">
-        <view v-if="loading" class="qr-loading">加载中...</view>
+        <view
+          v-if="loading"
+          class="qr-loading"
+        >
+          加载中...
+        </view>
         <image
           v-else-if="qrUrl"
           class="qr-image"
@@ -134,20 +155,45 @@ async function onSave() {
           mode="aspectFit"
           show-menu-by-longpress
         />
-        <view v-else class="qr-loading">二维码加载失败</view>
+        <view
+          v-else
+          class="qr-loading"
+        >
+          二维码加载失败
+        </view>
       </view>
 
-      <text class="caption">扫码进群</text>
+      <text class="caption">
+        扫码进群
+      </text>
     </view>
 
     <view class="bottom-bar">
-      <view class="bottom-action" @click="onSave">
-        <image class="bottom-icon" src="/static/icons/icon-download.svg" mode="aspectFit" />
-        <text class="bottom-text">保存</text>
+      <view
+        class="bottom-action"
+        @click="onSave"
+      >
+        <image
+          class="bottom-icon"
+          src="/static/icons/icon-download.svg"
+          mode="aspectFit"
+        />
+        <text class="bottom-text">
+          保存
+        </text>
       </view>
-      <view class="bottom-action" @click="onShare">
-        <image class="bottom-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
-        <text class="bottom-text">分享</text>
+      <view
+        class="bottom-action"
+        @click="onShare"
+      >
+        <image
+          class="bottom-icon"
+          src="/static/icons/icon-share.svg"
+          mode="aspectFit"
+        />
+        <text class="bottom-text">
+          分享
+        </text>
       </view>
     </view>
   </view>

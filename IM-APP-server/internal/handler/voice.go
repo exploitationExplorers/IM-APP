@@ -21,7 +21,7 @@ import (
 const maxVoiceBytes = 10 << 20
 
 type VoiceHandler struct {
-	MinIO *infra.MinIO
+	Storage *infra.Storage
 }
 
 // UploadVoice 接收网页端录制的语音，需要时转码成 m4a(AAC) 再落 MinIO。
@@ -29,8 +29,8 @@ type VoiceHandler struct {
 // 背景：H5 的 MediaRecorder 在 Chrome/安卓上只能录 opus-in-webm，iOS AVPlayer 不支持；
 // 浏览器侧又没有 AAC 编码器，只能在服务端转。转码失败（含未安装 ffmpeg）时降级原样存储。
 func (h *VoiceHandler) UploadVoice(c *gin.Context) {
-	if h.MinIO == nil || !h.MinIO.Available() {
-		response.Fail(c, http.StatusServiceUnavailable, "文件服务未配置，请启用 MinIO")
+	if !h.Storage.Available() {
+		response.Fail(c, http.StatusServiceUnavailable, "文件服务未配置")
 		return
 	}
 	f, err := c.FormFile("file")
@@ -73,13 +73,22 @@ func (h *VoiceHandler) UploadVoice(c *gin.Context) {
 
 	userID := middleware.UserID(c)
 	objectKey := fmt.Sprintf("voices/%s/%s.%s", userID, uuid.NewString(), outExt)
-	if err := h.MinIO.PutObject(c.Request.Context(), objectKey, bytes.NewReader(data), int64(len(data)), audioContentType(outExt)); err != nil {
+	store := h.Storage.Current
+	if store.Provider() == "oss" {
+		objectKey = "chat/" + objectKey
+	}
+	objectKey, err = store.NewKey(objectKey)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "语音文件名无效")
+		return
+	}
+	if err := store.PutObject(c.Request.Context(), objectKey, bytes.NewReader(data), int64(len(data)), audioContentType(outExt)); err != nil {
 		response.Fail(c, http.StatusInternalServerError, "保存语音失败")
 		return
 	}
 	response.OK(c, gin.H{
-		"url":   h.MinIO.FileURL(objectKey),
-		"size":  len(data),
+		"url":    store.FileURL(objectKey),
+		"size":   len(data),
 		"format": outExt,
 	})
 }

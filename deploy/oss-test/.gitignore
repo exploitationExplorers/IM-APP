@@ -1,0 +1,6 @@
+/.env
+/private/
+/artifacts/
+/node_modules/
+/.runtime/
+/__pycache__/

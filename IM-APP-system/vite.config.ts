@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
+import { createRequire } from "node:module";
 
 // 用函数式配置才能读到 .env 里的 VITE_PUBLIC_PATH。
 // ★ 这个变量以前只在 .env 里定义、没人读，所以产物一直是根绝对路径 /assets/...
@@ -8,6 +9,15 @@ import { resolve } from "path";
 //   否则 /admin/index.html 会去请求 /assets/xxx.js（根路径）→ 404 白屏。
 //   dev 下 VITE_PUBLIC_PATH=/ 不受影响，仍是 http://localhost:5180/。
 export default defineConfig(({ mode }) => {
+  if (mode === "oss-test") {
+    const { testFrontendConfig } = createRequire(import.meta.url)("../deploy/oss-test/frontend-vite.cjs");
+    return {
+      base: "/",
+      plugins: [vue()],
+      resolve: { alias: { "@": resolve(import.meta.dirname, "src") } },
+      ...testFrontendConfig("admin")
+    };
+  }
   const env = loadEnv(mode, import.meta.dirname, "");
   return {
     base: env.VITE_PUBLIC_PATH || "/",

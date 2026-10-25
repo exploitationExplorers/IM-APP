@@ -108,6 +108,8 @@ export namespace AppConfig {
     groupMemberHardLimit?: number;
     maxNicknameLen?: number;
     recallWindowSec?: number;
+    groupRetentionMaxMessages?: number;
+    groupRetentionHours?: number;
   }
 
   export interface ReqSaveSystemLimitsDraftBody {

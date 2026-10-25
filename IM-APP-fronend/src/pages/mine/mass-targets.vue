@@ -19,30 +19,53 @@ onShow(() => {
 function goBack() {
   uni.navigateBack()
 }
-
-function goEdit() {
-  uni.navigateTo({ url: '/pages/mine/mass-select-contacts?from=targets' })
-}
 </script>
 
 <template>
   <view class="page">
-    <ImNavBar title="群发对象" @back="goBack" />
+    <ImNavBar
+      title="群发对象"
+      @back="goBack"
+    />
 
     <view class="summary">
-      <text class="summary-title">你将发送消息给</text>
-      <text class="summary-count">{{ countText }}</text>
+      <text class="summary-title">
+        你将发送消息给
+      </text>
+      <text class="summary-count">
+        {{ countText }}
+      </text>
     </view>
 
-    <scroll-view scroll-y class="list">
-      <view v-for="t in targets" :key="t.id" class="item">
-        <image class="avatar" :src="t.avatar" mode="aspectFill" />
+    <scroll-view
+      scroll-y
+      class="list"
+    >
+      <view
+        v-for="t in targets"
+        :key="t.id"
+        class="item"
+      >
+        <image
+          class="avatar"
+          :src="t.avatar"
+          mode="aspectFill"
+        />
         <view class="info">
-          <text class="name">{{ t.name }}</text>
-          <text class="sub">{{ t.type }}</text>
+          <text class="name">
+            {{ t.name }}
+          </text>
+          <text class="sub">
+            {{ t.type }}
+          </text>
         </view>
       </view>
-      <view v-if="!targets.length" class="empty">暂无群发对象</view>
+      <view
+        v-if="!targets.length"
+        class="empty"
+      >
+        暂无群发对象
+      </view>
     </scroll-view>
   </view>
 </template>

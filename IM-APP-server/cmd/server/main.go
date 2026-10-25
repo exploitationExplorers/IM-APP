@@ -26,6 +26,24 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.ValidateRetention(); err != nil {
+		log.Fatalf("retention configuration: %v", err)
+	}
+	if err := cfg.ValidateMigrations(); err != nil {
+		log.Fatalf("migration configuration: %v", err)
+	}
+	if err := cfg.ValidateStorage(); err != nil {
+		log.Fatalf("storage configuration: %v", err)
+	}
+	if err := infra.ValidateArchiveSources(cfg.MediaSourcePrefixes); err != nil {
+		log.Fatalf("favorite media configuration: %v", err)
+	}
+	// Validate OSS locally BEFORE touching any DB/migrations. No cloud I/O.
+	if cfg.StorageBackend() == "oss" || cfg.OSS.Bucket != "" {
+		if _, err := infra.NewOSS(cfg.OSS); err != nil {
+			log.Fatalf("OSS configuration: %v", err)
+		}
+	}
 
 	pool, err := db.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -34,29 +52,37 @@ func main() {
 	defer pool.Close()
 
 	migrationsDir := filepath.Join("migrations")
-	if err := db.RunMigrationsDir(context.Background(), pool, migrationsDir); err != nil {
+	if err := db.RunStartupMigrations(context.Background(), pool, migrationsDir, cfg.MigrationsMode); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 	if err := db.RequireColumns(context.Background(), pool, map[string][]string{
-		"report_reasons":          {"id", "target_type", "reason", "language", "sort_order", "status"},
-		"reports":                 {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
-		"report_files":            {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
-		"feedbacks":               {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
-		"app_releases":            {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
-		"forward_tasks":           {"id", "user_id", "source_snapshot", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
-		"forward_task_targets":    {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
-		"forward_kafka_outbox":    {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
-		"im_message_recalls":      {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
-		"im_group_read_cursors":   {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
-		"group_member_limit_logs": {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
-		"group_message_purges":    {"group_id", "user_id", "purged_at"},
-		"users":                   {"id", "public_id", "public_id_changed_at", "last_seen_at"},
-		"groups":                  {"id", "public_id", "public_id_changed_at"},
-		"user_stickers":           {"id", "user_id", "file_id", "url", "created_at"},
+		"favorites":                  {"media_archived"},
+		"files":                      {"storage_provider", "storage_bucket"},
+		"report_reasons":             {"id", "target_type", "reason", "language", "sort_order", "status"},
+		"reports":                    {"id", "report_no", "reporter_id", "target_type", "target_id", "reason_id", "reason_text", "description", "status", "created_at", "updated_at"},
+		"report_files":               {"id", "report_id", "file_id", "file_url", "content_type", "created_at"},
+		"feedbacks":                  {"id", "user_id", "contact", "content", "image_file_id", "status", "created_at"},
+		"app_releases":               {"id", "platform", "channel", "version_name", "version_code", "package_type", "min_native_version", "download_url", "published"},
+		"forward_tasks":              {"id", "user_id", "source_snapshot", "media_archived", "target_count", "done_count", "success_count", "failed_count", "skipped_count", "cancelled_count", "status"},
+		"forward_media_snapshots":    {"user_id", "source_hash", "snapshot", "created_at"},
+		"group_retention_visibility": {"group_id", "min_visible_seq", "revision", "updated_at"},
+		"forward_task_targets":       {"id", "task_id", "user_id", "status", "attempts", "next_retry_at", "locked_by", "locked_until"},
+		"forward_kafka_outbox":       {"id", "task_id", "status", "attempts", "next_attempt_at", "locked_by", "locked_until"},
+		"im_message_recalls":         {"id", "conversation_id", "seq", "client_msg_id", "operator_user_id", "status", "recalled_at"},
+		"im_group_read_cursors":      {"conversation_id", "group_id", "user_id", "has_read_seq", "updated_at"},
+		"group_member_limit_logs":    {"id", "group_id", "old_limit", "new_limit", "member_count_snapshot", "platform_limit_snapshot"},
+		"group_message_purges":       {"group_id", "user_id", "purged_at"},
+		"users":                      {"id", "public_id", "public_id_changed_at", "last_seen_at"},
+		"groups":                     {"id", "public_id", "public_id_changed_at", "retention_max_messages", "retention_keep_hours"},
+		"user_stickers":              {"id", "user_id", "file_id", "url", "created_at"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations include 032_group_capacity_and_read_cursors.sql", err)
+		log.Fatalf("schema check: %v; required migrations include 052 through 056", err)
 	}
-	log.Println("migrations applied")
+	if cfg.MigrationsMode == "verify" {
+		log.Println("database schema verified; startup migration replay disabled")
+	} else {
+		log.Println("migrations applied")
+	}
 
 	if cfg.SeedDemo {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -81,12 +107,15 @@ func main() {
 		defer redisClient.Close()
 	}
 
-	minioClient, err := infra.NewMinIO(cfg.MinIO)
+	storageClient, err := infra.NewStorage(cfg)
 	if err != nil {
+		if cfg.StorageBackend() == "oss" || cfg.OSS.Bucket != "" {
+			log.Fatalf("storage: %v", err)
+		}
 		log.Printf("minio disabled: %v", err)
-		minioClient = &infra.MinIO{}
-	} else if minioClient.Available() {
-		log.Println("minio connected")
+		storageClient = &infra.Storage{Current: &infra.MinIO{}, Legacy: &infra.MinIO{}}
+	} else if storageClient.Available() {
+		log.Printf("object storage configured: %s", storageClient.Current.Provider())
 	}
 
 	imClient := im.NewClient(cfg.OpenIM)
@@ -125,15 +154,30 @@ func main() {
 		chatSvc.Hub = hub
 	}
 	favRepo := &repository.FavoriteRepo{DB: pool}
-	favSvc := &service.FavoriteService{Fav: favRepo}
+	mediaGuard := &repository.MediaGuard{DB: pool}
+	mediaArchive := infra.NewArchive(storageClient, infra.SourcePrefixes(cfg.MediaSourcePrefixes,
+		cfg.OpenIM.PublicAPIURL, cfg.OSS.MediaProxyURL, cfg.OSS.PublicUploadURL,
+		cfg.OSS.KeyPrefix, cfg.MinIO.PublicURL, cfg.MinIO.Bucket)).WithCDNRewrites(cfg.MediaCDNRewrites)
+	var mediaProtection *infra.MediaProtection
+	if cfg.MediaGCReferenceGuardEnabled {
+		mediaProtection, err = infra.NewMediaProtection(cfg.GroupRetentionAdapterURL, cfg.GroupRetentionAdapterKey)
+		if err != nil {
+			log.Fatal("media GC reference guard requires a private bridge URL/key")
+		}
+		mediaArchive.BeforeCopy = mediaProtection.Hold
+	}
+	favSvc := &service.FavoriteService{Fav: favRepo, Guard: mediaGuard,
+		Media: mediaArchive}
+	forwardMedia := &service.ForwardMediaService{
+		Repo: &repository.ForwardMediaRepo{DB: pool}, Media: mediaArchive, Guard: mediaGuard}
 	stickerRepo := &repository.StickerRepo{DB: pool}
 	stickerSvc := &service.StickerService{Stickers: stickerRepo, Files: fileRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}
 	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo, Users: userRepo, IM: imClient}
-	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue}
+	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue, Media: forwardMedia}
 	reportSvc := &service.ReportService{Reports: reportRepo}
 	feedbackSvc := &service.FeedbackService{Feedbacks: feedbackRepo}
-	appReleaseSvc := &service.AppReleaseService{Releases: appReleaseRepo, MinIO: minioClient}
+	appReleaseSvc := &service.AppReleaseService{Releases: appReleaseRepo, Storage: storageClient}
 
 	// 短信网关：配置了阿里云短信签名+模板则真发，否则用 dev 网关（仅记日志）
 	var smsGateway service.SMSGateway = service.DevSMSGateway{}
@@ -156,9 +200,10 @@ func main() {
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc, Repo: groupSvc.Groups}
-	fileH := &handler.FileHandler{MinIO: minioClient, Files: fileRepo}
-	voiceH := &handler.VoiceHandler{MinIO: minioClient}
+	fileH := &handler.FileHandler{Storage: storageClient, Files: fileRepo}
+	voiceH := &handler.VoiceHandler{Storage: storageClient}
 	imH := &handler.IMHandler{Service: imSvc}
+	retentionH := &handler.GroupRetentionHandler{Reader: &repository.GroupRetentionRepo{DB: pool}}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
 	feedbackH := &handler.FeedbackHandler{Svc: feedbackSvc}
 	appReleaseH := &handler.AppReleaseHandler{Svc: appReleaseSvc}
@@ -190,23 +235,27 @@ func main() {
 		"127.0.0.1", "::1",
 		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
 	})
-	loggerConfig := gin.LoggerConfig{}
+	// Media capability query tokens must not be persisted in access logs.
+	loggerConfig := gin.LoggerConfig{SkipPaths: []string{"/api/v1/public/oss-media"}}
 	if cfg.OpenIM.WebhookSecret != "" {
 		base := "/internal/openim/webhooks/" + cfg.OpenIM.WebhookSecret
-		loggerConfig.SkipPaths = []string{
-			base + "/callbackBeforeSendSingleMsgCommand",
-			base + "/callbackBeforeSendGroupMsgCommand",
-			base + "/callbackAfterSendSingleMsgCommand",
-			base + "/callbackAfterSendGroupMsgCommand",
-			base + "/callbackBeforeAfterMsgCommand",
-			base + "/callbackAfterDismissGroupCommand",
-		}
+		loggerConfig.SkipPaths = append(loggerConfig.SkipPaths,
+			base+"/callbackBeforeSendSingleMsgCommand",
+			base+"/callbackBeforeSendGroupMsgCommand",
+			base+"/callbackAfterSendSingleMsgCommand",
+			base+"/callbackAfterSendGroupMsgCommand",
+			base+"/callbackBeforeAfterMsgCommand",
+			base+"/callbackAfterDismissGroupCommand",
+		)
 	}
 	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
 	r.Use(corsMiddleware(cfg.CORSAllowOrigins))
 
 	// health 限流：每 IP 每分钟最多 20 次，防止前端频繁轮询
 	r.GET("/health", middleware.RateLimitIP(redisClient, 20, time.Minute, "health"), func(c *gin.Context) {
+		if mediaProtection != nil {
+			c.Header("X-IM-Media-Reference-Guard", infra.MediaGCProtocol)
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	if cfg.LegacyChatEnabled {
@@ -225,6 +274,9 @@ func main() {
 	}
 	internalIM := r.Group("/internal/im")
 	internalIM.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+	if mediaProtection != nil {
+		internalIM.Use(middleware.ProtectMedia(mediaProtection))
+	}
 	{
 		internalIM.POST("/messages", imInternalH.SendMessage)
 		internalIM.GET("/health", imInternalH.Health)
@@ -236,6 +288,9 @@ func main() {
 	// 管理后台内部接口（方案 A：admin 经 HTTP 调 server 执行业务逻辑 + OpenIM 同步）
 	internalAdmin := r.Group("/internal/admin")
 	internalAdmin.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+	if mediaProtection != nil {
+		internalAdmin.Use(middleware.ProtectMedia(mediaProtection))
+	}
 	{
 		internalAdmin.POST("/groups/:id/dismiss", adminGroupH.DismissGroup)
 		internalAdmin.POST("/groups/:id/mute", adminGroupH.MuteGroup)
@@ -258,11 +313,15 @@ func main() {
 
 	api := r.Group("/api/v1")
 	{
+		api.GET("/public/oss-media", fileH.OSSMedia)
 		api.GET("/public/countries", countryH.Countries)
 		api.GET("/public/app-release", middleware.RateLimitIP(redisClient, 30, time.Minute, "app-release"), appReleaseH.Check)
 		// 线上 Nginx 只反代 /api/，本机 pack:wgt 走公网发布时用这组，仍要内部密钥
 		adminRelease := api.Group("/admin")
 		adminRelease.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
+		if mediaProtection != nil {
+			adminRelease.Use(middleware.ProtectMedia(mediaProtection))
+		}
 		{
 			adminRelease.POST("/app-releases/uploads", appReleaseH.CreateUpload)
 			adminRelease.POST("/app-releases", appReleaseH.Publish)
@@ -278,6 +337,9 @@ func main() {
 
 		auth := api.Group("")
 		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.TouchLastSeen(userRepo.TouchLastSeen), middleware.NoStore())
+		if mediaProtection != nil {
+			auth.Use(middleware.ProtectMedia(mediaProtection))
+		}
 		{
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
@@ -335,6 +397,7 @@ func main() {
 			auth.PUT("/groups/:id/members/:userId/role", groupH.UpdateMemberRole)
 			auth.POST("/group-members/mute", groupH.MuteMember)
 			auth.POST("/group-members/unmute", groupH.UnmuteMember)
+			auth.POST("/group-members/purge-messages", groupH.PurgeMemberMessages)
 			auth.DELETE("/groups/:id/members/:userId", groupH.RemoveMember)
 			auth.GET("/groups/:id/message-purges", groupH.MessagePurges)
 			auth.PUT("/groups/:id/me/nickname", groupH.UpdateMyNickname)
@@ -359,7 +422,7 @@ func main() {
 			auth.POST("/friend-requests/:id/accept", contactH.AcceptFriendRequest)
 			auth.POST("/friend-requests/:id/reject", contactH.RejectFriendRequest)
 
-			if minioClient.Available() {
+			if storageClient.Available() {
 				auth.POST("/files/presign", fileH.Presign)
 			} else {
 				auth.POST("/files/presign", handler.DevPresign)
@@ -371,6 +434,7 @@ func main() {
 			auth.POST("/files/voice", voiceH.UploadVoice)
 
 			auth.POST("/im/token", imH.Token)
+			auth.GET("/im/group-retention/states", retentionH.States)
 			auth.GET("/im/peers/:businessUserId", imH.Peer)
 			auth.GET("/im/groups/:businessGroupId", imH.Group)
 			auth.GET("/im/groups/by-im/:imGroupId", imH.GroupByIM)
@@ -393,6 +457,7 @@ func main() {
 
 			// 新增写接口全部使用静态路径 + JSON body；旧 GET 动态路径仅保留兼容。
 			auth.POST("/forward-tasks", forwardH.Create)
+			auth.POST("/forward-media/preserve", forwardH.PreserveMedia)
 			auth.POST("/forward-batches", forwardH.CreateBatch)
 			auth.GET("/forward-tasks", forwardH.List)
 			auth.GET("/forward-tasks/:id", forwardH.GetLegacy)
@@ -427,6 +492,40 @@ func main() {
 	}
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
+	if cfg.FavoriteArchiveWorkerEnabled {
+		if cfg.StorageBackend() != "oss" {
+			log.Fatal("legacy favorite archive worker requires OSS")
+		}
+		go (&service.LegacyFavoriteArchiveWorker{Pending: favRepo, Archiver: favSvc}).Run(workerCtx)
+		log.Println("legacy favorite archive worker enabled; bounded copying only, no source deletion")
+	}
+	if cfg.GroupRetentionMode != "off" {
+		if err := db.RequireColumns(workerCtx, pool, map[string][]string{
+			"group_retention_jobs": {"id", "group_id", "run_day", "status", "lease_token", "plan", "committed_watermark"},
+		}); err != nil {
+			log.Fatalf("retention schema check: %v; requires 054_group_retention_plans.sql", err)
+		}
+		retentionRepo := &repository.GroupRetentionRepo{DB: pool, GroupIDs: cfg.GroupRetentionGroupIDs}
+		retentionScheduler := &service.GroupRetentionScheduler{Store: retentionRepo}
+		if cfg.GroupRetentionMode == "queue_only" {
+			go retentionScheduler.RunQueueOnly(workerCtx)
+			log.Println("group retention queue_only enabled; no messages/files are deleted and no client cleanup state is published")
+		} else {
+			if err := db.RequireColumns(workerCtx, pool, map[string][]string{
+				"group_retention_applications": {"job_id", "status", "attempts", "lease_token", "locked_until", "next_attempt_at"},
+			}); err != nil {
+				log.Fatalf("retention apply schema requires migration 055: %v", err)
+			}
+			adapter, err := service.NewRetentionHTTPAdapter(cfg.GroupRetentionAdapterURL, cfg.GroupRetentionAdapterKey)
+			if err != nil {
+				log.Fatal("invalid private retention adapter")
+			}
+			worker := &service.GroupRetentionWorker{Scheduler: retentionScheduler,
+				Applier: &service.GroupRetentionApplier{Store: retentionRepo}, Provider: adapter}
+			go worker.Run(workerCtx)
+			log.Println("group retention visibility_only enabled; source messages and OSS files remain protected")
+		}
+	}
 	if kafkaQueue.Available() {
 		outboxPublisher := &service.ForwardOutboxPublisher{
 			Repo: forwardRepo, Kafka: kafkaQueue,
@@ -448,6 +547,7 @@ func main() {
 		if cfg.Forward.WorkerEnabled {
 			forwardWorker := &service.ForwardWorker{
 				Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue,
+				Media:     forwardMedia,
 				BatchSize: cfg.Forward.BatchSize, MaxAttempts: cfg.Forward.MaxAttempts,
 				Concurrency: cfg.Forward.Concurrency, QPS: cfg.Forward.QPS,
 				PollInterval: time.Duration(cfg.Forward.PollSeconds) * time.Second,

@@ -55,22 +55,33 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="我在本群的昵称" @back="goBack" />
+    <ImNavBar
+      title="我在本群的昵称"
+      @back="goBack"
+    />
 
     <view class="form">
       <input
-        class="input"
         v-model="nickname"
+        class="input"
         :maxlength="NICKNAME_MAX"
         placeholder="未设置"
-      />
+      >
       <view class="meta">
-        <text class="hint">仅群内成员可见，最多 {{ NICKNAME_MAX }} 个字</text>
+        <text class="hint">
+          仅群内成员可见，最多 {{ NICKNAME_MAX }} 个字
+        </text>
       </view>
     </view>
 
     <view class="footer">
-      <button class="btn" :disabled="!canSubmit" @click="onSubmit">确认</button>
+      <button
+        class="btn"
+        :disabled="!canSubmit"
+        @click="onSubmit"
+      >
+        确认
+      </button>
     </view>
   </view>
 </template>

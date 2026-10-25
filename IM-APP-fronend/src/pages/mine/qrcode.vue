@@ -106,13 +106,30 @@ async function onSave() {
 
 <template>
   <view class="page">
-    <ImNavBar title="二维码" @back="goBack">
+    <ImNavBar
+      title="二维码"
+      @back="goBack"
+    >
       <template #right>
-        <view class="nav-action" @click="goScan">
-          <image class="nav-action-icon" src="/static/icons/icon-scan.svg" mode="aspectFit" />
+        <view
+          class="nav-action"
+          @click="goScan"
+        >
+          <image
+            class="nav-action-icon"
+            src="/static/icons/icon-scan.svg"
+            mode="aspectFit"
+          />
         </view>
-        <view class="nav-action" @click="onShare">
-          <image class="nav-action-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
+        <view
+          class="nav-action"
+          @click="onShare"
+        >
+          <image
+            class="nav-action-icon"
+            src="/static/icons/icon-share.svg"
+            mode="aspectFit"
+          />
         </view>
       </template>
     </ImNavBar>
@@ -125,14 +142,26 @@ async function onSave() {
           :src="avatarUrl"
           mode="aspectFill"
         />
-        <view v-else class="avatar avatar-fallback">
-          <text class="avatar-text">{{ nicknameInitial }}</text>
+        <view
+          v-else
+          class="avatar avatar-fallback"
+        >
+          <text class="avatar-text">
+            {{ nicknameInitial }}
+          </text>
         </view>
-        <text class="nickname">{{ nickname }}</text>
+        <text class="nickname">
+          {{ nickname }}
+        </text>
       </view>
 
       <view class="qr-wrap">
-        <view v-if="loading" class="qr-loading">加载中...</view>
+        <view
+          v-if="loading"
+          class="qr-loading"
+        >
+          加载中...
+        </view>
         <image
           v-else-if="qrImageUrl"
           class="qr-image"
@@ -140,18 +169,41 @@ async function onSave() {
           mode="aspectFit"
           show-menu-by-longpress
         />
-        <view v-else class="qr-loading">二维码加载失败</view>
+        <view
+          v-else
+          class="qr-loading"
+        >
+          二维码加载失败
+        </view>
       </view>
     </view>
 
     <view class="bottom-bar">
-      <view class="bottom-action" @click="onSave">
-        <image class="bottom-icon" src="/static/icons/icon-download.svg" mode="aspectFit" />
-        <text class="bottom-text">保存</text>
+      <view
+        class="bottom-action"
+        @click="onSave"
+      >
+        <image
+          class="bottom-icon"
+          src="/static/icons/icon-download.svg"
+          mode="aspectFit"
+        />
+        <text class="bottom-text">
+          保存
+        </text>
       </view>
-      <view class="bottom-action" @click="onShare">
-        <image class="bottom-icon" src="/static/icons/icon-share.svg" mode="aspectFit" />
-        <text class="bottom-text">分享</text>
+      <view
+        class="bottom-action"
+        @click="onShare"
+      >
+        <image
+          class="bottom-icon"
+          src="/static/icons/icon-share.svg"
+          mode="aspectFit"
+        />
+        <text class="bottom-text">
+          分享
+        </text>
       </view>
     </view>
   </view>

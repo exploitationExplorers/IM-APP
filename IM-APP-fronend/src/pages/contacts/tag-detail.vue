@@ -174,61 +174,139 @@ function onRemove(c: Contact) {
 </script>
 
 <template>
-  <view class="page" @click="closeMore">
-    <ImNavBar :title="`${tagName} (${members.length})`" @back="goBack">
+  <view
+    class="page"
+    @click="closeMore"
+  >
+    <ImNavBar
+      :title="`${tagName} (${members.length})`"
+      @back="goBack"
+    >
       <template #right>
-        <view class="nav-more" @click.stop="onMore">
-          <image class="nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
-          <view v-if="showMore" class="more-menu" @click.stop>
-            <view class="more-item" @click="openRename">变更名称</view>
-            <view class="more-item danger" @click="onDeleteTag">删除标签</view>
+        <view
+          class="nav-more"
+          @click.stop="onMore"
+        >
+          <image
+            class="nav-more-icon"
+            src="/static/icons/icon-more.svg"
+            mode="aspectFit"
+          />
+          <view
+            v-if="showMore"
+            class="more-menu"
+            @click.stop
+          >
+            <view
+              class="more-item"
+              @click="openRename"
+            >
+              变更名称
+            </view>
+            <view
+              class="more-item danger"
+              @click="onDeleteTag"
+            >
+              删除标签
+            </view>
           </view>
         </view>
       </template>
     </ImNavBar>
 
-    <AppSearchBar v-model="keyword" placeholder="搜索" />
+    <AppSearchBar
+      v-model="keyword"
+      placeholder="搜索"
+    />
 
-    <scroll-view scroll-y class="body">
-      <view v-if="filtered.length" class="list">
-        <view v-for="c in filtered" :key="c.id" class="row" @click="openContact(c)">
+    <scroll-view
+      scroll-y
+      class="body"
+    >
+      <view
+        v-if="filtered.length"
+        class="list"
+      >
+        <view
+          v-for="c in filtered"
+          :key="c.id"
+          class="row"
+          @click="openContact(c)"
+        >
           <image
             class="avatar"
             :src="c.avatar || APP_CONFIG.defaultAvatarUrl"
             mode="aspectFill"
           />
-          <text class="name">{{ displayName(c) }}</text>
-          <view class="remove" @click.stop="onRemove(c)">移除</view>
+          <text class="name">
+            {{ displayName(c) }}
+          </text>
+          <view
+            class="remove"
+            @click.stop="onRemove(c)"
+          >
+            移除
+          </view>
         </view>
       </view>
-      <view v-else-if="!loading" class="empty">暂无成员</view>
+      <view
+        v-else-if="!loading"
+        class="empty"
+      >
+        暂无成员
+      </view>
     </scroll-view>
 
     <view class="footer">
-      <view class="add-btn" @click="goAddMembers">新增</view>
+      <view
+        class="add-btn"
+        @click="goAddMembers"
+      >
+        新增
+      </view>
     </view>
 
-    <view v-if="showRename" class="mask" @click="closeRename">
-      <view class="dialog" @click.stop>
-        <text class="dialog-title">变更名称</text>
+    <view
+      v-if="showRename"
+      class="mask"
+      @click="closeRename"
+    >
+      <view
+        class="dialog"
+        @click.stop
+      >
+        <text class="dialog-title">
+          变更名称
+        </text>
         <input
-          class="dialog-input"
           v-model="draftName"
+          class="dialog-input"
           :maxlength="TAG_MAX"
           confirm-type="done"
           @confirm="confirmRename"
-        />
+        >
         <view class="dialog-meta">
-          <text class="dialog-hint">标签名称最多 {{ TAG_MAX }} 个字</text>
-          <text class="dialog-count">{{ draftCount }}/{{ TAG_MAX }}</text>
+          <text class="dialog-hint">
+            标签名称最多 {{ TAG_MAX }} 个字
+          </text>
+          <text class="dialog-count">
+            {{ draftCount }}/{{ TAG_MAX }}
+          </text>
         </view>
         <view class="dialog-actions">
-          <view class="dialog-btn ghost" @click="closeRename">取消</view>
+          <view
+            class="dialog-btn ghost"
+            @click="closeRename"
+          >
+            取消
+          </view>
           <view
             class="dialog-btn solid"
             :class="{ disabled: !canRename }"
             @click="confirmRename"
-          >确认</view>
+          >
+            确认
+          </view>
         </view>
       </view>
     </view>

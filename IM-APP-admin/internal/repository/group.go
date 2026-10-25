@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"im-app-admin/internal/models"
 
@@ -84,16 +85,38 @@ func (r *DataRepo) GetGroupDetail(ctx context.Context, groupID string) (*models.
 		       COALESCE(g.join_mode,'open'), COALESCE(g.allow_member_add_friend,true),
 		       COALESCE(g.announcement,''),
 		       COALESCE(g.max_members,2000),
-		       g.dissolved_at, COALESCE(g.dissolved_by_admin_id::text,''), COALESCE(g.dissolve_reason,'')
+		       g.dissolved_at, COALESCE(g.dissolved_by_admin_id::text,''), COALESCE(g.dissolve_reason,''),
+		       g.retention_max_messages, g.retention_keep_hours
 		FROM groups g LEFT JOIN users ou ON ou.id=g.owner_id WHERE g.id=$1::uuid`, groupID,
 	).Scan(&g.ID, &g.Name, &g.Avatar, &g.OwnerID, &g.OwnerName, &g.MemberCount, &g.Status,
 		&g.AllMuted, &g.CreatedAt, &g.JoinMode, &g.AllowMemberAddFriend, &g.Announcement,
-		&g.MaxMembers, &g.DissolvedAt, &g.DissolvedByAdminId, &g.DissolveReason)
+		&g.MaxMembers, &g.DissolvedAt, &g.DissolvedByAdminId, &g.DissolveReason,
+		&g.RetentionMaxMessages, &g.RetentionKeepHours)
 	if err != nil {
 		return nil, err
 	}
 	g.Status = normalizeGroupStatus(g.Status)
 	return &g, nil
+}
+
+func (r *DataRepo) UpdateGroupRetention(ctx context.Context, groupID string, req models.UpdateGroupRetentionRequest) error {
+	if req.UsePlatformDefault {
+		_, err := r.DB.Exec(ctx, `UPDATE groups SET retention_max_messages=NULL, retention_keep_hours=NULL
+			WHERE id=$1::uuid`, groupID)
+		return err
+	}
+	if req.RetentionMaxMessages == nil || req.RetentionKeepHours == nil {
+		return errors.New("请填写保留条数和小时，或选择使用平台默认")
+	}
+	if *req.RetentionMaxMessages < 1 || *req.RetentionMaxMessages > 20000 {
+		return errors.New("群消息保留条数须在 1～20000")
+	}
+	if *req.RetentionKeepHours < 1 || *req.RetentionKeepHours > 2160 {
+		return errors.New("群消息保留小时须在 1～2160")
+	}
+	_, err := r.DB.Exec(ctx, `UPDATE groups SET retention_max_messages=$2, retention_keep_hours=$3
+		WHERE id=$1::uuid`, groupID, *req.RetentionMaxMessages, *req.RetentionKeepHours)
+	return err
 }
 
 func (r *DataRepo) ListGroupMembers(ctx context.Context, groupID, keyword string, limit, offset int) ([]models.AppGroupMember, int64, error) {

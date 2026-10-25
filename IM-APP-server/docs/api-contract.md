@@ -4,6 +4,18 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 架构说明见 [architecture.md](./architecture.md)。
 
+## 群历史清理状态（只读）
+
+`GET /api/v1/im/group-retention/states?conversationIds=sg_<32位群ID>[,sg_<32位群ID>]`，Bearer 鉴权。
+仅接受这一个 query 参数、1～50 个不重复的小写群会话 ID，不接受 GET body。
+成功返回 `data.items=[{conversationId,minVisibleSeq,revision,updatedAt}]`，`Cache-Control: private, no-store`。
+仅查询当前有效成员及有效账号有权访问的群；无权访问或尚无已执行状态的群省略，空数组不撤销已知边界。
+`minVisibleSeq` 以下的正数 seq 不应再进入聊天历史、搜索、媒体列表或会话预览；seq=0 的本地发送中消息不因此丢弃。
+客户端按账号持久化并只接受递增版本和不后退的边界，超时、空结果、后端回滚不应复活旧消息。
+400 为参数错误，401 为未登录，503 为状态服务不可用；上游错误、群消息正文和凭据不出现在响应中。
+本接口没有执行清理或发布边界的写能力；预览计划永远不能作为已清理结果返回。
+详见 `openapi.yaml` 与 `group-retention.postman_collection.json`。
+
 ## 统一响应
 
 统一响应格式：
@@ -26,9 +38,9 @@ Go 业务服务（IM-APP-server）正式 REST 契约。前后端 Mock 与 Go 后
 
 ### GET `/api/v1/public/app-release`
 
-客户端检查是否有 wgt 热更新或整包更新。无需 JWT；按 IP 限流。`channel` 不传时默认 `test`。
+客户端检查是否有 wgt 热更新或整包更新。无需 JWT；按 IP 限流。`channel` 不传时默认 `test`。`canary` 只给内部壳，客户测试壳仍是 `test`，两条记录互不影响。
 
-Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前安装包 versionCode）、`wgtVersion`（当前资源包 versionCode）。
+Query：`platform=android|ios`、`channel=canary|test|prod`、`nativeVersion`（当前安装包 versionCode）、`wgtVersion`（当前资源包 versionCode）。
 
 **Response**
 ```json
@@ -44,15 +56,25 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 }
 ```
 
-`updateType`：`none` | `wgt` | `native`。无发布记录或已是最新时 `hasUpdate=false` 且 `updateType=none`。`downloadUrl` 为限时预签名地址。
+`updateType`：`none` | `wgt` | `native`。无发布记录或已是最新时 `hasUpdate=false` 且 `updateType=none`。`downloadUrl` 为服务端返回的可下载地址：兼容 MinIO、媒体/CDN URL，或 OSS 私有桶的稳定解析地址（302 到限时签名 GET）。客户端不得替换其中的 host、key 编码或签名参数。
 
 发布接口走内部密钥，不面向 App。线上 Nginx 只反代 `/api/`，因此本机 `pack:wgt --publish` 使用下面这组：
 
-- `POST /api/v1/admin/app-releases/uploads` Body：`{ "platform", "packageType", "fileName" }`，返回 `uploadUrl`（PUT）、`objectKey`、`fileUrl`
+- `POST /api/v1/admin/app-releases/uploads` Body：`{ "platform", "packageType", "fileName" }`，返回 `uploadUrl`（PUT）、`objectKey`、`fileUrl`、`expiresIn`，可选扩展 `headers`（存储签名要求的请求头）、`storageProvider`（`minio|oss`）。PUT 字节上传必须携带这些 headers；OSS 失败不得回退 MinIO，也不得继续发布记录。
 - `POST /api/v1/admin/app-releases` Body：`{ "platform", "channel", "versionName", "versionCode", "packageType", "objectKey", "changelog", "forceUpdate", "minNativeVersion?" }`
 - `GET /api/v1/admin/app-releases?platform=&channel=&limit=`
 
 内网仍保留 `POST/GET /internal/admin/app-releases*`。Header 均需 `X-Internal-API-Key`。日常用前端 `npm run pack:wgt -- --build --publish --min-native=100` 发布。详见仓库根目录 [plan.md](../../plan.md)。
+
+OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API 必须隔离。发布时按 `objectKey` 命名空间查对应存储，HEAD 校验非空且不超过 200 MiB；保留旧包 download URL，不自动改成当前桶。
+
+### GET `/api/v1/public/oss-media`
+
+私有业务 OSS 桶的稳定读取入口。Query：`key`、`token`，均为服务端生成的媒体 URL 中的原值，无需 JWT。可选 `variant=list|preview|preview-mobile|avatar` 仅用于图片：`list` 固定输出 `360px`、`q=60` 的 WebP，`preview` 固定输出 `1280px`、`q=75` 的 WebP，`preview-mobile` 固定输出 `960px`、`q=72` 的 WebP，`avatar` 固定输出 `128px`、`q=70` 的 WebP；不传 `variant` 时读取原对象，视频、语音和文件忽略该参数。服务端只接受这四个固定值，禁止客户端透传任意 `x-oss-process`。该 token 是指定 bucket/key 的 HMAC capability，持有链接即可读，不代表会话成员权限校验。
+
+成功返回 HTTP **302**，`Location` 为 10 分钟有效的 OSS 签名 GET（图片处理参数参与签名）；`Cache-Control: private, no-store`，`Referrer-Policy: no-referrer`。无效/缺失 token 或越界 key 返回 404，非法 variant 返回 400，解析服务未配置返回 503。这是裸 HTTP 响应，不使用统一 JSON envelope。媒体签名 key 必须稳定持久化，不能随部署随机变化；日志不得泄露完整 token。
+
+增量机器契约及独立测试请求见 `openapi-oss.yaml`、`oss-storage.postman_collection.json`。
 
 ### POST `/api/v1/auth/sms/send`
 
@@ -620,9 +642,11 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### POST `/api/v1/groups/qrcode/resolve`
 
-只读解析群二维码，返回 `joined`、`joinMode` 和 `nextAction=enter|join`。
+只读解析群二维码，返回 `joined`、`joinMode` 和 `nextAction=enter|join|apply`。
 
-扫码路径视为群主私发邀请：未入群时一律 `nextAction=join`，**不受**群 `joinMode=approval`、也不受被扫码用户「邀请入群需验证」影响。
+- 已在群中：`nextAction=enter`
+- 公开群（`joinMode=open`）且未入群：`nextAction=join`，确认后直接入群
+- 私密群（`joinMode=approval`）且未入群：`nextAction=apply`，确认后只提交入群申请，不能直接进群
 
 **Body** `{ "token": "..." }`
 
@@ -631,9 +655,10 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 用户确认后按二维码加入群：
 
 - 已是成员：返回 `enter`，并补齐 OpenIM 成员同步（自愈业务库有人、IM 未入群的历史脏数据）
-- 未入群：直接写入成员并返回 `joined`（忽略 `joinMode`，以群主邀请方式同步 OpenIM）
+- 公开群未入群：直接写入成员并返回 `joined`（以群主邀请方式同步 OpenIM）
+- 私密群未入群：写入入群申请并返回 `pending_approval`，管理员同意前不是群成员。`remark` 为空时记为「扫码申请入群」
 
-**Body** `{ "token": "...", "remark": "可选，扫码直入时忽略" }`，也支持传完整 `payload`。
+**Body** `{ "token": "...", "remark": "可选，仅私密群申请时使用" }`，也支持传完整 `payload`。
 
 ### POST `/api/v1/groups/:id/join`
 
@@ -703,6 +728,19 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 ### DELETE `/api/v1/groups/:id/members/:userId`
 
 移除群成员。群主可移除管理员和普通成员，管理员只能移除普通成员。
+
+### POST `/api/v1/group-members/purge-messages`
+
+为所有人删除某成员在群内的全部历史消息，**目标已退群也可操作**（炸群后退出的场景）。
+权限：群主/管理员；不能操作自己和群主，管理员不能操作其他管理员；已退群的目标按普通成员处理。
+
+**Body** `{ "groupId": "qun_xxx", "memberUserId": "<业务用户 UUID>" }`
+
+**Response** `data: { "userId": "...", "purgedAt": "2026-10-18T08:00:00Z" }`
+
+- 写入 `group_message_purges` 水位（与「移除并删除其消息」同一张表），重复调用把水位推到当前时间；客户端经 `GET /groups/:id/message-purges` 拉取后隐藏该成员在 `purgedAt` 之前的消息。
+- 成功后 imAdmin 向群内发一条文本 `群主|管理员清除了「昵称」的全部消息`，客户端识别为系统提示并重新拉取水位；发送失败只记日志，不影响结果。
+- 错误：`403 无权限`；`404 用户不存在`；`400 参数错误 / 操作失败`。
 
 ### PUT `/api/v1/groups/:id/settings`
 
@@ -865,6 +903,10 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 创建上传任务，获取预签名 multipart POST 表单。H5 和 App 都使用 `formUrl` + `formData` 上传，文件字段名为 `file`；`uploadUrl` 仅为兼容字段，值与 `formUrl` 相同。
 
+默认 OSS，也可显式设置 `STORAGE_PROVIDER=minio` 保留旧存储；路由与响应字段不变。客户端须原样发送所有 formData（可能是 `x-amz-*` 或 `x-oss-*`），**file 字段最后**，不要手工设置 multipart boundary，不向存储域名携带业务 JWT / 内部密钥。OSS 签名主机/编码/query 禁止改写。原生 App 使用 `uni.uploadFile`，不依赖 H5 fetch/File；均接受存储返回的 2xx。
+
+OSS 模式要求 `size` 为 1～20 MiB（含边界，单位 byte）；签名有效期 900 秒，policy 精确绑定实际 key 和桶、禁止覆盖。文件任务保存 provider/bucket；旧记录和旧 MinIO 客户端协议不变。
+
 **Body**
 ```json
 {
@@ -895,6 +937,8 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 确认上传完成，`fileId` 放在 JSON 请求体中。
 
+按该任务创建时保存的 provider/bucket 查询对象，不随全局存储开关变化。OSS 须真实存在、非空、不超过 20 MiB 且大小与创建时声明一致；缺对象/大小不符返回 400，存储无权限/故障返回 503，不标记 ready。MinIO 保留旧客户端的 size 声明兼容性。
+
 **Body**
 ```json
 { "fileId": "uuid", "etag": "optional" }
@@ -908,7 +952,7 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 ### POST `/api/v1/files/presign`（旧版 / 兼容）
 
-获取 MinIO 预签名 multipart POST 表单（MinIO 未配置时返回 dev 占位 URL）。
+获取当前存储（默认 OSS，可显式选择 MinIO）预签名 multipart POST 表单；显式选择 MinIO 且无存储的本地开发模式仍保留 dev 占位 URL，OSS 配置缺失时启动失败，不伪装成功。
 
 **Body**
 ```json
@@ -1079,6 +1123,25 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 
 接口约定：GET 使用 query 参数；新建的 POST 写接口全部使用静态路径和 JSON body，不把 `taskId` 拼入路径。`GET /api/v1/forward-tasks/:id` 只保留给旧客户端兼容，新客户端使用 `/forward-task-progress?taskId=...`。
 
+### POST `/api/v1/forward-media/preserve`
+
+客户端直接用 SDK 转发或引用回复前，为涉及的媒体生成独立副本。本接口只复制并返回快照，不发送消息。登录用户是副本所有者；只接收 JSON 请求体，禁止 query 参数、未知请求字段、客户端指定所有者或归档标志。
+
+```json
+{
+  "sourceSnapshot": {
+    "contentType": 102,
+    "content": {"sourcePicture": {"url": "https://chat.example.com/app/chat/image.jpg", "type": "image/jpeg"}}
+  }
+}
+```
+
+成功响应 `data` 为同样的 `{contentType,content}` 结构，媒体 URL 改为 `forwards/<ownerId>/...` 的独立副本稳定地址。按用户和规范化快照去重；不跨用户共享快照。图片/语音/视频/文件、@/引用/合并消息内嵌媒体均处理，兼容 App PascalCase 与 H5 camelCase、字符串内嵌 JSON。普通文字里的 URL/JSON 仍是文字，不下载。
+
+每条内嵌媒体都须有远程原文件，不能用旁边的缩略图或另一条文件的地址替代；视频还须有远程封面。快照及重写结果最多 64 KiB、最多 64 个媒体 URL，累计文件 512 MiB。应用地址范围、重定向、公网下载限制与收藏相同；不验证 OpenIM 源消息存在或群成员身份，源下载不附加 JWT/Cookie。
+
+无登录凭证返回 401；参数不合法、仅本地文件、快照超限返回 400；源不存在、范围/权限/超时/复制或持久化失败返回 503（不输出源链接和凭据）。失败时客户端必须停止本次转发或引用发送，允许重试；不得回退使用源地址。普通文字不依赖复制服务。
+
 ### POST `/api/v1/forward-tasks`
 
 创建异步转发草稿任务。`targetUserIds` 可以一次传入全部目标，服务端内部按每批 1000 条写 PostgreSQL；也可以先创建空任务，再通过 add/generate 逐批补充。
@@ -1100,6 +1163,8 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 ```
 
 `sourceClientMsgId` 与兼容字段 `sourceMessageId` 至少传一个；`sourceSnapshot.contentType` 只能是 1～999，禁止借转发接口伪造 OpenIM 通知/控制消息。
+
+媒体及引用快照在创建、提交和旧任务投递前进行独立复制；成功后冻结为副本快照。创建返回 503 时可能已存在未提交的草稿，使用同一幂等键重试即可；不会投递未保存副本的媒体。既有任务中尚未发送的目标由 worker 补偿保护，已发送的历史消息不会因此改写。批量接口复用同样流程；复制失败时可能已创建前面的草稿或提交前面的任务，请保留相同批量幂等键重试。
 
 ### 目标管理
 
@@ -1137,6 +1202,14 @@ Query：`platform=android|ios`、`channel=test|prod`、`nativeVersion`（当前�
 ### POST `/api/v1/favorites`
 
 收藏一条消息。
+
+媒体类型 `image / video / voice / file` 会先复制到当前业务存储的 `favorites/<userId>/...` 独立目录，成功后才提交收藏记录；返回的 `content` 使用独立副本的稳定地址。兼容 H5 camelCase、App PascalCase 以及字符串嵌套 JSON，保留原有内容结构。文字和表情不依赖媒体存储。
+
+源文件必须属于配置的应用媒体地址范围；每次重定向也检查范围，源 URL 的有效签名会保留。源文件失效、权限不足、复制超时或文件过大时返回失败，不写入新的成功记录；已有收藏保持原快照。同一用户同一消息的重试使用数据库中已保存的快照，不覆盖为请求中的新内容。
+
+输入及重写后的快照最多 64 KiB；一次收藏最多复制 64 个媒体地址，累计媒体字节上限 512 MiB，单次归档处理最长 45 秒。收藏保存失败可重试，不代表源聊天消息发送失败。旧收藏不会在列表查询时自动搬迁，使用专用补偿工具或再次收藏同一消息进行复制。
+
+本接口接收客户端快照，当前没有通过 OpenIM 验证源消息存在或会话成员身份；媒体下载凭源 URL 本身的访问能力和配置范围，不附加用户登录凭据。`senderId / conversationId` 是快照元数据，不作为读取源文件的授权依据。
 
 **Body**
 ```json

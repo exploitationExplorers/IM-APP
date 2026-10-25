@@ -221,20 +221,49 @@ function onDelete() {
 
 <template>
   <!-- 对齐参考站 PC modal：400×90dvh 居中白卡片，透明遮罩，深色标题 -->
-  <view v-if="modelValue" class="friend-layer" @click="close">
-    <view class="friend-modal" @click.stop>
+  <view
+    v-if="modelValue"
+    class="friend-layer"
+    @click="close"
+  >
+    <view
+      class="friend-modal"
+      @click.stop
+    >
       <view class="friend-hero" />
 
       <view class="friend-nav">
-        <text class="friend-nav-title">好友详情</text>
-        <view class="friend-nav-more" @click.stop="showMore = !showMore">
-          <image class="friend-nav-more-icon" src="/static/icons/icon-more.svg" mode="aspectFit" />
-          <view v-if="showMore" class="friend-more-menu">
-            <view class="friend-more-item" @click.stop="onBlock">
-              <image class="friend-more-icon" src="/static/icons/icon-block.svg" mode="aspectFit" />
+        <text class="friend-nav-title">
+          好友详情
+        </text>
+        <view
+          class="friend-nav-more"
+          @click.stop="showMore = !showMore"
+        >
+          <image
+            class="friend-nav-more-icon"
+            src="/static/icons/icon-more.svg"
+            mode="aspectFit"
+          />
+          <view
+            v-if="showMore"
+            class="friend-more-menu"
+          >
+            <view
+              class="friend-more-item"
+              @click.stop="onBlock"
+            >
+              <image
+                class="friend-more-icon"
+                src="/static/icons/icon-block.svg"
+                mode="aspectFit"
+              />
               <text>{{ contact?.isBlocked ? '移出黑名单' : '加入黑名单' }}</text>
             </view>
-            <view class="friend-more-item danger" @click.stop="onDelete">
+            <view
+              class="friend-more-item danger"
+              @click.stop="onDelete"
+            >
               <image
                 class="friend-more-icon"
                 src="/static/icons/icon-profile-remove.svg"
@@ -246,10 +275,18 @@ function onDelete() {
         </view>
       </view>
 
-      <view v-if="loading && !contact" class="friend-loading">加载中…</view>
+      <view
+        v-if="loading && !contact"
+        class="friend-loading"
+      >
+        加载中…
+      </view>
 
       <!-- 对齐参考站：mt-6dvh 白底 sheet；头像 -mt 压边且不在 overflow 容器内 -->
-      <view v-else-if="contact" class="friend-body">
+      <view
+        v-else-if="contact"
+        class="friend-body"
+      >
         <view class="friend-sheet">
           <!-- 参考站双层 -mt-2，合计约上移 16px，头像才完整压在白底上沿 -->
           <view class="friend-profile-wrap">
@@ -261,13 +298,23 @@ function onDelete() {
                 }"
               />
               <view class="friend-profile-meta">
-                <text class="friend-name selectable" @dblclick.stop="copyText(listName)">{{ listName }}</text>
+                <text
+                  class="friend-name selectable"
+                  @dblclick.stop="copyText(listName)"
+                >
+                  {{ listName }}
+                </text>
                 <text
                   v-if="contact.remark && contact.nickname && contact.remark.trim() !== contact.nickname.trim()"
                   class="friend-origin-name selectable"
                   @dblclick.stop="copyText(contact.nickname, '已复制昵称')"
-                >昵称：{{ contact.nickname }}</text>
-                <view v-if="contact.isBlocked" class="friend-blocked-tag">
+                >
+                  昵称：{{ contact.nickname }}
+                </text>
+                <view
+                  v-if="contact.isBlocked"
+                  class="friend-blocked-tag"
+                >
                   <text>已拉黑</text>
                 </view>
               </view>
@@ -277,31 +324,64 @@ function onDelete() {
           <view class="friend-main">
             <view class="friend-divider" />
 
-            <view class="friend-row" @click="goRemark">
-              <text class="friend-label">备注</text>
+            <view
+              class="friend-row"
+              @click="goRemark"
+            >
+              <text class="friend-label">
+                备注
+              </text>
               <view class="friend-row-right">
                 <text
                   v-if="contact.remark"
                   class="friend-value selectable"
                   @dblclick.stop="copyText(contact.remark, '已复制备注')"
-                >{{ contact.remark }}</text>
-                <image class="friend-chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+                >
+                  {{ contact.remark }}
+                </text>
+                <image
+                  class="friend-chevron"
+                  src="/static/icons/icon-chevron.svg"
+                  mode="aspectFit"
+                />
               </view>
             </view>
             <view class="friend-row">
-              <text class="friend-label">聊天号</text>
+              <text class="friend-label">
+                聊天号
+              </text>
               <view class="friend-row-right">
-                <text class="friend-pid">{{ contact.publicId || '—' }}</text>
-                <view v-if="contact.publicId" class="friend-copy" @click.stop="onCopyPublicId">
+                <text class="friend-pid">
+                  {{ contact.publicId || '—' }}
+                </text>
+                <view
+                  v-if="contact.publicId"
+                  class="friend-copy"
+                  @click.stop="onCopyPublicId"
+                >
                   <text>复制</text>
                 </view>
               </view>
             </view>
-            <view class="friend-row" @click="goTags">
-              <text class="friend-label">标签</text>
+            <view
+              class="friend-row"
+              @click="goTags"
+            >
+              <text class="friend-label">
+                标签
+              </text>
               <view class="friend-row-right">
-                <text v-if="tagText" class="friend-value">{{ tagText }}</text>
-                <image class="friend-chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+                <text
+                  v-if="tagText"
+                  class="friend-value"
+                >
+                  {{ tagText }}
+                </text>
+                <image
+                  class="friend-chevron"
+                  src="/static/icons/icon-chevron.svg"
+                  mode="aspectFit"
+                />
               </view>
             </view>
 
@@ -309,12 +389,16 @@ function onDelete() {
               <view class="friend-hr" />
 
               <view class="friend-groups-bar">
-              <text class="friend-groups-title">共同群组 ({{ groups.length }})</text>
-              <text
-                v-if="showAllGroupsLink"
-                class="friend-groups-all"
-                @click="goAllGroups"
-              >查看全部</text>
+                <text class="friend-groups-title">
+                  共同群组 ({{ groups.length }})
+                </text>
+                <text
+                  v-if="showAllGroupsLink"
+                  class="friend-groups-all"
+                  @click="goAllGroups"
+                >
+                  查看全部
+                </text>
               </view>
               <view class="friend-groups-list">
                 <view
@@ -328,20 +412,31 @@ function onDelete() {
                     :src="g.avatar || APP_CONFIG.defaultGroupAvatarUrl"
                     mode="aspectFill"
                   />
-                  <text class="friend-group-name">{{ g.name }}</text>
-                  <image class="friend-chevron" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+                  <text class="friend-group-name">
+                    {{ g.name }}
+                  </text>
+                  <image
+                    class="friend-chevron"
+                    src="/static/icons/icon-chevron.svg"
+                    mode="aspectFit"
+                  />
                 </view>
               </view>
             </template>
 
             <view class="friend-footer">
-              <view class="friend-msg-btn" @click="onMessage">
+              <view
+                class="friend-msg-btn"
+                @click="onMessage"
+              >
                 <image
                   class="friend-msg-icon"
                   src="/static/icons/icon-chat-white.svg"
                   mode="aspectFit"
                 />
-                <text class="friend-msg-text">消息</text>
+                <text class="friend-msg-text">
+                  消息
+                </text>
               </view>
             </view>
           </view>
@@ -354,26 +449,42 @@ function onDelete() {
         class="remark-layer"
         @click.stop="showRemarkEditor = false"
       >
-        <view class="remark-card" @click.stop>
-          <text class="remark-title">备注名</text>
+        <view
+          class="remark-card"
+          @click.stop
+        >
+          <text class="remark-title">
+            备注名
+          </text>
           <textarea
-            class="remark-input"
             v-model="remarkDraft"
+            class="remark-input"
             :maxlength="REMARK_MAX"
             :placeholder="contact?.nickname || '请输入备注名'"
             auto-height
           />
           <view class="remark-meta">
-            <text class="remark-hint">最多 {{ REMARK_MAX }} 个字</text>
-            <text class="remark-count">{{ remarkDraft.length }}/{{ REMARK_MAX }}</text>
+            <text class="remark-hint">
+              最多 {{ REMARK_MAX }} 个字
+            </text>
+            <text class="remark-count">
+              {{ remarkDraft.length }}/{{ REMARK_MAX }}
+            </text>
           </view>
           <view class="remark-actions">
-            <view class="remark-btn ghost" @click="showRemarkEditor = false">取消</view>
+            <view
+              class="remark-btn ghost"
+              @click="showRemarkEditor = false"
+            >
+              取消
+            </view>
             <view
               class="remark-btn primary"
               :class="{ disabled: remarkSaving }"
               @click="saveRemark"
-            >确认</view>
+            >
+              确认
+            </view>
           </view>
         </view>
       </view>
@@ -382,7 +493,7 @@ function onDelete() {
 </template>
 
 <style scoped lang="scss">
-/* 参考站：fixed 居中 + 透明遮罩 + 400×90dvh 白卡片 shadow-modal */
+/* 参考站：fixed 居中 + 透明遮罩 + 400 宽白卡片；高度比参考站 90dvh 略收 */
 .friend-layer {
   position: fixed;
   inset: 0;
@@ -398,8 +509,8 @@ function onDelete() {
   position: relative;
   width: 400px;
   max-width: calc(100vw - 48px);
-  height: 90dvh;
-  max-height: 90dvh;
+  height: 76dvh;
+  max-height: 76dvh;
   display: flex;
   flex-direction: column;
   background: #fff;

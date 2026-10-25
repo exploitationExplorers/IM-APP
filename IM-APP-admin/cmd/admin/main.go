@@ -23,6 +23,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.ValidateEnvironment(); err != nil {
+		log.Fatal(err)
+	}
 	if cfg.WeakJWTSecret() {
 		if mode := os.Getenv("GIN_MODE"); mode == "release" || mode == "test" {
 			log.Fatalf("config: ADMIN_JWT_SECRET 过弱（长度<32 或为已知默认值），生产环境拒绝启动，请设置强随机密钥")

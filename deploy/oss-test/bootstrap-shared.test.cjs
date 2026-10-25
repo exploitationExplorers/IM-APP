@@ -1,0 +1,23 @@
+'use strict'
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { sharedSQL } = require('./bootstrap-shared.cjs')
+test('test bootstrap uses exactly two canonical shared config tables and guards actual DB/role', () => {
+  const sql = sharedSQL()
+  assert.equal((sql.match(/CREATE TABLE/g) || []).length, 2)
+  assert.match(sql, /current_database\(\) <> 'imapp_oss_test'/)
+  assert.match(sql, /current_user <> 'im_oss_test'/)
+  assert.match(sql, /^BEGIN;/)
+  assert.match(sql, /COMMIT;\s*$/)
+  assert.ok(!/\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER)\b/i.test(sql))
+  assert.ok(sql.indexOf('RAISE EXCEPTION') < sql.indexOf('CREATE TABLE'))
+  assert.ok(!sql.includes('CREATE TABLE IF NOT EXISTS legal_documents'))
+})
+test('test bootstrap fails closed on missing, duplicate or changed-to-destructive DDL', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../IM-APP-admin/migrations/007_admin_config.sql'), 'utf8')
+  assert.throws(() => sharedSQL(''))
+  assert.throws(() => sharedSQL(source + source))
+  assert.throws(() => sharedSQL(source.replace('key         VARCHAR(64) PRIMARY KEY,', 'key TEXT,\nDROP TABLE users;')))
+})

@@ -11,6 +11,7 @@ type Favorite struct {
 	SenderID       string    `json:"senderId"`
 	ConversationID string    `json:"conversationId"`
 	CreatedAt      time.Time `json:"createdAt"`
+	MediaArchived  bool      `json:"-"`
 }
 
 // CreateFavoriteRequest 收藏请求。OpenIM 主路径传消息快照，不再查业务库 messages。

@@ -108,11 +108,17 @@ function goForgot() {
 <template>
   <view class="auth-page">
     <view class="auth-inner">
-      <image class="auth-logo" src="/static/logo/logo.png" mode="heightFix" />
+      <image
+        class="auth-logo"
+        src="/static/logo/logo.png"
+        mode="heightFix"
+      />
 
       <view class="auth-form">
         <view class="auth-tabs">
-          <text class="auth-tab active">账号密码登录</text>
+          <text class="auth-tab active">
+            账号密码登录
+          </text>
           <!--
           <text
             class="auth-tab"
@@ -131,26 +137,29 @@ function goForgot() {
           <ImCountryPicker v-model="countryCode" />
           <view class="auth-input-box">
             <input
+              v-model="phone"
               class="auth-input"
               type="number"
               maxlength="15"
               :placeholder="findCountryByDialCode(countryCode).placeholder"
               placeholder-style="color:#636E86"
-              v-model="phone"
-            />
+            >
           </view>
         </view>
 
         <view class="auth-row">
           <view class="auth-input-box is-join">
             <input
+              v-model="password"
               class="auth-input"
               :password="!showPassword"
               placeholder="请输入密码"
               placeholder-style="color:#636E86"
-              v-model="password"
-            />
-            <view class="auth-eye-btn" @click="showPassword = !showPassword">
+            >
+            <view
+              class="auth-eye-btn"
+              @click="showPassword = !showPassword"
+            >
               <image
                 class="auth-eye-icon"
                 :src="showPassword ? '/static/auth/icon-eye.svg' : '/static/auth/icon-eye-off.svg'"
@@ -179,22 +188,49 @@ function goForgot() {
         -->
 
         <view class="auth-extra">
-          <view class="auth-remember" @click="rememberPassword = !rememberPassword">
-            <view class="auth-remember-box" :class="{ on: rememberPassword }">
-              <text v-if="rememberPassword" class="auth-remember-tick">✓</text>
+          <view
+            class="auth-remember"
+            @click="rememberPassword = !rememberPassword"
+          >
+            <view
+              class="auth-remember-box"
+              :class="{ on: rememberPassword }"
+            >
+              <text
+                v-if="rememberPassword"
+                class="auth-remember-tick"
+              >
+                ✓
+              </text>
             </view>
             <text>记住号码密码</text>
           </view>
-          <text class="auth-forgot" @click="goForgot">忘记密码</text>
+          <text
+            class="auth-forgot"
+            @click="goForgot"
+          >
+            忘记密码
+          </text>
         </view>
 
         <view class="auth-spacer" />
 
-        <button class="auth-login-btn" :loading="loading" @click="onLogin">登录</button>
+        <button
+          class="auth-login-btn"
+          :loading="loading"
+          @click="onLogin"
+        >
+          登录
+        </button>
       </view>
 
       <view class="auth-footer">
-        <text class="auth-register-link" @click="goRegister">立即注册</text>
+        <text
+          class="auth-register-link"
+          @click="goRegister"
+        >
+          立即注册
+        </text>
       </view>
     </view>
     <ImNotificationPermissionDialog />

@@ -166,7 +166,7 @@ export const useUserStore = defineStore('user', () => {
     })
   }
 
-  /** 401 时清内存会话，不跳转（跳转由 request 层统一处理） */
+  /** 401 / 刷新失败时清内存会话，不跳转（跳转由 request 层统一处理） */
   function invalidateSession() {
     token.value = ''
     refreshToken.value = ''
@@ -174,6 +174,10 @@ export const useUserStore = defineStore('user', () => {
     clearToken()
     clearFriendRequestBadge()
     useContactStore().reset()
+    useChatStore().reset()
+    useGroupStore().reset()
+    useMassSendStore().resetAll()
+    void logoutOpenIM().catch(() => undefined)
   }
 
   async function logout() {

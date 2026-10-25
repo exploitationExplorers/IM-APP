@@ -1,0 +1,5 @@
+# Keep production scripts and injected Go sources portable across Windows/Linux.
+deploy/production.sh text eol=lf
+deploy/openim-retention/*.sh text eol=lf
+deploy/openim-retention/*.py text eol=lf
+deploy/openim-retention/*.go.in text eol=lf

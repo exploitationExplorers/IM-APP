@@ -51,18 +51,36 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="修改群组名称" @back="goBack" />
+    <ImNavBar
+      title="修改群组名称"
+      @back="goBack"
+    />
 
     <view class="form">
-      <input class="input" v-model="name" :maxlength="NAME_MAX" placeholder="请输入群组名称" />
+      <input
+        v-model="name"
+        class="input"
+        :maxlength="NAME_MAX"
+        placeholder="请输入群组名称"
+      >
       <view class="meta">
-        <text class="hint">群组名称最多 {{ NAME_MAX }} 个字</text>
-        <text class="count">{{ count }}/{{ NAME_MAX }}</text>
+        <text class="hint">
+          群组名称最多 {{ NAME_MAX }} 个字
+        </text>
+        <text class="count">
+          {{ count }}/{{ NAME_MAX }}
+        </text>
       </view>
     </view>
 
     <view class="footer">
-      <button class="btn" :disabled="!canSubmit" @click="onSubmit">确认</button>
+      <button
+        class="btn"
+        :disabled="!canSubmit"
+        @click="onSubmit"
+      >
+        确认
+      </button>
     </view>
   </view>
 </template>

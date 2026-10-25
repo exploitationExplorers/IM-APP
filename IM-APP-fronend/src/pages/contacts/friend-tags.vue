@@ -129,16 +129,23 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="新增标签" @back="goBack" />
+    <ImNavBar
+      title="新增标签"
+      @back="goBack"
+    />
 
     <view class="section">
       <view class="section-head">
-        <text class="section-title">已有标签</text>
+        <text class="section-title">
+          已有标签
+        </text>
         <text
           class="section-action"
           :class="isDirty && !saving ? 'primary' : 'muted'"
           @click="onSubmit"
-        >{{ saving ? '保存中' : '确认' }}</text>
+        >
+          {{ saving ? '保存中' : '确认' }}
+        </text>
       </view>
       <view class="chip-row">
         <view
@@ -147,19 +154,39 @@ async function onSubmit() {
           class="chip chip-on"
           @click="toggle(tag.id)"
         >
-          <text class="mark">×</text>
-          <text class="chip-text">{{ tag.name }}</text>
+          <text class="mark">
+            ×
+          </text>
+          <text class="chip-text">
+            {{ tag.name }}
+          </text>
         </view>
-        <text v-if="!assignedTags.length" class="empty">暂无标签</text>
+        <text
+          v-if="!assignedTags.length"
+          class="empty"
+        >
+          暂无标签
+        </text>
       </view>
     </view>
 
     <view class="section">
       <view class="section-head">
-        <text class="section-title">全部标签</text>
-        <view class="edit" @click="goEditTags">
-          <text class="section-action">编辑</text>
-          <image class="edit-arrow" src="/static/icons/icon-chevron.svg" mode="aspectFit" />
+        <text class="section-title">
+          全部标签
+        </text>
+        <view
+          class="edit"
+          @click="goEditTags"
+        >
+          <text class="section-action">
+            编辑
+          </text>
+          <image
+            class="edit-arrow"
+            src="/static/icons/icon-chevron.svg"
+            mode="aspectFit"
+          />
         </view>
       </view>
       <view class="chip-row">
@@ -170,39 +197,78 @@ async function onSubmit() {
           :class="selected.has(tag.id) ? 'chip-on' : 'chip-off'"
           @click="toggle(tag.id)"
         >
-          <text v-if="selected.has(tag.id)" class="mark">×</text>
-          <text v-else class="mark">+</text>
-          <text class="chip-text">{{ tag.name }}</text>
+          <text
+            v-if="selected.has(tag.id)"
+            class="mark"
+          >
+            ×
+          </text>
+          <text
+            v-else
+            class="mark"
+          >
+            +
+          </text>
+          <text class="chip-text">
+            {{ tag.name }}
+          </text>
         </view>
-        <view class="chip chip-add" @click="openCreate">
-          <text class="mark">+</text>
-          <text class="chip-text">新增</text>
+        <view
+          class="chip chip-add"
+          @click="openCreate"
+        >
+          <text class="mark">
+            +
+          </text>
+          <text class="chip-text">
+            新增
+          </text>
         </view>
       </view>
     </view>
 
-    <view v-if="showCreate" class="mask" @click="closeCreate">
-      <view class="dialog" @click.stop>
-        <text class="dialog-title">新增标签</text>
+    <view
+      v-if="showCreate"
+      class="mask"
+      @click="closeCreate"
+    >
+      <view
+        class="dialog"
+        @click.stop
+      >
+        <text class="dialog-title">
+          新增标签
+        </text>
         <input
-          class="dialog-input"
           v-model="draftName"
+          class="dialog-input"
           :maxlength="TAG_MAX"
           placeholder=""
           confirm-type="done"
           @confirm="confirmCreate"
-        />
+        >
         <view class="dialog-meta">
-          <text class="dialog-hint">标签名称最多 {{ TAG_MAX }} 个字</text>
-          <text class="dialog-count">{{ draftCount }}/{{ TAG_MAX }}</text>
+          <text class="dialog-hint">
+            标签名称最多 {{ TAG_MAX }} 个字
+          </text>
+          <text class="dialog-count">
+            {{ draftCount }}/{{ TAG_MAX }}
+          </text>
         </view>
         <view class="dialog-actions">
-          <view class="dialog-btn ghost" @click="closeCreate">取消</view>
+          <view
+            class="dialog-btn ghost"
+            @click="closeCreate"
+          >
+            取消
+          </view>
           <view
             class="dialog-btn solid"
             :class="{ disabled: !canCreate }"
             @click="confirmCreate"
-          >确认</view>
+          >
+            确认
+          </view>
         </view>
       </view>
     </view>

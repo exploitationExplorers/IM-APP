@@ -82,26 +82,42 @@ async function onSubmit() {
 
 <template>
   <view class="page">
-    <ImNavBar title="新增群组管理员" @back="goBack" />
+    <ImNavBar
+      title="新增群组管理员"
+      @back="goBack"
+    />
 
     <view class="search-wrap">
       <view class="search-box">
-        <text class="search-icon">⌕</text>
+        <text class="search-icon">
+          ⌕
+        </text>
         <input
-          class="search-input"
           v-model="keyword"
+          class="search-input"
           placeholder="搜索"
           confirm-type="search"
-        />
+        >
       </view>
     </view>
 
     <view class="section-head">
-      <text class="section-title">可选成员 ({{ loading ? '…' : filtered.length }})</text>
+      <text class="section-title">
+        可选成员 ({{ loading ? '…' : filtered.length }})
+      </text>
     </view>
 
-    <scroll-view scroll-y class="list" :show-scrollbar="false">
-      <text v-if="loading" class="empty">加载中...</text>
+    <scroll-view
+      scroll-y
+      class="list"
+      :show-scrollbar="false"
+    >
+      <text
+        v-if="loading"
+        class="empty"
+      >
+        加载中...
+      </text>
       <block v-else>
         <view
           v-for="member in filtered"
@@ -114,17 +130,31 @@ async function onSubmit() {
             :src="member.avatar || APP_CONFIG.defaultAvatarUrl"
             mode="aspectFill"
           />
-          <text class="name">{{ displayName(member) }}</text>
-          <view class="check" :class="{ on: selected.has(member.id) }" />
+          <text class="name">
+            {{ displayName(member) }}
+          </text>
+          <view
+            class="check"
+            :class="{ on: selected.has(member.id) }"
+          />
         </view>
-        <text v-if="!filtered.length" class="empty">
+        <text
+          v-if="!filtered.length"
+          class="empty"
+        >
           {{ candidates.length ? '无匹配成员' : '暂无可设为管理员的普通成员' }}
         </text>
       </block>
     </scroll-view>
 
     <view class="footer">
-      <button class="btn" :disabled="!canSubmit" @click="onSubmit">确认</button>
+      <button
+        class="btn"
+        :disabled="!canSubmit"
+        @click="onSubmit"
+      >
+        确认
+      </button>
     </view>
   </view>
 </template>

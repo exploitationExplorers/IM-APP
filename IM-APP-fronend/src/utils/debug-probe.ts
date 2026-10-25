@@ -1,4 +1,5 @@
 /** 调试资讯：端点探测与环境信息采集（纯前端，不新增后端接口） */
+import { APP_CONFIG } from '@/config'
 
 export interface ProbeResult {
   label: string
@@ -50,6 +51,7 @@ export function healthUrlFromApiBase(apiBaseUrl: string): string {
 }
 
 export function appProbeUrl(): string {
+  if (APP_CONFIG.ossTest) return 'https://localhost:18443/'
   // #ifdef H5
   if (typeof location !== 'undefined' && location.origin) {
     return location.origin + '/'
@@ -59,6 +61,7 @@ export function appProbeUrl(): string {
 }
 
 export function fileProbeUrl(defaultAvatarUrl: string): string {
+  if (APP_CONFIG.ossTest) return 'https://localhost:18443/static/group-default.svg'
   try {
     const u = new URL(defaultAvatarUrl)
     return `${u.origin}/`

@@ -7,7 +7,8 @@
  *   node scripts/pack-wgt.cjs --build --publish --min-native=100
  *   node scripts/pack-wgt.cjs --publish --file=unpackage/release/im-101.wgt --changelog=修复气泡错位
  *
- * --min-native 必须等于客户当前安装的 APK versionCode。
+ * --min-native 必须等于目标壳的 APK versionCode。
+ * 默认发到 canary，只有内部壳会更新。发给客户必须显式 --channel=test。
  */
 const crypto = require('crypto')
 const dns = require('dns')
@@ -18,6 +19,7 @@ const path = require('path')
 const zlib = require('zlib')
 const { execFileSync, spawnSync } = require('child_process')
 const { URL } = require('url')
+const { canFallbackToMinio, releaseUploadHeaders } = require('./release-upload.cjs')
 
 /**
  * 源站 IP 固定。当前线上是 8.154.44.197，纯 IP、无域名 —— 请求本来就直连 IP，
@@ -60,7 +62,7 @@ function parseArgs(argv) {
     force: false,
     minNative: '',
     changelog: '',
-    channel: 'test',
+    channel: 'canary',
     // wgt 默认双端：安卓/iOS（企业签）共用同一资源包；整包再按单端发
     platform: 'android,ios',
     file: '',
@@ -85,7 +87,29 @@ function parseArgs(argv) {
       throw new Error(`未知参数: ${raw}`)
     }
   }
+  args.channel = normalizeChannel(args.channel)
   return args
+}
+
+const ALLOWED_CHANNELS = new Set(['canary', 'test', 'prod'])
+
+function normalizeChannel(raw) {
+  const channel = String(raw || '').trim().toLowerCase()
+  if (!ALLOWED_CHANNELS.has(channel)) {
+    throw new Error(`--channel 只支持 canary / test / prod，收到: ${raw}`)
+  }
+  return channel
+}
+
+function warnCustomerChannel(channel) {
+  if (channel !== 'test' && channel !== 'prod') return
+  console.warn('')
+  console.warn('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+  console.warn(`警告: 即将发布到客户渠道 channel=${channel}`)
+  console.warn('客户手机上的测试壳下次打开就会安装这个包。')
+  console.warn('内部验收请用: npm run pack:wgt:canary')
+  console.warn('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+  console.warn('')
 }
 
 /** 支持 --platform=android / ios / android,ios / all */
@@ -456,13 +480,16 @@ async function publishReleaseForPlatform(args, platform, filePath, versionName, 
   try {
     putRes = await requestBuffer(upload.uploadUrl, {
       method: 'PUT',
-      headers: { 'Content-Length': String(buf.length) },
+      headers: releaseUploadHeaders(upload, buf.length),
       body: buf,
     })
   } catch (err) {
     putRes = { ok: false, status: 0, error: err }
   }
   if (!putRes.ok) {
+    if (!canFallbackToMinio(upload)) {
+      throw new Error(`对象存储上传失败 (${putRes.status})，不会回退到 MinIO，也不会发布记录`)
+    }
     // 必须走 nginx 的 /minio 前缀：deploy/docker-compose.yml 把 MinIO 绑在 127.0.0.1:9000，
     // 只回环，外网直连 :9000 连不上（改了会静默失败，只在预签名 PUT 失败时才暴露）。
     const minioEndpoint =
@@ -484,7 +511,7 @@ async function publishReleaseForPlatform(args, platform, filePath, versionName, 
     })
   }
   if (!putRes.ok) {
-    throw new Error(`上传 MinIO 失败 (${putRes.status})`)
+    throw new Error(`文件上传失败 (${putRes.status})`)
   }
 
   const payload = {
@@ -505,7 +532,7 @@ async function publishReleaseForPlatform(args, platform, filePath, versionName, 
   }
   const published = await apiJson(origin, key, 'POST', '/admin/app-releases', payload)
   console.log(
-    `已发布 ${platform} ${published.packageType} ${published.versionName} (${published.versionCode})`,
+    `已发布 ${platform} ${args.channel} ${published.packageType} ${published.versionName} (${published.versionCode})`,
   )
   console.log(published.downloadUrl)
 }
@@ -559,6 +586,7 @@ async function main() {
     console.log(`wgt 已生成: ${filePath}`)
   }
   if (args.publish) {
+    warnCustomerChannel(args.channel)
     if (!filePath || !fs.existsSync(filePath)) {
       throw new Error('发布需要已生成的安装包，请加 --build 或 --file')
     }

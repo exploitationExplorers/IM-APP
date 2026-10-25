@@ -1,0 +1,11 @@
+{
+  "services": {
+    "api": {
+      "environment": {
+        "GROUP_RETENTION_MODE": "visibility_only",
+        "GROUP_RETENTION_ALL_GROUPS": "true",
+        "GROUP_RETENTION_GROUP_IDS": ""
+      }
+    }
+  }
+}

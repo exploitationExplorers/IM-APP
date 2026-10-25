@@ -1,0 +1,269 @@
+package msg
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	rules "github.com/openimsdk/open-im-server/v3/internal/imappretention"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database/mgo"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
+	"github.com/openimsdk/protocol/constant"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+func TestIMAppRetentionBodyPurgeConfig(t *testing.T) {
+	group := strings.Repeat("a", 32)
+	for _, flag := range []string{"", "false"} {
+		groups, err := imAppBodyPurgeConfig(flag, "", "")
+		if err != nil || len(groups) != 0 {
+			t.Fatal("purge not disabled by default")
+		}
+	}
+	groups, err := imAppBodyPurgeConfig("true", group, "all-writers-patched-and-accepted")
+	if err != nil || len(groups) != 1 || !groups["sg_"+group] {
+		t.Fatal("explicit scope not parsed", err)
+	}
+	for _, c := range [][3]string{
+		{"1", group, "all-writers-patched-and-accepted"}, {"true", group, ""}, {"true", "", "all-writers-patched-and-accepted"},
+		{"false", group, ""}, {"false", "", "all-writers-patched-and-accepted"},
+		{"true", "sg_" + group, "all-writers-patched-and-accepted"}, {"true", group + "," + group, "all-writers-patched-and-accepted"},
+		{"true", group + ", bad", "all-writers-patched-and-accepted"},
+	} {
+		if _, err := imAppBodyPurgeConfig(c[0], c[1], c[2]); err == nil {
+			t.Fatal("unsafe config accepted", c[0])
+		}
+	}
+	tooMany := make([]string, 101)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("%032x", i)
+	}
+	if _, err := imAppBodyPurgeConfig("true", strings.Join(tooMany, ","), "all-writers-patched-and-accepted"); err == nil {
+		t.Fatal("unbounded group scope")
+	}
+	if err := (&imAppRetentionBridge{}).bodyPurgeBatch(context.Background()); err != nil {
+		t.Fatal("off gate touched database")
+	}
+}
+
+func TestIMAppRetentionBodyPurgeIntegration(t *testing.T) {
+	uri := os.Getenv("IM_APP_RETENTION_TEST_MONGO")
+	if uri == "" {
+		t.Skip("use isolated integration runner")
+	}
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "mongodb" || u.Hostname() != "127.0.0.1" || u.Path != "/imapp_retention_integration" || u.User != nil || u.RawQuery != "" || os.Getenv("IM_APP_RETENTION_TEST_ALLOW_INIT") != "1" {
+		t.Fatal("requires disposable localhost Mongo")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database("imapp_retention_body_integration")
+	names, err := db.ListCollectionNames(ctx, bson.M{})
+	if err != nil || len(names) != 0 {
+		t.Fatal("requires fresh body test database")
+	}
+	defer db.Drop(context.Background())
+	seq, err := mgo.NewSeqConversationMongo(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := mgo.NewMsgMongo(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := strings.Repeat("b", 32)
+	id := "sg_" + group
+	_, err = seq.Malloc(ctx, id, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &imAppRetentionBridge{db: db, server: &msgServer{MsgDatabase: &imAppRetentionDBStub{seq: seq, watermark: 503}}}
+	for first := int64(1); first <= 503; first += 100 {
+		doc := model.MsgDocModel{DocID: new(model.MsgDocModel).GetDocID(id, first), Msg: make([]*model.MsgInfoModel, 100)}
+		for i := range doc.Msg {
+			n := first + int64(i)
+			doc.Msg[i] = &model.MsgInfoModel{DelList: []string{}}
+			if n <= 503 {
+				doc.Msg[i].Msg = &model.MsgDataModel{Seq: n, GroupID: group, SessionType: 3, ContentType: constant.Text, SendTime: time.Now().Add(-time.Hour).UnixMilli(), Content: "retained or embedded quote source"}
+			}
+		}
+		if err := messages.Create(ctx, &doc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Fixture is sized for MaxMessages=500; body purge cases keep that pin.
+	policy := rules.RetentionPolicy{MaxMessages: 500, Window: rules.GroupRetentionWindow}
+	snap, err := b.snapshot(ctx, group, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() model.MsgDocModel {
+		t.Helper()
+		row, err := messages.FindOneByDocID(ctx, id+":0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *row
+	}
+	requireSource := func(want bool) {
+		t.Helper()
+		row := read()
+		if (row.Msg[0].Msg != nil) != want || row.Msg[3].Msg == nil {
+			t.Fatal("wrong expired/retained slot state")
+		}
+	}
+	t.Run("unapplied_receipt_cannot_purge", func(t *testing.T) {
+		b.bodyPurgeGroups = map[string]bool{id: true}
+		if err := b.bodyPurgeBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+		requireSource(true)
+	})
+	if err := b.apply(ctx, snap.SnapshotID, id, 4); err != nil {
+		t.Fatal(err)
+	}
+	var firstAck struct {
+		Applied time.Time `bson:"applied_at"`
+	}
+	if err := db.Collection(imAppRetentionReceipts).FindOne(ctx, bson.M{"_id": snap.SnapshotID}).Decode(&firstAck); err != nil || firstAck.Applied.IsZero() {
+		t.Fatal("ACK not durable", err)
+	}
+	if err := b.apply(ctx, snap.SnapshotID, id, 4); err != nil {
+		t.Fatal(err)
+	}
+	var repeatAck struct {
+		Applied time.Time `bson:"applied_at"`
+	}
+	_ = db.Collection(imAppRetentionReceipts).FindOne(ctx, bson.M{"_id": snap.SnapshotID}).Decode(&repeatAck)
+	if !firstAck.Applied.Equal(repeatAck.Applied) {
+		t.Fatal("retry extended grace")
+	}
+	t.Run("fresh_ack_obeys_grace", func(t *testing.T) {
+		if err := b.bodyPurgeBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+		requireSource(true)
+	})
+	if _, err := db.Collection(imAppRetentionReceipts).UpdateOne(ctx, bson.M{"_id": snap.SnapshotID}, bson.M{"$set": bson.M{"applied_at": time.Now().Add(-25 * time.Hour)}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("scope_rechecked_for_old_receipts", func(t *testing.T) {
+		b.bodyPurgeGroups = map[string]bool{"sg_" + strings.Repeat("c", 32): true}
+		if err := b.bodyPurgeBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+		requireSource(true)
+	})
+	b.bodyPurgeGroups = map[string]bool{id: true}
+	t.Run("durable_boundary_required", func(t *testing.T) {
+		if _, err := db.Collection(database.SeqConversationName).UpdateOne(ctx, bson.M{"conversation_id": id}, bson.M{"$set": bson.M{"min_seq": 1}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.bodyPurgeBatch(ctx); err == nil {
+			t.Fatal("purged beyond durable visibility")
+		}
+		requireSource(true)
+		if err := seq.SetMinSeq(ctx, id, 4); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("scrub_preserves_layout_tail_and_retry", func(t *testing.T) {
+		for range 2 {
+			if err := b.bodyPurgeBatch(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		requireSource(false)
+		row := read()
+		if len(row.Msg) != 100 || row.Msg[3].Msg.Seq != 4 || row.Msg[99].Msg.Seq != 100 {
+			t.Fatal("slot indices shifted")
+		}
+		var state struct {
+			Next int64 `bson:"im_app_body_purged_before"`
+		}
+		if err := db.Collection(database.SeqConversationName).FindOne(ctx, bson.M{"conversation_id": id}).Decode(&state); err != nil || state.Next != 4 {
+			t.Fatal("progress missing", err)
+		}
+		var ack struct {
+			Done bool `bson:"body_done"`
+		}
+		if err := db.Collection(imAppRetentionReceipts).FindOne(ctx, bson.M{"_id": snap.SnapshotID}).Decode(&ack); err != nil || !ack.Done {
+			t.Fatal("completion missing", err)
+		}
+	})
+	t.Run("large_backlog_is_bounded_and_resumable", func(t *testing.T) {
+		receiptID, _ := imAppUUID()
+		_, err := db.Collection(imAppRetentionReceipts).InsertOne(ctx, bson.M{"_id": receiptID, "conversation_id": id, "boundary": 2001, "applied_at": time.Now().Add(-25 * time.Hour), "expires_at": time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := seq.SetMinSeq(ctx, id, 2001); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.bodyPurgeBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+		var state struct {
+			Next int64 `bson:"im_app_body_purged_before"`
+		}
+		_ = db.Collection(database.SeqConversationName).FindOne(ctx, bson.M{"conversation_id": id}).Decode(&state)
+		if state.Next != 1001 {
+			t.Fatal("one batch exceeded document budget or skipped partial block", state.Next)
+		}
+		// Retry after a simulated crash/restart: the durable per-group cursor
+		// resumes rather than rescanning an unbounded old message prefix.
+		restarted := &imAppRetentionBridge{db: db, bodyPurgeGroups: map[string]bool{id: true}}
+		if err := restarted.bodyPurgeBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+		_ = db.Collection(database.SeqConversationName).FindOne(ctx, bson.M{"conversation_id": id}).Decode(&state)
+		if state.Next != 2001 {
+			t.Fatal("restart did not resume", state.Next)
+		}
+	})
+	t.Run("failed_groups_do_not_starve_other_aged_receipts", func(t *testing.T) {
+		b.bodyPurgeGroups = map[string]bool{}
+		for i := 1; i <= 6; i++ {
+			conversation := "sg_" + fmt.Sprintf("%032x", i)
+			b.bodyPurgeGroups[conversation] = true
+			_, err := db.Collection(imAppRetentionReceipts).InsertOne(ctx, bson.M{"_id": fmt.Sprintf("00000000-0000-4000-8000-%012d", i), "conversation_id": conversation, "boundary": 2, "applied_at": time.Now().Add(-25 * time.Hour), "expires_at": time.Now().Add(time.Hour)})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		good := "sg_" + strings.Repeat("e", 32)
+		b.bodyPurgeGroups[good] = true
+		if err := seq.SetMinSeq(ctx, good, 2); err != nil {
+			t.Fatal(err)
+		}
+		goodReceipt := "ffffffff-ffff-4fff-bfff-ffffffffffff"
+		_, err := db.Collection(imAppRetentionReceipts).InsertOne(ctx, bson.M{"_id": goodReceipt, "conversation_id": good, "boundary": 2, "applied_at": time.Now().Add(-25 * time.Hour), "expires_at": time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := b.bodyPurgeBatch(ctx); err == nil {
+			t.Fatal("bad groups not reported")
+		}
+		_ = b.bodyPurgeBatch(ctx)
+		var receipt struct {
+			Done bool `bson:"body_done"`
+		}
+		if err := db.Collection(imAppRetentionReceipts).FindOne(ctx, bson.M{"_id": goodReceipt}).Decode(&receipt); err != nil || !receipt.Done {
+			t.Fatal("bad groups starved valid receipt", err)
+		}
+	})
+	// The bridge has deliberately NO object storage dependency. Neither
+	// avatars/favorites/forwards nor original OSS mappings can be deleted here.
+}

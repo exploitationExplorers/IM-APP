@@ -32,7 +32,10 @@ function chooseReason(reason: { value: GroupReportReason; label: string }) {
 
 <template>
   <view class="page">
-    <ImNavBar title="检举原因" @back="goBack" />
+    <ImNavBar
+      title="检举原因"
+      @back="goBack"
+    />
 
     <view class="card">
       <view
@@ -42,8 +45,12 @@ function chooseReason(reason: { value: GroupReportReason; label: string }) {
         :class="{ last: i === REASONS.length - 1 }"
         @click="chooseReason(reason)"
       >
-        <text class="row-text">{{ reason.label }}</text>
-        <text class="arrow">›</text>
+        <text class="row-text">
+          {{ reason.label }}
+        </text>
+        <text class="arrow">
+          ›
+        </text>
       </view>
     </view>
   </view>

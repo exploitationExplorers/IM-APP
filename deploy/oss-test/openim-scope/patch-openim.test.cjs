@@ -1,0 +1,21 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const { transform, transformOSS, upstreamTools } = require('./patch-openim.cjs')
+test('refuses unpinned or modified upstream source', () => {
+  assert.throws(() => transform(Buffer.from('package third')), /unmodified OpenIM/)
+})
+
+test('OSS patch is pinned and enables CNAME before SDK signing, without URL rewriting', () => {
+  const source = fs.readFileSync(path.join(upstreamTools(), 's3/oss/oss.go'))
+  const patched = transformOSS(source)
+  assert.match(patched, /oss\.New\(conf\.Endpoint, conf\.AccessKeyID, conf\.AccessKeySecret, oss\.UseCname\(true\)\)/)
+  assert.match(patched, /conf\.Bucket != "yikeliao-188-hk-test"/)
+  assert.match(patched, /conf\.PublicRead \|\| conf\.SessionToken != ""/)
+  assert.match(patched, /request\.Header\.Set\(oss\.HTTPHeaderContentType, "application\/octet-stream"\)/)
+  assert.match(patched, /opt = &s3\.PutOption\{ContentType: "application\/octet-stream"\}/)
+  assert.ok(patched.endsWith(source.toString().slice(source.toString().indexOf('\nfunc (o *OSS) StatObject'))))
+  assert.throws(() => transformOSS(Buffer.from('package oss')), /unmodified pinned tools/)
+  assert.throws(() => transformOSS(Buffer.from(patched)), /unmodified pinned tools/)
+})

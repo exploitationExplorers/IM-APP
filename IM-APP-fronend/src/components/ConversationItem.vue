@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Conversation } from '@/types'
-import { APP_CONFIG } from '@/config'
 import { formatRelativeTime } from '@/utils/format'
 import { useChatStore } from '@/stores/chat'
+import { useAvatarThumbnail } from '@/composables/useAvatarThumbnail'
 
 const props = defineProps<{
   item: Conversation
@@ -83,6 +83,10 @@ function onRowClick(e: Event) {
 }
 
 const chatStore = useChatStore()
+const { src: avatarSrc, onError: onAvatarError } = useAvatarThumbnail(
+  () => props.item.avatar,
+  '/static/avatar-1.png',
+)
 const timeText = computed(() => formatRelativeTime(props.item.lastMessageAt))
 /** 列表预览压成单行，避免长文/换行把会话行撑开（对齐参考站省略号） */
 const previewText = computed(() =>
@@ -97,6 +101,8 @@ const isOnline = computed(
     !!props.item.peerUserId &&
     chatStore.isPeerOnline(props.item.peerUserId),
 )
+/** 免打扰时不再用红色 [有人@我] / [有新公告] 强提醒，只保留普通预览文案 */
+const visibleHighlightTags = computed(() => (isMuted.value ? [] : props.item.highlightTags || []))
 /** 会话本地最后一条消息是否发送失败：是则列表预览显示感叹号 */
 const lastFailed = computed(() => {
   const list = chatStore.messagesMap[props.item.id] || []
@@ -119,24 +125,69 @@ const lastFailed = computed(() => {
     @touchcancel="cancelHold"
   >
     <view class="avatar-wrap">
-      <image class="avatar" :src="item.avatar || '/static/avatar-1.png'" mode="aspectFill" />
-      <image v-if="item.pinned" class="pin-badge" src="/static/icons/icon-pin.svg" mode="aspectFit" />
-      <view v-if="isOnline" class="online-dot" />
+      <image
+        class="avatar"
+        :src="avatarSrc"
+        mode="aspectFill"
+        @error="onAvatarError"
+      />
+      <image
+        v-if="item.pinned"
+        class="pin-badge"
+        src="/static/icons/icon-pin.svg"
+        mode="aspectFit"
+      />
+      <view
+        v-if="isOnline"
+        class="online-dot"
+      />
     </view>
     <view class="body">
       <view class="top">
-        <text class="title">{{ item.title }}</text>
-        <text class="time">{{ timeText }}</text>
+        <text class="title">
+          {{ item.title }}
+        </text>
+        <text class="time">
+          {{ timeText }}
+        </text>
       </view>
       <view class="bottom">
         <view class="preview">
-          <view v-if="lastFailed" class="failed-mark">!</view>
-          <image v-if="isMuted" class="mute-icon" src="/static/icons/icon-bell-slash.svg" mode="aspectFit" />
-          <text v-for="tag in item.highlightTags" :key="tag" class="tag">{{ tag }}</text>
-          <view class="msg">{{ previewText }}</view>
+          <view
+            v-if="lastFailed"
+            class="failed-mark"
+          >
+            !
+          </view>
+          <image
+            v-if="isMuted"
+            class="mute-icon"
+            src="/static/icons/icon-bell-slash.svg"
+            mode="aspectFit"
+          />
+          <text
+            v-for="tag in visibleHighlightTags"
+            :key="tag"
+            class="tag"
+          >
+            {{ tag }}
+          </text>
+          <view class="msg">
+            {{ previewText }}
+          </view>
         </view>
-        <view v-if="item.unreadCount > 0" class="badge">
-          <text class="badge-text">{{ item.unreadCount > 99 ? '99+' : item.unreadCount }}</text>
+        <!-- 免打扰：微信式灰点，不显示数字、不用红标；普通会话仍用红标数字 -->
+        <view
+          v-if="item.unreadCount > 0 && isMuted"
+          class="badge badge-muted"
+        />
+        <view
+          v-else-if="item.unreadCount > 0"
+          class="badge"
+        >
+          <text class="badge-text">
+            {{ item.unreadCount > 99 ? '99+' : item.unreadCount }}
+          </text>
         </view>
       </view>
     </view>
@@ -296,6 +347,17 @@ const lastFailed = computed(() => {
   align-items: center;
   justify-content: center;
   margin-left: 12rpx;
+  flex-shrink: 0;
+}
+
+/** 免打扰未读：灰色小圆点，避免再当成强提醒 */
+.badge-muted {
+  min-width: 16rpx;
+  width: 16rpx;
+  height: 16rpx;
+  padding: 0;
+  background: #c0c4cc;
+  border-radius: 50%;
 }
 
 .badge-text {

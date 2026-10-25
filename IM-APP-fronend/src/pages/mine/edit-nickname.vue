@@ -73,7 +73,10 @@ async function onConfirm() {
 
 <template>
   <view class="page">
-    <ImNavBar title="修改昵称" @back="goBack" />
+    <ImNavBar
+      title="修改昵称"
+      @back="goBack"
+    />
 
     <view class="form">
       <view class="input-row">
@@ -86,14 +89,24 @@ async function onConfirm() {
           placeholder-style="color:#636E86"
           :focus="true"
           @input="onNicknameInput"
-        />
-        <view v-if="nickname" class="clear-btn" @click="clearNickname">
-          <text class="clear-icon">×</text>
+        >
+        <view
+          v-if="nickname"
+          class="clear-btn"
+          @click="clearNickname"
+        >
+          <text class="clear-icon">
+            ×
+          </text>
         </view>
       </view>
       <view class="meta">
-        <text class="hint">昵称最多 {{ NICKNAME_MAX }} 个字</text>
-        <text class="count">{{ nicknameCount }}/{{ NICKNAME_MAX }}</text>
+        <text class="hint">
+          昵称最多 {{ NICKNAME_MAX }} 个字
+        </text>
+        <text class="count">
+          {{ nicknameCount }}/{{ NICKNAME_MAX }}
+        </text>
       </view>
     </view>
 

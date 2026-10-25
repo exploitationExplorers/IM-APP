@@ -1,5 +1,6 @@
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
+import { isAppPlatform } from '@/utils/platform'
 
 export interface ParsedQrcodePayload {
   type?: string
@@ -145,14 +146,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error('图片加载失败'))
     img.src = src
   })
-}
-
-function isAppPlatform(): boolean {
-  try {
-    return uni.getSystemInfoSync().uniPlatform === 'app'
-  } catch {
-    return false
-  }
 }
 
 function canUseDomCanvas(): boolean {

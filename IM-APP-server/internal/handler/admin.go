@@ -175,16 +175,17 @@ func (h *AdminMessageHandler) RecallMessage(c *gin.Context) {
 // SetRestriction 设置登录/发信限制（server 在登录/发消息时强制检查）
 func (h *AdminUserHandler) SetRestriction(c *gin.Context) {
 	var req struct {
-		Type   string     `json:"type" binding:"required,oneof=login message"`
-		Banned bool       `json:"banned"`
-		Until  *time.Time `json:"until"`
-		Reason string     `json:"reason"`
+		Type       string     `json:"type" binding:"required,oneof=login message"`
+		Banned     bool       `json:"banned"`
+		Until      *time.Time `json:"until"`
+		Reason     string     `json:"reason"`
+		OperatorID string     `json:"operatorId"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	if err := h.Restrictions.SetRestriction(c.Request.Context(), c.Param("id"), req.Type, req.Banned, req.Until, req.Reason, ""); err != nil {
+	if err := h.Restrictions.SetRestriction(c.Request.Context(), c.Param("id"), req.Type, req.Banned, req.Until, req.Reason, req.OperatorID); err != nil {
 		response.Fail(c, http.StatusBadRequest, "设置失败："+err.Error())
 		return
 	}

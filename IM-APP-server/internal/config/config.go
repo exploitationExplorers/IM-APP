@@ -7,6 +7,10 @@ import (
 )
 
 type Config struct {
+	AppEnvironment       string
+	StorageProvider      string
+	MigrationsMode       string
+	OSS                  OSSConfig
 	HTTPAddr             string
 	DatabaseURL          string
 	JWTSecret            string
@@ -24,14 +28,24 @@ type Config struct {
 	// 保存并发布（存在 app_config_versions，只认 status='published'）。
 	// 后台没部署、或不想走发布流程时，用这两个环境变量直接把上限钉住；
 	// 设了之后管理后台再改也不影响线上，想交回后台托管就把变量去掉。
-	GroupMemberMax         int
-	DefaultGroupMaxMembers int
-	SeedDemo               bool
-	Kafka                  KafkaConfig
-	Forward                ForwardConfig
-	SMS                    SMSConfig
-	CORSAllowOrigins       []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
-	SMSRate                SMSRateConfig
+	GroupMemberMax               int
+	DefaultGroupMaxMembers       int
+	SeedDemo                     bool
+	Kafka                        KafkaConfig
+	Forward                      ForwardConfig
+	SMS                          SMSConfig
+	CORSAllowOrigins             []string // 允许跨域的前端域名白名单；为空时回退为通配 *（仅建议本地开发）
+	MediaSourcePrefixes          []string
+	MediaCDNRewrites             []string // "https://源前缀->https://CDN前缀"，转发/收藏下载前把会过期的签名地址换成 CDN 地址
+	GroupRetentionMode           string
+	GroupRetentionAdapterURL     string
+	GroupRetentionAdapterKey     string
+	GroupRetentionGroupIDs       []string
+	GroupRetentionAllGroups      bool
+	retentionScopeError          error
+	FavoriteArchiveWorkerEnabled bool
+	MediaGCReferenceGuardEnabled bool
+	SMSRate                      SMSRateConfig
 }
 
 // SMSRateConfig 设备指纹 + 多维度验证码限流配置
@@ -100,9 +114,41 @@ type SMSConfig struct {
 }
 
 func Load() Config {
-	loadDotEnv(".env")
+	// Explicit test processes must never pick up credentials/targets from an
+	// existing developer or production .env in the server working directory.
+	if strings.TrimSpace(os.Getenv("APP_ENV")) != "oss-test" {
+		loadDotEnv(".env")
+	}
+	ossRegion := getenv("OSS_REGION", "cn-hangzhou")
+	retentionGroups, retentionAllGroups, retentionScopeError := loadRetentionScope()
 
 	return Config{
+		GroupRetentionMode:           strings.ToLower(strings.TrimSpace(getenv("GROUP_RETENTION_MODE", "visibility_only"))),
+		GroupRetentionAdapterURL:     strings.TrimSpace(getenv("GROUP_RETENTION_ADAPTER_URL", "")),
+		GroupRetentionAdapterKey:     getenv("GROUP_RETENTION_ADAPTER_KEY", ""),
+		GroupRetentionGroupIDs:       retentionGroups,
+		GroupRetentionAllGroups:      retentionAllGroups,
+		retentionScopeError:          retentionScopeError,
+		FavoriteArchiveWorkerEnabled: getenvBool("FAVORITE_ARCHIVE_WORKER_ENABLED", false),
+		MediaGCReferenceGuardEnabled: getenvBool("MEDIA_GC_REFERENCE_GUARD_ENABLED", getenv("APP_ENV", "") == "oss-production"),
+		MediaSourcePrefixes:          splitCSV(getenv("MEDIA_SOURCE_URL_PREFIXES", "")),
+		MediaCDNRewrites:             splitCSV(getenv("MEDIA_CDN_REWRITES", "")),
+		AppEnvironment:               strings.TrimSpace(getenv("APP_ENV", "")),
+		StorageProvider:              storageProvider(getenv("STORAGE_PROVIDER", "oss")),
+		MigrationsMode:               strings.ToLower(strings.TrimSpace(getenv("MIGRATIONS_MODE", "auto"))),
+		OSS: OSSConfig{
+			Region:          ossRegion,
+			Endpoint:        getenv("OSS_ENDPOINT", "https://oss-"+ossRegion+".aliyuncs.com"),
+			PublicUploadURL: getenv("OSS_PUBLIC_UPLOAD_URL", ""),
+			Bucket:          getenv("OSS_BUCKET", ""),
+			AccessKeyID:     getenv("OSS_ACCESS_KEY_ID", ""),
+			AccessKeySecret: getenv("OSS_ACCESS_KEY_SECRET", ""),
+			SessionToken:    getenv("OSS_SESSION_TOKEN", ""),
+			KeyPrefix:       getenv("OSS_KEY_PREFIX", ""),
+			PublicBaseURL:   getenv("OSS_PUBLIC_BASE_URL", ""),
+			MediaProxyURL:   getenv("OSS_MEDIA_PROXY_URL", ""),
+			MediaSigningKey: getenv("OSS_MEDIA_SIGNING_KEY", ""),
+		},
 		HTTPAddr:               getenv("HTTP_ADDR", ":8080"),
 		DatabaseURL:            getenv("DATABASE_URL", "postgres://im:im123456@127.0.0.1:5433/im_app?sslmode=disable"),
 		JWTSecret:              getenv("JWT_SECRET", "im-local-dev-secret-change-me"),

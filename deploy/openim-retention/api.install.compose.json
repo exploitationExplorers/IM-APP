@@ -1,0 +1,21 @@
+{
+  "services": {
+    "api": {
+      "image": "${RETENTION_API_IMAGE:?Run prepare-production.py prepare first}",
+      "environment": {
+        "APP_ENV": "oss-production",
+        "STORAGE_PROVIDER": "oss",
+        "MIGRATIONS_MODE": "verify",
+        "SEED_DEMO": "false",
+        "GROUP_RETENTION_MODE": "visibility_only",
+        "MEDIA_GC_REFERENCE_GUARD_ENABLED": "true",
+        "GROUP_RETENTION_ALL_GROUPS": "true",
+        "GROUP_RETENTION_GROUP_IDS": "",
+        "GROUP_RETENTION_ADAPTER_URL": "http://openim-api:19093",
+        "GROUP_RETENTION_ADAPTER_KEY": "${IM_APP_RETENTION_KEY:?Run prepare-production.py prepare first}",
+        "MEDIA_SOURCE_URL_PREFIXES": "${RETENTION_MEDIA_SOURCE_URL_PREFIXES:?Missing scoped media sources}",
+        "FAVORITE_ARCHIVE_WORKER_ENABLED": "false"
+      }
+    }
+  }
+}

@@ -35,12 +35,20 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <view v-if="visible" class="toast-wrap" :class="placement">
+  <view
+    v-if="visible"
+    class="toast-wrap"
+    :class="placement"
+  >
     <view class="toast">
       <view class="icon">
-        <text class="check">✓</text>
+        <text class="check">
+          ✓
+        </text>
       </view>
-      <text class="text">{{ text }}</text>
+      <text class="text">
+        {{ text }}
+      </text>
     </view>
   </view>
 </template>

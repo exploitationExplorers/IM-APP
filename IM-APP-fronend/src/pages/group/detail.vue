@@ -475,114 +475,253 @@ async function onRemoveDissolved() {
 
 <template>
   <view class="page-wrap">
-    <view v-if="dissolved" class="dissolved-page">
-      <ImNavBar title="群组详情" @back="goBack" />
+    <view
+      v-if="dissolved"
+      class="dissolved-page"
+    >
+      <ImNavBar
+        title="群组详情"
+        @back="goBack"
+      />
       <view class="dissolved-card">
-        <image class="dissolved-avatar" :src="dissolvedInfo?.avatar || APP_CONFIG.defaultGroupAvatarUrl" mode="aspectFit" />
-        <text class="dissolved-name">{{ dissolvedInfo?.name || '群聊' }}</text>
-        <text class="dissolved-tip">该群已解散</text>
+        <image
+          class="dissolved-avatar"
+          :src="dissolvedInfo?.avatar || APP_CONFIG.defaultGroupAvatarUrl"
+          mode="aspectFit"
+        />
+        <text class="dissolved-name">
+          {{ dissolvedInfo?.name || '群聊' }}
+        </text>
+        <text class="dissolved-tip">
+          该群已解散
+        </text>
       </view>
-      <view class="dissolved-delete-row" @click="onRemoveDissolved">
-        <text class="dissolved-delete-label">删除该群</text>
+      <view
+        class="dissolved-delete-row"
+        @click="onRemoveDissolved"
+      >
+        <text class="dissolved-delete-label">
+          删除该群
+        </text>
       </view>
     </view>
     <template v-else>
-    <ImNavBar title="群组详情" @back="goBack" />
-    <scroll-view scroll-y class="page" :show-scrollbar="false">
-
-    <view class="card">
-      <view class="member-row">
-        <view
-          v-for="member in previewMembers"
-          :key="member.id"
-          class="member-item"
-          @click.stop="openPreviewMember(member)"
-        >
-          <image class="member-avatar" :src="memberPreviewAvatar(member.avatar)" mode="aspectFill" />
-          <text class="member-name" selectable @longpress.stop="copyMemberName(member)">{{ getMemberDisplayName(member) }}</text>
-        </view>
-        <view class="member-item" @click.stop="goToMembers">
-          <image
-            class="add-circle-icon"
-            src="/static/icons/icon-add-member.svg"
-            mode="aspectFit"
-          />
-        </view>
-      </view>
-      <view class="group-row" @click="goToMembers">
-        <text class="label">群组成员</text>
-        <view class="row-right">
-          <text class="muted">共{{ memberCount }}人</text>
-          <text class="arrow">›</text>
-        </view>
-      </view>
-    </view>
-
-    <view v-if="canManage" class="card">
-      <view class="info-row nav-row" @click="goToAdmin">
-        <text class="label">群组管理</text>
-        <text class="arrow">›</text>
-      </view>
-      <view class="info-row nav-row" @click="goToJoinRequests">
-        <text class="label">入群申请</text>
-        <view class="row-right">
-          <text v-if="pendingJoinCount" class="muted">{{ pendingJoinCount }}</text>
-          <text class="arrow">›</text>
-        </view>
-      </view>
-      <view class="info-row nav-row" @click="showJoinMode = true">
-        <text class="label">入群方式</text>
-        <view class="row-right">
-          <text class="muted">{{ joinModeLabel }}</text>
-          <text class="arrow">›</text>
-        </view>
-      </view>
-    </view>
-
-    <view class="card">
-      <view class="info-row" :class="{ 'nav-row': canEditProfile }" @click="goToEditName">
-        <text class="label">群组名称</text>
-        <view class="row-right">
-          <text class="value">{{ groupDetail?.name || groupName }}</text>
-          <text v-if="canEditProfile" class="arrow">›</text>
-        </view>
-      </view>
-
-      <view class="info-row" :class="{ 'nav-row': canEditProfile }" @click="onChooseAvatar">
-        <text class="label">群头像</text>
-        <view class="row-right">
-          <view class="avatar-box">
-            <image class="current-avatar" :src="avatar" mode="aspectFill" />
-          </view>
-          <text v-if="canEditProfile" class="arrow">›</text>
-        </view>
-      </view>
-
-      <view
-        class="info-row info-row-id"
-        :class="{ 'nav-row': canEditGroupId }"
-        @click="goToEditGroupId"
+      <ImNavBar
+        title="群组详情"
+        @back="goBack"
+      />
+      <scroll-view
+        scroll-y
+        class="page"
+        :show-scrollbar="false"
       >
-        <text class="label">群号</text>
-        <view class="id-box">
-          <text class="value id-value">{{ displayGroupId }}</text>
-          <view class="copy-btn" @click.stop="copyGroupId">复制</view>
-          <text v-if="canEditGroupId" class="id-edit-hint">设置</text>
-          <text v-if="canEditGroupId" class="arrow">›</text>
+        <view class="card">
+          <view class="member-row">
+            <view
+              v-for="member in previewMembers"
+              :key="member.id"
+              class="member-item"
+              @click.stop="openPreviewMember(member)"
+            >
+              <image
+                class="member-avatar"
+                :src="memberPreviewAvatar(member.avatar)"
+                mode="aspectFill"
+              />
+              <text
+                class="member-name"
+                selectable
+                @longpress.stop="copyMemberName(member)"
+              >
+                {{ getMemberDisplayName(member) }}
+              </text>
+            </view>
+            <view
+              class="member-item"
+              @click.stop="goToMembers"
+            >
+              <image
+                class="add-circle-icon"
+                src="/static/icons/icon-add-member.svg"
+                mode="aspectFit"
+              />
+            </view>
+          </view>
+          <view
+            class="group-row"
+            @click="goToMembers"
+          >
+            <text class="label">
+              群组成员
+            </text>
+            <view class="row-right">
+              <text class="muted">
+                共{{ memberCount }}人
+              </text>
+              <text class="arrow">
+                ›
+              </text>
+            </view>
+          </view>
         </view>
-      </view>
 
-      <view class="info-row nav-row" @click="goToAnnouncement">
-        <text class="label">群公告</text>
-        <text class="arrow">›</text>
-      </view>
+        <view
+          v-if="canManage"
+          class="card"
+        >
+          <view
+            class="info-row nav-row"
+            @click="goToAdmin"
+          >
+            <text class="label">
+              群组管理
+            </text>
+            <text class="arrow">
+              ›
+            </text>
+          </view>
+          <view
+            class="info-row nav-row"
+            @click="goToJoinRequests"
+          >
+            <text class="label">
+              入群申请
+            </text>
+            <view class="row-right">
+              <text
+                v-if="pendingJoinCount"
+                class="muted"
+              >
+                {{ pendingJoinCount }}
+              </text>
+              <text class="arrow">
+                ›
+              </text>
+            </view>
+          </view>
+          <view
+            class="info-row nav-row"
+            @click="showJoinMode = true"
+          >
+            <text class="label">
+              入群方式
+            </text>
+            <view class="row-right">
+              <text class="muted">
+                {{ joinModeLabel }}
+              </text>
+              <text class="arrow">
+                ›
+              </text>
+            </view>
+          </view>
+        </view>
 
-      <view class="info-row nav-row" @click="goToGroupQrcode">
-        <text class="label">群二维码</text>
-        <text class="arrow">›</text>
-      </view>
+        <view class="card">
+          <view
+            class="info-row"
+            :class="{ 'nav-row': canEditProfile }"
+            @click="goToEditName"
+          >
+            <text class="label">
+              群组名称
+            </text>
+            <view class="row-right">
+              <text class="value">
+                {{ groupDetail?.name || groupName }}
+              </text>
+              <text
+                v-if="canEditProfile"
+                class="arrow"
+              >
+                ›
+              </text>
+            </view>
+          </view>
 
-      <!-- 参考站无群备注，暂隐藏
+          <view
+            class="info-row"
+            :class="{ 'nav-row': canEditProfile }"
+            @click="onChooseAvatar"
+          >
+            <text class="label">
+              群头像
+            </text>
+            <view class="row-right">
+              <view class="avatar-box">
+                <image
+                  class="current-avatar"
+                  :src="avatar"
+                  mode="aspectFill"
+                />
+              </view>
+              <text
+                v-if="canEditProfile"
+                class="arrow"
+              >
+                ›
+              </text>
+            </view>
+          </view>
+
+          <view
+            class="info-row info-row-id"
+            :class="{ 'nav-row': canEditGroupId }"
+            @click="goToEditGroupId"
+          >
+            <text class="label">
+              群号
+            </text>
+            <view class="id-box">
+              <text class="value id-value">
+                {{ displayGroupId }}
+              </text>
+              <view
+                class="copy-btn"
+                @click.stop="copyGroupId"
+              >
+                复制
+              </view>
+              <text
+                v-if="canEditGroupId"
+                class="id-edit-hint"
+              >
+                设置
+              </text>
+              <text
+                v-if="canEditGroupId"
+                class="arrow"
+              >
+                ›
+              </text>
+            </view>
+          </view>
+
+          <view
+            class="info-row nav-row"
+            @click="goToAnnouncement"
+          >
+            <text class="label">
+              群公告
+            </text>
+            <text class="arrow">
+              ›
+            </text>
+          </view>
+
+          <view
+            class="info-row nav-row"
+            @click="goToGroupQrcode"
+          >
+            <text class="label">
+              群二维码
+            </text>
+            <text class="arrow">
+              ›
+            </text>
+          </view>
+
+          <!-- 参考站无群备注，暂隐藏
       <view class="info-row nav-row" @click="goToRemark">
         <text class="label">群备注</text>
         <view class="row-right">
@@ -592,64 +731,146 @@ async function onRemoveDissolved() {
       </view>
       -->
 
-      <view class="info-row nav-row last" @click="goToMyNickname">
-        <text class="label">我在本群的昵称</text>
-        <text class="arrow">›</text>
-      </view>
-    </view>
+          <view
+            class="info-row nav-row last"
+            @click="goToMyNickname"
+          >
+            <text class="label">
+              我在本群的昵称
+            </text>
+            <text class="arrow">
+              ›
+            </text>
+          </view>
+        </view>
 
-    <view class="card">
-      <view class="info-row nav-row" @click="goToMedia">
-        <text class="label">图片与视频</text>
-        <text class="arrow">›</text>
-      </view>
-      <view class="info-row nav-row" @click="goToSearchHistory">
-        <text class="label">搜索聊天记录</text>
-        <text class="arrow">›</text>
-      </view>
-      <view class="info-row nav-row last" @click="onClearHistory">
-        <text class="label">清除聊天记录</text>
-        <text class="arrow">›</text>
-      </view>
-    </view>
+        <view class="card">
+          <view
+            class="info-row nav-row"
+            @click="goToMedia"
+          >
+            <text class="label">
+              图片与视频
+            </text>
+            <text class="arrow">
+              ›
+            </text>
+          </view>
+          <view
+            class="info-row nav-row"
+            @click="goToSearchHistory"
+          >
+            <text class="label">
+              搜索聊天记录
+            </text>
+            <text class="arrow">
+              ›
+            </text>
+          </view>
+          <view
+            class="info-row nav-row last"
+            @click="onClearHistory"
+          >
+            <text class="label">
+              清除聊天记录
+            </text>
+            <text class="arrow">
+              ›
+            </text>
+          </view>
+        </view>
 
-    <view class="card">
-      <view class="switch-row">
-        <text class="label">消息免打扰</text>
-        <ImSwitch :model-value="recvOpt === MessageReceiveOptType.NotNotify" @change="onToggleRecv" />
-      </view>
-      <view class="switch-row last">
-        <text class="label">置顶聊天</text>
-        <ImSwitch :model-value="pinned" @change="onTogglePin" />
-      </view>
-    </view>
+        <view class="card">
+          <view class="switch-row">
+            <text class="label">
+              消息免打扰
+            </text>
+            <ImSwitch
+              :model-value="recvOpt === MessageReceiveOptType.NotNotify"
+              @change="onToggleRecv"
+            />
+          </view>
+          <view class="switch-row last">
+            <text class="label">
+              置顶聊天
+            </text>
+            <ImSwitch
+              :model-value="pinned"
+              @change="onTogglePin"
+            />
+          </view>
+        </view>
 
-    <view class="card">
-      <view class="action-row" @click="goToReport">
-        <text class="label">检举</text>
-        <text class="arrow">›</text>
-      </view>
-    </view>
+        <view class="card">
+          <view
+            class="action-row"
+            @click="goToReport"
+          >
+            <text class="label">
+              检举
+            </text>
+            <text class="arrow">
+              ›
+            </text>
+          </view>
+        </view>
 
-    <view v-if="isOwner" class="card">
-      <view class="leave-row" @click="onDismiss">
-        <text class="leave-label">解散群</text>
-      </view>
-    </view>
-    <view v-else class="card">
-      <view class="leave-row" @click="onLeave">
-        <text class="leave-label">退出群并删除对话</text>
-      </view>
-    </view>
-
-    </scroll-view>
+        <view
+          v-if="isOwner"
+          class="card"
+        >
+          <view
+            class="leave-row"
+            @click="onDismiss"
+          >
+            <text class="leave-label">
+              解散群
+            </text>
+          </view>
+        </view>
+        <view
+          v-else
+          class="card"
+        >
+          <view
+            class="leave-row"
+            @click="onLeave"
+          >
+            <text class="leave-label">
+              退出群并删除对话
+            </text>
+          </view>
+        </view>
+      </scroll-view>
     </template>
     <ImConfirmDialogHost />
-    <view v-if="showJoinMode" class="sheet-mask" @click="showJoinMode = false">
-      <view class="sheet" @click.stop>
-        <view class="sheet-item" @click="selectJoinMode('open')">公开群（扫码入群）</view>
-        <view class="sheet-item" @click="selectJoinMode('approval')">私密群（申请入群）</view>
-        <view class="sheet-cancel" @click="showJoinMode = false">取消</view>
+    <view
+      v-if="showJoinMode"
+      class="sheet-mask"
+      @click="showJoinMode = false"
+    >
+      <view
+        class="sheet"
+        @click.stop
+      >
+        <view
+          class="sheet-item"
+          @click="selectJoinMode('open')"
+        >
+          公开群（扫码入群）
+        </view>
+        <view
+          class="sheet-item"
+          @click="selectJoinMode('approval')"
+        >
+          私密群（申请入群）
+        </view>
+        <view
+          class="sheet-cancel"
+          @click="showJoinMode = false"
+        >
+          取消
+        </view>
       </view>
     </view>
   </view>

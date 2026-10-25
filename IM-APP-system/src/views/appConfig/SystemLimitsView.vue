@@ -19,6 +19,8 @@ const formModel = reactive<AppConfig.SystemLimits>({
   groupMemberHardLimit: 4000,
   maxNicknameLen: 0,
   recallWindowSec: 0,
+  groupRetentionMaxMessages: 3000,
+  groupRetentionHours: 72,
 });
 
 const actionVisible = shallowRef(false);
@@ -49,6 +51,8 @@ function applyPublished(): void {
   formModel.groupMemberHardLimit = limits.groupMemberHardLimit ?? 4000;
   formModel.maxNicknameLen = limits.maxNicknameLen ?? 0;
   formModel.recallWindowSec = limits.recallWindowSec ?? 0;
+  formModel.groupRetentionMaxMessages = limits.groupRetentionMaxMessages ?? 3000;
+  formModel.groupRetentionHours = limits.groupRetentionHours ?? 72;
 }
 
 async function openAction(mode: ActionMode): Promise<void> {
@@ -70,6 +74,14 @@ async function submitAction(): Promise<void> {
     ElMessage.warning("新群默认上限不能超过平台群人数上限");
     return;
   }
+  if ((formModel.groupRetentionMaxMessages ?? 0) < 1 || (formModel.groupRetentionMaxMessages ?? 0) > 20000) {
+    ElMessage.warning("群消息保留条数须在 1～20000");
+    return;
+  }
+  if ((formModel.groupRetentionHours ?? 0) < 1 || (formModel.groupRetentionHours ?? 0) > 2160) {
+    ElMessage.warning("群消息保留小时须在 1～2160");
+    return;
+  }
   actionLoading.value = true;
   try {
     if (actionMode.value === "draft") {
@@ -81,6 +93,8 @@ async function submitAction(): Promise<void> {
           defaultGroupMaxMembers: formModel.defaultGroupMaxMembers,
           maxNicknameLen: formModel.maxNicknameLen,
           recallWindowSec: formModel.recallWindowSec,
+          groupRetentionMaxMessages: formModel.groupRetentionMaxMessages,
+          groupRetentionHours: formModel.groupRetentionHours,
         },
         reason: actionReason.value.trim(),
       });
@@ -140,6 +154,14 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="消息撤回时间窗 (秒)">
           <el-input-number v-model="formModel.recallWindowSec" :min="0" :max="9999999" />
+        </el-form-item>
+        <el-form-item label="群消息保留条数">
+          <el-input-number v-model="formModel.groupRetentionMaxMessages" :min="1" :max="20000" />
+          <el-text type="info" class="limit-tip">与时间窗口取并集：最近 N 条始终保留（默认 3000）；仅「超条数且超窗口」才清理</el-text>
+        </el-form-item>
+        <el-form-item label="群消息保留小时">
+          <el-input-number v-model="formModel.groupRetentionHours" :min="1" :max="2160" />
+          <el-text type="info" class="limit-tip">滚动窗口，默认 72（3 天）必须保留；不足条数时超窗消息也保留。提高上限不会恢复已被隐藏的旧消息</el-text>
         </el-form-item>
       </el-form>
     </el-card>

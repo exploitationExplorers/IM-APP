@@ -692,6 +692,12 @@ var writeBodyFields = map[string][]fieldSpec{
 		{"enabled", "boolean", true, "是否允许群内互加好友"},
 		{"reason", "string", true, "操作原因"},
 	},
+	"PUT /api/admin/v1/groups/{id}/retention": {
+		{"retentionMaxMessages", "integer", false, "保留条数；与 usePlatformDefault=false 时必填"},
+		{"retentionKeepHours", "integer", false, "保留小时；与 usePlatformDefault=false 时必填"},
+		{"usePlatformDefault", "boolean", false, "true 时清空覆盖，改用平台默认"},
+		{"reason", "string", true, "操作原因"},
+	},
 	"POST /api/admin/v1/groups/{id}/dissolve": {
 		{"reason", "string", true, "解散原因"},
 		{"ticketNo", "string", false, "关联工单号"},
@@ -943,6 +949,7 @@ var apiDescriptions = map[string]string{
 	"GET /api/admin/v1/groups/{id}/reports":                      "群被举报记录",
 	"PUT /api/admin/v1/groups/{id}/mute-all":                     "设置/解除群全员禁言",
 	"PUT /api/admin/v1/groups/{id}/member-add-friend":            "设置群内成员互加好友开关",
+	"PUT /api/admin/v1/groups/{id}/retention":                   "设置群消息保留策略",
 	"POST /api/admin/v1/groups/{id}/dissolve":                    "解散违规群（高风险，需原因）",
 	"GET /api/admin/v1/groups/{id}/recall-logs":                  "群内管理撤回记录",
 	"POST /api/admin/v1/groups/{id}/messages/{messageId}/recall": "管理撤回指定消息（需关联原因/工单）",

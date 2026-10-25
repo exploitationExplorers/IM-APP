@@ -82,7 +82,10 @@ async function onConfirm() {
 
 <template>
   <view class="page">
-    <ImNavBar title="设置群号" @back="goBack" />
+    <ImNavBar
+      title="设置群号"
+      @back="goBack"
+    />
 
     <view class="form">
       <view class="input-row">
@@ -95,22 +98,39 @@ async function onConfirm() {
           placeholder-style="color:#636E86"
           :focus="true"
           @input="onInput"
-        />
-        <view v-if="publicId" class="clear-btn" @click="clearId">
-          <text class="clear-icon">×</text>
+        >
+        <view
+          v-if="publicId"
+          class="clear-btn"
+          @click="clearId"
+        >
+          <text class="clear-icon">
+            ×
+          </text>
         </view>
       </view>
       <view class="meta">
-        <text class="hint" :class="{ warn: publicId && !looksValid }">
+        <text
+          class="hint"
+          :class="{ warn: publicId && !looksValid }"
+        >
           {{ GROUP_ID_PREFIX }} 开头，后接 {{ SUFFIX_MIN }}-{{ SUFFIX_MAX }} 位字母或数字
         </text>
-        <text class="count">{{ idCount }}/{{ GROUP_ID_PREFIX.length + SUFFIX_MAX }}</text>
+        <text class="count">
+          {{ idCount }}/{{ GROUP_ID_PREFIX.length + SUFFIX_MAX }}
+        </text>
       </view>
 
       <view class="tips">
-        <text class="tip-line">· 群号用于加群搜索，别人知道群号后可以申请加入</text>
-        <text class="tip-line">· 大小写按输入保留，搜索时不区分大小写</text>
-        <text class="tip-line">· 每个群只能修改一次，改完就不能再改了，请谨慎设置</text>
+        <text class="tip-line">
+          · 群号用于加群搜索，别人知道群号后可以申请加入
+        </text>
+        <text class="tip-line">
+          · 大小写按输入保留，搜索时不区分大小写
+        </text>
+        <text class="tip-line">
+          · 每个群只能修改一次，改完就不能再改了，请谨慎设置
+        </text>
       </view>
     </view>
 

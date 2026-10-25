@@ -8,6 +8,7 @@ import { setupAppAuthGuard } from '@/composables/useAuthGuard'
 import { checkAndPromptAppUpdate } from '@/composables/useAppUpdate'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { getToken, setAuthExpiredHandler } from '@/utils/request'
+import { warmMediaCache } from '@/utils/mediaCache'
 import { initPerfMonitoring } from '@/utils/perf'
 
 onLaunch(() => {
@@ -15,6 +16,7 @@ onLaunch(() => {
     useUserStore().invalidateSession()
   })
   initPerfMonitoring()
+  warmMediaCache()
   const userStore = useUserStore()
   userStore.bootstrap()
   // H5 没有 App 那套 CSS 变量注入；写上也不影响，App 端无 document 会跳过

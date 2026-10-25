@@ -1,14 +1,7 @@
 import { getDeviceId } from '@/utils/device'
+import { isAppPlatform } from '@/utils/platform'
 
 export type NotificationAuthStatus = 'authorized' | 'denied' | 'notDetermined'
-
-function isAppPlatform(): boolean {
-  try {
-    return uni.getSystemInfoSync().uniPlatform === 'app'
-  } catch {
-    return false
-  }
-}
 
 /** 当前系统通知权限。H5 用 Notification API，App 用 getAppAuthorizeSetting。 */
 export function getNotificationAuthStatus(): NotificationAuthStatus {

@@ -65,12 +65,23 @@ function switchTo(url: string) {
       @click="switchTo('/pages/contacts/index')"
     >
       <view class="icon-wrap">
-        <image class="icon" :src="contactsIcon" mode="aspectFit" />
-        <view v-if="contactsBadge" class="badge">
-          <text class="badge-text">{{ contactsBadge }}</text>
+        <image
+          class="icon"
+          :src="contactsIcon"
+          mode="aspectFit"
+        />
+        <view
+          v-if="contactsBadge"
+          class="badge"
+        >
+          <text class="badge-text">
+            {{ contactsBadge }}
+          </text>
         </view>
       </view>
-      <text class="label">通讯录</text>
+      <text class="label">
+        通讯录
+      </text>
     </view>
 
     <view
@@ -79,12 +90,23 @@ function switchTo(url: string) {
       @click="switchTo('/pages/chat/index')"
     >
       <view class="icon-wrap">
-        <image class="icon" :src="chatIcon" mode="aspectFit" />
-        <view v-if="chatBadge" class="badge">
-          <text class="badge-text">{{ chatBadge }}</text>
+        <image
+          class="icon"
+          :src="chatIcon"
+          mode="aspectFit"
+        />
+        <view
+          v-if="chatBadge"
+          class="badge"
+        >
+          <text class="badge-text">
+            {{ chatBadge }}
+          </text>
         </view>
       </view>
-      <text class="label">聊天</text>
+      <text class="label">
+        聊天
+      </text>
     </view>
 
     <view
@@ -92,8 +114,14 @@ function switchTo(url: string) {
       :class="{ active: current === 'mine' }"
       @click="switchTo('/pages/mine/index')"
     >
-      <image class="icon" :src="mineIcon" mode="aspectFit" />
-      <text class="label">我的</text>
+      <image
+        class="icon"
+        :src="mineIcon"
+        mode="aspectFit"
+      />
+      <text class="label">
+        我的
+      </text>
     </view>
   </view>
 </template>
