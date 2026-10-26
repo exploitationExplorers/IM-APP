@@ -128,7 +128,7 @@ function onSubmit() {
   if (!canSubmit.value) return
   uni.showModal({
     title: '最后一次确认',
-    content: '账号将永久注销，聊天记录、好友、收藏、文件都会一并删除且无法恢复。确定注销吗？',
+    content: '账号将永久注销，业务资料、好友与群组关系、收藏等关联数据将立即删除且无法恢复。确定注销吗？',
     confirmText: '注销',
     confirmColor: THEME.danger,
     success: (res) => {
@@ -190,8 +190,9 @@ async function doDelete() {
       <view class="warn-card">
         <text class="warn-title">注销后不可恢复</text>
         <text class="warn-text">
-          账号注销后，我们将永久删除你的账号及关联数据，包括个人资料、好友与群组关系、
-          聊天记录、收藏内容与上传的文件。该操作无法撤销。
+          账号注销后，你的业务账号资料与好友、群组关系、收藏等关联数据将立即删除且无法恢复。
+          聊天服务中的账号资料将按清理流程失效、下线或匿名化处理，其他设备上已保存的聊天内容不会同步消失；
+          上传的文件与备份按平台清理策略轮转处理。该操作无法撤销。
         </text>
       </view>
 
@@ -210,7 +211,7 @@ async function doDelete() {
           <text class="stat-value">{{ summary.favoriteCount }} 条</text>
         </view>
         <view class="stat-row">
-          <text class="stat-label">上传的文件</text>
+          <text class="stat-label">文件（解除关联）</text>
           <text class="stat-value">{{ summary.fileCount }} 个</text>
         </view>
       </view>

@@ -93,7 +93,9 @@ export const useUserStore = defineStore('user', () => {
     useChatStore().reset()
     useContactStore().reset()
     useGroupStore().reset()
+    // 换账号登录时兜底清掉上一个账号的群发历史（正常登出已清，防 token 过期直登路径）
     useMassSendStore().resetAll()
+    useMassSendStore().clearHistory()
     await logoutOpenIM().catch(() => undefined)
 
     saveLoginPhone(countryCode || '+86', phone)
@@ -212,7 +214,10 @@ export const useUserStore = defineStore('user', () => {
     useChatStore().reset()
     useContactStore().reset()
     useGroupStore().reset()
+    // 群发历史是个人数据，落在本机 storage；resetAll 只清草稿/选中，
+    // 必须再调 clearHistory，否则换账号登录会看到上一个账号的群发记录。
     useMassSendStore().resetAll()
+    useMassSendStore().clearHistory()
     await logoutOpenIM().catch(() => undefined)
     uni.reLaunch({ url: '/pages/auth/sign-in' })
   }
