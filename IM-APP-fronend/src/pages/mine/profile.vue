@@ -143,8 +143,9 @@ function onChooseAvatar() {
     })
 }
 
+// 注销有前置检查（群主等阻碍项）、短信验证与二次确认，流程较长，走独立页面
 function onDeleteAccount() {
-  uni.navigateTo({ url: '/pages/mine/delete-account' })
+  uni.navigateTo({ url: '/pages/mine/account-deletion' })
 }
 </script>
 

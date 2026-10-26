@@ -216,6 +216,48 @@ func (c *Client) UpdateUser(ctx context.Context, user User) error {
 	return c.postWithAdmin(ctx, "/user/update_user_info_ex", map[string]any{"userInfo": user}, nil)
 }
 
+// openIMPlatformIDs 覆盖 OpenIM 支持的全部终端平台，用于强制下线时逐个踢出。
+var openIMPlatformIDs = []int{1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+// ForceLogoutAll 让指定用户在所有平台立即掉线。
+//
+// OpenIM v3 的 /user 路由组**没有删除用户接口**（v3.8.3 已核对），账号注销无法
+// 在 IM 侧真删；这里用强制下线 + AnonymizeUser 组合达到「账号不可再用」的效果。
+// 逐个平台调用，单个平台失败不影响其它平台；全部失败才返回错误。
+func (c *Client) ForceLogoutAll(ctx context.Context, userID string) error {
+	if !c.Available() {
+		return ErrUnavailable
+	}
+	var lastErr error
+	for _, platformID := range openIMPlatformIDs {
+		// OpenIM 不可达时每个平台都要等满客户端超时；调用方给了整体时限，
+		// 时限一到就别再逐个重试，否则注销请求会被拖到分钟级。
+		if err := ctx.Err(); err != nil {
+			if lastErr == nil {
+				lastErr = err
+			}
+			return lastErr
+		}
+		if err := c.postWithAdmin(ctx, "/auth/force_logout", map[string]any{
+			"userID":     userID,
+			"platformID": platformID,
+		}, nil); err != nil {
+			// 用户本就没在该平台登录时 OpenIM 会报错，属预期情况，只记录不中断
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+// AnonymizeUser 把 OpenIM 侧的用户资料抹成「已注销用户」并清空头像。
+//
+// v3 无法删除用户，但业务侧 users 行删除后用户再也拿不到 OpenIM token
+// （token 由本服务代理下发），因此改名 + 踢线即等价于账号失效，
+// 且避免了昵称/头像这类个人数据在 IM 侧残留。
+func (c *Client) AnonymizeUser(ctx context.Context, userID string) error {
+	return c.UpdateUser(ctx, User{UserID: userID, Nickname: "已注销用户", FaceURL: ""})
+}
+
 func (c *Client) IsUserRegistered(ctx context.Context, userID string) (bool, error) {
 	var data struct {
 		Results []struct {

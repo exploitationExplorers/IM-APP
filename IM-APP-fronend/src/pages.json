@@ -396,14 +396,17 @@
       }
     },
     {
-      "path": "pages/mine/delete-account",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "注销账号" }
-    },
-    {
       "path": "pages/mine/profile",
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "个人资料"
+      }
+    },
+    {
+      "path": "pages/mine/account-deletion",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "注销账号"
       }
     },
     {

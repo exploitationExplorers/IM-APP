@@ -8,7 +8,6 @@ import {
   fetchProfile,
   logoutCurrentDevice,
   refreshAuthToken,
-  deleteAccount as requestDeleteAccount,
 } from '@/api/auth'
 import { updateMyPublicId, updateProfile } from '@/api/user'
 import {
@@ -185,8 +184,7 @@ export const useUserStore = defineStore('user', () => {
     void logoutOpenIM().catch(() => undefined)
   }
 
-  async function deleteAccount(password: string) {
-    await requestDeleteAccount(password)
+  async function logoutAfterAccountDeletion() {
     clearLoginPhone()
     await finishLogout(true)
   }
@@ -295,7 +293,7 @@ export const useUserStore = defineStore('user', () => {
     tryRefreshToken,
     invalidateSession,
     logout,
-    deleteAccount,
+    logoutAfterAccountDeletion,
     bootstrap,
     restoreSessionIfNeeded,
   }
