@@ -10,11 +10,15 @@ import { getStatusBarHeight } from '@/utils/status-bar'
 import { getToken, setAuthExpiredHandler } from '@/utils/request'
 import { warmMediaCache } from '@/utils/mediaCache'
 import { initPerfMonitoring } from '@/utils/perf'
+import { clearLoginPassword } from '@/utils/login-phone'
+import { clearOldPassword } from '@/utils/password-state'
 
 onLaunch(() => {
   setAuthExpiredHandler(() => {
     useUserStore().invalidateSession()
   })
+  clearLoginPassword()
+  clearOldPassword()
   initPerfMonitoring()
   warmMediaCache()
   const userStore = useUserStore()

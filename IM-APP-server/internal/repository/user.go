@@ -19,6 +19,13 @@ type UserRepo struct {
 	DB *pgxpool.Pool
 }
 
+// Active 同时覆盖注销后用户行被删除和账号被停用的情况。
+func (r *UserRepo) Active(ctx context.Context, userID string) (bool, error) {
+	var active bool
+	err := r.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1::uuid AND status='active' AND canceled_at IS NULL)`, userID).Scan(&active)
+	return active, err
+}
+
 func (r *UserRepo) FindByID(ctx context.Context, id string) (models.User, error) {
 	var u models.User
 	err := r.DB.QueryRow(ctx, `

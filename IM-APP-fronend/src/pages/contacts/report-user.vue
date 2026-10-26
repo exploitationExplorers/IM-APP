@@ -4,12 +4,15 @@ import { onLoad } from '@dcloudio/uni-app'
 import { createUserReport, fetchReportReasons, type ReportReason } from '@/api/report'
 import { safeBack } from '@/utils/nav'
 import ImNavBar from '@/components/ImNavBar.vue'
+import ImReportEvidence from '@/components/ImReportEvidence.vue'
+import { uploadReportImage } from '@/utils/file-upload'
 
 const userId = ref('')
 const reasons = ref<ReportReason[]>([])
 const selectedId = ref('')
 const description = ref('')
 const submitting = ref(false)
+const evidence = ref<string[]>([])
 
 onLoad(async (query) => {
   userId.value = String(query?.id || '')
@@ -28,10 +31,12 @@ async function onSubmit() {
   if (!userId.value || !selectedId.value || submitting.value) return
   submitting.value = true
   try {
+    const evidenceFileIds = await Promise.all(evidence.value.map((path) => uploadReportImage(path)))
     await createUserReport({
       targetId: userId.value,
       reasonId: selectedId.value,
       description: description.value.trim(),
+      evidenceFileIds,
     })
     uni.showToast({ title: '已提交', icon: 'success' })
     setTimeout(() => goBack(), 400)
@@ -71,6 +76,13 @@ async function onSubmit() {
         class="textarea"
         placeholder="补充说明（选填）"
         maxlength="1000"
+      />
+    </view>
+
+    <view class="card">
+      <ImReportEvidence
+        v-model="evidence"
+        :disabled="submitting"
       />
     </view>
 

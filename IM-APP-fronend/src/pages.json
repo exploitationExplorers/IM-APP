@@ -397,6 +397,13 @@
       }
     },
     {
+      "path": "pages/mine/account-deletion",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "注销账号"
+      }
+    },
+    {
       "path": "pages/mine/edit-nickname",
       "style": {
         "navigationStyle": "custom",
@@ -538,7 +545,7 @@
   ],
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "Chat",
+    "navigationBarTitleText": "易可聊",
     "navigationBarBackgroundColor": "#FFFFFF",
     "backgroundColor": "#F5F6F8"
   },

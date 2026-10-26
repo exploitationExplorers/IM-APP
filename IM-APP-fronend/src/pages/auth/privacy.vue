@@ -1,5 +1,17 @@
+<script setup lang="ts">
+import { APP_CONFIG } from '@/config'
+import ImLegalDocument from '@/components/ImLegalDocument.vue'
+</script>
+
 <template>
-  <view class="doc">
+  <ImLegalDocument
+    v-if="APP_CONFIG.privacyPolicyUrl"
+    kind="privacy"
+  />
+  <view
+    v-else
+    class="doc"
+  >
     <text class="p">
       我们重视您的隐私。本政策说明我们如何收集、使用与保护您的个人信息。
     </text>

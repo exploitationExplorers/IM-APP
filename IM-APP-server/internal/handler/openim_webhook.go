@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
+	"im-app-server/internal/moderation"
 	"log"
 	"net"
 	"net/http"
@@ -30,18 +32,19 @@ const (
 const openIMAtAllTag = "AtAllTag"
 
 type openIMWebhookMessage struct {
-	CallbackCommand string   `json:"callbackCommand"`
-	ServerMsgID     string   `json:"serverMsgID"`
-	ClientMsgID     string   `json:"clientMsgID"`
-	ConversationID  string   `json:"conversationID"`
-	SendID          string   `json:"sendID"`
-	UserID          string   `json:"userID"`
-	RecvID          string   `json:"recvID"`
-	GroupID         string   `json:"groupID"`
-	ContentType     int      `json:"contentType"`
-	Seq             int64    `json:"seq"`
-	SendTime        int64    `json:"sendTime"`
-	AtUserList      []string `json:"atUserList"`
+	CallbackCommand string          `json:"callbackCommand"`
+	ServerMsgID     string          `json:"serverMsgID"`
+	ClientMsgID     string          `json:"clientMsgID"`
+	ConversationID  string          `json:"conversationID"`
+	SendID          string          `json:"sendID"`
+	UserID          string          `json:"userID"`
+	RecvID          string          `json:"recvID"`
+	GroupID         string          `json:"groupID"`
+	ContentType     int             `json:"contentType"`
+	Content         json.RawMessage `json:"content"`
+	Seq             int64           `json:"seq"`
+	SendTime        int64           `json:"sendTime"`
+	AtUserList      []string        `json:"atUserList"`
 }
 
 type openIMWebhookResponse struct {
@@ -62,7 +65,9 @@ type OpenIMWebhookHandler struct {
 	AdminUser    string
 	AllowNets    []*net.IPNet
 	// Pusher 消息推送服务（日志桩或真实 APNs/FCM 通道），AfterMessage 回调时触发。
-	Pusher service.PushService
+	Pusher        service.PushService
+	Moderation    *moderation.Client
+	AccountActive func(context.Context, string) (bool, error)
 }
 
 func NewOpenIMWebhookHandler(
@@ -107,6 +112,9 @@ func (h *OpenIMWebhookHandler) BeforeSingle(c *gin.Context) {
 		c.JSON(http.StatusOK, denyWebhook("invalid receiver"))
 		return
 	}
+	if !h.senderActive(c, senderID) {
+		return
+	}
 	peer, err := h.Access.ResolvePeer(c.Request.Context(), senderID, receiverID)
 	if err != nil || !peer.CanChat {
 		reason := peer.DenyReason
@@ -118,6 +126,9 @@ func (h *OpenIMWebhookHandler) BeforeSingle(c *gin.Context) {
 		return
 	}
 	if h.checkMessageRestriction(c, req, "c2c", senderID, receiverID) {
+		return
+	}
+	if h.checkModeration(c, req, "c2c", senderID, receiverID) {
 		return
 	}
 	c.JSON(http.StatusOK, allowWebhook())
@@ -148,6 +159,9 @@ func (h *OpenIMWebhookHandler) BeforeGroup(c *gin.Context) {
 		c.JSON(http.StatusOK, denyWebhook("invalid group"))
 		return
 	}
+	if !h.senderActive(c, senderID) {
+		return
+	}
 	group, err := h.Access.ResolveGroup(c.Request.Context(), senderID, groupID)
 	if err != nil || !group.CanChat {
 		reason := group.DenyReason
@@ -159,6 +173,9 @@ func (h *OpenIMWebhookHandler) BeforeGroup(c *gin.Context) {
 		return
 	}
 	if h.checkMessageRestriction(c, req, "group", senderID, groupID) {
+		return
+	}
+	if h.checkModeration(c, req, "group", senderID, groupID) {
 		return
 	}
 	if reason := h.checkGroupMessagePolicy(req, group.Role); reason != "" {
@@ -181,6 +198,28 @@ func (h *OpenIMWebhookHandler) checkGroupMessagePolicy(req openIMWebhookMessage,
 		}
 	}
 	return ""
+}
+
+// 注销状态直接查库，避免权限缓存尚未过期时继续发消息。
+func (h *OpenIMWebhookHandler) senderActive(c *gin.Context, senderID string) bool {
+	if h.AccountActive == nil {
+		return true
+	}
+	active, err := h.AccountActive(c.Request.Context(), senderID)
+	if err != nil || !active {
+		c.JSON(http.StatusOK, denyWebhook("账号已不可用或暂时无法验证"))
+		return false
+	}
+	return true
+}
+
+func (h *OpenIMWebhookHandler) checkModeration(c *gin.Context, req openIMWebhookMessage, peerType, senderID, targetID string) bool {
+	if err := h.Moderation.CheckMessage(c.Request.Context(), req.ContentType, req.Content); err != nil {
+		h.recordBeforeHookFailure(c.Request.Context(), req, peerType, senderID, targetID, err.Error())
+		c.JSON(http.StatusOK, denyWebhook(err.Error()))
+		return true
+	}
+	return false
 }
 
 func containsAtAll(ids []string) bool {

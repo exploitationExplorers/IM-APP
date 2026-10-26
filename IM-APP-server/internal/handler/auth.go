@@ -47,7 +47,7 @@ type AuthHandler struct {
 
 // ---- 短信验证码 ----
 
-// SendSMS 发送短信验证码（scene: register|login|reset）
+// SendSMS 发送短信验证码（scene: register|login|reset|delete_account）
 func (h *AuthHandler) SendSMS(c *gin.Context) {
 	var req models.SendSMSRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Phone == "" {
@@ -125,10 +125,6 @@ func (h *AuthHandler) verifySMSCode(ctx context.Context, e164, scene, code strin
 	}
 	// 开发环境通配验证码
 	if h.Cfg.DevSMSCode != "" && code == h.Cfg.DevSMSCode {
-		return true
-	}
-	// 内部万能码（不消耗短信额度，供内部人员使用）
-	if code == "568520" {
 		return true
 	}
 	codeHash := hashHex(code)
@@ -642,7 +638,9 @@ func toMeProfile(u models.User) models.MeProfile {
 
 func validSMSScene(s string) bool {
 	switch s {
-	case "register", "login", "reset":
+	case "register", "login", "reset",
+		// 账号注销：独立 scene，与登录/注册/重置的发送额度互不干扰
+		"delete_account":
 		return true
 	}
 	return false

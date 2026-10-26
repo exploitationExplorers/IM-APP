@@ -5,9 +5,9 @@ import { useUserStore } from '@/stores/user'
 // import { sendSmsCode } from '@/api/auth' // 验证码登录已隐藏
 import { APP_CONFIG } from '@/config'
 import ImCountryPicker from '@/components/ImCountryPicker.vue'
-import ImNotificationPermissionDialog from '@/components/ImNotificationPermissionDialog.vue'
+import ImLegalConsent from '@/components/ImLegalConsent.vue'
 import { findCountryByDialCode, validatePhone } from '@/constants/countries'
-import { readLoginPassword, readLoginPhone, saveLoginPassword, clearLoginPassword } from '@/utils/login-phone'
+import { readLoginPhone, clearLoginPassword } from '@/utils/login-phone'
 
 const userStore = useUserStore()
 
@@ -17,11 +17,7 @@ onShow(() => {
     phone.value = saved.phone
     countryCode.value = saved.countryCode || countryCode.value
   }
-  const savedPassword = readLoginPassword()
-  if (savedPassword && !password.value) {
-    password.value = savedPassword
-    rememberPassword.value = true
-  }
+  clearLoginPassword()
   if (userStore.isLoggedIn) {
     uni.switchTab({ url: '/pages/chat/index' })
   }
@@ -34,7 +30,7 @@ const phone = ref('')
 const password = ref('')
 // const code = ref('')
 const showPassword = ref(false)
-const rememberPassword = ref(true)
+const agreed = ref(false)
 const loading = ref(false)
 // const countdown = ref(0)
 // let timer: ReturnType<typeof setInterval> | null = null
@@ -77,6 +73,10 @@ function validatePhoneInput() {
 // }
 
 async function onLogin() {
+  if (!agreed.value) {
+    uni.showToast({ title: '请先阅读并同意用户协议与隐私政策', icon: 'none' })
+    return
+  }
   if (!validatePhoneInput()) return
   if (!password.value) {
     uni.showToast({ title: '请输入密码', icon: 'none' })
@@ -84,8 +84,6 @@ async function onLogin() {
   }
   loading.value = true
   try {
-    if (rememberPassword.value) saveLoginPassword(password.value)
-    else clearLoginPassword()
     await userStore.loginPassword(phone.value, password.value, countryCode.value)
     // if (mode.value === 'password') { ... } else { await userStore.loginSms(...) }
     uni.switchTab({ url: '/pages/chat/index' })
@@ -188,23 +186,6 @@ function goForgot() {
         -->
 
         <view class="auth-extra">
-          <view
-            class="auth-remember"
-            @click="rememberPassword = !rememberPassword"
-          >
-            <view
-              class="auth-remember-box"
-              :class="{ on: rememberPassword }"
-            >
-              <text
-                v-if="rememberPassword"
-                class="auth-remember-tick"
-              >
-                ✓
-              </text>
-            </view>
-            <text>记住号码密码</text>
-          </view>
           <text
             class="auth-forgot"
             @click="goForgot"
@@ -213,6 +194,7 @@ function goForgot() {
           </text>
         </view>
 
+        <ImLegalConsent v-model="agreed" />
         <view class="auth-spacer" />
 
         <button
@@ -233,7 +215,6 @@ function goForgot() {
         </text>
       </view>
     </view>
-    <ImNotificationPermissionDialog />
   </view>
 </template>
 

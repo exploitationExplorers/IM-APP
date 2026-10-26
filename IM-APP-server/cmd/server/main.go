@@ -17,6 +17,7 @@ import (
 	"im-app-server/internal/im"
 	"im-app-server/internal/infra"
 	"im-app-server/internal/middleware"
+	"im-app-server/internal/moderation"
 	"im-app-server/internal/repository"
 	"im-app-server/internal/service"
 	"im-app-server/internal/ws"
@@ -75,8 +76,10 @@ func main() {
 		"users":                      {"id", "public_id", "public_id_changed_at", "last_seen_at"},
 		"groups":                     {"id", "public_id", "public_id_changed_at", "retention_max_messages", "retention_keep_hours"},
 		"user_stickers":              {"id", "user_id", "file_id", "url", "created_at"},
+		// 058 账号注销：新二进制依赖这张审计表，缺表时宁可不启动也别让注销静默失败
+		"account_deletions": {"id", "user_id", "phone_e164_hash", "summary", "im_cleanup_status"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations include 052 through 056", err)
+		log.Fatalf("schema check: %v; required migrations include 052 through 058", err)
 	}
 	if cfg.MigrationsMode == "verify" {
 		log.Println("database schema verified; startup migration replay disabled")
@@ -118,7 +121,14 @@ func main() {
 		log.Printf("object storage configured: %s", storageClient.Current.Provider())
 	}
 
+	contentModeration, err := moderation.FromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
 	imClient := im.NewClient(cfg.OpenIM)
+	if contentModeration != nil && (!imClient.Available() || cfg.OpenIM.WebhookSecret == "" || len(cfg.OpenIM.WebhookAllowCIDRs) == 0) {
+		log.Fatal("content moderation requires OpenIM and authenticated beforeSend webhooks")
+	}
 	kafkaQueue := infra.NewKafka(cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.GroupID)
 	defer kafkaQueue.Close()
 
@@ -141,7 +151,7 @@ func main() {
 	groupRepo.DefaultGroupMaxMembers = cfg.DefaultGroupMaxMembers
 	groupReadCursorRepo := &repository.GroupReadCursorRepo{DB: pool}
 
-	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo}
+	userSvc := &service.UserService{Moderation: contentModeration, Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo}
 	imSvc := &service.IMService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, ReadCursors: groupReadCursorRepo, Config: cfg.OpenIM, TokenCache: redisClient,
 	}
@@ -173,7 +183,7 @@ func main() {
 	stickerRepo := &repository.StickerRepo{DB: pool}
 	stickerSvc := &service.StickerService{Stickers: stickerRepo, Files: fileRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}
-	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo, Users: userRepo, IM: imClient}
+	groupSvc := &service.GroupService{Moderation: contentModeration, Groups: groupRepo, Files: fileRepo, Users: userRepo, IM: imClient}
 	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue, Media: forwardMedia}
 	reportSvc := &service.ReportService{Reports: reportRepo}
 	feedbackSvc := &service.FeedbackService{Feedbacks: feedbackRepo}
@@ -196,11 +206,22 @@ func main() {
 		Restrictions: &repository.RestrictionRepo{DB: pool},
 	}
 	userH := &handler.UserHandler{Svc: userSvc}
+	// 账号注销（Apple 5.1.1(v) 合规）：审计哈希复用服务端长期密钥 JWTSecret，
+	// 换了密钥只会让历史哈希无法复现核对，不影响已完成的删除。
+	accountDeletionH := &handler.AccountDeletionHandler{
+		Svc: &service.AccountDeletionService{
+			Deletions: &repository.AccountDeletionRepo{DB: pool},
+			Users:     userRepo,
+			IM:        imClient,
+			HashKey:   cfg.JWTSecret,
+		},
+		Auth: authH,
+	}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc, Repo: groupSvc.Groups}
-	fileH := &handler.FileHandler{Storage: storageClient, Files: fileRepo}
+	fileH := &handler.FileHandler{Moderation: contentModeration, Storage: storageClient, Files: fileRepo}
 	voiceH := &handler.VoiceHandler{Storage: storageClient}
 	imH := &handler.IMHandler{Service: imSvc}
 	retentionH := &handler.GroupRetentionHandler{Reader: &repository.GroupRetentionRepo{DB: pool}}
@@ -221,6 +242,8 @@ func main() {
 		log.Println("WARN: OPENIM_WEBHOOK_SECRET 已配置，但未配置 OPENIM_WEBHOOK_ALLOW_CIDRS；" +
 			"OpenIM 回调来源 IP 不在白名单内将被全部拒绝（webhook 实际失效）")
 	}
+	openIMWebhookH.Moderation = contentModeration
+	openIMWebhookH.AccountActive = userRepo.Active
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
 	adminForwardH := &handler.AdminForwardHandler{Forward: forwardSvc}
 	adminUserH := &handler.AdminUserHandler{Restrictions: &repository.RestrictionRepo{DB: pool}, Client: imClient}
@@ -336,7 +359,7 @@ func main() {
 		api.POST("/auth/logout", authH.Logout)
 
 		auth := api.Group("")
-		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.TouchLastSeen(userRepo.TouchLastSeen), middleware.NoStore())
+		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.ActiveAccount(userRepo.Active), middleware.TouchLastSeen(userRepo.TouchLastSeen), middleware.NoStore())
 		if mediaProtection != nil {
 			auth.Use(middleware.ProtectMedia(mediaProtection))
 		}
@@ -344,6 +367,9 @@ func main() {
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
+			// 账号注销：先出前置检查（群主等阻碍项），确认后再物理删除
+			auth.GET("/me/deletion-preview", accountDeletionH.Preview)
+			auth.POST("/me/account/delete", middleware.RateLimitIP(redisClient, 10, time.Minute, "account-delete"), accountDeletionH.Delete)
 			auth.PUT("/me/public-id", userH.UpdatePublicID)
 			auth.POST("/me/password/verify", userH.VerifyPassword)
 			auth.PUT("/me/password", userH.ChangePassword)

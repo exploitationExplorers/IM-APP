@@ -30,6 +30,7 @@ import { useContactStore } from '@/stores/contact'
 import { useGroupStore } from '@/stores/group'
 import { useMassSendStore } from '@/stores/massSend'
 import { perfColdStartDone } from '@/utils/perf'
+import { clearOldPassword } from '@/utils/password-state'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(getToken())
@@ -168,6 +169,7 @@ export const useUserStore = defineStore('user', () => {
 
   /** 401 / 刷新失败时清内存会话，不跳转（跳转由 request 层统一处理） */
   function invalidateSession() {
+    clearOldPassword()
     token.value = ''
     refreshToken.value = ''
     profile.value = null
@@ -180,10 +182,20 @@ export const useUserStore = defineStore('user', () => {
     void logoutOpenIM().catch(() => undefined)
   }
 
+  async function logoutAfterAccountDeletion() {
+    clearLoginPhone()
+    await finishLogout(true)
+  }
+
   async function logout() {
-    await unregisterPushRegistration().catch(() => undefined)
+    await finishLogout(false)
+  }
+
+  async function finishLogout(accountDeleted: boolean) {
+    clearOldPassword()
+    if (!accountDeleted) await unregisterPushRegistration().catch(() => undefined)
     try {
-      if (refreshToken.value) {
+      if (!accountDeleted && refreshToken.value) {
         await logoutCurrentDevice()
       }
     } catch {
@@ -278,6 +290,7 @@ export const useUserStore = defineStore('user', () => {
     tryRefreshToken,
     invalidateSession,
     logout,
+    logoutAfterAccountDeletion,
     bootstrap,
     restoreSessionIfNeeded,
   }

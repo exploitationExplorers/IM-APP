@@ -1,0 +1,30 @@
+{
+  "info": {
+    "name": "IM-APP 账号注销",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "仅用于专用可注销的测试账号。先检查群主条件，通过 /auth/sms/send 发送 scene=delete_account 的验证码，再提交当前账号手机号、验证码与预检确认短语。注销采用事务物理删除及审计记录，OpenIM 旁路清理限时 8 秒并记录结果。"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://127.0.0.1:8080/api/v1"},
+    {"key": "accessToken", "value": ""},
+    {"key": "countryCode", "value": "+86"},
+    {"key": "phone", "value": ""},
+    {"key": "smsCode", "value": ""},
+    {"key": "acknowledge", "value": ""}
+  ],
+  "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{accessToken}}", "type": "string"}]},
+  "item": [
+    {"name": "检查注销条件", "request": {"method": "GET", "url": "{{baseUrl}}/me/deletion-preview"}},
+    {"name": "发送注销短信验证码", "request": {
+      "method": "POST", "url": "{{baseUrl}}/auth/sms/send",
+      "header": [{"key": "Content-Type", "value": "application/json"}],
+      "body": {"mode": "raw", "raw": "{\n  \"countryCode\": \"{{countryCode}}\",\n  \"phone\": \"{{phone}}\",\n  \"scene\": \"delete_account\"\n}"}
+    }},
+    {"name": "永久注销当前账号", "request": {
+      "method": "POST", "url": "{{baseUrl}}/me/account/delete",
+      "header": [{"key": "Content-Type", "value": "application/json"}],
+      "body": {"mode": "raw", "raw": "{\n  \"countryCode\": \"{{countryCode}}\",\n  \"phone\": \"{{phone}}\",\n  \"code\": \"{{smsCode}}\",\n  \"acknowledge\": \"{{acknowledge}}\"\n}"}
+    }},
+    {"name": "验证旧令牌失效（预期 401）", "request": {"method": "GET", "url": "{{baseUrl}}/me"}}
+  ]
+}

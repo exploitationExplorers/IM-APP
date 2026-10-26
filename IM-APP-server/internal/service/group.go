@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"im-app-server/internal/moderation"
 	"log"
 	"regexp"
 	"strings"
@@ -18,10 +19,11 @@ import (
 )
 
 type GroupService struct {
-	Groups *repository.GroupRepo
-	Files  *repository.FileRepo
-	Users  *repository.UserRepo
-	IM     *im.Client
+	Groups     *repository.GroupRepo
+	Files      *repository.FileRepo
+	Users      *repository.UserRepo
+	IM         *im.Client
+	Moderation *moderation.Client
 }
 
 // 群号：qun_ + 6–20 位字母数字（系统分配为 qun_ + 14 位小写随机）。遗留纯数字群号仍可查。
@@ -121,6 +123,9 @@ func (s *GroupService) Create(ctx context.Context, uid, name string, memberIDs [
 	if len(unique) < 3 {
 		return models.GroupInfo{}, repository.ErrInvalidGroupOperation
 	}
+	if err := s.Moderation.CheckText(ctx, name); err != nil {
+		return models.GroupInfo{}, err
+	}
 	return s.Groups.Create(ctx, uid, name, filtered)
 }
 
@@ -217,6 +222,26 @@ func (s *GroupService) UpdateSettings(
 			return err
 		}
 		announcementImages = &images
+	}
+	if name != nil {
+		if err := s.Moderation.CheckText(ctx, *name); err != nil {
+			return err
+		}
+	}
+	if avatarURL != nil {
+		if err := s.Moderation.CheckImages(ctx, []string{*avatarURL}); err != nil {
+			return err
+		}
+	}
+	if announcement != nil {
+		if err := s.Moderation.CheckText(ctx, *announcement); err != nil {
+			return err
+		}
+	}
+	if announcementImages != nil {
+		if err := s.Moderation.CheckImages(ctx, *announcementImages); err != nil {
+			return err
+		}
 	}
 	return s.Groups.UpdateSettings(ctx, internalID, uid, name, avatarURL, announcement, announcementImages, allow, joinMode, allMuted)
 }
@@ -329,6 +354,12 @@ func (s *GroupService) CreateAnnouncement(ctx context.Context, groupID, uid, con
 	if strings.TrimSpace(text) == "" && len(images) == 0 {
 		return repository.ErrInvalidGroupOperation
 	}
+	if err := s.Moderation.CheckText(ctx, text); err != nil {
+		return err
+	}
+	if err := s.Moderation.CheckImages(ctx, images); err != nil {
+		return err
+	}
 	return s.Groups.CreateAnnouncement(ctx, internalID, uid, text, images)
 }
 
@@ -351,6 +382,12 @@ func (s *GroupService) UpdateAnnouncement(ctx context.Context, groupID, uid, ann
 	}
 	if strings.TrimSpace(text) == "" && len(images) == 0 {
 		return repository.ErrInvalidGroupOperation
+	}
+	if err := s.Moderation.CheckText(ctx, text); err != nil {
+		return err
+	}
+	if err := s.Moderation.CheckImages(ctx, images); err != nil {
+		return err
 	}
 	return s.Groups.UpdateAnnouncement(ctx, internalID, uid, announcementID, text, images)
 }
@@ -407,6 +444,9 @@ func (s *GroupService) UpdateMyNickname(ctx context.Context, groupID, uid, nickn
 	nickname = strings.TrimSpace(nickname)
 	if len([]rune(nickname)) > 32 {
 		return repository.ErrInvalidGroupOperation
+	}
+	if err := s.Moderation.CheckText(ctx, nickname); err != nil {
+		return err
 	}
 	return s.Groups.UpdateMyNickname(ctx, internalID, uid, nickname)
 }

@@ -3,7 +3,7 @@ import type { UserInfo } from '@/types'
 const LOGIN_PHONE_KEY = 'im_login_phone'
 const LOGIN_PASSWORD_KEY = 'im_login_password'
 
-export const LOGIN_REMEMBER_KEYS = [LOGIN_PHONE_KEY, LOGIN_PASSWORD_KEY] as const
+export const LOGIN_REMEMBER_KEYS = [LOGIN_PHONE_KEY] as const
 
 export type LoginPhone = {
   countryCode: string
@@ -39,16 +39,7 @@ export function clearLoginPhone() {
   uni.removeStorageSync(LOGIN_PHONE_KEY)
 }
 
-export function saveLoginPassword(password: string) {
-  if (!password) return
-  uni.setStorageSync(LOGIN_PASSWORD_KEY, password)
-}
-
-export function readLoginPassword(): string {
-  const raw = uni.getStorageSync(LOGIN_PASSWORD_KEY)
-  return typeof raw === 'string' ? raw : ''
-}
-
+/** 升级时清除旧版本留下的明文密码；新版本不再保存密码。 */
 export function clearLoginPassword() {
   uni.removeStorageSync(LOGIN_PASSWORD_KEY)
 }

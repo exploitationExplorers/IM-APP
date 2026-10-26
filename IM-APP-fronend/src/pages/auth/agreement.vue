@@ -1,5 +1,17 @@
+<script setup lang="ts">
+import { APP_CONFIG } from '@/config'
+import ImLegalDocument from '@/components/ImLegalDocument.vue'
+</script>
+
 <template>
-  <view class="doc">
+  <ImLegalDocument
+    v-if="APP_CONFIG.userAgreementUrl"
+    kind="agreement"
+  />
+  <view
+    v-else
+    class="doc"
+  >
     <text class="p">
       欢迎使用本即时通讯应用。使用本服务即表示您同意遵守本协议的全部条款。
     </text>
