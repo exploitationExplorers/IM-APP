@@ -62,4 +62,7 @@ function open(kind: 'privacy' | 'agreement') {
 .legal-consent.is-inverse { color: #e2e8f0; }
 .is-inverse .legal-link { color: #fff; }
 .is-inverse .legal-box { border-color: #d1d9ec; }
+.is-inverse .legal-box.is-checked { border-color: #fff; background: #fff; }
+.is-inverse .legal-tick { border-color: #0a2fc2; }
+.is-inverse .legal-check:focus-visible { outline-color: #fff; }
 </style>

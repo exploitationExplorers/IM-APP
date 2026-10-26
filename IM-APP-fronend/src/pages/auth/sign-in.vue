@@ -203,6 +203,7 @@ function goForgot() {
 
         <ImLegalConsent
           v-model="agreed"
+          inverse
         />
 
         <button
