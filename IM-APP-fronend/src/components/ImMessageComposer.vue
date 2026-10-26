@@ -17,6 +17,8 @@ export interface ComposerContent {
 
 const props = defineProps<{
   placeholder?: string
+  /** 是否展示「收藏」入口（群发编辑页等暂不支持收藏内容的场景传 false 隐藏） */
+  showFavorite?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -757,6 +759,7 @@ function stopRecord() {
               </text>
             </view>
             <view
+              v-if="props.showFavorite !== false"
               class="grid-item"
               @click="pickFavorite"
             >

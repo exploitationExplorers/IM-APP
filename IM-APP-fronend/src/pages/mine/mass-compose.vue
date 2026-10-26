@@ -3,7 +3,8 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import ImMessageComposer, { type ComposerContent } from '@/components/ImMessageComposer.vue'
 import ImNavBar from '@/components/ImNavBar.vue'
-import { useMassSendStore } from '@/stores/massSend'
+import { useMassSendStore, type MassContent } from '@/stores/massSend'
+import { dispatchMassContent } from '@/utils/massDispatch'
 
 const massStore = useMassSendStore()
 const sending = ref(false)
@@ -38,31 +39,50 @@ function backToAssistant() {
   uni.redirectTo({ url: '/pages/mine/mass-assistant' })
 }
 
-function goFavorites() {
-  uni.navigateTo({ url: '/pages/mine/favorites?mode=pick' })
+function toMassContent(content: ComposerContent): MassContent {
+  return {
+    type: content.type === 'favorite' ? 'favorite' : content.type,
+    text: content.text,
+    images: content.images,
+    imageNames: content.imageNames,
+    filePath: content.filePath,
+    fileName: content.fileName,
+    audioPath: content.audioPath,
+    audioDuration: content.audioDuration,
+  }
 }
 
-function onFavoritePicked(item: unknown) {
-  if (!item) return
-  uni.showToast({ title: '已选择收藏内容', icon: 'success' })
-}
-
-function mockSend(content: ComposerContent) {
+async function onSend(content: ComposerContent) {
   if (sending.value) return
   sending.value = true
-  uni.showLoading({ title: '发送中...' })
-  setTimeout(() => {
+  uni.showLoading({ title: '发送中...', mask: true })
+  try {
+    const result = await dispatchMassContent(massStore.selectedTargets, toMassContent(content))
     uni.hideLoading()
-    massStore.send(content)
-    uni.showToast({ title: '已发送', icon: 'success' })
-    sending.value = false
+    massStore.send(toMassContent(content))
+    if (result.failed.length) {
+      const names = result.failed
+        .slice(0, 5)
+        .map((f) => `${f.name}（${f.reason}）`)
+        .join('\n')
+      const more = result.failed.length > 5 ? `\n...等共 ${result.failed.length} 个失败` : ''
+      uni.showModal({
+        title: `已发送 ${result.sent} 个，${result.failed.length} 个失败`,
+        content: `${names}${more}`,
+        showCancel: false,
+        confirmText: '知道了',
+      })
+    } else {
+      uni.showToast({ title: '已发送', icon: 'success' })
+    }
     backToAssistant()
-  }, 600)
+  } catch (e) {
+    uni.hideLoading()
+    uni.showToast({ title: (e as Error)?.message || '发送失败', icon: 'none', duration: 2500 })
+  } finally {
+    sending.value = false
+  }
 }
-
-defineExpose({
-  onFavoritePicked,
-})
 </script>
 
 <template>
@@ -93,8 +113,8 @@ defineExpose({
 
     <ImMessageComposer
       placeholder="输入消息"
-      @submit="mockSend"
-      @open-favorites="goFavorites"
+      :show-favorite="false"
+      @submit="onSend"
     />
   </view>
 </template>

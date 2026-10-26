@@ -362,13 +362,6 @@
       }
     },
     {
-      "path": "pages/group/clear-history",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "清除聊天记录"
-      }
-    },
-    {
       "path": "pages/group/report",
       "style": {
         "navigationStyle": "custom",
