@@ -63,7 +63,7 @@ function goBack() {
 </script>
 
 <template>
-  <view class="auth-page">
+  <view class="auth-page is-modern">
     <view class="auth-inner is-sign-up">
       <view
         class="auth-top-back"
@@ -85,7 +85,10 @@ function goBack() {
 
       <view class="auth-form">
         <view class="auth-row">
-          <ImCountryPicker v-model="countryCode" />
+          <ImCountryPicker
+            v-model="countryCode"
+            minimal
+          />
           <view class="auth-input-box">
             <input
               v-model="phone"
@@ -163,9 +166,7 @@ function goBack() {
 
         <ImLegalConsent
           v-model="agreed"
-          inverse
         />
-        <view class="auth-spacer" />
 
         <button
           class="auth-primary-btn"

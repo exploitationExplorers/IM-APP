@@ -104,7 +104,7 @@ function goForgot() {
 </script>
 
 <template>
-  <view class="auth-page">
+  <view class="auth-page is-modern">
     <view class="auth-inner">
       <image
         class="auth-logo"
@@ -115,7 +115,7 @@ function goForgot() {
       <view class="auth-form">
         <view class="auth-tabs">
           <text class="auth-tab active">
-            账号密码登录
+            登录{{ APP_CONFIG.displayName }}
           </text>
           <!--
           <text
@@ -131,8 +131,15 @@ function goForgot() {
           -->
         </view>
 
+        <text class="auth-description">
+          使用手机号和密码登录
+        </text>
+
         <view class="auth-row">
-          <ImCountryPicker v-model="countryCode" />
+          <ImCountryPicker
+            v-model="countryCode"
+            minimal
+          />
           <view class="auth-input-box">
             <input
               v-model="phone"
@@ -196,9 +203,7 @@ function goForgot() {
 
         <ImLegalConsent
           v-model="agreed"
-          inverse
         />
-        <view class="auth-spacer" />
 
         <button
           class="auth-login-btn"
