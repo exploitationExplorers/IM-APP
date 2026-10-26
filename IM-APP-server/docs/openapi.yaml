@@ -40,6 +40,71 @@ tags:
     description: 仅供 OpenIM Server 回调
 
 paths:
+  /api/v1/me/account-deletion:
+    get:
+      tags: [Auth Sync]
+      operationId: getAccountDeletionRequirements
+      summary: 检查账号注销条件
+      description: 需要有效且未注销的登录账号；群主须先转让或解散所有仍有效的群。无业务参数。
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: 注销条件检查结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer, enum: [0]}
+                  message: {type: string}
+                  data:
+                    type: object
+                    required: [canDelete, ownedGroupCount]
+                    properties:
+                      canDelete: {type: boolean}
+                      ownedGroupCount: {type: integer, minimum: 0}
+        '401': {description: 登录失效或账号已不可用}
+        '503': {description: 暂时无法检查账号}
+  /api/v1/me/account/delete:
+    post:
+      tags: [Auth Sync]
+      operationId: deleteOwnAccount
+      summary: 永久注销当前账号
+      description: |
+        密码验证后事务清除身份资料、登录会话和私人业务数据，保留匿名账号标识供已送达内容及治理记录引用。
+        群主须先转让或解散有效群。业务 token 立即失效；OpenIM 下线、资料匿名化和本人漫游记录清理通过 Outbox 重试。
+        不调用清除群聊或清除其他用户消息的接口。每个 IP 每分钟最多 10 次。
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password, confirmed]
+              properties:
+                password: {type: string, format: password, minLength: 1, description: 当前登录密码，UTF-8 编码不得超过 72 字节}
+                confirmed: {type: boolean, enum: [true]}
+      responses:
+        '200':
+          description: 业务注销已提交；OpenIM 清理已持久化排队
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer, enum: [0]}
+                  message: {type: string}
+                  data:
+                    type: object
+                    properties:
+                      ok: {type: boolean, enum: [true]}
+                      imCleanupPending: {type: boolean, enum: [true]}
+        '400': {description: JSON、确认标记或密码无效}
+        '401': {description: 登录失效或账号已不可用}
+        '409': {description: 仍拥有有效群或密码及账号状态已改变}
+        '429': {description: 请求过于频繁}
+        '503': {description: 注销失败，事务未提交}
   /api/v1/im/group-retention/states:
     get:
       operationId: getGroupRetentionStates
@@ -3047,6 +3112,11 @@ components:
         recvID: {type: string, description: 单聊消息接收方的 OpenIM 用户 ID。}
         groupID: {type: string, description: 群聊消息所属的 OpenIM 群 ID；单聊时为空。}
         contentType: {type: integer, description: OpenIM 消息内容类型编号。}
+        content:
+          description: beforeSend 审核使用的消息正文；支持 JSON 对象和 JSON 编码字符串、camelCase 与 PascalCase 字段。文本和图片审核失败或服务不可用时返回 nextCode=1；视频仅覆盖封面，完整视频及语音仍需单独接入。
+          oneOf:
+            - {type: string}
+            - {type: object, additionalProperties: true}
         seq: {type: integer, format: int64, description: 消息在会话中的序列号。}
         sendTime: {type: integer, format: int64, description: 消息发送时间戳（毫秒）。}
         atUserList:

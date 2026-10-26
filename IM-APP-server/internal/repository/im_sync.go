@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	IMEventUserCanceled       = "user.canceled"
 	IMEventUserRegistered     = "user.registered"
 	IMEventUserProfileUpdated = "user.profile_updated"
 	IMEventFriendAccepted     = "friend.accepted"

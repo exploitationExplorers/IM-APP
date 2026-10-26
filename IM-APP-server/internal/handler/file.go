@@ -12,6 +12,7 @@ import (
 	"im-app-server/internal/infra"
 	"im-app-server/internal/middleware"
 	"im-app-server/internal/models"
+	"im-app-server/internal/moderation"
 	"im-app-server/internal/response"
 
 	"github.com/gin-gonic/gin"
@@ -19,8 +20,9 @@ import (
 )
 
 type FileHandler struct {
-	Storage *infra.Storage
-	Files   FileRepository
+	Storage    *infra.Storage
+	Files      FileRepository
+	Moderation *moderation.Client
 }
 
 type FileRepository interface {
@@ -178,6 +180,10 @@ func (h *FileHandler) Complete(c *gin.Context) {
 	}
 	// Preserve the unconfigured local-dev behavior only for dev-created tasks.
 	devTask := !h.Storage.Available() && pending.StorageProvider == "minio" && pending.StorageBucket == ""
+	if devTask && h.Moderation != nil {
+		response.Fail(c, http.StatusServiceUnavailable, "内容审核需要可用的文件存储")
+		return
+	}
 	if !devTask {
 		store, err := h.Storage.ForLocation(pending.StorageProvider, pending.StorageBucket)
 		if err != nil {
@@ -198,6 +204,12 @@ func (h *FileHandler) Complete(c *gin.Context) {
 		if info.Size <= 0 || (store.Provider() == "oss" && (info.Size > infra.MaxFormUploadBytes || (pending.Size > 0 && info.Size != pending.Size))) {
 			response.Fail(c, http.StatusBadRequest, "文件大小与上传声明不符，请重新上传")
 			return
+		}
+		if strings.HasPrefix(strings.ToLower(pending.ContentType), "image/") {
+			if err := h.Moderation.CheckImages(c.Request.Context(), []string{store.FileURL(pending.ObjectKey)}); err != nil {
+				response.Fail(c, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
 		}
 	}
 	f, err := h.Files.MarkReady(c.Request.Context(), req.FileID, userID)

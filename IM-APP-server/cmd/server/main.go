@@ -17,6 +17,7 @@ import (
 	"im-app-server/internal/im"
 	"im-app-server/internal/infra"
 	"im-app-server/internal/middleware"
+	"im-app-server/internal/moderation"
 	"im-app-server/internal/repository"
 	"im-app-server/internal/service"
 	"im-app-server/internal/ws"
@@ -118,11 +119,19 @@ func main() {
 		log.Printf("object storage configured: %s", storageClient.Current.Provider())
 	}
 
+	contentModeration, err := moderation.FromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
 	imClient := im.NewClient(cfg.OpenIM)
+	if contentModeration != nil && (!imClient.Available() || cfg.OpenIM.WebhookSecret == "" || len(cfg.OpenIM.WebhookAllowCIDRs) == 0) {
+		log.Fatal("content moderation requires OpenIM and authenticated beforeSend webhooks")
+	}
 	kafkaQueue := infra.NewKafka(cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.GroupID)
 	defer kafkaQueue.Close()
 
 	userRepo := &repository.UserRepo{DB: pool}
+	accountRepo := &repository.AccountRepo{DB: pool}
 	contactRepo := &repository.ContactRepo{DB: pool}
 	contactTagRepo := &repository.ContactTagRepo{DB: pool}
 	privacyRepo := &repository.PrivacyRepo{DB: pool}
@@ -141,7 +150,7 @@ func main() {
 	groupRepo.DefaultGroupMaxMembers = cfg.DefaultGroupMaxMembers
 	groupReadCursorRepo := &repository.GroupReadCursorRepo{DB: pool}
 
-	userSvc := &service.UserService{Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo}
+	userSvc := &service.UserService{Moderation: contentModeration, Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo}
 	imSvc := &service.IMService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, ReadCursors: groupReadCursorRepo, Config: cfg.OpenIM, TokenCache: redisClient,
 	}
@@ -173,7 +182,7 @@ func main() {
 	stickerRepo := &repository.StickerRepo{DB: pool}
 	stickerSvc := &service.StickerService{Stickers: stickerRepo, Files: fileRepo}
 	countryRepo := &repository.CountryRepo{DB: pool}
-	groupSvc := &service.GroupService{Groups: groupRepo, Files: fileRepo, Users: userRepo, IM: imClient}
+	groupSvc := &service.GroupService{Moderation: contentModeration, Groups: groupRepo, Files: fileRepo, Users: userRepo, IM: imClient}
 	forwardSvc := &service.ForwardService{Repo: forwardRepo, Client: imClient, Kafka: kafkaQueue, Media: forwardMedia}
 	reportSvc := &service.ReportService{Reports: reportRepo}
 	feedbackSvc := &service.FeedbackService{Feedbacks: feedbackRepo}
@@ -195,12 +204,13 @@ func main() {
 		DB: pool, Cfg: cfg, Redis: redisClient, SMS: smsGateway,
 		Restrictions: &repository.RestrictionRepo{DB: pool},
 	}
+	accountH := &handler.AccountHandler{Svc: &service.AccountService{Users: userRepo, Accounts: accountRepo}, Accounts: accountRepo}
 	userH := &handler.UserHandler{Svc: userSvc}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
 	adminGroupH := &handler.AdminGroupHandler{Groups: groupSvc, Repo: groupSvc.Groups}
-	fileH := &handler.FileHandler{Storage: storageClient, Files: fileRepo}
+	fileH := &handler.FileHandler{Moderation: contentModeration, Storage: storageClient, Files: fileRepo}
 	voiceH := &handler.VoiceHandler{Storage: storageClient}
 	imH := &handler.IMHandler{Service: imSvc}
 	retentionH := &handler.GroupRetentionHandler{Reader: &repository.GroupRetentionRepo{DB: pool}}
@@ -221,6 +231,8 @@ func main() {
 		log.Println("WARN: OPENIM_WEBHOOK_SECRET 已配置，但未配置 OPENIM_WEBHOOK_ALLOW_CIDRS；" +
 			"OpenIM 回调来源 IP 不在白名单内将被全部拒绝（webhook 实际失效）")
 	}
+	openIMWebhookH.Moderation = contentModeration
+	openIMWebhookH.AccountActive = accountRepo.Active
 	forwardH := &handler.ForwardHandler{Svc: forwardSvc}
 	adminForwardH := &handler.AdminForwardHandler{Forward: forwardSvc}
 	adminUserH := &handler.AdminUserHandler{Restrictions: &repository.RestrictionRepo{DB: pool}, Client: imClient}
@@ -336,12 +348,14 @@ func main() {
 		api.POST("/auth/logout", authH.Logout)
 
 		auth := api.Group("")
-		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.TouchLastSeen(userRepo.TouchLastSeen), middleware.NoStore())
+		auth.Use(middleware.AuthRequired(cfg.JWTSecret), middleware.ActiveAccount(accountRepo.Active), middleware.TouchLastSeen(userRepo.TouchLastSeen), middleware.NoStore())
 		if mediaProtection != nil {
 			auth.Use(middleware.ProtectMedia(mediaProtection))
 		}
 		{
 			auth.POST("/auth/logout-all", authH.LogoutAll)
+			auth.GET("/me/account-deletion", accountH.Requirements)
+			auth.POST("/me/account/delete", middleware.RateLimitIP(redisClient, 10, time.Minute, "account-delete"), accountH.Delete)
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
 			auth.PUT("/me/public-id", userH.UpdatePublicID)
@@ -541,7 +555,7 @@ func main() {
 	if imClient.Available() {
 		imWorker := &service.IMSyncWorker{
 			Outbox: imOutboxRepo, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Client: imClient,
-			BatchSize: 20, MaxAttempts: 10, PollInterval: 2 * time.Second,
+			Redis: redisClient, BatchSize: 20, MaxAttempts: 10, PollInterval: 2 * time.Second,
 		}
 		go imWorker.Run(workerCtx)
 		if cfg.Forward.WorkerEnabled {

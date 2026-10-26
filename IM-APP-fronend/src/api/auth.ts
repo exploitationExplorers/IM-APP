@@ -128,6 +128,14 @@ export async function logoutAllDevices(): Promise<void> {
   })
 }
 
+export async function fetchAccountDeletionRequirements(): Promise<{ canDelete: boolean; ownedGroupCount: number }> {
+  return request({ url: '/me/account-deletion', method: 'GET' })
+}
+
+export async function deleteAccount(password: string): Promise<void> {
+  await request({ url: '/me/account/delete', method: 'POST', data: { password, confirmed: true } })
+}
+
 export async function fetchProfile(): Promise<UserInfo> {
   return request<UserInfo>({ url: '/me', method: 'GET' })
 }

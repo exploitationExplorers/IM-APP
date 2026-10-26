@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useAuthGuard } from '@/composables/useAuthGuard'
-import { APP_CONFIG, THEME } from '@/config'
+import { APP_CONFIG } from '@/config'
 import { playableMediaUrl } from '@/utils/chatMedia'
 import {
   pickLocalImages,
@@ -144,17 +144,7 @@ function onChooseAvatar() {
 }
 
 function onDeleteAccount() {
-  uni.showModal({
-    title: '注销帐号',
-    content: '注销后帐号数据将无法恢复，确定继续吗？',
-    confirmText: '注销',
-    confirmColor: THEME.danger,
-    success: (res) => {
-      if (res.confirm) {
-        uni.showToast({ title: '注销功能开发中', icon: 'none' })
-      }
-    },
-  })
+  uni.navigateTo({ url: '/pages/mine/delete-account' })
 }
 </script>
 

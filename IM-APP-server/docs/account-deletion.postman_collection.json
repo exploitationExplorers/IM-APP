@@ -1,0 +1,22 @@
+{
+  "info": {
+    "name": "IM-APP 账号注销",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "仅用于专用可注销的测试账号。先检查群主条件，再输入该账号密码并将 confirmed 改为 true。注销成功后当前 accessToken 和所有 refreshToken 不可继续访问业务接口；OpenIM 清理异步重试。"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://127.0.0.1:8080/api/v1"},
+    {"key": "accessToken", "value": ""},
+    {"key": "accountPassword", "value": ""}
+  ],
+  "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{accessToken}}", "type": "string"}]},
+  "item": [
+    {"name": "检查注销条件", "request": {"method": "GET", "url": "{{baseUrl}}/me/account-deletion"}},
+    {"name": "永久注销当前账号", "request": {
+      "method": "POST", "url": "{{baseUrl}}/me/account/delete",
+      "header": [{"key": "Content-Type", "value": "application/json"}],
+      "body": {"mode": "raw", "raw": "{\n  \"password\": \"{{accountPassword}}\",\n  \"confirmed\": false\n}"}
+    }},
+    {"name": "验证旧令牌失效（预期 401）", "request": {"method": "GET", "url": "{{baseUrl}}/me"}}
+  ]
+}

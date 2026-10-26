@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"im-app-server/internal/im"
+	"im-app-server/internal/infra"
 	"im-app-server/internal/models"
 	"im-app-server/internal/repository"
 )
@@ -24,6 +25,7 @@ type IMSyncWorker struct {
 	Groups       *repository.GroupRepo
 	Access       *repository.IMAccessRepo
 	Client       *im.Client
+	Redis        *infra.Redis
 	WorkerID     string
 	BatchSize    int
 	MaxAttempts  int
@@ -87,6 +89,24 @@ func (w *IMSyncWorker) RunOnce(ctx context.Context) error {
 
 func (w *IMSyncWorker) syncEvent(ctx context.Context, event repository.IMSyncEvent) error {
 	switch event.EventType {
+	case repository.IMEventUserCanceled:
+		user, err := w.Users.FindByID(ctx, event.AggregateID)
+		if err != nil {
+			return err
+		}
+		if user.Status != "canceled" {
+			return errors.New("account cancellation state mismatch")
+		}
+		userID, err := im.UserIDFromBusinessID(user.ID)
+		if err != nil {
+			return err
+		}
+		if w.Redis.Available() {
+			if err = w.Redis.Client.Del(ctx, pushTokenKey(userID)).Err(); err != nil {
+				return err
+			}
+		}
+		return w.Client.CancelAccount(ctx, userID)
 	case repository.IMEventUserRegistered, repository.IMEventUserProfileUpdated:
 		return w.syncUser(ctx, event.AggregateID)
 	case repository.IMEventFriendAccepted, repository.IMEventFriendDeleted,
