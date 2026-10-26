@@ -642,7 +642,9 @@ func toMeProfile(u models.User) models.MeProfile {
 
 func validSMSScene(s string) bool {
 	switch s {
-	case "register", "login", "reset":
+	case "register", "login", "reset",
+		// 账号注销：独立 scene，与登录/注册/重置的发送额度互不干扰
+		"delete_account":
 		return true
 	}
 	return false

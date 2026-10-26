@@ -31,7 +31,8 @@ export interface AuthResult extends TokenPair {
 /** @deprecated 使用 AuthResult */
 export type LoginResult = AuthResult
 
-export type SmsScene = 'login' | 'register' | 'reset'
+/** 短信验证码场景；delete_account 用于账号注销，额度与登录/注册互不干扰 */
+export type SmsScene = 'login' | 'register' | 'reset' | 'delete_account'
 
 export interface SendSMSResult {
   retryAfterSec: number

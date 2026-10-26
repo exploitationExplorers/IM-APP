@@ -75,8 +75,10 @@ func main() {
 		"users":                      {"id", "public_id", "public_id_changed_at", "last_seen_at"},
 		"groups":                     {"id", "public_id", "public_id_changed_at", "retention_max_messages", "retention_keep_hours"},
 		"user_stickers":              {"id", "user_id", "file_id", "url", "created_at"},
+		// 058 账号注销：新二进制依赖这张审计表，缺表时宁可不启动也别让注销静默失败
+		"account_deletions": {"id", "user_id", "phone_e164_hash", "summary", "im_cleanup_status"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations include 052 through 056", err)
+		log.Fatalf("schema check: %v; required migrations include 052 through 058", err)
 	}
 	if cfg.MigrationsMode == "verify" {
 		log.Println("database schema verified; startup migration replay disabled")
@@ -196,6 +198,17 @@ func main() {
 		Restrictions: &repository.RestrictionRepo{DB: pool},
 	}
 	userH := &handler.UserHandler{Svc: userSvc}
+	// 账号注销（Apple 5.1.1(v) 合规）：审计哈希复用服务端长期密钥 JWTSecret，
+	// 换了密钥只会让历史哈希无法复现核对，不影响已完成的删除。
+	accountDeletionH := &handler.AccountDeletionHandler{
+		Svc: &service.AccountDeletionService{
+			Deletions: &repository.AccountDeletionRepo{DB: pool},
+			Users:     userRepo,
+			IM:        imClient,
+			HashKey:   cfg.JWTSecret,
+		},
+		Auth: authH,
+	}
 	contactH := &handler.ContactHandler{Svc: contactSvc}
 	chatH := &handler.ChatHandler{Svc: chatSvc}
 	groupH := &handler.GroupHandler{Svc: groupSvc}
@@ -344,6 +357,9 @@ func main() {
 			auth.POST("/auth/logout-all", authH.LogoutAll)
 			auth.GET("/me", userH.Profile)
 			auth.PATCH("/me", userH.UpdateProfile)
+			// 账号注销：先出前置检查（群主等阻碍项），确认后再物理删除
+			auth.GET("/me/deletion-preview", accountDeletionH.Preview)
+			auth.DELETE("/me", accountDeletionH.Delete)
 			auth.PUT("/me/public-id", userH.UpdatePublicID)
 			auth.POST("/me/password/verify", userH.VerifyPassword)
 			auth.PUT("/me/password", userH.ChangePassword)
