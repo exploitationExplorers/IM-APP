@@ -27,7 +27,6 @@ for (const [kind, document] of Object.entries(source.documents)) {
     h2 { margin: 32px 0 16px; font-size: 20px; line-height: 1.6; }
     p { margin: 0 0 16px; }
     .date { font-size: 14px; color: #636e86; }
-    .notice { margin: 20px 0; padding: 16px; border-radius: 8px; background: #fff6e5; color: #7a4b00; }
     .important { font-weight: 600; }
   </style>
 </head>
@@ -35,7 +34,6 @@ for (const [kind, document] of Object.entries(source.documents)) {
 <main>
   <h1>${escapeHTML(document.title)}</h1>
   <p class="date">更新日期：${escapeHTML(source.updatedAt)}　生效日期：${escapeHTML(source.effectiveAt)}</p>
-  <p class="notice">${escapeHTML(source.notice)}</p>
   ${paragraphs(document.introduction)}
   ${document.sections.map((section) => `<section><h2>${escapeHTML(section.title)}</h2>\n${paragraphs(section.paragraphs, section.important)}</section>`).join('\n')}
 </main>
