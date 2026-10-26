@@ -166,6 +166,7 @@ function goBack() {
 
         <ImLegalConsent
           v-model="agreed"
+          inverse
         />
 
         <button
