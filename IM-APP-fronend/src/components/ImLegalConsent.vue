@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ modelValue: boolean }>()
+const props = defineProps<{ modelValue: boolean; inverse?: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>()
 
 function open(kind: 'privacy' | 'agreement') {
@@ -8,7 +8,10 @@ function open(kind: 'privacy' | 'agreement') {
 </script>
 
 <template>
-  <view class="legal-consent">
+  <view
+    class="legal-consent"
+    :class="{ 'is-inverse': props.inverse }"
+  >
     <view
       class="legal-check"
       role="checkbox"
@@ -36,4 +39,6 @@ function open(kind: 'privacy' | 'agreement') {
 .legal-consent { display: flex; flex-wrap: wrap; justify-content: center; gap: 12rpx; margin: 32rpx 0; font-size: 26rpx; line-height: 44rpx; color: #636e86; }
 .legal-check { padding: 8rpx 0; }
 .legal-link { color: #0a2fc2; padding: 8rpx 0; }
+.legal-consent.is-inverse { color: #fff; }
+.is-inverse .legal-link { color: #fff; font-weight: 600; text-decoration: underline; }
 </style>

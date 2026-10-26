@@ -161,7 +161,10 @@ function goBack() {
           </view>
         </view>
 
-        <ImLegalConsent v-model="agreed" />
+        <ImLegalConsent
+          v-model="agreed"
+          inverse
+        />
         <view class="auth-spacer" />
 
         <button
