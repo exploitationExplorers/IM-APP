@@ -54,6 +54,7 @@
             /* ios打包配置 */
             "ios" : {
                 "dSYMs" : false,
+                "devices" : "universal",
                 "privacyDescription" : {
                     "NSPhotoLibraryAddUsageDescription" : "用于将您主动保存的聊天图片和视频写入系统相册",
                     "NSCameraUsageDescription" : "用于拍照、拍摄视频以及扫描二维码",
