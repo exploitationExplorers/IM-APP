@@ -55,6 +55,7 @@
             "ios" : {
                 "dSYMs" : false,
                 "UIBackgroundModes" : "audio",
+                "devices" : "universal",
                 "privacyDescription" : {
                     "NSCameraUsageDescription" : "用于拍照、拍摄视频以及扫描二维码",
                     "NSMicrophoneUsageDescription" : "用于录制语音消息与拍摄视频时采集声音",
