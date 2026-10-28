@@ -1,22 +1,22 @@
-/* H5 PC 模式 / iPad 通用 App 三栏布局：参考站 https://qwa.11skrmx6.net
-   注意：以下样式由 .im-desktop class 驱动（class 由 useDesktopLayout 按宽度/设备加），
-   不再依赖 @media(min-width:960px)，否则 iPad 竖屏(<960) 不会隐藏 tabbar、高度不对。 */
+/* H5 PC 模式：参考站三栏布局 https://qwa.11skrmx6.net */
 
-html.im-desktop,
-html.im-desktop body,
-html.im-desktop #app {
-  height: 100%;
-  overflow: hidden;
-}
+@media (min-width: 960px) {
+  html.im-desktop,
+  html.im-desktop body,
+  html.im-desktop #app {
+    height: 100%;
+    overflow: hidden;
+  }
 
-html.im-desktop page,
-html.im-desktop uni-page-body {
-  height: 100%;
-  min-height: 100%;
-}
+  html.im-desktop page,
+  html.im-desktop uni-page-body {
+    height: 100%;
+    min-height: 100%;
+  }
 
-html.im-desktop .tabbar {
-  display: none !important;
+  html.im-desktop .tabbar {
+    display: none !important;
+  }
 }
 
 .im-desktop-workspace {
