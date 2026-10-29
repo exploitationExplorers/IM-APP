@@ -1161,6 +1161,9 @@ var ErrForbidden = errors.New("forbidden")
 
 var ErrInvalidGroupOperation = errors.New("invalid group operation")
 
+// ErrInvitationUsed 同一张入群邀请已经使用过。被移出后不能靠这张卡再进，需要群主重新邀请。
+var ErrInvitationUsed = errors.New("invitation already used")
+
 var ErrApprovalRequired = errors.New("group approval required")
 
 var ErrAlreadyGroupMember = errors.New("already a group member")
@@ -1790,6 +1793,10 @@ func (r *GroupRepo) AcceptInvitation(ctx context.Context, uid, token string) (mo
 			return models.ApplyGroupInvitationResult{NextAction: "already_member"}, nil
 		}
 		return models.ApplyGroupInvitationResult{NextAction: "already_member", Group: &g}, nil
+	}
+	// 卡片只生效一次。踢出群后成员行已删除，不能再凭同一 token 进来。
+	if invStatus != "pending" {
+		return models.ApplyGroupInvitationResult{}, ErrInvitationUsed
 	}
 
 	var joinMode, gStatus string
