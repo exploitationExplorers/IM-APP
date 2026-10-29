@@ -289,8 +289,8 @@ func (r *ContactRepo) IsGroupAddFriendAllowed(ctx context.Context, uid, toUserID
 	err := r.DB.QueryRow(ctx, `
 		SELECT g.allow_member_add_friend, gm1.role
 		FROM groups g
-		JOIN group_members gm1 ON gm1.group_id=g.id AND gm1.user_id=$1
-		JOIN group_members gm2 ON gm2.group_id=g.id AND gm2.user_id=$2
+		JOIN group_members gm1 ON gm1.group_id=g.id AND gm1.user_id=$1 AND COALESCE(gm1.status,'active')='active'
+		JOIN group_members gm2 ON gm2.group_id=g.id AND gm2.user_id=$2 AND COALESCE(gm2.status,'active')='active'
 		JOIN users u1 ON u1.id=gm1.user_id AND COALESCE(u1.status,'active')='active'
 		JOIN users u2 ON u2.id=gm2.user_id AND COALESCE(u2.status,'active')='active'
 		WHERE g.id=$3::uuid AND COALESCE(g.status,'active')='active'`, uid, toUserID, groupID).Scan(&allow, &role)
@@ -301,6 +301,20 @@ func (r *ContactRepo) IsGroupAddFriendAllowed(ctx context.Context, uid, toUserID
 		return true, nil
 	}
 	return allow, nil
+}
+
+// IsGroupAdminOfTarget 只向同一个有效群内的群主或管理员公开目标聊天号。
+func (r *ContactRepo) IsGroupAdminOfTarget(ctx context.Context, uid, toUserID, groupID string) (bool, error) {
+	var allowed bool
+	err := r.DB.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM groups g
+		JOIN group_members viewer ON viewer.group_id=g.id AND viewer.user_id=$1::uuid
+		JOIN group_members target ON target.group_id=g.id AND target.user_id=$2::uuid
+		WHERE g.id=$3::uuid AND g.status='active'
+		  AND COALESCE(viewer.status,'active')='active' AND COALESCE(target.status,'active')='active'
+		  AND viewer.role IN ('owner','admin')
+	)`, uid, toUserID, groupID).Scan(&allowed)
+	return allowed, err
 }
 
 func (r *ContactRepo) UpdateContactRemark(ctx context.Context, uid, friendID, remark string) error {

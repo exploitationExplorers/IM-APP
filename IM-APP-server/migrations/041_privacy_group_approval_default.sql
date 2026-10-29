@@ -1,9 +1,4 @@
--- 邀请入群需验证改为默认关闭。
--- 已有行是按旧默认 true 写入的，一并改回 false，否则已注册账号打开隐私页仍是开。
+-- 旧版本在这里关闭全部用户的入群验证。启动会重放历史迁移，
+-- 因此这里只维护安全默认值，不再覆盖用户已经保存的选择。
 ALTER TABLE privacy_settings
-  ALTER COLUMN require_group_approval SET DEFAULT false;
-
-UPDATE privacy_settings
-SET require_group_approval = false,
-    updated_at = NOW()
-WHERE require_group_approval = true;
+  ALTER COLUMN require_group_approval SET DEFAULT true;

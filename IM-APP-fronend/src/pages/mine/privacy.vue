@@ -1,69 +1,37 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { fetchPrivacySettings, updatePrivacySettings } from '@/api/user'
+import { onShow } from '@dcloudio/uni-app'
+import { usePrivacySettings } from '@/composables/usePrivacySettings'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { backToChatHome } from '@/utils/nav'
 import type { PrivacySettings } from '@/types'
 
-/** 加好友、邀请入群默认都无需验证 */
-const friendVerify = ref(false)
-const groupInviteVerify = ref(false)
-const saving = ref(false)
+const { settings, disabled, load, save } = usePrivacySettings()
 
-onMounted(async () => {
+onShow(async () => {
   try {
-    const s = await fetchPrivacySettings()
-    friendVerify.value = s.requireFriendApproval
-    groupInviteVerify.value = s.requireGroupApproval
+    await load()
   } catch (e) {
     uni.showToast({ title: (e as Error).message || '加载失败', icon: 'none' })
   }
 })
 
-async function persist(next: PrivacySettings, rollback: () => void) {
-  if (saving.value) return
-  saving.value = true
+async function persist(key: keyof PrivacySettings, e: Event) {
+  const value = (e as unknown as { detail: { value: boolean } }).detail.value
   try {
-    const s = await updatePrivacySettings(next)
-    friendVerify.value = s.requireFriendApproval
-    groupInviteVerify.value = s.requireGroupApproval
-    uni.showToast({ title: '已保存', icon: 'success' })
+    if (await save(key, value)) {
+      uni.showToast({ title: '已保存', icon: 'success' })
+    }
   } catch (e) {
-    rollback()
     uni.showToast({ title: (e as Error).message || '保存失败', icon: 'none' })
-  } finally {
-    saving.value = false
   }
 }
 
 function onFriendVerify(e: Event) {
-  const newValue = (e as unknown as { detail: { value: boolean } }).detail.value
-  const prev = friendVerify.value
-  friendVerify.value = newValue
-  void persist(
-    {
-      requireFriendApproval: newValue,
-      requireGroupApproval: groupInviteVerify.value,
-    },
-    () => {
-      friendVerify.value = prev
-    },
-  )
+  void persist('requireFriendApproval', e)
 }
 
 function onGroupInviteVerify(e: Event) {
-  const newValue = (e as unknown as { detail: { value: boolean } }).detail.value
-  const prev = groupInviteVerify.value
-  groupInviteVerify.value = newValue
-  void persist(
-    {
-      requireFriendApproval: friendVerify.value,
-      requireGroupApproval: newValue,
-    },
-    () => {
-      groupInviteVerify.value = prev
-    },
-  )
+  void persist('requireGroupApproval', e)
 }
 
 function goBlacklist() {
@@ -84,7 +52,8 @@ function goBlacklist() {
         加我为好友需验证
       </text>
       <switch
-        :checked="friendVerify"
+        :checked="settings.requireFriendApproval"
+        :disabled="disabled"
         color="#0A2FC2"
         style="transform:scale(0.8)"
         @change="onFriendVerify"
@@ -95,7 +64,8 @@ function goBlacklist() {
         邀请我加入群聊需验证
       </text>
       <switch
-        :checked="groupInviteVerify"
+        :checked="settings.requireGroupApproval"
+        :disabled="disabled"
         color="#0A2FC2"
         style="transform:scale(0.8)"
         @change="onGroupInviteVerify"

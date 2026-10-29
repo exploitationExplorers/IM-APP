@@ -488,7 +488,9 @@ type fieldSpec struct {
 
 // nestedBodyFields 请求体中 object 字段的子结构（key = "方法 路径 字段名"）
 var nestedBodyFields = map[string][]fieldSpec{
-	"PUT /api/admin/v1/system-limits limits": {
+	"POST /api/admin/v1/system-limits limits": {
+		{"defaultRequireFriendApproval", "boolean", false, "新用户加好友需验证，缺字段时保留原草稿值，默认开启"},
+		{"defaultRequireGroupApproval", "boolean", false, "新用户邀请入群需验证，缺字段时保留原草稿值，默认开启"},
 		{"maxFileSizeMb", "integer", false, "单文件大小上限(MB)"},
 		{"maxGroupMembers", "integer", false, "单群成员数上限"},
 		{"recallWindowSec", "integer", false, "消息撤回时间窗(秒)"},
@@ -806,7 +808,7 @@ var writeBodyFields = map[string][]fieldSpec{
 	"PUT /api/admin/v1/report-reasons/{id}/status": {
 		{"status", "string", true, "active|disabled"},
 	},
-	"PUT /api/admin/v1/system-limits": {
+	"POST /api/admin/v1/system-limits": {
 		{"limits", "object", true, "系统限制对象"},
 		{"reason", "string", true, "操作原因"},
 	},
@@ -817,6 +819,7 @@ var writeBodyFields = map[string][]fieldSpec{
 	},
 	"POST /api/admin/v1/system-limits/publish": {
 		{"reason", "string", true, "操作原因"},
+		{"applyPrivacyDefaultsToExisting", "boolean", false, "明确设为 true 时，在发布事务中将两项隐私默认值同步全部现有用户；默认 false"},
 	},
 	"POST /api/admin/v1/sensitive-words": {
 		{"word", "string", true, "敏感词"},
@@ -949,7 +952,7 @@ var apiDescriptions = map[string]string{
 	"GET /api/admin/v1/groups/{id}/reports":                      "群被举报记录",
 	"PUT /api/admin/v1/groups/{id}/mute-all":                     "设置/解除群全员禁言",
 	"PUT /api/admin/v1/groups/{id}/member-add-friend":            "设置群内成员互加好友开关",
-	"PUT /api/admin/v1/groups/{id}/retention":                   "设置群消息保留策略",
+	"PUT /api/admin/v1/groups/{id}/retention":                    "设置群消息保留策略",
 	"POST /api/admin/v1/groups/{id}/dissolve":                    "解散违规群（高风险，需原因）",
 	"GET /api/admin/v1/groups/{id}/recall-logs":                  "群内管理撤回记录",
 	"POST /api/admin/v1/groups/{id}/messages/{messageId}/recall": "管理撤回指定消息（需关联原因/工单）",
@@ -991,8 +994,8 @@ var apiDescriptions = map[string]string{
 	"POST /api/admin/v1/report-reasons":                          "新建举报原因",
 	"PUT /api/admin/v1/report-reasons/{id}":                      "修改举报原因",
 	"PUT /api/admin/v1/report-reasons/{id}/status":               "启用/停用举报原因（被引用只能停用）",
-	"GET /api/admin/v1/system-limits":                            "获取系统限制配置（已发布）",
-	"PUT /api/admin/v1/system-limits":                            "保存系统限制草稿",
+	"GET /api/admin/v1/system-limits":                            "获取已保存的系统限制草稿",
+	"POST /api/admin/v1/system-limits":                           "保存系统限制草稿",
 	"POST /api/admin/v1/system-limits/publish":                   "发布系统限制配置（版本化）",
 	"GET /api/admin/v1/features":                                 "获取功能开关（MFA/举报）",
 	"PUT /api/admin/v1/features":                                 "设置功能开关（MFA/举报，可部分修改）",
@@ -1310,6 +1313,8 @@ var modelSchemas = map[string][]fieldSpec{
 		{"status", "string", false, "active|disabled"},
 	},
 	"SystemLimits": {
+		{"defaultRequireFriendApproval", "boolean", false, "新用户加好友需验证，默认开启"},
+		{"defaultRequireGroupApproval", "boolean", false, "新用户邀请入群需验证，默认开启"},
 		{"maxFileSizeMb", "integer", false, "单文件大小上限(MB)"},
 		{"maxGroupMembers", "integer", false, "单群成员数上限"},
 		{"recallWindowSec", "integer", false, "消息撤回时间窗(秒)"},

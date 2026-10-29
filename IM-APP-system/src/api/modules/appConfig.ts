@@ -110,6 +110,8 @@ export namespace AppConfig {
     recallWindowSec?: number;
     groupRetentionMaxMessages?: number;
     groupRetentionHours?: number;
+	defaultRequireFriendApproval?: boolean;
+	defaultRequireGroupApproval?: boolean;
   }
 
   export interface ReqSaveSystemLimitsDraftBody {
@@ -119,6 +121,7 @@ export namespace AppConfig {
 
   export interface ReqPublishSystemLimitsBody {
     reason: string;
+	applyPrivacyDefaultsToExisting?: boolean;
   }
   export interface GroupLimitImpact {
     configuredAboveLimit: number;
@@ -183,8 +186,8 @@ export const getGroupLimitImpactApi = (maxGroupMembers: number) => {
   return http.get<AppConfig.GroupLimitImpact>(`${SYSTEM_LIMITS_BASE}/group-impact`, { maxGroupMembers }, { loading: false });
 };
 
-export const putSystemLimitsDraftApi = (body: AppConfig.ReqSaveSystemLimitsDraftBody) => {
-  return http.put<AppConfig.OkResult>(SYSTEM_LIMITS_BASE, body, { loading: false });
+export const postSystemLimitsDraftApi = (body: AppConfig.ReqSaveSystemLimitsDraftBody) => {
+  return http.post<AppConfig.OkResult>(SYSTEM_LIMITS_BASE, body, { loading: false });
 };
 
 export const postSystemLimitsPublishApi = (body: AppConfig.ReqPublishSystemLimitsBody) => {

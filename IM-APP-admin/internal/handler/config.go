@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"im-app-admin/internal/middleware"
 	"im-app-admin/internal/models"
@@ -177,7 +178,7 @@ func (h *OpsHandler) GetGroupLimitImpact(c *gin.Context) {
 
 func (h *OpsHandler) SaveSystemLimits(c *gin.Context) {
 	var req models.SystemLimitsRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
 		response.BadRequest(c, "必须填写原因")
 		return
 	}
@@ -190,15 +191,19 @@ func (h *OpsHandler) SaveSystemLimits(c *gin.Context) {
 }
 
 func (h *OpsHandler) PublishSystemLimits(c *gin.Context) {
-	var req response.AdminActionRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+	var req models.PublishSystemLimitsRequest
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
 		response.BadRequest(c, "必须填写原因")
 		return
 	}
-	if err := h.Svc.PublishSystemLimits(c.Request.Context(), middleware.AdminID(c)); err != nil {
+	if err := h.Svc.PublishSystemLimits(c.Request.Context(), middleware.AdminID(c), req.ApplyPrivacyDefaultsToExisting); err != nil {
 		response.FailErr(c, http.StatusBadRequest, "发布失败", err)
 		return
 	}
-	c.Set("auditReason", req.Reason)
+	auditReason := req.Reason
+	if req.ApplyPrivacyDefaultsToExisting {
+		auditReason += "（已同步现有用户隐私设置）"
+	}
+	c.Set("auditReason", auditReason)
 	response.OK(c, gin.H{"ok": true})
 }
