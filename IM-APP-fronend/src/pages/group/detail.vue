@@ -114,6 +114,8 @@ onLoad((query) => {
 
 /** 已完成过首屏加载的群号；从子页面返回时不再全量重拉 */
 const loadedGroupId = ref('')
+/** 从入群申请页返回时，成员和申请角标需要刷新 */
+const refreshAfterJoinRequests = ref(false)
 
 onShow(async () => {
   if (!groupId.value) {
@@ -136,6 +138,11 @@ onShow(async () => {
       // 子页面（群成员 / 改群名 / 我在本群的昵称等）改动后自己会刷新 store，
       // 这里只需补一次会话设置，不必再把详情和全量成员重拉一遍。
       await initConversationSettings()
+      if (refreshAfterJoinRequests.value) {
+        refreshAfterJoinRequests.value = false
+        await groupStore.loadDetail(groupId.value).catch(() => undefined)
+        void loadPendingJoinCount()
+      }
       return
     }
     // 全量成员是按 100/页游标串行翻页的，群越大越慢。首屏只等「群资料」，
@@ -251,6 +258,7 @@ function goToAdmin() {
 }
 
 function goToJoinRequests() {
+  refreshAfterJoinRequests.value = true
   uni.navigateTo({
     url: `/pages/group/join-requests?id=${encodeURIComponent(groupId.value)}`,
   })

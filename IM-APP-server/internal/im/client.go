@@ -88,6 +88,13 @@ func (c *Client) Available() bool {
 	return c != nil && strings.TrimSpace(c.cfg.APIURL) != "" && c.cfg.Secret != "" && c.cfg.AdminUser != ""
 }
 
+func (c *Client) AdminUserID() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.cfg.AdminUser)
+}
+
 type User struct {
 	UserID   string `json:"userID"`
 	Nickname string `json:"nickname"`
