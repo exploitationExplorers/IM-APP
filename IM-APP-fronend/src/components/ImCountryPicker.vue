@@ -8,6 +8,7 @@ const emit = defineEmits<{
 
 const props = defineProps<{
   modelValue: string
+  minimal?: boolean
 }>()
 
 const showPicker = ref(false)
@@ -25,7 +26,10 @@ defineExpose({ validatePhone: (phone: string) => validatePhone(props.modelValue,
 </script>
 
 <template>
-  <view class="country-picker">
+  <view
+    class="country-picker"
+    :class="{ 'is-minimal': props.minimal }"
+  >
     <view
       class="code-box"
       @click="togglePicker"
@@ -117,5 +121,23 @@ defineExpose({ validatePhone: (phone: string) => validatePhone(props.modelValue,
 
 .dial {
   color: #8a8f9c;
+}
+
+.is-minimal .code-box {
+  width: 78px;
+  height: 52px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.is-minimal .code-text {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.is-minimal .code-caret {
+  margin-left: 4px;
+  font-size: 11px;
 }
 </style>

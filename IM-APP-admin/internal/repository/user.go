@@ -160,12 +160,16 @@ func (r *DataRepo) ListUserGroups(ctx context.Context, userID string) ([]models.
 
 // SetRestriction 设置登录/发信限制（UPSERT user_restrictions，不动 users 表）
 func (r *DataRepo) SetRestriction(ctx context.Context, userID, restrType string, banned bool, until *time.Time, reason, operatorID string) error {
+	var op any
+	if operatorID != "" {
+		op = operatorID
+	}
 	_, err := r.DB.Exec(ctx, `
 		INSERT INTO user_restrictions(user_id, type, banned, until, reason, operator_id)
 		VALUES($1::uuid,$2,$3,$4,$5,$6::uuid)
 		ON CONFLICT (user_id, type) DO UPDATE SET
 			banned=$3, until=$4, reason=$5, operator_id=$6::uuid, created_at=NOW()`,
-		userID, restrType, banned, until, reason, operatorID)
+		userID, restrType, banned, until, reason, op)
 	return err
 }
 

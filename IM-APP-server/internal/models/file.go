@@ -40,6 +40,7 @@ type CompleteUploadRequest struct {
 // PendingFile is internal metadata, not a new client API contract.
 type PendingFile struct {
 	ObjectKey       string
+	ContentType     string
 	StorageProvider string
 	StorageBucket   string
 	Size            int64

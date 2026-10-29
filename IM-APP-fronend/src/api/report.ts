@@ -19,6 +19,7 @@ export async function createUserReport(input: {
   targetId: string
   reasonId: string
   description?: string
+  evidenceFileIds?: string[]
 }): Promise<{ id: string; status: string }> {
   return request<{ id: string; status: string }>({
     url: '/reports',
@@ -28,6 +29,7 @@ export async function createUserReport(input: {
       targetId: input.targetId,
       reasonId: input.reasonId,
       description: input.description || '',
+      evidenceFileIds: input.evidenceFileIds || [],
     },
   })
 }

@@ -41,7 +41,14 @@ import { isOSSStorageUrl } from '@/utils/storage-url'
 import type { PlusResolveLocalFile } from '@/types/plus-io'
 import { preserveForwardMedia } from '@/api/forward'
 import { mayContainForwardMedia, snapshotFromMessage, withForwardSnapshot } from '@/utils/forwardSnapshot'
+import {
+  describeNativeCreateResult,
+  inferNativeMessageType,
+  isNativeCreateResultError,
+  slimQuotedMessage,
+} from '@/utils/quotePayload'
 import { groupRetention, retentionSeq } from '@/utils/groupRetention'
+import { getAppSdkDataDir } from '@/utils/openimDataDir'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
 const H5_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 5 // Warn : Silent
@@ -260,85 +267,6 @@ function currentPlatformId(): number {
 }
 
 /**
- * App 端 OpenIM 本地库目录。
- * uni.env.USER_DATA_PATH 是小程序字段，App 上为空，SDK 会把库建到 `/OpenIM_v3_xxx.db` 然后 10006。
- * 目录按 OpenIM 用户 ID 隔离，避免换号后读到上个账号的本地会话/消息库。
- */
-function getAppSdkDataDir(userId: string): Promise<string> {
-  const io = plus?.io
-  if (!io) {
-    return Promise.reject(new Error('当前 App 环境无法获取本地存储目录'))
-  }
-  const safeUserId = userId.replace(/[^0-9a-z_-]/gi, '') || 'default'
-
-  const fromUrl = (): string => {
-    const raw = io.convertLocalFileSystemURL(`_doc/openim/${safeUserId}/`) || ''
-    return raw.replace(/^file:\/\//, '')
-  }
-
-  return new Promise((resolve, reject) => {
-    const type = io.PRIVATE_DOC ?? 1
-    io.requestFileSystem(
-      type,
-      (fs) => {
-        const root = fs.root
-        if (!root) {
-          const fallback = fromUrl()
-          if (fallback && fallback !== '/') {
-            resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
-            return
-          }
-          reject(new Error('OpenIM 数据目录无效'))
-          return
-        }
-        root.getDirectory(
-          'openim',
-          { create: true },
-          (entry) => {
-            entry.getDirectory(
-              safeUserId,
-              { create: true },
-              (userEntry) => {
-                const path = (userEntry.fullPath || fromUrl()).replace(/^file:\/\//, '')
-                if (!path || path === '/') {
-                  reject(new Error('OpenIM 数据目录无效'))
-                  return
-                }
-                resolve(path.endsWith('/') ? path : `${path}/`)
-              },
-              (err) => {
-                const fallback = fromUrl()
-                if (fallback && fallback !== '/') {
-                  resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
-                  return
-                }
-                reject(err)
-              },
-            )
-          },
-          (err) => {
-            const fallback = fromUrl()
-            if (fallback && fallback !== '/') {
-              resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
-              return
-            }
-            reject(err)
-          },
-        )
-      },
-      (err) => {
-        const fallback = fromUrl()
-        if (fallback && fallback !== '/') {
-          resolve(fallback.endsWith('/') ? fallback : `${fallback}/`)
-          return
-        }
-        reject(err)
-      },
-    )
-  })
-}
-
-/**
  * 统一 asyncApi 的返回形态：多数方法返回 { errCode, data } 信封，
  * createXxxMessage 这类同步方法直接返回结果本身。
  * 失败时 polyfill reject 的是 { errCode, errMsg } 裸对象，转成 Error 才能带到 UI。
@@ -399,13 +327,11 @@ function copyNativeCreatedMessage(raw: unknown): MessageItem {
     if (nested) obj = nested
   }
   const clientMsgID = obj && pickString(obj, ['clientMsgID', 'ClientMsgID', 'clientMsgId'])
-  let contentType = Number(obj?.contentType ?? obj?.ContentType ?? 0)
-  // 个别基座创建引用消息只带回 quoteElem，不带 contentType
-  if ((!Number.isFinite(contentType) || contentType <= 0) && obj) {
-    if (obj.quoteElem != null || obj.QuoteElem != null) contentType = MessageType.QuoteMessage
-    else if (obj.textElem != null || obj.TextElem != null) contentType = MessageType.TextMessage
-  }
-  if (!obj || !clientMsgID || !Number.isFinite(contentType) || contentType <= 0) {
+  // 个别基座创建引用消息只带回 *Elem，不带 contentType（图片/视频/语音都遇到过）。
+  // 只认 quoteElem/textElem 会把这些全判成无效，必须按 elem 全量反推。
+  const contentType = obj ? inferNativeMessageType(obj) : 0
+  if (!obj || !clientMsgID || contentType <= 0) {
+    devWarn('[im] 原生创建消息结果无效', describeNativeCreateResult(raw))
     throw new Error('原生 SDK 创建消息结果无效')
   }
   // 保留完整媒体元素及原生扩展字段，不用展示层的归一化逻辑裁剪待发消息。
@@ -714,7 +640,17 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
   } catch (e) {
     if (!isLoginRepeat(e)) {
       const msg = (e as Error)?.message || ''
-      if (msg.includes('10005') || msg.includes('10004')) {
+      if (isApp() && isLocalDatabaseWriteError(e)) {
+        // 目录丢失/路径失效时，只重试 Login 会继续使用同一坏路径；重新准备目录并初始化一次。
+        const epoch = loginEpoch
+        await forceSdkLogout()
+        if (epoch !== loginEpoch) throw new Error('已退出登录')
+        resetLoginCache()
+        appSdkReadyUserId = ''
+        await initAppSdk(imToken)
+        synced = waitForSync()
+        await imCall(IMMethods.Login, payload)
+      } else if (msg.includes('10005') || msg.includes('10004')) {
         await new Promise((r) => setTimeout(r, 400))
         synced = waitForSync()
         try {
@@ -744,9 +680,10 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
 
 async function initAppSdk(imToken: IMTokenResult): Promise<void> {
   if (!isApp()) return
+  // 即使同一进程已初始化，重新登录前也要补回可能丢失的目录。
+  const dataDir = await getAppSdkDataDir(imToken.userId, typeof plus === 'undefined' ? undefined : plus?.io)
   if (appSdkReadyUserId === imToken.userId) return
-  const dataDir = await getAppSdkDataDir(imToken.userId)
-  await imCall(IMMethods.InitSDK, {
+  const initialized = await imCall<unknown>(IMMethods.InitSDK, {
     platformID: imToken.platform,
     apiAddr: imToken.apiAddr,
     wsAddr: imToken.wsAddr,
@@ -754,6 +691,7 @@ async function initAppSdk(imToken: IMTokenResult): Promise<void> {
     logLevel: APP_SDK_LOG_LEVEL,
     isLogStandardOutput: APP_SDK_LOG_STDOUT,
   })
+  if (initialized === false) throw new Error('聊天 SDK 初始化失败，请关闭 App 后重新打开')
   appSdkReadyUserId = imToken.userId
 }
 
@@ -841,6 +779,12 @@ async function reloginSession(): Promise<string> {
     return userId
   } catch (e) {
     if (epoch !== loginEpoch) return ensureIMLogin()
+    if (isApp() && isLocalDatabaseWriteError(e)) {
+      appSdkReadyUserId = ''
+      resetLoginCache()
+      console.error('[im] database login recovery failed', e)
+      throw new Error('聊天本地数据库初始化失败，请检查手机可用空间后重新打开 App')
+    }
     throw e
   }
 }
@@ -977,7 +921,7 @@ export async function getConversationList(offset = 0, count = 200): Promise<Conv
   try {
     return await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
   } catch (e) {
-    if (!isDatabaseClosedError(e)) throw e
+    if (!isDatabaseClosedError(e) && !(isApp() && isLocalDatabaseWriteError(e))) throw e
     await reopenClosedSdkDatabase()
     return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
   }
@@ -1039,9 +983,12 @@ function isDatabaseClosedError(err: unknown): boolean {
 }
 
 /**
- * 本地库写不进去。除了「库被关掉」，SQLite 写不了 journal/WAL、文件保护生效、
- * 目录不可写时都报 `attempt to write a readonly database`——线上实测这一类才是
- * 主流（10005 + InsertMessage failed），所以两句话都要认，否则重开流程救不回来。
+ * 本地库不可用，需要 Logout→Login 重开。
+ * 覆盖几类线上原文（都常被包成 10005 / 10006）：
+ * - database is closed
+ * - attempt to write a readonly database（journal/WAL、文件保护）
+ * - initDB / unable to open database / no such file（目录在、.db 丢了或还没建好）
+ * - InsertMessage failed
  */
 export function isLocalDatabaseWriteError(err: unknown): boolean {
   const text = err instanceof Error ? err.message : String(err || '')
@@ -1049,6 +996,9 @@ export function isLocalDatabaseWriteError(err: unknown): boolean {
     isDatabaseClosedError(err) ||
     /readonly database/i.test(text) ||
     /disk i\/o error/i.test(text) ||
+    /init\s*database|initdb failed|open db failed/i.test(text) ||
+    /unable to open database file/i.test(text) ||
+    /no such file or directory/i.test(text) ||
     (/insertmessage/i.test(text) && /failed/i.test(text))
   )
 }
@@ -1185,26 +1135,66 @@ export async function sendQuoteMessage(
   text: string,
   quote: MessageItem,
 ): Promise<MessageItem> {
-  const protectedQuote = await protectReferencedMedia(quote)
+  // App：CreateQuoteMessage 对 withForwardSnapshot 改写后的体极敏感（文字、图片都是）。
+  // 同会话引用用清洗后的原消息创建；媒体副本保护只留给转发。
+  // H5：仍走媒体副本保护，避免签名图过期后引用预览挂掉。
+  const quoteForCreate = isApp()
+    ? sanitizeMessageForNativeQuote(quote)
+    : await protectReferencedMedia(quote)
   // SDK 的 createQuoteMessage 要求 message 是被引用消息的 JSON 字符串（QuoteMsgParams.message: string），
   // 直接传对象会被 JSON.parse 隐式转成 "[object Object]" 而报 errCode=10006。
+  const paramsOf = (source: MessageItem) => ({ text, message: JSON.stringify(source) })
+  // 1) 首选：清洗后的原消息（App）/ 媒体保护后的引用（H5 老图保命路径）
   try {
-    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
-      text,
-      message: JSON.stringify(protectedQuote),
-    })
+    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, paramsOf(quoteForCreate))
     return sendCreatedMessage(target, message)
   } catch (e) {
-    // 媒体保护改写后个别基座创建失败：回退原消息再试（纯文本引用最常见）
-    const msg = (e as Error)?.message || ''
-    if (!msg.includes('创建消息结果无效')) throw e
-    if (protectedQuote === quote) throw e
-    const message = await imCall<MessageItem>(IMMethods.CreateQuoteMessage, {
-      text,
-      message: JSON.stringify(cloneMessageForNativeQuote(quote)),
-    })
-    return sendCreatedMessage(target, message)
+    if (!isNativeCreateResultError(e)) throw e
   }
+  // 2) 最小字段集：只带身份 + 类型 + 远程预览，避开基座解析整包 PictureElem 失败
+  try {
+    const message = await imCall<MessageItem>(
+      IMMethods.CreateQuoteMessage,
+      paramsOf(minimalMessageForNativeQuote(quote)),
+    )
+    return sendCreatedMessage(target, message)
+  } catch (e) {
+    if (!isNativeCreateResultError(e)) throw e
+  }
+  // 3) 回退原消息再试（部分 App 基座吃不下 withForwardSnapshot 改写后的结构）
+  try {
+    const message = await imCall<MessageItem>(
+      IMMethods.CreateQuoteMessage,
+      paramsOf(cloneMessageForNativeQuote(quote)),
+    )
+    return sendCreatedMessage(target, message)
+  } catch (e) {
+    if (!isNativeCreateResultError(e)) throw e
+    devWarn('[im] 原生 CreateQuoteMessage 不可用，降级为文本骨架 + quoteElem')
+  }
+  // 4) 彻底绕开原生 CreateQuoteMessage：用最基础的 createTextMessage 拿
+  //    SDK 生成的 clientMsgID 与会话字段，再挂 quoteElem。文字/图片/视频都走这条。
+  const message = await createQuoteFromTextMessage(text, quote)
+  return sendCreatedMessage(target, message)
+}
+
+/**
+ * 兜底构造引用消息：绕开原生 CreateQuoteMessage。
+ * 个别 iOS 基座对任何入参都 resolve 空结果，表现为「所有类型的引用都发不出去」；
+ * createTextMessage 是最基础的创建方法（普通文字消息依赖它，已验证可用），
+ * 用它拿骨架与 clientMsgID，再手动挂 quoteElem。
+ */
+async function createQuoteFromTextMessage(text: string, quote: MessageItem): Promise<MessageItem> {
+  const base = await imCall<MessageItem>(IMMethods.CreateTextMessage, text)
+  const plain = plainNativeRecord(base as unknown as Record<string, unknown>)
+  const quoted = slimQuotedMessage(quote)
+  return {
+    ...plain,
+    contentType: MessageType.QuoteMessage,
+    ContentType: MessageType.QuoteMessage,
+    quoteElem: { text, quoteMessage: quoted },
+    QuoteElem: { Text: text, QuoteMessage: quoted },
+  } as unknown as MessageItem
 }
 
 export async function sendForwardMessage(target: IMTarget, source: MessageItem): Promise<MessageItem> {
@@ -1226,6 +1216,115 @@ function cloneMessageForNativeQuote(source: MessageItem): MessageItem {
   } catch {
     return { ...source }
   }
+}
+
+function isRemoteHttpUrl(value: unknown): boolean {
+  return typeof value === 'string' && /^https?:\/\//i.test(value.trim())
+}
+
+/** 清掉本机临时路径，只留 http(s)，避免 iOS CreateQuoteMessage 因死链路径返回空结果 */
+function clearLocalPathFields(obj: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = obj[key]
+    if (typeof value !== 'string' || !value) continue
+    if (isRemoteHttpUrl(value)) continue
+    obj[key] = ''
+  }
+}
+
+function sanitizeMediaElem(raw: unknown): void {
+  if (!raw || typeof raw !== 'object') return
+  const elem = raw as Record<string, unknown>
+  clearLocalPathFields(elem, [
+    'sourcePath',
+    'SourcePath',
+    'soundPath',
+    'SoundPath',
+    'filePath',
+    'FilePath',
+    'videoPath',
+    'VideoPath',
+    'snapshotPath',
+    'SnapshotPath',
+  ])
+}
+
+function sanitizeMessageForNativeQuote(source: MessageItem): MessageItem {
+  const plain = cloneMessageForNativeQuote(source)
+  const bag = plain as unknown as Record<string, unknown>
+  sanitizeMediaElem(bag.pictureElem ?? bag.PictureElem)
+  sanitizeMediaElem(bag.soundElem ?? bag.SoundElem)
+  sanitizeMediaElem(bag.videoElem ?? bag.VideoElem)
+  sanitizeMediaElem(bag.fileElem ?? bag.FileElem)
+  return plain
+}
+
+/** 创建仍失败时的兜底：只带身份与类型，图片只留一张远程缩略图 URL */
+function minimalMessageForNativeQuote(source: MessageItem): MessageItem {
+  const plain = sanitizeMessageForNativeQuote(source)
+  const bag = plain as unknown as Record<string, unknown>
+  const contentType = Number(bag.contentType ?? bag.ContentType ?? 0)
+  const base: Record<string, unknown> = {
+    clientMsgID: pickString(bag, ['clientMsgID', 'ClientMsgID', 'clientMsgId']),
+    serverMsgID: pickString(bag, ['serverMsgID', 'ServerMsgID']),
+    sendID: pickString(bag, ['sendID', 'SendID']),
+    recvID: pickString(bag, ['recvID', 'RecvID']),
+    groupID: pickString(bag, ['groupID', 'GroupID']),
+    senderNickname: pickString(bag, ['senderNickname', 'SenderNickname']),
+    senderFaceUrl: pickString(bag, ['senderFaceUrl', 'SenderFaceUrl']),
+    contentType,
+    ContentType: contentType,
+    sessionType: Number(bag.sessionType ?? bag.SessionType ?? 0),
+    sendTime: Number(bag.sendTime ?? bag.SendTime ?? 0),
+    createTime: Number(bag.createTime ?? bag.CreateTime ?? 0),
+  }
+  if (contentType === MessageType.TextMessage || contentType === MessageType.AtTextMessage) {
+    const text =
+      pickString(
+        (bag.textElem as Record<string, unknown>) ||
+          (bag.TextElem as Record<string, unknown>) ||
+          {},
+        ['content', 'Content'],
+      ) ||
+      pickString(
+        (bag.atTextElem as Record<string, unknown>) ||
+          (bag.AtTextElem as Record<string, unknown>) ||
+          {},
+        ['text', 'Text'],
+      )
+    if (text) {
+      base.textElem = { content: text }
+      base.TextElem = { Content: text }
+    }
+    return base as unknown as MessageItem
+  }
+  if (contentType === MessageType.PictureMessage) {
+    const pic =
+      (bag.pictureElem as Record<string, unknown>) ||
+      (bag.PictureElem as Record<string, unknown>) ||
+      {}
+    const info =
+      (pic.sourcePicture as Record<string, unknown>) ||
+      (pic.SourcePicture as Record<string, unknown>) ||
+      (pic.snapshotPicture as Record<string, unknown>) ||
+      (pic.SnapshotPicture as Record<string, unknown>) ||
+      {}
+    const url =
+      pickString(info, ['url', 'Url', 'URL']) ||
+      pickString(pic, ['sourcePath', 'SourcePath'])
+    if (isRemoteHttpUrl(url)) {
+      const picture = { url, type: pickString(info, ['type', 'Type']) || 'image/jpeg' }
+      base.pictureElem = {
+        sourcePath: '',
+        sourcePicture: picture,
+        bigPicture: picture,
+        snapshotPicture: picture,
+      }
+      base.PictureElem = base.pictureElem
+    }
+    return base as unknown as MessageItem
+  }
+  return plain
 }
 
 async function protectReferencedMedia(source: MessageItem): Promise<MessageItem> {

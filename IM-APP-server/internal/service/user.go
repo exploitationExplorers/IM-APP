@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"im-app-server/internal/models"
+	"im-app-server/internal/moderation"
 	"im-app-server/internal/repository"
 )
 
@@ -20,11 +21,12 @@ var (
 )
 
 type UserService struct {
-	Users    *repository.UserRepo
-	Files    *repository.FileRepo
-	Contacts *repository.ContactRepo
-	Privacy  *repository.PrivacyRepo
-	Groups   *repository.GroupRepo
+	Users      *repository.UserRepo
+	Files      *repository.FileRepo
+	Contacts   *repository.ContactRepo
+	Privacy    *repository.PrivacyRepo
+	Groups     *repository.GroupRepo
+	Moderation *moderation.Client
 }
 
 func (s *UserService) GetProfile(ctx context.Context, uid string) (models.User, error) {
@@ -49,6 +51,21 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, nickname, a
 		}
 		if f.URL != "" {
 			avatarURL = &f.URL
+		}
+	}
+	if nickname != nil {
+		if err := s.Moderation.CheckText(ctx, *nickname); err != nil {
+			return models.User{}, err
+		}
+	}
+	if bio != nil {
+		if err := s.Moderation.CheckText(ctx, *bio); err != nil {
+			return models.User{}, err
+		}
+	}
+	if avatarURL != nil {
+		if err := s.Moderation.CheckImages(ctx, []string{*avatarURL}); err != nil {
+			return models.User{}, err
 		}
 	}
 	u, err := s.Users.UpdateProfile(ctx, uid, nickname, avatarURL, bio)

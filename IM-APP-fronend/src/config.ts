@@ -23,7 +23,9 @@ function resolveUpdateChannel(raw: string | undefined): 'canary' | 'test' | 'pro
 
 export const APP_CONFIG = {
   ossTest,
-  appName: 'Chat',
+  privacyPolicyUrl: env.VITE_PRIVACY_POLICY_URL || '',
+  userAgreementUrl: env.VITE_USER_AGREEMENT_URL || '',
+  appName: '易可聊',
   displayName: '易可聊',
   version: 'v1.0.0',
   apiBaseUrl,
@@ -38,7 +40,7 @@ export const APP_CONFIG = {
   defaultCountryCode: '+86',
   /** 参考站默认头像 */
   defaultAvatarUrl:
-    env.VITE_DEFAULT_AVATAR_URL || 'https://nxbf.yuntsy.com/contents/headimg.jpg',
+    env.VITE_DEFAULT_AVATAR_URL || '/static/avatar-default.svg',
   /** 群未设头像时的占位，形状与参考站一致（蓝底双气泡） */
   defaultGroupAvatarUrl: '/static/group-default.svg',
 }

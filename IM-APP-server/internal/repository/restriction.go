@@ -12,12 +12,17 @@ type RestrictionRepo struct{ DB *pgxpool.Pool }
 
 // SetRestriction 写/更新限制（UPSERT）
 func (r *RestrictionRepo) SetRestriction(ctx context.Context, userID, restrType string, banned bool, until *time.Time, reason, operatorID string) error {
+	// operator_id 可空；空串不能直接 ::uuid，否则会报 invalid input syntax
+	var op any
+	if operatorID != "" {
+		op = operatorID
+	}
 	_, err := r.DB.Exec(ctx, `
 		INSERT INTO user_restrictions(user_id, type, banned, until, reason, operator_id)
 		VALUES($1::uuid,$2,$3,$4,$5,$6::uuid)
 		ON CONFLICT (user_id, type) DO UPDATE SET
 			banned=$3, until=$4, reason=$5, operator_id=$6::uuid, created_at=NOW()`,
-		userID, restrType, banned, until, reason, operatorID)
+		userID, restrType, banned, until, reason, op)
 	return err
 }
 

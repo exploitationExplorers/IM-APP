@@ -32,10 +32,10 @@ func (r *FileRepo) CreateFile(ctx context.Context, ownerID, purpose, fileName, c
 func (r *FileRepo) FindPendingByID(ctx context.Context, fileID, ownerID string) (models.PendingFile, error) {
 	var f models.PendingFile
 	err := r.DB.QueryRow(ctx, `
-		SELECT object_key, storage_provider, storage_bucket, size FROM files
+		SELECT object_key, storage_provider, storage_bucket, size, content_type FROM files
 		WHERE id=$1::uuid AND owner_id=$2::uuid AND status='pending'`,
 		fileID, ownerID,
-	).Scan(&f.ObjectKey, &f.StorageProvider, &f.StorageBucket, &f.Size)
+	).Scan(&f.ObjectKey, &f.StorageProvider, &f.StorageBucket, &f.Size, &f.ContentType)
 	return f, err
 }
 

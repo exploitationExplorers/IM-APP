@@ -73,7 +73,6 @@ import {
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
 import {
   CHAT_HISTORY_PAGE_SIZE as PAGE_SIZE,
-  HISTORY_BROWSE_MAX,
   MESSAGE_WINDOW_SIZE,
   RAW_MESSAGE_WINDOW_SIZE,
 } from '@/constants/chat'
@@ -367,15 +366,25 @@ export const useChatStore = defineStore('chat', () => {
     }
   })
 
+  /** 底部/侧栏总未读：免打扰会话（recvMsgOpt=1/2）不计入，避免红点继续提示 */
   const totalUnread = computed(() =>
-    conversations.value.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
+    conversations.value.reduce((sum, c) => {
+      const opt = c.recvMsgOpt
+      if (opt === MessageReceiveOptType.NotReceive || opt === MessageReceiveOptType.NotNotify) {
+        return sum
+      }
+      return sum + (c.unreadCount || 0)
+    }, 0),
   )
 
   function rememberRaw(item: MessageItem) {
     if (!item?.clientMsgID) return
     if (groupRetention.removed(conversationIdOf(item), item)) return
     rawMessages.value = { ...rawMessages.value, [item.clientMsgID]: item }
-    trimRawMessagesWindow(conversationIdOf(item))
+    // 当前会话的历史仍可继续翻阅、引用和转发，原始消息随会话退出时统一回收。
+    if (conversationIdOf(item) !== activeConversationId) {
+      trimRawMessagesWindow(conversationIdOf(item))
+    }
   }
 
   /** 裁剪单会话 rawMessages，避免无界增长 */
@@ -537,22 +546,8 @@ export const useChatStore = defineStore('chat', () => {
     }
     // 正在看这个会话时不要按 200 条硬裁：上翻历史可能已超过 WINDOW，
     // 新消息一来 slice(-200) 会把正在看的旧气泡删掉，视口往上跳。
-    // 离开房间由 trimConversationMemory 回收；在房时最多放到 HISTORY_BROWSE_MAX。
-    if (message.conversationId === activeConversationId) {
-      const cur = messagesMap.value[message.conversationId] || []
-      if (cur.length > HISTORY_BROWSE_MAX) {
-        const trimmed = cur.slice(-HISTORY_BROWSE_MAX)
-        const removedIds = cur.slice(0, cur.length - HISTORY_BROWSE_MAX).map((m) => m.id)
-        messagesMap.value = { ...messagesMap.value, [message.conversationId]: trimmed }
-        if (removedIds.length) {
-          const nextRaw = { ...rawMessages.value }
-          removedIds.forEach((id) => {
-            delete nextRaw[id]
-          })
-          rawMessages.value = nextRaw
-        }
-      }
-    } else {
+    // 当前会话保留正在浏览的历史，离开房间后由 trimConversationMemory 回收。
+    if (message.conversationId !== activeConversationId) {
       trimMessageWindow(message.conversationId)
     }
     // 列表预览不能只等 OnConversationChanged：事件慢/丢时会话行会一直挂旧文案
@@ -1136,10 +1131,10 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadMessages(conversationId: string) {
     perfMarkStart('chat:load-messages')
-    let existing = messagesMap.value[conversationId] || []
     perfMarkStart('chat:load-messages:sdk')
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
-    existing = groupRetention.filter(conversationId, existing)
+    // 请求期间可能收到新消息或翻页，合并时读取最新状态。
+    const existing = groupRetention.filter(conversationId, messagesMap.value[conversationId] || [])
     perfMarkEnd('chat:load-messages:sdk', `${messageList.length} msgs`)
     messageList.forEach(rememberRaw)
     const mapped = messageList
@@ -1157,12 +1152,18 @@ export const useChatStore = defineStore('chat', () => {
     const withRead = readIds.size
       ? mapped.map((m) => (m.hasRead || !readIds.has(m.id) ? m : { ...m, hasRead: true }))
       : mapped
+    const oldestTime = withRead.length ? Math.min(...withRead.map((m) => Date.parse(m.createdAt))) : NaN
+    const historyIds = new Set(withRead.map((m) => m.id))
+    const older = existing.filter((m) => !historyIds.has(m.id) && Date.parse(m.createdAt) < oldestTime)
+    const merged = mergeLocalPending([...older, ...withRead], existing)
+      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: groupRetention.filter(conversationId, mergeLocalPending(withRead, existing)),
+      [conversationId]: groupRetention.filter(conversationId, merged),
     }
-    historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
-    trimMessageWindow(conversationId)
+    // 最近一页的 isEnd 不能覆盖更早的翻页游标。
+    historyEnd.value = { ...historyEnd.value, [conversationId]: older.length ? !!historyEnd.value[conversationId] : isEnd }
+    if (conversationId !== activeConversationId) trimMessageWindow(conversationId)
     await markAsRead(conversationId)
     perfMarkEnd('chat:load-messages', conversationId)
   }
@@ -1187,11 +1188,6 @@ export const useChatStore = defineStore('chat', () => {
     const list = messagesMap.value[conversationId] || []
     if (!list.length) {
       perfMarkEnd('chat:load-more-messages', 'no-list')
-      return false
-    }
-    // 浏览中软上限：再翻只会继续涨 DOM；不裁最新侧，也不伪造成 historyEnd
-    if (list.length >= HISTORY_BROWSE_MAX) {
-      perfMarkEnd('chat:load-more-messages', 'browse-cap')
       return false
     }
     const { messageList, isEnd } = await getHistoryMessages(
@@ -1834,6 +1830,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function removeLocal(conversationId: string, messageId: string) {
+    if (!conversationId || !messageId) return
     await deleteLocalMessage(conversationId, messageId).catch(() => undefined)
     const list = messagesMap.value[conversationId] || []
     messagesMap.value = {

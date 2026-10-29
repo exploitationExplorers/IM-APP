@@ -15,6 +15,7 @@ import { imConfirm } from '@/composables/useImConfirm'
 import ImDesktopGroupMenu from '@/components/desktop/ImDesktopGroupMenu.vue'
 import ImDesktopFriendDetail from '@/components/desktop/ImDesktopFriendDetail.vue'
 import { useChatMessageActions, type MemberMeta } from '@/composables/useChatMessageActions'
+import { useChatComposerInput, type ComposerInputEvent } from '@/composables/useChatComposerInput'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useChatSettingsStore } from '@/stores/chatSettings'
@@ -58,6 +59,7 @@ import { formatChatDayLabel, formatLastSeen, formatMeridiemClock, quoteSummaryOf
 import { perfMarkEnd, perfMarkStart } from '@/utils/perf'
 import { imagePreviewUrlOf, playableMediaUrl, previewImagesWithSave, listThumbnailUrl } from '@/utils/chatMedia'
 import { resetMediaCacheQueue } from '@/utils/mediaCache'
+import { isIOSApp } from '@/utils/platform'
 import {
   isAnnouncementDismissed,
   rememberDismissedAnnouncement,
@@ -144,7 +146,8 @@ const GROUP_READ_POLL_INTERVAL_MS = 15_000
 const GROUP_READ_POLL_MAX_MS = 3 * 60_000
 let groupReadPollStartedAt = 0
 let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
-const input = ref('')
+const composerInput = useChatComposerInput(isIOSApp)
+const { input, inputEpoch } = composerInput
 const inputRef = ref<{ $el?: HTMLElement } | HTMLTextAreaElement | null>(null)
 /**
  * 消息列表倒置（scroll-view 与内层各 scaleY(-1)）：scrollTop=0 即视觉底部。
@@ -597,6 +600,16 @@ const actions = useChatMessageActions({
   onMuteChanged: () => {
     void refreshGroupMeta()
   },
+  onMessagesPurged: async (groupId, purge) => {
+    if (groupId !== businessId.value || chatType.value !== 'group') return
+    if (purge) {
+      const ts = Date.parse(purge.purgedAt)
+      if (purge.userId && Number.isFinite(ts)) {
+        purgedMap.value = { ...purgedMap.value, [purge.userId]: ts }
+      }
+    }
+    await loadMessagePurges(groupId)
+  },
   onRetry: (m) => onRetry(m),
 })
 
@@ -813,6 +826,7 @@ watch(
   activeConversationId,
   (id) => {
     resetMediaCacheQueue()
+    purgedMap.value = {}
     chatStore.setActiveConversation(id)
   },
   { immediate: true },
@@ -1175,7 +1189,7 @@ watch(
   },
 )
 
-/** H5：v-model 清空后 uni-textarea 常不刷 DOM，回车发送会留下旧字；只动网页端 */
+/** H5 同步实际 DOM；iOS App 另外通过 inputEpoch 重置原生输入控件。 */
 function setComposerText(text: string) {
   input.value = text
   if (!isH5ComposerPlatform()) return
@@ -1195,6 +1209,8 @@ async function onSend() {
   // 发送前先快照：失败要回填输入；atList 无论成败都清空，避免残留劫持后续普通消息
   const pendingAt = [...actions.atList.value]
   const hadQuote = !!actions.quote.value
+  const conversationId = activeConversationId.value
+  const draft = composerInput.clearForSend()
   setComposerText('')
   userHoldingList = false
   actions.atList.value = []
@@ -1219,12 +1235,12 @@ async function onSend() {
     } else {
       await chatStore.sendText(activeConversationId.value, text, imUserId.value || myId.value)
     }
-    await nextTick()
-    // 发送成功后再清一次：防止回车键后续事件把字写回输入框
-    setComposerText('')
     scrollToBottom(true)
   } catch (e) {
-    setComposerText(text)
+    // 只恢复尚未编辑过的草稿，不能覆盖用户正在输入的下一条消息。
+    if (activeConversationId.value === conversationId && composerInput.restoreAfterFailure(draft)) {
+      setComposerText(input.value)
+    }
     if (hadQuote && !actions.quote.value) {
       /* quote 已清则不再恢复，避免重复引用 */
     }
@@ -1296,16 +1312,25 @@ function triggerSend() {
   void onSend()
 }
 
-function onConfirmSend(e?: { detail?: { value?: string } }) {
+function onConfirmSend(e?: ComposerInputEvent) {
+  if (!composerInput.isCurrentEvent(e)) return
   // H5 已在 keydown 处理；此处只服务 App 软键盘「发送」
   if (isH5ComposerPlatform()) return
   if (!enterToSend.value) return
   // 部分机型点键盘发送时，v-model 已经空了，字还在事件里
-  const fromEvent = e?.detail?.value
+  const fromEvent = typeof e?.detail === 'object' ? e.detail?.value : undefined
   if (typeof fromEvent === 'string' && fromEvent.trim() && !input.value.trim()) {
     input.value = fromEvent
   }
   triggerSend()
+}
+
+function onComposerFocus(e: ComposerInputEvent) {
+  if (composerInput.isCurrentEvent(e)) composerFocusFlag.value = true
+}
+
+function onComposerBlur(e: ComposerInputEvent) {
+  if (composerInput.isCurrentEvent(e)) composerFocusFlag.value = false
 }
 
 /** 输入框触到 max-height 后，把光标行滚进可视区（粘贴/换行常见） */
@@ -1569,10 +1594,11 @@ async function loadGroupMembersMeta(groupId: string): Promise<void> {
 async function loadMessagePurges(groupId: string): Promise<void> {
   try {
     const items = await fetchGroupMessagePurges(groupId)
-    const next: Record<string, number> = {}
+    if (groupId !== businessId.value || chatType.value !== 'group') return
+    const next: Record<string, number> = { ...purgedMap.value }
     for (const it of items) {
       const ts = Date.parse(it.purgedAt)
-      if (it.userId && Number.isFinite(ts)) next[it.userId] = ts
+      if (it.userId && Number.isFinite(ts)) next[it.userId] = Math.max(next[it.userId] || 0, ts)
     }
     purgedMap.value = next
   } catch {
@@ -1656,12 +1682,10 @@ const atMentionMembers = computed<AtMentionMember[]>(() => {
  * 匹配：行首或空白后的 `@关键字`（关键字不含空白与 @）。
  * App 中文输入法偶发插入全角 ＠，统一成半角再匹配。
  */
-function syncAtMentionFromInput(e?: Event | { detail?: { value?: string } }) {
-  // App 端 @input 有时早于 v-model 落库，优先用事件值
-  const detail = e && 'detail' in e ? e.detail : undefined
-  if (detail && typeof detail.value === 'string') {
-    input.value = detail.value
-  }
+function syncAtMentionFromInput(e?: ComposerInputEvent) {
+  // 显式接管输入，避免 v-model 在过滤旧控件事件之前先把已发送的文字写回来。
+  const currentValue = e && isH5ComposerPlatform() ? getComposerTextareaEl()?.value : undefined
+  if (e && !composerInput.onInput(e, currentValue)) return
   // 粘贴/换行后输入框触到 max-height，需主动滚到光标行
   const pasteTarget = e && 'target' in e ? (e as Event).target : null
   scrollComposerCaretIntoView(pasteTarget)
@@ -2850,13 +2874,16 @@ function pickFavorite() {
           </view>
           <view class="input-wrap">
             <textarea
+              :key="inputEpoch"
               ref="inputRef"
-              v-model="input"
+              :value="input"
+              :data-composer-epoch="inputEpoch"
               class="input"
               :focus="composerFocusFlag"
               :maxlength="-1"
               :auto-height="true"
               :confirm-type="composerConfirmType"
+              :confirm-hold="true"
               :show-confirm-bar="false"
               :disable-default-padding="true"
               :hold-keyboard="true"
@@ -2866,7 +2893,8 @@ function pickFavorite() {
               :cursor-spacing="20"
               @input="syncAtMentionFromInput"
               @confirm="onConfirmSend"
-              @blur="composerFocusFlag = false"
+              @focus="onComposerFocus"
+              @blur="onComposerBlur"
             />
             <text
               class="emoji"
@@ -2884,7 +2912,7 @@ function pickFavorite() {
           <view
             v-if="hasInput"
             class="send-btn"
-            @tap.stop="onSend"
+            @tap.stop="triggerSend"
           >
             传送
           </view>

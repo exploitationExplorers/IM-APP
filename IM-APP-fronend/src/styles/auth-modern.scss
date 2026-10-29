@@ -1,0 +1,71 @@
+// 登录与注册使用独立外观，避免影响找回密码等页面。
+.auth-page.is-modern {
+  color: #fff;
+  padding: 0 24px;
+
+  .auth-inner {
+    flex: none;
+    width: 100%;
+    max-width: 400px;
+    min-height: 0;
+    padding: calc(64px + var(--status-bar-height, 0px)) 0 calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .auth-logo {
+    flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 32px;
+    border-radius: 15px;
+  }
+
+  .auth-form { flex: none; }
+  .auth-tabs { justify-content: center; margin: 0 0 8px; }
+  .auth-tab.active { padding: 0; border: 0; color: #fff; font-size: 26px; font-weight: 600; line-height: 36px; }
+  .auth-description { display: block; text-align: center; margin-bottom: 32px; color: #e2e8f0; font-size: 14px; line-height: 22px; }
+  .auth-row { gap: 10px; margin-bottom: 16px; }
+  .auth-input-box { height: 52px; padding: 0 16px; border: 1px solid #e4e7ec; border-radius: 12px; background: #f8fafc; }
+  .auth-input-box:focus-within { border-color: #7ca4f7; background: #fff; }
+  .auth-input-box.is-join { padding-right: 4px; }
+  .auth-input { height: 50px; font-size: 15px; }
+  .auth-eye-btn { width: 44px; height: 50px; }
+  .auth-eye-icon { width: 22px; height: 22px; }
+  .auth-extra { justify-content: flex-end; margin: 0; }
+  .auth-forgot { color: #fff; font-size: 13px; line-height: 24px; }
+  .auth-login-btn,
+  .auth-primary-btn { height: 50px; border-radius: 12px; background: #fff !important; color: $auth-primary !important; font-size: 16px; font-weight: 500; line-height: 50px; }
+  .auth-login-btn:active,
+  .auth-primary-btn:active { background: #eaf0ff !important; }
+  .auth-footer { padding: 28px 0 0; }
+  .auth-register-link { color: #fff; font-size: 14px; font-weight: 400; line-height: 24px; }
+  .auth-top-back { width: 32px; height: 32px; margin-bottom: 24px; }
+  .auth-top-back-icon { color: #fff; font-size: 38px; }
+  .auth-title { margin: 0 0 28px; color: #fff; font-size: 26px; font-weight: 600; text-align: center; line-height: 36px; }
+  .auth-sms-btn { padding: 0 0 0 10px; color: #245bd6; font-size: 13px; }
+  .auth-inner.is-sign-up { padding-top: calc(24px + var(--status-bar-height, 0px)); }
+  .auth-logo.is-sign-up { margin: 0 auto 24px; width: 44px; height: 44px; border-radius: 12px; }
+
+}
+
+@media (min-width: 960px) {
+  .auth-page.is-modern {
+    justify-content: center;
+    min-height: 100vh;
+    padding: 40px 24px;
+
+    .auth-inner {
+      max-width: 440px;
+      padding: 40px;
+    }
+
+    .auth-inner.is-sign-up { padding: 28px 40px 36px; }
+  }
+}
+
+@media (max-height: 650px) and (max-width: 959px) {
+  .auth-page.is-modern {
+    .auth-inner { padding-top: calc(28px + var(--status-bar-height, 0px)); }
+    .auth-logo { width: 44px; height: 44px; margin-bottom: 24px; border-radius: 12px; }
+    .auth-description { margin-bottom: 24px; }
+  }
+}
