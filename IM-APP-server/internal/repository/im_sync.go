@@ -20,6 +20,7 @@ const (
 	IMEventBlockRemoved       = "block.removed"
 	IMEventGroupCreated       = "group.created"
 	IMEventGroupInvitePending = "group.invite.pending"
+	IMEventGroupJoinRequested = "group.join.requested"
 	IMEventGroupUpdated       = "group.updated"
 	IMEventGroupMemberJoined  = "group.member.joined"
 	IMEventGroupMemberLeft    = "group.member.left"

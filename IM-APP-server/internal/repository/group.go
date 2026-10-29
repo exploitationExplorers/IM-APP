@@ -538,47 +538,71 @@ func (r *GroupRepo) addMemberWithOperator(
 		return models.GroupInfo{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := r.addMemberTx(ctx, tx, groupID, uid, operatorID, enforceJoinMode, reason); err != nil {
+		return models.GroupInfo{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.GroupInfo{}, err
+	}
+	return r.GetByID(ctx, groupID, uid)
+}
+
+// addMemberTx performs the membership write inside an existing transaction.
+// Callers that also mutate related state must use this helper so both changes commit atomically.
+func (r *GroupRepo) addMemberTx(
+	ctx context.Context, tx pgx.Tx, groupID, uid, operatorID string, enforceJoinMode bool, reason string,
+) error {
 	var convID, joinMode, ownerID string
 	var configuredMax int
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		SELECT COALESCE(conversation_id::text,''), join_mode, COALESCE(max_members,2000), owner_id::text
 		FROM groups WHERE id=$1 AND status='active' FOR UPDATE`, groupID).Scan(&convID, &joinMode, &configuredMax, &ownerID)
 	if err != nil {
-		return models.GroupInfo{}, err
+		return err
 	}
 	var alreadyMember bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2)`, groupID, uid).Scan(&alreadyMember); err != nil {
-		return models.GroupInfo{}, err
+		return err
 	}
 	if alreadyMember {
-		if err := tx.Commit(ctx); err != nil {
-			return models.GroupInfo{}, err
+		if reason == "" {
+			reason = "join"
 		}
-		return r.GetByID(ctx, groupID, uid)
+		payload := map[string]string{"userId": uid, "reason": reason}
+		if reason == "invite" {
+			op := strings.TrimSpace(operatorID)
+			if op == "" {
+				op = ownerID
+			}
+			if op != "" {
+				payload["operatorId"] = op
+			}
+		}
+		return EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, payload)
 	}
 	if enforceJoinMode && joinMode == "approval" {
-		return models.GroupInfo{}, ErrApprovalRequired
+		return ErrApprovalRequired
 	}
 	// 单群配置、已发布平台配置、环境技术硬上限取最小值。
 	var curCount int
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM group_members WHERE group_id=$1`, groupID).Scan(&curCount); err != nil {
-		return models.GroupInfo{}, err
+		return err
 	}
 	if curCount >= r.effectiveGroupLimit(ctx, tx, configuredMax) {
-		return models.GroupInfo{}, ErrGroupFull
+		return ErrGroupFull
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO group_members(group_id, user_id, role) VALUES($1,$2,'member')
 		ON CONFLICT DO NOTHING`, groupID, uid)
 	if err != nil {
-		return models.GroupInfo{}, err
+		return err
 	}
 	if r.LegacyChatEnabled && convID != "" {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO conversation_members(conversation_id, user_id, unread_count)
 			VALUES($1::uuid, $2::uuid, 0) ON CONFLICT DO NOTHING`, convID, uid)
 		if err != nil {
-			return models.GroupInfo{}, err
+			return err
 		}
 	}
 	if reason == "" {
@@ -598,12 +622,9 @@ func (r *GroupRepo) addMemberWithOperator(
 		}
 	}
 	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupMemberJoined, payload); err != nil {
-		return models.GroupInfo{}, err
+		return err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return models.GroupInfo{}, err
-	}
-	return r.GetByID(ctx, groupID, uid)
+	return nil
 }
 
 // enqueueOwnerInviteMember 业务库已有成员时补齐 OpenIM 成员关系（扫码 enter / 自愈）。
@@ -1170,6 +1191,10 @@ var ErrAlreadyGroupMember = errors.New("already a group member")
 
 var ErrJoinRequestFailed = errors.New("join request failed")
 
+var ErrJoinRequestNotFound = errors.New("join request not found")
+
+var ErrJoinRequestHandled = errors.New("join request already handled")
+
 var ErrGroupFull = errors.New("group member limit reached")
 
 var ErrGroupNotFound = errors.New("group not found")
@@ -1583,6 +1608,18 @@ type PendingGroupInviteCard struct {
 	MemberCount   int
 }
 
+// PendingGroupJoinRequestNotification is the durable data needed to notify group managers
+// that a join request is waiting for review.
+type PendingGroupJoinRequestNotification struct {
+	RequestID       string
+	GroupPublicID   string
+	GroupName       string
+	ApplicantID     string
+	ApplicantName   string
+	ApplicantAvatar string
+	RecipientIDs    []string
+}
+
 func groupInviteRequiresApproval(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, userID string, defaultApproval bool) (bool, error) {
@@ -1633,6 +1670,53 @@ func (r *GroupRepo) PendingInvitationCard(ctx context.Context, groupID, token st
 		  AND NOT EXISTS(SELECT 1 FROM group_members gm WHERE gm.group_id=g.id AND gm.user_id=i.invitee_id)`,
 		groupID, token).Scan(&inviterID, &card.Token, &card.InviteeID, &card.PublicGroupID, &card.GroupName, &card.GroupAvatar, &card.MemberCount)
 	return inviterID, card, err
+}
+
+func (r *GroupRepo) PendingJoinRequestNotification(
+	ctx context.Context, groupID, requestID string,
+) (PendingGroupJoinRequestNotification, error) {
+	var notification PendingGroupJoinRequestNotification
+	err := r.DB.QueryRow(ctx, `
+		SELECT jr.id::text, g.public_id, g.name, u.id::text,
+		       COALESCE(u.nickname,''), COALESCE(u.avatar,'')
+		FROM group_join_requests jr
+		JOIN groups g ON g.id=jr.group_id AND g.status='active'
+		JOIN users u ON u.id=jr.user_id AND COALESCE(u.status,'active')='active'
+		WHERE jr.id=$1::uuid AND jr.group_id=$2::uuid AND jr.status='pending'`,
+		requestID, groupID).Scan(
+		&notification.RequestID,
+		&notification.GroupPublicID,
+		&notification.GroupName,
+		&notification.ApplicantID,
+		&notification.ApplicantName,
+		&notification.ApplicantAvatar,
+	)
+	if err != nil {
+		return notification, err
+	}
+	rows, err := r.DB.Query(ctx, `
+		SELECT gm.user_id::text
+		FROM group_members gm
+		JOIN users u ON u.id=gm.user_id AND COALESCE(u.status,'active')='active'
+		WHERE gm.group_id=$1::uuid AND gm.role IN ('owner','admin')
+		  AND COALESCE(gm.status,'active')='active'
+		ORDER BY CASE gm.role WHEN 'owner' THEN 0 ELSE 1 END, gm.user_id`,
+		groupID)
+	if err != nil {
+		return PendingGroupJoinRequestNotification{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var recipientID string
+		if err := rows.Scan(&recipientID); err != nil {
+			return PendingGroupJoinRequestNotification{}, err
+		}
+		notification.RecipientIDs = append(notification.RecipientIDs, recipientID)
+	}
+	if err := rows.Err(); err != nil {
+		return PendingGroupJoinRequestNotification{}, err
+	}
+	return notification, nil
 }
 
 func (r *GroupRepo) InviteMembers(ctx context.Context, groupID, uid string, userIDs []string) (models.InviteGroupMembersResult, []PendingGroupInviteCard, error) {
@@ -1943,6 +2027,11 @@ func (r *GroupRepo) CreateJoinRequest(ctx context.Context, groupID, uid, remark 
 	} else {
 		return models.GroupJoinRequestItem{}, err
 	}
+	if err := EnqueueIMSyncAggregateTx(ctx, tx, "group", groupID, IMEventGroupJoinRequested, map[string]string{
+		"requestId": id,
+	}); err != nil {
+		return models.GroupJoinRequestItem{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return models.GroupJoinRequestItem{}, err
 	}
@@ -1996,23 +2085,65 @@ func (r *GroupRepo) ListJoinRequests(ctx context.Context, groupID, uid string) (
 }
 
 func (r *GroupRepo) ApproveJoinRequest(ctx context.Context, groupID, uid, requestID string) (models.GroupInfo, error) {
-	role, err := r.memberRole(ctx, groupID, uid)
-	if err != nil || (role != "owner" && role != "admin") {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return models.GroupInfo{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var role string
+	err = tx.QueryRow(ctx, `
+		SELECT gm.role
+		FROM group_members gm
+		JOIN groups g ON g.id=gm.group_id
+		WHERE gm.group_id=$1::uuid AND gm.user_id=$2::uuid
+		  AND COALESCE(gm.status,'active')='active' AND g.status='active'`,
+		groupID, uid).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && role != "owner" && role != "admin") {
 		return models.GroupInfo{}, ErrForbidden
 	}
-	var applicantID string
-	err = r.DB.QueryRow(ctx, `SELECT user_id::text FROM group_join_requests
-		WHERE id=$1::uuid AND group_id=$2::uuid AND status='pending'`, requestID, groupID).Scan(&applicantID)
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
-	group, err := r.addMember(ctx, groupID, applicantID, false, "join")
+
+	var applicantID, requestStatus string
+	err = tx.QueryRow(ctx, `
+		SELECT user_id::text, status
+		FROM group_join_requests
+		WHERE id=$1::uuid AND group_id=$2::uuid
+		FOR UPDATE`, requestID, groupID).Scan(&applicantID, &requestStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.GroupInfo{}, ErrJoinRequestNotFound
+	}
 	if err != nil {
 		return models.GroupInfo{}, err
 	}
-	_, err = r.DB.Exec(ctx, `UPDATE group_join_requests SET status='approved', handler_id=$3::uuid, handled_at=NOW()
-		WHERE id=$1::uuid AND group_id=$2::uuid AND status='pending'`, requestID, groupID, uid)
-	return group, err
+	switch requestStatus {
+	case "pending", "approved":
+		// Approved requests are repaired idempotently when the membership write was lost.
+		// Rejected or otherwise handled requests must not add the applicant.
+	default:
+		return models.GroupInfo{}, ErrJoinRequestHandled
+	}
+	if err := r.addMemberTx(ctx, tx, groupID, applicantID, "", false, "join"); err != nil {
+		return models.GroupInfo{}, err
+	}
+	if requestStatus == "pending" {
+		tag, err := tx.Exec(ctx, `
+			UPDATE group_join_requests SET status='approved', handler_id=$3::uuid, handled_at=NOW()
+			WHERE id=$1::uuid AND group_id=$2::uuid AND status='pending'`,
+			requestID, groupID, uid)
+		if err != nil {
+			return models.GroupInfo{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return models.GroupInfo{}, ErrJoinRequestHandled
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.GroupInfo{}, err
+	}
+	return r.GetByID(ctx, groupID, applicantID)
 }
 
 func (r *GroupRepo) RejectJoinRequest(ctx context.Context, groupID, uid, requestID string) error {

@@ -49,6 +49,7 @@ import {
 } from '@/utils/quotePayload'
 import { groupRetention, retentionSeq } from '@/utils/groupRetention'
 import { getAppSdkDataDir } from '@/utils/openimDataDir'
+import { parseGroupJoinRequestPayload } from '@/utils/groupJoinRequest'
 
 /** @openim/client-sdk LogLevel：H5 WASM 登录参数 */
 const H5_SDK_LOG_LEVEL = import.meta.env.DEV ? 3 : 5 // Warn : Silent
@@ -3025,18 +3026,38 @@ export function toChatMessage(rawItem: MessageItem): ChatMessage {
     Number(item.contentType) === MessageType.CustomMessage
       ? parseGroupInvitePayload(customMessageDataOf(item))
       : null
-  let content = inviteFromCustom ? JSON.stringify(inviteFromCustom) : extractContent(item)
+  const joinRequestFromCustom =
+    Number(item.contentType) === MessageType.CustomMessage
+      ? parseGroupJoinRequestPayload(customMessageDataOf(item))
+      : null
+  let content = joinRequestFromCustom
+    ? JSON.stringify(joinRequestFromCustom)
+    : inviteFromCustom
+      ? JSON.stringify(inviteFromCustom)
+      : extractContent(item)
   const rawType = toAppMessageType(Number(item.contentType))
   // App 原生桥偶发 contentType 丢失/类型错标，图片会变成 text + file:// 路径；按 content 再收敛一次
-  let type: AppMessageType = inviteFromCustom
-    ? 'groupInvite'
+  let type: AppMessageType = joinRequestFromCustom
+    ? 'groupJoinRequest'
+    : inviteFromCustom
+      ? 'groupInvite'
     : ((resolveQuoteType(rawType, content) as AppMessageType) || rawType)
   // CustomMessage：兜底再从 content 识别
-  if (type !== 'groupInvite' && Number(item.contentType) === MessageType.CustomMessage) {
+  if (
+    type !== 'groupInvite' &&
+    type !== 'groupJoinRequest' &&
+    Number(item.contentType) === MessageType.CustomMessage
+  ) {
     const invite = parseGroupInvitePayload(content)
     if (invite) {
       type = 'groupInvite'
       content = JSON.stringify(invite)
+    } else {
+      const joinRequest = parseGroupJoinRequestPayload(content)
+      if (joinRequest) {
+        type = 'groupJoinRequest'
+        content = JSON.stringify(joinRequest)
+      }
     }
   }
   const fromIMAdmin = item.sendID === 'imAdmin' || item.senderNickname === 'imAdmin'
@@ -3136,7 +3157,12 @@ function customMessageDataOf(item: MessageItem): string {
         const parsed = JSON.parse(text) as Record<string, unknown>
         if (typeof parsed.data === 'string') return parsed.data
         // H5 偶发直接把业务 JSON 放在 content
-        if (parsed.businessKey === 'group_invite' || parsed.BusinessKey === 'group_invite') {
+        if (
+          parsed.businessKey === 'group_invite' ||
+          parsed.BusinessKey === 'group_invite' ||
+          parsed.businessKey === 'group_join_request' ||
+          parsed.BusinessKey === 'group_join_request'
+        ) {
           return text
         }
       } catch {
@@ -3578,8 +3604,11 @@ function extractCardContent(item: MessageItem): string {
 }
 
 function extractCustomContent(item: MessageItem): string {
-  const invite = parseGroupInvitePayload(customMessageDataOf(item))
+  const data = customMessageDataOf(item)
+  const invite = parseGroupInvitePayload(data)
   if (invite) return JSON.stringify(invite)
+  const joinRequest = parseGroupJoinRequestPayload(data)
+  if (joinRequest) return JSON.stringify(joinRequest)
   const raw = item as MessageItem & Record<string, unknown>
   const elem = (raw.customElem ?? raw.CustomElem) as
     | { description?: string; Description?: string }
@@ -4418,6 +4447,8 @@ function summarize(latestMsg: string | MessageItem | null | undefined): string {
     const dataStr = customMessageDataOf(message)
     const invite = parseGroupInvitePayload(dataStr)
     if (invite) return '[群邀请]'
+    const joinRequest = parseGroupJoinRequestPayload(dataStr)
+    if (joinRequest) return '[入群申请]'
     const pin = parseMessagePinPayload(dataStr)
     if (pin) return pin.action === 'unpin' ? '' : '[置顶消息]'
   }

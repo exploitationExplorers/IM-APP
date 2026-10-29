@@ -1,6 +1,15 @@
 /** 聊天相关类型 */
 
-export type MessageType = 'text' | 'image' | 'voice' | 'video' | 'file' | 'card' | 'groupInvite' | 'system'
+export type MessageType =
+  | 'text'
+  | 'image'
+  | 'voice'
+  | 'video'
+  | 'file'
+  | 'card'
+  | 'groupInvite'
+  | 'groupJoinRequest'
+  | 'system'
 
 /** 名片消息内容（card 消息的 content，JSON 字符串） */
 export interface CardPayload {
@@ -17,6 +26,16 @@ export interface GroupInvitePayload {
   groupName: string
   groupAvatar: string
   memberCount: number
+}
+
+/** 群主/管理员收到的入群申请通知卡片 */
+export interface GroupJoinRequestPayload {
+  requestId: string
+  groupId: string
+  groupName: string
+  applicantId: string
+  applicantNickname: string
+  applicantAvatar: string
 }
 
 export interface MessageQuote {

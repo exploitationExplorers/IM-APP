@@ -20,6 +20,17 @@ const openIMMongoDupKey = "bulk write exception: write errors: [E11000 duplicate
 	"openim_v3.group_member index: group_id_1_user_id_1 dup key: " +
 	"{ group_id: \"g1\", user_id: \"u1\" }] mongo insert many"
 
+func TestAdminUserID(t *testing.T) {
+	client := newClient(config.OpenIMConfig{AdminUser: " imAdmin "}, nil)
+	if got := client.AdminUserID(); got != "imAdmin" {
+		t.Fatalf("AdminUserID() = %q, want imAdmin", got)
+	}
+	var nilClient *Client
+	if got := nilClient.AdminUserID(); got != "" {
+		t.Fatalf("nil AdminUserID() = %q, want empty", got)
+	}
+}
+
 func TestGetUserTokenUsesCachedAdminToken(t *testing.T) {
 	var adminCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

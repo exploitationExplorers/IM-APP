@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -548,6 +549,60 @@ func (s *GroupService) sendGroupInviteCard(ctx context.Context, inviterID string
 		clientMsgID = clientMsgID[:64]
 	}
 	_, err = s.IM.SendCustomC2CMessage(ctx, sendID, recvID, clientMsgID, string(payload), "邀请你加入群聊", "group_invite")
+	return err
+}
+
+func (s *GroupService) sendGroupJoinRequestCard(
+	ctx context.Context, recipientID string, card repository.PendingGroupJoinRequestNotification,
+) error {
+	if s.IM == nil || !s.IM.Available() {
+		return errors.New("openim unavailable")
+	}
+	sendID := s.IM.AdminUserID()
+	if sendID == "" {
+		return errors.New("openim admin user unavailable")
+	}
+	recvID, err := im.UserIDFromBusinessID(recipientID)
+	if err != nil {
+		return err
+	}
+	if s.Users != nil {
+		recipient, err := s.Users.FindByID(ctx, recipientID)
+		if err != nil {
+			return err
+		}
+		if err := s.IM.EnsureUser(ctx, im.User{
+			UserID: recvID, Nickname: recipient.Nickname, FaceURL: recipient.Avatar,
+		}); err != nil {
+			return err
+		}
+	}
+	payload, err := json.Marshal(map[string]any{
+		"businessKey":       "group_join_request",
+		"requestId":         card.RequestID,
+		"groupId":           card.GroupPublicID,
+		"groupName":         card.GroupName,
+		"applicantId":       card.ApplicantID,
+		"applicantNickname": card.ApplicantName,
+		"applicantAvatar":   card.ApplicantAvatar,
+	})
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256([]byte(card.RequestID + ":" + recipientID))
+	clientMsgID := fmt.Sprintf("gjr_%x", sum)
+	if len(clientMsgID) > 64 {
+		clientMsgID = clientMsgID[:64]
+	}
+	_, err = s.IM.SendCustomC2CMessage(
+		ctx,
+		sendID,
+		recvID,
+		clientMsgID,
+		string(payload),
+		"入群申请",
+		"group_join_request",
+	)
 	return err
 }
 
