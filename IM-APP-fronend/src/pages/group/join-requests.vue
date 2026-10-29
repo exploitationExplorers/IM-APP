@@ -10,6 +10,8 @@ const groupId = ref('')
 const keyword = ref('')
 const loaded = ref(false)
 const items = ref<GroupJoinRequestItem[]>([])
+const acceptingId = ref('')
+const rejectingId = ref('')
 
 const filtered = computed(() => {
   const text = keyword.value.trim().toLowerCase()
@@ -41,22 +43,32 @@ function goBack() {
 }
 
 async function onAccept(item: GroupJoinRequestItem) {
+  if (acceptingId.value || rejectingId.value) return
+  acceptingId.value = item.id
   try {
     await approveJoinRequest(groupId.value, item.id)
     items.value = items.value.filter((row) => row.id !== item.id)
     uni.showToast({ title: '已接受', icon: 'success' })
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '操作失败', icon: 'none' })
+    await reload()
+  } finally {
+    acceptingId.value = ''
   }
 }
 
 async function onReject(item: GroupJoinRequestItem) {
+  if (acceptingId.value || rejectingId.value) return
+  rejectingId.value = item.id
   try {
     await rejectJoinRequest(groupId.value, item.id)
     items.value = items.value.filter((row) => row.id !== item.id)
     uni.showToast({ title: '已拒绝', icon: 'none' })
   } catch (e) {
     uni.showToast({ title: (e as Error)?.message || '操作失败', icon: 'none' })
+    await reload()
+  } finally {
+    rejectingId.value = ''
   }
 }
 </script>
@@ -102,15 +114,17 @@ async function onReject(item: GroupJoinRequestItem) {
         </text>
         <text
           class="reject"
+          :class="{ 'action-disabled': !!acceptingId || !!rejectingId }"
           @click="onReject(item)"
         >
-          拒绝
+          {{ rejectingId === item.id ? '处理中...' : '拒绝' }}
         </text>
         <text
           class="accept"
+          :class="{ 'action-disabled': !!acceptingId || !!rejectingId }"
           @click="onAccept(item)"
         >
-          接受
+          {{ acceptingId === item.id ? '处理中...' : '接受' }}
         </text>
       </view>
       <text
@@ -208,6 +222,10 @@ async function onReject(item: GroupJoinRequestItem) {
 .accept {
   color: #0a2fc2;
   border: 1rpx solid #0a2fc2;
+}
+
+.action-disabled {
+  opacity: 0.45;
 }
 
 .msg {

@@ -44,6 +44,11 @@ func groupPrivacyPool(t *testing.T) *pgxpool.Pool {
 		  inviter_id uuid NOT NULL, invitee_id uuid NOT NULL, token text UNIQUE NOT NULL,
 		  status text NOT NULL DEFAULT 'pending', created_at timestamptz NOT NULL DEFAULT now(),
 		  handled_at timestamptz);
+		CREATE TABLE group_join_requests(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+		  group_id uuid NOT NULL REFERENCES groups(id), user_id uuid NOT NULL REFERENCES users(id),
+		  remark text NOT NULL DEFAULT '', status text NOT NULL DEFAULT 'pending',
+		  handler_id uuid REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now(),
+		  handled_at timestamptz);
 		CREATE TABLE im_sync_outbox(id bigserial PRIMARY KEY, aggregate_type text, aggregate_id uuid,
 		  event_type text NOT NULL, payload jsonb NOT NULL);`)
 	if err != nil {
@@ -212,4 +217,122 @@ func TestGroupPrivacyPostgresIntegration(t *testing.T) {
 			t.Fatalf("kicked member reused invitation: %v", err)
 		}
 	})
+
+	t.Run("approve_join_request_is_idempotent", func(t *testing.T) {
+		pool := groupPrivacyPool(t)
+		repo := &repository.GroupRepo{DB: pool}
+		ctx := context.Background()
+		groupID, requestID := createPendingJoinRequest(t, pool, true)
+
+		if _, err := repo.ApproveJoinRequest(ctx, groupID, groupPrivacyOwner, requestID); err != nil {
+			t.Fatalf("first approve failed: %v", err)
+		}
+		if _, err := repo.ApproveJoinRequest(ctx, groupID, groupPrivacyOwner, requestID); err != nil {
+			t.Fatalf("repeated approve must be idempotent: %v", err)
+		}
+
+		var member, approved bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid),
+			       EXISTS(SELECT 1 FROM group_join_requests WHERE id=$3::uuid AND status='approved')`,
+			groupID, groupPrivacyFirst, requestID).Scan(&member, &approved); err != nil {
+			t.Fatal(err)
+		}
+		if !member || !approved {
+			t.Fatalf("member=%v approved=%v, want both true", member, approved)
+		}
+	})
+
+	t.Run("approve_join_request_rolls_back_member_when_request_update_fails", func(t *testing.T) {
+		pool := groupPrivacyPool(t)
+		repo := &repository.GroupRepo{DB: pool}
+		ctx := context.Background()
+		groupID, requestID := createPendingJoinRequest(t, pool, true)
+		if _, err := pool.Exec(ctx, `
+			CREATE FUNCTION reject_approved_request() RETURNS trigger AS $$
+			BEGIN
+			  IF NEW.status='approved' THEN
+			    RAISE EXCEPTION 'approval update blocked';
+			  END IF;
+			  RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+			CREATE TRIGGER reject_approved_request_trigger
+			BEFORE UPDATE ON group_join_requests
+			FOR EACH ROW EXECUTE FUNCTION reject_approved_request();`); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := repo.ApproveJoinRequest(ctx, groupID, groupPrivacyOwner, requestID); err == nil {
+			t.Fatal("expected approval update failure")
+		}
+		var member bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=$1::uuid AND user_id=$2::uuid)`,
+			groupID, groupPrivacyFirst).Scan(&member); err != nil {
+			t.Fatal(err)
+		}
+		if member {
+			t.Fatal("member write survived a failed approval transaction")
+		}
+	})
+
+	t.Run("create_join_request_enqueues_owner_notification", func(t *testing.T) {
+		pool := groupPrivacyPool(t)
+		repo := &repository.GroupRepo{DB: pool}
+		ctx := context.Background()
+		groupID, _ := createPendingJoinRequest(t, pool, false)
+
+		item, err := repo.CreateJoinRequest(ctx, groupID, groupPrivacyFirst, "申请入群")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var count int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM im_sync_outbox
+			WHERE event_type=$1 AND aggregate_id=$2::uuid
+			  AND payload->>'requestId'=$3`,
+			repository.IMEventGroupJoinRequested, groupID, item.ID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("join request notification events=%d, want 1", count)
+		}
+		notification, err := repo.PendingJoinRequestNotification(ctx, groupID, item.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if notification.ApplicantID != groupPrivacyFirst || notification.GroupPublicID != "qun_review" ||
+			len(notification.RecipientIDs) != 1 || notification.RecipientIDs[0] != groupPrivacyOwner {
+			t.Fatalf("unexpected notification: %#v", notification)
+		}
+	})
+}
+
+func createPendingJoinRequest(t *testing.T, pool *pgxpool.Pool, withRequest bool) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+	var groupID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO groups(name, owner_id, public_id, join_mode)
+		VALUES('审核群','11111111-1111-4111-8111-111111111111','qun_review','approval')
+		RETURNING id::text`).Scan(&groupID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO group_members(group_id, user_id, role)
+		VALUES($1::uuid,$2::uuid,'owner')`, groupID, groupPrivacyOwner); err != nil {
+		t.Fatal(err)
+	}
+	if !withRequest {
+		return groupID, ""
+	}
+	var requestID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO group_join_requests(group_id, user_id, remark)
+		VALUES($1::uuid,$2::uuid,'申请入群')
+		RETURNING id::text`, groupID, groupPrivacyFirst).Scan(&requestID); err != nil {
+		t.Fatal(err)
+	}
+	return groupID, requestID
 }

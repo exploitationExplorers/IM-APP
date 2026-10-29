@@ -511,11 +511,20 @@ func (h *GroupHandler) ApproveJoinRequest(c *gin.Context) {
 	uid := middleware.UserID(c)
 	g, err := h.Svc.ApproveJoinRequest(c.Request.Context(), c.Param("id"), uid, c.Param("requestId"))
 	if err != nil {
-		if errors.Is(err, repository.ErrGroupFull) {
+		switch {
+		case errors.Is(err, repository.ErrGroupFull):
 			response.Fail(c, http.StatusConflict, "群人数已达上限")
-			return
+		case errors.Is(err, repository.ErrJoinRequestNotFound):
+			response.Fail(c, http.StatusNotFound, "入群申请不存在")
+		case errors.Is(err, repository.ErrJoinRequestHandled):
+			response.Fail(c, http.StatusConflict, "入群申请已处理")
+		case errors.Is(err, repository.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, "无权限")
+		default:
+			log.Printf("approve join request group=%s request=%s operator=%s: %v",
+				c.Param("id"), c.Param("requestId"), uid, err)
+			response.Fail(c, http.StatusInternalServerError, "接受入群申请失败")
 		}
-		response.Fail(c, http.StatusBadRequest, "操作失败")
 		return
 	}
 	response.OK(c, g)

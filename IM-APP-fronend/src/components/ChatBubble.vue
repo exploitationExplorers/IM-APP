@@ -59,7 +59,14 @@ function releaseImageLoad() {
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { APP_CONFIG } from '@/config'
-import type { CardPayload, ChatMessage, GroupInvitePayload, GroupRole, MessageQuote } from '@/types'
+import type {
+  CardPayload,
+  ChatMessage,
+  GroupInvitePayload,
+  GroupJoinRequestPayload,
+  GroupRole,
+  MessageQuote,
+} from '@/types'
 import { parseVideoMeta, formatVideoDuration, isRemoteMediaUrl, isUsableVideoPoster, looksLikeLocalFilePath, parseFileContent, openChatFile, playableMediaUrl, ensurePlayableAudioPath, previewImagesWithSave, toAbsFileUrl, avatarThumbnailUrl } from '@/utils/chatMedia'
 import { forgetMediaCache, peekMediaCache, requestMediaCache } from '@/utils/mediaCache'
 import { cacheableChatMediaUrl } from '@/utils/mediaCacheIdentity'
@@ -67,6 +74,7 @@ import { isAppPlatform } from '@/utils/platform'
 import { useAvatarThumbnail } from '@/composables/useAvatarThumbnail'
 import { formatMeridiemClock, looksLikeImageUrl, quoteSummaryOf, splitTextWithLinks } from '@/utils/format'
 import { soundMetaOf } from '@/utils/openim'
+import { parseGroupJoinRequestPayload } from '@/utils/groupJoinRequest'
 
 const props = defineProps<{
   message: ChatMessage
@@ -120,6 +128,7 @@ const emit = defineEmits<{
   longpress: [event?: Event]
   cardView: [card: CardPayload]
   groupInviteApply: [invite: GroupInvitePayload]
+  groupJoinRequestOpen: [request: GroupJoinRequestPayload]
   retry: [message: ChatMessage]
   playVideo: [message: ChatMessage]
   /** 点图片预览：由父级按需拼会话图片列表，避免每条气泡都绑 previewUrls */
@@ -217,6 +226,21 @@ const cardAvatar = computed(() => avatarThumbnailUrl(cardMeta.value?.avatar || A
 
 function onApplyGroupInvite() {
   if (groupInviteMeta.value) emit('groupInviteApply', groupInviteMeta.value)
+}
+
+const groupJoinRequestMeta = computed<GroupJoinRequestPayload | null>(() => {
+  if (props.message.type !== 'groupJoinRequest') return null
+  return parseGroupJoinRequestPayload(props.message.content)
+})
+
+const groupJoinRequestAvatar = computed(() => {
+  const url = (groupJoinRequestMeta.value?.applicantAvatar || '').trim()
+  if (isRemoteMediaUrl(url)) return avatarThumbnailUrl(url)
+  return APP_CONFIG.defaultAvatarUrl
+})
+
+function onOpenGroupJoinRequest() {
+  if (groupJoinRequestMeta.value) emit('groupJoinRequestOpen', groupJoinRequestMeta.value)
 }
 
 function onLongPress(event?: Event) {
@@ -1325,6 +1349,34 @@ function openLink(url: string) {
           </text>
         </view>
         <view
+          v-else-if="message.type === 'groupJoinRequest'"
+          class="bubble group-join-request-bubble"
+          @longpress="onLongPress"
+          @contextmenu.prevent="onContextMenu"
+        >
+          <view class="gjr-head">
+            <image
+              class="gjr-avatar"
+              :src="groupJoinRequestAvatar"
+              mode="aspectFill"
+            />
+            <view class="gjr-copy">
+              <text class="gjr-name">
+                {{ groupJoinRequestMeta?.applicantNickname || '申请人' }}
+              </text>
+              <text class="gjr-desc">
+                申请加入 {{ groupJoinRequestMeta?.groupName || '群聊' }}
+              </text>
+            </view>
+          </view>
+          <text
+            class="gjr-action"
+            @click.stop="onOpenGroupJoinRequest"
+          >
+            去审核
+          </text>
+        </view>
+        <view
           v-else-if="message.type === 'file'"
           class="bubble file-bubble"
           :class="mine ? 'bubble-mine' : 'bubble-other'"
@@ -1827,6 +1879,65 @@ function openLink(url: string) {
   font-size: 28rpx;
   color: #2563eb;
   font-weight: 500;
+}
+
+.group-join-request-bubble {
+  width: 440rpx;
+  padding: 26rpx;
+  background: #fff;
+  border: 1rpx solid #e5e7eb;
+  border-radius: 16rpx;
+  box-sizing: border-box;
+}
+
+.gjr-head {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+}
+
+.gjr-avatar {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  background: #eef1f5;
+  flex-shrink: 0;
+}
+
+.gjr-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.gjr-name,
+.gjr-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gjr-name {
+  font-size: 29rpx;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.gjr-desc {
+  font-size: 25rpx;
+  color: #6b7280;
+}
+
+.gjr-action {
+  margin-top: 22rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid #eef1f5;
+  text-align: right;
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #0a2fc2;
 }
 
 .voice-other {

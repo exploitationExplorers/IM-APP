@@ -94,6 +94,8 @@ func (w *IMSyncWorker) syncEvent(ctx context.Context, event repository.IMSyncEve
 		return w.syncRelationship(ctx, event)
 	case repository.IMEventGroupInvitePending:
 		return w.syncGroupInvitation(ctx, event)
+	case repository.IMEventGroupJoinRequested:
+		return w.syncGroupJoinRequest(ctx, event)
 	case repository.IMEventGroupCreated, repository.IMEventGroupUpdated,
 		repository.IMEventGroupMemberJoined, repository.IMEventGroupMemberLeft,
 		repository.IMEventGroupMemberRole, repository.IMEventGroupMemberMute,
@@ -124,6 +126,32 @@ func (w *IMSyncWorker) syncGroupInvitation(ctx context.Context, event repository
 	}
 	sender := GroupService{IM: w.Client, Users: w.Users}
 	return sender.sendGroupInviteCard(ctx, inviterID, card)
+}
+
+func (w *IMSyncWorker) syncGroupJoinRequest(ctx context.Context, event repository.IMSyncEvent) error {
+	var payload struct {
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("decode %s payload: %w", event.EventType, err)
+	}
+	if strings.TrimSpace(payload.RequestID) == "" {
+		return errors.New("group join request id is required")
+	}
+	card, err := w.Groups.PendingJoinRequestNotification(ctx, event.AggregateID, payload.RequestID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sender := GroupService{IM: w.Client, Users: w.Users}
+	for _, recipientID := range card.RecipientIDs {
+		if err := sender.sendGroupJoinRequestCard(ctx, recipientID, card); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (w *IMSyncWorker) syncUser(ctx context.Context, businessUserID string) error {

@@ -47,7 +47,15 @@ import {
   fetchGroupMessagePurges,
 } from '@/api/group'
 import { safeBack } from '@/utils/nav'
-import type { CardPayload, ChatMessage, Conversation, GroupInvitePayload, GroupMember, GroupRole } from '@/types'
+import type {
+  CardPayload,
+  ChatMessage,
+  Conversation,
+  GroupInvitePayload,
+  GroupJoinRequestPayload,
+  GroupMember,
+  GroupRole,
+} from '@/types'
 import {
   collapseRepeatedGroupNameNotices,
   formatIMNotification,
@@ -182,7 +190,8 @@ function isVisibleMessage(m: ChatMessage): boolean {
     m.type === 'video' ||
     m.type === 'file' ||
     m.type === 'card' ||
-    m.type === 'groupInvite'
+    m.type === 'groupInvite' ||
+    m.type === 'groupJoinRequest'
   ) {
     return true
   }
@@ -2075,6 +2084,16 @@ async function onGroupInviteApply(invite: GroupInvitePayload) {
   }
 }
 
+function onOpenGroupJoinRequest(request: GroupJoinRequestPayload) {
+  if (!request.groupId) {
+    uni.showToast({ title: '入群申请信息缺失', icon: 'none' })
+    return
+  }
+  uni.navigateTo({
+    url: `/pages/group/join-requests?id=${encodeURIComponent(request.groupId)}`,
+  })
+}
+
 function requestAudioPermission(): Promise<boolean> {
   return new Promise((resolve) => {
     const authorize = (
@@ -2743,6 +2762,7 @@ function pickFavorite() {
             @select-click="actions.toggleSelect(m)"
             @card-view="onViewCard"
             @group-invite-apply="onGroupInviteApply"
+            @group-join-request-open="onOpenGroupJoinRequest"
             @longpress="(e) => actions.openMenu(m, e)"
             @retry="onRetry(m)"
             @play-video="onPlayVideo"

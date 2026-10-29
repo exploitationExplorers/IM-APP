@@ -62,6 +62,8 @@ export function quoteSummaryOf(type: string, content: string): string {
       return '名片'
     case 'groupInvite':
       return '群邀请'
+    case 'groupJoinRequest':
+      return '入群申请'
     case 'system':
       return '消息'
     default: {
