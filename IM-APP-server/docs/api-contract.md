@@ -698,6 +698,7 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 - 公开群（`joinMode=open`）：直接入群，`nextAction=joined`
 - 审核群（`joinMode=approval`）：提交入群申请，`nextAction=pending_approval`
 - 已在群中：`nextAction=already_member`
+- 同一张邀请卡只能成功使用一次。再次点击，包括被移出群之后，返回 400，`message` 为「邀请已失效」。邀请没有过期时间。群主或管理员重新邀请会生成新卡。
 
 **Response `data`**
 ```json

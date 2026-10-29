@@ -462,6 +462,10 @@ func (h *GroupHandler) AcceptInvitation(c *gin.Context) {
 			response.OK(c, models.ApplyGroupInvitationResult{NextAction: "already_member"})
 			return
 		}
+		if errors.Is(err, repository.ErrInvitationUsed) {
+			response.Fail(c, http.StatusBadRequest, "邀请已失效")
+			return
+		}
 		response.Fail(c, http.StatusBadRequest, "邀请无效或已过期")
 		return
 	}

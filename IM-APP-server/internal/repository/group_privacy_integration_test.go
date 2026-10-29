@@ -42,7 +42,8 @@ func groupPrivacyPool(t *testing.T) *pgxpool.Pool {
 		CREATE TABLE group_remarks(group_id uuid NOT NULL, user_id uuid NOT NULL, remark text);
 		CREATE TABLE group_invitations(id bigserial PRIMARY KEY, group_id uuid NOT NULL REFERENCES groups(id),
 		  inviter_id uuid NOT NULL, invitee_id uuid NOT NULL, token text UNIQUE NOT NULL,
-		  status text NOT NULL DEFAULT 'pending', created_at timestamptz NOT NULL DEFAULT now());
+		  status text NOT NULL DEFAULT 'pending', created_at timestamptz NOT NULL DEFAULT now(),
+		  handled_at timestamptz);
 		CREATE TABLE im_sync_outbox(id bigserial PRIMARY KEY, aggregate_type text, aggregate_id uuid,
 		  event_type text NOT NULL, payload jsonb NOT NULL);`)
 	if err != nil {
@@ -175,6 +176,40 @@ func TestGroupPrivacyPostgresIntegration(t *testing.T) {
 			if err := pool.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("creation left %s rows: %d %v", table, count, err)
 			}
+		}
+	})
+
+	t.Run("used_invitation_cannot_rejoin_after_kick", func(t *testing.T) {
+		pool := groupPrivacyPool(t)
+		repo := &repository.GroupRepo{DB: pool}
+		ctx := context.Background()
+		var groupID string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO groups(name, owner_id, public_id, join_mode)
+			VALUES('once','11111111-1111-4111-8111-111111111111','qun_once','open')
+			RETURNING id::text`).Scan(&groupID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO group_members(group_id, user_id, role) VALUES($1::uuid,$2,'owner')`,
+			groupID, groupPrivacyOwner); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO group_invitations(group_id, inviter_id, invitee_id, token)
+			VALUES($1::uuid,$2,$3,'once-token')`,
+			groupID, groupPrivacyOwner, groupPrivacyFirst); err != nil {
+			t.Fatal(err)
+		}
+		joined, err := repo.AcceptInvitation(ctx, groupPrivacyFirst, "once-token")
+		if err != nil || joined.NextAction != "joined" {
+			t.Fatalf("first accept = %#v, %v", joined, err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM group_members WHERE group_id=$1::uuid AND user_id=$2`, groupID, groupPrivacyFirst); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.AcceptInvitation(ctx, groupPrivacyFirst, "once-token"); !errors.Is(err, repository.ErrInvitationUsed) {
+			t.Fatalf("kicked member reused invitation: %v", err)
 		}
 	})
 }
