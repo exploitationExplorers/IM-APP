@@ -99,7 +99,7 @@ export async function fetchPrivacySettings(): Promise<PrivacySettings> {
 export async function updatePrivacySettings(settings: PrivacySettings): Promise<PrivacySettings> {
   return request<PrivacySettings>({
     url: '/me/privacy-settings',
-    method: 'PUT',
+    method: 'POST',
     data: settings,
   })
 }

@@ -171,7 +171,7 @@ func BuildRouter(d Deps) *gin.Engine {
 			auth.PUT("/report-reasons/:id/status", middleware.RequirePermission(rbacRepo, "report-reasons.write"), d.OpsH.SetReportReasonStatus)
 			auth.GET("/system-limits", middleware.RequirePermission(rbacRepo, "system-limits.read"), d.OpsH.GetSystemLimits)
 			auth.GET("/system-limits/group-impact", middleware.RequirePermission(rbacRepo, "system-limits.read"), d.OpsH.GetGroupLimitImpact)
-			auth.PUT("/system-limits", middleware.RequirePermission(rbacRepo, "system-limits.write"), d.OpsH.SaveSystemLimits)
+			auth.POST("/system-limits", middleware.RequirePermission(rbacRepo, "system-limits.write"), d.OpsH.SaveSystemLimits)
 			auth.POST("/system-limits/publish", middleware.RequirePermission(rbacRepo, "system-limits.write"), d.OpsH.PublishSystemLimits)
 
 			// 模块 09：敏感词与资料审核

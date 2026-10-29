@@ -116,7 +116,7 @@ type InviteGroupMembersReq struct {
 	UserIDs []string `json:"userIds"`
 }
 
-/** 邀请入群结果：直拉人数 + 需对方验证（已发卡）人数 */
+/** 邀请入群结果：直接入群人数 + 待对方确认人数（邀请卡异步投递并重试） */
 type InviteGroupMembersResult struct {
 	InvitedCount    int `json:"invitedCount"`
 	PendingCount    int `json:"pendingCount"`

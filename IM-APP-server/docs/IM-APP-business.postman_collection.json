@@ -56,18 +56,18 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/me/privacy-settings",
-            "description": "requireFriendApproval 默认 false（加好友无需验证）；requireGroupApproval 默认 false（邀请入群无需验证）。"
+            "description": "requireFriendApproval 和 requireGroupApproval 默认均为 true。新用户读取后台已发布的隐私默认值；普通发布不会覆盖现有个人设置。"
           },
           "response": []
         },
         {
           "name": "修改隐私设置",
           "request": {
-            "method": "PUT",
+            "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"requireFriendApproval\": false,\n  \"requireGroupApproval\": false\n}"
+              "raw": "{\n  \"requireFriendApproval\": true,\n  \"requireGroupApproval\": true\n}"
             },
             "url": "{{baseUrl}}/me/privacy-settings",
             "description": "修改当前用户隐私设置。"
@@ -245,7 +245,7 @@
               "raw": "{\n  \"toUserId\": \"{{contactId}}\",\n  \"message\": \"你好，想加你为好友\",\n  \"source\": \"public_id\"\n}"
             },
             "url": "{{baseUrl}}/friend-requests",
-            "description": "若对方 requireFriendApproval=false，直接互加，status=accepted；否则 pending。source=group 时需 sourceGroupId 且校验群内禁止互加。"
+            "description": "先精确搜索聊天号或解析有效二维码，服务端记录绑定当前账号、目标与来源的 30 分钟授权；未传 source 时使用最近有效授权。无授权/过期/伪造来源返回 403。与群申请共用每分钟 20 次、每 24 小时 100 次账号额度，超限 429。若对方 requireFriendApproval=false，直接互加，status=accepted；否则 pending。source=group 时需 sourceGroupId 且校验双方有效成员与群内互加权限。"
           },
           "response": []
         },
@@ -259,7 +259,7 @@
               "raw": "{\n  \"groupId\": \"{{groupId}}\",\n  \"toUserId\": \"{{memberUserId}}\",\n  \"message\": \"你好，我是群成员\"\n}"
             },
             "url": "{{baseUrl}}/group-friend-requests",
-            "description": "服务端强制校验双方均为有效群成员以及 allowMemberAddFriend=true，客户端不能伪造来源绕过。"
+            "description": "服务端强制校验双方均为当前有效群成员；群主/管理员可添加，普通成员受 allowMemberAddFriend 约束。与普通申请共用每分钟 20 次、每 24 小时 100 次账号额度，超限 429。"
           },
           "response": []
         },
@@ -434,7 +434,7 @@
               "raw": "{\n  \"name\": \"观察世界的窗口\",\n  \"memberIds\": [\"{{contactId}}\"]\n}"
             },
             "url": "{{baseUrl}}/groups",
-            "description": "创建群聊，返回 conversationId。"
+            "description": "创建群聊，初始成员必须为有效好友。开启入群验证的用户先收到异步邀请卡，确认前不会进入业务群或 OpenIM 群；memberCount 仅统计实际入群人数，可能暂为 1。返回 conversationId。"
           },
           "response": []
         },

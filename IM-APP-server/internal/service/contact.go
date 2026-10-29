@@ -15,14 +15,23 @@ import (
 var (
 	ErrInvalidContactQuery  = errors.New("invalid contact query")
 	ErrInvalidFriendRequest = errors.New("invalid friend request")
+	ErrFriendSourceRequired = repository.ErrFriendSourceRequired
+	ErrFriendRateLimited    = repository.ErrFriendRateLimited
 )
 
+type FriendSourceAuthorizer interface {
+	Grant(context.Context, string, string, string) error
+	Resolve(context.Context, string, string, string) (string, error)
+	Take(context.Context, string) error
+}
+
 type ContactService struct {
-	Contacts *repository.ContactRepo
-	Groups   *repository.GroupRepo
-	Users    *repository.UserRepo
-	Tags     *repository.ContactTagRepo
-	Privacy  *repository.PrivacyRepo
+	Contacts       *repository.ContactRepo
+	Groups         *repository.GroupRepo
+	Users          *repository.UserRepo
+	Tags           *repository.ContactTagRepo
+	Privacy        *repository.PrivacyRepo
+	FriendSecurity FriendSourceAuthorizer
 }
 
 func (s *ContactService) ListContacts(ctx context.Context, uid, keyword, sort, cursor string, limit int) (models.ContactPage, error) {
@@ -71,10 +80,7 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 		return empty, ErrInvalidFriendRequest
 	}
 	toUserID = parsedTargetID.String()
-	if source == "" {
-		source = "public_id"
-	}
-	if source != "public_id" && source != "user_qrcode" && source != "group" {
+	if source != "" && source != "public_id" && source != "user_qrcode" && source != "group" {
 		return empty, ErrInvalidFriendRequest
 	}
 	if source == "group" && sourceGroupID == "" {
@@ -86,14 +92,24 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 	if uid == toUserID {
 		return empty, ErrSelfAction
 	}
-	if _, err := s.Users.FindByID(ctx, toUserID); err != nil {
+	target, err := s.Users.FindByID(ctx, toUserID)
+	if err != nil {
 		return empty, ErrNotFound
 	}
-	blocked, _ := s.Contacts.IsBlocked(ctx, toUserID, uid)
+	if target.Status != "active" {
+		return empty, ErrForbidden
+	}
+	blocked, err := s.Contacts.IsBlocked(ctx, toUserID, uid)
+	if err != nil {
+		return empty, err
+	}
 	if blocked {
 		return empty, ErrForbidden
 	}
-	ok, _ := s.Contacts.IsFriend(ctx, uid, toUserID)
+	ok, err := s.Contacts.IsFriend(ctx, uid, toUserID)
+	if err != nil {
+		return empty, err
+	}
 	if ok {
 		return empty, ErrAlreadyFriend
 	}
@@ -110,9 +126,21 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 			return empty, ErrForbidden
 		}
 		sourceGroupID = internalID
+	} else {
+		source, err = verifiedFriendSource(ctx, s.FriendSecurity, uid, toUserID, source)
+		if err != nil {
+			return empty, err
+		}
 	}
 
-	// 对方未开启「加我为好友需验证」时直接成为好友（参考站默认关闭）
+	if s.FriendSecurity == nil {
+		return empty, ErrFriendSourceRequired
+	}
+	if err := s.FriendSecurity.Take(ctx, uid); err != nil {
+		return empty, err
+	}
+
+	// 对方明确关闭「加我为好友需验证」时直接成为好友，读取失败时保留审批。
 	needApproval := true
 	if s.Privacy != nil {
 		ps, err := s.Privacy.Get(ctx, toUserID)
@@ -133,6 +161,20 @@ func (s *ContactService) SendFriendRequest(ctx context.Context, uid, toUserID, m
 		return empty, err
 	}
 	return models.SendFriendResult{OK: true, ID: id, Status: "pending"}, nil
+}
+
+func verifiedFriendSource(ctx context.Context, security FriendSourceAuthorizer, uid, targetID, source string) (string, error) {
+	if security == nil {
+		return "", ErrFriendSourceRequired
+	}
+	verified, err := security.Resolve(ctx, uid, targetID, source)
+	if err != nil {
+		return "", err
+	}
+	if (verified != "public_id" && verified != "user_qrcode") || (source != "" && source != verified) {
+		return "", ErrFriendSourceRequired
+	}
+	return verified, nil
 }
 
 func (s *ContactService) SendGroupFriendRequest(ctx context.Context, uid string, req models.CreateGroupFriendRequest) (models.GroupFriendRequestResult, error) {

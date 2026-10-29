@@ -495,22 +495,9 @@ func (s *GroupService) InviteMembers(ctx context.Context, groupID, uid string, u
 	if err != nil {
 		return models.InviteGroupMembersResult{}, err
 	}
-	result, pending, err := s.Groups.InviteMembers(ctx, internalID, uid, userIDs)
-	if err != nil {
-		return models.InviteGroupMembersResult{}, err
-	}
-	cardFailed := 0
-	for _, card := range pending {
-		if sendErr := s.sendGroupInviteCard(ctx, uid, card); sendErr != nil {
-			cardFailed++
-			log.Printf("send group invite card failed inviter=%s invitee=%s: %v", uid, card.InviteeID, sendErr)
-		}
-	}
-	result.CardFailedCount = cardFailed
-	if cardFailed > 0 && result.PendingCount > 0 {
-		result.PendingCount -= cardFailed
-	}
-	return result, nil
+	// 邀请卡由与邀请记录一起提交的 outbox 投递，重试不会放宽入群验证。
+	result, _, err := s.Groups.InviteMembers(ctx, internalID, uid, userIDs)
+	return result, err
 }
 
 func (s *GroupService) sendGroupInviteCard(ctx context.Context, inviterID string, card repository.PendingGroupInviteCard) error {

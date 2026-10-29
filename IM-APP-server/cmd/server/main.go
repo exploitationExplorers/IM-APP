@@ -76,10 +76,12 @@ func main() {
 		"users":                      {"id", "public_id", "public_id_changed_at", "last_seen_at"},
 		"groups":                     {"id", "public_id", "public_id_changed_at", "retention_max_messages", "retention_keep_hours"},
 		"user_stickers":              {"id", "user_id", "file_id", "url", "created_at"},
+		"friend_source_grants":       {"from_user", "to_user", "source", "expires_at", "granted_at"},
+		"friend_request_attempts":    {"user_id", "created_at"},
 		// 058 账号注销：新二进制依赖这张审计表，缺表时宁可不启动也别让注销静默失败
 		"account_deletions": {"id", "user_id", "phone_e164_hash", "summary", "im_cleanup_status"},
 	}); err != nil {
-		log.Fatalf("schema check: %v; required migrations include 052 through 058", err)
+		log.Fatalf("schema check: %v; required migrations include 052 through 058 and 070", err)
 	}
 	if cfg.MigrationsMode == "verify" {
 		log.Println("database schema verified; startup migration replay disabled")
@@ -134,6 +136,7 @@ func main() {
 
 	userRepo := &repository.UserRepo{DB: pool}
 	contactRepo := &repository.ContactRepo{DB: pool}
+	friendSecurityRepo := &repository.FriendSecurityRepo{DB: pool}
 	contactTagRepo := &repository.ContactTagRepo{DB: pool}
 	privacyRepo := &repository.PrivacyRepo{DB: pool}
 	chatRepo := &repository.ChatRepo{DB: pool}
@@ -151,14 +154,14 @@ func main() {
 	groupRepo.DefaultGroupMaxMembers = cfg.DefaultGroupMaxMembers
 	groupReadCursorRepo := &repository.GroupReadCursorRepo{DB: pool}
 
-	userSvc := &service.UserService{Moderation: contentModeration, Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo}
+	userSvc := &service.UserService{Moderation: contentModeration, Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo, FriendSecurity: friendSecurityRepo}
 	imSvc := &service.IMService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, ReadCursors: groupReadCursorRepo, Config: cfg.OpenIM, TokenCache: redisClient,
 	}
 	imAdminSvc := &service.IMAdminService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Outbox: imOutboxRepo,
 	}
-	contactSvc := &service.ContactService{Contacts: contactRepo, Groups: groupRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo}
+	contactSvc := &service.ContactService{Contacts: contactRepo, Groups: groupRepo, Users: userRepo, Tags: contactTagRepo, Privacy: privacyRepo, FriendSecurity: friendSecurityRepo}
 	chatSvc := &service.ChatService{Chat: chatRepo}
 	if cfg.LegacyChatEnabled {
 		chatSvc.Hub = hub
@@ -269,6 +272,8 @@ func main() {
 			base+"/callbackAfterSendGroupMsgCommand",
 			base+"/callbackBeforeAfterMsgCommand",
 			base+"/callbackAfterDismissGroupCommand",
+			base+"/callbackBeforeAddFriendCommand",
+			base+"/callbackBeforeAddFriendAgreeCommand",
 		)
 	}
 	r.Use(gin.LoggerWithConfig(loggerConfig), gin.Recovery())
@@ -294,6 +299,8 @@ func main() {
 		webhooks.POST("/callbackAfterSendGroupMsgCommand", openIMWebhookH.AfterMessage)
 		webhooks.POST("/callbackBeforeAfterMsgCommand", openIMWebhookH.AfterMessage)
 		webhooks.POST("/callbackAfterDismissGroupCommand", openIMWebhookH.AfterDismissGroup)
+		webhooks.POST("/callbackBeforeAddFriendCommand", openIMWebhookH.BeforeFriendMutation)
+		webhooks.POST("/callbackBeforeAddFriendAgreeCommand", openIMWebhookH.BeforeFriendMutation)
 	}
 	internalIM := r.Group("/internal/im")
 	internalIM.Use(middleware.InternalAPIKey(cfg.IMInternalAPIKey))
@@ -374,7 +381,7 @@ func main() {
 			auth.POST("/me/password/verify", userH.VerifyPassword)
 			auth.PUT("/me/password", userH.ChangePassword)
 			auth.GET("/me/privacy-settings", userH.GetPrivacySettings)
-			auth.PUT("/me/privacy-settings", userH.UpdatePrivacySettings)
+			auth.POST("/me/privacy-settings", userH.UpdatePrivacySettings)
 			auth.GET("/me/qrcode", userH.Qrcode)
 			auth.POST("/users/qrcode/resolve", userH.ResolveUserQRCode)
 			auth.GET("/users/search", userH.Search)

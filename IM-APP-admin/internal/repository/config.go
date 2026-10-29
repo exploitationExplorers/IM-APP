@@ -3,8 +3,11 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"im-app-admin/internal/models"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // ===== APP 与公共配置（清单 08） =====
@@ -138,18 +141,38 @@ func (r *OpsRepo) SetReportReasonStatus(ctx context.Context, id, status string) 
 const cfgKeySystemLimits = "system.limits"
 
 func defaultLimits() *models.SystemLimits {
+	friendApproval, groupApproval := true, true
 	return &models.SystemLimits{
 		MaxFileSizeMB: 20, MaxGroupMembers: 2000, DefaultGroupMaxMembers: 2000,
 		RecallWindowSec: 120, MaxForwardTargets: 10000, MaxNicknameLen: 32,
 		GroupRetentionMaxMessages: 3000, GroupRetentionHours: 72,
+		DefaultRequireFriendApproval: &friendApproval, DefaultRequireGroupApproval: &groupApproval,
 	}
 }
 
 func (r *OpsRepo) GetSystemLimits(ctx context.Context) (*models.SystemLimits, error) {
-	l := defaultLimits()
 	var raw string
-	if err := r.DB.QueryRow(ctx, `SELECT value FROM app_configs WHERE key=$1`, cfgKeySystemLimits).Scan(&raw); err == nil && raw != "" {
-		_ = json.Unmarshal([]byte(raw), l)
+	err := r.DB.QueryRow(ctx, `SELECT value FROM app_configs WHERE key=$1`, cfgKeySystemLimits).Scan(&raw)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	return parseSystemLimits(raw)
+}
+
+func parseSystemLimits(raw string) (*models.SystemLimits, error) {
+	l := defaultLimits()
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), l); err != nil {
+			return nil, err
+		}
+	}
+	if l.DefaultRequireFriendApproval == nil {
+		value := true
+		l.DefaultRequireFriendApproval = &value
+	}
+	if l.DefaultRequireGroupApproval == nil {
+		value := true
+		l.DefaultRequireGroupApproval = &value
 	}
 	if l.GroupRetentionMaxMessages <= 0 {
 		l.GroupRetentionMaxMessages = 3000
@@ -161,11 +184,16 @@ func (r *OpsRepo) GetSystemLimits(ctx context.Context) (*models.SystemLimits, er
 }
 
 func (r *OpsRepo) SaveSystemLimits(ctx context.Context, l *models.SystemLimits, operatorID string) error {
-	b, _ := json.Marshal(l)
-	_, err := r.DB.Exec(ctx, `
+	b, err := json.Marshal(l)
+	if err != nil {
+		return err
+	}
+	_, err = r.DB.Exec(ctx, `
 		INSERT INTO app_configs(key, value, description, updated_by, updated_at)
 		VALUES($1,$2,'系统限制草稿',$3::uuid,NOW())
-		ON CONFLICT (key) DO UPDATE SET value=$2, updated_by=$3::uuid, updated_at=NOW()`,
+		ON CONFLICT (key) DO UPDATE
+		SET value=(COALESCE(NULLIF(app_configs.value,''),'{}')::jsonb || EXCLUDED.value::jsonb)::text,
+		    updated_by=$3::uuid, updated_at=NOW()`,
 		cfgKeySystemLimits, string(b), operatorID)
 	return err
 }
@@ -207,14 +235,39 @@ func (r *OpsRepo) SaveFeatureFlags(ctx context.Context, flags *models.FeatureFla
 	return err
 }
 
-func (r *OpsRepo) PublishSystemLimits(ctx context.Context, operatorID string) error {
-	var raw string
-	if err := r.DB.QueryRow(ctx, `SELECT value FROM app_configs WHERE key=$1`, cfgKeySystemLimits).Scan(&raw); err != nil {
+func (r *OpsRepo) PublishSystemLimits(ctx context.Context, limits *models.SystemLimits, operatorID string, applyPrivacyDefaultsToExisting bool) error {
+	// 发布服务已经校验的同一份快照，避免重新读取被并发修改的草稿。
+	raw, err := json.Marshal(limits)
+	if err != nil {
 		return err
 	}
-	_, err := r.DB.Exec(ctx, `
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	// 串行分配版本号；发布与批量修改用户设置在同一事务中完成。
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(6511001)`); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO app_config_versions(version, data_json, status, published_at, created_by)
 		SELECT COALESCE(MAX(version),0)+1, $1, 'published', NOW(), $2::uuid
-		FROM app_config_versions`, raw, operatorID)
-	return err
+		FROM app_config_versions`, string(raw), operatorID)
+	if err != nil {
+		return err
+	}
+	if applyPrivacyDefaultsToExisting {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO privacy_settings(user_id, require_friend_approval, require_group_approval)
+			SELECT id, $1::boolean, $2::boolean FROM users
+			ON CONFLICT (user_id) DO UPDATE
+			SET require_friend_approval=EXCLUDED.require_friend_approval,
+			    require_group_approval=EXCLUDED.require_group_approval, updated_at=NOW()`,
+			limits.DefaultRequireFriendApproval, limits.DefaultRequireGroupApproval)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }

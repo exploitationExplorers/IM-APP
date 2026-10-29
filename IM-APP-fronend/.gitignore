@@ -27,3 +27,5 @@ design-ref/
 unpackage/release/
 
 .env
+
+.workflow

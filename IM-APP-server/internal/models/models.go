@@ -129,7 +129,7 @@ type FriendRequestList struct {
 	Recent  []FriendRequest `json:"recent"`
 }
 
-// PrivacySettings 对齐参考站：默认加好友无需验证
+// PrivacySettings 个人隐私设置，缺省要求好友和入群确认。
 type PrivacySettings struct {
 	RequireFriendApproval bool `json:"requireFriendApproval"`
 	RequireGroupApproval  bool `json:"requireGroupApproval"`

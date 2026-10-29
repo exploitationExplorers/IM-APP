@@ -158,7 +158,7 @@ services:
       minio:
         condition: service_healthy
     ports:
-      - "10002:10002"   # API 端口，Go 后端 OPENIM_API_URL 指向它
+      - "127.0.0.1:10002:10002" # 公网必须经过 Nginx 权限边界；容器内服务名连接不变
       - "10001:10001"   # WS 网关端口，客户端 SDK 的 wsAddr 指向它（原版未暴露）
     environment:
       OPENIM_API_PORT: "10002"

@@ -100,9 +100,10 @@ beforeGroupOnlinePush:
   timeout: 5
   failedContinue: true
 beforeAddFriend:
-  enable: false
+  # 好友申请统一经过业务服务，SDK 直连写关系必须阻断。
+  enable: true
   timeout: 5
-  failedContinue: true
+  failedContinue: false
 beforeUpdateUserInfo:
   enable: false
   timeout: 5
@@ -199,9 +200,9 @@ afterAddFriend:
   enable: false
   timeout: 5
 beforeAddFriendAgree:
-  enable: false
+  enable: true
   timeout: 5
-  failedContinue: true
+  failedContinue: false
 afterAddFriendAgree:
   enable: false
   timeout: 5
