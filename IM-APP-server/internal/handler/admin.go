@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"time"
 
@@ -189,6 +191,10 @@ func (h *AdminUserHandler) SetRestriction(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "设置失败："+err.Error())
 		return
 	}
+	// 禁止登录必须立刻作废已有会话并踢掉聊天连接，不能只拦下一次登录。
+	if req.Type == "login" && req.Banned {
+		h.dropOnlineSessions(c.Request.Context(), c.Param("id"))
+	}
 	response.OK(c, gin.H{"ok": true})
 }
 
@@ -206,6 +212,9 @@ func (h *AdminUserHandler) SetUserStatus(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
 		return
 	}
+	if req.Status == "banned" {
+		h.forceLogoutIM(c.Request.Context(), c.Param("id"))
+	}
 	response.OK(c, gin.H{"ok": true})
 }
 
@@ -215,7 +224,35 @@ func (h *AdminUserHandler) RevokeSessions(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "操作失败："+err.Error())
 		return
 	}
+	h.forceLogoutIM(c.Request.Context(), c.Param("id"))
 	response.OK(c, gin.H{"ok": true})
+}
+
+// dropOnlineSessions 作废业务登录态，并通知 OpenIM 断开全部平台。
+// 聊天服务不可达时不回滚限制本身：业务接口已会拒绝这个账号。
+func (h *AdminUserHandler) dropOnlineSessions(ctx context.Context, userID string) {
+	if h.Restrictions != nil {
+		if err := h.Restrictions.RevokeSessions(ctx, userID); err != nil {
+			log.Printf("revoke sessions user=%s: %v", userID, err)
+		}
+	}
+	h.forceLogoutIM(ctx, userID)
+}
+
+func (h *AdminUserHandler) forceLogoutIM(ctx context.Context, userID string) {
+	if h.Client == nil || !h.Client.Available() {
+		return
+	}
+	imUserID, err := im.UserIDFromBusinessID(userID)
+	if err != nil {
+		log.Printf("force logout convert user=%s: %v", userID, err)
+		return
+	}
+	logoutCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	if err := h.Client.ForceLogoutAll(logoutCtx, imUserID); err != nil {
+		log.Printf("force logout user=%s: %v", userID, err)
+	}
 }
 
 // CancelForwardTask 管理端终止转发任务（走 server 队列逻辑）
