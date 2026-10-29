@@ -175,7 +175,7 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 
 ### POST `/api/v1/auth/token/refresh`
 
-用 `refreshToken` 换取新的 `accessToken` + `refreshToken`（旧 refreshToken 立即失效）。
+用 `refreshToken` 换取新的 `accessToken` + `refreshToken`（旧 refreshToken 立即失效）。账号被封禁或处于「禁止登录」时返回 401，不再签发新令牌。禁止登录同时作废该用户全部 refresh token，并拒绝其尚未过期的 access token 访问业务接口（401），客户端因此退出到登录页。
 
 **Body**
 ```json

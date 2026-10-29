@@ -310,6 +310,13 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		response.Fail(c, http.StatusUnauthorized, "用户不存在")
 		return
 	}
+	if h.Restrictions != nil {
+		status, loginBanned, _, rerr := h.Restrictions.UserRestrictions(ctx, user.ID)
+		if rerr == nil && (status == "banned" || loginBanned) {
+			response.Fail(c, http.StatusUnauthorized, "账号已限制登录")
+			return
+		}
+	}
 	newRefresh, err := randomRefreshToken()
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "签发令牌失败")

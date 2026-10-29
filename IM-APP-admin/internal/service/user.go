@@ -9,8 +9,8 @@ import (
 
 // DataService 用户/群组/举报业务
 type DataService struct {
-	Repo             *repository.DataRepo
-	ServerBaseURL    string // server 地址（方案 A：写操作走 server 执行+OpenIM 同步）
+	Repo              *repository.DataRepo
+	ServerBaseURL     string // server 地址（方案 A：写操作走 server 执行+OpenIM 同步）
 	ServerInternalKey string // 与 server IM_INTERNAL_API_KEY 一致
 }
 
@@ -43,8 +43,18 @@ func (s *DataService) ListUserForwardTasks(ctx context.Context, id string, page,
 // SetRestriction 设置登录/发信限制。
 // 与 server 共用 PostgreSQL 的 user_restrictions；登录/发消息时由 server 读表强制检查。
 // 直接写库（带管理员 UUID），避免只走内部 HTTP 时因空 operator_id 等导致静默失败。
+// 禁止登录后再调 server 作废已有会话并踢掉聊天连接，已经在线的人不能继续加好友。
 func (s *DataService) SetRestriction(ctx context.Context, id, restrType string, req models.RestrictionRequest, operatorID string) error {
-	return s.Repo.SetRestriction(ctx, id, restrType, *req.Banned, req.Until, req.Reason, operatorID)
+	if err := s.Repo.SetRestriction(ctx, id, restrType, *req.Banned, req.Until, req.Reason, operatorID); err != nil {
+		return err
+	}
+	if restrType == "login" && req.Banned != nil && *req.Banned {
+		if _, err := callServerInternal(ctx, s.ServerBaseURL, s.ServerInternalKey,
+			"/internal/admin/users/"+id+"/sessions/revoke", map[string]any{}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // BanUser 封禁/解封用户：方案 A —— 调 server（改状态 + 撤销会话 + 强制生效），本地写状态审计
