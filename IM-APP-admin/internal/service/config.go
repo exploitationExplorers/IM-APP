@@ -105,7 +105,7 @@ func (s *OpsService) SaveFeatureFlags(ctx context.Context, flags *models.Feature
 	return s.Repo.SaveFeatureFlags(ctx, flags, operatorID)
 }
 
-func (s *OpsService) PublishSystemLimits(ctx context.Context, operatorID string) error {
+func (s *OpsService) PublishSystemLimits(ctx context.Context, operatorID string, applyPrivacyDefaultsToExisting bool) error {
 	l, err := s.Repo.GetSystemLimits(ctx)
 	if err != nil {
 		return err
@@ -117,5 +117,6 @@ func (s *OpsService) PublishSystemLimits(ctx context.Context, operatorID string)
 	if err := validateRetentionLimits(l.GroupRetentionMaxMessages, l.GroupRetentionHours); err != nil {
 		return err
 	}
-	return s.Repo.PublishSystemLimits(ctx, operatorID)
+	l.GroupMemberHardLimit = 0
+	return s.Repo.PublishSystemLimits(ctx, l, operatorID, applyPrivacyDefaultsToExisting)
 }

@@ -21,12 +21,13 @@ var (
 )
 
 type UserService struct {
-	Users      *repository.UserRepo
-	Files      *repository.FileRepo
-	Contacts   *repository.ContactRepo
-	Privacy    *repository.PrivacyRepo
-	Groups     *repository.GroupRepo
-	Moderation *moderation.Client
+	Users          *repository.UserRepo
+	Files          *repository.FileRepo
+	Contacts       *repository.ContactRepo
+	Privacy        *repository.PrivacyRepo
+	Groups         *repository.GroupRepo
+	Moderation     *moderation.Client
+	FriendSecurity FriendSourceAuthorizer
 }
 
 func (s *UserService) GetProfile(ctx context.Context, uid string) (models.User, error) {
@@ -140,6 +141,15 @@ func (s *UserService) SearchByPublicID(ctx context.Context, uid, publicID string
 	if u.ID == uid {
 		return nil, errors.New("cannot search self")
 	}
+	if u.Status != "active" {
+		return nil, nil
+	}
+	if s.FriendSecurity == nil {
+		return nil, ErrFriendSourceRequired
+	}
+	if err := s.FriendSecurity.Grant(ctx, uid, u.ID, "public_id"); err != nil {
+		return nil, err
+	}
 	pub := repository.ToPublicProfile(u)
 	return &pub, nil
 }
@@ -150,15 +160,41 @@ func (s *UserService) GetPublicProfile(ctx context.Context, viewerID, userID, gr
 		return models.PublicProfile{}, ErrNotFound
 	}
 	pub := repository.ToPublicProfile(u)
-	// 从群成员资料进入时：普通成员只能看到脱敏聊天号；群主/管理员可见完整 ID（可加任意成员）
-	if groupPublicID != "" && viewerID != "" && viewerID != userID && s.Groups != nil {
-		internalID, ierr := s.Groups.InternalIDByPublicID(ctx, groupPublicID)
-		if ierr == nil {
-			role, rerr := s.Groups.MemberRoleOf(ctx, internalID, viewerID)
-			if rerr == nil && role != "owner" && role != "admin" {
-				pub.PublicID = MaskPublicID(pub.PublicID)
-			}
+	// UUID 资料查询不是聊天号发现入口；缺省参数、伪造群号和查询失败均不泄露聊天号。
+	if viewerID == userID {
+		return pub, nil
+	}
+	allowed := false
+	if viewerID != "" && s.Contacts != nil {
+		allowed, err = s.Contacts.IsFriend(ctx, viewerID, userID)
+		if err != nil {
+			return models.PublicProfile{}, err
 		}
+	}
+	if !allowed && viewerID != "" && s.FriendSecurity != nil {
+		_, grantErr := verifiedFriendSource(ctx, s.FriendSecurity, viewerID, userID, "")
+		if grantErr == nil {
+			allowed = true
+		} else if !errors.Is(grantErr, ErrFriendSourceRequired) {
+			return models.PublicProfile{}, grantErr
+		}
+	}
+	if groupPublicID != "" {
+		if s.Groups == nil || s.Contacts == nil || viewerID == "" {
+			return models.PublicProfile{}, ErrForbidden
+		}
+		internalID, groupErr := s.Groups.InternalIDByPublicID(ctx, strings.TrimSpace(groupPublicID))
+		if groupErr != nil {
+			return models.PublicProfile{}, ErrForbidden
+		}
+		admin, groupErr := s.Contacts.IsGroupAdminOfTarget(ctx, viewerID, userID, internalID)
+		if groupErr != nil {
+			return models.PublicProfile{}, groupErr
+		}
+		allowed = allowed || admin
+	}
+	if !allowed {
+		pub.PublicID = MaskPublicID(pub.PublicID)
 	}
 	return pub, nil
 }
@@ -237,6 +273,17 @@ func (s *UserService) ResolveUserQRCode(ctx context.Context, uid, token string) 
 	if err != nil {
 		return models.UserQRCodeResolveResult{}, ErrNotFound
 	}
+	if u.Status != "active" {
+		return models.UserQRCodeResolveResult{}, ErrNotFound
+	}
+	if u.ID != uid {
+		if s.FriendSecurity == nil {
+			return models.UserQRCodeResolveResult{}, ErrFriendSourceRequired
+		}
+		if err := s.FriendSecurity.Grant(ctx, uid, u.ID, "user_qrcode"); err != nil {
+			return models.UserQRCodeResolveResult{}, err
+		}
+	}
 	relation, _ := s.relationWith(ctx, uid, u.ID)
 	return models.UserQRCodeResolveResult{
 		User:     withRelationProfile(u, relation),
@@ -277,10 +324,7 @@ func withRelationProfile(u models.User, relation string) models.PublicProfile {
 
 func (s *UserService) GetPrivacySettings(ctx context.Context, uid string) (models.PrivacySettings, error) {
 	if s.Privacy == nil {
-		return models.PrivacySettings{
-			RequireFriendApproval: false,
-			RequireGroupApproval:  false,
-		}, nil
+		return repository.DefaultPrivacySettings(), nil
 	}
 	return s.Privacy.Get(ctx, uid)
 }

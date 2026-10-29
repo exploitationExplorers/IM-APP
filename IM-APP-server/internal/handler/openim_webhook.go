@@ -263,9 +263,12 @@ func (h *OpenIMWebhookHandler) checkMessageRestriction(c *gin.Context, req openI
 	if h.Restrictions == nil {
 		return false
 	}
-	_, _, messageBanned, err := h.Restrictions.UserRestrictions(c.Request.Context(), senderID)
-	if err == nil && messageBanned {
+	_, loginBanned, messageBanned, err := h.Restrictions.UserRestrictions(c.Request.Context(), senderID)
+	if err == nil && (loginBanned || messageBanned) {
 		reason := "message restricted by admin"
+		if loginBanned {
+			reason = "login restricted by admin"
+		}
 		h.recordBeforeHookFailure(c.Request.Context(), req, peerType, senderID, targetID, reason)
 		c.JSON(http.StatusOK, denyWebhook(reason))
 		return true

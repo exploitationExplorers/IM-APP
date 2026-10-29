@@ -40,6 +40,48 @@ tags:
     description: 仅供 OpenIM Server 回调
 
 paths:
+  /api/v1/me/privacy-settings:
+    get:
+      tags: [Auth Sync]
+      operationId: getPrivacySettings
+      summary: 获取个人隐私设置
+      description: 新用户使用后台已发布的隐私默认值，缺字段时好友验证和入群验证均开启；已有个人设置保持不变。
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: 当前用户隐私设置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer, enum: [0]}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/PrivacySettings'}
+        '401': {description: 登录失效或账号不可用}
+    post:
+      tags: [Auth Sync]
+      operationId: updatePrivacySettings
+      summary: 修改个人隐私设置
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PrivacySettings'}
+      responses:
+        '200':
+          description: 已保存的隐私设置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer, enum: [0]}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/PrivacySettings'}
+        '400': {description: 参数错误}
+        '401': {description: 登录失效或账号不可用}
   /api/v1/me/deletion-preview:
     get:
       tags: [Auth Sync]
@@ -252,6 +294,41 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '500': {$ref: '#/components/responses/InternalError'}
 
+  /api/v1/friend-requests:
+    post:
+      tags: [Contact Sync]
+      summary: 按已验证来源发起好友申请
+      description: |
+        public_id 和 user_qrcode 必须有同一调用者、目标、来源的有效授权，分别由精确聊天号搜索和二维码解析签发，有效期 30 分钟。
+        不传 source 的旧客户端使用最近有效授权；仅有目标 UUID 或伪造来源不能添加。
+        group 来源要求 sourceGroupId，双方必须为当前有效群成员，并校验群内互加权限。
+        与 group-friend-requests 共用账号级滑动窗口：20 次/分钟、100 次/24 小时；超限返回 429。
+        对方开启验证时仅创建 pending 申请，明确关闭验证才直接创建双向好友关系。
+      operationId: createVerifiedFriendRequest
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toUserId]
+              properties:
+                toUserId: {type: string, format: uuid}
+                message: {type: string, maxLength: 500}
+                source: {type: string, enum: [public_id, user_qrcode, group]}
+                sourceGroupId: {type: string, description: 仅 group 来源填写群号}
+      responses:
+        '200':
+          description: data 包含 ok、id、status（pending 或 accepted）。
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403':
+          description: 来源未验证、授权过期、来源不匹配或群权限不足；重新搜索/扫码后重试。
+        '429':
+          description: 当前账号好友申请过于频繁，请稍后重试。
+        '500': {$ref: '#/components/responses/InternalError'}
+
   /api/v1/friend-requests/{id}/accept:
     post:
       tags: [Contact Sync]
@@ -273,8 +350,9 @@ paths:
       summary: 从群成员资料发起好友申请
       description: |
         仅用于“从某个群的成员列表或成员资料页加好友”。
-        服务端校验群处于 active 状态、双方均为有效群成员且 allowMemberAddFriend=true。
-        关闭群内加好友仅限制该群来源；用户仍可通过公开 ID 或个人二维码按正常规则加好友。
+        服务端校验群处于 active 状态、双方均为当前有效群成员；普通成员要求 allowMemberAddFriend=true，群主/管理员不受该开关限制。
+        关闭群内加好友仅限制该群来源；其他来源必须先精确搜索公开 ID 或解析有效个人二维码获得服务端授权。
+        与 friend-requests 共用账号级滑动窗口：20 次/分钟、100 次/24 小时。
       operationId: createGroupSourceFriendRequest
       x-change-type: new
       security: [{bearerAuth: []}]
@@ -290,6 +368,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
+        '429':
+          description: 当前账号好友申请过于频繁，请稍后重试。
         '500': {$ref: '#/components/responses/InternalError'}
 
   /api/v1/groups:
@@ -1977,6 +2057,18 @@ components:
       content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
 
   schemas:
+    PrivacySettings:
+      type: object
+      required: [requireFriendApproval, requireGroupApproval]
+      properties:
+        requireFriendApproval:
+          type: boolean
+          default: true
+          description: 加我为好友需验证
+        requireGroupApproval:
+          type: boolean
+          default: true
+          description: 邀请我加入群聊需验证
     UUID:
       type: string
       format: uuid

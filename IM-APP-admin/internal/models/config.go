@@ -60,11 +60,19 @@ type SystemLimits struct {
 	// 群消息逻辑保留：真实可见消息条数 + 滚动小时窗口（可按群覆盖）
 	GroupRetentionMaxMessages int `json:"groupRetentionMaxMessages"`
 	GroupRetentionHours       int `json:"groupRetentionHours"`
+	// 指针区分旧客户端未提交字段和管理员明确关闭；未提交时保留草稿原值。
+	DefaultRequireFriendApproval *bool `json:"defaultRequireFriendApproval,omitempty"`
+	DefaultRequireGroupApproval  *bool `json:"defaultRequireGroupApproval,omitempty"`
 }
 
 type SystemLimitsRequest struct {
 	Limits *SystemLimits `json:"limits" binding:"required"`
 	Reason string        `json:"reason" binding:"required"`
+}
+
+type PublishSystemLimitsRequest struct {
+	Reason                         string `json:"reason" binding:"required"`
+	ApplyPrivacyDefaultsToExisting bool   `json:"applyPrivacyDefaultsToExisting"`
 }
 
 type GroupLimitImpact struct {

@@ -92,6 +92,8 @@ func (w *IMSyncWorker) syncEvent(ctx context.Context, event repository.IMSyncEve
 	case repository.IMEventFriendAccepted, repository.IMEventFriendDeleted,
 		repository.IMEventBlockAdded, repository.IMEventBlockRemoved:
 		return w.syncRelationship(ctx, event)
+	case repository.IMEventGroupInvitePending:
+		return w.syncGroupInvitation(ctx, event)
 	case repository.IMEventGroupCreated, repository.IMEventGroupUpdated,
 		repository.IMEventGroupMemberJoined, repository.IMEventGroupMemberLeft,
 		repository.IMEventGroupMemberRole, repository.IMEventGroupMemberMute,
@@ -101,6 +103,27 @@ func (w *IMSyncWorker) syncEvent(ctx context.Context, event repository.IMSyncEve
 	default:
 		return fmt.Errorf("unsupported OpenIM sync event type %q", event.EventType)
 	}
+}
+
+func (w *IMSyncWorker) syncGroupInvitation(ctx context.Context, event repository.IMSyncEvent) error {
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("decode %s payload: %w", event.EventType, err)
+	}
+	if payload.Token == "" {
+		return errors.New("group invitation token is required")
+	}
+	inviterID, card, err := w.Groups.PendingInvitationCard(ctx, event.AggregateID, payload.Token)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sender := GroupService{IM: w.Client, Users: w.Users}
+	return sender.sendGroupInviteCard(ctx, inviterID, card)
 }
 
 func (w *IMSyncWorker) syncUser(ctx context.Context, businessUserID string) error {

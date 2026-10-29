@@ -175,7 +175,7 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 
 ### POST `/api/v1/auth/token/refresh`
 
-用 `refreshToken` 换取新的 `accessToken` + `refreshToken`（旧 refreshToken 立即失效）。
+用 `refreshToken` 换取新的 `accessToken` + `refreshToken`（旧 refreshToken 立即失效）。账号被封禁或处于「禁止登录」时返回 401，不再签发新令牌。禁止登录同时作废该用户全部 refresh token，并拒绝其尚未过期的 access token 访问业务接口（401），客户端因此退出到登录页。
 
 **Body**
 ```json
@@ -259,15 +259,17 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 **Response**
 ```json
 {
-  "requireFriendApproval": false,
-  "requireGroupApproval": false
+  "requireFriendApproval": true,
+  "requireGroupApproval": true
 }
 ```
 
-- `requireFriendApproval`：加我为好友需验证。**默认 `false`**（对齐参考站，关闭后对方加好友立即通过）。
-- `requireGroupApproval`：邀请我入群需验证。**默认 `false`**（关闭后被邀请直接入群）。
+- `requireFriendApproval`：加我为好友需验证。**默认 `true`**，关闭后对方加好友立即通过。
+- `requireGroupApproval`：邀请我入群需验证。**默认 `true`**，关闭后被邀请直接入群。
+- 新用户默认值读取管理后台已发布的 `system.limits.defaultRequireFriendApproval`、`defaultRequireGroupApproval`；缺字段时均为 `true`。草稿不生效，已有个人设置不会随普通发布改变。
+- 升级迁移 `069_privacy_defaults.sql` 仅首次将存量用户两项设置开启并补齐缺行；之后重复迁移保留用户选择。后台发布可显式传 `applyPrivacyDefaultsToExisting: true`，在同一事务中批量同步现有用户。
 
-### PUT `/api/v1/me/privacy-settings`
+### POST `/api/v1/me/privacy-settings`
 
 修改隐私设置。Body 同 Response 结构。
 
@@ -318,11 +320,15 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 
 按公开 ID 搜索用户。**不支持手机号搜索。** 响应不含 `phone` 字段。
 
+精确搜索成功后，服务端为当前账号与目标用户记录有效期 30 分钟的 `public_id` 添加授权；该授权不能用于其他账号或目标。
+
 未找到返回 `data: null`。
 
 ### POST `/api/v1/users/qrcode/resolve`
 
 解析个人二维码 token（扫码加好友）。
+
+解析有效二维码后，服务端记录有效期 30 分钟的 `user_qrcode` 添加授权。无效、过期或撤销的二维码不会产生授权。
 
 **Body**
 ```json
@@ -343,7 +349,7 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 
 查看用户公开资料（不含完整手机号）。
 
-**Query**：`groupId`（可选，群号）。从群成员资料进入时传入：仅该群**群主**可见完整 `publicId`，其他成员返回脱敏值（如 `ch****01`），避免凭聊天号互加好友。
+**Query**：`groupId`（可选，群号）。仅本人、好友、有有效搜索/扫码授权的调用者，或与目标同在有效群的群主/管理员可见完整 `publicId`；其余调用者返回脱敏值（如 `ch****01`）。省略 `groupId` 不会公开聊天号，无效群号与数据库校验失败不会放行。查询 UUID 资料本身不产生添加授权。
 
 ---
 
@@ -474,6 +480,10 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 
 `source=group` 时服务端校验双方均为有效群成员；群主/管理员始终可加，普通成员受该群 `allowMemberAddFriend` 约束。
 
+`source=public_id|user_qrcode` 必须匹配当前账号、目标与来源的有效服务端授权。先调用精确聊天号搜索或个人二维码解析；授权有效期 30 分钟。旧客户端不传 `source` 时，服务端使用最近有效授权并记录真实来源，不再默认认定为搜索添加。仅有目标 UUID、伪造来源或授权过期返回 `403`，需重新搜索/扫码。
+
+本接口与 `/api/v1/group-friend-requests` 共用账号级滑动窗口：每分钟 20 次、每 24 小时 100 次，超限返回 `429`。额度在创建申请前原子消费，后续写入失败仍计数；更换 IP 或来源不能重置配额。
+
 若对方 `requireFriendApproval=false`，服务端直接互加好友，不再进入待审核。
 
 **Response**
@@ -560,7 +570,7 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 
 ### POST `/api/v1/groups`
 
-创建群聊。新建群默认 `allowMemberAddFriend=false`（禁止群成员互加好友开关默认开启）。
+创建群聊。新建群默认 `allowMemberAddFriend=false`（禁止群成员互加好友开关默认开启）。初始成员必须是群主的有效好友，包含群主至少选择 3 人。被邀请人开启「邀请我加入群聊需验证」时，先保存待确认邀请，不能直接加入业务群或 OpenIM 群；邀请卡通过可靠任务异步投递，失败自动重试。`memberCount` 只统计已实际加入的人，确认前可能只有群主。
 
 **Body**
 ```json
@@ -669,7 +679,7 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 群主/管理员邀请好友入群。
 
 - 被邀请人**未**开启「邀请我加入群聊需验证」：直接写入群成员并同步 OpenIM。
-- 被邀请人**已**开启验证：不拉进群，写入 `group_invitations`，并向双方私聊下发入群邀请卡片（CustomMessage，`businessKey=group_invite`）。已在群中或非好友会被跳过。
+- 被邀请人**已**开启验证：不拉进群，同一事务写入 `group_invitations` 和邀请卡发送任务，提交后异步下发入群邀请卡片（CustomMessage，`businessKey=group_invite`），发送失败自动重试。`pendingCount` 表示待确认邀请数。已在群中或非好友会被跳过。未保存个人设置时采用后台已发布默认值，缺配置时默认需要确认。
 
 **Body** `{ "userIds": ["uuid"] }`
 
@@ -688,6 +698,7 @@ OSS 接入阶段不运行上述发布命令；测试与生产发布数据库/API
 - 公开群（`joinMode=open`）：直接入群，`nextAction=joined`
 - 审核群（`joinMode=approval`）：提交入群申请，`nextAction=pending_approval`
 - 已在群中：`nextAction=already_member`
+- 同一张邀请卡只能成功使用一次。再次点击，包括被移出群之后，返回 400，`message` 为「邀请已失效」。邀请没有过期时间。群主或管理员重新邀请会生成新卡。
 
 **Response `data`**
 ```json

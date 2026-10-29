@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, shallowRef } from "vue";
 import { ElMessage } from "element-plus";
 
-import { AppConfig, getGroupLimitImpactApi, getSystemLimitsApi, postSystemLimitsPublishApi, putSystemLimitsDraftApi } from "@/api/modules/appConfig";
+import { AppConfig, getGroupLimitImpactApi, getSystemLimitsApi, postSystemLimitsPublishApi, postSystemLimitsDraftApi } from "@/api/modules/appConfig";
 
 type ActionMode = "draft" | "publish";
 
@@ -21,13 +21,34 @@ const formModel = reactive<AppConfig.SystemLimits>({
   recallWindowSec: 0,
   groupRetentionMaxMessages: 3000,
   groupRetentionHours: 72,
+  defaultRequireFriendApproval: true,
+  defaultRequireGroupApproval: true,
 });
+
+const savedSnapshot = shallowRef("");
+const hasUnsavedChanges = computed(() => JSON.stringify(limitsPayload()) !== savedSnapshot.value);
+
+function limitsPayload(): AppConfig.SystemLimits {
+  return {
+    maxFileSizeMb: formModel.maxFileSizeMb,
+    maxForwardTargets: formModel.maxForwardTargets,
+    maxGroupMembers: formModel.maxGroupMembers,
+    defaultGroupMaxMembers: formModel.defaultGroupMaxMembers,
+    maxNicknameLen: formModel.maxNicknameLen,
+    recallWindowSec: formModel.recallWindowSec,
+    groupRetentionMaxMessages: formModel.groupRetentionMaxMessages,
+    groupRetentionHours: formModel.groupRetentionHours,
+    defaultRequireFriendApproval: formModel.defaultRequireFriendApproval,
+    defaultRequireGroupApproval: formModel.defaultRequireGroupApproval,
+  };
+}
 
 const actionVisible = shallowRef(false);
 const actionLoading = shallowRef(false);
 const actionMode = shallowRef<ActionMode>("draft");
 const actionReason = shallowRef("");
 const groupImpact = shallowRef<AppConfig.GroupLimitImpact | null>(null);
+const applyPrivacyDefaultsToExisting = shallowRef(false);
 
 const actionTitle = computed(() => (actionMode.value === "draft" ? "保存系统限制草稿" : "发布系统限制配置"));
 
@@ -37,6 +58,7 @@ async function fetchPublished(): Promise<void> {
     const res = await getSystemLimitsApi();
     publishedLimits.value = res.data ?? null;
     applyPublished();
+    savedSnapshot.value = JSON.stringify(limitsPayload());
   } finally {
     loading.value = false;
   }
@@ -53,11 +75,14 @@ function applyPublished(): void {
   formModel.recallWindowSec = limits.recallWindowSec ?? 0;
   formModel.groupRetentionMaxMessages = limits.groupRetentionMaxMessages ?? 3000;
   formModel.groupRetentionHours = limits.groupRetentionHours ?? 72;
+  formModel.defaultRequireFriendApproval = limits.defaultRequireFriendApproval ?? true;
+  formModel.defaultRequireGroupApproval = limits.defaultRequireGroupApproval ?? true;
 }
 
 async function openAction(mode: ActionMode): Promise<void> {
   actionMode.value = mode;
   actionReason.value = "";
+  applyPrivacyDefaultsToExisting.value = false;
   actionVisible.value = true;
   groupImpact.value = null;
   if (mode === "publish" && formModel.maxGroupMembers) {
@@ -85,22 +110,17 @@ async function submitAction(): Promise<void> {
   actionLoading.value = true;
   try {
     if (actionMode.value === "draft") {
-      await putSystemLimitsDraftApi({
-        limits: {
-          maxFileSizeMb: formModel.maxFileSizeMb,
-          maxForwardTargets: formModel.maxForwardTargets,
-          maxGroupMembers: formModel.maxGroupMembers,
-          defaultGroupMaxMembers: formModel.defaultGroupMaxMembers,
-          maxNicknameLen: formModel.maxNicknameLen,
-          recallWindowSec: formModel.recallWindowSec,
-          groupRetentionMaxMessages: formModel.groupRetentionMaxMessages,
-          groupRetentionHours: formModel.groupRetentionHours,
-        },
+      await postSystemLimitsDraftApi({
+        limits: limitsPayload(),
         reason: actionReason.value.trim(),
       });
       ElMessage.success("保存草稿成功");
+      await fetchPublished();
     } else {
-      await postSystemLimitsPublishApi({ reason: actionReason.value.trim() });
+      await postSystemLimitsPublishApi({
+        reason: actionReason.value.trim(),
+        applyPrivacyDefaultsToExisting: applyPrivacyDefaultsToExisting.value,
+      });
       ElMessage.success("发布成功");
       await fetchPublished();
     }
@@ -128,14 +148,22 @@ onMounted(() => {
 <template>
   <div class="page">
     <div class="toolbar">
-      <el-button :disabled="loading || saving" @click="refresh">刷新已发布配置</el-button>
-      <el-button :disabled="loading" @click="applyPublished">重置为已发布</el-button>
+      <el-button :disabled="loading || saving" @click="refresh">刷新已保存草稿</el-button>
+      <el-button :disabled="loading" @click="applyPublished">重置为已保存草稿</el-button>
       <el-button type="primary" :disabled="loading" @click="openAction('draft')">保存草稿</el-button>
-      <el-button type="danger" :disabled="loading" @click="openAction('publish')">发布配置</el-button>
+      <el-button type="danger" :disabled="loading || hasUnsavedChanges" @click="openAction('publish')">发布配置</el-button>
+      <el-text v-if="hasUnsavedChanges && !loading" type="info">修改后请先保存草稿，再发布生效</el-text>
     </div>
 
     <el-card shadow="never">
       <el-form :model="formModel" label-width="170px">
+        <el-form-item label="新用户加好友需验证">
+          <el-switch v-model="formModel.defaultRequireFriendApproval" />
+        </el-form-item>
+        <el-form-item label="新用户入群需验证">
+          <el-switch v-model="formModel.defaultRequireGroupApproval" />
+          <el-text type="info" class="limit-tip">发布后用于新用户；同步现有用户请在发布时勾选</el-text>
+        </el-form-item>
         <el-form-item label="单文件大小上限 (MB)">
           <el-input-number v-model="formModel.maxFileSizeMb" :min="0" :max="999999" />
         </el-form-item>
@@ -175,6 +203,13 @@ onMounted(() => {
 		:title="`发布后 ${groupImpact.configuredAboveLimit} 个群的单群配置会被平台上限截断；${groupImpact.currentlyOverLimit} 个群将进入只出不进状态。`"
 	  />
       <el-form label-width="90px">
+        <el-form-item v-if="actionMode === 'publish'" label="隐私设置">
+          <div>
+            <el-checkbox v-model="applyPrivacyDefaultsToExisting">将这两项隐私默认值同步到所有现有用户</el-checkbox>
+            <p>加好友验证：{{ formModel.defaultRequireFriendApproval ? '开启' : '关闭' }}；入群验证：{{ formModel.defaultRequireGroupApproval ? '开启' : '关闭' }}</p>
+            <el-text v-if="applyPrivacyDefaultsToExisting" type="warning">将覆盖用户当前的两项隐私设置；未勾选时保留现有用户设置。</el-text>
+          </div>
+        </el-form-item>
         <el-form-item label="操作原因" required>
           <el-input
             v-model="actionReason"

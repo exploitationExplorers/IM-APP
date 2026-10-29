@@ -19,10 +19,20 @@ type UserRepo struct {
 	DB *pgxpool.Pool
 }
 
-// Active 同时覆盖注销后用户行被删除和账号被停用的情况。
+// Active 同时覆盖注销、停用，以及管理端「禁止登录」后旧 access token 继续调接口。
+// 登录限制到期（until 已过）后恢复为可访问，不要求先改回 banned=false。
 func (r *UserRepo) Active(ctx context.Context, userID string) (bool, error) {
 	var active bool
-	err := r.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1::uuid AND status='active' AND canceled_at IS NULL)`, userID).Scan(&active)
+	err := r.DB.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM users u
+			WHERE u.id=$1::uuid AND u.status='active' AND u.canceled_at IS NULL
+			  AND NOT EXISTS (
+				SELECT 1 FROM user_restrictions ur
+				WHERE ur.user_id=u.id AND ur.type='login' AND ur.banned
+				  AND (ur.until IS NULL OR ur.until > NOW())
+			  )
+		)`, userID).Scan(&active)
 	return active, err
 }
 

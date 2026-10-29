@@ -116,12 +116,19 @@ func (h *UserHandler) GetPrivacySettings(c *gin.Context) {
 
 func (h *UserHandler) UpdatePrivacySettings(c *gin.Context) {
 	uid := middleware.UserID(c)
-	var req models.PrivacySettings
-	if err := c.ShouldBindJSON(&req); err != nil {
+	// 指针区分“明确关闭”和字段缺失，空请求不能静默关闭所有验证。
+	var req struct {
+		RequireFriendApproval *bool `json:"requireFriendApproval"`
+		RequireGroupApproval  *bool `json:"requireGroupApproval"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.RequireFriendApproval == nil || req.RequireGroupApproval == nil {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	s, err := h.Svc.UpdatePrivacySettings(c.Request.Context(), uid, req)
+	s, err := h.Svc.UpdatePrivacySettings(c.Request.Context(), uid, models.PrivacySettings{
+		RequireFriendApproval: *req.RequireFriendApproval,
+		RequireGroupApproval:  *req.RequireGroupApproval,
+	})
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "更新隐私设置失败")
 		return
@@ -261,6 +268,10 @@ func (h *ContactHandler) CreateFriendRequest(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrInvalidFriendRequest):
 			response.Fail(c, http.StatusBadRequest, "好友申请参数错误")
+		case errors.Is(err, service.ErrFriendSourceRequired):
+			response.Fail(c, http.StatusForbidden, "请重新搜索聊天号或扫描二维码后添加好友")
+		case errors.Is(err, service.ErrFriendRateLimited):
+			response.Fail(c, http.StatusTooManyRequests, "好友申请过于频繁，请稍后再试")
 		case errors.Is(err, service.ErrSelfAction):
 			response.Fail(c, http.StatusBadRequest, "不能添加自己")
 		case errors.Is(err, service.ErrAlreadyFriend):
@@ -288,6 +299,10 @@ func (h *ContactHandler) CreateGroupFriendRequest(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrInvalidFriendRequest), errors.Is(err, service.ErrSelfAction):
 			response.Fail(c, http.StatusBadRequest, "好友申请参数错误")
+		case errors.Is(err, service.ErrFriendSourceRequired):
+			response.Fail(c, http.StatusForbidden, "请重新打开群成员资料后添加好友")
+		case errors.Is(err, service.ErrFriendRateLimited):
+			response.Fail(c, http.StatusTooManyRequests, "好友申请过于频繁，请稍后再试")
 		case errors.Is(err, service.ErrAlreadyFriend):
 			response.Fail(c, http.StatusConflict, "已经是好友")
 		case errors.Is(err, service.ErrNotFound):

@@ -1752,6 +1752,16 @@
       },
       "SystemLimits": {
         "properties": {
+          "defaultRequireFriendApproval": {
+            "description": "新用户加好友需验证，默认开启",
+            "type": "boolean",
+            "default": true
+          },
+          "defaultRequireGroupApproval": {
+            "description": "新用户邀请入群需验证，默认开启",
+            "type": "boolean",
+            "default": true
+          },
           "maxFileSizeMb": {
             "description": "单文件大小上限(MB)",
             "type": "integer"
@@ -9867,7 +9877,7 @@
     },
     "/api/admin/v1/system-limits": {
       "get": {
-        "description": "获取系统限制配置（已发布）。接口路径：/api/admin/v1/system-limits",
+        "description": "获取已保存的系统限制草稿。接口路径：/api/admin/v1/system-limits",
         "operationId": "GET_api_admin_v1_system-limits",
         "responses": {
           "200": {
@@ -9914,14 +9924,14 @@
             "description": "服务异常"
           }
         },
-        "summary": "获取系统限制配置（已发布）",
+        "summary": "获取已保存的系统限制草稿",
         "tags": [
           "APP配置"
         ]
       },
-      "put": {
+      "post": {
         "description": "保存系统限制草稿。接口路径：/api/admin/v1/system-limits",
-        "operationId": "PUT_api_admin_v1_system-limits",
+        "operationId": "POST_api_admin_v1_system-limits",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9929,6 +9939,14 @@
                 "properties": {
                   "limits": {
                     "properties": {
+                      "defaultRequireFriendApproval": {
+                        "description": "新用户加好友需验证，缺字段时保留原草稿值",
+                        "type": "boolean"
+                      },
+                      "defaultRequireGroupApproval": {
+                        "description": "新用户邀请入群需验证，缺字段时保留原草稿值",
+                        "type": "boolean"
+                      },
                       "maxFileSizeMb": {
                         "description": "单文件大小上限(MB)",
                         "type": "integer"
@@ -10035,6 +10053,11 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "applyPrivacyDefaultsToExisting": {
+                    "description": "显式设为 true 时，在发布事务中覆盖全部现有用户的两项隐私设置",
+                    "type": "boolean",
+                    "default": false
+                  },
                   "reason": {
                     "description": "操作原因",
                     "type": "string"
