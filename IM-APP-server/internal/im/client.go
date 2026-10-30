@@ -37,6 +37,16 @@ func UserIDFromBusinessID(businessUserID string) (string, error) {
 	return strings.ReplaceAll(id.String(), "-", ""), nil
 }
 
+// GroupConversationIDFromBusinessID maps a business group UUID to the
+// OpenIM group conversation ID used by the client conversation list.
+func GroupConversationIDFromBusinessID(businessGroupID string) (string, error) {
+	groupID, err := UserIDFromBusinessID(businessGroupID)
+	if err != nil {
+		return "", err
+	}
+	return "sg_" + groupID, nil
+}
+
 // BusinessIDFromUserID reverses the deterministic UUID mapping used by this
 // service. It rejects arbitrary OpenIM accounts that do not belong to the app.
 func BusinessIDFromUserID(openIMUserID string) (string, error) {

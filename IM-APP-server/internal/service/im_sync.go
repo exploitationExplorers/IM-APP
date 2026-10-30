@@ -145,9 +145,14 @@ func (w *IMSyncWorker) syncGroupJoinRequest(ctx context.Context, event repositor
 	if err != nil {
 		return err
 	}
+	groupConversationID, err := im.GroupConversationIDFromBusinessID(event.AggregateID)
+	if err != nil {
+		return fmt.Errorf("build group conversation id: %w", err)
+	}
+	card.GroupConversationID = groupConversationID
 	sender := GroupService{IM: w.Client, Users: w.Users}
 	for _, recipientID := range card.RecipientIDs {
-		if err := sender.sendGroupJoinRequestCard(ctx, recipientID, card); err != nil {
+		if err := sender.sendGroupJoinRequestNotification(ctx, recipientID, card); err != nil {
 			return err
 		}
 	}

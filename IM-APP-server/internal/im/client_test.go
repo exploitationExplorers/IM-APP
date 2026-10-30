@@ -161,6 +161,16 @@ func TestUserIDFromBusinessID(t *testing.T) {
 	}
 }
 
+func TestGroupConversationIDFromBusinessID(t *testing.T) {
+	got, err := GroupConversationIDFromBusinessID("10223cf6-59ec-4556-8c09-141915e190ed")
+	if err != nil {
+		t.Fatalf("GroupConversationIDFromBusinessID() error = %v", err)
+	}
+	if got != "sg_10223cf659ec45568c09141915e190ed" {
+		t.Fatalf("GroupConversationIDFromBusinessID() = %q", got)
+	}
+}
+
 func TestSendBusinessNotificationUsesAdminToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
