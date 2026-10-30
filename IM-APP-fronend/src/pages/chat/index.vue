@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onHide, onShow, onUnload } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ConversationItem from '@/components/ConversationItem.vue'
 import ImSwipeActionItem from '@/components/ImSwipeActionItem.vue'
@@ -802,10 +802,31 @@ async function consumePendingDesktopChat() {
   }
 }
 
+const JOIN_REQUEST_POLL_MS = 15_000
+let joinRequestPollTimer: ReturnType<typeof setInterval> | undefined
+
+function stopJoinRequestPolling() {
+  if (joinRequestPollTimer !== undefined) {
+    clearInterval(joinRequestPollTimer)
+    joinRequestPollTimer = undefined
+  }
+}
+
+function startJoinRequestPolling() {
+  stopJoinRequestPolling()
+  void chatStore.reconcileJoinRequestHighlights()
+  joinRequestPollTimer = setInterval(() => {
+    void chatStore.reconcileJoinRequestHighlights()
+  }, JOIN_REQUEST_POLL_MS)
+}
+
 onShow(() => {
   void consumePendingDesktopChat()
-  void chatStore.reconcileJoinRequestHighlights()
+  startJoinRequestPolling()
 })
+
+onHide(stopJoinRequestPolling)
+onUnload(stopJoinRequestPolling)
 
 watch(
   () => contactStore.pendingDesktopChat?.token,
