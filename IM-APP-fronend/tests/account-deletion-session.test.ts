@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   logoutIM: vi.fn(),
   clearCache: vi.fn(),
   reset: vi.fn(),
+  clearMassHistory: vi.fn(),
 }))
 
 vi.mock('@/api/auth', () => ({
@@ -31,7 +32,9 @@ vi.mock('@/utils/perf', () => ({ perfColdStartDone: vi.fn() }))
 vi.mock('@/stores/chat', () => ({ useChatStore: () => ({ reset: mocks.reset }) }))
 vi.mock('@/stores/contact', () => ({ useContactStore: () => ({ reset: mocks.reset }) }))
 vi.mock('@/stores/group', () => ({ useGroupStore: () => ({ reset: mocks.reset }) }))
-vi.mock('@/stores/massSend', () => ({ useMassSendStore: () => ({ resetAll: mocks.reset }) }))
+vi.mock('@/stores/massSend', () => ({
+  useMassSendStore: () => ({ resetAll: mocks.reset, clearHistory: mocks.clearMassHistory }),
+}))
 vi.mock('@/stores/chatSettings', () => ({ useChatSettingsStore: vi.fn() }))
 
 import { useUserStore } from '@/stores/user'
