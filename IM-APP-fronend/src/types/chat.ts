@@ -129,6 +129,8 @@ export interface Conversation {
   highlightTags?: string[]
   /** OpenIM ConversationItem.groupAtType：0 无 / 1 @我 / 2 @所有人 / 3 两者 / 4 有新公告 */
   groupAtType?: number
+  /** 当前管理员/群主收到、尚未进入群聊的入群申请提醒 */
+  joinRequestPending?: boolean
   pinned?: boolean
   /** 聊天页顶部「置顶消息」横幅 */
   pinnedMessage?: ConversationPinnedMessage | null
