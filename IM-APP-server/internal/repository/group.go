@@ -1611,13 +1611,14 @@ type PendingGroupInviteCard struct {
 // PendingGroupJoinRequestNotification is the durable data needed to notify group managers
 // that a join request is waiting for review.
 type PendingGroupJoinRequestNotification struct {
-	RequestID       string
-	GroupPublicID   string
-	GroupName       string
-	ApplicantID     string
-	ApplicantName   string
-	ApplicantAvatar string
-	RecipientIDs    []string
+	RequestID           string
+	GroupPublicID       string
+	GroupConversationID string
+	GroupName           string
+	ApplicantID         string
+	ApplicantName       string
+	ApplicantAvatar     string
+	RecipientIDs        []string
 }
 
 func groupInviteRequiresApproval(ctx context.Context, q interface {

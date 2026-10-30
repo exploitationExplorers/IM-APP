@@ -12,40 +12,38 @@ import (
 	"im-app-server/internal/repository"
 )
 
-func TestSendGroupJoinRequestCardUsesAdminAndStableMessageID(t *testing.T) {
+func TestSendGroupJoinRequestNotificationUsesBusinessNotification(t *testing.T) {
 	var sends int
-	var clientMsgIDs []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/auth/get_admin_token":
 			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":"3600"}}`))
-		case "/msg/send_msg":
-			if r.Header.Get("token") != "admin-token" {
-				t.Fatalf("missing admin token")
-			}
+		case "/msg/send_business_notification":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body["sendID"] != "imAdmin" || body["recvID"] != "22222222222242228222222222222222" {
-				t.Fatalf("unexpected send target: %#v", body)
+			if body["sendUserID"] != "imAdmin" ||
+				body["recvUserID"] != "22222222222242228222222222222222" ||
+				body["key"] != "group_join_request" ||
+				body["reliabilityLevel"] != float64(2) {
+				t.Fatalf("unexpected business notification body: %#v", body)
 			}
-			content := body["content"].(map[string]any)
 			var payload map[string]any
-			if err := json.Unmarshal([]byte(content["data"].(string)), &payload); err != nil {
+			if err := json.Unmarshal([]byte(body["data"].(string)), &payload); err != nil {
 				t.Fatal(err)
 			}
-			if payload["businessKey"] != "group_join_request" ||
-				payload["requestId"] != "request-1" ||
+			if payload["requestId"] != "request-1" ||
 				payload["groupId"] != "qun_review" ||
+				payload["groupConversationId"] != "sg_22222222222242228222222222222222" ||
 				payload["applicantNickname"] != "申请人" {
 				t.Fatalf("unexpected notification payload: %#v", payload)
 			}
-			clientMsgIDs = append(clientMsgIDs, body["clientMsgID"].(string))
 			sends++
-			_, _ = w.Write([]byte(`{"errCode":0,"data":{"serverMsgID":"server-1","clientMsgID":"` +
-				body["clientMsgID"].(string) + `"}}`))
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"serverMsgID":"server-1","clientMsgID":"client-1"}}`))
+		case "/msg/send_msg":
+			t.Fatal("join request must not create a C2C conversation")
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -57,24 +55,19 @@ func TestSendGroupJoinRequestCardUsesAdminAndStableMessageID(t *testing.T) {
 	})
 	service := &GroupService{IM: client}
 	card := repository.PendingGroupJoinRequestNotification{
-		RequestID:       "request-1",
-		GroupPublicID:   "qun_review",
-		GroupName:       "审核群",
-		ApplicantID:     "33333333-3333-4333-8333-333333333333",
-		ApplicantName:   "申请人",
-		ApplicantAvatar: "https://cdn.example/avatar.png",
+		RequestID:           "request-1",
+		GroupPublicID:       "qun_review",
+		GroupConversationID: "sg_22222222222242228222222222222222",
+		GroupName:           "审核群",
+		ApplicantID:         "33333333-3333-4333-8333-333333333333",
+		ApplicantName:       "申请人",
+		ApplicantAvatar:     "https://cdn.example/avatar.png",
 	}
 	recipient := "22222222-2222-4222-8222-222222222222"
-	if err := service.sendGroupJoinRequestCard(context.Background(), recipient, card); err != nil {
+	if err := service.sendGroupJoinRequestNotification(context.Background(), recipient, card); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.sendGroupJoinRequestCard(context.Background(), recipient, card); err != nil {
-		t.Fatal(err)
-	}
-	if sends != 2 {
-		t.Fatalf("send calls=%d, want 2", sends)
-	}
-	if len(clientMsgIDs) != 2 || clientMsgIDs[0] == "" || clientMsgIDs[0] != clientMsgIDs[1] {
-		t.Fatalf("clientMsgID must be stable across retries: %#v", clientMsgIDs)
+	if sends != 1 {
+		t.Fatalf("send calls=%d, want 1", sends)
 	}
 }
