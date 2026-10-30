@@ -624,6 +624,24 @@ func (s *GroupService) ListJoinRequests(ctx context.Context, groupID, uid string
 	return s.Groups.ListJoinRequests(ctx, internalID, uid)
 }
 
+func (s *GroupService) PendingJoinRequestGroups(
+	ctx context.Context,
+	uid string,
+) ([]models.PendingGroupJoinRequestGroup, error) {
+	items, err := s.Groups.PendingJoinRequestGroups(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		conversationID, err := im.GroupConversationIDFromBusinessID(items[i].GroupID)
+		if err != nil {
+			return nil, err
+		}
+		items[i].GroupConversationID = conversationID
+	}
+	return items, nil
+}
+
 func (s *GroupService) ApproveJoinRequest(ctx context.Context, groupID, uid, requestID string) (models.GroupInfo, error) {
 	internalID, err := s.internalGroupID(ctx, groupID)
 	if err != nil {

@@ -307,6 +307,31 @@ func TestGroupPrivacyPostgresIntegration(t *testing.T) {
 			t.Fatalf("unexpected notification: %#v", notification)
 		}
 	})
+
+	t.Run("pending_join_request_groups_are_scoped_to_managers", func(t *testing.T) {
+		pool := groupPrivacyPool(t)
+		repo := &repository.GroupRepo{DB: pool}
+		ctx := context.Background()
+		groupID, _ := createPendingJoinRequest(t, pool, true)
+
+		groups, err := repo.PendingJoinRequestGroups(ctx, groupPrivacyOwner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(groups) != 1 || groups[0].GroupID != groupID ||
+			groups[0].GroupPublicID != "qun_review" || groups[0].Count != 1 ||
+			groups[0].LatestCreatedAt == "" {
+			t.Fatalf("unexpected pending groups: %#v", groups)
+		}
+
+		other, err := repo.PendingJoinRequestGroups(ctx, groupPrivacyFirst)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(other) != 0 {
+			t.Fatalf("non-manager must not receive pending groups: %#v", other)
+		}
+	})
 }
 
 func createPendingJoinRequest(t *testing.T, pool *pgxpool.Pool, withRequest bool) (string, string) {

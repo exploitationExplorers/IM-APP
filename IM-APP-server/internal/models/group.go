@@ -143,6 +143,15 @@ type GroupJoinRequestItem struct {
 	Applicant UserSummary `json:"applicant"`
 }
 
+type PendingGroupJoinRequestGroup struct {
+	GroupID             string `json:"-"`
+	GroupPublicID       string `json:"groupId"`
+	GroupConversationID string `json:"groupConversationId"`
+	GroupName           string `json:"groupName"`
+	Count               int    `json:"count"`
+	LatestCreatedAt     string `json:"latestCreatedAt"`
+}
+
 type JoinGroupResult struct {
 	Group GroupInfo `json:"group"`
 	Role  string    `json:"role,omitempty"`
