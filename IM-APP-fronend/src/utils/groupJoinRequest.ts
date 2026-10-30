@@ -16,7 +16,9 @@ export function parseGroupJoinRequestPayload(raw: unknown): GroupJoinRequestPayl
   const obj = parseObject(raw)
   if (!obj) return null
   const businessKey = String(pickField(obj, 'businessKey') ?? '')
-  if (businessKey !== 'group_join_request') return null
+  // toChatMessage 会把原始 customElem.data 归一化成 message.content，归一化结果不再携带 businessKey。
+  // 因此这里既要接受原始 payload，也要接受已经归一化的 payload。
+  if (businessKey && businessKey !== 'group_join_request') return null
   const requestId = String(pickField(obj, 'requestId') ?? '').trim()
   const groupId = String(pickField(obj, 'groupId') ?? '').trim()
   if (!requestId || !groupId) return null
