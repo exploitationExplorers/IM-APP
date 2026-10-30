@@ -70,6 +70,14 @@ export interface GroupJoinRequestItem {
   }
 }
 
+export interface PendingGroupJoinRequestGroup {
+  groupId: string
+  groupConversationId: string
+  groupName: string
+  count: number
+  latestCreatedAt: string
+}
+
 export interface GroupQRCodeResolveResult {
   group: GroupInfo
   joined: boolean

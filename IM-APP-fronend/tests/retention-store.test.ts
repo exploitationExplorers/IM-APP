@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   resolveSeq: vi.fn(),
   clearHistory: vi.fn(),
   markRead: vi.fn(),
+  pendingGroups: vi.fn(),
 }))
 vi.mock('@/utils/openim', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/utils/openim')>()),
@@ -31,6 +32,10 @@ vi.mock('openim-uniapp-polyfill', async () => ({
 vi.mock('@/utils/platform', () => ({ isApp: () => true, isH5: () => false, isAndroid: () => false }))
 vi.mock('@/utils/request', () => ({ getToken: () => '' }))
 vi.mock('@/api/groupRetention', () => ({ fetchGroupRetentionStates: mocks.fetch }))
+vi.mock('@/api/group', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/group')>()),
+  fetchPendingJoinRequestGroups: mocks.pendingGroups,
+}))
 vi.mock('@/api/contact', () => ({ fetchBlacklist: vi.fn(async () => ({ items: [] })) }))
 vi.mock('@/stores/contact', () => ({ useContactStore: () => ({ remarkByUserId: {}, remarkOf: () => '', ensureRemarkIndex: async () => {} }) }))
 vi.mock('@/stores/chatSettings', () => ({ useChatSettingsStore: () => ({ noDisturb: false, sound: true, vibration: false }) }))
@@ -65,8 +70,13 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.resolveSeq.mockResolvedValue({ seq: 0 })
   mocks.markRead.mockResolvedValue(undefined)
+  mocks.pendingGroups.mockResolvedValue([])
   mocks.events.clear()
-  vi.stubGlobal('uni', { getStorageSync: () => undefined, setStorageSync: vi.fn() })
+  const storage = new Map<string, unknown>()
+  vi.stubGlobal('uni', {
+    getStorageSync: (key: string) => storage.get(key),
+    setStorageSync: (key: string, value: unknown) => storage.set(key, value),
+  })
   setActivePinia(createPinia())
   groupRetention.setOwner('')
   groupRetention.setOwner('retention-store-owner')
@@ -109,6 +119,35 @@ describe('real Pinia chat store + frozen native SDK events + durable retention',
     })
 
     await store.markAsRead(b)
+    expect(store.conversations.find((c) => c.id === b)).toMatchObject({
+      joinRequestPending: false,
+      highlightTags: [],
+    })
+  })
+
+  it('reconciles pending join requests that were missed by realtime events', async () => {
+    store.conversations = [{
+      ...conversation(b),
+      groupAtType: 0,
+      highlightTags: [],
+      joinRequestPending: false,
+    }]
+    mocks.pendingGroups.mockResolvedValue([{
+      groupId: 'qun_review',
+      groupConversationId: b,
+      groupName: '审核群',
+      count: 1,
+      latestCreatedAt: '2026-10-30T12:46:25Z',
+    }])
+
+    await store.reconcileJoinRequestHighlights()
+    expect(store.conversations.find((c) => c.id === b)).toMatchObject({
+      joinRequestPending: true,
+      highlightTags: ['[有新的进群申请]'],
+    })
+
+    await store.markAsRead(b)
+    await store.reconcileJoinRequestHighlights()
     expect(store.conversations.find((c) => c.id === b)).toMatchObject({
       joinRequestPending: false,
       highlightTags: [],
