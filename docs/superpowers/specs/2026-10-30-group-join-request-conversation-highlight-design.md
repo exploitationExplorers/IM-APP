@@ -87,13 +87,13 @@ CreateJoinRequest
 ### 后端
 
 1. `PendingGroupJoinRequestNotification` 增加 `GroupConversationID`。
-2. 查询 `groups.conversation_id`，使用 `COALESCE(g.conversation_id::text, '')`。
+2. 该字段不读取 `groups.conversation_id`（这是旧版业务会话 UUID），而是由 `event.AggregateID` 经 `im.UserIDFromBusinessID` 转成 OpenIM 群 ID 后拼接为 `sg_<openimGroupID>`。
 3. `sendGroupJoinRequestCard` 重命名为 `sendGroupJoinRequestNotification`，改为发送业务通知：
    - 逐个别发送给有效群主/管理员。
    - 使用 `SendBusinessNotification(..., guaranteed=true)`。
    - 不再调用 `SendCustomC2CMessage`。
 4. `IMSyncWorker.syncGroupJoinRequest` 保持事件消费逻辑，只调整发送方法。
-5. 如果 `GroupConversationID` 为空，返回错误并交给 outbox 重试；不把通知挂到错误的群。
+5. 如果 `GroupConversationID` 无法生成，返回错误并交给 outbox 重试；不把通知挂到错误的群。
 
 ### 前端
 
