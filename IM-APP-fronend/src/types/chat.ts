@@ -32,6 +32,7 @@ export interface GroupInvitePayload {
 export interface GroupJoinRequestPayload {
   requestId: string
   groupId: string
+  groupConversationId?: string
   groupName: string
   applicantId: string
   applicantNickname: string

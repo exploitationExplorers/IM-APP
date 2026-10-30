@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { parseGroupJoinRequestPayload } from '@/utils/groupJoinRequest'
+import {
+  parseGroupJoinRequestBusinessNotification,
+  parseGroupJoinRequestPayload,
+} from '@/utils/groupJoinRequest'
 
 describe('parseGroupJoinRequestPayload', () => {
   it('解析 H5 custom message 的 camelCase 通知', () => {
@@ -71,6 +74,38 @@ describe('parseGroupJoinRequestPayload', () => {
       parseGroupJoinRequestPayload({
         businessKey: 'group_join_request',
         groupId: 'qun_review',
+      }),
+    ).toBeNull()
+  })
+
+  it('解析业务通知中的群会话 ID', () => {
+    expect(
+      parseGroupJoinRequestBusinessNotification({
+        key: 'group_join_request',
+        data: JSON.stringify({
+          requestId: 'request-4',
+          groupId: 'qun_review',
+          groupConversationId: 'sg_22222222222242228222222222222222',
+          groupName: '审核群',
+          applicantId: 'user-4',
+          applicantNickname: '申请人D',
+          applicantAvatar: '',
+        }),
+      }),
+    ).toMatchObject({
+      requestId: 'request-4',
+      groupConversationId: 'sg_22222222222242228222222222222222',
+    })
+  })
+
+  it('拒绝缺少群会话 ID 的业务通知', () => {
+    expect(
+      parseGroupJoinRequestBusinessNotification({
+        key: 'group_join_request',
+        data: JSON.stringify({
+          requestId: 'request-5',
+          groupId: 'qun_review',
+        }),
       }),
     ).toBeNull()
   })
