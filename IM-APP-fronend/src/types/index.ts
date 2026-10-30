@@ -52,6 +52,7 @@ export type {
   GroupPermissions,
   GroupSettingsInput,
   GroupJoinRequestItem,
+  PendingGroupJoinRequestGroup,
   GroupQRCodeResolveResult,
   JoinGroupByQRCodeResult,
   GroupMemberMuteResult,

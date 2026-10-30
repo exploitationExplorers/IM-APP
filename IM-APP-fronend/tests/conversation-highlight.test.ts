@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   hasPendingJoinRequest,
   isLegacyAdminJoinRequestConversation,
+  joinRequestSeenAt,
+  markJoinRequestSeen,
+  replacePendingJoinRequests,
   setPendingJoinRequest,
 } from '@/utils/conversation-highlight'
 
@@ -54,5 +57,18 @@ describe('join request conversation highlight', () => {
         lastMessage: '其他系统消息',
       }),
     ).toBe(false)
+  })
+
+  it('replaces pending state with the server snapshot', () => {
+    setPendingJoinRequest('user-a', 'sg_old', true)
+    replacePendingJoinRequests('user-a', ['sg_new'])
+    expect(hasPendingJoinRequest('user-a', 'sg_old')).toBe(false)
+    expect(hasPendingJoinRequest('user-a', 'sg_new')).toBe(true)
+  })
+
+  it('persists the last seen time per conversation', () => {
+    markJoinRequestSeen('user-a', 'sg_group', Date.parse('2026-10-30T12:00:00Z'))
+    expect(joinRequestSeenAt('user-a', 'sg_group')).toBe(Date.parse('2026-10-30T12:00:00Z'))
+    expect(joinRequestSeenAt('user-b', 'sg_group')).toBe(0)
   })
 })
