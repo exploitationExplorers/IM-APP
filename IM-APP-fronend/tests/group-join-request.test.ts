@@ -41,6 +41,24 @@ describe('parseGroupJoinRequestPayload', () => {
     })
   })
 
+  it('兼容归一化后缺少 businessKey 的消息内容', () => {
+    expect(
+      parseGroupJoinRequestPayload({
+        requestId: 'request-3',
+        groupId: 'qun_review',
+        groupName: '审核群',
+        applicantId: 'user-3',
+        applicantNickname: '申请人C',
+        applicantAvatar: '',
+      }),
+    ).toMatchObject({
+      requestId: 'request-3',
+      groupId: 'qun_review',
+      applicantId: 'user-3',
+      applicantNickname: '申请人C',
+    })
+  })
+
   it('拒绝其他业务消息和缺少关键字段的 payload', () => {
     expect(
       parseGroupJoinRequestPayload({
