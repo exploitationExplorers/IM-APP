@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, watchEffect } from 'vue'
+import { ref, computed, onMounted, watch, watchEffect } from 'vue'
 import { onHide, onShow, onUnload } from '@dcloudio/uni-app'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import ConversationItem from '@/components/ConversationItem.vue'
@@ -802,7 +802,7 @@ async function consumePendingDesktopChat() {
   }
 }
 
-const JOIN_REQUEST_POLL_MS = 15_000
+const JOIN_REQUEST_POLL_MS = 5_000
 let joinRequestPollTimer: ReturnType<typeof setInterval> | undefined
 
 function stopJoinRequestPolling() {
@@ -825,6 +825,7 @@ onShow(() => {
   startJoinRequestPolling()
 })
 
+onMounted(startJoinRequestPolling)
 onHide(stopJoinRequestPolling)
 onUnload(stopJoinRequestPolling)
 
