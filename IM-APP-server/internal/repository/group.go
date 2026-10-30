@@ -2085,6 +2085,34 @@ func (r *GroupRepo) ListJoinRequests(ctx context.Context, groupID, uid string) (
 	return list, nil
 }
 
+func (r *GroupRepo) PendingJoinRequestGroups(ctx context.Context, uid string) ([]models.PendingGroupJoinRequestGroup, error) {
+	rows, err := r.DB.Query(ctx, `
+		SELECT g.id::text, g.public_id, g.name, COUNT(*), MAX(jr.created_at)
+		FROM group_join_requests jr
+		JOIN groups g ON g.id=jr.group_id AND g.status='active'
+		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$1::uuid
+		  AND gm.role IN ('owner','admin') AND COALESCE(gm.status,'active')='active'
+		JOIN users u ON u.id=$1::uuid AND COALESCE(u.status,'active')='active'
+		WHERE jr.status='pending'
+		GROUP BY g.id, g.public_id, g.name
+		ORDER BY COUNT(*) DESC, g.name`, uid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]models.PendingGroupJoinRequestGroup, 0)
+	for rows.Next() {
+		var item models.PendingGroupJoinRequestGroup
+		var latest time.Time
+		if err := rows.Scan(&item.GroupID, &item.GroupPublicID, &item.GroupName, &item.Count, &latest); err != nil {
+			return nil, err
+		}
+		item.LatestCreatedAt = latest.UTC().Format(time.RFC3339)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *GroupRepo) ApproveJoinRequest(ctx context.Context, groupID, uid, requestID string) (models.GroupInfo, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
