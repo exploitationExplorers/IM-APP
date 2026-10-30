@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -552,15 +551,16 @@ func (s *GroupService) sendGroupInviteCard(ctx context.Context, inviterID string
 	return err
 }
 
-func (s *GroupService) sendGroupJoinRequestCard(
-	ctx context.Context, recipientID string, card repository.PendingGroupJoinRequestNotification,
+func (s *GroupService) sendGroupJoinRequestNotification(
+	ctx context.Context,
+	recipientID string,
+	card repository.PendingGroupJoinRequestNotification,
 ) error {
 	if s.IM == nil || !s.IM.Available() {
 		return errors.New("openim unavailable")
 	}
-	sendID := s.IM.AdminUserID()
-	if sendID == "" {
-		return errors.New("openim admin user unavailable")
+	if strings.TrimSpace(card.GroupConversationID) == "" {
+		return errors.New("group conversation id is required")
 	}
 	recvID, err := im.UserIDFromBusinessID(recipientID)
 	if err != nil {
@@ -578,30 +578,24 @@ func (s *GroupService) sendGroupJoinRequestCard(
 		}
 	}
 	payload, err := json.Marshal(map[string]any{
-		"businessKey":       "group_join_request",
-		"requestId":         card.RequestID,
-		"groupId":           card.GroupPublicID,
-		"groupName":         card.GroupName,
-		"applicantId":       card.ApplicantID,
-		"applicantNickname": card.ApplicantName,
-		"applicantAvatar":   card.ApplicantAvatar,
+		"requestId":           card.RequestID,
+		"groupId":             card.GroupPublicID,
+		"groupConversationId": card.GroupConversationID,
+		"groupName":           card.GroupName,
+		"applicantId":         card.ApplicantID,
+		"applicantNickname":   card.ApplicantName,
+		"applicantAvatar":     card.ApplicantAvatar,
 	})
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256([]byte(card.RequestID + ":" + recipientID))
-	clientMsgID := fmt.Sprintf("gjr_%x", sum)
-	if len(clientMsgID) > 64 {
-		clientMsgID = clientMsgID[:64]
-	}
-	_, err = s.IM.SendCustomC2CMessage(
+	_, err = s.IM.SendBusinessNotification(
 		ctx,
-		sendID,
 		recvID,
-		clientMsgID,
-		string(payload),
-		"入群申请",
+		"",
 		"group_join_request",
+		string(payload),
+		true,
 	)
 	return err
 }
