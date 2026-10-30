@@ -2,6 +2,19 @@ export const JOIN_REQUEST_HIGHLIGHT_TAG = '[有新的进群申请]'
 
 const PREFIX = 'im_join_request_pending_'
 
+export function isLegacyAdminJoinRequestConversation(conv: {
+  type: 'private' | 'group'
+  id: string
+  peerUserId?: string
+  lastMessage: string
+}): boolean {
+  return (
+    conv.type === 'private' &&
+    (conv.peerUserId === 'imAdmin' || conv.id.endsWith('_imAdmin')) &&
+    conv.lastMessage === '[入群申请]'
+  )
+}
+
 function keyOf(userId: string): string {
   return `${PREFIX}${userId || 'anon'}`
 }

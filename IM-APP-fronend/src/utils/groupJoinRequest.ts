@@ -42,5 +42,5 @@ export function parseGroupJoinRequestBusinessNotification(
   const key = String(pickField(obj, 'key') ?? '')
   if (key !== 'group_join_request') return null
   const payload = parseGroupJoinRequestPayload(pickField(obj, 'data'))
-  return payload?.groupConversationId ? payload : null
+  return payload?.groupConversationId?.startsWith('sg_') ? payload : null
 }

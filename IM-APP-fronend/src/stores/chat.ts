@@ -52,6 +52,12 @@ import {
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { mergeVideoContent } from '@/utils/chatMedia'
 import { groupRetention } from '@/utils/groupRetention'
+import { parseGroupJoinRequestBusinessNotification } from '@/utils/groupJoinRequest'
+import {
+  hasPendingJoinRequest,
+  isLegacyAdminJoinRequestConversation,
+  setPendingJoinRequest,
+} from '@/utils/conversation-highlight'
 import {
   isIMNotification,
   isGroupAnnouncementNotice,
@@ -450,10 +456,12 @@ export const useChatStore = defineStore('chat', () => {
     writeUnreadAnnouncement(announcementOwnerId(), conversationId, unread)
     const conv = conversations.value.find((c) => c.id === conversationId)
     if (!conv) return
+    const joinRequestPending = hasPendingJoinRequest(imUserId.value, conversationId)
     patchConversation(conversationId, {
       highlightTags: highlightTagsOf(
         effectiveGroupAtType(conv.groupAtType, conv.unreadCount),
         unread,
+        joinRequestPending,
       ),
     })
   }
@@ -466,9 +474,15 @@ export const useChatStore = defineStore('chat', () => {
     if (stored === undefined && conv.groupAtType === GroupAtType.AtGroupNotice) {
       writeUnreadAnnouncement(announcementOwnerId(), conv.id, true)
     }
+    const joinRequestPending = hasPendingJoinRequest(imUserId.value, conv.id)
     const next = {
       ...conv,
-      highlightTags: highlightTagsOf(effectiveGroupAtType(conv.groupAtType, conv.unreadCount), unread),
+      joinRequestPending,
+      highlightTags: highlightTagsOf(
+        effectiveGroupAtType(conv.groupAtType, conv.unreadCount),
+        unread,
+        joinRequestPending,
+      ),
     }
     if (next.lastMessage) {
       next.lastMessage = replaceOpenIMAdminLabel(next.lastMessage)
@@ -757,6 +771,17 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
     }
+    const joinRequestPending = hasPendingJoinRequest(imUserId.value, merged.id)
+    const hasUnreadAnn = unreadAnnouncementState(announcementOwnerId(), merged.id) === true
+    merged = {
+      ...merged,
+      joinRequestPending,
+      highlightTags: highlightTagsOf(
+        effectiveGroupAtType(merged.groupAtType, merged.unreadCount),
+        hasUnreadAnn,
+        joinRequestPending,
+      ),
+    }
     return sanitizeRetentionPreview(merged)
   }
 
@@ -813,11 +838,44 @@ export const useChatStore = defineStore('chat', () => {
     if (changed) messagesMap.value = { ...messagesMap.value, ...next }
   }
 
+  function applyJoinRequestNotification(raw: unknown) {
+    const payload = parseGroupJoinRequestBusinessNotification(raw)
+    const conversationId = payload?.groupConversationId
+    if (!conversationId) return
+    if (conversationId === activeConversationId) {
+      setPendingJoinRequest(imUserId.value, conversationId, false)
+      const conv = conversations.value.find((c) => c.id === conversationId)
+      if (conv) {
+        patchConversation(conversationId, {
+          joinRequestPending: false,
+          highlightTags: highlightTagsOf(
+            effectiveGroupAtType(conv.groupAtType, conv.unreadCount),
+            unreadAnnouncementState(announcementOwnerId(), conversationId) === true,
+            false,
+          ),
+        })
+      }
+      return
+    }
+    setPendingJoinRequest(imUserId.value, conversationId, true)
+    const conv = conversations.value.find((c) => c.id === conversationId)
+    if (!conv || conv.type !== 'group') return
+    patchConversation(conversationId, {
+      joinRequestPending: true,
+      highlightTags: highlightTagsOf(
+        effectiveGroupAtType(conv.groupAtType, conv.unreadCount),
+        unreadAnnouncementState(announcementOwnerId(), conversationId) === true,
+        true,
+      ),
+    })
+  }
+
   function subscribeRealtime() {
     unsubscribeRealtime()
     unsubscribers = [
       onIMEvent<MessageItem>(IMEvents.OnRecvNewMessage, ingestIncoming),
       onIMEvent<MessageItem[]>(IMEvents.OnRecvNewMessages, ingestIncoming),
+      onIMEvent<unknown>(IMEvents.OnRecvCustomBusinessMessage, applyJoinRequestNotification),
       onIMEvent<ConversationItem[]>(IMEvents.OnConversationChanged, upsertConversations),
       onIMEvent<ConversationItem[]>(IMEvents.OnNewConversation, upsertConversations),
       onIMEvent<RevokedNotice>(
@@ -892,13 +950,22 @@ export const useChatStore = defineStore('chat', () => {
       await reconcileExitedGroups(list)
       await groupRetention.sync(list.map((item) => String(item.conversationID || (item as unknown as Record<string, unknown>).ConversationID || '')))
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
+      const mappedConversations = list.map((item) => {
+        const mapped = decorateConversation(toConversation(item))
+        const prev = prevById.get(mapped.id)
+        return prev ? keepNewerPreview(prev, mapped) : mapped
+      })
+      const legacyAdminJoinRequestIds = mappedConversations
+        .filter(isLegacyAdminJoinRequestConversation)
+        .map((conv) => conv.id)
+      if (legacyAdminJoinRequestIds.length) {
+        void Promise.all(
+          legacyAdminJoinRequestIds.map((id) => hideConversation(id).catch(() => undefined)),
+        )
+      }
       conversations.value = sortConversations(
-        list
-          .map((item) => {
-            const mapped = decorateConversation(toConversation(item))
-            const prev = prevById.get(mapped.id)
-            return prev ? keepNewerPreview(prev, mapped) : mapped
-          })
+        mappedConversations
+          .filter((conv) => !legacyAdminJoinRequestIds.includes(conv.id))
           .filter(shouldShowConversation),
       )
       refreshOnlineStatus().catch(() => undefined)
@@ -1277,18 +1344,22 @@ export const useChatStore = defineStore('chat', () => {
     // 进房即视为看过公告提醒，避免会话行 [有新公告] 一直挂着
     if (conv.type === 'group') {
       writeUnreadAnnouncement(announcementOwnerId(), conversationId, false)
+      setPendingJoinRequest(imUserId.value, conversationId, false)
     }
     // 对齐微信：进入群聊并标记已读后，会话列表不再保留 [有人@我] / [有新公告]
     if (conv.type === 'group' && isAtMeType(conv.groupAtType)) {
       patchConversation(conversationId, {
         groupAtType: GroupAtType.AtNormal,
-        highlightTags: highlightTagsOf(GroupAtType.AtNormal, false),
+        joinRequestPending: false,
+        highlightTags: highlightTagsOf(GroupAtType.AtNormal, false, false),
       })
       await resetConversationGroupAtType(conversationId).catch(() => undefined)
     } else if (conv.type === 'group') {
       patchConversation(conversationId, {
+        joinRequestPending: false,
         highlightTags: highlightTagsOf(
           effectiveGroupAtType(conv.groupAtType, 0),
+          false,
           false,
         ),
       })
