@@ -3,6 +3,7 @@ import { parseQrcodePayload } from '@/utils/qrcode'
 import type {
   GroupInfo,
   GroupJoinRequestItem,
+  PendingGroupJoinRequestGroup,
   GroupMember,
   GroupMemberPage,
   GroupMemberMuteResult,
@@ -140,6 +141,13 @@ export async function updateGroupSettings(groupId: string, input: GroupSettingsI
 export async function fetchJoinRequests(groupId: string): Promise<GroupJoinRequestItem[]> {
   return request<GroupJoinRequestItem[]>({
     url: `/groups/${groupId}/join-requests`,
+    method: 'GET',
+  })
+}
+
+export async function fetchPendingJoinRequestGroups(): Promise<PendingGroupJoinRequestGroup[]> {
+  return request<PendingGroupJoinRequestGroup[]>({
+    url: '/groups/pending-join-requests',
     method: 'GET',
   })
 }

@@ -4,6 +4,7 @@ import { IMEvents, MessageType, OnlineState, SessionType } from 'openim-uniapp-p
 import type { ConversationItem, MessageItem } from 'openim-uniapp-polyfill'
 import type { ChatMessage, Conversation, ConversationPinnedMessage } from '@/types'
 import { fetchBlacklist } from '@/api/contact'
+import { fetchPendingJoinRequestGroups } from '@/api/group'
 import { recallMessage, resolveIMGroup, resolveIMGroupByIM, resolveIMPeer } from '@/api/im'
 import {
   businessUserIdFromIM,
@@ -56,6 +57,9 @@ import { parseGroupJoinRequestBusinessNotification } from '@/utils/groupJoinRequ
 import {
   hasPendingJoinRequest,
   isLegacyAdminJoinRequestConversation,
+  joinRequestSeenAt,
+  markJoinRequestSeen,
+  replacePendingJoinRequests,
   setPendingJoinRequest,
 } from '@/utils/conversation-highlight'
 import {
@@ -844,6 +848,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!conversationId) return
     if (conversationId === activeConversationId) {
       setPendingJoinRequest(imUserId.value, conversationId, false)
+      markJoinRequestSeen(imUserId.value, conversationId)
       const conv = conversations.value.find((c) => c.id === conversationId)
       if (conv) {
         patchConversation(conversationId, {
@@ -868,6 +873,41 @@ export const useChatStore = defineStore('chat', () => {
         true,
       ),
     })
+    void reconcileJoinRequestHighlights()
+  }
+
+  async function reconcileJoinRequestHighlights() {
+    try {
+      const items = await fetchPendingJoinRequestGroups()
+      const visible = new Set<string>()
+      for (const item of items) {
+        if (!item.groupConversationId || item.groupConversationId === activeConversationId) {
+          continue
+        }
+        const latest = Date.parse(item.latestCreatedAt)
+        const seenAt = joinRequestSeenAt(imUserId.value, item.groupConversationId)
+        if (!seenAt || !Number.isFinite(latest) || latest > seenAt) {
+          visible.add(item.groupConversationId)
+        }
+      }
+      replacePendingJoinRequests(imUserId.value, visible)
+      conversations.value = conversations.value.map((conv) => {
+        if (conv.type !== 'group') return conv
+        const pending = visible.has(conv.id)
+        if (conv.joinRequestPending === pending) return conv
+        return {
+          ...conv,
+          joinRequestPending: pending,
+          highlightTags: highlightTagsOf(
+            effectiveGroupAtType(conv.groupAtType, conv.unreadCount),
+            unreadAnnouncementState(announcementOwnerId(), conv.id) === true,
+            pending,
+          ),
+        }
+      })
+    } catch {
+      // 对账失败时保留本地状态，等待下一次前台/重连刷新。
+    }
   }
 
   function subscribeRealtime() {
@@ -968,6 +1008,7 @@ export const useChatStore = defineStore('chat', () => {
           .filter((conv) => !legacyAdminJoinRequestIds.includes(conv.id))
           .filter(shouldShowConversation),
       )
+      await reconcileJoinRequestHighlights()
       refreshOnlineStatus().catch(() => undefined)
       // 备注索引与通讯录分页解耦：拉全量备注后再盖一次会话标题
       void useContactStore()
@@ -1345,6 +1386,7 @@ export const useChatStore = defineStore('chat', () => {
     if (conv.type === 'group') {
       writeUnreadAnnouncement(announcementOwnerId(), conversationId, false)
       setPendingJoinRequest(imUserId.value, conversationId, false)
+      markJoinRequestSeen(imUserId.value, conversationId)
     }
     // 对齐微信：进入群聊并标记已读后，会话列表不再保留 [有人@我] / [有新公告]
     if (conv.type === 'group' && isAtMeType(conv.groupAtType)) {
@@ -1982,6 +2024,7 @@ export const useChatStore = defineStore('chat', () => {
     onlineStatus,
     isPeerOnline,
     loadConversations,
+    reconcileJoinRequestHighlights,
     resyncAfterResume,
     enterConversation,
     assertConversationAccessible,
