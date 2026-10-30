@@ -804,6 +804,7 @@ async function consumePendingDesktopChat() {
 
 onShow(() => {
   void consumePendingDesktopChat()
+  void chatStore.reconcileJoinRequestHighlights()
 })
 
 watch(
