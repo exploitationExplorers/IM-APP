@@ -507,6 +507,16 @@ func (h *GroupHandler) ListJoinRequests(c *gin.Context) {
 	response.OK(c, list)
 }
 
+func (h *GroupHandler) PendingJoinRequests(c *gin.Context) {
+	uid := middleware.UserID(c)
+	list, err := h.Svc.PendingJoinRequestGroups(c.Request.Context(), uid)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	response.OK(c, list)
+}
+
 func (h *GroupHandler) ApproveJoinRequest(c *gin.Context) {
 	uid := middleware.UserID(c)
 	g, err := h.Svc.ApproveJoinRequest(c.Request.Context(), c.Param("id"), uid, c.Param("requestId"))

@@ -418,6 +418,7 @@ func main() {
 			auth.POST("/groups/qrcode/resolve", groupH.ResolveQRCode)
 			auth.POST("/groups/qrcode/join", groupH.JoinByQRCode)
 			auth.GET("/groups/detail", groupH.DetailStatic)
+			auth.GET("/groups/pending-join-requests", groupH.PendingJoinRequests)
 			auth.GET("/groups/:id", groupH.Detail)
 			auth.GET("/group-members", groupH.Members)
 			auth.GET("/groups/:id/qrcode", groupH.Qrcode)
