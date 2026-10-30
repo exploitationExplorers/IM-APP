@@ -103,6 +103,9 @@ const isOnline = computed(
 )
 /** 免打扰时不再用红色 [有人@我] / [有新公告] 强提醒，只保留普通预览文案 */
 const visibleHighlightTags = computed(() => (isMuted.value ? [] : props.item.highlightTags || []))
+const showJoinRequestDot = computed(
+  () => !isMuted.value && props.item.joinRequestPending === true,
+)
 /** 会话本地最后一条消息是否发送失败：是则列表预览显示感叹号 */
 const lastFailed = computed(() => {
   const list = chatStore.messagesMap[props.item.id] || []
@@ -178,7 +181,11 @@ const lastFailed = computed(() => {
         </view>
         <!-- 免打扰：微信式灰点，不显示数字、不用红标；普通会话仍用红标数字 -->
         <view
-          v-if="item.unreadCount > 0 && isMuted"
+          v-if="showJoinRequestDot"
+          class="badge badge-dot"
+        />
+        <view
+          v-else-if="item.unreadCount > 0 && isMuted"
           class="badge badge-muted"
         />
         <view
@@ -348,6 +355,15 @@ const lastFailed = computed(() => {
   justify-content: center;
   margin-left: 12rpx;
   flex-shrink: 0;
+}
+
+.badge-dot {
+  width: 20rpx;
+  height: 20rpx;
+  min-width: 20rpx;
+  padding: 0;
+  border-radius: 50%;
+  background: #e54d42;
 }
 
 /** 免打扰未读：灰色小圆点，避免再当成强提醒 */

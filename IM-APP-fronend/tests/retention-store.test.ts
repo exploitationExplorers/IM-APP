@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   resolveSeq: vi.fn(),
   clearHistory: vi.fn(),
+  markRead: vi.fn(),
 }))
 vi.mock('@/utils/openim', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/utils/openim')>()),
   sendTextMessage: mocks.send,
   resolveMessageSeq: mocks.resolveSeq,
   clearConversationMessages: mocks.clearHistory,
+  markConversationRead: mocks.markRead,
 }))
 vi.mock('openim-uniapp-polyfill', async () => ({
   ...(await import('../node_modules/openim-uniapp-polyfill/src/types/enum')),
@@ -62,6 +64,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()
   mocks.resolveSeq.mockResolvedValue({ seq: 0 })
+  mocks.markRead.mockResolvedValue(undefined)
   mocks.events.clear()
   vi.stubGlobal('uni', { getStorageSync: () => undefined, setStorageSync: vi.fn() })
   setActivePinia(createPinia())
@@ -82,6 +85,36 @@ afterEach(() => {
 })
 
 describe('real Pinia chat store + frozen native SDK events + durable retention', () => {
+  it('marks the group conversation on a business notification and clears it on read', async () => {
+    store.conversations = [{ ...conversation(b), groupAtType: 0, highlightTags: [] }]
+    const receive = mocks.events.get(IMEvents.OnRecvCustomBusinessMessage)!
+    receive({
+      data: {
+        key: 'group_join_request',
+        data: JSON.stringify({
+          requestId: 'request-1',
+          groupId: 'qun_review',
+          groupConversationId: b,
+          groupName: '审核群',
+          applicantId: 'user-1',
+          applicantNickname: '申请人',
+          applicantAvatar: '',
+        }),
+      },
+    })
+
+    expect(store.conversations.find((c) => c.id === b)).toMatchObject({
+      joinRequestPending: true,
+      highlightTags: ['[有新的进群申请]'],
+    })
+
+    await store.markAsRead(b)
+    expect(store.conversations.find((c) => c.id === b)).toMatchObject({
+      joinRequestPending: false,
+      highlightTags: [],
+    })
+  })
+
   it('prunes only the applied group and prevents expired events from resurrecting messages or notifications', async () => {
     const receive = mocks.events.get(IMEvents.OnRecvNewMessage)!
     receive({ data: nativeMessage(a, 99, 'old-a') })

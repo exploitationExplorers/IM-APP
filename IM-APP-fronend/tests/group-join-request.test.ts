@@ -109,4 +109,17 @@ describe('parseGroupJoinRequestPayload', () => {
       }),
     ).toBeNull()
   })
+
+  it('拒绝非群聊会话 ID 的业务通知', () => {
+    expect(
+      parseGroupJoinRequestBusinessNotification({
+        key: 'group_join_request',
+        data: JSON.stringify({
+          requestId: 'request-6',
+          groupId: 'qun_review',
+          groupConversationId: 'si_owner_peer',
+        }),
+      }),
+    ).toBeNull()
+  })
 })

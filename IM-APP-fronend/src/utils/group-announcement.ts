@@ -1,3 +1,5 @@
+import { JOIN_REQUEST_HIGHLIGHT_TAG } from '@/utils/conversation-highlight'
+
 /** 与 OpenIM GroupAtType 对齐：会话预览红色提醒档位 */
 export const GroupAtType = {
   AtNormal: 0,
@@ -64,10 +66,15 @@ export function effectiveGroupAtType(
 }
 
 /** 会话列表预览红色标签：可同时出现 [有人@我] 与 [有新公告] */
-export function highlightTagsOf(groupAtType: number | undefined, hasUnreadAnnouncement: boolean): string[] {
+export function highlightTagsOf(
+  groupAtType: number | undefined,
+  hasUnreadAnnouncement: boolean,
+  joinRequestPending = false,
+): string[] {
   const tags: string[] = []
   if (isAtMeType(groupAtType)) tags.push('[有人@我]')
   if (groupAtType === GroupAtType.AtGroupNotice || hasUnreadAnnouncement) tags.push('[有新公告]')
+  if (joinRequestPending) tags.push(JOIN_REQUEST_HIGHLIGHT_TAG)
   return tags
 }
 
