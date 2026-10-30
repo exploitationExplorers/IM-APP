@@ -22,12 +22,25 @@ export function parseGroupJoinRequestPayload(raw: unknown): GroupJoinRequestPayl
   const requestId = String(pickField(obj, 'requestId') ?? '').trim()
   const groupId = String(pickField(obj, 'groupId') ?? '').trim()
   if (!requestId || !groupId) return null
+  const groupConversationId = String(pickField(obj, 'groupConversationId') ?? '').trim()
   return {
     requestId,
     groupId,
+    ...(groupConversationId ? { groupConversationId } : {}),
     groupName: String(pickField(obj, 'groupName') ?? '群聊'),
     applicantId: String(pickField(obj, 'applicantId') ?? '').trim(),
     applicantNickname: String(pickField(obj, 'applicantNickname') ?? '申请人').trim(),
     applicantAvatar: String(pickField(obj, 'applicantAvatar') ?? ''),
   }
+}
+
+export function parseGroupJoinRequestBusinessNotification(
+  raw: unknown,
+): GroupJoinRequestPayload | null {
+  const obj = parseObject(raw)
+  if (!obj) return null
+  const key = String(pickField(obj, 'key') ?? '')
+  if (key !== 'group_join_request') return null
+  const payload = parseGroupJoinRequestPayload(pickField(obj, 'data'))
+  return payload?.groupConversationId ? payload : null
 }
