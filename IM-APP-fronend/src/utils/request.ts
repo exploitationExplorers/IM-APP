@@ -328,7 +328,16 @@ async function refreshAccessToken(): Promise<string> {
       '',
     )
       .then(({ statusCode, body }) => {
-        if (statusCode >= 200 && statusCode < 300 && body?.code === 0 && body.data?.accessToken) {
+        // 退出或换号后返回的旧续期结果，不能覆盖或清理当前账号。
+        if (getRefreshToken() !== refreshToken) throw new Error('登录状态已变更，请重试')
+        if (statusCode === 401) {
+          handleAuthExpired()
+          throw new Error('未登录或登录已过期')
+        }
+        if (
+          statusCode >= 200 && statusCode < 300 && body?.code === 0 &&
+          body.data?.accessToken && body.data?.refreshToken
+        ) {
           setToken(body.data.accessToken)
           setRefreshToken(body.data.refreshToken)
           // 异步落盘 + 回读校验，确保 App 强杀进程后 token 仍在 storage
@@ -340,7 +349,8 @@ async function refreshAccessToken(): Promise<string> {
           })
           return body.data.accessToken
         }
-        throw new Error(body?.message || `刷新登录失败(${statusCode})`)
+        // 网络、限流、服务不可用或响应异常均不代表凭证失效，保留会话供下次请求续期。
+        throw new Error(body?.message || `登录续期暂时失败(${statusCode})`)
       })
       .finally(() => {
         refreshingTokenPromise = null
@@ -350,35 +360,35 @@ async function refreshAccessToken(): Promise<string> {
 }
 
 export async function request<T>(options: RequestOptions, retried = false): Promise<T> {
-  const response = await rawRequest<T>(options)
+  const requestToken = options.token ?? getToken()
+  const response = await rawRequest<T>(options, requestToken)
   const { statusCode, body } = response
+  // 慢请求携带的旧凭证不能使已经更新或切换的会话失效。
+  if (statusCode === 401 && options.auth !== false && requestToken !== getToken()) {
+    throw new Error('登录状态已变更，请重试')
+  }
   const canRefresh =
     options.auth !== false && !retried && !isRefreshEndpoint(options.url) && !!getRefreshToken()
 
   if (statusCode === 401 && canRefresh) {
-    try {
-      const token = await refreshAccessToken()
-      const retriedRes = await rawRequest<T>(options, token)
-      if (
-        retriedRes.statusCode >= 200 &&
-        retriedRes.statusCode < 300 &&
-        retriedRes.body &&
-        retriedRes.body.code === 0
-      ) {
-        return retriedRes.body.data
-      }
-      if (retriedRes.statusCode === 401) {
-        handleAuthExpired()
-        throw new Error('未登录或登录已过期')
-      }
-      throw new Error(retriedRes.body?.message || `请求失败(${retriedRes.statusCode})`)
-    } catch (e) {
-      // refresh 失败（含服务端「登录已过期，请重新登录」）必须清会话并跳登录。
-      // 以前对 isAuthFailureError 直接 rethrow，页面只 toast、用户得手动退出。
+    const token = await refreshAccessToken()
+    if (token !== getToken()) throw new Error('登录状态已变更，请重试')
+    const retriedRes = await rawRequest<T>(options, token)
+    if (
+      retriedRes.statusCode >= 200 &&
+      retriedRes.statusCode < 300 &&
+      retriedRes.body &&
+      retriedRes.body.code === 0
+    ) {
+      return retriedRes.body.data
+    }
+    if (retriedRes.statusCode === 401) {
+      if (token !== getToken()) throw new Error('登录状态已变更，请重试')
       handleAuthExpired()
-      if (isAuthFailureError(e)) throw e
       throw new Error('未登录或登录已过期')
     }
+    // 续期已成功，业务请求的网络或权限错误由调用方处理，不清除有效凭证。
+    throw new Error(retriedRes.body?.message || `请求失败(${retriedRes.statusCode})`)
   }
 
   if (statusCode === 401) {
