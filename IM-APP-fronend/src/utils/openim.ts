@@ -3140,35 +3140,42 @@ function toAppMessageType(contentType: number): AppMessageType {
   }
 }
 
-/** 从 OpenIM CustomMessage(110) 各端字段取出 data 字符串 */
+function asRecord(raw: unknown): Record<string, unknown> | null {
+  if (raw && typeof raw === 'object') return raw as Record<string, unknown>
+  if (typeof raw !== 'string' || !raw.trim().startsWith('{')) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+function customDataText(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value
+  if (value && typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return ''
+    }
+  }
+  return ''
+}
+
+/** 从 OpenIM CustomMessage(110) 各端字段取出 data 字符串。纯描述文案不当成 payload。 */
 function customMessageDataOf(item: MessageItem): string {
   const raw = item as MessageItem & Record<string, unknown>
-  const elem = (raw.customElem ?? raw.CustomElem) as Record<string, unknown> | undefined
+  const elem = asRecord(raw.customElem ?? raw.CustomElem)
   if (elem) {
-    const data = elem.data ?? elem.Data
-    if (typeof data === 'string' && data) return data
+    const data = customDataText(elem.data ?? elem.Data)
+    if (data) return data
   }
-  const fromContent = jsonContentField(item.content, 'data')
-  if (fromContent) return fromContent
-  if (typeof item.content === 'string' && item.content.trim()) {
-    const text = item.content.trim()
-    if (text.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(text) as Record<string, unknown>
-        if (typeof parsed.data === 'string') return parsed.data
-        // H5 偶发直接把业务 JSON 放在 content
-        if (
-          parsed.businessKey === 'group_invite' ||
-          parsed.BusinessKey === 'group_invite' ||
-          parsed.businessKey === 'group_join_request' ||
-          parsed.BusinessKey === 'group_join_request'
-        ) {
-          return text
-        }
-      } catch {
-        /* ignore */
-      }
-    }
+  const contentObj = asRecord(item.content)
+  if (contentObj) {
+    const nested = customDataText(contentObj.data ?? contentObj.Data)
+    if (nested) return nested
+    if (contentObj.businessKey || contentObj.BusinessKey) return JSON.stringify(contentObj)
   }
   return ''
 }
