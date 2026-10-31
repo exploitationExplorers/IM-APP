@@ -1339,9 +1339,10 @@ function openLink(url: string) {
             {{ groupInviteTitle }}
           </text>
           <text class="gi-desc">
-            邀请你加入群聊
+            {{ mine ? '你邀请对方加入群聊' : '邀请你加入群聊' }}
           </text>
           <text
+            v-if="!mine"
             class="gi-action"
             @click.stop="onApplyGroupInvite"
           >

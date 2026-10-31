@@ -31,7 +31,7 @@ vi.mock('@/api/groupRetention', () => ({ fetchGroupRetentionStates: mocks.fetchR
 vi.mock('@/utils/request', () => ({ getToken: () => '' }))
 vi.mock('@/stores/contact', () => ({ useContactStore: vi.fn() }))
 
-import { IMMethods, MessageStatus, SessionType } from 'openim-uniapp-polyfill'
+import { IMMethods, MessageStatus, MessageType, SessionType } from 'openim-uniapp-polyfill'
 import {
   sendImageUrlMessage,
   sendTextMessage,
@@ -42,6 +42,7 @@ import {
   searchLocalMessages,
   findLocalMessage,
   toConversation,
+  toChatMessage,
   isLocalDatabaseWriteError,
 } from '@/utils/openim'
 import { groupRetention } from '@/utils/groupRetention'
@@ -495,6 +496,29 @@ describe('isLocalDatabaseWriteError（本地库写不进去，需重开库后重
       'error *errors.withStack not implement CodeError: init database initDB failed /var/mobile/.../doc/openim/xxx/: open db failed .../OpenIM_v3_xxx.db: unable to open database file: no such file or directory: 10006 Internal SDK error (login errCode=10005)'
     expect(isLocalDatabaseWriteError(new Error(real))).toBe(true)
     expect(isLocalDatabaseWriteError(new Error('open db failed: no such file or directory'))).toBe(true)
+  })
+
+  it('App 把入群邀请 data 放成对象时仍能进聊天卡片', () => {
+    const message = toChatMessage({
+      clientMsgID: 'gi_tok',
+      sendID: 'sender',
+      recvID: 'recv',
+      contentType: MessageType.CustomMessage,
+      sessionType: SessionType.Single,
+      sendTime: 1,
+      CustomElem: {
+        Data: {
+          businessKey: 'group_invite',
+          token: 'tok',
+          groupId: 'qun_1',
+          groupName: '资料群',
+          memberCount: 3,
+        },
+        Description: '邀请你加入群聊',
+      },
+    } as unknown as MessageItem)
+    expect(message.type).toBe('groupInvite')
+    expect(JSON.parse(message.content)).toMatchObject({ token: 'tok', groupId: 'qun_1', groupName: '资料群' })
   })
 
   it('不把断线、好友关系等无关错误当成库问题', () => {

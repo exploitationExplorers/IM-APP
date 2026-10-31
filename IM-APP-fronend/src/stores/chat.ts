@@ -1245,9 +1245,12 @@ export const useChatStore = defineStore('chat', () => {
     const existing = groupRetention.filter(conversationId, messagesMap.value[conversationId] || [])
     perfMarkEnd('chat:load-messages:sdk', `${messageList.length} msgs`)
     messageList.forEach(rememberRaw)
-    const mapped = messageList
-      .filter((item) => !messagePinPayloadOf(item) && !groupRetention.removed(conversationId, item))
-      .map(toChatMessage)
+    const mapped = await withLatestCustomCard(
+      conversationId,
+      messageList
+        .filter((item) => !messagePinPayloadOf(item) && !groupRetention.removed(conversationId, item))
+        .map(toChatMessage),
+    )
     // App 历史接口偶发空结果时不要把房间里刚发出的消息整表冲掉
     if (!mapped.length && existing.length) {
       historyEnd.value = { ...historyEnd.value, [conversationId]: false }
@@ -1274,6 +1277,27 @@ export const useChatStore = defineStore('chat', () => {
     if (conversationId !== activeConversationId) trimMessageWindow(conversationId)
     await markAsRead(conversationId)
     perfMarkEnd('chat:load-messages', conversationId)
+  }
+
+  /**
+   * 服务端代发的入群邀请会更新会话 latestMsg，本地历史却经常没有这条。
+   * 列表因此显示 [群邀请]，点进房间两边都看不到卡片。
+   */
+  async function withLatestCustomCard(conversationId: string, messages: ChatMessage[]): Promise<ChatMessage[]> {
+    const item = await findConversationById(conversationId).catch(() => undefined)
+    const raw = item as (ConversationItem & { LatestMsg?: unknown }) | undefined
+    const latest = coerceMessage(raw?.latestMsg ?? raw?.LatestMsg)
+    if (!latest?.clientMsgID || groupRetention.removed(conversationId, latest)) return messages
+    const chat = toChatMessage(latest)
+    if (chat.type !== 'groupInvite' && chat.type !== 'groupJoinRequest') return messages
+    const index = messages.findIndex((row) => row.id === chat.id)
+    if (index < 0) {
+      return [...messages, chat].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    }
+    if (messages[index].type === chat.type) return messages
+    const next = messages.slice()
+    next[index] = chat
+    return next
   }
 
   /** 历史还没跟上 SDK 时，保留本地发送中 / 刚发出的图片，避免返回再进入就消失 */
