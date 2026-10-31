@@ -3066,6 +3066,7 @@ function pickFavorite() {
   overflow: hidden;
   position: relative;
   box-sizing: border-box;
+  overscroll-behavior: none;
 }
 
 .room-embedded {
@@ -3087,9 +3088,11 @@ function pickFavorite() {
   background: #ffffff;
   border-bottom: 1rpx solid #ececec;
   flex-shrink: 0;
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 20;
   overflow: visible;
+  overscroll-behavior: none;
 }
 
 .back-btn {
@@ -3258,6 +3261,7 @@ function pickFavorite() {
   height: 0;
   background: #e6e8ee;
   transform: scaleY(-1);
+  overscroll-behavior: none;
 }
 
 .msg-list :deep(.uni-scroll-view),
@@ -3642,5 +3646,14 @@ function pickFavorite() {
 .plus-icon-img {
   width: 56rpx;
   height: 56rpx;
+}
+</style>
+
+<style lang="scss">
+/* 页面本身不滚动，下拉只发生在消息列表里，群名栏留在顶部 */
+page {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 </style>

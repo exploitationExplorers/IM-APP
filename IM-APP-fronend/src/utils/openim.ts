@@ -141,23 +141,15 @@ let loginEpoch = 0
 let boundAccessToken = ''
 /** Logout/Login 串行执行。并发 Logout 会把 SQLite 关掉，发送里的 GetGroups 就报 database is closed */
 let sessionChain: Promise<void> = Promise.resolve()
-let sessionDepth = 0
 /** 本地库已经关掉时，下一次登录不能走「状态仍是已登录就跳过 Login」 */
 let forceNextLogin = false
-/** 同一用户进程内只 InitSDK 一次。重复 InitSDK 会把正在用的本地库关掉 */
-let appSdkReadyUserId = ''
+/** 原生桥只接受首次 InitSDK，Logout 不清初始化标记；必须始终维护实际绑定的目录。 */
+let appSdkDirectory: { ownerId: string; path: string } | null = null
 let closedDbRecovery: Promise<void> | null = null
 
 function enqueueSession<T>(task: () => Promise<T>): Promise<T> {
-  if (sessionDepth > 0) return task()
-  const run = sessionChain.then(async () => {
-    sessionDepth += 1
-    try {
-      return await task()
-    } finally {
-      sessionDepth -= 1
-    }
-  })
+  // 正在 await 的任务不代表新调用来自该任务内部，不能放行并发 Login/Logout。
+  const run = sessionChain.then(task)
   sessionChain = run.then(
     () => undefined,
     () => undefined,
@@ -627,6 +619,7 @@ function installH5StorageProxy(): void {
 installH5StorageProxy()
 
 async function loginSdk(imToken: IMTokenResult): Promise<void> {
+  const epoch = loginEpoch
   const payload = {
     userID: imToken.userId,
     token: imToken.token,
@@ -639,20 +632,21 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
   try {
     await imCall(IMMethods.Login, payload)
   } catch (e) {
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
     if (!isLoginRepeat(e)) {
       const msg = (e as Error)?.message || ''
       if (isApp() && isLocalDatabaseWriteError(e)) {
-        // 目录丢失/路径失效时，只重试 Login 会继续使用同一坏路径；重新准备目录并初始化一次。
-        const epoch = loginEpoch
+        // 补回首次 InitSDK 绑定的目录；重复 InitSDK 在部分原生桥上会直接返回 true。
         await forceSdkLogout()
         if (epoch !== loginEpoch) throw new Error('已退出登录')
         resetLoginCache()
-        appSdkReadyUserId = ''
         await initAppSdk(imToken)
+        if (epoch !== loginEpoch) throw new Error('已退出登录')
         synced = waitForSync()
         await imCall(IMMethods.Login, payload)
       } else if (msg.includes('10005') || msg.includes('10004')) {
         await new Promise((r) => setTimeout(r, 400))
+        if (epoch !== loginEpoch) throw new Error('已退出登录')
         synced = waitForSync()
         try {
           await imCall(IMMethods.Login, payload)
@@ -664,9 +658,11 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
       }
     } else {
       const loggedUserId = await getSdkLoginUserId()
+      if (epoch !== loginEpoch) throw new Error('已退出登录')
       // 空 userId 表示上一次 Login 还在进行。10102 的意思就是已经在登，这时再 Logout 会把进行中的登录打失败。
       if (loggedUserId && loggedUserId !== imToken.userId) {
         await imCall(IMMethods.Logout).catch(() => undefined)
+        if (epoch !== loginEpoch) throw new Error('已退出登录')
         synced = waitForSync()
         try {
           await imCall(IMMethods.Login, payload)
@@ -681,9 +677,17 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
 
 async function initAppSdk(imToken: IMTokenResult): Promise<void> {
   if (!isApp()) return
-  // 即使同一进程已初始化，重新登录前也要补回可能丢失的目录。
-  const dataDir = await getAppSdkDataDir(imToken.userId, typeof plus === 'undefined' ? undefined : plus?.io)
-  if (appSdkReadyUserId === imToken.userId) return
+  const epoch = loginEpoch
+  // SDK 在目录内按 userID 区分数据库；换号不会改变原生桥首次接收的 dataDir。
+  const ownerId = appSdkDirectory?.ownerId || imToken.userId
+  const dataDir = await getAppSdkDataDir(ownerId, typeof plus === 'undefined' ? undefined : plus?.io)
+  if (epoch !== loginEpoch) throw new Error('已退出登录')
+  if (appSdkDirectory) {
+    if (dataDir !== appSdkDirectory.path) {
+      throw new Error('聊天存储路径已变化，请完全关闭 App 后重新打开')
+    }
+    return
+  }
   const initialized = await imCall<unknown>(IMMethods.InitSDK, {
     platformID: imToken.platform,
     apiAddr: imToken.apiAddr,
@@ -693,7 +697,7 @@ async function initAppSdk(imToken: IMTokenResult): Promise<void> {
     isLogStandardOutput: APP_SDK_LOG_STDOUT,
   })
   if (initialized === false) throw new Error('聊天 SDK 初始化失败，请关闭 App 后重新打开')
-  appSdkReadyUserId = imToken.userId
+  appSdkDirectory = { ownerId, path: dataDir }
 }
 
 async function doLogin(): Promise<string> {
@@ -706,8 +710,10 @@ async function doLogin(): Promise<string> {
   }
 
   await initAppSdk(imToken)
+  if (epoch !== loginEpoch) throw new Error('已退出登录')
 
   const status = await getSdkLoginStatus()
+  if (epoch !== loginEpoch) throw new Error('已退出登录')
   if (status === LoginStatus.Logged) {
     const loggedUserId = await getSdkLoginUserId()
     if (!force && loggedUserId === imToken.userId) {
@@ -722,6 +728,7 @@ async function doLogin(): Promise<string> {
     await imCall(IMMethods.Logout).catch(() => undefined)
   }
 
+  if (epoch !== loginEpoch) throw new Error('已退出登录')
   await loginSdk(imToken)
   if (epoch !== loginEpoch) {
     await imCall(IMMethods.Logout).catch(() => undefined)
@@ -752,8 +759,10 @@ async function reuseLiveSession(): Promise<string | null> {
 }
 
 async function reloginSession(): Promise<string> {
+  let epoch = loginEpoch
   if (!forceNextLogin) {
     const reused = await reuseLiveSession()
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
     if (reused) return reused
   }
   const businessToken = getToken()
@@ -761,14 +770,14 @@ async function reloginSession(): Promise<string> {
     const switchingAccount = !businessToken || (boundAccessToken !== '' && businessToken !== boundAccessToken)
     if (switchingAccount) {
       invalidatePendingLogin()
-      appSdkReadyUserId = ''
+      epoch = loginEpoch
     } else {
       // 同一账号换 IM token，不要增加 loginEpoch，进行中的发送还要重试。
       resetLoginCache()
     }
     await forceSdkLogout().catch(() => undefined)
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
   }
-  const epoch = loginEpoch
   if (!loginPromise) {
     loginPromise = doLogin().finally(() => {
       loginPromise = null
@@ -776,12 +785,11 @@ async function reloginSession(): Promise<string> {
   }
   try {
     const userId = await loginPromise
-    if (epoch !== loginEpoch) return ensureIMLogin()
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
     return userId
   } catch (e) {
-    if (epoch !== loginEpoch) return ensureIMLogin()
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
     if (isApp() && isLocalDatabaseWriteError(e)) {
-      appSdkReadyUserId = ''
       resetLoginCache()
       console.error('[im] database login recovery failed', e)
       throw new Error('聊天本地数据库初始化失败，请检查手机可用空间后重新打开 App')
@@ -798,9 +806,9 @@ function reopenClosedSdkDatabase(): Promise<void> {
   if (!closedDbRecovery) {
     const epoch = loginEpoch
     closedDbRecovery = enqueueSession(async () => {
-      if (epoch !== loginEpoch) return
+      if (epoch !== loginEpoch) throw new Error('已退出登录')
       if (loginPromise) await loginPromise.catch(() => undefined)
-      if (epoch !== loginEpoch) return
+      if (epoch !== loginEpoch) throw new Error('已退出登录')
       forceNextLogin = true
       await reloginSession()
     }).finally(() => {
@@ -813,11 +821,11 @@ function reopenClosedSdkDatabase(): Promise<void> {
 /** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
 export async function ensureIMLogin(): Promise<string> {
   if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
-  if (!forceNextLogin) {
-    const reused = await reuseLiveSession()
-    if (reused) return reused
-  }
-  return enqueueSession(() => reloginSession())
+  const epoch = loginEpoch
+  return enqueueSession(() => {
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
+    return reloginSession()
+  })
 }
 
 /**
@@ -872,18 +880,16 @@ export async function initOpenIM(): Promise<void> {
 }
 
 export async function logoutOpenIM(): Promise<void> {
-  await enqueueSession(async () => {
-    invalidatePendingLogin()
-    appSdkReadyUserId = ''
+  // 立即取消在途/排队登录，原生 Logout 仍排在当前 SDK 操作之后。
+  invalidatePendingLogin()
+  const logout = enqueueSession(async () => {
     // 刷新后内存会话为空，但 H5 WASM 仍可能是 Logged；必须 Logout，
     // 否则下次 doLogin 走 Logged 捷径、本地库不触发完整同步。
-    try {
-      await withTimeout(forceSdkLogout(), 3000)
-    } catch {
-      // 本地必须清掉，避免下一个账号读到上一个号的会话库
-    }
+    await forceSdkLogout()
     resetLoginCache()
   })
+  // UI 最多等 3 秒，但队列须等原生操作真正结束，防止迟到的 Logout 关闭新账号数据库。
+  await withTimeout(logout, 3000).catch(() => undefined)
 }
 
 /** 手动重连：重新取 token 再登录，用于「重新选线」 */

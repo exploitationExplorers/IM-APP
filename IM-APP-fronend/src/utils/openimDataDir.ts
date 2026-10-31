@@ -39,7 +39,8 @@ function createDirectory(parent: DirectoryEntry, name: string): Promise<Director
 async function documentRoot(io: AppDataIO): Promise<DirectoryEntry> {
   try {
     return await new Promise<DirectoryEntry>((resolve, reject) => {
-      io.requestFileSystem(io.PRIVATE_DOC ?? 1, (fs) => {
+      // 5+ 的 PRIVATE_DOC 是 2；1 是资源目录 PRIVATE_WWW，iOS 安装包内不可写。
+      io.requestFileSystem(io.PRIVATE_DOC ?? 2, (fs) => {
         if (!fs.root?.getDirectory) reject(new Error('App document root is unavailable'))
         else resolve(fs.root)
       }, reject)
@@ -61,10 +62,10 @@ export async function getAppSdkDataDir(userId: string, io?: AppDataIO): Promise<
   try {
     const root = await documentRoot(io)
     const directory = await createDirectory(root, 'openim')
-    const userDirectory = await createDirectory(directory, safeUserId)
+    await createDirectory(directory, safeUserId)
     const relative = `_doc/openim/${safeUserId}/`
-    // iOS 的 fullPath 可能是虚拟路径；以当前沙盒的绝对路径为准，不能沿用上次安装的路径。
-    const path = io.convertLocalFileSystemURL(userDirectory.toLocalURL?.() || relative)
+    // 从当前 _doc 解析，目录对象上的 fullPath/toLocalURL 可能残留 iOS 旧沙盒路径。
+    const path = io.convertLocalFileSystemURL(relative)
       .replace(/^file:\/\//, '').replace(/\/+$/, '')
     if (!path.startsWith('/') || path === '' || path.includes('://')) {
       throw new Error('App database directory is not an absolute local path')
