@@ -1241,8 +1241,6 @@ export const useChatStore = defineStore('chat', () => {
     perfMarkStart('chat:load-messages')
     perfMarkStart('chat:load-messages:sdk')
     const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE)
-    // 请求期间可能收到新消息或翻页，合并时读取最新状态。
-    const existing = groupRetention.filter(conversationId, messagesMap.value[conversationId] || [])
     perfMarkEnd('chat:load-messages:sdk', `${messageList.length} msgs`)
     messageList.forEach(rememberRaw)
     const mapped = await withLatestCustomCard(
@@ -1251,6 +1249,8 @@ export const useChatStore = defineStore('chat', () => {
         .filter((item) => !messagePinPayloadOf(item) && !groupRetention.removed(conversationId, item))
         .map(toChatMessage),
     )
+    // 历史和会话资料都返回后再读状态，避免后一次 await 覆盖刚翻出的历史。
+    const existing = groupRetention.filter(conversationId, messagesMap.value[conversationId] || [])
     // App 历史接口偶发空结果时不要把房间里刚发出的消息整表冲掉
     if (!mapped.length && existing.length) {
       historyEnd.value = { ...historyEnd.value, [conversationId]: false }
@@ -1341,12 +1341,15 @@ export const useChatStore = defineStore('chat', () => {
     // 禁止此处 trimMessageWindow：slice(-WINDOW) 会裁掉刚 prepend 的旧消息，
     // 列表几乎不变却仍 return true → scroll-into-view 跳动（消息多了上滑卡）。
     // 离开聊天室时由 trimConversationMemory 回收。
+    const current = messagesMap.value[conversationId] || []
+    const currentIds = new Set(current.map((item) => item.id))
+    const fresh = older.filter((item) => !currentIds.has(item.id))
     messagesMap.value = {
       ...messagesMap.value,
-      [conversationId]: groupRetention.filter(conversationId, [...older, ...list]),
+      [conversationId]: groupRetention.filter(conversationId, [...fresh, ...current]),
     }
     perfMarkEnd('chat:load-more-messages', `${older.length} msgs`)
-    return true
+    return fresh.length > 0
   }
 
   /**
@@ -1371,7 +1374,9 @@ export const useChatStore = defineStore('chat', () => {
       if (!messageList.length) return false
       messageList.forEach(rememberRaw)
       const older = messageList.filter((item) => !messagePinPayloadOf(item) && !groupRetention.removed(conversationId, item)).map(toChatMessage)
-      const merged = groupRetention.filter(conversationId, [...older, ...list])
+      const current = messagesMap.value[conversationId] || []
+      const currentIds = new Set(current.map((item) => item.id))
+      const merged = groupRetention.filter(conversationId, [...older.filter((item) => !currentIds.has(item.id)), ...current])
       messagesMap.value = { ...messagesMap.value, [conversationId]: merged }
       if (merged.some((m) => m.id === clientMsgId)) {
         retainFromMessage(conversationId, clientMsgId)

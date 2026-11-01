@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { onLoad, onReachBottom } from '@dcloudio/uni-app'
-import type { MessageItem } from 'openim-uniapp-polyfill'
+import { onLoad, onReachBottom, onUnload } from '@dcloudio/uni-app'
+import { IMEvents, type MessageItem } from 'openim-uniapp-polyfill'
 import {
   businessUserIdFromIM,
   ensureLocalConversationHistory,
   messageSearchPreview,
+  onIMEvent,
   resolveGroupConversationID,
   searchConversationMessagesPage,
   type ConversationMessageSearchCursor,
@@ -14,6 +15,7 @@ import { formatFavoriteDay, formatClock } from '@/utils/format'
 import ImNavBar from '@/components/ImNavBar.vue'
 import AppSearchBar from '@/components/AppSearchBar.vue'
 import { useContactStore } from '@/stores/contact'
+import { groupRetention } from '@/utils/groupRetention'
 
 const contactStore = useContactStore()
 const groupId = ref('')
@@ -23,6 +25,7 @@ const keyword = ref('')
 const loading = ref(false)
 const loadingMore = ref(false)
 const hasMore = ref(false)
+const searchError = ref('')
 const results = ref<MessageItem[]>([])
 let searchCursor: ConversationMessageSearchCursor | null = null
 let searchSeq = 0
@@ -52,9 +55,10 @@ onLoad(async (query) => {
   }
 })
 
-async function runSearch(raw: string) {
+async function runSearch(raw: string, preserveResults = false) {
   const text = raw.trim()
   const seq = ++searchSeq
+  searchError.value = ''
   searchCursor = null
   hasMore.value = false
   if (!text || !conversationId.value) {
@@ -69,20 +73,37 @@ async function runSearch(raw: string) {
     const page = await searchConversationMessagesPage({
       conversationID: conversationId.value,
       keyword: text,
+      continueOnEmpty: true,
+      isCancelled: () => seq !== searchSeq,
     })
     if (seq !== searchSeq) return
-    results.value = page.messages
+    if (preserveResults) mergeResults(page.messages)
+    else results.value = page.messages
     searchCursor = page.cursor
+    if (preserveResults) {
+      const displayed = new Set(results.value.map((item) => item.clientMsgID))
+      searchCursor.pending = searchCursor.pending.filter((item) => !displayed.has(item.clientMsgID))
+      searchCursor.seenIds = [...new Set([...searchCursor.seenIds, ...displayed])]
+    }
     hasMore.value = page.hasMore
   } catch (e) {
     if (seq !== searchSeq) return
-    results.value = []
+    if (!preserveResults) results.value = []
     searchCursor = null
     hasMore.value = false
-    uni.showToast({ title: (e as Error)?.message || '搜索失败', icon: 'none' })
+    searchError.value = (e as Error)?.message || '搜索失败，请重试'
   } finally {
     if (seq === searchSeq) loading.value = false
   }
+}
+
+function mergeResults(messages: MessageItem[]) {
+  const merged = new Map(results.value.map((item) => [item.clientMsgID, item]))
+  for (const item of messages) {
+    if (item.clientMsgID) merged.set(item.clientMsgID, item)
+  }
+  results.value = groupRetention.filter(conversationId.value, [...merged.values()])
+    .sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
 }
 
 /** 上滑加载更早的命中：继续翻本地索引 / 历史，不重头搜 */
@@ -99,30 +120,23 @@ async function loadMore() {
     return
   }
   const seq = searchSeq
+  searchError.value = ''
   loadingMore.value = true
   try {
     const page = await searchConversationMessagesPage({
       conversationID: conversationId.value,
       keyword: text,
       cursor: searchCursor,
+      continueOnEmpty: true,
+      isCancelled: () => seq !== searchSeq,
     })
     if (seq !== searchSeq) return
-    if (page.messages.length) {
-      const seen = new Set(results.value.map((m) => m.clientMsgID))
-      const merged = results.value.slice()
-      for (const item of page.messages) {
-        if (!item.clientMsgID || seen.has(item.clientMsgID)) continue
-        seen.add(item.clientMsgID)
-        merged.push(item)
-      }
-      merged.sort((a, b) => Number(b.sendTime || 0) - Number(a.sendTime || 0))
-      results.value = merged
-    }
+    mergeResults(page.messages)
     searchCursor = page.cursor
     hasMore.value = page.hasMore
   } catch (e) {
     if (seq !== searchSeq) return
-    uni.showToast({ title: (e as Error)?.message || '加载更多失败', icon: 'none' })
+    searchError.value = (e as Error)?.message || '加载更多失败，请重试'
   } finally {
     if (seq === searchSeq) loadingMore.value = false
   }
@@ -133,25 +147,41 @@ onReachBottom(() => {
 })
 
 watch([keyword, conversationId], () => {
+  // 换词时立即作废旧查询，不能等防抖结束才拦截旧结果。
+  searchSeq += 1
+  searchError.value = ''
   if (searchTimer) clearTimeout(searchTimer)
   const text = keyword.value.trim()
+  results.value = []
+  searchCursor = null
+  hasMore.value = false
   if (!text) {
-    searchSeq += 1
-    results.value = []
-    searchCursor = null
-    hasMore.value = false
     loading.value = false
     loadingMore.value = false
     return
   }
+  loading.value = true
+  loadingMore.value = false
   // 会话 ID 还在 resolve 时先显示「搜索中」，避免误报「未找到」；ID 就绪后 watch 会再跑
   if (!conversationId.value) {
-    loading.value = true
     return
   }
   searchTimer = setTimeout(() => {
     void runSearch(text)
   }, 280)
+})
+
+// App 离线消息同步完成后重查当前关键词，无需用户退出、刷新再搜。
+const offSync = onIMEvent(IMEvents.OnSyncServerFinish, () => {
+  if (!keyword.value.trim() || !conversationId.value) return
+  if (searchTimer) clearTimeout(searchTimer)
+  void runSearch(keyword.value, true)
+})
+
+onUnload(() => {
+  searchSeq += 1
+  if (searchTimer) clearTimeout(searchTimer)
+  offSync()
 })
 
 /** 与群聊气泡一致：好友备注优先，否则用 SDK 昵称 */
@@ -234,7 +264,14 @@ function openResult(item: MessageItem) {
         搜索中…
       </view>
       <view
-        v-else-if="!results.length"
+        v-else-if="searchError"
+        class="empty"
+        @click="results.length && searchCursor ? loadMore() : runSearch(keyword)"
+      >
+        {{ searchError }}，点击重试
+      </view>
+      <view
+        v-else-if="!results.length && !hasMore"
         class="empty"
       >
         未找到相关记录

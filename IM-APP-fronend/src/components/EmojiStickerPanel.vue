@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { createSticker, deleteStickers, fetchStickers, type StickerItem } from '@/api/sticker'
 import { playableMediaUrl } from '@/utils/chatMedia'
 import { uploadSticker } from '@/utils/file-upload'
+import { isAppPlatform } from '@/utils/platform'
 
 const emit = defineEmits<{
   (e: 'select', value: string): void
@@ -89,41 +90,68 @@ function goManageEmotions() {
   uni.navigateTo({ url: '/pages/mine/emotions' })
 }
 
+async function uploadPickedPaths(paths: string[]) {
+  if (!paths.length) return
+  uploading.value = true
+  uni.showLoading({ title: '上传中...', mask: true })
+  let ok = 0
+  let fail = 0
+  try {
+    for (const path of paths) {
+      try {
+        const fileId = await uploadSticker(path)
+        await createSticker(fileId)
+        ok++
+      } catch {
+        fail++
+      }
+    }
+    await loadStickers()
+    if (ok && !fail) {
+      uni.showToast({ title: '添加成功', icon: 'success' })
+    } else if (ok && fail) {
+      uni.showToast({ title: `${ok} 张成功，${fail} 张失败`, icon: 'none' })
+    } else {
+      uni.showToast({ title: '添加失败', icon: 'none' })
+    }
+  } finally {
+    uni.hideLoading()
+    uploading.value = false
+  }
+}
+
+/** 网页上在点击里同步打开文件框。模板里的 input 会被编成 uni-input，type=file 会丢。 */
+function pickStickerFilesOnWeb() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/*'
+  input.multiple = true
+  input.addEventListener('change', () => {
+    const files = Array.from(input.files || [])
+    input.remove()
+    if (uploading.value || !files.length) return
+    const paths = files.map((file) => URL.createObjectURL(file))
+    void uploadPickedPaths(paths).finally(() => {
+      paths.forEach((path) => URL.revokeObjectURL(path))
+    })
+  })
+  document.body.appendChild(input)
+  input.click()
+}
+
 function onAddSticker() {
   if (uploading.value) return
+  if (typeof document !== 'undefined' && !isAppPlatform()) {
+    pickStickerFilesOnWeb()
+    return
+  }
   uni.chooseImage({
     count: 9,
     sizeType: ['compressed'],
     sourceType: ['album', 'camera'],
-    success: async (res) => {
+    success: (res) => {
       const paths = (res.tempFilePaths || []) as string[]
-      if (!paths.length) return
-      uploading.value = true
-      uni.showLoading({ title: '上传中...', mask: true })
-      let ok = 0
-      let fail = 0
-      try {
-        for (const path of paths) {
-          try {
-            const fileId = await uploadSticker(path)
-            await createSticker(fileId)
-            ok++
-          } catch {
-            fail++
-          }
-        }
-        await loadStickers()
-        if (ok && !fail) {
-          uni.showToast({ title: '添加成功', icon: 'success' })
-        } else if (ok && fail) {
-          uni.showToast({ title: `${ok} 张成功，${fail} 张失败`, icon: 'none' })
-        } else {
-          uni.showToast({ title: '添加失败', icon: 'none' })
-        }
-      } finally {
-        uni.hideLoading()
-        uploading.value = false
-      }
+      void uploadPickedPaths(paths)
     },
   })
 }

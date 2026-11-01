@@ -1266,12 +1266,25 @@ async function onSend() {
 
 /** uni-app textarea 的 focus 属性：切会话时先 false 再 true 才能重新抢焦点 */
 const composerFocusFlag = ref(false)
+let composerFocusTimers: ReturnType<typeof setTimeout>[] = []
+
+/** 搜索框等其它输入已经拿到焦点时，不能再把字抢进聊天框 */
+function isForeignTextField(el: Element | null): boolean {
+  if (!(el instanceof HTMLElement)) return false
+  if (el.closest('.input-wrap, .composer-row')) return false
+  if (el.closest('.search-bar')) return true
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable
+}
 
 function focusComposer() {
   if (!isH5ComposerPlatform()) return
   if (composerBlocked.value || voiceMode.value) return
+  composerFocusTimers.forEach((timer) => clearTimeout(timer))
+  composerFocusTimers = []
   composerFocusFlag.value = false
   const apply = () => {
+    if (typeof document !== 'undefined' && isForeignTextField(document.activeElement)) return
     composerFocusFlag.value = true
     const el = getComposerTextareaEl()
     if (!el) return
@@ -1286,9 +1299,9 @@ function focusComposer() {
     }
   }
   nextTick(apply)
-  // 消息列表/群资料异步渲染后还要再抢一次，否则会落在文档 body 上
-  setTimeout(apply, 40)
-  setTimeout(apply, 160)
+  // 消息列表/群资料异步渲染后还要再抢一次，否则会落在文档 body 上。
+  // 用户已经点进搜索框时跳过，避免打出来的字进到聊天输入框。
+  composerFocusTimers = [setTimeout(apply, 40), setTimeout(apply, 160)]
 }
 
 function isH5ComposerPlatform(): boolean {
@@ -1416,6 +1429,8 @@ async function sendPastedImages(files: File[]) {
 }
 
 onUnmounted(() => {
+  composerFocusTimers.forEach((timer) => clearTimeout(timer))
+  composerFocusTimers = []
   if (typeof window !== 'undefined') {
     window.removeEventListener('paste', onWindowPaste)
     window.removeEventListener('keydown', onComposerKeydown, true)
@@ -2690,6 +2705,7 @@ function pickFavorite() {
     <scroll-view
       scroll-y
       class="msg-list"
+      :class="{ 'msg-list-web': isH5ComposerPlatform() }"
       :scroll-top="msgScrollTop"
       :lower-threshold="600"
       @scroll="onMsgScroll"
@@ -3255,12 +3271,24 @@ function pickFavorite() {
   color: #8a8f9c;
 }
 
-/* 倒置列表：外层翻一次让 scrollTop=0 落在视觉底部，内层再翻回来保证内容正向 */
+/* 倒置列表：外层翻一次让 scrollTop=0 落在视觉底部，内层再翻回来保证内容正向。
+   App 的 scroll-view 自己滚动，翻转加在宿主上。
+   网页端真正 overflow 的是内层 .uni-scroll-view，翻转若加在外层，裁切发生在翻转之前，气泡被剪掉，房间只剩底色。 */
 .msg-list {
   flex: 1;
   height: 0;
   background: #e6e8ee;
   transform: scaleY(-1);
+  overscroll-behavior: none;
+}
+
+.msg-list-web {
+  transform: none;
+}
+
+.msg-list-web :deep(.uni-scroll-view > .uni-scroll-view) {
+  transform: scaleY(-1);
+  background: #e6e8ee;
   overscroll-behavior: none;
 }
 

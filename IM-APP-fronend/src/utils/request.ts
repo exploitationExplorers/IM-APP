@@ -297,6 +297,8 @@ function rawRequest<T>(options: RequestOptions, tokenOverride?: string): Promise
         'Content-Type': 'application/json',
         ...(auth && token ? { Authorization: `Bearer ${token}` } : {}),
         ...header,
+        // iOS 基座遇到 gzip 的 JSON 不会解压，直接拿去解析，通讯录这种稍大的响应就变成「响应解析失败」。
+        'Accept-Encoding': 'identity',
       },
       success: (res) => {
         resolve({

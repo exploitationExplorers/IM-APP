@@ -11,14 +11,27 @@ const emit = defineEmits<{
   (e: 'clear'): void
 }>()
 
+function readInputValue(e: Event): string {
+  const detail = (e as unknown as { detail?: { value?: string } }).detail?.value
+  if (typeof detail === 'string') return detail
+  const target = e.target as HTMLInputElement | null
+  return typeof target?.value === 'string' ? target.value : ''
+}
+
 function onInput(e: Event) {
-  const value = (e as unknown as { detail: { value: string } }).detail?.value ?? ''
-  emit('update:modelValue', value)
+  emit('update:modelValue', readInputValue(e))
+}
+
+/** 点到图标或空白时也要把焦点放进输入框，否则字会继续进到旁边已聚焦的聊天框 */
+function onBarClick(e: Event) {
+  emit('click')
+  const root = e.currentTarget as HTMLElement | null
+  const input = root?.querySelector?.('input')
+  if (input instanceof HTMLInputElement) input.focus()
 }
 
 function onConfirm(e: Event) {
-  const value = (e as unknown as { detail: { value: string } }).detail?.value ?? ''
-  emit('confirm', value)
+  emit('confirm', readInputValue(e))
 }
 
 function onClear() {
@@ -30,7 +43,7 @@ function onClear() {
 <template>
   <view
     class="search-bar"
-    @click="emit('click')"
+    @click="onBarClick"
   >
     <icon
       type="search"

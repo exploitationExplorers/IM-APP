@@ -3734,6 +3734,8 @@ export interface LocalMessageSearchHit {
   clientMsgID: string
   /** 指定会话内搜索时返回的命中消息列表（已按时间新→旧） */
   messages: MessageItem[]
+  /** 按 SDK 原始页判断，不能用过滤后的条数推断索引是否耗尽。 */
+  hasMore?: boolean
 }
 
 /**
@@ -3784,9 +3786,10 @@ export async function searchLocalMessages(params: {
     if (ids.length) await groupRetention.sync(ids)
     return hits.flatMap((hit) => {
       const messages = groupRetention.filter(hit.conversationID, hit.messages)
+      const hasMore = hit.messages.length >= payload.count
       if (!messages.length) return []
-      return [{ ...hit, messages, messageCount: messages.length, clientMsgID: messages[0].clientMsgID,
-        preview: messageSearchPreview(messages[0]) }]
+      return [{ ...hit, messages, hasMore, messageCount: messages.length, clientMsgID: messages[0]?.clientMsgID || '',
+        preview: messages[0] ? messageSearchPreview(messages[0]) : '' }]
     })
   } catch {
     // H5 / 旧基座偶发无此方法：回退为空，调用方仍可用标题/摘要过滤
@@ -3953,6 +3956,10 @@ export async function searchConversationMessagesPage(params: {
   limit?: number
   /** 本轮最多扫多少条历史；会话列表搜索宜小，避免「加载更多」卡住 */
   historyScanBatch?: number
+  /** 群内搜索空页继续向前查，不能把一批没命中当成整个会话没记录。 */
+  continueOnEmpty?: boolean
+  /** 用户换词或离开页面后停止后续扫描。 */
+  isCancelled?: () => boolean
 }): Promise<ConversationMessageSearchPage> {
   const conversationID = params.conversationID
   const rawKeyword = params.keyword.trim()
@@ -3985,8 +3992,11 @@ export async function searchConversationMessagesPage(params: {
   if (isFirstPage) void ensureLocalConversationHistory(conversationID, SEARCH_HISTORY_CAP)
 
   const seen = new Set(cursor.seenIds)
+  const pendingIds = new Set<string>()
   const pending = cursor.pending.filter((item) => {
-    if (!item?.clientMsgID || seen.has(item.clientMsgID)) return false
+    // seen 包含「已入队」的消息，不能据此丢掉尚未展示的下一页。
+    if (!item?.clientMsgID || pendingIds.has(item.clientMsgID) || groupRetention.removed(conversationID, item)) return false
+    pendingIds.add(item.clientMsgID)
     seen.add(item.clientMsgID)
     return true
   })
@@ -4002,6 +4012,7 @@ export async function searchConversationMessagesPage(params: {
   /** 命中先入队，再按 limit 吐出，避免一页内多余命中被游标跳过 */
   const enqueue = (item: MessageItem, fromSdk: boolean) => {
     if (!item?.clientMsgID || seen.has(item.clientMsgID)) return false
+    if (groupRetention.removed(conversationID, item)) return false
     if (fromSdk ? !acceptSdkSearchHit(item, key) : !matchesSearchKeyword(item, key)) return false
     seen.add(item.clientMsgID)
     if (out.length < limit) out.push(item)
@@ -4010,7 +4021,7 @@ export async function searchConversationMessagesPage(params: {
   }
 
   const sdkPageSize = 100
-  while (!cursor.sdkDone && out.length < limit && !pending.length) {
+  while (!cursor.sdkDone && out.length < limit && !pending.length && !params.isCancelled?.()) {
     const hits = await searchLocalMessages({
       keyword: rawKeyword,
       conversationID,
@@ -4021,7 +4032,7 @@ export async function searchConversationMessagesPage(params: {
       hits.find((h) => h.conversationID === conversationID) ||
       (hits.length === 1 ? hits[0] : undefined)
     const batch = conv?.messages || []
-    if (!batch.length) {
+    if (!conv) {
       cursor.sdkDone = true
       break
     }
@@ -4030,10 +4041,8 @@ export async function searchConversationMessagesPage(params: {
       if (enqueue(item, true)) added += 1
     }
     cursor.sdkPage += 1
-    const total = Number(conv?.messageCount || 0)
-    if (total > 0 && seen.size >= total) cursor.sdkDone = true
-    else if (batch.length < sdkPageSize) cursor.sdkDone = true
-    else if (!added) cursor.sdkDone = true
+    // messageCount 是当前页可见条数，并非整个索引的总命中数。
+    cursor.sdkDone = !conv.hasMore || (batch.length > 0 && !added)
   }
   takePending()
 
@@ -4052,7 +4061,7 @@ export async function searchConversationMessagesPage(params: {
         ])
         for (const item of history) enqueue(item, false)
         takePending()
-        if (!out.length && !pending.length && !cursor.sdkDone) {
+        if (!out.length && !pending.length && !params.isCancelled?.()) {
           cursor.sdkPage = 1
           cursor.sdkDone = false
           const hits = await searchLocalMessages({
@@ -4067,7 +4076,7 @@ export async function searchConversationMessagesPage(params: {
           for (const item of conv?.messages || []) enqueue(item, true)
           takePending()
           cursor.sdkPage = 2
-          if (!(conv?.messages || []).length) cursor.sdkDone = true
+          cursor.sdkDone = !conv?.hasMore
         }
       }
     }
@@ -4084,7 +4093,8 @@ export async function searchConversationMessagesPage(params: {
       !cursor.historyDone &&
       out.length < limit &&
       !pending.length &&
-      scanned < historyScanBatch
+      !params.isCancelled?.() &&
+      (scanned < historyScanBatch || (params.continueOnEmpty && !out.length))
     ) {
       const { messageList, isEnd } = await getHistoryMessages(
         conversationID,
