@@ -307,19 +307,24 @@ function mergeConversationHits(
   return added
 }
 
-/** 标题 / 摘要命中 + 已有消息命中的会话，都作为「加载更多」补扫对象 */
+/**
+ * 标题 / 摘要命中 + 已有消息命中的会话优先挖；其余会话兜底排到队尾。
+ * 对标微信：关键词可能埋在既不是标题也不是最新一条摘要的历史深处，不能因为首屏零命中就判死刑，
+ * 否则这些会话永远进不了补扫队列，表现为「有的词搜得到、有的词怎么翻都搜不到」。
+ */
 function rebuildDigQueue(keywordText: string, map: Map<string, MessageHitBucket>) {
   const k = keywordText.trim().toLowerCase()
-  const ids = new Set<string>(map.keys())
+  const prioritized = new Set<string>(map.keys())
   for (const c of chatStore.conversations) {
     if (
       c.title.toLowerCase().includes(k) ||
       c.lastMessage.toLowerCase().includes(k)
     ) {
-      ids.add(c.id)
+      prioritized.add(c.id)
     }
   }
-  digQueue = [...ids]
+  const rest = chatStore.conversations.map((c) => c.id).filter((id) => !prioritized.has(id))
+  digQueue = [...prioritized, ...rest]
   for (const id of digQueue) {
     if (digCursors.has(id) || digDone.has(id)) continue
     const existing = map.get(id)?.messages || []
@@ -332,7 +337,8 @@ function rebuildDigQueue(keywordText: string, map: Map<string, MessageHitBucket>
       seenIds: existing.map((m) => m.clientMsgId).filter(Boolean),
       pending: [],
     })
-    void ensureLocalConversationHistory(id)
+    // 兜底的长尾会话不抢先预热，避免一次搜索把所有会话的历史都并发拉一遍；真正挖到它时再预热
+    if (prioritized.has(id)) void ensureLocalConversationHistory(id)
   }
 }
 
@@ -426,6 +432,8 @@ async function loadMoreMessageSearch() {
     if (gained < 15) {
       const id = digQueue.find((cid) => !digDone.has(cid) && digCursors.has(cid))
       if (id) {
+        // 长尾会话到这一步才真正要挖，预热是幂等的（已预热过直接命中缓存）
+        void ensureLocalConversationHistory(id)
         const cursor = digCursors.get(id)!
         // 同步已展示命中，避免历史补扫重复入列
         const seenIds = new Set(cursor.seenIds)
@@ -487,7 +495,9 @@ watch(keyword, (value) => {
   }
   // 输入法组字中会频繁触发，短防抖后再打本地库
   messageSearchTimer = setTimeout(() => {
-    void runMessageSearch(k)
+    void runMessageSearch(k).then(() => {
+      if (!searchRows.value.length) void autoDigUntilHit(messageSearchSeq)
+    })
   }, 280)
 })
 
@@ -533,6 +543,20 @@ const searchRows = computed(() => {
   }
   return rows
 })
+
+/**
+ * 首屏零命中时自动续挖，而不是直接判「无匹配聊天」。
+ * 列表是空的，没有行可以触发上滑/点击加载更多，必须自己跑完整个 digQueue 才罢休。
+ * 换关键词 / 已出结果 / 彻底挖完都会让条件不成立，循环自然收尾。
+ */
+async function autoDigUntilHit(seq: number) {
+  while (seq === messageSearchSeq && !searchRows.value.length && messageSearchHasMore.value) {
+    await loadMoreMessageSearch()
+    if (seq !== messageSearchSeq) return
+    const wait = searchLoadCooldownUntil - Date.now()
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
+  }
+}
 
 async function reloadConversations() {
   try {
@@ -1077,7 +1101,13 @@ watchEffect(() => {
           </ImSwipeActionItem>
         </uni-swipe-action>
         <view
-          v-if="keyword.trim() ? !searchRows.length : !filtered.length"
+          v-if="keyword.trim() && !searchRows.length && (messageSearchLoadingMore || messageSearchHasMore)"
+          class="search-footer"
+        >
+          搜索中…
+        </view>
+        <view
+          v-else-if="keyword.trim() ? !searchRows.length : !filtered.length"
           class="empty"
         >
           {{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}
