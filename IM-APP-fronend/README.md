@@ -37,6 +37,10 @@ VITE_WS_BASE_URL=ws://8.154.44.197/openim-ws
 
 改完页面/逻辑发给客户：不要重打 APK，见 [docs/wgt热更新发布.md](./docs/wgt热更新发布.md)。
 
+## iOS App Store 上架
+
+提审包必须走 `ios-store`，不能用普通 App / 企业签打包。步骤与拒审自检见 [docs/iOS-App-Store上架打包检查清单.md](./docs/iOS-App-Store上架打包检查清单.md)。
+
 ## 联调
 
 1. 启动后端（见 `../IM-APP-server/README.md`）

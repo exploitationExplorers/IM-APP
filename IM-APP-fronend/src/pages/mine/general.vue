@@ -3,14 +3,18 @@ import { ref } from 'vue'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { clearAppCache } from '@/utils/app-cache'
+// #ifndef APP-STORE
 import { reselectLine } from '@/utils/reselect-line'
+// #endif
 
 useAuthGuard()
 
 const showClearModal = ref(false)
-const showLineModal = ref(false)
 const clearing = ref(false)
+// #ifndef APP-STORE
+const showLineModal = ref(false)
 const selectingLine = ref(false)
+// #endif
 
 function goBack() {
   const pages = getCurrentPages()
@@ -47,18 +51,9 @@ function openClearModal() {
   showClearModal.value = true
 }
 
-function openLineModal() {
-  showLineModal.value = true
-}
-
 function closeClearModal() {
   if (clearing.value) return
   showClearModal.value = false
-}
-
-function closeLineModal() {
-  if (selectingLine.value) return
-  showLineModal.value = false
 }
 
 function confirmClearCache() {
@@ -75,6 +70,16 @@ function confirmClearCache() {
   }
 }
 
+// #ifndef APP-STORE
+function openLineModal() {
+  showLineModal.value = true
+}
+
+function closeLineModal() {
+  if (selectingLine.value) return
+  showLineModal.value = false
+}
+
 async function confirmReselectLine() {
   if (selectingLine.value) return
   selectingLine.value = true
@@ -88,6 +93,7 @@ async function confirmReselectLine() {
     selectingLine.value = false
   }
 }
+// #endif
 </script>
 
 <template>
@@ -172,6 +178,7 @@ async function confirmReselectLine() {
         mode="aspectFit"
       />
     </view>
+    <!-- #ifndef APP-STORE -->
     <view
       class="cell"
       @click="openLineModal"
@@ -185,7 +192,6 @@ async function confirmReselectLine() {
         mode="aspectFit"
       />
     </view>
-    <!-- #ifndef APP-STORE -->
     <view
       class="cell"
       @click="onDebug"
@@ -235,6 +241,7 @@ async function confirmReselectLine() {
       </view>
     </view>
 
+    <!-- #ifndef APP-STORE -->
     <view
       v-if="showLineModal"
       class="modal-mask"
@@ -265,6 +272,7 @@ async function confirmReselectLine() {
         </view>
       </view>
     </view>
+    <!-- #endif -->
   </view>
 </template>
 

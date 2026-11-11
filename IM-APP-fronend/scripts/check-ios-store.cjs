@@ -17,9 +17,14 @@ function validateStoreEnv(env) {
 }
 
 if (require.main === module) {
+  // vite loadEnv：.env.ios-store 可提交；.env.ios-store.local 仅本机覆盖（勿提交）
   const errors = validateStoreEnv({ ...loadEnv('ios-store', process.cwd()), ...process.env })
   if (errors.length) {
-    console.error('App Store 配置尚未完成，请在 .env.ios-store.local 配置：\n' + errors.join('\n'))
+    console.error(
+      'App Store 配置尚未完成。公网 API/法律页应写在 .env.ios-store；' +
+        '仅 VITE_APP_STORE_ID 等本机覆盖可写 .env.ios-store.local：\n' +
+        errors.join('\n'),
+    )
     process.exitCode = 1
   }
 }
