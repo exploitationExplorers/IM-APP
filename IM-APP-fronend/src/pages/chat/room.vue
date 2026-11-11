@@ -932,6 +932,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
         conversationId: convIdHint,
         type: chatType.value,
         businessId: businessId.value,
+        reveal: true,
       })
       perfMarkEnd('chat:room-enter-conversation')
       return conv

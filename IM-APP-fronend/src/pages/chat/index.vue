@@ -787,6 +787,7 @@ async function consumePendingDesktopChat() {
     const conv = await chatStore.enterConversation({
       type: pending.type,
       businessId: pending.businessId,
+      reveal: true,
     })
     const matched = chatStore.conversations.find((c) => c.id === conv.id)
     const candidate: Conversation =

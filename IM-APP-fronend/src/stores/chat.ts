@@ -63,6 +63,7 @@ import {
   setPendingJoinRequest,
 } from '@/utils/conversation-highlight'
 import {
+  isFriendConnectedNotice,
   isIMNotification,
   isGroupAnnouncementNotice,
   isGroupUnavailableError,
@@ -219,6 +220,13 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
   const hiddenIds = readHiddenIds()
+  /**
+   * 删好友会同时写入 hiddenIds，并调用 OpenIM hideConversation（latest_msg_send_time 置 0）。
+   * 之后拉会话列表不再返回它。重新加好友并打开/发送时要先从 hiddenIds 拿掉，
+   * 同时记在这里，避免紧接着的 loadConversations 用「列表里没有」把刚恢复的会话冲掉。
+   * 冲掉之后发送会走 requireConversation，用户看到的就是「会话不存在」。
+   */
+  const reopenedIds = new Set<string>()
 
   function readBlockedPeerKeys(): Set<string> {
     try {
@@ -298,6 +306,7 @@ export const useChatStore = defineStore('chat', () => {
     if (peer && isBlockedPeer(peer)) return
     hiddenIds.delete(conversationId)
     writeHiddenIds(hiddenIds)
+    reopenedIds.add(conversationId)
   }
 
   function shouldShowConversation(conv: Conversation) {
@@ -546,15 +555,28 @@ export const useChatStore = defineStore('chat', () => {
     // 已移除的会话：仅普通新消息才取消隐藏；解散/系统通知保持隐藏，避免 H5 刷新又刷回来
     // 我拉黑的对方：会话保持消失，不因对方再发消息刷回列表
     if (hiddenIds.has(message.conversationId)) {
-      if (message.notificationKind === 'dissolved' || isIMNotification(item.contentType)) {
-        return
-      }
       const peer = item.sendID === imUserId.value ? item.recvID : item.sendID
       if (isBlockedPeer(peer) || isBlockedPeer(businessUserIdFromIM(peer || ''))) {
         return
       }
+      // 重新成为好友的通知不是普通聊天，但必须解除「删好友」时的本地隐藏。
+      // 否则双方都进得了房间、看得到历史，一发消息就报「会话不存在」。
+      const friendRestored = isFriendConnectedNotice(Number(item.contentType))
+      if (message.notificationKind === 'dissolved' || (isIMNotification(item.contentType) && !friendRestored)) {
+        return
+      }
       unhideConversation(message.conversationId)
-      void conversationOf(message.conversationId).catch(() => undefined)
+      const source = peerIdFromSingleConversation(message.conversationId, imUserId.value) || peer
+      if (friendRestored && source && !isBlockedPeer(source)) {
+        void getOneConversation(source, SessionType.Single)
+          .then((convItem) => {
+            unhideConversation(toConversation(convItem).id)
+            upsertConversations([convItem])
+          })
+          .catch(() => undefined)
+      } else {
+        void conversationOf(message.conversationId).catch(() => undefined)
+      }
     }
     const list = messagesMap.value[message.conversationId] || []
     if (list.some((m) => m.id === message.id)) return
@@ -1003,11 +1025,16 @@ export const useChatStore = defineStore('chat', () => {
           legacyAdminJoinRequestIds.map((id) => hideConversation(id).catch(() => undefined)),
         )
       }
-      conversations.value = sortConversations(
-        mappedConversations
-          .filter((conv) => !legacyAdminJoinRequestIds.includes(conv.id))
-          .filter(shouldShowConversation),
+      const visible = mappedConversations
+        .filter((conv) => !legacyAdminJoinRequestIds.includes(conv.id))
+        .filter(shouldShowConversation)
+      for (const conv of visible) reopenedIds.delete(conv.id)
+      const visibleIds = new Set(visible.map((conv) => conv.id))
+      // OpenIM 仍把这条私聊当成隐藏时，列表接口不会带回；保住刚重新打开的那条，避免发送找不到会话
+      const carried = conversations.value.filter(
+        (conv) => reopenedIds.has(conv.id) && !visibleIds.has(conv.id) && shouldShowConversation(conv),
       )
+      conversations.value = sortConversations([...visible, ...carried])
       await reconcileJoinRequestHighlights()
       refreshOnlineStatus().catch(() => undefined)
       // 备注索引与通讯录分页解耦：拉全量备注后再盖一次会话标题
@@ -1140,6 +1167,8 @@ export const useChatStore = defineStore('chat', () => {
     conversationId?: string
     type: 'private' | 'group'
     businessId?: string
+    /** 用户正在打开这个聊天（房间 / 桌面栏），删好友后重新添加的私聊要解除本地隐藏 */
+    reveal?: boolean
   }): Promise<Conversation> {
     await ensureIMLogin()
     subscribeRealtime()
@@ -1167,6 +1196,12 @@ export const useChatStore = defineStore('chat', () => {
         }
         return mapped
       }
+      // hideConversation 之后 GetConversationList 不再返回该会话，但 getOneConversation 仍能取回。
+      // 桌面端进房只带 conversationId，不走下面的 businessId 分支。
+      if (params.reveal && params.type !== 'group') {
+        const revived = await revivePrivateByConversationId(params.conversationId)
+        if (revived) return revived
+      }
     }
 
     if (!params.businessId) throw new Error('缺少会话目标')
@@ -1186,9 +1221,22 @@ export const useChatStore = defineStore('chat', () => {
       ? (target as { imGroupId: string }).imGroupId
       : (target as { imUserId: string }).imUserId
     const item = await getGroupOrPeerConversation(sourceId, isGroup)
-    if (isGroup) allowGroupConversation(item.conversationID)
+    const mapped = toConversation(item)
+    if (isGroup) allowGroupConversation(mapped.id)
+    else if (params.reveal && !blockedByPeer) unhideConversation(mapped.id)
     upsertConversations([item])
-    return toConversation(item)
+    return mapped
+  }
+
+  /** 删好友后重新打开：用会话 id 里的对端把私聊从本地隐藏和 SDK 隐藏里拉回来 */
+  async function revivePrivateByConversationId(conversationId: string): Promise<Conversation | undefined> {
+    const peer = peerIdFromSingleConversation(conversationId, imUserId.value)
+    if (!peer || isBlockedPeer(peer)) return undefined
+    const item = await getGroupOrPeerConversation(peer, false)
+    const mapped = toConversation(item)
+    unhideConversation(mapped.id)
+    upsertConversations([item])
+    return conversations.value.find((c) => c.id === mapped.id) || mapped
   }
 
   async function assertConversationAccessible(conversation: Conversation): Promise<void> {
@@ -1439,8 +1487,46 @@ export const useChatStore = defineStore('chat', () => {
 
   function requireConversation(conversationId: string): Conversation {
     const conv = conversations.value.find((c) => c.id === conversationId)
-    if (!conv) throw new Error('会话不存在')
-    return conv
+    if (conv) return conv
+    const revived = reviveHiddenPrivateConversation(conversationId)
+    if (revived) return revived
+    throw new Error('会话不存在')
+  }
+
+  /**
+   * 房间已经用会话 id 拉到历史，但删好友时写入的 hiddenIds 让 upsert 把会话滤掉了。
+   * 发送前同步补回一条可发的私聊，避免「会话不存在」；资料再由 SDK 异步补齐。
+   */
+  function reviveHiddenPrivateConversation(conversationId: string): Conversation | undefined {
+    if (!conversationId.startsWith('si_')) return undefined
+    if (!hiddenIds.has(conversationId) && !reopenedIds.has(conversationId)) return undefined
+    const peer = peerIdFromSingleConversation(conversationId, imUserId.value)
+    if (!peer || isBlockedPeer(peer)) return undefined
+    unhideConversation(conversationId)
+    reopenedIds.add(conversationId)
+    const existing = conversations.value.find((c) => c.id === conversationId)
+    if (existing) return existing
+    const stub = decorateConversation({
+      id: conversationId,
+      type: 'private',
+      title: '',
+      avatar: '',
+      lastMessage: '',
+      lastMessageAt: '',
+      unreadCount: 0,
+      peerUserId: peer,
+    })
+    conversations.value = sortConversations([...conversations.value, stub])
+    void getOneConversation(peer, SessionType.Single)
+      .then((item) => {
+        if (isBlockedPeer(peer)) return
+        const mapped = toConversation(item)
+        unhideConversation(mapped.id || conversationId)
+        reopenedIds.add(mapped.id || conversationId)
+        upsertConversations([item])
+      })
+      .catch(() => undefined)
+    return conversations.value.find((c) => c.id === conversationId) || stub
   }
 
   async function clearHistory(conversationId: string) {
@@ -1576,14 +1662,23 @@ export const useChatStore = defineStore('chat', () => {
     if (exitedGroupIds.has(conversationId)) {
       throw new Error('你已退出该群聊，不能发送消息')
     }
-    if (!hiddenIds.has(conversationId)) return
-    unhideConversation(conversationId)
+    const wasHidden = hiddenIds.has(conversationId)
+    if (wasHidden) unhideConversation(conversationId)
+    if (!wasHidden && conversations.value.some((c) => c.id === conversationId)) return
     try {
-      await conversationOf(conversationId)
+      const found = await conversationOf(conversationId)
+      if (found && conversations.value.some((c) => c.id === conversationId)) return
+      // 列表接口不返回被 hideConversation 的会话，改用 getOneConversation 拉回
+      const peer = peerIdFromSingleConversation(conversationId, imUserId.value)
+      if (!peer || isBlockedPeer(peer)) return
+      const item = await getOneConversation(peer, SessionType.Single)
+      const mapped = toConversation(item)
+      unhideConversation(mapped.id)
+      reopenedIds.add(mapped.id)
+      upsertConversations([item])
     } catch (e) {
-      hiddenIds.add(conversationId)
-      writeHiddenIds(hiddenIds)
-      throw e
+      // 消息已经发出。拉不回会话不能重新藏起来，否则下一条又是「会话不存在」。
+      console.warn('[chat] 重新显示会话失败', conversationId, e)
     }
   }
 
