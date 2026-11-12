@@ -1,0 +1,90 @@
+name: Native verification
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'IM-APP-android/**'
+      - 'IM-APP-ios/**'
+      - 'contracts/native-bootstrap/**'
+      - 'contracts/ui-parity/**'
+      - 'scripts/native/**'
+      - '.github/workflows/native-checks.yml'
+      - 'IM-APP-server/internal/models/auth.go'
+      - 'IM-APP-server/internal/response/response.go'
+      - 'IM-APP-server/internal/handler/im.go'
+      - 'IM-APP-server/internal/service/im.go'
+      - 'IM-APP-server/cmd/server/main.go'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.scope.outputs.android }}
+      ios: ${{ steps.scope.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/native/verify_bootstrap.py
+      - name: Validate original UI assets and native copies
+        run: python scripts/native/verify_ui_parity.py
+      - name: Validate iOS project references and release guard
+        run: python IM-APP-ios/scripts/verify_project.py
+      - name: Select affected platforms
+        id: scope
+        run: python scripts/native/ci_scope.py
+
+  android:
+    needs: contracts
+    if: needs.contracts.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.4'
+      - name: Unit tests, debug build and lint
+        working-directory: IM-APP-android
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-test-results
+          path: |
+            IM-APP-android/app/build/test-results/
+            IM-APP-android/app/build/reports/
+          if-no-files-found: ignore
+
+  ios:
+    needs: contracts
+    if: needs.contracts.outputs.ios == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift core tests
+        run: swift test --package-path IM-APP-ios/Packages/IMCore
+      - name: Check Xcode project
+        run: xcodebuild -list -project IM-APP-ios/IMNative.xcodeproj
+      - name: Compile simulator app without distribution signing
+        run: >-
+          xcodebuild -project IM-APP-ios/IMNative.xcodeproj
+          -scheme IMNative -sdk iphonesimulator -configuration Debug
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath .native-cache/DerivedData CODE_SIGNING_ALLOWED=NO build

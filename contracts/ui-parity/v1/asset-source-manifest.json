@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "source_of_truth": "existing uni-app source assets; no competitor assets",
+  "generated_by": "node scripts/native/sync_ui_assets.mjs",
+  "records": [
+    {
+      "name": "uni_avatar_1",
+      "source": "IM-APP-fronend/src/static/avatar-1.png",
+      "source_sha256": "a933a356eb8f6f253e493114b7928d0b42843b062ef5e0b82c0a68063629278f",
+      "transformation": "byte-copy",
+      "output_sha256": "a933a356eb8f6f253e493114b7928d0b42843b062ef5e0b82c0a68063629278f",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_avatar_1.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_avatar_1.imageset/uni_avatar_1.png"
+      ]
+    },
+    {
+      "name": "uni_avatar_me",
+      "source": "IM-APP-fronend/src/static/avatar-me.png",
+      "source_sha256": "06b447703195cf2f1496b988bce2754a6f07a4032f1c0df0e3f13c953444cd03",
+      "transformation": "byte-copy",
+      "output_sha256": "06b447703195cf2f1496b988bce2754a6f07a4032f1c0df0e3f13c953444cd03",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_avatar_me.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_avatar_me.imageset/uni_avatar_me.png"
+      ]
+    },
+    {
+      "name": "uni_icon_mic",
+      "source": "IM-APP-fronend/src/static/icon-mic.png",
+      "source_sha256": "13fb8f8149bd85891ea0cd529fd1a2edfd8c3cf892493250214e7ffe2ff91cf6",
+      "transformation": "byte-copy",
+      "output_sha256": "13fb8f8149bd85891ea0cd529fd1a2edfd8c3cf892493250214e7ffe2ff91cf6",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_mic.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_mic.imageset/uni_icon_mic.png"
+      ]
+    },
+    {
+      "name": "uni_icon_photo",
+      "source": "IM-APP-fronend/src/static/icon-photo.png",
+      "source_sha256": "c6e5c09d753c4d5ee79c9ea4886ee82bb551baa634cbef2938035ec0081831d2",
+      "transformation": "byte-copy",
+      "output_sha256": "c6e5c09d753c4d5ee79c9ea4886ee82bb551baa634cbef2938035ec0081831d2",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_photo.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_photo.imageset/uni_icon_photo.png"
+      ]
+    },
+    {
+      "name": "uni_icon_camera",
+      "source": "IM-APP-fronend/src/static/icon-camera.png",
+      "source_sha256": "66a72b36eeae812fa99f16ed896ef4bf237f1c100f80f3244b1d7d85288fde4e",
+      "transformation": "byte-copy",
+      "output_sha256": "66a72b36eeae812fa99f16ed896ef4bf237f1c100f80f3244b1d7d85288fde4e",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_camera.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_camera.imageset/uni_icon_camera.png"
+      ]
+    },
+    {
+      "name": "uni_icon_file",
+      "source": "IM-APP-fronend/src/static/icon-file.png",
+      "source_sha256": "b2c748d40589dfd8043ef490b5eac4d474cabb7bd64aca7d5118f43bbdfcb64d",
+      "transformation": "byte-copy",
+      "output_sha256": "b2c748d40589dfd8043ef490b5eac4d474cabb7bd64aca7d5118f43bbdfcb64d",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_file.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_file.imageset/uni_icon_file.png"
+      ]
+    },
+    {
+      "name": "uni_icon_card",
+      "source": "IM-APP-fronend/src/static/icon-card.png",
+      "source_sha256": "cf5de400f2689edfc6743b4e347c58cadd9f9ed3418a9e913709b90fc9ac7ac9",
+      "transformation": "byte-copy",
+      "output_sha256": "cf5de400f2689edfc6743b4e347c58cadd9f9ed3418a9e913709b90fc9ac7ac9",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_card.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_card.imageset/uni_icon_card.png"
+      ]
+    },
+    {
+      "name": "uni_icon_favorite",
+      "source": "IM-APP-fronend/src/static/icon-favorite.png",
+      "source_sha256": "d64dc49ad8ac9448cc385757efba6c3d4008eb6258a0543f5ef1ad1aff511e2d",
+      "transformation": "byte-copy",
+      "output_sha256": "d64dc49ad8ac9448cc385757efba6c3d4008eb6258a0543f5ef1ad1aff511e2d",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_favorite.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_favorite.imageset/uni_icon_favorite.png"
+      ]
+    },
+    {
+      "name": "uni_tab_contacts",
+      "source": "IM-APP-fronend/src/static/tab/contacts.svg",
+      "source_sha256": "7c3067bbce2e3135bc84639bf3feb11f83ce48ab15606ee393b5a3755055b4ab",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "c5ae198b5a92a7ff731890bc88f2637b79ca5ec29b282928134b131beb20c4fb",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_tab_contacts.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_tab_contacts.imageset/uni_tab_contacts.png"
+      ]
+    },
+    {
+      "name": "uni_tab_contacts_active",
+      "source": "IM-APP-fronend/src/static/tab/contacts-active.svg",
+      "source_sha256": "3ff2d0a16bf2fe77a7fb1c995626cd04b0c89dd0a09b5d3727efb540b4de5358",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "918cca592e7b8b18036e2898ca71b075b7f295228c32698105d041817e41e1f6",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_tab_contacts_active.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_tab_contacts_active.imageset/uni_tab_contacts_active.png"
+      ]
+    },
+    {
+      "name": "uni_tab_chat",
+      "source": "IM-APP-fronend/src/static/tab/chat.svg",
+      "source_sha256": "560c2122a70dea26bcd81b47ab46c6d6c5d2b7f71edf3bb129db93c2b7cd4e6d",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "1a823f4c0832728425a73bf03499135996fc018e837c9c949416e85af1a17c29",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_tab_chat.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_tab_chat.imageset/uni_tab_chat.png"
+      ]
+    },
+    {
+      "name": "uni_tab_chat_active",
+      "source": "IM-APP-fronend/src/static/tab/chat-active.svg",
+      "source_sha256": "5766047ae1d66d1698a845a574a9058f091c73ba2288b276b667475f43f2e45c",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "308bf87ea9f1ac9c7e9eb6eabda111503c68af55fdc60b0ddff778717c1fa4fe",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_tab_chat_active.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_tab_chat_active.imageset/uni_tab_chat_active.png"
+      ]
+    },
+    {
+      "name": "uni_tab_mine",
+      "source": "IM-APP-fronend/src/static/tab/mine.svg",
+      "source_sha256": "86d963769d1db068316ac7817591692899491e77a1ec841bb524c64a45adfd37",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "9297efc65d5b09054064d5b4fa47bb2e7eec25bf8cfb649bcecbfb364e820d73",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_tab_mine.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_tab_mine.imageset/uni_tab_mine.png"
+      ]
+    },
+    {
+      "name": "uni_tab_mine_active",
+      "source": "IM-APP-fronend/src/static/tab/mine-active.svg",
+      "source_sha256": "f1b0653d8fa7e80db18221a50150a40c45a1bc98b414874591dec80313678e29",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "1e985bfa638840f198501e43af3ea2f1e3eceaf51ece34e42f91da8d3813268e",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_tab_mine_active.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_tab_mine_active.imageset/uni_tab_mine_active.png"
+      ]
+    },
+    {
+      "name": "uni_auth_eye",
+      "source": "IM-APP-fronend/src/static/auth/icon-eye.svg",
+      "source_sha256": "410f1d2ce3a34289e7203399f630ca72280a8a4d886ecd6a9614e5a2a4525cd4",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "2fb3274dd0507ca6ac45e06df93918731683f139417bffd33944d8e5311464cc",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_auth_eye.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_auth_eye.imageset/uni_auth_eye.png"
+      ]
+    },
+    {
+      "name": "uni_auth_eye_off",
+      "source": "IM-APP-fronend/src/static/auth/icon-eye-off.svg",
+      "source_sha256": "b8fc3702aab01b58a7131dcfd7be9ecbbf1bf670a454fc71439f39591cd339f6",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "4344648b91d90beff95d4dac1185b6e4b59788d86800d8eeded25039321c28d4",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_auth_eye_off.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_auth_eye_off.imageset/uni_auth_eye_off.png"
+      ]
+    },
+    {
+      "name": "uni_auth_chevron_down",
+      "source": "IM-APP-fronend/src/static/auth/icon-chevron-down.svg",
+      "source_sha256": "eacd18bc9bb9179e7ca7deaaa7519acfdf5e5491fe5d99b834a4c022ec7a31e1",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "cf5a077263a9dc8abe5c76cd41050d3a19e51d3c2aa8f37c9aa9af85373c81b6",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_auth_chevron_down.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_auth_chevron_down.imageset/uni_auth_chevron_down.png"
+      ]
+    },
+    {
+      "name": "uni_icon_plus",
+      "source": "IM-APP-fronend/src/static/icons/icon-plus.svg",
+      "source_sha256": "fd9f5cd2854b9508a61b99a197c4bca9825a601efca7f56f3abb63fa8d5164a4",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "ff5da4f13fea103f5e382d8c41e0a4670b47f01e9e8ed95645e4348bf3ad43fa",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_plus.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_plus.imageset/uni_icon_plus.png"
+      ]
+    },
+    {
+      "name": "uni_icon_back",
+      "source": "IM-APP-fronend/src/static/icons/icon-back.svg",
+      "source_sha256": "6ab05614b4f7c3ca099afed1c4b265089ea5737f298d379be6108cb834c621ef",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "5675315462470498f7635ae0452c6e9adc27a42514444f57a56d1e42fb199beb",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_back.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_back.imageset/uni_icon_back.png"
+      ]
+    },
+    {
+      "name": "uni_icon_more",
+      "source": "IM-APP-fronend/src/static/icons/icon-more.svg",
+      "source_sha256": "eecc500785352567424646dcb2e9592a5ae324abf0572d73c5389e6472b46975",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "9ce5944e234b6f8ca7cb794d894c638e8a9a18cd1c1bc1d18cd709f3ccc6fb67",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_more.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_more.imageset/uni_icon_more.png"
+      ]
+    },
+    {
+      "name": "uni_icon_pin",
+      "source": "IM-APP-fronend/src/static/icons/icon-pin.svg",
+      "source_sha256": "0b61e23468d8819d9da9ca0f24899d9f1d1d17c1571fa70d11c61951df7305d6",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "ebe93a5845824cde285f907a4313c6ad076e481fe2b62e0f4d8a15eedbae90ff",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_pin.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_pin.imageset/uni_icon_pin.png"
+      ]
+    },
+    {
+      "name": "uni_icon_bell_slash",
+      "source": "IM-APP-fronend/src/static/icons/icon-bell-slash.svg",
+      "source_sha256": "7bbffed722f3e07838498cb24cb8e38fb1bc58e240f6b673f15f4cf7668a15e8",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "18add24ace05ce2e1ad85f7896f7c4677d7aa35c66f00ca202b6e3fbd994af00",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_icon_bell_slash.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_icon_bell_slash.imageset/uni_icon_bell_slash.png"
+      ]
+    },
+    {
+      "name": "uni_menu_add_friend",
+      "source": "IM-APP-fronend/src/static/icons/menu-add-friend.svg",
+      "source_sha256": "41f066947c09fb7d8dde6d856857431ef7ecab67a8594fcf0568ed8c96814918",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "249c843ba2652b737affea318a1966fc91ff5193a7bd58ca1929618a33f72142",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_menu_add_friend.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_menu_add_friend.imageset/uni_menu_add_friend.png"
+      ]
+    },
+    {
+      "name": "uni_menu_add_group",
+      "source": "IM-APP-fronend/src/static/icons/menu-add-group.svg",
+      "source_sha256": "0e9cfe3beaa2f1fa0f3c937bd7f7bcc991a4afceccffdfd1183e4a5b0c603ed0",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "31f0cbb8a46a9c7561fc312430006d18db49951f1a3723d6f8a634b9e1c76316",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_menu_add_group.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_menu_add_group.imageset/uni_menu_add_group.png"
+      ]
+    },
+    {
+      "name": "uni_menu_create_group",
+      "source": "IM-APP-fronend/src/static/icons/menu-create-group.svg",
+      "source_sha256": "290dde9e4016d43c254eb80ec34c267c5c40351f88042fee549abe2ca5404180",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "7ded7e395fefa756e3eea3a68a81649f73c7b0ca7d82743527a60ddb4028415a",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_menu_create_group.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_menu_create_group.imageset/uni_menu_create_group.png"
+      ]
+    },
+    {
+      "name": "uni_group_default",
+      "source": "IM-APP-fronend/src/static/group-default.svg",
+      "source_sha256": "8a9fc86657709a5c402f9ead0db4984621f9b3171f452cc81fc3253f442eae34",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "620755a41210e62ce4bb61cffa6fef683a385dad8dfcff9aa4cabef24142c021",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_group_default.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_group_default.imageset/uni_group_default.png"
+      ]
+    },
+    {
+      "name": "uni_avatar_default",
+      "source": "IM-APP-fronend/src/static/avatar-default.svg",
+      "source_sha256": "bd8627921d4d403e4cc8b909ef1933b8b595cc9c476caff694dad94b8e019b59",
+      "transformation": "original SVG rasterized to transparent 96x96 PNG; displayed at original logical size",
+      "output_sha256": "8a15d5977cd8e0a8ff3662d7657a84a70e9c42be5d93358c2aa82e0a534167de",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_avatar_default.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_avatar_default.imageset/uni_avatar_default.png"
+      ]
+    },
+    {
+      "name": "uni_logo",
+      "source": "IM-APP-fronend/src/static/logo/logo.png",
+      "source_sha256": "c880e497171e0817398e86943fd3bb4f0eb758f26c866374ae27eed51c8aca1a",
+      "transformation": "original PNG downsampled to 168x168; login uses 56 logical pixels",
+      "output_sha256": "dd89abfc6b0404c8df24dfd07143bb97719bc2bbbd24dd710682bfd2139a72bc",
+      "destinations": [
+        "IM-APP-android/app/src/main/res/drawable-nodpi/uni_logo.png",
+        "IM-APP-ios/IMNative/Assets.xcassets/uni_logo.imageset/uni_logo.png"
+      ]
+    },
+    {
+      "name": "agreement",
+      "source": "IM-APP-fronend/src/static/legal/agreement.html",
+      "source_sha256": "10235900fada8df5f111b405c67e39b5e8a468c727ed5cf4b27c4ee729de4a51",
+      "output_sha256": "10235900fada8df5f111b405c67e39b5e8a468c727ed5cf4b27c4ee729de4a51",
+      "transformation": "byte-copy",
+      "destinations": [
+        "IM-APP-android/app/src/main/assets/legal/agreement.html",
+        "IM-APP-ios/IMNative/Legal/agreement.html"
+      ]
+    },
+    {
+      "name": "privacy",
+      "source": "IM-APP-fronend/src/static/legal/privacy.html",
+      "source_sha256": "151ad4ea4e82f2ed58a695581cea13e92e2b13ff829606daf7a1cf07f980359c",
+      "output_sha256": "151ad4ea4e82f2ed58a695581cea13e92e2b13ff829606daf7a1cf07f980359c",
+      "transformation": "byte-copy",
+      "destinations": [
+        "IM-APP-android/app/src/main/assets/legal/privacy.html",
+        "IM-APP-ios/IMNative/Legal/privacy.html"
+      ]
+    }
+  ]
+}

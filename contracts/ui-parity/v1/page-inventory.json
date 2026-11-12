@@ -1,0 +1,444 @@
+{
+  "source": "IM-APP-fronend/src/pages.json",
+  "ui_policy": "preserve existing uni-app UI; replace rendering and data stack natively",
+  "pages": [
+    {
+      "page": "pages/download/index",
+      "source": "IM-APP-fronend/src/pages/download/index.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/chat/index",
+      "source": "IM-APP-fronend/src/pages/chat/index.vue",
+      "status": "sample_ui_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/auth/sign-in",
+      "source": "IM-APP-fronend/src/pages/auth/sign-in.vue",
+      "status": "native_implemented_local_validation",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/auth/sign-up",
+      "source": "IM-APP-fronend/src/pages/auth/sign-up.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/auth/onboarding",
+      "source": "IM-APP-fronend/src/pages/auth/onboarding.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/auth/forgot-password",
+      "source": "IM-APP-fronend/src/pages/auth/forgot-password.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/auth/agreement",
+      "source": "IM-APP-fronend/src/pages/auth/agreement.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/auth/privacy",
+      "source": "IM-APP-fronend/src/pages/auth/privacy.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/index",
+      "source": "IM-APP-fronend/src/pages/contacts/index.vue",
+      "status": "tab_only_body_not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/index",
+      "source": "IM-APP-fronend/src/pages/mine/index.vue",
+      "status": "tab_only_body_not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/chat/room",
+      "source": "IM-APP-fronend/src/pages/chat/room.vue",
+      "status": "sample_text_ui_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/chat/forward",
+      "source": "IM-APP-fronend/src/pages/chat/forward.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/chat/image-viewer",
+      "source": "IM-APP-fronend/src/pages/chat/image-viewer.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/chat/video-viewer",
+      "source": "IM-APP-fronend/src/pages/chat/video-viewer.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/chat/card-picker",
+      "source": "IM-APP-fronend/src/pages/chat/card-picker.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/chat/favorite-picker",
+      "source": "IM-APP-fronend/src/pages/chat/favorite-picker.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/report-user",
+      "source": "IM-APP-fronend/src/pages/contacts/report-user.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/new-friends",
+      "source": "IM-APP-fronend/src/pages/contacts/new-friends.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/add-friend",
+      "source": "IM-APP-fronend/src/pages/contacts/add-friend.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/add-group",
+      "source": "IM-APP-fronend/src/pages/contacts/add-group.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/scan",
+      "source": "IM-APP-fronend/src/pages/contacts/scan.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/scan-result",
+      "source": "IM-APP-fronend/src/pages/contacts/scan-result.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/scan-group-result",
+      "source": "IM-APP-fronend/src/pages/contacts/scan-group-result.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/user-profile",
+      "source": "IM-APP-fronend/src/pages/contacts/user-profile.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/friend-detail",
+      "source": "IM-APP-fronend/src/pages/contacts/friend-detail.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/friend-common-groups",
+      "source": "IM-APP-fronend/src/pages/contacts/friend-common-groups.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/friend-remark",
+      "source": "IM-APP-fronend/src/pages/contacts/friend-remark.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/friend-tags",
+      "source": "IM-APP-fronend/src/pages/contacts/friend-tags.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/tag-detail",
+      "source": "IM-APP-fronend/src/pages/contacts/tag-detail.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/tag-add-members",
+      "source": "IM-APP-fronend/src/pages/contacts/tag-add-members.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/tags",
+      "source": "IM-APP-fronend/src/pages/contacts/tags.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/contacts/groups",
+      "source": "IM-APP-fronend/src/pages/contacts/groups.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/create",
+      "source": "IM-APP-fronend/src/pages/group/create.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/detail",
+      "source": "IM-APP-fronend/src/pages/group/detail.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/members",
+      "source": "IM-APP-fronend/src/pages/group/members.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/invite",
+      "source": "IM-APP-fronend/src/pages/group/invite.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/admin",
+      "source": "IM-APP-fronend/src/pages/group/admin.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/admins",
+      "source": "IM-APP-fronend/src/pages/group/admins.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/admin-add",
+      "source": "IM-APP-fronend/src/pages/group/admin-add.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/join-requests",
+      "source": "IM-APP-fronend/src/pages/group/join-requests.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/edit-name",
+      "source": "IM-APP-fronend/src/pages/group/edit-name.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/edit-group-id",
+      "source": "IM-APP-fronend/src/pages/group/edit-group-id.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/announcement",
+      "source": "IM-APP-fronend/src/pages/group/announcement.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/remark",
+      "source": "IM-APP-fronend/src/pages/group/remark.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/qrcode",
+      "source": "IM-APP-fronend/src/pages/group/qrcode.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/my-nickname",
+      "source": "IM-APP-fronend/src/pages/group/my-nickname.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/media",
+      "source": "IM-APP-fronend/src/pages/group/media.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/search-history",
+      "source": "IM-APP-fronend/src/pages/group/search-history.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/report",
+      "source": "IM-APP-fronend/src/pages/group/report.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/report-submit",
+      "source": "IM-APP-fronend/src/pages/group/report-submit.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/group/leave",
+      "source": "IM-APP-fronend/src/pages/group/leave.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/profile",
+      "source": "IM-APP-fronend/src/pages/mine/profile.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/account-deletion",
+      "source": "IM-APP-fronend/src/pages/mine/account-deletion.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/edit-nickname",
+      "source": "IM-APP-fronend/src/pages/mine/edit-nickname.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/edit-chat-id",
+      "source": "IM-APP-fronend/src/pages/mine/edit-chat-id.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/edit-bio",
+      "source": "IM-APP-fronend/src/pages/mine/edit-bio.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/qrcode",
+      "source": "IM-APP-fronend/src/pages/mine/qrcode.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/favorites",
+      "source": "IM-APP-fronend/src/pages/mine/favorites.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/notifications",
+      "source": "IM-APP-fronend/src/pages/mine/notifications.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/chat-settings",
+      "source": "IM-APP-fronend/src/pages/mine/chat-settings.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/mass-assistant",
+      "source": "IM-APP-fronend/src/pages/mine/mass-assistant.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/mass-select-contacts",
+      "source": "IM-APP-fronend/src/pages/mine/mass-select-contacts.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/mass-compose",
+      "source": "IM-APP-fronend/src/pages/mine/mass-compose.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/mass-targets",
+      "source": "IM-APP-fronend/src/pages/mine/mass-targets.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/privacy",
+      "source": "IM-APP-fronend/src/pages/mine/privacy.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/blacklist",
+      "source": "IM-APP-fronend/src/pages/mine/blacklist.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/security",
+      "source": "IM-APP-fronend/src/pages/mine/security.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/reset-password",
+      "source": "IM-APP-fronend/src/pages/mine/reset-password.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/general",
+      "source": "IM-APP-fronend/src/pages/mine/general.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/feedback",
+      "source": "IM-APP-fronend/src/pages/mine/feedback.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/about",
+      "source": "IM-APP-fronend/src/pages/mine/about.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/emotions",
+      "source": "IM-APP-fronend/src/pages/mine/emotions.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    },
+    {
+      "page": "pages/mine/debug",
+      "source": "IM-APP-fronend/src/pages/mine/debug.vue",
+      "status": "not_implemented",
+      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+    }
+  ]
+}

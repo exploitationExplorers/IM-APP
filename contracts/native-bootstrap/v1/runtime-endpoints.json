@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "environment": "existing-backend",
+  "api_base_url": "https://www.xn--jprz53bj9s.com/api/v1",
+  "source": "Existing uni-app public HTTPS origin www.易可聊.com; /api is forwarded to the existing backend",
+  "authorization": "User explicitly requested using the existing backend on 2026-11-12",
+  "ordinary_login_requires_manual_configuration": false,
+  "credentials_embedded": false,
+  "login_flow": [
+    {"method": "POST", "path": "/auth/login"},
+    {"method": "GET", "path": "/me", "authorization": "Bearer accessToken"}
+  ],
+  "im_token_requested_by_login": false,
+  "notes": "The OpenIM SDK is not integrated yet. Business login does not issue an unused IM token or claim message-store readiness."
+}

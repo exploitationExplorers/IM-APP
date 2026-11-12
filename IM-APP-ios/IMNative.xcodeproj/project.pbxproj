@@ -1,0 +1,136 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {};
+    objectVersion = 56;
+    objects = {
+        A10000000000000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001; };
+        A10000000000000000000002 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002; };
+        A10000000000000000000003 /* LoginViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003; };
+        A10000000000000000000004 /* SampleConversationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004; };
+        A10000000000000000000005 /* IMCore in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000001; };
+        A10000000000000000000006 /* NativeUITheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007; };
+        A10000000000000000000007 /* LegalViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008; };
+        A10000000000000000000008 /* SampleMainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009; };
+        A10000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010; };
+        A10000000000000000000010 /* Legal in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011; };
+
+        A20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+        A20000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+        A20000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewController.swift; sourceTree = "<group>"; };
+        A20000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleConversationViewController.swift; sourceTree = "<group>"; };
+        A20000000000000000000005 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+        A20000000000000000000006 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IMNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        A20000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeUITheme.swift; sourceTree = "<group>"; };
+        A20000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalViewController.swift; sourceTree = "<group>"; };
+        A20000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleMainViewController.swift; sourceTree = "<group>"; };
+        A20000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+        A20000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = folder; path = Legal; sourceTree = "<group>"; };
+
+        A30000000000000000000001 = {isa = PBXGroup; children = (A30000000000000000000002, A30000000000000000000003, ); sourceTree = "<group>"; };
+        A30000000000000000000002 = {isa = PBXGroup; children = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000004, A20000000000000000000007, A20000000000000000000008, A20000000000000000000009, A20000000000000000000010, A20000000000000000000011, A20000000000000000000005, ); path = IMNative; sourceTree = "<group>"; };
+        A30000000000000000000003 = {isa = PBXGroup; children = (A20000000000000000000006, ); name = Products; sourceTree = "<group>"; };
+
+        A40000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000006, A10000000000000000000007, A10000000000000000000008, ); runOnlyForDeploymentPostprocessing = 0; };
+        A40000000000000000000002 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000005, ); runOnlyForDeploymentPostprocessing = 0; };
+        A40000000000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000009, A10000000000000000000010, ); runOnlyForDeploymentPostprocessing = 0; };
+        A40000000000000000000004 = {
+            isa = PBXShellScriptBuildPhase;
+            alwaysOutOfDate = 1;
+            buildActionMask = 2147483647;
+            files = ();
+            inputPaths = ();
+            name = "Block unconfigured production release";
+            outputPaths = ();
+            runOnlyForDeploymentPostprocessing = 0;
+            shellPath = /bin/sh;
+            shellScript = "set -eu\ncase \"${CONFIGURATION}:${ACTION:-build}\" in\n  Release:*|*:install)\n    echo \"error: Production identity, signing, SDK compatibility and migration gates are not configured. Debug simulator build only.\"\n    exit 1\n    ;;\nesac\n";
+        };
+
+        A50000000000000000000001 = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A70000000000000000000002;
+            buildPhases = (A40000000000000000000004, A40000000000000000000001, A40000000000000000000002, A40000000000000000000003, );
+            buildRules = ();
+            dependencies = ();
+            name = IMNative;
+            packageProductDependencies = (AC0000000000000000000001, );
+            productName = IMNative;
+            productReference = A20000000000000000000006;
+            productType = "com.apple.product-type.application";
+        };
+
+        A60000000000000000000001 = {
+            isa = PBXProject;
+            attributes = {BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {A50000000000000000000001 = {CreatedOnToolsVersion = 15.0; }; }; };
+            buildConfigurationList = A70000000000000000000001;
+            compatibilityVersion = "Xcode 14.0";
+            developmentRegion = zh_CN;
+            hasScannedForEncodings = 0;
+            knownRegions = (zh_CN, en, Base, );
+            mainGroup = A30000000000000000000001;
+            packageReferences = (AB0000000000000000000001, );
+            productRefGroup = A30000000000000000000003;
+            projectDirPath = "";
+            projectRoot = "";
+            targets = (A50000000000000000000001, );
+        };
+
+        A70000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (A80000000000000000000001, A80000000000000000000002, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+        A70000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (A90000000000000000000001, A90000000000000000000002, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+
+        A80000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {
+            CLANG_ENABLE_MODULES = YES;
+            DEBUG_INFORMATION_FORMAT = dwarf;
+            ENABLE_TESTABILITY = YES;
+            GCC_C_LANGUAGE_STANDARD = gnu17;
+            GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)", );
+            IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+            SDKROOT = iphoneos;
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+            SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+            SWIFT_VERSION = 5.0;
+        }; name = Debug; };
+        A80000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {
+            CLANG_ENABLE_MODULES = YES;
+            DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+            IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+            SDKROOT = iphoneos;
+            SWIFT_COMPILATION_MODE = wholemodule;
+            SWIFT_OPTIMIZATION_LEVEL = "-O";
+            SWIFT_VERSION = 5.0;
+        }; name = Release; };
+
+        A90000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {
+            CODE_SIGN_STYLE = Automatic;
+            CURRENT_PROJECT_VERSION = 2;
+            GENERATE_INFOPLIST_FILE = NO;
+            INFOPLIST_FILE = IMNative/Info.plist;
+            LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", );
+            MARKETING_VERSION = 0.1.1;
+            PRODUCT_BUNDLE_IDENTIFIER = com.im.nativebootstrap.staging;
+            PRODUCT_NAME = "$(TARGET_NAME)";
+            SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+            SUPPORTS_MACCATALYST = NO;
+            SWIFT_EMIT_LOC_STRINGS = YES;
+            TARGETED_DEVICE_FAMILY = "1,2";
+        }; name = Debug; };
+        A90000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {
+            CODE_SIGN_STYLE = Automatic;
+            CURRENT_PROJECT_VERSION = 2;
+            GENERATE_INFOPLIST_FILE = NO;
+            INFOPLIST_FILE = IMNative/Info.plist;
+            LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", );
+            MARKETING_VERSION = 0.1.1;
+            PRODUCT_BUNDLE_IDENTIFIER = com.im.nativebootstrap.staging;
+            PRODUCT_NAME = "$(TARGET_NAME)";
+            SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+            SUPPORTS_MACCATALYST = NO;
+            TARGETED_DEVICE_FAMILY = "1,2";
+        }; name = Release; };
+
+        AB0000000000000000000001 = {isa = XCLocalSwiftPackageReference; relativePath = Packages/IMCore; };
+        AC0000000000000000000001 = {isa = XCSwiftPackageProductDependency; package = AB0000000000000000000001; productName = IMCore; };
+    };
+    rootObject = A60000000000000000000001;
+}

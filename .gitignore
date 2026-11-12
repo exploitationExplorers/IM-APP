@@ -42,3 +42,10 @@ docs/前端架构分析与优化方案.html
 # Python 本地缓存，不随源码提交
 __pycache__/
 *.py[cod]
+
+# 原生工程本地工具、依赖和验证产物。
+.native-cache/
+
+# Craft Anything / REA 本地分析与复刻原型（体积大、含竞品取证，勿入库）
+.analysis/
+craft-yanchat-client/

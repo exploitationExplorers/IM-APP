@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "basePath": "/api/v1",
+  "sourceOfTruth": [
+    "IM-APP-server/cmd/server/main.go",
+    "IM-APP-server/internal/models/auth.go",
+    "IM-APP-server/internal/response/response.go",
+    "IM-APP-server/internal/handler/im.go",
+    "IM-APP-server/internal/service/im.go"
+  ],
+  "envelope": {"code": "integer", "message": "string", "data": "object|null", "successCode": 0},
+  "platformIds": {"ios": 1, "android": 2, "legacyDefault": 5},
+  "endpoints": [
+    {"id": "passwordLogin", "method": "POST", "path": "/auth/login", "auth": false, "requestFields": ["countryCode", "phone", "password", "deviceId"], "response": "AuthResult"},
+    {"id": "smsLogin", "method": "POST", "path": "/auth/login/sms", "auth": false, "requestFields": ["countryCode", "phone", "code", "deviceId"], "response": "AuthResult"},
+    {"id": "sendSms", "method": "POST", "path": "/auth/sms/send", "auth": false, "requestFields": ["countryCode", "phone", "scene", "deviceId"], "response": "SendSMSResult"},
+    {"id": "refreshToken", "method": "POST", "path": "/auth/token/refresh", "auth": false, "requestFields": ["refreshToken", "deviceId"], "response": "TokenPair"},
+    {"id": "imToken", "method": "POST", "path": "/im/token", "auth": true, "requestFields": ["platformId"], "response": "IMToken"},
+    {"id": "profile", "method": "GET", "path": "/me", "auth": true, "requestFields": [], "response": "MeProfile"}
+  ],
+  "rules": [
+    "POST uses application/json; authorization uses Bearer header.",
+    "HTTP success and code=0 are both required; null data is not an authentication result.",
+    "Business user.id and IM userId are separate identities; do not infer equality.",
+    "Read apiAddr and wsAddr from IMToken, never from competitor configuration.",
+    "Request a token for the current platform; do not change the legacy server default.",
+    "A business or IM token does not prove SDK login, store readability, or sync completion.",
+    "The user authorized the existing backend as the default; see runtime-endpoints.json. Credentials are never embedded and all requests require explicit user actions.",
+    "Business login requests auth/login and me only; issuing an IM token is deferred until the actual SDK is connected.",
+    "Production signing and distribution remain blocked pending identity and migration checks."
+  ]
+}
