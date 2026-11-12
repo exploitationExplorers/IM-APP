@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAppSdkDataDir, type AppDataIO } from '@/utils/openimDataDir'
+import { backupAppSdkDataDir, getAppSdkDataDir, resetAppSdkDataDir, type AppDataIO } from '@/utils/openimDataDir'
 
 function createIO() {
   const created: string[] = []
@@ -117,5 +117,82 @@ describe('OpenIM App 数据库目录', () => {
 
   it('没有 plus.io 时明确失败', async () => {
     await expect(getAppSdkDataDir('user-a')).rejects.toThrow('当前 App 环境无法获取本地存储目录')
+  })
+
+  it('备份异常库时移到同级目录保留文件，随后可在原路径创建新库', async () => {
+    const { io, directory, userDirectory } = createIO()
+    const moveTo = vi.fn((_parent, _name, success) => success(userDirectory))
+    const remove = vi.fn()
+    Object.assign(userDirectory, { moveTo, remove })
+    await expect(backupAppSdkDataDir('user-a', io)).resolves.toBe(true)
+    expect(moveTo).toHaveBeenCalledWith(directory, expect.stringMatching(/^user-a\.recovery-\d+$/), expect.any(Function), expect.any(Function))
+    expect(remove).not.toHaveBeenCalled()
+    await expect(getAppSdkDataDir('user-a', io)).resolves.toBe('/var/mobile/current/doc/openim/user-a/')
+  })
+
+  it('备份失败时保留原库，不能改为删除文件', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { io, userDirectory } = createIO()
+    const removeRecursively = vi.fn()
+    const moveTo = vi.fn((_parent, _name, _success, fail) => fail({ code: 10 }))
+    Object.assign(userDirectory, { moveTo, removeRecursively })
+    await expect(backupAppSdkDataDir('user-a', io)).resolves.toBe(false)
+    expect(removeRecursively).not.toHaveBeenCalled()
+  })
+
+  it('原生桥不支持目录移动时不能宣称备份成功', async () => {
+    const { io } = createIO()
+    await expect(backupAppSdkDataDir('user-a', io)).resolves.toBe(false)
+    await expect(backupAppSdkDataDir('user-a')).resolves.toBe(false)
+  })
+
+  it('资源卡死时按相对路径删掉该账号的本地库', async () => {
+    const removed = vi.fn((success: () => void) => success())
+    const io: AppDataIO = {
+      PRIVATE_DOC: 2,
+      requestFileSystem: vi.fn(),
+      convertLocalFileSystemURL: vi.fn(),
+      resolveLocalFileSystemURL: vi.fn((_path, success) => success({
+        getDirectory: vi.fn(),
+        removeRecursively: removed,
+      })),
+    }
+    await expect(resetAppSdkDataDir('user-a', io)).resolves.toBe(true)
+    expect(io.resolveLocalFileSystemURL).toHaveBeenCalledWith('_doc/openim/user-a/', expect.any(Function), expect.any(Function))
+    expect(removed).toHaveBeenCalledOnce()
+  })
+
+  it('iOS 没有 removeRecursively 时逐个删除本地库文件', async () => {
+    const removedFiles: string[] = []
+    const file = {
+      isFile: true,
+      getDirectory: vi.fn(),
+      remove: vi.fn((success: () => void) => {
+        removedFiles.push('db')
+        success()
+      }),
+    }
+    const directory = {
+      isDirectory: true,
+      getDirectory: vi.fn(),
+      createReader: () => ({
+        readEntries: (success: (entries: unknown[]) => void) => success([file]),
+      }),
+      remove: vi.fn((success: () => void) => {
+        removedFiles.push('dir')
+        success()
+      }),
+    }
+    const io: AppDataIO = {
+      PRIVATE_DOC: 2,
+      requestFileSystem: vi.fn(),
+      convertLocalFileSystemURL: vi.fn(() => 'file:///var/mobile/current/doc/openim/user-a/'),
+      resolveLocalFileSystemURL: vi.fn((path, success, fail) => {
+        if (path === '_doc/openim/user-a/') success(directory)
+        else fail({ code: 1 })
+      }),
+    }
+    await expect(resetAppSdkDataDir('user-a', io)).resolves.toBe(true)
+    expect(removedFiles).toEqual(['db', 'dir'])
   })
 })

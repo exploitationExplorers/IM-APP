@@ -51,26 +51,21 @@ describe.each(['ios', 'android', 'h5'])('聊天搜索分页（%s）', (platform)
     expect(results.at(-1)?.clientMsgID).toBe('msg-229')
   })
 
-  it('预热未完成且前 250 条无命中时，继续查到更早的消息', async () => {
+  it('本地索引为空时按页向更早历史查找，不会一次拉满整个会话', async () => {
     const all = Array.from({ length: 350 }, (_, i) => message(i, i === 280 ? '蛇' : '普通消息'))
-    let finishWarm!: (value: unknown) => void
-    let firstHistory = true
+    const pageSizes: number[] = []
     mocks.asyncApi.mockImplementation(async (method, _id, params) => {
       if (method === IMMethods.SearchLocalMessages) return { searchResultItems: [] }
       if (method === IMMethods.GetAdvancedHistoryMessageList) {
-        if (firstHistory) {
-          firstHistory = false
-          return new Promise((resolve) => { finishWarm = resolve })
-        }
+        pageSizes.push(params.count)
         const offset = params.startClientMsgID ? Number(params.startClientMsgID.slice(4)) + 1 : 0
         return { MessageList: all.slice(offset, offset + params.count), IsEnd: offset + params.count >= all.length }
       }
       throw new Error(`Unexpected method: ${method}`)
     })
-    const pending = search.searchConversationMessagesPage({ conversationID, keyword: '蛇', continueOnEmpty: true })
-    await vi.advanceTimersByTimeAsync(1200)
-    const result = await pending
-    finishWarm({ messageList: [], isEnd: true })
+    const result = await search.searchConversationMessagesPage({ conversationID, keyword: '蛇', continueOnEmpty: true })
     expect(result.messages.map((item) => item.clientMsgID)).toEqual(['msg-280'])
+    expect(pageSizes.length).toBeGreaterThan(0)
+    expect(pageSizes.every((count) => count <= 50)).toBe(true)
   })
 })

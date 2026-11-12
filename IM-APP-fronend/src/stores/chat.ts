@@ -46,9 +46,8 @@ import {
   setConversationPinnedMessage,
   sendMessagePinSync,
   messagePinPayloadOf,
-  invalidateIMLoginCache,
-  waitForSync,
   isNotInGroupIMError,
+  isIMSyncPendingError,
 } from '@/utils/openim'
 import { quoteSummaryOf, quoteThumbOf } from '@/utils/format'
 import { mergeVideoContent } from '@/utils/chatMedia'
@@ -112,6 +111,7 @@ export const useChatStore = defineStore('chat', () => {
   /** OpenIM 原始消息，引用 / 转发需要完整 MessageItem */
   const rawMessages = ref<Record<string, MessageItem>>({})
   const loading = ref(false)
+  const conversationLoadError = ref('')
   /** 会话是否已翻到最早一条 */
   const historyEnd = ref<Record<string, boolean>>({})
   /** OpenIM userID → 在线状态（0=离线 1=在线） */
@@ -134,6 +134,9 @@ export const useChatStore = defineStore('chat', () => {
    */
   let activeConversationId = ''
   let sessionGeneration = 0
+  let conversationLoadPromise: Promise<void> | null = null
+  let conversationRetryTimer: ReturnType<typeof setTimeout> | undefined
+  let conversationRetryDelay = 2000
   let retentionTimer: ReturnType<typeof setTimeout> | undefined
 
   function sanitizeRetentionPreview(conv: Conversation): Conversation {
@@ -980,37 +983,53 @@ export const useChatStore = defineStore('chat', () => {
     retentionTimer = undefined
   }
 
-  async function loadConversations() {
+  /** 登录预热、下拉刷新和同步事件共用一次读取，避免并发恢复同一个 SDK。 */
+  function loadConversations(): Promise<void> {
+    if (conversationLoadPromise) return conversationLoadPromise
+    const task = performConversationLoad()
+    conversationLoadPromise = task
+    const clear = () => {
+      if (conversationLoadPromise === task) conversationLoadPromise = null
+    }
+    void task.then(clear, clear)
+    return task
+  }
+
+  /** 同步事件可能迟到或丢失，超时后继续读现有 SDK，不触发 Logout/Login。 */
+  function retryConversationsAfterSync() {
+    if (conversationRetryTimer !== undefined) return
+    const generation = sessionGeneration
+    conversationRetryTimer = setTimeout(() => {
+      conversationRetryTimer = undefined
+      if (generation !== sessionGeneration) return
+      void loadConversations().catch(() => undefined)
+    }, conversationRetryDelay)
+    conversationRetryDelay = Math.min(conversationRetryDelay * 2, 30000)
+  }
+
+  async function performConversationLoad() {
+    const generation = sessionGeneration
+    if (conversationRetryTimer !== undefined) clearTimeout(conversationRetryTimer)
+    conversationRetryTimer = undefined
     perfMarkStart('chat:load-conversations')
     loading.value = true
+    conversationLoadError.value = ''
     try {
       await ensureIMLogin()
+      if (generation !== sessionGeneration) return
       syncHiddenIdsFromStorage()
       syncBlockedPeerKeysFromStorage()
       // 黑名单对齐与拉会话并行：别串行等 blocked 再 getConversationList（图里那条常拖慢进首页）
       const blockedSync = syncBlockedPeersFromServer()
       subscribeRealtime()
-      let list
-      try {
-        ;[list] = await Promise.all([getConversationList(), blockedSync])
-      } catch (e) {
-        const msg = (e as Error)?.message || ''
-        if (msg.includes('10004') || msg.includes('10005')) {
-          invalidateIMLoginCache()
-          await ensureIMLogin()
-          syncHiddenIdsFromStorage()
-          syncBlockedPeerKeysFromStorage()
-          await waitForSync(5000)
-          const retryBlocked = syncBlockedPeersFromServer()
-          ;[list] = await Promise.all([getConversationList(), retryBlocked])
-        } else {
-          throw e
-        }
-      }
+      // SDK 层统一处理资源未就绪与数据库恢复，避免这里只清缓存后复用异常原生会话。
+      const [list] = await Promise.all([getConversationList(), blockedSync])
+      if (generation !== sessionGeneration) return
       // ★ 必须先对账再过滤：仍留在 exitedGroupIds 里的会话会被下面的 filter 直接筛掉，
       //   那样就永远没机会做成员校验恢复了（见 reconcileExitedGroups）。
       await reconcileExitedGroups(list)
       await groupRetention.sync(list.map((item) => String(item.conversationID || (item as unknown as Record<string, unknown>).ConversationID || '')))
+      if (generation !== sessionGeneration) return
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       const mappedConversations = list.map((item) => {
         const mapped = decorateConversation(toConversation(item))
@@ -1035,14 +1054,20 @@ export const useChatStore = defineStore('chat', () => {
         (conv) => reopenedIds.has(conv.id) && !visibleIds.has(conv.id) && shouldShowConversation(conv),
       )
       conversations.value = sortConversations([...visible, ...carried])
+      conversationRetryDelay = 2000
       await reconcileJoinRequestHighlights()
       refreshOnlineStatus().catch(() => undefined)
       // 备注索引与通讯录分页解耦：拉全量备注后再盖一次会话标题
       void useContactStore()
         .ensureRemarkIndex()
         .then(() => applyContactRemarks())
+    } catch (error) {
+      if (generation !== sessionGeneration) return
+      if (isIMSyncPendingError(error)) retryConversationsAfterSync()
+      else conversationLoadError.value = error instanceof Error ? error.message : '聊天记录加载失败，请下拉重试'
+      throw error
     } finally {
-      loading.value = false
+      if (generation === sessionGeneration) loading.value = false
       perfMarkEnd('chat:load-conversations')
     }
   }
@@ -1072,7 +1097,7 @@ export const useChatStore = defineStore('chat', () => {
     lastResyncAt = now
     resyncing = true
     try {
-      // loadConversations 内部已有 ensureIMLogin + subscribeRealtime + 10004/10005 重登重试
+      // loadConversations 内部已有登录、实时订阅，以及 SDK 资源恢复。
       await loadConversations()
       // 顺带把当前打开的会话补拉一次：内嵌的 room.vue 收不到页面级 onShow
       const active = activeConversationId
@@ -1373,7 +1398,7 @@ export const useChatStore = defineStore('chat', () => {
     const { messageList, isEnd } = await getHistoryMessages(
       conversationId,
       PAGE_SIZE,
-      list[0].id,
+      oldestLoadedMessageId(list),
     )
     historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
     if (!messageList.length) {
@@ -1415,7 +1440,7 @@ export const useChatStore = defineStore('chat', () => {
     for (let i = 0; i < maxPages; i++) {
       if (historyEnd.value[conversationId]) return false
       const list = messagesMap.value[conversationId] || []
-      const anchor = list[0]?.id
+      const anchor = oldestLoadedMessageId(list)
       if (!anchor) return false
       const { messageList, isEnd } = await getHistoryMessages(conversationId, PAGE_SIZE, anchor)
       historyEnd.value = { ...historyEnd.value, [conversationId]: isEnd }
@@ -2117,6 +2142,12 @@ export const useChatStore = defineStore('chat', () => {
 
   function reset() {
     sessionGeneration++
+    if (conversationRetryTimer !== undefined) clearTimeout(conversationRetryTimer)
+    conversationRetryTimer = undefined
+    conversationRetryDelay = 2000
+    conversationLoadPromise = null
+    conversationLoadError.value = ''
+    loading.value = false
     unsubscribeRealtime()
     conversations.value = []
     messagesMap.value = {}
@@ -2143,6 +2174,7 @@ export const useChatStore = defineStore('chat', () => {
     conversations,
     messagesMap,
     loading,
+    conversationLoadError,
     historyEnd,
     totalUnread,
     onlineStatus,
@@ -2201,4 +2233,18 @@ function sortConversations(list: Conversation[]): Conversation[] {
     if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
     return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
   })
+}
+
+/** 翻页必须从当前已加载的最早一条继续。时间相同则保持列表头部，避免把游标拨回更新的消息。 */
+function oldestLoadedMessageId(list: ChatMessage[]): string {
+  let oldest = list[0]
+  let oldestTime = Date.parse(oldest?.createdAt || '')
+  for (const item of list) {
+    const time = Date.parse(item.createdAt)
+    if (Number.isFinite(time) && (!Number.isFinite(oldestTime) || time < oldestTime)) {
+      oldest = item
+      oldestTime = time
+    }
+  }
+  return oldest?.id || ''
 }

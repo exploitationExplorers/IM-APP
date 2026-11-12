@@ -157,14 +157,26 @@ let groupReadReportTimer: ReturnType<typeof setTimeout> | null = null
 const composerInput = useChatComposerInput(isIOSApp)
 const { input, inputEpoch } = composerInput
 const inputRef = ref<{ $el?: HTMLElement } | HTMLTextAreaElement | null>(null)
+function isH5ComposerPlatform(): boolean {
+  try {
+    const platform = uni.getSystemInfoSync().uniPlatform
+    return platform === 'web' || platform === 'h5'
+  } catch {
+    return false
+  }
+}
+
 /**
- * 消息列表倒置（scroll-view 与内层各 scaleY(-1)）：scrollTop=0 即视觉底部。
- * 上翻加载的旧消息落在滚动远端，视口不会被推走；新消息、图片撑高、键盘顶起都天然贴底，
- * 不再需要任何「补偿滚动」，iOS 惯性滚动也不会被打断。
- * scroll-into-view 在倒置下算反了方向，统一用 scroll-top 定位。
+ * App 消息列表倒置（scroll-view 与内层各 scaleY(-1)）：scrollTop=0 即视觉底部。
+ * 上翻加载的旧消息落在滚动远端，视口不会被推走。
+ * 网页不能再翻转：祖先上的 scaleY 会让安卓和 iOS 浏览器丢掉手指滑动。
+ * 网页是正向列表，贴底用一个超过内容高度的 scrollTop。
  */
-const msgScrollTop = ref(0)
+const WEB_BOTTOM_SCROLL = 1000000
+const msgScrollTop = ref(isH5ComposerPlatform() ? WEB_BOTTOM_SCROLL : 0)
 let msgScrollTopNonce = 0
+/** iOS 不能把 scaleY 写在 scroll-view 上，否则手指拉不动。翻转改到外层。 */
+const iosMessageList = isIOSApp()
 /** 用户停在底部时才自动贴底；往上翻历史时来新消息不再拽回去 */
 const stickToBottom = ref(true)
 let lastListScrollTop = 0
@@ -665,7 +677,8 @@ function scrollToMessage(id: string) {
           if (!box || !el) return
           const boxCenter = Number(box.top || 0) + Number(box.height || 0) / 2
           const elCenter = Number(el.top || 0) + Number(el.height || 0) / 2
-          setMsgScrollTop(lastListScrollTop + boxCenter - elCenter)
+          const towardCenter = isH5ComposerPlatform() ? elCenter - boxCenter : boxCenter - elCenter
+          setMsgScrollTop(lastListScrollTop + towardCenter)
         })
     }, 30)
   })
@@ -1049,12 +1062,35 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
 }
 
 let loadingMore = false
+function h5MessageScroller(): HTMLElement | null {
+  if (typeof document === 'undefined' || !isH5ComposerPlatform()) return null
+  const content = document.querySelector('.msg-list-web .uni-scroll-view-content')
+  const parent = content?.parentElement
+  return parent instanceof HTMLElement ? parent : null
+}
+
+/** 网页正向列表把更早的消息插在顶部，补上增高的距离，视口才不会被顶走 */
+async function keepH5ViewAfterPrepend(beforeHeight: number) {
+  if (!isH5ComposerPlatform() || beforeHeight <= 0) return
+  await nextTick()
+  const el = h5MessageScroller()
+  if (!el) return
+  const delta = el.scrollHeight - beforeHeight
+  if (delta > 1) setMsgScrollTop(el.scrollTop + delta)
+}
+
 /**
- * 倒置列表的 scrolltolower = 视觉上接近顶部（lower-threshold 提前量预加载）。
- * 先扩内存里已有的，再向 SDK 要更早一页；追加都在滚动远端，不需要任何位置补偿。
+ * App 倒置列表的 scrolltolower = 视觉上接近顶部。
+ * 网页 scrolltolower 是视觉底部，只在靠近顶部时才拉更早的记录。
+ * 网页把旧消息插在顶部，要按增高补回 scrollTop。
  */
 async function onReachOldest() {
-  if (revealOlderMessages()) return
+  if (isH5ComposerPlatform() && lastListScrollTop > 600) return
+  const beforeHeight = h5MessageScroller()?.scrollHeight || 0
+  if (revealOlderMessages()) {
+    await keepH5ViewAfterPrepend(beforeHeight)
+    return
+  }
   const convId = activeConversationId.value
   if (!convId || loadingMore) return
   loadingMore = true
@@ -1074,6 +1110,7 @@ async function onReachOldest() {
   } finally {
     loadingMore = false
     loadingOlder.value = false
+    await keepH5ViewAfterPrepend(beforeHeight)
   }
 }
 
@@ -1112,17 +1149,18 @@ function collapseRenderWindowSoon() {
   if (collapseWindowTimer) clearTimeout(collapseWindowTimer)
   collapseWindowTimer = setTimeout(() => {
     collapseWindowTimer = null
-    if (stickToBottom.value && lastListScrollTop < 60) renderFromId.value = ''
+    const atBottom = isH5ComposerPlatform() || lastListScrollTop < 60
+    if (stickToBottom.value && atBottom) renderFromId.value = ''
   }, 300)
 }
 
-/** 贴底 = scrollTop 归零；倒置列表里内容撑高不会让底部移位，无需重试 */
+/** App 贴底 = scrollTop 归零。网页是正向列表，贴底用超过内容高度的 scrollTop */
 function scrollToBottom(force = false) {
   // 自己发消息必须贴底。手指标志在 iOS / 部分安卓上可能停在 true，不能因此把发送结果留在屏幕外
   if (userHoldingList && !force) return
   if (!force && !stickToBottom.value) return
   stickToBottom.value = true
-  setMsgScrollTop(0)
+  setMsgScrollTop(isH5ComposerPlatform() ? WEB_BOTTOM_SCROLL : 0)
   if (renderFromId.value) collapseRenderWindowSoon()
 }
 
@@ -1142,10 +1180,19 @@ function pinRenderWindowTop() {
   if (first) renderFromId.value = first
 }
 
-function onMsgScroll(e: { detail?: { scrollTop?: number } }) {
-  const top = Number(e.detail?.scrollTop || 0)
-  lastListScrollTop = top
-  // 倒置后 scrollTop 就是离底部的距离；回调里不改 scroll-top，避免和手势对拉
+function applyStickFromScroll(top: number) {
+  if (isH5ComposerPlatform()) {
+    const el = h5MessageScroller()
+    if (!el) return
+    const distance = el.scrollHeight - top - el.clientHeight
+    if (distance < 80) stickToBottom.value = true
+    else if (distance > 140) {
+      if (stickToBottom.value) pinRenderWindowTop()
+      stickToBottom.value = false
+    }
+    return
+  }
+  // 倒置后 scrollTop 就是离底部的距离
   if (top < 60) stickToBottom.value = true
   else if (top > 120) {
     if (stickToBottom.value) pinRenderWindowTop()
@@ -1153,10 +1200,24 @@ function onMsgScroll(e: { detail?: { scrollTop?: number } }) {
   }
 }
 
+function onMsgScroll(e: { detail?: { scrollTop?: number; scrollHeight?: number } }) {
+  const top = Number(e.detail?.scrollTop || 0)
+  lastListScrollTop = top
+  applyStickFromScroll(top)
+  // 网页正向列表：靠近顶部才拉更早的记录。回调里不改 scroll-top，避免和手势对拉
+  if (isH5ComposerPlatform()) {
+    if (top < 600) void onReachOldest()
+    return
+  }
+  // iOS 的 scrolltolower 经常不来。已经离开底部、并且接近内容末端时补拉更早一页。
+  if (!iosMessageList || top <= 80) return
+  const scrollHeight = Number(e.detail?.scrollHeight || 0)
+  if (scrollHeight > 0 && top + 720 >= scrollHeight) void onReachOldest()
+}
+
 /**
- * H5 桌面：列表倒置，滚轮/触控板方向要再翻回来。
- * uni-scroll-view 里有两层 .uni-scroll-view，外层只是包裹；真正 overflow 的是内容节点的父元素。
- * 滚错节点再 preventDefault，滚轮会被吃掉、列表完全不动。触摸滑动不走这里。
+ * H5 桌面滚轮。真正 overflow 的是内层 .uni-scroll-view。
+ * 网页不再翻转列表，滚轮方向与元素一致。触摸滑动不走这里。
  */
 function onMsgListWheel(e: WheelEvent) {
   if (e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
@@ -1168,21 +1229,18 @@ function onMsgListWheel(e: WheelEvent) {
   if (max <= 1) return
   e.preventDefault()
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1
-  const next = Math.min(max, Math.max(0, scroller.scrollTop - e.deltaY * unit))
+  const next = Math.min(max, Math.max(0, scroller.scrollTop + e.deltaY * unit))
   scroller.scrollTop = next
   // 滚轮不保证触发 @scroll，这里同步贴底状态，避免翻历史时来新消息又贴回去
   lastListScrollTop = next
-  if (next < 60) stickToBottom.value = true
-  else if (next > 120) {
-    if (stickToBottom.value) pinRenderWindowTop()
-    stickToBottom.value = false
-  }
+  applyStickFromScroll(next)
+  if (next < 600) void onReachOldest()
 }
 
 function jumpToBottom() {
   userHoldingList = false
   stickToBottom.value = true
-  setMsgScrollTop(0)
+  setMsgScrollTop(isH5ComposerPlatform() ? WEB_BOTTOM_SCROLL : 0)
   collapseRenderWindowSoon()
 }
 
@@ -1303,15 +1361,6 @@ function focusComposer() {
   // 消息列表/群资料异步渲染后还要再抢一次，否则会落在文档 body 上。
   // 用户已经点进搜索框时跳过，避免打出来的字进到聊天输入框。
   composerFocusTimers = [setTimeout(apply, 40), setTimeout(apply, 160)]
-}
-
-function isH5ComposerPlatform(): boolean {
-  try {
-    const platform = uni.getSystemInfoSync().uniPlatform
-    return platform === 'web' || platform === 'h5'
-  } catch {
-    return false
-  }
 }
 
 function getComposerTextareaEl(preferred?: EventTarget | null): HTMLTextAreaElement | null {
@@ -2703,10 +2752,14 @@ function pickFavorite() {
 
     <!-- 不开 scroll-with-animation：uni 的滚动动画是 transform 假动画 + 过渡结束才提交 scrollTop，
          发送后连续两次贴底会在动画中途重测位置，最终落点偏小导致最新消息下半截被视口切掉 -->
+    <view
+      class="msg-scroller-host"
+      :class="{ 'msg-scroller-host-ios': iosMessageList }"
+    >
     <scroll-view
       scroll-y
       class="msg-list"
-      :class="{ 'msg-list-web': isH5ComposerPlatform() }"
+      :class="{ 'msg-list-web': isH5ComposerPlatform(), 'msg-list-ios': iosMessageList }"
       :scroll-top="msgScrollTop"
       :lower-threshold="600"
       @scroll="onMsgScroll"
@@ -2789,6 +2842,7 @@ function pickFavorite() {
         </view>
       </view>
     </scroll-view>
+    </view>
 
     <view
       v-if="!stickToBottom"
@@ -3272,9 +3326,22 @@ function pickFavorite() {
   color: #8a8f9c;
 }
 
-/* 倒置列表：外层翻一次让 scrollTop=0 落在视觉底部，内层再翻回来保证内容正向。
-   App 的 scroll-view 自己滚动，翻转加在宿主上。
-   网页端真正 overflow 的是内层 .uni-scroll-view，翻转若加在外层，裁切发生在翻转之前，气泡被剪掉，房间只剩底色。 */
+/* App 倒置列表：外层翻一次让 scrollTop=0 落在视觉底部，内层再翻回来保证内容正向。
+   iOS 不能翻转 scroll-view 本体，否则手指向下拉时列表不动，翻转改到外包一层。
+   网页任何祖先上的 scaleY 都会让手机浏览器丢掉手指滑动，所以网页不做翻转。 */
+.msg-scroller-host {
+  flex: 1;
+  height: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.msg-scroller-host-ios {
+  transform: scaleY(-1);
+}
+
 .msg-list {
   flex: 1;
   height: 0;
@@ -3283,14 +3350,35 @@ function pickFavorite() {
   overscroll-behavior: none;
 }
 
-.msg-list-web {
+.msg-list-ios {
   transform: none;
 }
 
+.msg-list-web {
+  transform: none;
+  height: 100%;
+  min-height: 0;
+}
+
+.msg-list-web :deep(.uni-scroll-view),
+.msg-list-web :deep(.msg-flip) {
+  transform: none;
+}
+
+.msg-list-web :deep(> .uni-scroll-view) {
+  height: 100%;
+}
+
 .msg-list-web :deep(.uni-scroll-view > .uni-scroll-view) {
-  transform: scaleY(-1);
   background: #e6e8ee;
   overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.msg-list-web :deep(.uni-scroll-view-content) {
+  height: auto;
+  min-height: 100%;
 }
 
 .msg-list :deep(.uni-scroll-view),
@@ -3306,6 +3394,10 @@ function pickFavorite() {
   padding-bottom: 16rpx;
   box-sizing: border-box;
   transform: scaleY(-1);
+}
+
+.msg-list-web :deep(.msg-flip) {
+  transform: none;
 }
 
 .msg-loading-older {

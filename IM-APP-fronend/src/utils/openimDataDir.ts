@@ -1,13 +1,33 @@
 interface DirectoryEntry {
   fullPath?: string
   isDirectory?: boolean
+  isFile?: boolean
   toLocalURL?: () => string
+  remove?: (success: () => void, fail: (error: unknown) => void) => void
+  removeRecursively?: (success: () => void, fail: (error: unknown) => void) => void
+  createReader?: () => {
+    // 5+ 的类型声明写成单个目录，真实回调应返回数组，读取后再验证。
+    readEntries: (success: (entries: unknown) => void, fail: (error: unknown) => void) => void
+  }
   getDirectory: (
     name: string,
     options: { create: boolean },
     success: (entry: DirectoryEntry) => void,
     fail: (error: unknown) => void,
   ) => void
+}
+
+interface MovableDirectoryEntry extends DirectoryEntry {
+  moveTo: (
+    parent: DirectoryEntry,
+    name: string,
+    success: () => void,
+    fail: (error: unknown) => void,
+  ) => void
+}
+
+function canMoveDirectory(entry: DirectoryEntry): entry is MovableDirectoryEntry {
+  return entry.isDirectory !== false && 'moveTo' in entry && typeof entry.moveTo === 'function'
 }
 
 export interface AppDataIO {
@@ -82,4 +102,94 @@ export async function getAppSdkDataDir(userId: string, io?: AppDataIO): Promise<
   } catch (error) {
     throw directoryError(error)
   }
+}
+
+/** 隔离无法打开的旧库，保留原始文件；SDK 下一次登录在原路径重建。 */
+export async function backupAppSdkDataDir(userId: string, io?: AppDataIO): Promise<boolean> {
+  if (!io?.resolveLocalFileSystemURL) return false
+  const safeUserId = userId.replace(/[^0-9a-z_-]/gi, '')
+  if (!safeUserId) return false
+  try {
+    const entry = await resolveEntry(io, `_doc/openim/${safeUserId}/`)
+    if (!entry || !canMoveDirectory(entry)) return false
+    const parent = await createDirectory(await documentRoot(io), 'openim')
+    await new Promise<void>((resolve, reject) => {
+      entry.moveTo(parent, `${safeUserId}.recovery-${Date.now()}`, () => resolve(), reject)
+    })
+    return true
+  } catch (error) {
+    console.error('[im] backup database directory failed', error)
+    return false
+  }
+}
+
+/**
+ * 删掉该账号的 OpenIM 本地库。只在资源初始化反复失败时调用。
+ * 服务端会话还在，下次登录会重新同步；未发出的本地消息会丢。
+ * iOS 的 DirectoryEntry 经常没有 removeRecursively，要自己逐个删。
+ */
+export async function resetAppSdkDataDir(userId: string, io?: AppDataIO): Promise<boolean> {
+  if (!io?.resolveLocalFileSystemURL) return false
+  const safeUserId = userId.replace(/[^0-9a-z_-]/gi, '')
+  if (!safeUserId) return false
+  const relative = `_doc/openim/${safeUserId}`
+  const candidates = [`${relative}/`, relative]
+  if (io.convertLocalFileSystemURL) {
+    const converted = io.convertLocalFileSystemURL(`${relative}/`)
+    const absolute = String(converted || '').replace(/^file:\/\//, '').replace(/\/+$/, '')
+    if (absolute.startsWith('/')) candidates.push(`${absolute}/`, absolute)
+  }
+  for (const path of candidates) {
+    if (await removeResolvedDirectory(io, path)) return true
+  }
+  return false
+}
+
+function resolveEntry(io: AppDataIO, path: string): Promise<DirectoryEntry | undefined> {
+  return new Promise((resolve) => {
+    io.resolveLocalFileSystemURL!(path, (entry) => resolve(entry), () => resolve(undefined))
+  })
+}
+
+async function removeResolvedDirectory(io: AppDataIO, path: string): Promise<boolean> {
+  const entry = await resolveEntry(io, path)
+  if (!entry) return false
+  try {
+    await removeEntry(entry)
+    return true
+  } catch (error) {
+    console.error('[im] reset database directory failed', error)
+    return false
+  }
+}
+
+function removeEntry(entry: DirectoryEntry): Promise<void> {
+  if (entry.removeRecursively) {
+    return new Promise((resolve, reject) => entry.removeRecursively!(() => resolve(), reject))
+  }
+  return new Promise((resolve, reject) => {
+    const reader = entry.createReader?.()
+    if (!reader || entry.isFile) {
+      if (!entry.remove) {
+        reject(new Error('无法删除聊天本地库'))
+        return
+      }
+      entry.remove(() => resolve(), reject)
+      return
+    }
+    reader.readEntries((children) => {
+      if (!Array.isArray(children)) {
+        reject(new Error('App database directory entries are invalid'))
+        return
+      }
+      void (async () => {
+        for (const child of children) await removeEntry(child)
+        if (!entry.remove) {
+          resolve()
+          return
+        }
+        entry.remove(() => resolve(), reject)
+      })().catch(reject)
+    }, reject)
+  })
 }

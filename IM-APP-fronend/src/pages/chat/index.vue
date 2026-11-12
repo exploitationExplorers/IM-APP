@@ -20,10 +20,9 @@ import { useDesktopListResize } from '@/composables/useDesktopListResize'
 import type { Conversation } from '@/types'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { isDissolvedGroupConversationPreview, isGroupUnavailableError, notifyGroupUnavailable } from '@/utils/im-notification'
-import { setConversationRecvOpt } from '@/utils/openim'
+import { imSyncPending, imSyncProgress, isIMSyncPendingError, setConversationRecvOpt } from '@/utils/openim'
 import { resolveIMGroupByIM } from '@/api/im'
 import {
-  ensureLocalConversationHistory,
   messageSearchPreview,
   searchConversationMessagesPage,
   searchLocalMessages,
@@ -83,6 +82,16 @@ watch(
 )
 
 const filterLabel = computed(() => (filterKey.value === 'unread' ? '未读' : '全部'))
+const conversationLoadStatus = computed(() => {
+  if (chatStore.conversations.length) return ''
+  if (imSyncPending.value) {
+    const progress = imSyncProgress.value === null ? '' : `（${imSyncProgress.value}%）`
+    return `正在同步聊天记录${progress}，请保持 App 在前台，完成后会自动显示`
+  }
+  if (chatStore.loading) return '正在加载聊天记录…'
+  if (chatStore.conversationLoadError) return '聊天记录暂时无法加载，请下拉重试'
+  return ''
+})
 
 const activeSwipeId = ref<string | null>(null)
 const convMenu = ref<{ item: Conversation; x: number; y: number } | null>(null)
@@ -337,8 +346,6 @@ function rebuildDigQueue(keywordText: string, map: Map<string, MessageHitBucket>
       seenIds: existing.map((m) => m.clientMsgId).filter(Boolean),
       pending: [],
     })
-    // 兜底的长尾会话不抢先预热，避免一次搜索把所有会话的历史都并发拉一遍；真正挖到它时再预热
-    if (prioritized.has(id)) void ensureLocalConversationHistory(id)
   }
 }
 
@@ -430,11 +437,9 @@ async function loadMoreMessageSearch() {
     }
 
     if (gained < 15) {
-      const id = digQueue.find((cid) => !digDone.has(cid) && digCursors.has(cid))
-      if (id) {
-        // 长尾会话到这一步才真正要挖，预热是幂等的（已预热过直接命中缓存）
-        void ensureLocalConversationHistory(id)
-        const cursor = digCursors.get(id)!
+        const id = digQueue.find((cid) => !digDone.has(cid) && digCursors.has(cid))
+        if (id) {
+          const cursor = digCursors.get(id)!
         // 同步已展示命中，避免历史补扫重复入列
         const seenIds = new Set(cursor.seenIds)
         for (const row of map.get(id)?.messages || []) {
@@ -495,9 +500,7 @@ watch(keyword, (value) => {
   }
   // 输入法组字中会频繁触发，短防抖后再打本地库
   messageSearchTimer = setTimeout(() => {
-    void runMessageSearch(k).then(() => {
-      if (!searchRows.value.length) void autoDigUntilHit(messageSearchSeq)
-    })
+    void runMessageSearch(k)
   }, 280)
 })
 
@@ -544,24 +547,12 @@ const searchRows = computed(() => {
   return rows
 })
 
-/**
- * 首屏零命中时自动续挖，而不是直接判「无匹配聊天」。
- * 列表是空的，没有行可以触发上滑/点击加载更多，必须自己跑完整个 digQueue 才罢休。
- * 换关键词 / 已出结果 / 彻底挖完都会让条件不成立，循环自然收尾。
- */
-async function autoDigUntilHit(seq: number) {
-  while (seq === messageSearchSeq && !searchRows.value.length && messageSearchHasMore.value) {
-    await loadMoreMessageSearch()
-    if (seq !== messageSearchSeq) return
-    const wait = searchLoadCooldownUntil - Date.now()
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
-  }
-}
 
 async function reloadConversations() {
   try {
     await chatStore.loadConversations()
   } catch (e) {
+    if (isIMSyncPendingError(e)) return
     const message = (e as Error)?.message || '会话加载失败'
     // 登录过期由 request 层 reLaunch 登录页，这里不再挡在聊天页只弹 toast
     if (message.includes('登录已过期') || message.includes('未登录')) return
@@ -1102,16 +1093,23 @@ watchEffect(() => {
           </ImSwipeActionItem>
         </uni-swipe-action>
         <view
-          v-if="keyword.trim() && !searchRows.length && (messageSearchLoadingMore || messageSearchHasMore)"
+          v-if="keyword.trim() && !searchRows.length && messageSearchLoadingMore"
           class="search-footer"
         >
           搜索中…
         </view>
         <view
+          v-else-if="keyword.trim() && !searchRows.length && messageSearchHasMore"
+          class="search-footer"
+          @click="onSearchFooterLoadMore"
+        >
+          点击查找更早的聊天记录
+        </view>
+        <view
           v-else-if="keyword.trim() ? !searchRows.length : !filtered.length"
           class="empty"
         >
-          {{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}
+          {{ keyword.trim() ? '无匹配聊天' : conversationLoadStatus || '无聊天消息' }}
         </view>
       </scroll-view>
     </view>
