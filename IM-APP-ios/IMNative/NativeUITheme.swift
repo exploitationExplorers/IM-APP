@@ -38,9 +38,15 @@ extension UIColor {
 
 extension UIViewController {
     func showNativeNotice(_ message: String, title: String = "提示") {
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "知道了", style: .default))
-        present(alert, animated: true)
+        guard isViewLoaded, !message.isEmpty else { return }
+        let host: UIView = view.window ?? view
+        host.viewWithTag(7831)?.removeFromSuperview()
+        let toast = UILabel(); toast.tag = 7831; toast.text = message; toast.numberOfLines = 0; toast.textAlignment = .center
+        toast.font = .systemFont(ofSize: 14); toast.textColor = .white; toast.backgroundColor = UIColor.black.withAlphaComponent(0.78); toast.layer.cornerRadius = 8; toast.clipsToBounds = true; toast.isUserInteractionEnabled = false
+        let size = toast.sizeThatFits(CGSize(width: max(80, host.bounds.width - 104), height: max(60, host.bounds.height - 120)))
+        toast.frame = CGRect(x: (host.bounds.width - size.width - 32) / 2, y: (host.bounds.height - size.height - 24) / 2, width: size.width + 32, height: size.height + 24)
+        host.addSubview(toast); UIAccessibility.post(notification: .announcement, argument: message)
+        UIView.animate(withDuration: 0.2, delay: 3, options: [.beginFromCurrentState], animations: { toast.alpha = 0 }, completion: { _ in toast.removeFromSuperview() })
     }
 
     /// 映射旧页的按钮锚定白浮层，不使用平台 Action Sheet 改变普通菜单外观。

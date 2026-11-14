@@ -1,0 +1,1362 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原生开发笔记</title>
+<style>
+:root{
+  --bg:#f7f8fb;--panel:#fff;--ink:#1a2336;--muted:#66758d;--line:#e4e8f0;
+  --blue:#0a2fc2;--blue-soft:#edf2ff;--blue-ink:#1233b2;
+  --code-bg:#f1f4f9;--ok:#1a7f4b;--warn:#9a6700;--sidebar:290px;
+  --radius:10px;--font:ui-sans-serif,system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,Consolas,"Cascadia Mono",monospace;
+}
+html.dark{
+  --bg:#0f141e;--panel:#171d2a;--ink:#e8edf7;--muted:#9aa7bd;--line:#2a3346;
+  --blue:#7ea0ff;--blue-soft:#1a2744;--blue-ink:#a8c0ff;
+  --code-bg:#111827;--ok:#3ecf8e;--warn:#e3b341;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.75 var(--font)}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+code{font-family:var(--mono);font-size:.9em;background:var(--code-bg);padding:.1em .35em;border-radius:4px}
+pre{margin:0;overflow:auto;font:13px/1.65 var(--mono);white-space:pre}
+h2{font-size:1.15rem;margin:1.6em 0 .5em}
+p,ul,ol{margin:.7em 0}
+li{margin:.25em 0}
+.app{display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr);min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;overflow:auto;background:var(--panel);border-right:1px solid var(--line);padding:14px 12px 28px;display:flex;flex-direction:column;gap:10px}
+.brand{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px 8px}
+.brand strong{font-size:15px}
+.brand-actions{display:flex;gap:2px}
+.icon-btn{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+.icon-btn:hover{background:var(--blue-soft);color:var(--blue)}
+.study-chip{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px;color:var(--muted)}
+.study-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.nav-home{display:block;padding:8px 10px;border-radius:8px;color:var(--ink);font-weight:600}
+.nav-home.active,.nav-link.active{background:var(--blue-soft);color:var(--blue-ink)}
+.stage-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:8px;color:var(--muted);text-align:left}
+.stage-btn:hover{background:var(--code-bg)}
+.stage-btn .left{display:flex;gap:6px;align-items:center;min-width:0}
+.stage.open .stage-btn{color:var(--ink)}
+.stage-links{display:none;padding:0 0 6px}
+.stage.open .stage-links{display:block}
+.nav-link{display:block;padding:7px 10px 7px 22px;border-radius:8px;color:var(--muted);font-size:13px;line-height:1.35}
+.nav-link:hover{background:var(--code-bg);color:var(--ink);text-decoration:none}
+.nav-link.done::before{content:"✓ ";color:var(--ok)}
+.main{min-width:0;padding:28px clamp(18px,4vw,48px) 64px;max-width:920px}
+.topbar{display:flex;justify-content:space-between;gap:12px;align-items:center;color:var(--muted);font-size:13px;margin-bottom:18px}
+.crumb{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lesson-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}
+.lesson-head h1{margin:0;font-size:28px;line-height:1.3}
+.done-box{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:999px;white-space:nowrap;user-select:none}
+.done-box input{accent-color:var(--blue);width:16px;height:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.continue{display:flex;justify-content:space-between;gap:16px;align-items:center;margin:22px 0;border-color:#c9d6ff;background:linear-gradient(180deg,var(--blue-soft),var(--panel))}
+.continue .meta{color:var(--muted);font-size:13px}
+.bar{height:8px;background:var(--line);border-radius:999px;overflow:hidden;margin-top:10px;width:min(280px,100%)}
+.bar>i{display:block;height:100%;width:0;background:var(--blue);border-radius:inherit}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:18px 0}
+.stage-card{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel)}
+.stage-card h3{margin:0 0 6px;font-size:16px}
+.stage-card p{margin:0;color:var(--muted);font-size:13px}
+.stage-card .prog{margin-top:12px;font-size:12px;color:var(--muted)}
+.note,.warn,.tip{padding:12px 14px;border-radius:8px;margin:16px 0;border:1px solid var(--line)}
+.note{background:var(--blue-soft);border-left:3px solid var(--blue)}
+.warn{background:#fff8e8;border-left:3px solid var(--warn)}
+html.dark .warn{background:#2a2314}
+.tip{background:#eefaf3;border-left:3px solid var(--ok)}
+html.dark .tip{background:#14261c}
+.code{position:relative;margin:14px 0;border:1px solid var(--line);border-radius:10px;background:var(--code-bg);overflow:hidden}
+.code .lang{position:absolute;top:8px;left:12px;font-size:11px;color:var(--muted)}
+.code .copy{position:absolute;top:6px;right:8px;padding:4px 8px;border-radius:6px;font-size:12px;color:var(--muted)}
+.code .copy:hover{background:var(--panel);color:var(--ink)}
+.code pre{padding:34px 14px 14px}
+.table-wrap{overflow:auto;margin:16px 0;border:1px solid var(--line);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{background:var(--code-bg);color:var(--muted);font-weight:600}
+tr:last-child td{border-bottom:0}
+.pager{display:flex;justify-content:space-between;gap:12px;margin-top:36px;padding-top:18px;border-top:1px solid var(--line)}
+.pager a{display:inline-flex;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);max-width:46%}
+.pager a:hover{border-color:var(--blue);color:var(--blue);text-decoration:none}
+.heatmap{display:grid;grid-template-columns:repeat(14,1fr);gap:4px;margin-top:10px}
+.heatmap i{aspect-ratio:1;border-radius:3px;background:var(--line)}
+.heatmap i.on{background:color-mix(in srgb,var(--blue) 55%,#8fd3a8)}
+.footer-hint{margin-top:28px;color:var(--muted);font-size:12px}
+.roadmap li{margin:.4em 0}
+.mobile-bar{display:none;position:sticky;top:0;z-index:20;gap:8px;align-items:center;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);margin:-28px -18px 18px}
+@media(max-width:860px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:fixed;inset:0 auto 0 0;width:min(86vw,300px);z-index:40;transform:translateX(-105%);transition:.2s}
+  .sidebar.open{transform:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
+  .mobile-bar{display:flex!important}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <strong>原生开发笔记</strong>
+      <div class="brand-actions">
+        <button class="icon-btn" id="themeBtn" title="深色/浅色" aria-label="切换主题">◐</button>
+        <button class="icon-btn" id="closeSidebar" title="收起" aria-label="收起侧栏">⟨</button>
+      </div>
+    </div>
+    <button class="study-chip" id="studyChip" type="button">
+      <span class="dot"></span>
+      <span id="studyText">今天 0 秒</span>
+      <span style="margin-left:auto">学习统计 ›</span>
+    </button>
+    <a class="nav-home" data-route="home" href="#home">首页 · 学习路线</a>
+    <div id="navStages"></div>
+  </aside>
+  <main class="main">
+    <div class="mobile-bar">
+      <button class="icon-btn" id="openSidebar" aria-label="打开目录">☰</button>
+      <strong>原生开发笔记</strong>
+    </div>
+    <div id="view"></div>
+    <p class="footer-hint">键盘 ← → 上一节 / 下一节 · 进度存在本机 · 建议把代码自己敲一遍</p>
+  </main>
+</div>
+<script>
+const C = (lang, code) =>
+  `<div class="code"><span class="lang">${lang}</span><button class="copy" type="button">复制</button><pre>${code.replace(/</g,"&lt;")}</pre></div>`;
+
+const STAGES = [
+  { id: "prep", title: "开始之前" },
+  { id: "kt", title: "阶段一：Kotlin 语言基础" },
+  { id: "and", title: "阶段二：Android 工程与 UI" },
+  { id: "sw", title: "阶段三：Swift 语言基础" },
+  { id: "ios", title: "阶段四：iOS 工程与 UI" }
+];
+
+const LESSONS = [
+/* —— 准备 —— */
+{
+  id: "prep-env", stage: "prep", title: "0.1 准备环境", minutes: 10,
+  html: `
+<p>原生开发分两条线，建议先 Android（Windows 就能练），再补 iOS（需要 Mac）。</p>
+<h2>要装什么</h2>
+<div class="table-wrap"><table>
+<tr><th>平台</th><th>工具</th><th>语言</th></tr>
+<tr><td>Android</td><td>Android Studio（自带 SDK、模拟器）</td><td>Kotlin</td></tr>
+<tr><td>iOS</td><td>Xcode（App Store）</td><td>Swift</td></tr>
+</table></div>
+<p>Android Studio 安装后：新建 Empty Activity（Compose）工程，点 Run 能在模拟器看到 Hello，环境就算通了。</p>
+<p>Xcode 安装后：新建 App，Interface 选 SwiftUI 或 Storyboard 都行，先能 Run 到模拟器。</p>
+${C("提示", `本笔记不依赖某个业务仓库。
+先把语法和平台概念学扎实，再去看任何真实项目会轻松很多。`)}
+<div class="tip">每节代码建议自己敲、跑。Kotlin 可在 Android Studio 的 Kotlin playground / scratch 里试；Swift 可用 Xcode Playground。</div>
+`
+},
+
+/* —— Kotlin —— */
+{
+  id: "kt-vars", stage: "kt", title: "1.1 变量、类型、空安全", minutes: 12,
+  html: `
+<p><code>val</code> 不可变（类似 JS 的 <code>const</code>），<code>var</code> 可变。<strong>能 val 就 val</strong>。</p>
+${C("kotlin", `val name = "林必龙"     // String，类型可推断
+var age = 18            // Int
+val price = 9.9         // Double
+val ok = true           // Boolean
+val nothing: String? = null   // 可空类型：类型后面加 ?
+
+println(name)           // 林必龙
+println(age)            // 18`)}
+<h2>类型标注</h2>
+<p>值一眼能看出类型时可省略；函数参数和返回值建议写。</p>
+${C("kotlin", `val episode: Int = 3
+val title: String = "第 $episode 集"   // 字符串模板用 $
+
+fun greet(who: String): String {
+    return "你好，$who"
+}`)}
+<h2>空安全（Kotlin 最重要的点）</h2>
+${C("kotlin", `var token: String? = null
+// token.length          // 编译错误：可能是 null
+val len1 = token?.length          // 安全调用，结果 Int?，这里是 null
+val len2 = token?.length ?: 0     // Elvis：左边为 null 就用右边 → 0
+val must = token!!                // 强拆：你保证非空，空就崩，少用`)}
+<div class="note">和 TypeScript 的 <code>string | null</code> + 可选链很像，但 Kotlin <strong>编译期强制</strong>你处理 null。</div>
+`
+},
+{
+  id: "kt-control", stage: "kt", title: "1.2 判断和循环", minutes: 10,
+  html: `
+${C("kotlin", `val score = 85
+if (score >= 60) {
+    println("及格")
+} else {
+    println("不及格")
+}
+
+// if 是表达式，能当右边的值
+val pass = if (score >= 60) "及格" else "不及格"
+
+// when ≈ switch，但更强
+val grade = when {
+    score >= 90 -> "A"
+    score >= 80 -> "B"
+    score >= 60 -> "C"
+    else -> "D"
+}
+println(grade)   // B`)}
+${C("kotlin", `for (i in 1..3) {          // 1 2 3 包含两端
+    print(i)
+}
+for (i in 0 until 3) {     // 0 1 2 不含 3
+    print(i)
+}
+for (i in 5 downTo 1 step 2) {  // 5 3 1
+    print(i)
+}
+
+val names = listOf("a", "b", "c")
+for ((index, name) in names.withIndex()) {
+    println("$index=$name")
+}
+
+var n = 3
+while (n > 0) {
+    n--
+}`)}
+`
+},
+{
+  id: "kt-collections", stage: "kt", title: "1.3 集合：List、Set、Map", minutes: 12,
+  html: `
+${C("kotlin", `// 不可变（推荐默认）
+val list = listOf(1, 2, 2, 3)       // [1, 2, 2, 3]
+val set = setOf(1, 2, 2, 3)         // [1, 2, 3] 去重
+val map = mapOf("a" to 1, "b" to 2) // {a=1, b=2}
+
+// 可变
+val mut = mutableListOf(1, 2)
+mut.add(3)
+
+println(list[0])        // 1
+println(map["a"])       // 1
+println("b" in map)     // true`)}
+<h2>常用高阶操作（和 JS 数组方法对应）</h2>
+${C("kotlin", `val nums = listOf(1, 2, 3, 4, 5)
+val evens = nums.filter { it % 2 == 0 }     // [2, 4]
+val doubled = nums.map { it * 2 }           // [2, 4, 6, 8, 10]
+val sum = nums.sum()                        // 15
+val firstEven = nums.find { it % 2 == 0 }   // 2
+val grouped = nums.groupBy { it % 2 }       // {1=[1,3,5], 0=[2,4]}
+
+// it = 唯一参数的默认名字
+nums.forEach { println(it) }`)}
+<div class="tip"><code>listOf</code> 不可变；需要增删用 <code>mutableListOf</code>。读接口数据时常用 <code>map { }</code> 转成自己的模型。</div>
+`
+},
+{
+  id: "kt-functions", stage: "kt", title: "1.4 函数、默认参数、具名参数", minutes: 10,
+  html: `
+${C("kotlin", `fun add(a: Int, b: Int): Int {
+    return a + b
+}
+
+// 单表达式可省略花括号和 return
+fun add2(a: Int, b: Int) = a + b
+
+// 默认参数 + 具名参数（调用可读性很好）
+fun connect(host: String, port: Int = 443, useTls: Boolean = true) {
+    println("$host:$port tls=$useTls")
+}
+
+connect("api.example.com")
+connect("api.example.com", useTls = false)
+connect(port = 8080, host = "localhost")`)}
+${C("kotlin", `// 可变参数
+fun join(sep: String, vararg parts: String): String {
+    return parts.joinToString(sep)
+}
+println(join("-", "a", "b", "c"))   // a-b-c
+
+// 局部函数：只在外层函数里用
+fun process(raw: String): String {
+    fun clean(s: String) = s.trim().lowercase()
+    return clean(raw)
+}`)}
+`
+},
+{
+  id: "kt-lambda", stage: "kt", title: "1.5 Lambda、高阶函数、扩展函数", minutes: 12,
+  html: `
+${C("kotlin", `// 函数类型：(参数) -> 返回值
+val mul: (Int, Int) -> Int = { x, y -> x * y }
+println(mul(3, 4))   // 12
+
+fun runTwice(block: () -> Unit) {
+    block()
+    block()
+}
+runTwice { println("hi") }
+
+// 尾随 lambda：最后一个参数是函数时，可写在括号外
+listOf(1, 2, 3).filter { it > 1 }.forEach { println(it) }`)}
+<h2>扩展函数：给已有类型“加方法”</h2>
+${C("kotlin", `fun String.initial(): String {
+    return this.firstOrNull()?.uppercase() ?: "?"
+}
+println("kotlin".initial())   // K
+
+fun Int.isEven() = this % 2 == 0
+println(4.isEven())           // true`)}
+<div class="note">Android / Compose 里大量 API 是扩展函数（比如 <code>Modifier.padding</code>）。看到 <code>xxx.yyy()</code> 但类定义里没有 <code>yyy</code>，多半是扩展。</div>
+`
+},
+{
+  id: "kt-class", stage: "kt", title: "1.6 类、属性、构造", minutes: 12,
+  html: `
+${C("kotlin", `class User(
+    val id: String,          // 只读属性，自动有 getter
+    var nickname: String     // 可变属性
+) {
+    var loginCount = 0
+        private set          // 外面只能读，不能改
+
+    fun bump() {
+        loginCount++
+    }
+}
+
+val u = User("u1", "小明")
+u.nickname = "小明改"
+u.bump()
+println(u.id)            // u1
+println(u.loginCount)    // 1`)}
+${C("kotlin", `class Counter(start: Int = 0) {
+    private var value = start
+
+    // 次构造
+    constructor(start: Int, label: String) : this(start) {
+        println("label=$label")
+    }
+
+    fun inc() = ++value
+    fun get() = value
+}
+
+// 单例：全局只有一份
+object AppConfig {
+    const val APP_NAME = "Demo"
+    fun version() = "1.0"
+}
+println(AppConfig.APP_NAME)`)}
+`
+},
+{
+  id: "kt-oop", stage: "kt", title: "1.7 继承、接口、抽象类", minutes: 10,
+  html: `
+<p>Kotlin 类默认 <code>final</code>，要继承必须写 <code>open</code>。</p>
+${C("kotlin", `open class Animal(val name: String) {
+    open fun speak() = "..."
+}
+
+class Dog(name: String) : Animal(name) {
+    override fun speak() = "汪"
+}
+
+interface Repository {
+    fun load(): String
+    fun save(data: String) {   // 接口可有默认实现
+        println("save $data")
+    }
+}
+
+class MemoryRepo : Repository {
+    override fun load() = "cached"
+}
+
+abstract class Shape {
+    abstract fun area(): Double
+}
+
+class Circle(val r: Double) : Shape() {
+    override fun area() = Math.PI * r * r
+}`)}
+`
+},
+{
+  id: "kt-data", stage: "kt", title: "1.8 data class、sealed、enum", minutes: 10,
+  html: `
+${C("kotlin", `// data class：自动 equals / hashCode / copy / toString
+data class Message(
+    val id: String,
+    val text: String,
+    val read: Boolean = false
+)
+
+val m1 = Message("1", "你好")
+val m2 = m1.copy(read = true)
+println(m1)                 // Message(id=1, text=你好, read=false)
+println(m1 == Message("1", "你好"))  // true`)}
+${C("kotlin", `enum class SyncStatus { IDLE, RUNNING, SUCCESS, FAILED }
+
+// sealed：受限的类型层级，when 可穷尽检查
+sealed class Result {
+    data class Ok(val data: String) : Result()
+    data class Err(val message: String) : Result()
+    data object Loading : Result()
+}
+
+fun show(r: Result): String = when (r) {
+    is Result.Ok -> r.data
+    is Result.Err -> "错误：\${r.message}"
+    Result.Loading -> "加载中"
+}`)}
+<div class="tip">网络成功/失败、UI 状态机，优先 <code>sealed class</code>，比一堆 boolean 清晰。</div>
+`
+},
+{
+  id: "kt-null-exception", stage: "kt", title: "1.9 异常、空安全进阶", minutes: 10,
+  html: `
+${C("kotlin", `fun parseInt(s: String): Int {
+    return try {
+        s.toInt()
+    } catch (e: NumberFormatException) {
+        0
+    } finally {
+        // 总会执行，做清理
+    }
+}
+
+// runCatching：更现代的写法
+val n = runCatching { "12".toInt() }.getOrDefault(0)
+
+fun requireToken(token: String?) {
+    require(!token.isNullOrBlank()) { "token 不能为空" }
+    check(token!!.length >= 10) { "token 太短" }
+}`)}
+${C("kotlin", `val list: List<String?> = listOf("a", null, "b")
+val cleaned = list.filterNotNull()          // [a, b]
+val name: String? = null
+name?.let { println("有值：$it") }          // 有值才执行
+val shown = name.takeIf { it!!.length > 1 } // 条件成立返回自己，否则 null`)}
+`
+},
+{
+  id: "kt-generics", stage: "kt", title: "1.10 泛型与内联", minutes: 9,
+  html: `
+${C("kotlin", `class Box<T>(val value: T)
+
+fun <T> singletonList(item: T): List<T> = listOf(item)
+
+// 上界：T 必须是 Comparable
+fun <T : Comparable<T>> maxOf2(a: T, b: T): T =
+    if (a >= b) a else b
+
+println(maxOf2(3, 9))          // 9
+println(maxOf2("a", "c"))      // c
+
+// reified：内联后能拿到 T 的真实类型（Android 里 Gson/导航常用）
+inline fun <reified T> Any.safeCast(): T? = this as? T
+val x: Any = "hi"
+println(x.safeCast<String>())  // hi
+println(x.safeCast<Int>())     // null`)}
+`
+},
+{
+  id: "kt-coroutine", stage: "kt", title: "1.11 协程基础：async / await 的 Kotlin 版", minutes: 14,
+  html: `
+<p>Android 网络请求别堵主线程。Kotlin 用<strong>协程</strong>（coroutines），概念接近 JS 的 <code>async/await</code>。</p>
+${C("kotlin", `import kotlinx.coroutines.*
+
+suspend fun fetchUser(): String {
+    delay(500)                 // 挂起，不堵线程
+    return "小明"
+}
+
+fun main() = runBlocking {
+    println("start")
+    val name = fetchUser()     // 等它完成
+    println(name)              // 小明
+
+    // 并发
+    val a = async { fetchUser() }
+    val b = async { delay(300); "资料" }
+    println("\${a.await()} / \${b.await()}")
+}`)}
+${C("kotlin", `// Android 里常见写法（示意）
+// viewModelScope.launch {
+//     _ui.value = UiState.Loading
+//     runCatching { api.login(phone, pwd) }
+//         .onSuccess { _ui.value = UiState.Ok(it) }
+//         .onFailure { _ui.value = UiState.Err(it.message) }
+// }
+
+// withContext(Dispatchers.IO) { ... }  // 切到后台线程
+// withContext(Dispatchers.Main) { ... } // 切回主线程更新 UI`)}
+<div class="warn"><code>suspend</code> 函数只能在协程或其他 suspend 里调用。看到红色编译错误「只能在协程中调用」，就是这个原因。</div>
+`
+},
+{
+  id: "kt-package", stage: "kt", title: "1.12 包、可见性、导入", minutes: 7,
+  html: `
+${C("kotlin", `package com.example.chat.data
+
+import java.time.Instant
+import com.example.chat.core.Session as ChatSession  // 别名，避免重名
+
+internal class RepoHidden   // 同模块可见
+private fun onlyHere() {}   // 本文件可见
+
+class PublicApi {
+    protected open fun forSubclass() {}
+}`)}
+<div class="table-wrap"><table>
+<tr><th>修饰符</th><th>可见范围</th></tr>
+<tr><td>默认 public</td><td>到处可见</td></tr>
+<tr><td>internal</td><td>同一模块（同一 Gradle module）</td></tr>
+<tr><td>private</td><td>同一文件（顶层）/ 同一类</td></tr>
+<tr><td>protected</td><td>类及子类</td></tr>
+</table></div>
+`
+},
+
+/* —— Android —— */
+{
+  id: "and-project", stage: "and", title: "2.1 工程结构与 Gradle", minutes: 12,
+  html: `
+<p>新建 Android 工程后，先认这些路径：</p>
+${C("text", `app/
+  src/main/
+    java|kotlin/.../MainActivity.kt   # 入口界面
+    res/drawable|layout|values        # 图片、布局、颜色字符串
+    AndroidManifest.xml               # 组件声明、权限
+  build.gradle.kts                    # 本模块依赖
+build.gradle.kts                      # 工程级
+settings.gradle.kts                   # 有哪些 module
+gradle/wrapper/                       # 锁定 Gradle 版本`)}
+${C("kotlin", `// app/build.gradle.kts 片段示意
+android {
+    namespace = "com.example.demo"
+    compileSdk = 34
+    defaultConfig {
+        applicationId = "com.example.demo"
+        minSdk = 24
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
+    }
+}
+dependencies {
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
+}`)}
+<div class="note"><code>applicationId</code> 是手机上的唯一身份；改它就等于另一个 App，不会覆盖旧安装。</div>
+`
+},
+{
+  id: "and-activity", stage: "and", title: "2.2 Activity 与生命周期", minutes: 10,
+  html: `
+<p><strong>Activity</strong> ≈ 一个可显示的屏幕容器。即使用 Compose，也至少有一个 Activity 当入口。</p>
+${C("kotlin", `class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            Text("Hello")
+        }
+    }
+}`)}
+${C("text", `onCreate → onStart → onResume → (前台可交互)
+onPause  → onStop  → onDestroy
+
+旋转屏幕等配置变化：默认可能销毁重建（要用 ViewModel 保住状态）
+切到别的 App：onPause / onStop，进程可能被系统杀掉`)}
+<div class="tip">聊天页重点关心：进入时订阅消息、离开时取消订阅，避免泄漏和重复回调。</div>
+`
+},
+{
+  id: "and-compose", stage: "and", title: "2.3 Compose 基础：声明式 UI", minutes: 14,
+  html: `
+<p>Compose：用函数描述 UI，状态变了自动重组（recompose）。</p>
+${C("kotlin", `@Composable
+fun Counter() {
+    var count by remember { mutableStateOf(0) }
+
+    Column(Modifier.padding(24.dp)) {
+        Text(text = "点击了 $count 次")
+        Button(onClick = { count++ }) {
+            Text("点我")
+        }
+    }
+}`)}
+${C("kotlin", `@Composable
+fun UserCard(name: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Image / AsyncImage ...
+        Text(name, modifier = Modifier.weight(1f))
+    }
+}`)}
+<p>常用布局：<code>Column</code>（竖）、<code>Row</code>（横）、<code>Box</code>（叠）、<code>LazyColumn</code>（懒加载列表）。</p>
+<div class="warn">不要在 <code>@Composable</code> 里直接做网络请求；副作用放到 <code>LaunchedEffect</code> / ViewModel。</div>
+`
+},
+{
+  id: "and-state", stage: "and", title: "2.4 状态与 ViewModel", minutes: 12,
+  html: `
+${C("kotlin", `data class LoginUiState(
+    val loading: Boolean = false,
+    val error: String? = null,
+    val success: Boolean = false
+)
+
+class LoginViewModel : ViewModel() {
+    private val _ui = MutableStateFlow(LoginUiState())
+    val ui: StateFlow<LoginUiState> = _ui.asStateFlow()
+
+    fun login(phone: String, password: String) {
+        viewModelScope.launch {
+            _ui.value = LoginUiState(loading = true)
+            runCatching { api.login(phone, password) }
+                .onSuccess { _ui.value = LoginUiState(success = true) }
+                .onFailure { _ui.value = LoginUiState(error = it.message) }
+        }
+    }
+}
+
+@Composable
+fun LoginScreen(vm: LoginViewModel = viewModel()) {
+    val state by vm.ui.collectAsState()
+    if (state.loading) CircularProgressIndicator()
+    state.error?.let { Text(it) }
+}`)}
+<div class="tip">原则：<strong>UI 无脑、状态上移</strong>。Composable 负责画；ViewModel 负责业务与存活过旋转。</div>
+`
+},
+{
+  id: "and-list", stage: "and", title: "2.5 列表：LazyColumn", minutes: 10,
+  html: `
+${C("kotlin", `data class Conv(val id: String, val title: String, val preview: String)
+
+@Composable
+fun ConvList(items: List<Conv>, onOpen: (String) -> Unit) {
+    LazyColumn {
+        items(items, key = { it.id }) { item ->
+            ListItem(
+                headlineContent = { Text(item.title) },
+                supportingContent = { Text(item.preview) },
+                modifier = Modifier.clickable { onOpen(item.id) }
+            )
+            HorizontalDivider()
+        }
+    }
+}`)}
+<p>要点：</p>
+<ul>
+<li>永远给稳定 <code>key</code>（消息 id / 会话 id），否则动画和状态会乱</li>
+<li>大列表不要一次 <code>Column + map</code>，要用 Lazy</li>
+<li>分页：滑近底部再请求下一页</li>
+</ul>
+`
+},
+{
+  id: "and-nav", stage: "and", title: "2.6 导航 Navigation", minutes: 9,
+  html: `
+${C("kotlin", `NavHost(navController, startDestination = "login") {
+    composable("login") {
+        LoginScreen(onOk = { navController.navigate("home") })
+    }
+    composable("home") {
+        HomeScreen(onChat = { id ->
+            navController.navigate("chat/$id")
+        })
+    }
+    composable(
+        "chat/{id}",
+        arguments = listOf(navArgument("id") { type = NavType.StringType })
+    ) { entry ->
+        val id = entry.arguments?.getString("id")!!
+        ChatScreen(id)
+    }
+}`)}
+`
+},
+{
+  id: "and-network", stage: "and", title: "2.7 网络请求与 JSON", minutes: 12,
+  html: `
+<p>常见组合：OkHttp / Ktor / 最简 HttpURLConnection + Gson/Moshi/kotlinx.serialization。</p>
+${C("kotlin", `// 概念示意：suspend + JSON
+@Serializable
+data class LoginReq(val phone: String, val password: String, val deviceId: String)
+
+@Serializable
+data class ApiResp<T>(val code: Int, val message: String, val data: T?)
+
+suspend fun login(req: LoginReq): User {
+    val raw = http.post("/auth/login", body = json.encodeToString(req))
+    val resp = json.decodeFromString<ApiResp<User>>(raw)
+    if (resp.code != 0 || resp.data == null) error(resp.message)
+    return resp.data
+}`)}
+<div class="warn">Android 9+ 默认禁止明文 HTTP；正式环境用 HTTPS。Token 放 Header：<code>Authorization: Bearer ...</code>，不要打进日志。</div>
+`
+},
+{
+  id: "and-storage", stage: "and", title: "2.8 本地存储：DataStore / 文件 / DB", minutes: 10,
+  html: `
+<div class="table-wrap"><table>
+<tr><th>方案</th><th>适合</th></tr>
+<tr><td>DataStore Preferences</td><td>开关、简单配置（替代旧 SharedPreferences）</td></tr>
+<tr><td>文件 / 缓存目录</td><td>图片、下载的媒体</td></tr>
+<tr><td>Room（SQLite）</td><td>结构化本地数据</td></tr>
+<tr><td>SDK 自己的库</td><td>如 IM SDK 的消息库——业务层不要乱写它的私有表</td></tr>
+</table></div>
+${C("kotlin", `val Context.settings by preferencesDataStore("settings")
+
+suspend fun saveTheme(dark: Boolean) {
+    context.settings.edit { it[booleanPreferencesKey("dark")] = dark }
+}`)}
+`
+},
+{
+  id: "and-resource", stage: "and", title: "2.9 资源、权限、主题", minutes: 8,
+  html: `
+<ul>
+<li>图片放 <code>res/drawable</code> 或 <code>drawable-xxhdpi</code></li>
+<li>字符串放 <code>res/values/strings.xml</code>，方便多语言</li>
+<li>危险权限（相机、麦克风、存储）要在 Manifest 声明，并在运行时请求</li>
+</ul>
+${C("xml", `<uses-permission android:name="android.permission.CAMERA" />
+<uses-permission android:name="android.permission.INTERNET" />`)}
+${C("kotlin", `val launcher = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestPermission()
+) { granted -> /* ... */ }
+launcher.launch(Manifest.permission.CAMERA)`)}
+`
+},
+{
+  id: "and-debug", stage: "and", title: "2.10 调试、日志、单元测试", minutes: 9,
+  html: `
+${C("kotlin", `Log.d("Login", "start")          // Debug
+Log.e("Login", "failed", error)  // Error
+// 别 Log token / 密码 / 短信验证码
+
+@Test
+fun maskPhone_works() {
+    assertEquals("138****8000", maskPhone("13800138000"))
+}`)}
+<p>Android Studio：断点点在行号旁，以 Debug 运行。单元测试在 <code>src/test</code>；需要真框架的在 <code>src/androidTest</code>。</p>
+`
+},
+
+/* —— Swift —— */
+{
+  id: "sw-vars", stage: "sw", title: "3.1 变量、类型、可选值", minutes: 12,
+  html: `
+<p><code>let</code> 不可变，<code>var</code> 可变。可选值用 <code>?</code>，和 Kotlin 空安全是同一类问题。</p>
+${C("swift", `let name = "林必龙"       // String
+var age = 18              // Int
+let price = 9.9           // Double
+let ok = true             // Bool
+var token: String? = nil  // 可选
+
+print(name)
+let len = token?.count ?? 0
+// let bad = token!       // 强制解包，nil 会崩，少用`)}
+${C("swift", `func greet(_ who: String) -> String {
+    return "你好，\\(who)"   // 字符串插值
+}
+print(greet("小明"))
+
+// if let / guard let：安全解包
+func show(_ token: String?) {
+    guard let token, !token.isEmpty else {
+        print("没有 token")
+        return
+    }
+    print("token 长度 \\(token.count)")
+}`)}
+`
+},
+{
+  id: "sw-control", stage: "sw", title: "3.2 判断和循环", minutes: 9,
+  html: `
+${C("swift", `let score = 85
+if score >= 60 {
+    print("及格")
+} else {
+    print("不及格")
+}
+
+let grade: String
+switch score {
+case 90...100: grade = "A"
+case 80..<90: grade = "B"
+case 60..<80: grade = "C"
+default: grade = "D"
+}
+
+for i in 1...3 { print(i) }       // 1 2 3
+for i in 0..<3 { print(i) }       // 0 1 2
+for name in ["a", "b"] { print(name) }
+
+var n = 3
+while n > 0 { n -= 1 }`)}
+`
+},
+{
+  id: "sw-collections", stage: "sw", title: "3.3 数组、集合、字典", minutes: 10,
+  html: `
+${C("swift", `var list = [1, 2, 2, 3]
+var set: Set<Int> = [1, 2, 2, 3]     // {1,2,3}
+var map = ["a": 1, "b": 2]
+
+list.append(4)
+print(list[0])
+print(map["a"] ?? 0)
+
+let evens = list.filter { $0 % 2 == 0 }
+let doubled = list.map { $0 * 2 }
+let sum = list.reduce(0, +)
+
+// $0 $1 是闭包默认参数名
+list.forEach { print($0) }`)}
+`
+},
+{
+  id: "sw-functions", stage: "sw", title: "3.4 函数与闭包", minutes: 11,
+  html: `
+${C("swift", `func add(_ a: Int, b: Int = 0) -> Int {
+    a + b
+}
+print(add(2, b: 3))
+
+func runTwice(_ block: () -> Void) {
+    block(); block()
+}
+runTwice { print("hi") }
+
+// 尾随闭包
+let nums = [1, 2, 3].filter { $0 > 1 }`)}
+${C("swift", `// 逃逸闭包：异步回调常见
+func load(completion: @escaping (String) -> Void) {
+    DispatchQueue.global().async {
+        completion("data")
+    }
+}
+
+// 值捕获注意循环引用：闭包里用 [weak self]
+class Controller {
+    var name = "vc"
+    func bind() {
+        load { [weak self] value in
+            guard let self else { return }
+            print(self.name, value)
+        }
+    }
+}`)}
+`
+},
+{
+  id: "sw-struct-class", stage: "sw", title: "3.5 结构体、类、属性", minutes: 12,
+  html: `
+<p>Swift 里<strong>优先用 struct</strong>（值类型）；需要继承/身份时用 class（引用类型）。</p>
+${C("swift", `struct User {
+    let id: String
+    var nickname: String
+}
+
+class Counter {
+    private(set) var value = 0
+    func inc() { value += 1 }
+}
+
+var u1 = User(id: "1", nickname: "a")
+var u2 = u1              // 拷贝
+u2.nickname = "b"
+print(u1.nickname)       // a
+
+let c1 = Counter()
+let c2 = c1              // 引用同一对象
+c2.inc()
+print(c1.value)          // 1`)}
+`
+},
+{
+  id: "sw-protocol", stage: "sw", title: "3.6 协议、扩展、枚举", minutes: 11,
+  html: `
+${C("swift", `protocol Repository {
+    func load() -> String
+}
+
+extension Repository {
+    func save(_ data: String) {
+        print("save \\(data)")
+    }
+}
+
+struct MemoryRepo: Repository {
+    func load() -> String { "cached" }
+}
+
+enum SyncStatus {
+    case idle, running, success
+    case failed(message: String)
+}
+
+let s = SyncStatus.failed(message: "timeout")
+switch s {
+case .idle: print("idle")
+case .running: print("run")
+case .success: print("ok")
+case .failed(let message): print(message)
+}`)}
+<div class="tip">带关联值的 <code>enum</code> ≈ Kotlin <code>sealed class</code>，非常适合结果类型。</div>
+`
+},
+{
+  id: "sw-error", stage: "sw", title: "3.7 错误处理 Result / throws", minutes: 9,
+  html: `
+${C("swift", `enum ApiError: Error {
+    case unauthorized
+    case message(String)
+}
+
+func login() throws -> String {
+    throw ApiError.message("密码错误")
+}
+
+do {
+    let token = try login()
+    print(token)
+} catch ApiError.unauthorized {
+    print("请重新登录")
+} catch {
+    print(error)
+}
+
+// Result
+let r: Result<String, ApiError> = .failure(.message("断网"))
+switch r {
+case .success(let v): print(v)
+case .failure(let e): print(e)
+}`)}
+`
+},
+{
+  id: "sw-async", stage: "sw", title: "3.8 async / await 与并发", minutes: 12,
+  html: `
+${C("swift", `func fetchUser() async throws -> String {
+    try await Task.sleep(nanoseconds: 300_000_000)
+    return "小明"
+}
+
+Task {
+    do {
+        async let a = fetchUser()
+        async let b = fetchUser()
+        let (x, y) = try await (a, b)
+        print(x, y)
+    } catch {
+        print(error)
+    }
+}
+
+// 主线程更新 UI
+await MainActor.run {
+    // label.text = ...
+}`)}
+<div class="note">旧代码常见 completion handler；新代码优先 async/await。两者可以桥接，但一个模块里尽量统一。</div>
+`
+},
+{
+  id: "sw-access", stage: "sw", title: "3.9 访问控制、属性包装", minutes: 8,
+  html: `
+${C("swift", `public struct APIClient {}      // 模块外可用
+internal struct Helper {}       // 默认，模块内
+fileprivate secret() {}         // 本文件
+private func onlyType() {}      // 本声明作用域
+
+@propertyWrapper
+struct Trimmed {
+    private var value = ""
+    var wrappedValue: String {
+        get { value }
+        set { value = newValue.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+    init(wrappedValue: String) { self.wrappedValue = wrappedValue }
+}
+
+struct Form {
+    @Trimmed var phone: String
+}`)}
+<p>SwiftUI 里常见 <code>@State</code> <code>@Binding</code> <code>@StateObject</code>，本质都是属性包装器。</p>
+`
+},
+{
+  id: "sw-codable", stage: "sw", title: "3.10 Codable 与 JSON", minutes: 9,
+  html: `
+${C("swift", `struct LoginReq: Codable {
+    let phone: String
+    let password: String
+    let deviceId: String
+}
+
+struct ApiResp<T: Codable>: Codable {
+    let code: Int
+    let message: String
+    let data: T?
+}
+
+let req = LoginReq(phone: "13800138000", password: "xx", deviceId: "d1")
+let data = try JSONEncoder().encode(req)
+let obj = try JSONDecoder().decode(LoginReq.self, from: data)
+print(obj.phone)`)}
+`
+},
+
+/* —— iOS —— */
+{
+  id: "ios-xcode", stage: "ios", title: "4.1 Xcode 工程与 App 入口", minutes: 10,
+  html: `
+${C("text", `MyApp/
+  MyAppApp.swift          # @main 入口（SwiftUI 生命周期）
+  ContentView.swift
+  Info.plist              # 权限说明文案等
+  Assets.xcassets         # 图片资源
+MyApp.xcodeproj`)}
+<p>关键概念：</p>
+<ul>
+<li><strong>Bundle ID</strong>：类似 Android applicationId</li>
+<li><strong>Scheme</strong>：怎么编译运行</li>
+<li><strong>Simulator / Device</strong>：模拟器方便，真机才有推送、性能、权限完整行为</li>
+<li><strong>Signing</strong>：真机运行需要开发者证书</li>
+</ul>
+`
+},
+{
+  id: "ios-swiftui", stage: "ios", title: "4.2 SwiftUI 基础", minutes: 14,
+  html: `
+${C("swift", `struct CounterView: View {
+    @State private var count = 0
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("点击了 \\(count) 次")
+            Button("点我") { count += 1 }
+        }
+        .padding()
+    }
+}`)}
+${C("swift", `struct UserRow: View {
+    let name: String
+    var body: some View {
+        HStack {
+            Text(name)
+            Spacer()
+            Image(systemName: "chevron.right")
+        }
+        .padding(.horizontal)
+    }
+}
+
+List {
+    ForEach(["甲","乙"], id: \\.self) { name in
+        UserRow(name: name)
+    }
+}`)}
+<p>布局：<code>VStack</code>/<code>HStack</code>/<code>ZStack</code>；列表用 <code>List</code>/<code>LazyVStack</code>。</p>
+`
+},
+{
+  id: "ios-uikit", stage: "ios", title: "4.3 UIKit 基础（很多老项目仍在用）", minutes: 12,
+  html: `
+${C("swift", `final class LoginViewController: UIViewController {
+    private let phoneField = UITextField()
+    private let button = UIButton(type: .system)
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        button.setTitle("登录", for: .normal)
+        button.addTarget(self, action: #selector(onLogin), for: .touchUpInside)
+        // 用 Auto Layout 约束把控件摆好
+    }
+
+    @objc private func onLogin() {
+        print(phoneField.text ?? "")
+    }
+}`)}
+<div class="table-wrap"><table>
+<tr><th>生命周期</th><th>时机</th></tr>
+<tr><td>viewDidLoad</td><td>视图第一次加载</td></tr>
+<tr><td>viewWillAppear</td><td>每次即将显示</td></tr>
+<tr><td>viewDidDisappear</td><td>消失后，适合取消任务</td></tr>
+</table></div>
+`
+},
+{
+  id: "ios-nav", stage: "ios", title: "4.4 页面导航与数据传递", minutes: 9,
+  html: `
+${C("swift", `// SwiftUI
+NavigationStack {
+    List(convs) { c in
+        NavigationLink(c.title, value: c.id)
+    }
+    .navigationDestination(for: String.self) { id in
+        ChatView(id: id)
+    }
+}
+
+// UIKit
+let chat = ChatViewController(id: "c1")
+navigationController?.pushViewController(chat, animated: true)`)}
+`
+},
+{
+  id: "ios-network", stage: "ios", title: "4.5 URLSession 网络", minutes: 11,
+  html: `
+${C("swift", `func getProfile(token: String) async throws -> Data {
+    var req = URLRequest(url: URL(string: "https://example.com/api/v1/me")!)
+    req.httpMethod = "GET"
+    req.setValue("Bearer \\(token)", forHTTPHeaderField: "Authorization")
+    let (data, resp) = try await URLSession.shared.data(for: req)
+    guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        throw URLError(.badServerResponse)
+    }
+    return data
+}`)}
+<div class="warn">ATS 默认要求 HTTPS。别在正式包里关闭 ATS 去迁就明文 HTTP。</div>
+`
+},
+{
+  id: "ios-storage", stage: "ios", title: "4.6 本地存储：UserDefaults / Keychain / 文件", minutes: 9,
+  html: `
+<div class="table-wrap"><table>
+<tr><th>方案</th><th>适合</th><th>注意</th></tr>
+<tr><td>UserDefaults</td><td>小配置</td><td>别存 token/密码</td></tr>
+<tr><td>Keychain</td><td>密钥、刷新令牌</td><td>敏感凭据</td></tr>
+<tr><td>FileManager</td><td>文件、缓存</td><td>分清 Documents / Caches</td></tr>
+<tr><td>SwiftData / Core Data</td><td>结构化数据</td><td>学习曲线更陡</td></tr>
+</table></div>
+${C("swift", `UserDefaults.standard.set(true, forKey: "dark")
+let dark = UserDefaults.standard.bool(forKey: "dark")`)}
+`
+},
+{
+  id: "ios-lifecycle", stage: "ios", title: "4.7 App 生命周期与后台", minutes: 8,
+  html: `
+<ul>
+<li>前台活跃：可刷新会话、连长连接</li>
+<li>进后台：尽快保存草稿，取消不必要任务</li>
+<li>被系统杀掉：下次冷启动要从持久化恢复，不要假设内存还在</li>
+<li>推送：权限、证书、后台模式要单独学</li>
+</ul>
+${C("swift", `// SwiftUI 场景
+@Environment(\\.scenePhase) var phase
+.onChange(of: phase) { _, new in
+    if new == .active { /* 回到前台 */ }
+    if new == .background { /* 进后台 */ }
+}`)}
+`
+},
+{
+  id: "ios-test", stage: "ios", title: "4.8 调试与测试", minutes: 8,
+  html: `
+${C("swift", `import XCTest
+
+final class MaskTests: XCTestCase {
+    func testMask() {
+        XCTAssertEqual(maskPhone("13800138000"), "138****8000")
+    }
+}`)}
+<p>Xcode：断点、LLDB、<code>po 变量名</code> 打印对象。UI 测试（XCUITest）成本高，业务逻辑优先单测。</p>
+<div class="tip">学到这里：Kotlin/Swift 语法 + Android/iOS 工程骨架已经齐了。下一步用一个小 App（登录 + 列表 + 详情）两端各做一遍，比继续看概念有效。</div>
+`
+}
+];
+
+const STORE_KEY = "native-dev-notes-v2";
+const state = loadState();
+
+function loadState() {
+  try {
+    return Object.assign({
+      done: {}, last: "home", theme: "light",
+      secondsToday: 0, day: todayKey(), heat: {}
+    }, JSON.parse(localStorage.getItem(STORE_KEY) || "{}"));
+  } catch {
+    return { done: {}, last: "home", theme: "light", secondsToday: 0, day: todayKey(), heat: {} };
+  }
+}
+function saveState(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function todayKey(){ const d=new Date(); return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`; }
+function ensureDay(){ if(state.day!==todayKey()){ state.day=todayKey(); state.secondsToday=0; saveState(); } }
+function lessonsOf(s){ return LESSONS.filter(l=>l.stage===s); }
+function lessonById(id){ return LESSONS.find(l=>l.id===id); }
+function doneCount(s){ return lessonsOf(s).filter(l=>state.done[l.id]).length; }
+function totalDone(){ return LESSONS.filter(l=>state.done[l.id]).length; }
+
+function buildNav(){
+  document.getElementById("navStages").innerHTML = STAGES.map(s=>{
+    const links = lessonsOf(s.id).map(l=>
+      `<a class="nav-link ${state.done[l.id]?"done":""}" data-route="${l.id}" href="#${l.id}">${l.title}</a>`
+    ).join("");
+    return `<div class="stage" data-stage="${s.id}">
+      <button class="stage-btn" type="button" data-toggle="${s.id}">
+        <span class="left"><span>›</span><span>${s.title}</span></span>
+        <span>${doneCount(s.id)} / ${lessonsOf(s.id).length}</span>
+      </button>
+      <div class="stage-links">${links}</div>
+    </div>`;
+  }).join("");
+}
+
+function setActiveNav(route){
+  document.querySelectorAll(".nav-home,.nav-link").forEach(a=>{
+    a.classList.toggle("active", a.getAttribute("data-route")===route);
+  });
+  const lesson = lessonById(route);
+  document.querySelectorAll(".stage").forEach(el=>{
+    const sid = el.getAttribute("data-stage");
+    el.classList.toggle("open", lesson ? lesson.stage===sid : sid==="prep"||sid==="kt");
+  });
+  if(lesson) document.querySelector(`.stage[data-stage="${lesson.stage}"]`)?.classList.add("open");
+}
+
+function renderHome(){
+  const pct = Math.round(totalDone()/LESSONS.length*100);
+  const last = lessonById(state.last) || LESSONS[0];
+  const heat = Array.from({length:28},(_,i)=>{
+    const d=new Date(); d.setDate(d.getDate()-(27-i));
+    const k=`${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+    return `<i class="${state.heat[k]?"on":""}" title="${k}"></i>`;
+  }).join("");
+  return `
+  <h1 style="margin-top:0">原生开发笔记</h1>
+  <p>从零学移动端原生：先 <strong>Kotlin 语法</strong> 和 <strong>Android</strong>，再 <strong>Swift 语法</strong> 和 <strong>iOS</strong>。风格对齐常见编程笔记站——每节讲知识点 + 可抄代码，不绑定某个业务仓库。</p>
+  <ul class="roadmap">
+    <li><strong>开始之前</strong>：装 Android Studio / Xcode，跑通 Hello。</li>
+    <li><strong>阶段一</strong>：Kotlin 变量、集合、函数、类、协程等语言基础。</li>
+    <li><strong>阶段二</strong>：Android 工程、生命周期、Compose、导航、网络、存储。</li>
+    <li><strong>阶段三</strong>：Swift 可选值、协议、枚举、async/await、Codable。</li>
+    <li><strong>阶段四</strong>：iOS 工程、SwiftUI / UIKit、导航、网络、存储。</li>
+  </ul>
+  <p>每节代码建议自己敲一遍。Kotlin 1.9+ / Swift 5.9 语法为主。</p>
+  <a class="card continue" href="#${last.id}" style="text-decoration:none;color:inherit">
+    <div>
+      <div class="meta">继续学习 · 上次读到</div>
+      <strong>${last.title}</strong>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="meta" style="margin-top:8px">已学完 ${totalDone()} / ${LESSONS.length} 节</div>
+    </div>
+    <div style="font-size:28px;color:var(--blue)">→</div>
+  </a>
+  <h2>学习热力图</h2>
+  <div class="heatmap">${heat}</div>
+  <h2>阶段卡片</h2>
+  <div class="grid">
+    ${STAGES.map(s=>{
+      const first=lessonsOf(s.id)[0];
+      return `<a class="stage-card" href="#${first.id}" style="color:inherit;text-decoration:none">
+        <h3>${s.title}</h3>
+        <p>${lessonsOf(s.id).length} 节</p>
+        <div class="prog">已学完 ${doneCount(s.id)} / ${lessonsOf(s.id).length}</div>
+      </a>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderLesson(lesson){
+  const idx = LESSONS.findIndex(l=>l.id===lesson.id);
+  const stage = STAGES.find(s=>s.id===lesson.stage);
+  const prev = LESSONS[idx-1];
+  const next = LESSONS[idx+1];
+  return `
+  <div class="topbar">
+    <div class="crumb"><a href="#home" data-route="home">首页</a><span>/</span><span>${stage.title}</span></div>
+    <div>第 ${idx+1} / ${LESSONS.length} 节 · 约 ${lesson.minutes} 分钟</div>
+  </div>
+  <div class="lesson-head">
+    <h1>${lesson.title}</h1>
+    <label class="done-box"><input type="checkbox" id="doneToggle" ${state.done[lesson.id]?"checked":""}> 学完了</label>
+  </div>
+  ${lesson.html}
+  <div style="margin-top:28px">
+    <button class="done-box" id="doneNext" type="button">${state.done[lesson.id]?"已标记完成":"学完了，下一节 →"}</button>
+  </div>
+  <div class="pager">
+    <a href="#${prev?prev.id:"home"}">${prev?("← "+prev.title):"← 回首页"}</a>
+    <a href="#${next?next.id:"home"}">${next?(next.title+" →"):"回首页 →"}</a>
+  </div>`;
+}
+
+function route(){
+  const id=(location.hash||"#home").slice(1)||"home";
+  const view=document.getElementById("view");
+  if(id==="home"){
+    view.innerHTML=renderHome();
+    document.title="原生开发笔记";
+    setActiveNav("home");
+  }else{
+    const lesson=lessonById(id)||LESSONS[0];
+    state.last=lesson.id; state.heat[todayKey()]=true; saveState();
+    view.innerHTML=renderLesson(lesson);
+    document.title=lesson.title+" · 原生开发笔记";
+    setActiveNav(lesson.id);
+    const mark=(checked)=>{
+      state.done[lesson.id]=!!checked; saveState(); buildNav(); setActiveNav(lesson.id);
+      const i=LESSONS.findIndex(l=>l.id===lesson.id);
+      if(checked && LESSONS[i+1]) location.hash=LESSONS[i+1].id; else route();
+    };
+    document.getElementById("doneToggle")?.addEventListener("change",e=>mark(e.target.checked));
+    document.getElementById("doneNext")?.addEventListener("click",()=>mark(true));
+  }
+  view.querySelectorAll(".copy").forEach(btn=>{
+    btn.addEventListener("click", async()=>{
+      const pre=btn.parentElement.querySelector("pre");
+      try{ await navigator.clipboard.writeText(pre.innerText); btn.textContent="已复制"; setTimeout(()=>btn.textContent="复制",1200); }
+      catch{ btn.textContent="失败"; }
+    });
+  });
+  document.getElementById("sidebar").classList.remove("open");
+  window.scrollTo(0,0);
+}
+
+function tickStudy(){
+  ensureDay(); state.secondsToday+=1;
+  if(state.secondsToday%5===0) saveState();
+  const s=state.secondsToday;
+  document.getElementById("studyText").textContent = s<60 ? `今天 ${s} 秒` : `今天 ${Math.floor(s/60)} 分 ${s%60} 秒`;
+}
+function applyTheme(){ document.documentElement.classList.toggle("dark", state.theme==="dark"); }
+
+document.getElementById("navStages").addEventListener("click",e=>{
+  const t=e.target.closest("[data-toggle]");
+  if(t){ e.preventDefault(); document.querySelector(`.stage[data-stage="${t.dataset.toggle}"]`)?.classList.toggle("open"); }
+});
+document.getElementById("themeBtn").addEventListener("click",()=>{ state.theme=state.theme==="dark"?"light":"dark"; saveState(); applyTheme(); });
+document.getElementById("openSidebar").addEventListener("click",()=>document.getElementById("sidebar").classList.add("open"));
+document.getElementById("closeSidebar").addEventListener("click",()=>document.getElementById("sidebar").classList.remove("open"));
+document.getElementById("studyChip").addEventListener("click",()=>{
+  alert(`今天已学习 ${state.secondsToday} 秒\n累计完成 ${totalDone()} / ${LESSONS.length} 节`);
+});
+window.addEventListener("hashchange", route);
+window.addEventListener("keydown",e=>{
+  if(e.target.matches("input,textarea")) return;
+  const id=(location.hash||"#home").slice(1);
+  const idx=LESSONS.findIndex(l=>l.id===id);
+  if(e.key==="ArrowRight"){ if(id==="home") location.hash=LESSONS[0].id; else if(idx>=0&&LESSONS[idx+1]) location.hash=LESSONS[idx+1].id; }
+  if(e.key==="ArrowLeft"){ if(idx>0) location.hash=LESSONS[idx-1].id; else if(idx===0) location.hash="home"; }
+});
+
+ensureDay(); applyTheme(); buildNav(); route(); setInterval(tickStudy,1000);
+</script>
+</body>
+</html>

@@ -11,8 +11,8 @@
     {
       "page": "pages/chat/index",
       "source": "IM-APP-fronend/src/pages/chat/index.vue",
-      "status": "sample_ui_implemented",
-      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+      "status": "native_sdk_implemented_account_validation_pending",
+      "scope_note": "Fixed official SDK wired for conversations/history/text/outbox; account interoperability and full business/UI parity pending; offline samples remain isolated."
     },
     {
       "page": "pages/auth/sign-in",
@@ -65,8 +65,8 @@
     {
       "page": "pages/chat/room",
       "source": "IM-APP-fronend/src/pages/chat/room.vue",
-      "status": "sample_text_ui_implemented",
-      "scope_note": "Source routing contains conditional H5-only pages; native applicability to be reviewed"
+      "status": "native_sdk_implemented_account_validation_pending",
+      "scope_note": "Fixed official SDK wired for conversations/history/text/outbox; account interoperability and full business/UI parity pending; offline samples remain isolated."
     },
     {
       "page": "pages/chat/forward",

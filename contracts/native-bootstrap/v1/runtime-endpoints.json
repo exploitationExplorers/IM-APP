@@ -11,5 +11,11 @@
     {"method": "GET", "path": "/me", "authorization": "Bearer accessToken"}
   ],
   "im_token_requested_by_login": false,
-  "notes": "The OpenIM SDK is not integrated yet. Business login does not issue an unused IM token or claim message-store readiness."
+  "im_connection": {
+    "enabled_after_business_authentication": true,
+    "token_requested_for_real_sdk": true,
+    "contract": "im-runtime.contract.json",
+    "token_policy": "The IM controller requests one platform-specific token for a real SDK login. The business authentication helper still performs only auth/login and me. Reconnect and resource-not-ready do not loop token issuance."
+  },
+  "notes": "Business authentication and SDK readiness are separate. An authenticated profile is not proof that the SDK store is readable or synchronization has finished."
 }

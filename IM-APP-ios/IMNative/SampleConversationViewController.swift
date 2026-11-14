@@ -1,12 +1,26 @@
 import UIKit
 import IMCore
 
-private final class SampleMessageCell: UICollectionViewCell {
-    private let avatar = UIImageView()
+final class NativeMessageCell: UICollectionViewCell {
+    private let avatar = NativeRemoteImageView()
+    private let mediaView = NativeRemoteImageView()
+    private let mediaSpinner = UIActivityIndicatorView(style: .medium)
+    private let videoPlay = UIImageView(image: UIImage(systemName: "play.fill"))
+    private let videoDuration = UILabel()
+    private var videoMetadata: VideoMessageMetadata?
+    private var hasMedia = false
     private let bubble = UIView()
     private let label = UILabel()
     private let bubbleMask = CAShapeLayer()
-    private var message: SampleMessage?
+    private var messageText = ""
+    private var isMine = false
+    private var statusText = ""
+    private let dateLabel = UILabel(); private var dateText: String?
+    private let quoteView = UIView(); private let quoteLabel = UILabel(); private let quoteImage = NativeRemoteImageView(); private var quoted: MessageQuoteReference?
+    private let cardImage = NativeRemoteImageView(); private let cardAction = UILabel(); private var card: BusinessMessageCard?
+    var onAvatarTap: (() -> Void)?; var onQuoteTap: (() -> Void)?
+    func avatarContains(_ point: CGPoint) -> Bool { avatar.frame.contains(point) }
+
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -15,32 +29,100 @@ private final class SampleMessageCell: UICollectionViewCell {
         label.numberOfLines = 0
         [avatar, bubble].forEach { contentView.addSubview($0) }
         bubble.addSubview(label)
+        bubble.addSubview(mediaView); mediaView.contentMode = .scaleAspectFill; mediaView.clipsToBounds = true
+        bubble.addSubview(videoPlay); videoPlay.tintColor = .white; videoPlay.contentMode = .scaleAspectFit; videoPlay.layer.shadowColor = UIColor.black.cgColor; videoPlay.layer.shadowOpacity = 0.35; videoPlay.layer.shadowRadius = 2
+        bubble.addSubview(videoDuration); videoDuration.textAlignment = .center; videoDuration.textColor = .white; videoDuration.backgroundColor = UIColor.black.withAlphaComponent(0.45); videoDuration.layer.cornerRadius = 3; videoDuration.clipsToBounds = true
+        mediaView.onImageLoaded = { [weak self] in
+            guard let self = self, self.videoMetadata?.hasDimensions == false else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, self.videoMetadata?.hasDimensions == false else { return }; self.setNeedsLayout()
+                var parent = self.superview
+                while let view = parent { if let collection = view as? UICollectionView { collection.collectionViewLayout.invalidateLayout(); break }; parent = view.superview }
+            }
+        }
+        bubble.addSubview(mediaSpinner); mediaSpinner.color = .white; mediaSpinner.backgroundColor = UIColor.black.withAlphaComponent(0.35); mediaSpinner.layer.cornerRadius = 18; mediaSpinner.hidesWhenStopped = true
         bubble.layer.mask = bubbleMask
+        contentView.addSubview(dateLabel); dateLabel.textAlignment = .center; dateLabel.textColor = NativeUITheme.secondary
+        avatar.isUserInteractionEnabled = true; avatar.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(avatarTapped)))
+        bubble.addSubview(quoteView); quoteView.addSubview(quoteImage); quoteView.addSubview(quoteLabel); quoteView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(quoteTapped))); quoteView.backgroundColor = UIColor.black.withAlphaComponent(0.06); quoteLabel.numberOfLines = 2; quoteImage.contentMode = .scaleAspectFill; quoteImage.clipsToBounds = true
+        bubble.addSubview(cardImage); bubble.addSubview(cardAction); cardImage.contentMode = .scaleAspectFill; cardImage.clipsToBounds = true; cardAction.textAlignment = .center
+
     }
 
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
 
+    @objc private func avatarTapped() { onAvatarTap?() }
+    @objc private func quoteTapped() { onQuoteTap?() }
     func configure(_ message: SampleMessage) {
-        self.message = message
-        avatar.image = NativeUITheme.image(message.isMine ? "uni_avatar_me" : "uni_avatar_1")
-        bubble.backgroundColor = message.isMine ? NativeUITheme.mineBubble : .white
-        label.textColor = message.isMine ? .white : UIColor(hex: 0x222222)
+        configure(text: message.text, isMine: message.isMine)
+    }
+
+    func configure(text: String, isMine: Bool, status: String = "", resetResources: Bool = true) {
+        mediaSpinner.stopAnimating()
+        videoMetadata = nil; videoPlay.isHidden = true; videoDuration.isHidden = true; videoDuration.text = nil
+        hasMedia = false; mediaView.isHidden = true; card = nil; quoted = nil; dateText = nil; quoteView.isHidden = true; cardImage.isHidden = true; cardAction.isHidden = true; onAvatarTap = nil; onQuoteTap = nil
+        if resetResources { mediaView.cancel(); cardImage.cancel(); quoteImage.cancel(); avatar.image = NativeUITheme.image(isMine ? "uni_avatar_me" : "uni_avatar_1") }
+        messageText = text; self.isMine = isMine; statusText = status
+        bubble.backgroundColor = isMine ? NativeUITheme.mineBubble : .white
+        label.textColor = isMine ? .white : UIColor(hex: 0x222222)
+        setNeedsLayout()
+    }
+
+    func configure(message: ChatTextItem, service: NativeIMService, date: String? = nil, preparing: Bool = false) {
+        let mine = message.senderID == service.imUserID
+        var text = message.text
+        if let media = message.media { if media.kind == 103 { text = "▶  \(media.duration)″" }; if media.kind == 105 { text = "📄 " + media.filename } }
+        // 同消息重配仅更新文本/状态，不取消仍在取图的任务或覆盖已经命中的头像。
+        configure(text: text, isMine: mine, status: service.sendingLabel(message), resetResources: false)
+        dateText = date; dateLabel.text = date
+        avatar.load(message.avatar, policy: service.business.media, placeholder: "uni_avatar_default")
+        if message.status != 4, let card = BusinessMessageCard(serialized: message.serialized) { self.card = card; messageText = card.title + "\n" + card.summary; bubble.backgroundColor = .white; cardImage.isHidden = false; cardAction.isHidden = false; cardAction.text = card.actionTitle; cardImage.load(card.avatar, policy: service.business.media, placeholder: "uni_group_default"); mediaView.cancel(); quoteImage.cancel(); setNeedsLayout(); return }
+        cardImage.cancel()
+        if message.status != 4, let quote = MessageQuoteReference(serialized: message.serialized) { quoted = quote; quoteView.isHidden = false; quoteLabel.text = (quote.sender.isEmpty ? "" : quote.sender + "：") + quote.summary; quoteImage.isHidden = quote.image.isEmpty; if !quote.image.isEmpty { quoteImage.load(quote.image, policy: service.business.media, variant: .list) } }
+
+        if quoted == nil { quoteImage.cancel() }
+        guard message.status != 4, let media = message.media, [102, 104].contains(media.kind) else { mediaView.cancel(); return }
+        hasMedia = true; mediaView.isHidden = false
+        if media.kind == 104 { let metadata = VideoMessageMetadata(serialized: message.serialized, duration: media.duration); videoMetadata = metadata; videoPlay.isHidden = false; videoDuration.isHidden = false; videoDuration.text = metadata.durationLabel; mediaView.contentMode = .scaleAspectFit; mediaView.backgroundColor = UIColor(hex: 0x151515) }
+        else { mediaView.contentMode = .scaleAspectFill; mediaView.backgroundColor = .clear }
+        if preparing || service.mediaIsSending(message) { statusText = ""; mediaSpinner.startAnimating() }
+        let raw = media.thumbnail.isEmpty ? (videoMetadata?.thumbnail ?? media.url) : media.thumbnail
+        let local = videoMetadata.flatMap { mine ? service.ownedMediaURL($0.localThumbnail) : nil } ?? service.ownedImageURL(for: message)
+        if let url = local { mediaView.loadOwnedLocal(url, remote: [raw] + (media.kind == 102 ? [media.url] : []), policy: service.business.media) }
+        else { mediaView.load(raw, policy: service.business.media, variant: .list, placeholder: "", fallbacks: media.kind == 102 ? [media.url] : []) }
+        messageText = ""
         setNeedsLayout()
     }
 
     private func dimensions(width: CGFloat) -> (CGFloat, CGFloat, CGFloat, NSAttributedString) {
         let r: (CGFloat) -> CGFloat = { NativeUITheme.rpx($0, width: width) }
         let font = UIFont.systemFont(ofSize: r(30))
+        let dateHeight: CGFloat = dateText == nil ? 0 : r(68)
+
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = r(45)
         paragraph.maximumLineHeight = r(45)
         paragraph.lineBreakMode = .byCharWrapping
-        let text = NSAttributedString(string: message?.text ?? "", attributes: [.font: font, .paragraphStyle: paragraph, .foregroundColor: message?.isMine == true ? UIColor.white : UIColor(hex: 0x222222)])
+        let text = NSMutableAttributedString(string: messageText, attributes: [.font: font, .paragraphStyle: paragraph, .foregroundColor: isMine ? UIColor.white : UIColor(hex: 0x222222)])
+        if !statusText.isEmpty {
+            text.append(NSAttributedString(string: "\n" + statusText, attributes: [.font: UIFont.systemFont(ofSize: r(20)), .foregroundColor: isMine ? UIColor.white.withAlphaComponent(0.8) : NativeUITheme.secondary]))
+        }
         let maximum = max(r(80), (width - r(48)) * 0.70 - r(44))
         let rect = text.boundingRect(with: CGSize(width: maximum, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
-        let bubbleWidth = ceil(rect.width) + r(44)
-        let bubbleHeight = max(r(45), ceil(rect.height)) + r(36)
-        return (bubbleWidth, bubbleHeight, max(r(72), bubbleHeight) + r(32), text)
+        let bubbleWidth = max(ceil(rect.width) + r(44), quoted == nil ? 0 : r(360))
+        let bubbleHeight = max(r(45), ceil(rect.height)) + r(36) + (quoted == nil ? 0 : r(96))
+        if card != nil { return (r(460), r(248), r(280) + dateHeight, text) }
+
+        if let video = videoMetadata {
+            var size = video.fitted(maxWidth: Double(r(280)), maxHeight: Double(r(360)))
+            if !video.hasDimensions, let actual = mediaView.loadedImageSize, actual.width > 0, actual.height > 0 {
+                let scale = min(r(280) / actual.width, r(360) / actual.height); size = (Double(actual.width * scale), Double(actual.height * scale))
+            }
+            let statusHeight = statusText.isEmpty ? 0 : r(60)
+            return (CGFloat(size.width), CGFloat(size.height) + statusHeight, CGFloat(size.height) + statusHeight + r(32) + dateHeight, text)
+        }
+        if hasMedia { let edge = min(width * 0.5, 220); let height = edge + (statusText.isEmpty && messageText.isEmpty ? 0 : r(60)); return (edge, height, height + r(32) + dateHeight, text) }
+        return (bubbleWidth, bubbleHeight, max(r(72), bubbleHeight) + r(32) + dateHeight, text)
     }
 
     override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
@@ -54,14 +136,24 @@ private final class SampleMessageCell: UICollectionViewCell {
         let width = contentView.bounds.width
         let r: (CGFloat) -> CGFloat = { NativeUITheme.rpx($0, width: width) }
         let (bubbleWidth, bubbleHeight, _, text) = dimensions(width: width)
-        let mine = message?.isMine == true
+        let mine = isMine
         let avatarX = mine ? width - r(24) - r(72) : r(24)
-        avatar.frame = CGRect(x: avatarX, y: r(16), width: r(72), height: r(72))
+        let dateHeight: CGFloat = dateText == nil ? 0 : r(68); dateLabel.isHidden = dateText == nil; dateLabel.frame = CGRect(x: r(32), y: r(12), width: width - r(64), height: r(44)); dateLabel.font = .systemFont(ofSize: r(24))
+        avatar.frame = CGRect(x: avatarX, y: r(16) + dateHeight, width: r(72), height: r(72))
         avatar.layer.cornerRadius = r(36)
         let x = mine ? avatarX - r(16) - bubbleWidth : avatar.frame.maxX + r(16)
-        bubble.frame = CGRect(x: x, y: r(16), width: bubbleWidth, height: bubbleHeight)
+        bubble.frame = CGRect(x: x, y: r(16) + dateHeight, width: bubbleWidth, height: bubbleHeight)
         label.attributedText = text
-        label.frame = CGRect(x: r(22), y: r(18), width: bubbleWidth - r(44), height: bubbleHeight - r(36))
+        label.frame = CGRect(x: r(22), y: r(18), width: bubbleWidth - r(44), height: bubbleHeight - r(36) - (quoted == nil ? 0 : r(96)))
+        let mediaHeight = videoMetadata == nil ? bubbleWidth : bubbleHeight - (statusText.isEmpty ? 0 : r(60))
+        if hasMedia { mediaView.frame = CGRect(x: 0, y: 0, width: bubbleWidth, height: mediaHeight); label.frame = CGRect(x: r(12), y: mediaHeight, width: bubbleWidth - r(24), height: max(0, bubbleHeight - mediaHeight)) }
+        videoPlay.frame = CGRect(x: (bubbleWidth - r(64)) / 2, y: (mediaHeight - r(64)) / 2, width: r(64), height: r(64))
+        videoDuration.font = .systemFont(ofSize: r(16)); let durationWidth = max(r(54), min(bubbleWidth, (videoDuration.text ?? "").size(withAttributes: [.font: UIFont.systemFont(ofSize: r(16))]).width + r(12)))
+        videoDuration.frame = CGRect(x: (bubbleWidth - durationWidth) / 2, y: mediaHeight - r(32), width: durationWidth, height: r(24))
+        mediaSpinner.frame = CGRect(x: (bubbleWidth - 36) / 2, y: (mediaHeight - 36) / 2, width: 36, height: 36)
+        videoPlay.isHidden = videoMetadata == nil || mediaSpinner.isAnimating
+        if let quote = quoted { quoteView.frame = CGRect(x: r(16), y: bubbleHeight - r(100), width: bubbleWidth - r(32), height: r(84)); quoteImage.frame = CGRect(x: r(8), y: r(10), width: r(64), height: r(64)); quoteLabel.frame = CGRect(x: quote.image.isEmpty ? r(12) : r(84), y: r(8), width: quoteView.bounds.width - (quote.image.isEmpty ? r(24) : r(96)), height: r(68)); quoteLabel.font = .systemFont(ofSize: r(24)); quoteLabel.textColor = isMine ? UIColor.white.withAlphaComponent(0.9) : NativeUITheme.secondary }
+        if card != nil { cardImage.frame = CGRect(x: r(24), y: r(24), width: r(96), height: r(96)); cardImage.layer.cornerRadius = r(12); label.frame = CGRect(x: r(140), y: r(18), width: bubbleWidth - r(164), height: r(130)); label.text = messageText; label.font = .systemFont(ofSize: r(28)); label.textColor = NativeUITheme.body; cardAction.frame = CGRect(x: r(24), y: r(164), width: bubbleWidth - r(48), height: r(64)); cardAction.font = .systemFont(ofSize: r(28), weight: .medium); cardAction.textColor = NativeUITheme.primary; cardAction.backgroundColor = UIColor(hex: 0xf3f4f7); cardAction.layer.cornerRadius = r(10); cardAction.clipsToBounds = true }
         let radius = r(16)
         let sharp = r(4)
         let topLeft = mine ? radius : sharp
@@ -82,9 +174,11 @@ private final class SampleMessageCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        message = nil
+        messageText = ""; statusText = ""; isMine = false
+        videoMetadata = nil; videoPlay.isHidden = true; videoDuration.isHidden = true; mediaSpinner.stopAnimating()
         label.attributedText = nil
         avatar.image = nil
+        avatar.cancel(); mediaView.cancel(); quoteImage.cancel(); cardImage.cancel(); hasMedia = false; card = nil; quoted = nil; dateText = nil; onAvatarTap = nil; onQuoteTap = nil
     }
 }
 
@@ -129,7 +223,7 @@ final class SampleConversationViewController: UIViewController {
         collection = UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewCompositionalLayout(section: NSCollectionLayoutSection(group: group)))
         collection.backgroundColor = UIColor(hex: 0xe6e8ee)
         collection.keyboardDismissMode = .interactive
-        collection.register(SampleMessageCell.self, forCellWithReuseIdentifier: "message")
+        collection.register(NativeMessageCell.self, forCellWithReuseIdentifier: "message")
         collection.accessibilityIdentifier = "sampleMessageList"
         let contentViews: [UIView] = [header, collection, composer]
         contentViews.forEach { $0.translatesAutoresizingMaskIntoConstraints = false; view.addSubview($0) }
@@ -188,7 +282,7 @@ final class SampleConversationViewController: UIViewController {
         ])
         dataSource = UICollectionViewDiffableDataSource<Int, UUID>(collectionView: collection) { [weak self] collection, index, id in
             guard let self = self, let message = self.messages[id],
-                  let cell = collection.dequeueReusableCell(withReuseIdentifier: "message", for: index) as? SampleMessageCell else { return nil }
+                  let cell = collection.dequeueReusableCell(withReuseIdentifier: "message", for: index) as? NativeMessageCell else { return nil }
             cell.configure(message)
             return cell
         }

@@ -2,7 +2,7 @@ import UIKit
 import IMCore
 
 private final class ConversationRowCell: UITableViewCell {
-    let avatar = UIImageView()
+    let avatar = NativeRemoteImageView()
     let name = UILabel()
     let preview = UILabel()
     let time = UILabel()
@@ -46,7 +46,7 @@ private final class ConversationRowCell: UITableViewCell {
 
 enum NativeMainMode {
     case localSample
-    case realAccount(BusinessAccountSession)
+    case realAccount(NativeIMService)
 }
 
 @MainActor
@@ -76,6 +76,11 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     private var unreadOnly = false
     private var latestPreview = "这是本机样例会话，不会发送到服务器。"
     private let conversation: LocalSampleConversation?
+    private var chatObserver: UUID?
+    private let conversationRefresh = UIRefreshControl()
+    private let loadMore = UIButton(type: .system)
+    private var contactsPage: NativeContactsViewController?
+    private var minePage: NativeMineViewController?
 
     init(mode: NativeMainMode = .localSample) {
         self.mode = mode
@@ -87,19 +92,44 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
 
     private var realAccount: BusinessAccountSession? {
-        if case .realAccount(let account) = mode { return account }
+        if case .realAccount(let chat) = mode { return chat.account }
         return nil
+    }
+    private var chat: NativeIMService? {
+        if case .realAccount(let chat) = mode { return chat }
+        return nil
+    }
+    private var visibleConversations: [NativeConversation] {
+        let keyword = (search.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (chat?.conversations ?? []).filter {
+            (!unreadOnly || (chat?.conversationUnread($0) ?? 0) > 0) && (keyword.isEmpty || $0.title.localizedCaseInsensitiveContains(keyword) || (chat?.conversationPreview($0) ?? "").localizedCaseInsensitiveContains(keyword))
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: animated)
+        if let chat = chat, chatObserver == nil { chatObserver = chat.observe { [weak self] in self?.refreshTab() } }
         guard let conversation = conversation else { refreshTab(); return }
         Task { [weak self] in
             let messages = await conversation.snapshot()
             guard let self = self else { return }
             self.latestPreview = messages.last?.text ?? "暂无消息"
             self.refreshTab()
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        if let chatObserver = chatObserver { chat?.removeObserver(chatObserver) }
+        chatObserver = nil
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // 只在真正离开导航栈后退出，取消的交互式返回不注销仍可见的账号。
+        if let chat = chat, navigationController?.viewControllers.contains(where: { $0 === self }) != true {
+            Task { await chat.logout() }
         }
     }
 
@@ -113,7 +143,9 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         more.setTitleColor(NativeUITheme.body, for: .normal)
         more.addTarget(self, action: #selector(showMore), for: .touchUpInside)
         add.addTarget(self, action: #selector(showAdd), for: .touchUpInside)
-        sampleNotice.text = realAccount == nil ? NativeUITheme.sampleNotice : "账号已登录 · 聊天功能接入中"
+        sampleNotice.text = chat?.statusText ?? NativeUITheme.sampleNotice
+        sampleNotice.isUserInteractionEnabled = true
+        sampleNotice.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(refreshRealConversations)))
         sampleNotice.textColor = NativeUITheme.secondary
         sampleNotice.textAlignment = .center
         sampleNotice.font = .systemFont(ofSize: 11)
@@ -136,10 +168,20 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         table.delegate = self
         table.register(ConversationRowCell.self, forCellReuseIdentifier: "conversation")
         table.keyboardDismissMode = .onDrag
+        conversationRefresh.addTarget(self, action: #selector(refreshRealConversations), for: .valueChanged)
+        if chat != nil { table.refreshControl = conversationRefresh }
+        loadMore.setTitle("加载更多会话", for: .normal)
+        loadMore.frame.size.height = 44
+        loadMore.addTarget(self, action: #selector(loadMoreConversations), for: .touchUpInside)
         empty.textAlignment = .center
         empty.textColor = NativeUITheme.body
         empty.numberOfLines = 0
         configureProfile()
+        if let chat = chat {
+            let contacts = NativeContactsViewController(service: chat), mine = NativeMineViewController(service: chat)
+            for child in [contacts as UIViewController, mine as UIViewController] { addChild(child); view.insertSubview(child.view, belowSubview: tabbar); child.didMove(toParent: self) }
+            contactsPage = contacts; minePage = mine
+        }
         tabbar.backgroundColor = .white
         tabbar.layer.shadowColor = UIColor.black.cgColor
         tabbar.layer.shadowOpacity = 0.05
@@ -209,6 +251,8 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         let warningHeight = profileWarning.sizeThatFits(CGSize(width: profileWidth, height: .greatestFiniteMagnitude)).height
         profileWarning.frame = CGRect(x: r(8), y: profileFields.frame.maxY + r(32), width: profileWidth, height: warningHeight)
         profilePanel.contentSize = CGSize(width: profilePanel.bounds.width, height: profileWarning.frame.maxY + r(48))
+        contactsPage?.view.frame = CGRect(x: 0, y: header.frame.maxY, width: width, height: max(0, tabbar.frame.minY - header.frame.maxY))
+        minePage?.view.frame = CGRect(x: 0, y: 0, width: width, height: tabbar.frame.minY)
     }
 
     private func configureProfile() {
@@ -242,27 +286,32 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             tabLabels[index].textColor = currentTab == index ? NativeUITheme.primary : NativeUITheme.body
         }
         let chat = currentTab == 1
-        let sampleChat = chat && conversation != nil
-        searchBox.isHidden = !sampleChat
-        filter.isHidden = !sampleChat
-        table.isHidden = !sampleChat
-        add.isHidden = !sampleChat
-        profilePanel.isHidden = currentTab != 2 || realAccount == nil
+        searchBox.isHidden = !chat
+        filter.isHidden = !chat
+        table.isHidden = !chat
+        add.isHidden = currentTab == 2
+        profilePanel.isHidden = true
+        contactsPage?.view.isHidden = currentTab != 0; minePage?.view.isHidden = currentTab != 2
+        header.isHidden = currentTab == 2 && realAccount != nil; sampleNotice.isHidden = !chat
         filter.setTitle(unreadOnly ? "未读 ▾" : "全部 ▾", for: .normal)
         if realAccount != nil {
-            empty.text = chat ? "聊天功能接入中\n当前不会收发消息或同步聊天记录" : "通讯录功能接入中"
-            empty.isHidden = currentTab == 2
+            sampleNotice.text = self.chat?.statusText
+            empty.text = self.chat?.loadingConversations == true ? "正在读取会话…" : "暂无符合条件的会话\n点击上方状态可重新读取"
+            empty.isHidden = !chat || !visibleConversations.isEmpty
+            loadMore.isEnabled = self.chat?.loadingConversations != true
+            table.tableFooterView = self.chat?.conversationsEnd == false ? loadMore : nil
         } else {
             empty.text = chat ? "暂无对话…" : (currentTab == 0 ? "通讯录页面尚未接入\n当前仅提供聊天页面本地样例" : "个人中心页面尚未接入\n当前仅提供聊天页面本地样例")
             empty.isHidden = chat && hasVisibleConversation
         }
         table.reloadData()
+        if self.chat?.loadingConversations != true { conversationRefresh.endRefreshing() }
         view.setNeedsLayout()
     }
 
-    @objc private func selectTab(_ sender: UIButton) { currentTab = sender.tag; refreshTab() }
+    @objc private func selectTab(_ sender: UIButton) { currentTab = sender.tag; refreshTab(); if currentTab == 0 { contactsPage?.reloadContent() } }
     @objc private func searchChanged() { refreshTab() }
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool { textField.resignFirstResponder(); return true }
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool { textField.resignFirstResponder(); if let chat = chat, !(textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { navigationController?.pushViewController(NativeSearchController(service: chat, initialQuery: textField.text ?? ""), animated: true) }; return true }
 
     @objc private func showFilter() {
         showAnchoredNativeMenu(anchor: filter, items: [
@@ -274,9 +323,12 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     @objc private func showMore() {
         if realAccount != nil {
             showAnchoredNativeMenu(anchor: more, items: [
+                NativeMenuItem(title: "重新读取会话", action: { [weak self] in self?.refreshRealConversations() }),
+                NativeMenuItem(title: "全部已读", action: { [weak self] in guard let self = self, let chat = self.chat else { return }; Task { do { let all = try await chat.loadAllConversations(); for conversation in all { try await chat.markRead(conversation) } } catch { self.showNativeNotice(error.localizedDescription) } } }),
                 NativeMenuItem(title: "退出登录", destructive: true, action: { [weak self] in
-                    // 仅释放本机内存业务凭据，不调用会影响其他客户端的全局退出接口。
-                    self?.navigationController?.popViewController(animated: true)
+                    guard let self = self, let chat = self.chat else { return }
+                    self.more.isEnabled = false
+                    Task { await chat.logout(); let root = self.navigationController?.viewControllers.first; self.navigationController?.popViewController(animated: true); if let warning = chat.business.logoutWarning { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { root?.showNativeNotice(warning) } } }
                 })
             ])
             return
@@ -292,19 +344,58 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     }
 
     @objc private func showAdd() {
+        if let chat = chat {
+            showAnchoredNativeMenu(anchor: add, items: [
+                NativeMenuItem(title: "扫一扫", icon: "uni_icon_camera", action: { [weak self] in self?.navigationController?.pushViewController(NativeQRScannerController(service: chat), animated: true) }),
+                NativeMenuItem(title: "添加朋友", icon: "uni_menu_add_friend", action: { [weak self] in self?.navigationController?.pushViewController(NativeAddFriendController(service: chat), animated: true) }),
+                NativeMenuItem(title: "添加群聊", icon: "uni_menu_add_group", action: { [weak self] in self?.openGroupAction(create: false) }),
+                NativeMenuItem(title: "创建群聊", icon: "uni_menu_create_group", action: { [weak self] in self?.openGroupAction(create: true) })
+            ]); return
+        }
         let items = [("添加朋友", "uni_menu_add_friend"), ("添加群聊", "uni_menu_add_group"), ("创建群聊", "uni_menu_create_group")].map { title, icon in
             NativeMenuItem(title: title, icon: icon, action: { [weak self] in self?.showNativeNotice("\(title)尚未接入；本地样例不会修改账号或群关系。") })
         }
         showAnchoredNativeMenu(anchor: add, items: items)
     }
+    private func openGroupAction(create: Bool) { guard let chat = chat else { return }; let page = NativeGroupsController(service: chat); navigationController?.pushViewController(page, animated: false); if create { page.createGroup() } else { page.joinGroup() } }
 
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { hasVisibleConversation ? 1 : 0 }
+    @objc private func refreshRealConversations() {
+        guard let chat = chat else { return }
+        Task { await chat.loadConversations(reset: true) }
+    }
+    @objc private func loadMoreConversations() {
+        guard let chat = chat else { return }
+        Task { await chat.loadConversations() }
+    }
+
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let chat = chat, indexPath.row < visibleConversations.count else { return nil }; let conversation = visibleConversations[indexPath.row]
+        func action(_ title: String, color: UIColor, work: @escaping () async throws -> Void) -> UIContextualAction {
+            let result = UIContextualAction(style: .normal, title: title) { [weak self] _, _, completion in Task { do { try await work(); completion(true) } catch { completion(false); self?.showNativeNotice(error.localizedDescription) } } }; result.backgroundColor = color; return result
+        }
+        let items = [action("隐藏", color: .systemRed) { try await chat.hide(conversation) }, action(conversation.muted ? "取消免打扰" : "免打扰", color: .systemGray) { try await chat.mute(conversation) }, action(conversation.pinned ? "取消置顶" : "置顶", color: NativeUITheme.primary) { try await chat.pin(conversation) }]
+        let config = UISwipeActionsConfiguration(actions: items); config.performsFirstActionWithFullSwipe = false; return config
+    }
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { chat == nil ? (hasVisibleConversation ? 1 : 0) : visibleConversations.count }
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "conversation", for: indexPath) as! ConversationRowCell
-        cell.preview.text = latestPreview
+        if chat != nil {
+            let item = visibleConversations[indexPath.row]
+            cell.name.text = item.title.isEmpty ? "聊天" : item.title
+            let unread = chat?.conversationUnread(item) ?? 0
+            cell.preview.text = (unread > 0 ? "[\(unread)] " : "") + (chat?.conversationPreview(item) ?? "")
+            if let chat = chat { cell.avatar.load(item.avatar, policy: chat.business.media, placeholder: item.type == 3 ? "uni_group_default" : "uni_avatar_default") }
+            cell.time.text = item.timestamp > 0 ? Date(timeIntervalSince1970: Double(item.timestamp) / 1000).formatted(date: .omitted, time: .shortened) : ""
+        } else { cell.preview.text = latestPreview }
         return cell
     }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        if let chat = chat {
+            let item = visibleConversations[indexPath.row]
+            guard item.canOpen else { showNativeNotice("此类型会话尚未接入。"); return }
+            navigationController?.pushViewController(NativeConversationViewController(service: chat, conversation: item), animated: true)
+            return
+        }
         guard let conversation = conversation else { return }
         navigationController?.pushViewController(SampleConversationViewController(sample: conversation), animated: true)
     }

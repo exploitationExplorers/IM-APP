@@ -4,6 +4,40 @@
     classes = {};
     objectVersion = 56;
     objects = {
+        C20000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDiagnosticsController.swift; sourceTree = "<group>"; };
+        C10000000000000000000011 /* NativeDiagnosticsController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000011; };
+        C20000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatExtras.swift; sourceTree = "<group>"; };
+        C10000000000000000000010 /* NativeChatExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000010; };
+        C2000000000000000000000F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeForwardTasks.swift; sourceTree = "<group>"; };
+        C1000000000000000000000F /* NativeForwardTasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000F; };
+        C2000000000000000000000E = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGroupExtras.swift; sourceTree = "<group>"; };
+        C1000000000000000000000E /* NativeGroupExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000E; };
+        C2000000000000000000000D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAccountDeletionController.swift; sourceTree = "<group>"; };
+        C1000000000000000000000D /* NativeAccountDeletionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000D; };
+        C2000000000000000000000C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeReportAndFeedback.swift; sourceTree = "<group>"; };
+        C1000000000000000000000C /* NativeReportAndFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000C; };
+        C2000000000000000000000B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeQRScannerController.swift; sourceTree = "<group>"; };
+        C1000000000000000000000B /* NativeQRScannerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000B; };
+        C2000000000000000000000A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMassAndEmotions.swift; sourceTree = "<group>"; };
+        C1000000000000000000000A /* NativeMassAndEmotions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A; };
+        C20000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSearchViewController.swift; sourceTree = "<group>"; };
+        C10000000000000000000009 /* NativeSearchViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000009; };
+        C20000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSettingsViewController.swift; sourceTree = "<group>"; };
+        C10000000000000000000008 /* NativeSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000008; };
+        C20000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMineViewController.swift; sourceTree = "<group>"; };
+        C10000000000000000000007 /* NativeMineViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000007; };
+        C20000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMedia.swift; sourceTree = "<group>"; };
+        C10000000000000000000006 /* NativeMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006; };
+        C20000000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGroupsViewController.swift; sourceTree = "<group>"; };
+        C10000000000000000000005 /* NativeGroupsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005; };
+        C20000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeContactsViewController.swift; sourceTree = "<group>"; };
+        C10000000000000000000004 /* NativeContactsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004; };
+        C20000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBusinessUI.swift; sourceTree = "<group>"; };
+        C10000000000000000000003 /* NativeBusinessUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003; };
+        C20000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBusiness.swift; sourceTree = "<group>"; };
+        C10000000000000000000002 /* NativeBusiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002; };
+        C20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAuthFlowController.swift; sourceTree = "<group>"; };
+        C10000000000000000000001 /* NativeAuthFlowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001; };
         A10000000000000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001; };
         A10000000000000000000002 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002; };
         A10000000000000000000003 /* LoginViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003; };
@@ -14,6 +48,10 @@
         A10000000000000000000008 /* SampleMainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009; };
         A10000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010; };
         A10000000000000000000010 /* Legal in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011; };
+        A10000000000000000000011 /* NativeIMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012; };
+        A10000000000000000000012 /* NativeConversationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013; };
+        A10000000000000000000013 /* NativeOpenIMBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014; };
+        B10000000000000000000090 /* NativeKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000090; };
 
         A20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
         A20000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
@@ -26,12 +64,18 @@
         A20000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleMainViewController.swift; sourceTree = "<group>"; };
         A20000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
         A20000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = folder; path = Legal; sourceTree = "<group>"; };
+        A20000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeIMService.swift; sourceTree = "<group>"; };
+        A20000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConversationViewController.swift; sourceTree = "<group>"; };
+        A20000000000000000000014 = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NativeOpenIMBridge.m; sourceTree = "<group>"; };
+        A20000000000000000000015 = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NativeOpenIMBridge.h; sourceTree = "<group>"; };
+        A20000000000000000000016 = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "IMNative-Bridging-Header.h"; sourceTree = "<group>"; };
+        B20000000000000000000090 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeKeychain.swift; sourceTree = "<group>"; };
 
         A30000000000000000000001 = {isa = PBXGroup; children = (A30000000000000000000002, A30000000000000000000003, ); sourceTree = "<group>"; };
-        A30000000000000000000002 = {isa = PBXGroup; children = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000004, A20000000000000000000007, A20000000000000000000008, A20000000000000000000009, A20000000000000000000010, A20000000000000000000011, A20000000000000000000005, ); path = IMNative; sourceTree = "<group>"; };
+        A30000000000000000000002 = {isa = PBXGroup; children = (C20000000000000000000011, C20000000000000000000010, C2000000000000000000000F, C2000000000000000000000E, C2000000000000000000000D, C2000000000000000000000C, C2000000000000000000000B, C2000000000000000000000A, C20000000000000000000009, C20000000000000000000008, C20000000000000000000007, C20000000000000000000006, C20000000000000000000005, C20000000000000000000004, C20000000000000000000003, C20000000000000000000002, C20000000000000000000001, A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000004, A20000000000000000000007, A20000000000000000000008, A20000000000000000000009, A20000000000000000000010, A20000000000000000000011, A20000000000000000000012, A20000000000000000000013, A20000000000000000000014, A20000000000000000000015, A20000000000000000000016, B20000000000000000000090, A20000000000000000000005, ); path = IMNative; sourceTree = "<group>"; };
         A30000000000000000000003 = {isa = PBXGroup; children = (A20000000000000000000006, ); name = Products; sourceTree = "<group>"; };
 
-        A40000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000006, A10000000000000000000007, A10000000000000000000008, ); runOnlyForDeploymentPostprocessing = 0; };
+        A40000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (C10000000000000000000011, C10000000000000000000010, C1000000000000000000000F, C1000000000000000000000E, C1000000000000000000000D, C1000000000000000000000C, C1000000000000000000000B, C1000000000000000000000A, C10000000000000000000009, C10000000000000000000008, C10000000000000000000007, C10000000000000000000006, C10000000000000000000005, C10000000000000000000004, C10000000000000000000003, C10000000000000000000002, C10000000000000000000001, A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000006, A10000000000000000000007, A10000000000000000000008, A10000000000000000000011, A10000000000000000000012, A10000000000000000000013, B10000000000000000000090, ); runOnlyForDeploymentPostprocessing = 0; };
         A40000000000000000000002 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000005, ); runOnlyForDeploymentPostprocessing = 0; };
         A40000000000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000009, A10000000000000000000010, ); runOnlyForDeploymentPostprocessing = 0; };
         A40000000000000000000004 = {
@@ -81,6 +125,7 @@
 
         A80000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {
             CLANG_ENABLE_MODULES = YES;
+            CLANG_ENABLE_OBJC_ARC = YES;
             DEBUG_INFORMATION_FORMAT = dwarf;
             ENABLE_TESTABILITY = YES;
             GCC_C_LANGUAGE_STANDARD = gnu17;
@@ -93,6 +138,7 @@
         }; name = Debug; };
         A80000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {
             CLANG_ENABLE_MODULES = YES;
+            CLANG_ENABLE_OBJC_ARC = YES;
             DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
             IPHONEOS_DEPLOYMENT_TARGET = 15.0;
             SDKROOT = iphoneos;
@@ -103,11 +149,13 @@
 
         A90000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {
             CODE_SIGN_STYLE = Automatic;
-            CURRENT_PROJECT_VERSION = 2;
+            CURRENT_PROJECT_VERSION = 4;
             GENERATE_INFOPLIST_FILE = NO;
             INFOPLIST_FILE = IMNative/Info.plist;
             LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", );
-            MARKETING_VERSION = 0.1.1;
+            MARKETING_VERSION = 0.3.0;
+            SWIFT_OBJC_BRIDGING_HEADER = "IMNative/IMNative-Bridging-Header.h";
+            OTHER_LDFLAGS = ("$(inherited)", "-ObjC", );
             PRODUCT_BUNDLE_IDENTIFIER = com.im.nativebootstrap.staging;
             PRODUCT_NAME = "$(TARGET_NAME)";
             SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -117,11 +165,13 @@
         }; name = Debug; };
         A90000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {
             CODE_SIGN_STYLE = Automatic;
-            CURRENT_PROJECT_VERSION = 2;
+            CURRENT_PROJECT_VERSION = 4;
             GENERATE_INFOPLIST_FILE = NO;
             INFOPLIST_FILE = IMNative/Info.plist;
             LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", );
-            MARKETING_VERSION = 0.1.1;
+            MARKETING_VERSION = 0.3.0;
+            SWIFT_OBJC_BRIDGING_HEADER = "IMNative/IMNative-Bridging-Header.h";
+            OTHER_LDFLAGS = ("$(inherited)", "-ObjC", );
             PRODUCT_BUNDLE_IDENTIFIER = com.im.nativebootstrap.staging;
             PRODUCT_NAME = "$(TARGET_NAME)";
             SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

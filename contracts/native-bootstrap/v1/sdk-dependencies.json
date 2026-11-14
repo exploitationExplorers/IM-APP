@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "server_declared": "v3.8.3-patch.16",
+  "server_source": "IM-APP-server/deploy/openim/docker-compose.yml",
+  "android": {
+    "wrapper": "io.openim:android-sdk:3.8.3.5",
+    "core": "io.openim:core-sdk:3.8.3-patch10",
+    "source": "https://github.com/openimsdk/open-im-sdk-android/tree/v3.8.3.5",
+    "core_pairing": "Fixed v3.8.3.5 tag build.gradle; Maven POM omits transitive dependencies",
+    "abis_in_core_aar": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "x86",
+      "x86_64"
+    ],
+    "evidence": [
+      {
+        "path": ".native-cache/openim-sdk/android/3.8.3.5/android-sdk-3.8.3.5.aar",
+        "bytes": 125198,
+        "sha256": "ac7437e4f8850b60be8306005fb97564bbd5eeb1c7859bb90a140edbcea6f076"
+      },
+      {
+        "path": ".native-cache/openim-sdk/android/3.8.3.5/core-sdk-3.8.3-patch10.aar",
+        "bytes": 31461422,
+        "sha256": "12bdf1d26167802b7d19edae1821d9a6de56703c15cf4247adbb189c0ff69160"
+      },
+      {
+        "path": ".native-cache/openim-sdk/android/3.8.3.5/release-tag.gradle",
+        "bytes": 652,
+        "sha256": "259ac56da9cc801ba71cca833f4e51cece51fb404df6d79a5773d0ce8901556e"
+      }
+    ]
+  },
+  "ios": {
+    "wrapper": "OpenIMSDK 3.8.3-hotfix.15",
+    "core": "OpenIMSDKCore 3.8.3-hotfix.15",
+    "source": {
+      "git": "https://github.com/OpenIMSDK/Open-IM-SDK-iOS.git",
+      "tag": "3.8.3-hotfix.15"
+    },
+    "source_commit": "780307d05fb93f32b093188bfab3ca4047123fa9",
+    "resolution": "Podfile exact versions; CocoaPods 1.16.2; macOS pod install produces the actual lock/workspace",
+    "evidence": [
+      {
+        "path": ".native-cache/openim-sdk/research/ios-3.8.3-hotfix.15.podspec.json",
+        "bytes": 1831,
+        "sha256": "0ed9424e4079203d582874f5b575db12ef7956655fcb66d78b82a798c9ec1951"
+      },
+      {
+        "path": ".native-cache/openim-sdk/research/ios-core-3.8.3-hotfix.15.podspec.json",
+        "bytes": 901,
+        "sha256": "18ec426c4b031feed43595e0fa48749f8c8db5060bd4c6bca24f123d5b3c0ae7"
+      }
+    ]
+  },
+  "runtime_compatibility": "Fixed source/metadata verified; real account server interoperability not yet executed",
+  "research": ".workflow/scratch/20261113-native-sdk/research.md"
+}

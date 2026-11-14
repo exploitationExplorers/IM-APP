@@ -12,6 +12,12 @@
     <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key><true/>
+    <key>NativeUpdateManifestURL</key><string>$(NATIVE_UPDATE_MANIFEST_URL)</string>
+    <key>NativeTestFlightURL</key><string>$(NATIVE_TESTFLIGHT_URL)</string>
+    <key>NativeAppStoreURL</key><string>$(NATIVE_APPSTORE_URL)</string>
+    <key>NSMicrophoneUsageDescription</key><string>用于录制并发送聊天语音消息。</string>
+    <key>NSPhotoLibraryAddUsageDescription</key><string>用于将聊天图片和视频保存到相册。</string>
+    <key>NSCameraUsageDescription</key><string>用于扫描好友和群聊二维码，以及拍摄聊天照片。</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key><false/>

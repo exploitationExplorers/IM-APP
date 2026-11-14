@@ -144,6 +144,15 @@ public struct APIClient: Sendable {
         try await post("auth/sms/send", body: input)
     }
 
+    public func register(countryCode: String, phone: String, code: String, password: String, deviceID: String) async throws -> AuthResult {
+        let result: AuthResult = try await post("auth/register", body: ["countryCode": countryCode, "phone": phone, "code": code, "password": password, "deviceId": deviceID])
+        try validate(result); return result
+    }
+
+    public func resetPassword(countryCode: String, phone: String, code: String, password: String) async throws {
+        let _: EmptyReply = try await post("auth/password/reset", body: ["countryCode": countryCode, "phone": phone, "code": code, "password": password])
+    }
+
     public func refreshToken(_ input: RefreshTokenRequest) async throws -> TokenPair {
         let result: TokenPair = try await post("auth/token/refresh", body: input)
         guard !result.accessToken.isEmpty, !result.refreshToken.isEmpty, result.expiresIn > 0 else {
@@ -157,12 +166,13 @@ public struct APIClient: Sendable {
         guard !accessToken.isEmpty else { throw APIError.invalidCredentials }
         let result: IMToken = try await post("im/token", body: Input(platformId: 1), accessToken: accessToken)
         guard result.platform == 1 else { throw APIError.platformMismatch }
-        guard !result.userId.isEmpty, !result.token.isEmpty, result.expireSec > 0,
-              secureEndpoint(result.apiAddr, scheme: "https"),
-              secureEndpoint(result.wsAddr, scheme: "wss") else {
+        guard !result.userId.isEmpty, !result.token.isEmpty, result.expireSec > 0 else {
             throw APIError.invalidCredentials
         }
-        return result
+        let api = try IMEndpointPolicy.resolve(result.apiAddr, webSocket: false, businessBaseURL: configuration.baseURL)
+        let ws = try IMEndpointPolicy.resolve(result.wsAddr, webSocket: true, businessBaseURL: configuration.baseURL)
+        return IMToken(userId: result.userId, token: result.token, platform: result.platform,
+                       expireSec: result.expireSec, apiAddr: api, wsAddr: ws)
     }
 
     private func validate(_ result: AuthResult) throws {
@@ -172,25 +182,39 @@ public struct APIClient: Sendable {
         }
     }
 
-    private func secureEndpoint(_ address: String, scheme: String) -> Bool {
-        guard let components = URLComponents(string: address),
-              components.scheme?.lowercased() == scheme,
-              let host = components.host, !host.isEmpty,
-              components.user == nil, components.password == nil,
-              components.query == nil, components.fragment == nil else { return false }
-        return components.url != nil
-    }
-
     private func post<Input: Encodable, Output: Decodable>(
         _ path: String, body: Input, accessToken: String? = nil
     ) async throws -> Output {
         try await request(path, method: "POST", body: JSONEncoder().encode(body), accessToken: accessToken)
     }
 
-    private func request<Output: Decodable>(
-        _ path: String, method: String, body: Data? = nil, accessToken: String? = nil
+    /// 所有业务调用仍走同一 HTTPS origin。仅允许相对接口路径，查询通过 URLQueryItem 编码。
+    public func businessRequest<Output: Decodable>(
+        _ path: String, method: String = "GET", query: [URLQueryItem] = [],
+        body: [String: JSONValue]? = nil, accessToken: String
     ) async throws -> Output {
-        var request = URLRequest(url: configuration.baseURL.appendingPathComponent(path))
+        guard !accessToken.isEmpty else { throw APIError.invalidCredentials }
+        return try await request(path, method: method, body: body.map { try JSONEncoder().encode($0) },
+                                 accessToken: accessToken, query: query)
+    }
+
+    public func publicRequest<Output: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> Output {
+        guard path.hasPrefix("public/") else { throw APIError.invalidConfiguration }
+        return try await request(path, method: "GET", query: query)
+    }
+
+    private func request<Output: Decodable>(
+        _ path: String, method: String, body: Data? = nil, accessToken: String? = nil,
+        query: [URLQueryItem] = []
+    ) async throws -> Output {
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains(":"), !path.contains("?"),
+              !path.contains("#"), !path.split(separator: "/").contains(".."),
+              ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method),
+              var components = URLComponents(url: configuration.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        else { throw APIError.invalidConfiguration }
+        if !query.isEmpty { components.queryItems = query }
+        guard let url = components.url else { throw APIError.invalidConfiguration }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 20
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
@@ -213,6 +237,7 @@ public struct APIClient: Sendable {
             do { envelope = try JSONDecoder().decode(APIEnvelope<Output>.self, from: response.body) }
             catch { throw APIError.invalidResponse }
             guard envelope.code == 0 else { throw APIError.business(code: envelope.code, message: safeMessage(envelope.message)) }
+            if envelope.data == nil, let empty = EmptyReply() as? Output { return empty }
             guard let payload = envelope.data else { throw APIError.emptyPayload }
             return payload
         } catch is CancellationError {

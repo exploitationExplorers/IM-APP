@@ -38,7 +38,8 @@ class IOSProjectStaticTests(unittest.TestCase):
 
     def test_all_app_sources_are_in_build_phase(self):
         source_phase = re.search(r"isa = PBXSourcesBuildPhase;.*?files = \((.*?)\);", self.project, re.S).group(1)
-        for source in sorted((IOS / "IMNative").glob("*.swift")):
+        sources = sorted((IOS / "IMNative").glob("*.swift")) + sorted((IOS / "IMNative").glob("*.m"))
+        for source in sources:
             reference = re.search(r"([A-F0-9]{24})\s*=\s*\{isa = PBXFileReference;[^}]*path = " + re.escape(source.name) + r";", self.project)
             self.assertIsNotNone(reference, source.name)
             build = re.search(r"([A-F0-9]{24})\s*/\*.*?\*/\s*=\s*\{isa = PBXBuildFile; fileRef = " + reference.group(1), self.project)
@@ -58,6 +59,37 @@ class IOSProjectStaticTests(unittest.TestCase):
             self.assertEqual(reference.attrib["BlueprintIdentifier"], "A50000000000000000000001")
             self.assertIn(reference.attrib["BlueprintIdentifier"], self.project)
         self.assertEqual(scheme.find("LaunchAction").attrib["buildConfiguration"], "Debug")
+        podfile = (IOS / "Podfile").read_text(encoding="utf-8")
+        self.assertIn("pod 'OpenIMSDK', '3.8.3-hotfix.15'", podfile)
+        self.assertIn("pod 'OpenIMSDKCore', '3.8.3-hotfix.15'", podfile)
+        self.assertIn("workspace 'IMNative'", podfile)
+        self.assertIn('SWIFT_OBJC_BRIDGING_HEADER = "IMNative/IMNative-Bridging-Header.h";', self.project)
+        self.assertTrue((IOS / "IMNative/NativeOpenIMBridge.h").is_file())
+        self.assertIn('#import "NativeOpenIMBridge.h"', (IOS / "IMNative/IMNative-Bridging-Header.h").read_text(encoding="utf-8"))
+        service = (IOS / "IMNative/NativeIMService.swift").read_text(encoding="utf-8")
+        self.assertIn("import OpenIMSDK", service)
+        self.assertNotIn("canImport(OpenIMSDK)", service)
+        self.assertIn("FileProtectionType.completeUntilFirstUserAuthentication", service)
+        self.assertNotIn("noFileProtection", service)
+        # 官方固定tag的header是静态签名证据；CI可能没有D盘研究缓存，不替代pod编译。
+        research = ROOT / ".native-cache/openim-sdk/research"
+        if (research / "OIMManager+Message.h").is_file():
+            expected = {
+                "OIMManager+Message.h": ["+ (OIMMessageInfo *)createTextMessage:", "- (void)sendMessage:", "- (void)getAdvancedHistoryMessageList:", "- (void)findMessageList:"],
+                "OIMManager+Conversation.h": ["getConversationListSplitWithOffset:", "getOneConversationWithSessionType:"],
+                "OIMManager+Connection.h": ["initSDKWithConfig:", "- (void)unInitSDK;"],
+                "OIMSearchParam.h": ["NSString *startClientMsgID", "clientMsgIDList"],
+                "core-Open_im_sdk.objc.h": ["Open_im_sdkSetAppBackgroundStatus(", "Open_im_sdkNetworkStatusChanged("],
+            }
+            for name, signatures in expected.items():
+                header = (research / name).read_text(encoding="utf-8")
+                for signature in signatures: self.assertIn(signature, header, name + ": " + signature)
+        bridge = (IOS / "IMNative/NativeOpenIMBridge.m").read_text(encoding="utf-8")
+        self.assertIn("request.startClientMsgID = cursor", bridge)
+        self.assertNotIn("request.lastMinSeq =", bridge)
+        self.assertIn("result.status != OIMMessageStatusSendSuccess", bridge)
+        for selector in ["removeConversationListener:self", "removeAdvancedMsgListener:self", "Open_im_sdkSetAppBackgroundStatus", "Open_im_sdkNetworkStatusChanged"]:
+            self.assertIn(selector, bridge)
 
     def test_info_plist_and_staging_identity(self):
         with (IOS / "IMNative/Info.plist").open("rb") as file:
@@ -66,14 +98,19 @@ class IOSProjectStaticTests(unittest.TestCase):
         self.assertNotIn("NSAppTransportSecurity", info)
         self.assertEqual(self.project.count("PRODUCT_BUNDLE_IDENTIFIER = com.im.nativebootstrap.staging;"), 2)
         self.assertNotIn("DEVELOPMENT_TEAM", self.project)
-        self.assertEqual(self.project.count("MARKETING_VERSION = 0.1.1;"), 2)
-        self.assertEqual(self.project.count("CURRENT_PROJECT_VERSION = 2;"), 2)
+        self.assertEqual(self.project.count("MARKETING_VERSION = 0.3.0;"), 2)
+        self.assertEqual(self.project.count("CURRENT_PROJECT_VERSION = 4;"), 2)
         endpoints = json.loads((ROOT / "contracts/native-bootstrap/v1/runtime-endpoints.json").read_text(encoding="utf-8"))
         login = (IOS / "IMNative/LoginViewController.swift").read_text(encoding="utf-8")
         self.assertIn('private var serverAddress = "' + endpoints["api_base_url"] + '"', login)
         self.assertIn("api.businessPasswordLogin", login)
         self.assertNotIn("api.imToken", login)
         self.assertNotIn("authenticationSucceeded", login)
+        service = (IOS / "IMNative/NativeIMService.swift").read_text(encoding="utf-8")
+        self.assertEqual(service.count("api.imToken("), 1)
+        # 媒体临时文件可以清理，但SDK目录/账号数据库不得自动删除。
+        self.assertNotRegex(service, r"removeItem\s*\(\s*at:\s*(?:storageDirectory|sdkDirectory|namespace|root|directory)\b")
+        self.assertNotIn('removeItem(atPath:', service)
 
     def test_shared_fixture_bytes_have_not_drifted(self):
         shared = ROOT / "contracts/native-bootstrap/v1/fixtures"

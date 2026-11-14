@@ -1,0 +1,139 @@
+name: Prepare native Android distribution
+
+on:
+  workflow_dispatch:
+    inputs:
+      distribution_base_url:
+        description: 'Real fixed HTTPS directory URL for the native test download page'
+        type: string
+        required: true
+      testflight_public_url:
+        description: 'Optional real https://testflight.apple.com/join/XXXXXXXX invitation'
+        type: string
+        required: false
+      appstore_url:
+        description: 'Optional real apps.apple.com application URL after the native app is published'
+        type: string
+        required: false
+      deploy_to_github_pages:
+        description: 'Publish the verified directory to the configured GitHub Pages site'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-staging-distribution
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      GRADLE_USER_HOME: ${{ github.workspace }}/.native-cache/gradle
+      ANDROID_USER_HOME: ${{ github.workspace }}/.native-cache/android
+      DISTRIBUTION_BASE_URL: ${{ inputs.distribution_base_url }}
+      TESTFLIGHT_PUBLIC_URL: ${{ inputs.testflight_public_url }}
+      APPSTORE_URL: ${{ inputs.appstore_url }}
+      EXPECTED_CERTIFICATE_SHA256: ${{ vars.NATIVE_ANDROID_CERT_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.4'
+      - name: Validate configuration and restore the stable testing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.NATIVE_ANDROID_KEYSTORE_BASE64 }}
+          NATIVE_ANDROID_STORE_PASSWORD: ${{ secrets.NATIVE_ANDROID_STORE_PASSWORD }}
+          NATIVE_ANDROID_KEY_ALIAS: ${{ secrets.NATIVE_ANDROID_KEY_ALIAS }}
+          NATIVE_ANDROID_KEY_PASSWORD: ${{ secrets.NATIVE_ANDROID_KEY_PASSWORD }}
+        run: |
+          python - <<'PY'
+          import base64, os
+          from pathlib import Path
+          from scripts.native.prepare_distribution import https_url, certificate
+          base = https_url(os.environ['DISTRIBUTION_BASE_URL'], base=True)
+          certificate(os.environ['EXPECTED_CERTIFICATE_SHA256'])
+          for name in ('KEYSTORE_BASE64', 'NATIVE_ANDROID_STORE_PASSWORD', 'NATIVE_ANDROID_KEY_ALIAS', 'NATIVE_ANDROID_KEY_PASSWORD'):
+              if not os.environ.get(name):
+                  raise SystemExit('Missing required stable native signing secret: ' + name)
+          key = Path('.native-cache/signing/native-staging.jks').resolve()
+          key.parent.mkdir(parents=True, exist_ok=True)
+          key.write_bytes(base64.b64decode(''.join(os.environ['KEYSTORE_BASE64'].split()), validate=True))
+          key.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('NATIVE_ANDROID_KEYSTORE=' + str(key) + '\n')
+              output.write('NATIVE_UPDATE_MANIFEST_URL=' + base + 'update.json\n')
+              output.write('NATIVE_DOWNLOAD_PAGE_URL=' + base + '\n')
+          PY
+      - name: Validate distribution tooling
+        run: python -m unittest discover -s scripts/native/tests -p test_distribution.py
+      - name: Test and build with the stable native testing key
+        working-directory: IM-APP-android
+        env:
+          NATIVE_ANDROID_STORE_PASSWORD: ${{ secrets.NATIVE_ANDROID_STORE_PASSWORD }}
+          NATIVE_ANDROID_KEY_ALIAS: ${{ secrets.NATIVE_ANDROID_KEY_ALIAS }}
+          NATIVE_ANDROID_KEY_PASSWORD: ${{ secrets.NATIVE_ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+      - name: Read the previously published manifest
+        run: |
+          mkdir -p .native-cache/distribution
+          code=$(curl --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 5 --max-time 60 --max-filesize 262144 --output .native-cache/distribution/previous.json --write-out '%{http_code}' "$NATIVE_UPDATE_MANIFEST_URL")
+          if [ "$code" = 404 ]; then
+            rm .native-cache/distribution/previous.json
+          elif [ "$code" != 200 ]; then
+            echo "Cannot verify the previous publication (HTTP $code)."
+            exit 1
+          fi
+      - name: Verify APK identity, signature and increasing version; prepare static directory
+        run: |
+          args=()
+          if [ -f .native-cache/distribution/previous.json ]; then
+            args+=(--previous-manifest .native-cache/distribution/previous.json)
+          fi
+          python scripts/native/prepare_distribution.py \
+            --apk IM-APP-android/app/build/outputs/apk/debug/app-debug.apk \
+            --base-url "$NATIVE_DOWNLOAD_PAGE_URL" \
+            --out .native-cache/distribution/site \
+            --aapt "$ANDROID_HOME/build-tools/34.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/34.0.0/apksigner" \
+            --expected-certificate-sha256 "$EXPECTED_CERTIFICATE_SHA256" \
+            --changelog-file docs/原生内测更新说明.md \
+            --testflight-url "$TESTFLIGHT_PUBLIC_URL" --appstore-url "$APPSTORE_URL" "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-staging-download-site
+          path: .native-cache/distribution/site/
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v3
+        if: inputs.deploy_to_github_pages
+        with:
+          path: .native-cache/distribution/site/
+      - name: Remove temporary signing file
+        if: always()
+        run: rm -f .native-cache/signing/native-staging.jks
+
+  pages:
+    if: inputs.deploy_to_github_pages
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish prepared native test download directory
+        id: deployment
+        uses: actions/deploy-pages@v4

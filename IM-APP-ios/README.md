@@ -1,58 +1,57 @@
-# iOS 原生验证工程
+# 易可聊 iOS 原生工程
 
-本工程实现 Swift / UIKit 的首阶段开发基础，当前版本为 `0.1.1 (2)`，使用独立测试 Bundle ID `com.im.nativebootstrap.staging`。默认业务接口为 `https://www.xn--jprz53bj9s.com/api/v1`，对应现有 `www.易可聊.com` 的 HTTPS 服务；普通登录无需配置地址。工程不含正式证书或推送配置，不会覆盖原 uni-app 应用，也没有修改或部署后端。
+当前开发版本 `0.3.0 (4)`，Swift / UIKit，iOS 15 起。测试 Bundle ID 为 `com.im.nativebootstrap.staging`。以现有 uni-app 的页面、文案、素材与业务操作为基准；核心聊天使用官方 OpenIM SDK。未修改旧前端或后端，未部署或发布。
 
-## 当前可评审内容
+## 在朋友的 Mac 上验证
 
-- `Packages/IMCore` 是无第三方依赖的 Swift Package：五个既有 Go 认证接口、既有 `GET /me` 资料接口、Codable 模型、可注入 HTTP transport、会话 actor 和纯内存样例。
-- 业务用户 ID 与 OpenIM 用户 ID 独立保存；获取业务凭据和 IM Token 不会将本地库设为可读，也不会标记同步完成。
-- Session ticket 原子包含账号 key 与 generation；每次同步还有独立 SyncAttempt。切号、重登、退出和同步重试后，旧回调不能推进新状态。
-- 同步失败、超时和取消分别记录，已可读本地库保持可读；核心不操作 SDK 私有数据库，没有自动删库、伪 SQLite 或伪同步实现。
-- UIKit 登录页沿用 uni-app 的易可聊品牌、蓝渐变、原 Logo、密码登录结构和法律勾选；填写现有手机号与密码并同意协议后，依次调用 `POST /auth/login`、`GET /me`。成功后进入真实账号主界面，“我的”显示返回的昵称、易可聊号、脱敏手机号和简介。`GET /me` 失败时只显示本次 `auth.user` 资料并标明加载异常；若资料的业务 ID 不匹配则拒绝进入账号页。
-- 当前没有 IM SDK，业务登录不会申请未使用的 IM Token，也不会调用 SDK 会话的 `authenticationSucceeded` 或标记消息库可读 / 同步完成。真实模式不创建样例会话，“聊天 / 通讯录”如实显示功能接入中。`SessionCoordinator` 和原有 SDK 状态门禁保持独立。
-- 业务凭据只保留在当前账号页的内存会话，不写 UserDefaults、文件或日志，不展示 token；退出登录只释放本机内存会话，不请求全局退出。进程重启后需要重新登录；Keychain、自动续期和真实聊天均未接入。请求保持 HTTPS，拒绝自动重定向，未增加 ATS 放行。错误只显示经过长度限制和疑似凭据 / HTML 过滤的业务 `message`，非 JSON 错误使用通用 HTTP 提示，不显示原始正文。
-- 长按 Logo 仍可打开开发面板覆盖已授权的 HTTPS 地址，保存地址只影响下一次登录，不会自动请求；也可取消当前登录。普通页面不显示环境输入、验证码登录或 SDK 术语。
-- Logo 长按面板中的“打开本地样例”不需要账号、不联网。主导航按“通讯录 / 聊天 / 我的”排列，会话列表和文本聊天映射既有 Vue 组件的尺寸、颜色、文案和原图资产。样例持续显示“本地样例 · 不联网 · 不送达”；内存会话在样例模式内保留，退出样例后释放，没有真实发送或已送达状态。
-- 27 项 XCTest 引用与 `contracts/native-bootstrap/v1/fixtures` 逐字节相同的合成 fixture，保留原有路由 / SDK 状态覆盖，并增加登录→资料两路由、GET Bearer、资料失败回退、身份不匹配、取消与安全错误提示验证。测试不使用真实凭据、不访问远端。
-
-## Mac 上运行
-
-需要 Xcode 15 或以上版本、Swift 5.9 或以上、iOS 15 或以上模拟器。工程使用 Swift 5 语言模式，尚未接入任何 OpenIM SDK；不用 CocoaPods 或另外下载项目脚手架。
+解压配套 `IM-iOS-0.3.0-mac-check.zip`，在解压后的根目录执行：
 
 ```bash
-# 从仓库根目录执行；只运行本地测试，不访问真实服务。
-python3 IM-APP-ios/scripts/verify_project.py
-swift test --package-path IM-APP-ios/Packages/IMCore
-xcodebuild -list -project IM-APP-ios/IMNative.xcodeproj
-xcodebuild -project IM-APP-ios/IMNative.xcodeproj \
-  -scheme IMNative -sdk iphonesimulator -configuration Debug \
-  -derivedDataPath IM-APP-ios/DerivedData CODE_SIGNING_ALLOWED=NO build
+bash IM-APP-ios/scripts/verify_on_mac.sh
 ```
 
-在 Xcode 打开 `IMNative.xcodeproj`，选择 `IMNative` Scheme 和可用 iOS 模拟器，Run 后可直接使用团队授权账号验证既有业务登录；长按 Logo 可改用测试地址或进入离线样例。本次开发没有运行真实登录 / 短信请求，没有使用真实凭据；上线账号验证需由团队在 Mac 或真机执行。
+需要完整 Xcode、Python 3、Ruby 与 Bundler。脚本依次执行工程静态检查、Swift Package 核心测试、固定 CocoaPods 依赖安装和无分发签名的模拟器 Debug 编译；失败即停，结果和日志保存在 `verification/mac/`。它不提交账号、不发布、不上传证书。
 
-手动验收时检查：登录成功确实进入主界面；“我的”资料属于本次登录账号；聊天页没有样例消息；退出后回到登录页；取消登录或改为本地样例后，迟到的请求不能再次打开账号页。业务请求返回成功只能证明登录 / 资料链路可用，不能视作聊天、性能或 iOS 同步问题验收通过。
+构建后打开 `IM-APP-ios/IMNative.xcworkspace`，选择 `IMNative` Scheme 和模拟器运行。连接 iPhone 时，在 Signing & Capabilities 选择自己的开发团队、信任设备并启用 Developer Mode。真机签名、免费个人团队限制和完整回归步骤见 [Mac 验证步骤](../docs/iOS-Mac验证步骤.md)。不能只打开 `.xcodeproj` 跳过 SDK 依赖。
 
-`Xcode Test` 的空 TestAction 不包含 Package 的独立 XCTest；CI 和本地应执行上面的 `swift test` 命令。Simulator Build 验证 app→IMCore 链接，不能代替 UI 运行或真机库测试。
+首次安装依赖后核对并保留 `Podfile.lock` / `Gemfile.lock`；Pods、vendor、DerivedData 和个人签名配置不提交。纯核心测试也可单独运行：
 
-Windows 上只执行 Python 静态校验。Swift/Xcode/模拟器在当前环境没有安装，因此本次没有执行 `swift test`、`xcodebuild` 或运行截图；不得将这些步骤记作已通过。
+```bash
+python3 IM-APP-ios/scripts/verify_project.py
+swift test --package-path IM-APP-ios/Packages/IMCore
+```
 
-## 发布与数据门禁
+## 固定依赖
 
-当前 Release 和 Archive 会由 Build Phase 明确失败，避免把独立测试身份当正式升级包。暂不提供绕过开关。配置正式应用身份、签名、OpenIM SDK 兼容、数据迁移及发布审批后，再通过经过评审的改动接入发布流水线。
+- CocoaPods：`OpenIMSDK = 3.8.3-hotfix.15`、`OpenIMSDKCore = 3.8.3-hotfix.15`，CocoaPods 工具版本 `1.16.2`。
+- 包装层官方 tag commit：`780307d05fb93f32b093188bfab3ca4047123fa9`；Core：`45cd9dcc80f3b41fcaa49664c768713d6b4976bb`。
+- `NativeOpenIMBridge.h/.m` 将固定版本的正式 ObjC selector 适配为自有 Swift 接口；不使用 SDK 替身。Core 生命周期使用正式导出的后台和网络状态 API。
+- `Packages/IMCore` 不依赖第三方二进制，覆盖身份与代次、端点策略、Outbox、媒体快照和可见水位等纯核心逻辑。Windows 静态检查和语法解析不能证明 Swift 类型、ObjC 导入或二进制链接正确。
 
-后续必须先完成以下验证，才能声称 iOS 同步问题已解决：
+## 登录与页面
 
-1. 确定与现网 OpenIM 服务及旧 App SDK 数据兼容的版本，接入真实 SDK 适配层。
-2. 真机验证离线开库、文件保护 / 锁屏、同步中断、网络切换、杀进程重启、磁盘不足与升级迁移。
-3. 在 SDK 支持的方式下保全草稿、待发、仅本地消息和附件；同步错误不能直接触发清库。
-4. 完成持久 Outbox 与不确定发送结果对账；当前内存样例不具备持久聊天能力。
-5. 验证推送、后台生命周期、历史分页和混合媒体性能；通过旧客户端互通与正式签名覆盖升级测试。
+普通登录默认连接现有 `https://www.xn--jprz53bj9s.com/api/v1`。`/auth/login` → `/me` 校验业务身份，再独立申请平台 `1` 的 `/im/token` 登录 SDK；业务用户 ID 和 IM userId 分开保存。Logo 长按保留开发配置与明确标注“不联网、不送达”的离线样例，不给真实账号注入样例会话。
 
-当前 App 只做认证与本地界面验证。`SessionCoordinator` 的状态 API 是后续 SDK 适配边界，不能据此推断 SDK 开库、SQLite 事务或同步游标已经可用。
+Keychain 使用 `AfterFirstUnlockThisDeviceOnly`、不云同步，保存业务会话而不保存密码。冷启动恢复资料；过期或明确 401 最多一次刷新，旋转凭据先安全保存。条件保存/清理防止迟到刷新或退出覆盖新登录。普通断线由 SDK 重连，不循环签发 Token。
 
-## 首轮 UI 还原范围
+已补接通讯录、好友申请/标签/资料、建群/邀请/管理/公告、个人资料/二维码、收藏、设置、反馈举报、注销、注册找回及群发等原生业务流程。具体实现与仍有差异的页面以 [逐页对齐记录](../docs/原生功能与UI对齐-20261113/功能与UI对齐记录.md) 和 `contracts/ui-parity/v1/ios-page-map.json` 为准，不以有页面标题代表全部完成。
 
-本轮已映射 `sign-in.vue` / `auth-modern.scss`、`ImTabBar`、`ConversationItem`、`ChatBubble` 文本部分、`ImMessageComposer` 文本行及 `chat/index` / `chat/room` 的首轮结构。`rpx = 窗口逻辑宽度 / 750`，登录最终覆盖中的 `px` 保持逻辑尺寸。根生成的原 PNG / SVG 栅格图位于 `Assets.xcassets`，法律原文以 `Legal` 目录打包，仅本地读取、禁用 JavaScript 和外部跳转。
+图像加载在后台执行，包含共享下载、并发上限、有界解码、内存/磁盘缓存和失效反馈；头像和富消息使用真实媒体。GIF 使用有界动画策略，超大图片回退首帧，实际设备表现仍需验证。媒体兼容旧 camelCase / PascalCase，已知旧签名媒体恢复稳定入口，未知签名参数不随意修改。
 
-通讯录、个人中心、注册、找回密码、群管理、媒体、表情面板等没有在此轮还原，点击未接入入口会如实提示。没有旧 App 与原生同视口截图对照，也没有 Mac 实际运行，不能宣称像素一致、全量 UI 完成或编译通过。
+## 消息可靠性与本地库
+
+SDK 独占自己的历史数据库，应用不读写私有表、不建立第二套全量消息库、不自动删库或修库。账号和环境分目录隔离，目录排除备份并使用文件保护；自有 Outbox 与业务可见水位单独持久保存。群保留水位和成员清理屏障保持单调，迟到历史不能复活已隐藏原文。
+
+文字、图片、视频、语音与文件走真实 SDK 和持久 Outbox：先创建稳定 clientMsgID、原子保存，再调用发送。写盘失败不发送。SDK 接受只表示已提交，不冒充送达或已读。超时/强杀后的未知结果先按 ID 核对，不自动盲目重发；空查询或本地失败不足以证明服务器未接收。退出/切号取消业务操作并依次停止旧 SDK，代次和独立同步 attempt 拦截旧回调。
+
+会话与历史使用正式分页接口；错误不伪装空页或结束。固定 SDK 请求包装层不暴露 `lastMinSeq`，历史使用真实支持的 `startClientMsgID`，返回水位只作上下文；必须在多页和保留边界场景验证，不自造 SDK 参数。同步等待超时保留库，迟到完成不伪造成功。
+
+## 验收与发布
+
+本机 Windows 无 Xcode：核心 XCTest、CocoaPods、Xcode 编译、iPhone 真机、真实账号互通与性能验收均不能在此声称通过。当前静态执行记录与 Android 合成截图见逐页对齐文档；iOS 运行结果需由朋友的 Mac 回传日志补齐。
+
+Mac 编译成功后仍须验证：旧/新端媒体互通、头像/旧图片、分页和搜索定位、群权限/保留边界、登录恢复与切号、锁屏/前后台、断网与强杀期间同步/发送、磁盘不足、长历史性能。使用授权内测账号；同账号同平台登录会遵守现网 OpenIM 互踢策略。
+
+现有后端 `LoggingPushService` 是日志实现，登记 push-token 不等于 APNs 真正下发。实时音视频、后台推送、线上定制协议、正式身份/签名和旧库覆盖迁移分别验收。当前 staging 安装不覆盖旧正式 App，也不能证明覆盖迁移成功。
+
+Release / Archive Build Phase 仍明确阻断，未提供绕过开关。原生 iOS 不使用 uni-app 云打包；完成门禁后使用团队 Mac / CI 的 Xcode Archive → TestFlight / App Store。正式步骤见原生重构方案。当前不能宣称 iOS 同步故障已彻底解决或已具备生产替换条件。

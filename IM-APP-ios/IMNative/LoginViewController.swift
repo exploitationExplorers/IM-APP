@@ -18,13 +18,16 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
     private let legal = UITextView()
     private let loginButton = UIButton(type: .system)
     private let register = UIButton(type: .system)
+    private let smsLogin = UIButton(type: .system)
     private let deviceID = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
     private var selectedCountry = 0
     private var agreed = false
     private var serverAddress = "https://www.xn--jprz53bj9s.com/api/v1"
     private var loginTask: Task<Void, Never>?
     private var activeOperationID: UUID?
+    private var startingChat: NativeIMService?
     private var countryOverlay: UIControl?
+    private var attemptedRestore = false
     private let countries = [("中国", "+86", "请输入手机号码", "^1\\d{10}$"), ("中国香港", "+852", "请输入 8 位手机号码", "^\\d{8}$"), ("美国", "+1", "请输入 10 位手机号码", "^\\d{10}$"), ("新加坡", "+65", "请输入 8 位手机号码", "^\\d{8}$"), ("马来西亚", "+60", "请输入手机号码", "^\\d{9,10}$")]
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -32,6 +35,11 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: animated)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if !attemptedRestore { attemptedRestore = true; restoreSession() }
     }
 
     override func viewDidLoad() {
@@ -53,7 +61,7 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
         logo.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(openDebugPanel(_:))))
         heading.textAlignment = .center
         descriptionLabel.textAlignment = .center
-        [logo, heading, descriptionLabel, countryButton, phone, passwordBox, forgot, consent, legal, loginButton, register].forEach { scroll.addSubview($0) }
+        [logo, heading, descriptionLabel, countryButton, phone, passwordBox, forgot, consent, legal, loginButton, register, smsLogin].forEach { scroll.addSubview($0) }
         countryButton.setTitleColor(NativeUITheme.body, for: .normal)
         countryButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
         countryButton.addTarget(self, action: #selector(selectCountry), for: .touchUpInside)
@@ -105,6 +113,12 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
         register.setTitleColor(.white, for: .normal)
         register.titleLabel?.font = .systemFont(ofSize: 14)
         register.addTarget(self, action: #selector(registerAccount), for: .touchUpInside)
+        smsLogin.setTitle("验证码登录", for: .normal)
+        smsLogin.setTitleColor(.white, for: .normal)
+        smsLogin.titleLabel?.font = .systemFont(ofSize: 14)
+        smsLogin.addTarget(self, action: #selector(openSMSLogin), for: .touchUpInside)
+        // 原版当前只展示密码登录；注册和找回密码仍使用验证码。
+        smsLogin.isHidden = true
         updateCountry()
     }
 
@@ -154,6 +168,7 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
         loginButton.frame = CGRect(x: x, y: y, width: width, height: 50)
         y += 78
         register.frame = CGRect(x: x, y: y, width: width, height: 24)
+        smsLogin.frame = CGRect(x: x + width / 2, y: y, width: width / 2, height: 24)
         scroll.contentSize = CGSize(width: view.bounds.width, height: max(y + 56 + view.safeAreaInsets.bottom, view.bounds.height + 1))
     }
 
@@ -224,8 +239,25 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
         return false
     }
 
-    @objc private func forgotPassword() { showNativeNotice("找回密码页面尚未接入，请使用现有客户端完成。") }
-    @objc private func registerAccount() { showNativeNotice("注册页面尚未接入，请使用现有客户端完成。") }
+    @objc private func forgotPassword() { openAuthFlow(.resetPassword) }
+    @objc private func registerAccount() { openAuthFlow(.register) }
+    @objc private func openSMSLogin() { openAuthFlow(.smsLogin) }
+
+    private func openAuthFlow(_ mode: NativeAuthFlowController.Mode) {
+        cancelAuthentication()
+        do {
+            let configuration = try APIConfiguration(baseURL: serverAddress)
+            weak var authFlow: NativeAuthFlowController?
+            let controller = NativeAuthFlowController(configuration: configuration, deviceID: deviceID, mode: mode) { [weak self] account in
+                guard let self = self, let flow = authFlow,
+                      self.navigationController?.viewControllers.contains(where: { $0 === flow }) == true,
+                      self.navigationController?.topViewController === flow || self.navigationController?.topViewController is NativeOnboardingController else { return }
+                self.beginAuthenticatedSession(account, configuration: configuration)
+            }
+            authFlow = controller
+            navigationController?.pushViewController(controller, animated: true)
+        } catch { showNativeNotice(error.localizedDescription) }
+    }
 
     @objc private func openDebugPanel(_ recognizer: UILongPressGestureRecognizer) {
         guard recognizer.state == .began else { return }
@@ -261,6 +293,9 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
         phone.isEnabled = !loading
         credential.isEnabled = !loading
         countryButton.isEnabled = !loading
+        forgot.isEnabled = !loading
+        register.isEnabled = !loading
+        smsLogin.isEnabled = !loading
         loginButton.setTitle(loading ? "登录中…" : "登录", for: .normal)
     }
 
@@ -283,9 +318,9 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
                 do {
                     let account = try await api.businessPasswordLogin(PasswordLoginRequest(countryCode: selected.1, phone: number, password: secret, deviceId: self.deviceID))
                     guard !Task.isCancelled, self.activeOperationID == operationID else { return }
-                    self.credential.text = ""
-                    self.view.endEditing(true)
-                    self.navigationController?.pushViewController(SampleMainViewController(mode: .realAccount(account)), animated: true)
+                    let saved = SavedBusinessLogin(account: account, configuration: configuration)
+                    try await NativeSessionVault.shared.save(saved)
+                    try await self.activate(account, configuration: configuration, operationID: operationID)
                 } catch {
                     guard !Task.isCancelled, self.activeOperationID == operationID else { return }
                     self.showNativeNotice(error.localizedDescription)
@@ -299,10 +334,91 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
         } catch { showNativeNotice(error.localizedDescription) }
     }
 
+    private func beginAuthenticatedSession(_ account: BusinessAccountSession, configuration: APIConfiguration) {
+        cancelAuthentication()
+        let operationID = UUID(); activeOperationID = operationID; setLoading(true)
+        loginTask = Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                try await NativeSessionVault.shared.save(SavedBusinessLogin(account: account, configuration: configuration))
+                try await self.activate(account, configuration: configuration, operationID: operationID)
+            } catch {
+                if !Task.isCancelled, self.activeOperationID == operationID { self.showNativeNotice(error.localizedDescription) }
+            }
+            self.finishAuthentication(operationID)
+        }
+    }
+
+    private func activate(_ account: BusinessAccountSession, configuration: APIConfiguration, operationID: UUID) async throws {
+        try Task.checkCancellation()
+        guard activeOperationID == operationID else { throw CancellationError() }
+        let chat = NativeIMService(account: account, configuration: configuration)
+        startingChat = chat
+        await chat.start()
+        guard !Task.isCancelled, activeOperationID == operationID else { await chat.stop(); throw CancellationError() }
+        startingChat = nil; credential.text = ""; view.endEditing(true)
+        navigationController?.setViewControllers([self, SampleMainViewController(mode: .realAccount(chat))], animated: true)
+    }
+
+    private func finishAuthentication(_ operationID: UUID) {
+        guard activeOperationID == operationID else { return }
+        activeOperationID = nil; loginTask = nil; setLoading(false)
+    }
+
+    private func isUnauthorized(_ error: Error) -> Bool {
+        guard let error = error as? APIError else { return false }
+        switch error {
+        case .httpStatus(401), .business(code: 401, message: _): return true
+        default: return false
+        }
+    }
+
+    private func restoreSession() {
+        let operationID = UUID(); activeOperationID = operationID; setLoading(true)
+        loginButton.setTitle("恢复登录中…", for: .normal)
+        loginTask = Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                guard var saved = try await NativeSessionVault.shared.load() else { self.finishAuthentication(operationID); return }
+                let configuration = try saved.validate()
+                let api = APIClient(configuration: configuration)
+                var profile: UserProfile?
+                var needsRefresh = saved.expiresAt <= Date().addingTimeInterval(60)
+                if !needsRefresh {
+                    do { profile = try await api.currentUser(accessToken: saved.authentication.accessToken, expectedUserID: saved.profile.id) }
+                    catch { if self.isUnauthorized(error) { needsRefresh = true } else { throw error } }
+                }
+                if needsRefresh {
+                    let previousRefreshToken = saved.authentication.refreshToken
+                    let tokens = try await api.refreshToken(RefreshTokenRequest(refreshToken: saved.authentication.refreshToken, deviceId: self.deviceID))
+                    try Task.checkCancellation()
+                    guard self.activeOperationID == operationID else { throw CancellationError() }
+                    let auth = AuthResult(accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresIn: tokens.expiresIn, user: saved.profile)
+                    saved = SavedBusinessLogin(account: BusinessAccountSession(authentication: auth, profile: saved.profile), configuration: configuration)
+                    // 先保存旋转后的 refreshToken；资料请求暂时失败不能丢掉新凭据。
+                    try await NativeSessionVault.shared.save(saved, expectedRefreshToken: previousRefreshToken)
+                    profile = try await api.currentUser(accessToken: tokens.accessToken, expectedUserID: saved.profile.id)
+                }
+                try Task.checkCancellation()
+                guard self.activeOperationID == operationID, let profile = profile else { throw CancellationError() }
+                let auth = AuthResult(accessToken: saved.authentication.accessToken, refreshToken: saved.authentication.refreshToken, expiresIn: saved.authentication.expiresIn, user: profile)
+                let account = BusinessAccountSession(authentication: auth, profile: profile)
+                try await NativeSessionVault.shared.save(SavedBusinessLogin(account: account, configuration: configuration, expiresAt: saved.expiresAt), expectedRefreshToken: saved.authentication.refreshToken)
+                self.serverAddress = configuration.baseURL.absoluteString
+                try await self.activate(account, configuration: configuration, operationID: operationID)
+            } catch {
+                if !Task.isCancelled, self.activeOperationID == operationID { self.showNativeNotice(error.localizedDescription) }
+            }
+            self.finishAuthentication(operationID)
+        }
+    }
+
     private func cancelAuthentication() {
         loginTask?.cancel()
         loginTask = nil
         activeOperationID = nil
+        if let chat = startingChat { Task { await chat.stop() } }
+        startingChat = nil
         credential.text = ""
         setLoading(false)
     }

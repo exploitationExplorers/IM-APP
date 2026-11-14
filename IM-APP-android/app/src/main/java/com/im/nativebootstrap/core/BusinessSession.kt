@@ -8,7 +8,7 @@ import java.util.concurrent.CancellationException
 class BusinessLoginAttempt internal constructor(val generation: Long)
 class BusinessLoginResult(val profile: BusinessProfile, val profileWarning: String? = null)
 
-/** 业务凭据只驻留本次进程内存，与尚未接入的 IM 会话完全分开。 */
+/** 业务凭据与 IM 身份分开管理；安全持久化由上层 Keystore 存储负责。 */
 class BusinessSession {
     private val lock = Any()
     private var generation = 0L
@@ -29,7 +29,26 @@ class BusinessSession {
         profile = user
         true
     }
+    /** 仅把当前账号访问凭据交给一次请求，不写入 UI 状态。 */
+    internal fun <T> withAccessToken(userId:String, action:(String)->T):T? {
+        val captured=synchronized(lock) { if(profile?.businessUserId==userId) tokens?.accessToken else null } ?: return null
+        return action(captured)
+    }
     fun currentProfile(): BusinessProfile? = synchronized(lock) { profile }
+    internal fun replaceProfile(next:BusinessProfile):Boolean = synchronized(lock) {
+        if(profile?.businessUserId!=next.businessUserId)return@synchronized false
+        profile=next;true
+    }
+    internal fun currentTokens(): TokenPair? = synchronized(lock) { tokens }
+    internal fun replaceTokens(userId:String,expectedAccessToken:String,next:TokenPair):Boolean = synchronized(lock) {
+        if(profile?.businessUserId!=userId||tokens?.accessToken!=expectedAccessToken)return@synchronized false
+        tokens=next;true
+    }
+    internal fun restore(credentials:TokenPair,user:BusinessProfile):BusinessLoginAttempt = synchronized(lock) {
+        generation+=1
+        tokens=credentials;profile=user
+        BusinessLoginAttempt(generation).also {active=it}
+    }
     internal fun hasCredentials(): Boolean = synchronized(lock) { tokens != null }
     fun logout() = synchronized(lock) {
         generation += 1
@@ -41,9 +60,9 @@ class BusinessSession {
 
 /** 每次业务登录只调用 auth/login（或显式短信登录）与 me，不申请 IM Token。 */
 class BusinessLoginFlow(private val session: BusinessSession) {
-    fun login(attempt: BusinessLoginAttempt, api: NativeAPI, country: String, phone: String, secret: String, deviceId: String, password: Boolean): BusinessLoginResult? {
+    fun login(attempt: BusinessLoginAttempt, api: NativeAPI, country: String, phone: String, secret: String, deviceId: String, password: Boolean, registerCode: String? = null): BusinessLoginResult? {
         if (!session.accepts(attempt)) return null
-        val auth = if (password) api.passwordLogin(country, phone, secret, deviceId) else api.smsLogin(country, phone, secret, deviceId)
+        val auth = if (registerCode != null) api.register(country, phone, registerCode, secret, deviceId) else if (password) api.passwordLogin(country, phone, secret, deviceId) else api.smsLogin(country, phone, secret, deviceId)
         if (!session.accepts(attempt)) return null
         var warning: String? = null
         val user = try {

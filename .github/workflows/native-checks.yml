@@ -80,11 +80,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Swift core tests
         run: swift test --package-path IM-APP-ios/Packages/IMCore
-      - name: Check Xcode project
-        run: xcodebuild -list -project IM-APP-ios/IMNative.xcodeproj
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Install CocoaPods
+        run: gem install cocoapods --version 1.16.2 --no-document
+      - name: Resolve pinned native OpenIM SDK
+        working-directory: IM-APP-ios
+        run: pod install --repo-update
+      - name: Check Xcode workspace
+        run: xcodebuild -list -workspace IM-APP-ios/IMNative.xcworkspace
       - name: Compile simulator app without distribution signing
         run: >-
-          xcodebuild -project IM-APP-ios/IMNative.xcodeproj
+          xcodebuild -workspace IM-APP-ios/IMNative.xcworkspace
           -scheme IMNative -sdk iphonesimulator -configuration Debug
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath .native-cache/DerivedData CODE_SIGNING_ALLOWED=NO build

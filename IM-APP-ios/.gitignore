@@ -5,6 +5,10 @@ build/
 xcuserdata/
 *.xcuserstate
 Config/Local.xcconfig
+Pods/
+IMNative.xcworkspace/
+vendor/bundle/
+.bundle/
 *.p12
 *.mobileprovision
 

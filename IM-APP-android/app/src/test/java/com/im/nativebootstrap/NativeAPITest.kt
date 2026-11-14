@@ -126,4 +126,13 @@ class NativeAPITest {
             assertFalse(error.toString().contains("raw-response-token"))
         }
     }
+    @Test fun imTokenUpgradesOnlyAllowlistedLegacyEndpointsForDefaultBackend() {
+        val source=fixture("im-token-success.json").replace("https://im.example.invalid","http://8.154.44.197/openim-api").replace("wss://im.example.invalid","ws://8.154.44.197/openim-ws")
+        val api=NativeAPI(transport=HTTPTransport { APIResponse(200,source) })
+        val token=api.imToken("synthetic-token")
+        assertEquals("https://www.xn--jprz53bj9s.com/openim-api",token.apiAddr)
+        assertEquals("wss://www.xn--jprz53bj9s.com/openim-ws",token.wsAddr)
+        val different=NativeAPI("https://other.invalid/api/v1",HTTPTransport { APIResponse(200,source) })
+        assertThrows(APIException::class.java) { different.imToken("synthetic-token") }
+    }
 }

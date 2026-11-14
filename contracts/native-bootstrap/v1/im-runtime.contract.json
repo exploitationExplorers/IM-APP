@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "authorization": "User requested real native chat SDK integration on 2026-11-13",
+  "server_version_source": "IM-APP-server/deploy/openim/docker-compose.yml",
+  "server_version_declared": "v3.8.3-patch.16",
+  "compatibility": "Declared server version is repository evidence; production interoperability remains an account/device verification gate.",
+  "token": {
+    "method": "POST",
+    "path": "/im/token",
+    "authorization": "Bearer business accessToken",
+    "platform_ids": {"android": 2, "ios": 1},
+    "policy": "Request once for a real SDK login; reuse while valid; do not loop token issuance on resource-not-ready or transport reconnect."
+  },
+  "endpoints": {
+    "default_business_origin": "https://www.xn--jprz53bj9s.com",
+    "api_path": "/openim-api",
+    "ws_path": "/openim-ws",
+    "legacy_http_api": "http://8.154.44.197/openim-api",
+    "legacy_ws": "ws://8.154.44.197/openim-ws",
+    "upgrade_policy": "Only for the exact default existing business origin, upgrade exact legacy host/default port/path endpoints to existing public HTTPS/WSS origin; explicit default port and a single trailing slash may normalize to the same endpoint. Reject userinfo, query, fragment and unrelated cleartext hosts. Secure explicit server endpoints remain supported. Do not disable TLS verification."
+  },
+  "first_real_chat_slice": [
+    "SDK initialization and login with environment/account isolated private directories",
+    "paginated real conversations and stable IDs",
+    "history by clientMsgID cursor; errors are not end-of-history",
+    "text create/send and incoming message events",
+    "single session type 1 and supergroup session type 3 routing",
+    "separate connection/store/sync status; account generation and sync attempt isolation",
+    "persistent own outbox separate from SDK private tables; uncertain results must not auto-resend",
+    "logout invalidates callbacks and credentials without deleting account databases"
+  ],
+  "delivery_policy": "SDK send acceptance is not recipient delivery or read receipt. Do not display synthetic delivered/read indicators.",
+  "unsupported_messages": "Media/custom/system types require explicit readable summaries and must not be rendered as text or exposed as raw JSON. Rich rendering and business action handling need separate parity work.",
+  "release_gates": ["physical device storage/sync", "legacy client interoperability", "signed upgrade/migration", "performance", "iOS Xcode build and runtime"]
+}

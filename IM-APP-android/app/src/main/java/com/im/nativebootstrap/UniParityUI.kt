@@ -2,7 +2,6 @@ package com.im.nativebootstrap
 
 import android.app.Activity
 import android.webkit.WebView
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -67,6 +66,11 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.im.nativebootstrap.data.RuntimeEndpoints
+import com.im.nativebootstrap.chat.*
+import com.im.nativebootstrap.core.StoreStatus
+import com.im.nativebootstrap.core.SyncStatus
+import com.im.nativebootstrap.business.*
+import com.im.nativebootstrap.media.SharedAvatar
 import kotlin.math.abs
 
 private val Primary = Color(0xFF0A2FC2)
@@ -75,7 +79,7 @@ private val Hint = Color(0xFF636E86)
 private val ScreenGray = Color(0xFFE6E8EE)
 
 /** uni-app rpx 只按视口宽度缩放；auth-modern.scss 的 px 直接用 dp。 */
-private class UniScale(private val width: Float) {
+internal class UniScale(private val width: Float) {
     fun dp(rpx: Int): Dp = (width * rpx / 750f).dp
     fun text(rpx: Int) = (width * rpx / 750f).sp
 }
@@ -85,29 +89,66 @@ private fun cssText(size: Int, color: Color = Ink, weight: FontWeight = FontWeig
 @Composable
 fun UniParityApp(model: BootstrapViewModel = viewModel()) {
     val state by model.state.collectAsStateWithLifecycle()
+    val business by model.business.state.collectAsStateWithLifecycle()
+    val preferences by model.settings.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scale = UniScale(LocalConfiguration.current.screenWidthDp.toFloat())
     var debugOpen by remember { mutableStateOf(false) }
     var endpoint by remember { mutableStateOf(RuntimeEndpoints.DEFAULT_API_BASE_URL) }
     var tab by remember { mutableStateOf("chat") }
     var legal by remember { mutableStateOf<String?>(null) }
+    var authRoute by remember { mutableStateOf<String?>(null) }
+    var chatPicker by remember {mutableStateOf<String?>(null)}
+    var globalSearch by remember{mutableStateOf(false)}
+    LaunchedEffect(state.authenticated) { if(state.authenticated)authRoute=null else {chatPicker=null;globalSearch=false} }
     val login = !state.sample && !state.authenticated
+    LaunchedEffect(state.notice,state.busy) {
+        if(!state.busy&&!state.sample&&state.notice.isNotBlank())NativeNotices.show(state.notice)
+    }
+    LaunchedEffect(business.notice) {
+        business.notice?.takeIf(String::isNotBlank)?.let { NativeNotices.show(it);model.business.clearNotice() }
+    }
     SideEffect {
         (context as? Activity)?.let { WindowInsetsControllerCompat(it.window, it.window.decorView).isAppearanceLightStatusBars = !login }
     }
-    BackHandler(enabled = debugOpen || legal != null || state.sample || state.authenticated || state.busy) {
+    BackHandler(enabled = debugOpen || legal != null || authRoute != null || chatPicker != null || globalSearch || business.subpage || state.chatOpen || state.sample || state.busy) {
         when {
             legal != null -> legal = null
             debugOpen -> debugOpen = false
+            authRoute != null -> authRoute = null
+            chatPicker != null -> chatPicker = null
+            globalSearch -> globalSearch=false
             state.chatOpen -> model.closeChat()
+            business.subpage -> model.business.back()
             else -> model.logout()
         }
     }
-    val toast: (String) -> Unit = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+    val toast: (String) -> Unit = NativeNotices::show
     when {
-        login -> UniLogin(state, endpoint, model, onDebug = { debugOpen = true }, onLegal = { legal = it }, toast = toast)
-        state.sample && state.chatOpen -> UniChat(state, model, scale, toast)
-        else -> UniHome(state, model, scale, tab, { tab = it }, toast)
+        login && authRoute != null -> NativeAuthPage(authRoute!!,model,endpoint,{authRoute=null},{legal=it})
+        login -> UniLogin(state, endpoint, model, onDebug = { debugOpen = true }, onLegal = { legal = it }, onAuth = { authRoute=it }, toast = toast)
+        globalSearch -> NativeGlobalChatSearch({globalSearch=false},model::searchAllMessages){hit->globalSearch=false;model.openSearchHit(hit)}
+        chatPicker != null && state.chat.active != null -> {
+            val mode=chatPicker!!
+            NativeChatPicker(mode,state.chat.active!!.title,{chatPicker=null},
+                {keyword,tab,page,cursor,done->model.loadChatPicker(mode,keyword,tab,page,cursor,done)},
+                {item,done->model.sendChatPicker(mode,item,done)},model::deleteChatFavorite)
+        }
+        state.chatOpen && !state.sample -> key(state.chat.active?.target?.conversationId) { NativeChatRoom(state.chat,NativeChatCallbacks(
+            onBack=model::closeChat,onLoadHistory=model::loadHistory,onSendText=model::sendQuotedText,onSendMedia=model::sendMedia,
+            onReconcile=model::reconcileMessage,onRetryFailed=model::retryFailedMessage,onRetryUpload=model::retryImageUpload,onDiscardUpload=model::discardImageUpload,onAction=model::messageAction,onForward=model::forwardMessage,
+            onOpenPeer={model.closeChat();model.openPeerProfile(it)},onOpenDetails=model::openChatDetails,
+            onOpenFavorites={chatPicker="favorite"},onOpenCards={chatPicker="card"},onLoadMentions=model::loadMentions,onSelectMention=model::selectMention,
+            onLoadForward=model::loadForwardTargets,onSubmitForward=model::submitForward,onForwardProgress=model::forwardProgress,onForwardTaskAction=model::forwardTaskAction,onConsumeForwardNotice=model::consumeForwardNotice,
+            onReportUser=model::reportChatUser,onLoadMessageMenu=model::loadMessageMenu,onAddSticker=model::addChatSticker,
+            onLoadStickers=model::loadChatStickers,onSendSticker=model::sendChatSticker,onDeleteSticker=model::deleteChatSticker,onManageStickers=model::manageChatStickers,
+            onRefreshPermission=model::refreshChatPermission,onRecall=model::recallChatMessage,
+            onAcceptGroupInvite=model::acceptChatGroupInvite,onOpenBusinessGroup=model::openBusinessGroupFromChat,onOpenJoinRequests=model::openJoinRequestsFromChat,
+            onOpenAnnouncements=model::openAnnouncementsFromChat,onDismissAnnouncement=model::dismissChatAnnouncement,onDismissPin=model::dismissChatPin,onLoadGroupMembers=model::loadVisibleChatMembers
+        ),state.profile?.avatar.orEmpty(),preferences.enterToSend) }
+        state.chatOpen -> key("offline-sample") { UniChat(state, model, scale, toast) }
+        state.authenticated && business.subpage -> NativeBusinessPage(model.business,model){legal=it}
+        else -> UniHome(state, model, scale, tab, { tab = it }, toast,onSearch={globalSearch=true})
     }
     if (debugOpen) AlertDialog(
         onDismissRequest = { debugOpen = false },
@@ -128,7 +169,7 @@ fun UniParityApp(model: BootstrapViewModel = viewModel()) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun UniLogin(state: BootstrapState, endpoint: String, model: BootstrapViewModel, onDebug: () -> Unit, onLegal: (String) -> Unit, toast: (String) -> Unit) {
+private fun UniLogin(state: BootstrapState, endpoint: String, model: BootstrapViewModel, onDebug: () -> Unit, onLegal: (String) -> Unit, onAuth:(String)->Unit, toast: (String) -> Unit) {
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var country by remember { mutableStateOf("+86") }
@@ -188,7 +229,7 @@ private fun UniLogin(state: BootstrapState, endpoint: String, model: BootstrapVi
                 })
                 Spacer(Modifier.height(16.dp))
                 Box(Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.CenterEnd) {
-                    Text("忘记密码", Modifier.clickable { toast("找回密码页面尚未接入，本轮仅还原登录。") }, style = cssText(13, Color.White), lineHeight = 24.sp)
+                    Text("忘记密码", Modifier.clickable { onAuth("forgot") }, style = cssText(13, Color.White), lineHeight = 24.sp)
                 }
                 Row(Modifier.fillMaxWidth().height(62.dp).padding(vertical = 20.dp), verticalAlignment = Alignment.Top) {
                     Box(Modifier.requiredSize(24.dp).offset(x = (-4).dp).clickable(role = Role.Checkbox) { agreed = !agreed }.semantics { contentDescription = "同意用户协议和隐私政策" }, contentAlignment = Alignment.Center) {
@@ -208,9 +249,8 @@ private fun UniLogin(state: BootstrapState, endpoint: String, model: BootstrapVi
                 }, contentAlignment = Alignment.Center) {
                     Text(if (state.busy) "登录中…" else "登录", style = cssText(16, Primary, FontWeight.Medium))
                 }
-                if (state.notice.isNotBlank() && !state.busy) Text(state.notice, Modifier.padding(top = 12.dp), style = cssText(12, Color(0xFFE2E8F0)))
                 Spacer(Modifier.height(28.dp))
-                Text("立即注册", Modifier.clickable { toast("注册页面尚未接入，本轮仅还原登录。") }, style = cssText(14, Color.White), lineHeight = 24.sp)
+                Text("立即注册", Modifier.clickable { onAuth("register") }, style = cssText(14, Color.White), lineHeight = 24.sp)
                 Spacer(Modifier.height(32.dp))
             }
         }
@@ -274,24 +314,35 @@ private fun LegalSheet(kind: String, dismiss: () -> Unit) {
 }
 
 @Composable
-private fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniScale, tab: String, changeTab: (String) -> Unit, toast: (String) -> Unit) {
+internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniScale, tab: String, changeTab: (String) -> Unit, toast: (String) -> Unit,onSearch:()->Unit={},businessController:BusinessController=model.business) {
+    var addMenu by remember { mutableStateOf(false) }
+    var moreMenu by remember{mutableStateOf(false)}
     Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding()) {
         if (state.sample) SampleStrip(s) else state.profileWarning?.let { Text(it, Modifier.fillMaxWidth().background(Color(0xFFF3F4F7)).padding(horizontal = s.dp(24), vertical = s.dp(12)), fontSize = s.text(24), color = Hint) }
-        Row(Modifier.fillMaxWidth().height(s.dp(96)).padding(horizontal = s.dp(40)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        if(!state.sample && tab=="chat") ChatStatus(state,model,s)
+        if(tab!="mine" || state.sample) Row(Modifier.fillMaxWidth().height(s.dp(96)).padding(horizontal = s.dp(40)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(when (tab) { "contacts" -> "通讯录"; "mine" -> "我的"; else -> "聊天" }, fontSize = s.text(48), lineHeight = s.text(64), color = Ink, fontWeight = FontWeight.Bold)
             if (tab != "mine") Row(verticalAlignment = Alignment.CenterVertically) {
-                if (tab == "chat") Text("⋯", Modifier.size(s.dp(64)).clickable { toast(if (state.sample) "本地样例没有待标记的未读消息。" else "聊天功能接入中。") }.wrapContentSize(), fontSize = s.text(44), fontWeight = FontWeight.Bold)
-                Image(painterResource(R.drawable.uni_icon_plus), "添加", Modifier.size(s.dp(64)).padding(s.dp(8)).clickable { toast("添加朋友、群聊与创建群聊尚未接入。") })
+                if (tab == "chat")Box {
+                    Text("⋯",Modifier.size(s.dp(64)).clickable{moreMenu=true}.wrapContentSize(),fontSize=s.text(44),fontWeight=FontWeight.Bold)
+                    androidx.compose.material3.DropdownMenu(moreMenu,{moreMenu=false}){androidx.compose.material3.DropdownMenuItem(text={Text("全部已读")},onClick={moreMenu=false;if(state.sample)toast("本地样例没有未读消息") else model.markLoadedConversationsRead(toast)})}
+                }
+                Box {
+                    Image(painterResource(R.drawable.uni_icon_plus), "添加", Modifier.size(s.dp(64)).padding(s.dp(8)).clickable { if(!state.sample)addMenu=true })
+                    androidx.compose.material3.DropdownMenu(addMenu,{addMenu=false}) {
+                        listOf("添加朋友" to "add-friend","添加群聊" to "add-group","创建群聊" to "create-group","扫一扫" to "scan").forEach{(label,page)->androidx.compose.material3.DropdownMenuItem(text={Text(label)},onClick={addMenu=false;model.business.open(page)})}
+                    }
+                }
             }
         }
         Box(Modifier.weight(1f)) {
             when (tab) {
-                "chat" -> ConversationList(state, model, s, toast)
-                "contacts" -> Column(Modifier.fillMaxSize()) {
+                "chat" -> ConversationList(state, model, s, toast,onSearch)
+                "contacts" -> if(!state.sample)ContactsHome(businessController,state.chat.conversations.filter{it.target.sessionType==1}.map{businessUserId(it.target.userId)}) else Column(Modifier.fillMaxSize()) {
                     Search(s, "搜索", "", {}, toast)
                     Text(if (state.sample) "当前本地样例没有通讯录。" else "通讯录功能接入中。", Modifier.align(Alignment.CenterHorizontally).padding(top = s.dp(80)), fontSize = s.text(28), color = Hint)
                 }
-                else -> Column(Modifier.fillMaxSize().padding(horizontal = s.dp(40))) {
+                else -> if(!state.sample)MineHome(businessController,state.profile,model::logout) else Column(Modifier.fillMaxSize().padding(horizontal = s.dp(40))) {
                     Row(Modifier.fillMaxWidth().padding(vertical = s.dp(36)), verticalAlignment = Alignment.CenterVertically) {
                         Image(painterResource(R.drawable.uni_avatar_default), "我的头像", Modifier.size(s.dp(112)).clip(CircleShape))
                         Column(Modifier.padding(start = s.dp(28))) {
@@ -302,7 +353,7 @@ private fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniScal
                             }
                         }
                     }
-                    Text(if (state.sample) "本轮仅还原登录、导航、会话和文本聊天。" else "聊天、通讯录功能接入中。", Modifier.padding(vertical = s.dp(20)), fontSize = s.text(26), color = Hint)
+                    Text(if (state.sample) "本轮仅还原登录、导航、会话和文本聊天。" else "当前已登录，聊天状态可在聊天页查看。", Modifier.padding(vertical = s.dp(20)), fontSize = s.text(26), color = Hint)
                     Text(if (state.sample) "退出本地样例并清除内容" else "退出登录", Modifier.fillMaxWidth().clickable { model.logout() }.padding(vertical = s.dp(30)), fontSize = s.text(28), color = Primary)
                 }
             }
@@ -317,14 +368,68 @@ private fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniScal
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s: UniScale, toast: (String) -> Unit) {
+private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s: UniScale, toast: (String) -> Unit,onSearch:()->Unit) {
     var query by remember { mutableStateOf("") }
+    var filterUnread by remember{mutableStateOf(false)}
+    var filters by remember{mutableStateOf(false)}
+    var swipe by remember{mutableStateOf<String?>(null)}
+    var hits by remember{mutableStateOf(emptyList<ChatGlobalHit>())};var searchPage by remember{mutableIntStateOf(0)};var searchEnd by remember{mutableStateOf(false)};var searching by remember{mutableStateOf(false)};var searchError by remember{mutableStateOf("")};var searchVersion by remember{mutableIntStateOf(0)}
+    fun searchMore(reset:Boolean=false){
+        if(query.isBlank()||searching&&!reset)return
+        if(reset){searchVersion++;hits=emptyList();searchPage=0;searchEnd=false}
+        val version=searchVersion;searching=true;searchError=""
+        model.searchAllMessages(query,searchPage+1,60){result->if(version==searchVersion){searching=false;result.fold({page->hits=(hits+page.hits).distinctBy{it.conversation.target.conversationId+":"+it.message.id};searchPage=page.page;searchEnd=page.end},{searchError=it.message?:"搜索未完成"})}}
+    }
+    LaunchedEffect(query){searchVersion++;searching=false;hits=emptyList();searchPage=0;searchEnd=false;if(query.isNotBlank()&&!state.sample){kotlinx.coroutines.delay(300);searchMore(true)}}
+    var selected by remember{mutableStateOf<ChatConversation?>(null)}
+    val result:(Result<Unit>)->Unit={it.fold({},{error->toast(error.message?:"操作未完成")})}
+    selected?.let{item->AlertDialog(onDismissRequest={selected=null},title={Text(item.title)},text={Column {
+        TextButton(onClick={selected=null;model.updateConversation(item,pinned=!item.pinned,done=result)}){Text(if(item.pinned)"取消置顶" else "置顶")}
+        TextButton(onClick={selected=null;model.updateConversation(item,muted=!item.muted,done=result)}){Text(if(item.muted)"取消免打扰" else "消息免打扰")}
+        TextButton(onClick={selected=null;model.markConversationRead(item,result)}){Text("标为已读")}
+        TextButton(onClick={selected=null;model.hideConversation(item,result)}){Text("移出会话列表")}
+    }},confirmButton={TextButton(onClick={selected=null}){Text("取消")}})}
     Column(Modifier.fillMaxSize()) {
         Search(s, "搜索聊天 / 关键词", query, { query = it }, toast)
         Row(Modifier.fillMaxWidth().padding(start = s.dp(40), end = s.dp(40), bottom = s.dp(8)), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            Text("全部", Modifier.clickable { toast(if (state.sample) "本地样例仅展示一条会话。" else "聊天功能接入中。") }, color = Hint, fontSize = s.text(24), lineHeight = s.text(40))
+            if(!state.sample&&state.chat.conversations.any{it.unread>0})Text("全部已读",Modifier.weight(1f).clickable{model.markLoadedConversationsRead(toast)},color=Primary,fontSize=s.text(24))
+            Box {
+                Text(if(filterUnread)"未读" else "全部", Modifier.clickable { filters=true }, color = Hint, fontSize = s.text(24), lineHeight = s.text(40))
+                androidx.compose.material3.DropdownMenu(filters,{filters=false}){listOf(false to "全部",true to "未读").forEach{(unread,label)->androidx.compose.material3.DropdownMenuItem(text={Text(label)},onClick={filterUnread=unread;filters=false})}}
+            }
             Text("▾", Modifier.padding(start = s.dp(4)), color = Hint, fontSize = s.text(20))
+        }
+        if(!state.sample) {
+            NativePullRefresh(state.chat.conversationsLoading,{model.loadConversations(true)},Modifier.weight(1f)){LazyColumn(Modifier.fillMaxSize()) {
+                items(state.chat.conversations.filter { (!filterUnread||it.unread>0)&&(query.isBlank()||it.title.contains(query,true)||it.preview.contains(query,true)) },key={ it.target.conversationId }) { item ->
+                    NativeConversationSwipe(swipe==item.target.conversationId,{swipe=item.target.conversationId},{swipe=null},item.pinned,s.dp(140),{model.updateConversation(item,pinned=!item.pinned,done=result)},{model.hideConversation(item,result)}) {
+                    Row(Modifier.fillMaxWidth().background(if(item.pinned)Color(0xFFF3F4F7) else Color.White).combinedClickable(onClick={if(swipe!=null)swipe=null else model.openRealChat(item)},onLongClick={selected=item}).padding(horizontal=s.dp(40),vertical=s.dp(24)),verticalAlignment=Alignment.CenterVertically) {
+                        SharedAvatar(item.avatar,Modifier.size(s.dp(96)).clip(CircleShape),item.target.sessionType==3)
+                        Column(Modifier.weight(1f).padding(start=s.dp(24))) {
+                            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                                Text(item.title,Modifier.weight(1f),fontSize=s.text(32),fontWeight=FontWeight.Medium,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                if(item.time>0)Text(java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(if(item.time<10_000_000_000L)item.time*1000 else item.time)),fontSize=s.text(22),color=Color(0xFF999999))
+                            }
+                            Row(Modifier.padding(top=s.dp(12)),verticalAlignment=Alignment.CenterVertically){Text(item.preview,Modifier.weight(1f),fontSize=s.text(26),color=Color(0xFF999999),maxLines=1,overflow=TextOverflow.Ellipsis);if(item.muted)Text("免打扰",fontSize=s.text(20),color=Hint);if(item.unread>0)Text(if(item.unread>99)"99+" else item.unread.toString(),Modifier.padding(start=s.dp(8)).clip(CircleShape).background(Color(0xFFEF4444)).padding(horizontal=s.dp(10),vertical=s.dp(2)),fontSize=s.text(22),color=Color.White)}
+                        }
+                    }
+                    }
+                }
+                if(query.isNotBlank()) {
+                    items(hits.groupBy{it.conversation.target.conversationId}.values.toList(),key={"search:"+it.first().conversation.target.conversationId}){matches->
+                        val hit=matches.first()
+                        Row(Modifier.fillMaxWidth().clickable{model.openSearchHit(hit)}.padding(horizontal=s.dp(40),vertical=s.dp(20)),verticalAlignment=Alignment.CenterVertically){SharedAvatar(hit.conversation.avatar,Modifier.size(s.dp(96)),hit.conversation.target.sessionType==3);Column(Modifier.weight(1f).padding(start=s.dp(24))){Text(hit.conversation.title,fontSize=s.text(32));Text("${matches.size} 条相关聊天记录",fontSize=s.text(24),color=Hint);Text(hit.message.text,maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=s.text(26),color=Hint)}}
+                    }
+                    item{Text(if(searching)"搜索中…" else if(searchError.isNotBlank())searchError+" · 重试" else if(searchEnd)"没有更多了" else "点击查找更早的聊天记录",Modifier.fillMaxWidth().clickable(enabled=!searching){searchMore()}.padding(s.dp(28)).wrapContentWidth(),fontSize=s.text(24),color=Hint)}
+                }
+                item {
+                    Text(when { state.chat.conversationsLoading->"正在读取…";state.chat.conversations.isEmpty()->"暂无对话，点击重试读取";state.chat.conversationsEnd->"已显示全部会话";else->"加载更多会话" },Modifier.fillMaxWidth().clickable(enabled=state.chat.loggedIn&&!state.chat.conversationsLoading) { model.loadConversations(state.chat.conversations.isEmpty()) }.padding(s.dp(32)).wrapContentWidth(),fontSize=s.text(26),color=Hint)
+                }
+            }
+            }
+            return@Column
         }
         if (state.sample && (query.isBlank() || "交互测试 本地样例".contains(query))) Row(Modifier.fillMaxWidth().clickable { model.openChat() }.padding(horizontal = s.dp(40), vertical = s.dp(24)), verticalAlignment = Alignment.CenterVertically) {
             Image(painterResource(R.drawable.uni_avatar_1), "交互测试头像", Modifier.size(s.dp(96)).clip(CircleShape), contentScale = ContentScale.Crop)
@@ -355,24 +460,45 @@ private fun SampleStrip(s: UniScale) {
 
 @Composable
 private fun UniChat(state: BootstrapState, model: BootstrapViewModel, s: UniScale, toast: (String) -> Unit) {
+    val displayMessages=if(state.sample) state.messages.map { ChatMessage(it.id,it.text,it.mine,0) } else state.chat.messages
     var text by remember { mutableStateOf("") }
+    var submitting by remember { mutableStateOf(false) }
+    var initialScrollDone by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val lastId = state.messages.lastOrNull()?.id
-    LaunchedEffect(lastId) { if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex) }
+    val lastId = displayMessages.lastOrNull()?.id
+    LaunchedEffect(lastId,state.chat.historyLoading) {
+        if(displayMessages.isNotEmpty()) {
+            val end=displayMessages.lastIndex+if(state.sample)0 else 1
+            if(!initialScrollDone && (state.sample||!state.chat.historyLoading)) { listState.scrollToItem(end);initialScrollDone=true }
+            else if(initialScrollDone && (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: Int.MAX_VALUE)>=end-2) listState.animateScrollToItem(end)
+        }
+    }
     Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().background(Color.White).height(s.dp(110)).padding(horizontal = s.dp(26), vertical = s.dp(8)), verticalAlignment = Alignment.CenterVertically) {
             Text("‹", Modifier.size(s.dp(52)).clickable { model.closeChat() }.wrapContentSize(), fontSize = s.text(52), color = Color(0xFF1A1A1A))
-            Text("交互测试", Modifier.weight(1f), fontSize = s.text(34), fontWeight = FontWeight.Bold, color = Color(0xFF111111))
+            Text(if(state.sample) "交互测试" else state.chat.active?.title.orEmpty(), Modifier.weight(1f), fontSize = s.text(34), fontWeight = FontWeight.Bold, color = Color(0xFF111111))
             Text("⋯", Modifier.size(s.dp(52)).clickable { toast("聊天资料与更多操作尚未接入。") }.wrapContentSize(), fontSize = s.text(42), color = Color(0xFF444444))
         }
-        SampleStrip(s)
+        if(state.sample) SampleStrip(s) else {
+            ChatStatus(state,model,s)
+            if(state.chat.active?.target?.sessionType==3) Text("群消息保留规则尚未完成验证",Modifier.fillMaxWidth().padding(s.dp(12)),fontSize=s.text(22),color=Hint)
+        }
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().background(ScreenGray), contentPadding = PaddingValues(vertical = s.dp(8))) {
-            items(state.messages, key = { it.id }, contentType = { "text" }) { msg ->
+            if(!state.sample) item {
+                Text(when { state.chat.historyLoading->"正在读取…";state.chat.historyEnd->"已到最早消息";else->"加载更早消息 / 重试" },Modifier.fillMaxWidth().clickable(enabled=state.chat.ready&&!state.chat.historyLoading&&!state.chat.historyEnd) { model.loadHistory() }.padding(s.dp(24)).wrapContentWidth(),fontSize=s.text(24),color=Hint)
+            }
+            items(displayMessages, key = { it.id }, contentType = { "text" }) { msg ->
                 Row(Modifier.fillMaxWidth().padding(horizontal = s.dp(24), vertical = s.dp(16)), horizontalArrangement = if (msg.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
                     if (!msg.mine) Image(painterResource(R.drawable.uni_avatar_1), "对方头像", Modifier.size(s.dp(72)).clip(CircleShape), contentScale = ContentScale.Crop)
                     Column(Modifier.widthIn(max = (LocalConfiguration.current.screenWidthDp * .7f).dp).padding(horizontal = s.dp(16)), horizontalAlignment = if (msg.mine) Alignment.End else Alignment.Start) {
                         val shape = if (msg.mine) RoundedCornerShape(s.dp(16), s.dp(4), s.dp(16), s.dp(16)) else RoundedCornerShape(s.dp(4), s.dp(16), s.dp(16), s.dp(16))
+                        if(!state.sample && !msg.mine && state.chat.active?.target?.sessionType==3 && msg.sender.isNotBlank()) Text(msg.sender,Modifier.padding(bottom=s.dp(4)),fontSize=s.text(22),color=Hint)
                         Text(msg.text, Modifier.clip(shape).background(if (msg.mine) Color(0xFF2B5CFF) else Color.White).padding(horizontal = s.dp(22), vertical = s.dp(18)), fontSize = s.text(30), lineHeight = s.text(45), color = if (msg.mine) Color.White else Color(0xFF222222))
+                        if(!state.sample && msg.mine) {
+                            val pending=state.chat.outbox.firstOrNull { it.id==msg.id }
+                            val label=when(pending?.state) { OutboxState.PENDING->"待提交";OutboxState.SENDING->"发送中";OutboxState.UNCERTAIN->"结果待核对 · 点击核对";OutboxState.FAILED->"发送失败 · 点击核对";OutboxState.ACCEPTED->"已提交";null->if(msg.status==2||msg.seq>0) "已提交" else "结果待核对" }
+                            Text(label,Modifier.padding(top=s.dp(6)).clickable(enabled=pending!=null&&pending.state !in listOf(OutboxState.SENDING,OutboxState.ACCEPTED)) { model.reconcileMessage(msg.id) },fontSize=s.text(20),color=Hint)
+                        }
                     }
                     if (msg.mine) Image(painterResource(R.drawable.uni_avatar_default), "我的头像", Modifier.size(s.dp(72)).clip(CircleShape), contentScale = ContentScale.Crop)
                 }
@@ -385,7 +511,23 @@ private fun UniChat(state: BootstrapState, model: BootstrapViewModel, s: UniScal
                 Text("☺", Modifier.size(s.dp(60)).clickable { toast("表情面板尚未接入。") }.wrapContentSize(), fontSize = s.text(36), color = Color(0xFF666666))
             }
             Text("+", Modifier.size(s.dp(64)).clickable { toast("照片、文件与收藏尚未接入。") }.wrapContentSize(), fontSize = s.text(40), color = Color(0xFF333333))
-            if (text.isNotBlank()) Box(Modifier.height(s.dp(64)).clip(RoundedCornerShape(s.dp(10))).background(Primary).clickable { model.sendSample(text); text = "" }.padding(horizontal = s.dp(24)), contentAlignment = Alignment.Center) { Text("传送", fontSize = s.text(28), color = Color.White) }
+            if (text.isNotBlank()) Box(Modifier.height(s.dp(64)).clip(RoundedCornerShape(s.dp(10))).background(Primary).clickable(enabled=!submitting&&(state.sample||state.chat.ready)) {
+                val submittedText=text
+                submitting=true
+                model.sendText(submittedText) { saved -> submitting=false;if(saved&&text==submittedText) text="" }
+            }.padding(horizontal = s.dp(24)), contentAlignment = Alignment.Center) { Text("传送", fontSize = s.text(28), color = Color.White) }
         }
+    }
+}
+
+@Composable
+private fun ChatStatus(state:BootstrapState,model:BootstrapViewModel,s:UniScale) {
+    val chat=state.chat
+    val connection=when(chat.connection) { ConnectionState.IDLE->"聊天待连接";ConnectionState.CONNECTING->"连接中";ConnectionState.CONNECTED->"已连接";ConnectionState.DISCONNECTED->"连接中断，正在重连";ConnectionState.AUTH_REQUIRED->"聊天登录已失效" }
+    val store=when(chat.store) { StoreStatus.CLOSED->"本地记录未打开";StoreStatus.OPENING->"本地记录准备中";StoreStatus.READABLE->"本地记录可读";StoreStatus.FAILED->"本地记录暂不可用" }
+    val sync=when(chat.sync) { SyncStatus.IDLE->"等待同步";SyncStatus.RUNNING->"同步中";SyncStatus.COMPLETED->"同步完成";SyncStatus.FAILED->"同步未完成";SyncStatus.TIMED_OUT->"同步超时";SyncStatus.CANCELLED->"同步已取消" }
+    Column(Modifier.fillMaxWidth().background(Color(0xFFF3F4F7)).padding(horizontal=s.dp(24),vertical=s.dp(8))) {
+        Text("$connection · $store · $sync",fontSize=s.text(21),color=Hint)
+        chat.error?.let { Text(it,Modifier.clickable(enabled=chat.loggedIn) { if(chat.active==null) model.loadConversations(true) else model.loadHistory() }.padding(top=s.dp(6)),fontSize=s.text(24),color=Primary) }
     }
 }

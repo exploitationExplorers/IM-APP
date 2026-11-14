@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><title>历史聊天图片性能与流量优化方案</title>
+<style>
+:root{--ink:#17263a;--muted:#52677b;--line:#dce5ed;--blue:#1658ac;--teal:#08796e}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f3f6f9;color:var(--ink);font:15px/1.85 system-ui,"Microsoft YaHei",sans-serif}header{background:#122c46;color:white;padding:34px max(24px,calc((100vw - 1280px)/2))}header strong{font-size:28px;line-height:1.4;display:block}header p{color:#d1e0ee;margin:9px 0}.badge{display:inline-block;margin-top:12px;padding:4px 12px;border:1px solid #7799b8;border-radius:5px;font-size:12px}.layout{max-width:1340px;margin:26px auto;display:grid;grid-template-columns:245px minmax(0,1fr);gap:22px;padding:0 22px}nav{position:sticky;top:16px;align-self:start;background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px}nav a{display:block;text-decoration:none;color:#3c5268;font-size:12px;padding:7px 8px;border-radius:4px}nav a:hover,nav a:focus{background:#edf4fb;color:var(--blue)}main{min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;padding:28px 34px}h1{font-size:27px;line-height:1.45;margin-top:0}h2{font-size:21px;line-height:1.5;margin:32px 0 16px;padding-top:24px;border-top:1px solid var(--line);scroll-margin-top:18px}p{margin:12px 0;overflow-wrap:anywhere}a{color:var(--blue)}code{font:12px/1.8 ui-monospace,Consolas,monospace;background:#eff3f7;border-radius:3px;padding:2px 4px;overflow-wrap:anywhere}pre{padding:20px;background:#14283e;color:#edf5ff;border-radius:7px;overflow:auto}pre code{background:none;padding:0;white-space:pre;color:inherit}.table-scroll{overflow-x:auto;margin:18px 0}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid var(--line);padding:11px 12px;vertical-align:top;text-align:left;min-width:110px}th{background:#edf3f9;color:#243f59}.decision{background:#edf8f5;border-left:4px solid var(--teal);padding:16px 20px;margin-bottom:24px}.decision strong{font-size:18px;color:#0a6259}.decision p{margin:6px 0}.flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0;list-style:none;margin:18px 0}.flow li{border:1px solid var(--line);padding:16px;background:#f7f9fc;border-radius:6px;font-size:13px}.flow b{display:block;margin-bottom:7px;color:#164d80;font-size:15px}.flow small{color:var(--muted)}.note{font-size:12px;color:var(--muted)}footer{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}@media(max-width:920px){.layout{display:block;padding:0 14px}nav{position:static;margin-bottom:18px;display:flex;flex-wrap:wrap}nav a{max-width:100%}main{padding:22px 18px}.flow{grid-template-columns:1fr}header strong{font-size:24px}}@media print{body{background:white}.layout{display:block;padding:0;margin:0}nav{display:none}main{padding:0;border:none}header{background:white;color:var(--ink);padding:15px 0}header p{color:var(--muted)}h2{break-after:avoid}tr{break-inside:avoid}.decision,.flow{break-inside:avoid}}
+</style></head><body>
+<header><strong>历史图片：先做到再次打开不重复传图</strong><p>保留现有 UI 与 OpenIM 内核，完善原生媒体缓存、请求调度和图片交付。</p><span class="badge">2026-11-13 · 源码 + REA 静态证据 · 性能指标待实测</span></header>
+<div class="layout"><nav aria-label="方案目录"><a href="#section-0">1. 建议与本次问题</a><a href="#section-1">2. “只下载一次”、本地缓存、CDN 与 OSS 的关系</a><a href="#section-2">3. 本次分析绑定的版本</a><a href="#section-3">4. 三个版本的已知差异</a><a href="#section-4">5. 当前原生版确实存在的优化缺口</a><a href="#section-5">6. 一次复现就应记录清楚的链路</a><a href="#section-6">7. 推荐实现：保留消息内核，建设统一媒体层</a><a href="#section-7">8. 真缩略图、旧消息与服务端兼容</a><a href="#section-8">9. 发送图片的单独优化</a><a href="#section-9">10. 是否需要自研 SDK</a><a href="#section-10">11. 实施顺序与交付</a><a href="#section-11">12. 验收：重复打开零整图下载，首次打开减少等待</a><a href="#section-12">13. 证据与尚未回答的问题</a></nav><main>
+<section class="decision"><strong>建议：先建设自有 IMKit／媒体层</strong><p>当前证据支持优先修缓存身份、离屏取消、可见图片优先与真实缩略图；暂不支持从零重写整套消息 SDK。</p></section>
+<section aria-label="缓存层级示意"><p class="note">机制示意，不代表参考软件运行数据；本地缓存未命中时才进入后续层级。</p><ol class="flow"><li><b>① 手机本地</b>内存 → 磁盘<br><small>有效且授权允许：直接显示，避免图像响应体下载。</small></li><li><b>② CDN 边缘</b>本地未命中 → 就近取图<br><small>仍有用户下行流量；命中减少回源，不能替代手机缓存。</small></li><li><b>③ 对象存储</b>CDN 未命中 → 回源<br><small>用真实缩略图减少字节，按权限与规格控制缓存。</small></li></ol></section>
+<h1 id="document-title">历史聊天图片性能与流量优化方案</h1>
+<p>日期：2026-11-13。适用范围：现有 uni-app、已交付 Android 原生测试版，以及后续 iOS 原生版。本文是基于本地源码与竞品 APK 静态分析制定的实施方案；尚未采集用户慢图的真实网络与性能数据。</p>
+<h2 id="section-0">1. 建议与本次问题</h2>
+<p>实施更新：用户已同意按本方案开发，本轮已落地 Android 历史图片媒体层与 iOS 缓存身份等配套代码；具体交付、验证边界和仍需 Mac／真实样本完成的阶段，见<a href="本轮实施与验证.md">本轮实施与验证</a>。以下调查结论中的“当前 Android”特指原先交付的 0.3.0-parity，不能混同为优化后的实现。</p>
+<p>建议保留 OpenIM 消息内核，优先重做应用自己的媒体加载与缓存层，形成统一的 IMKit。第一目标是解决“打开历史聊天，旧图片显示慢”；第二目标是减少同一资源的重复下载及 CDN／OSS 流量。当前证据不足以支持从零自研整套 IM SDK。</p>
+<p>原生能够减少桥接和界面开销，但不会自动解决图片缓存键不稳定、离屏请求占队列、旧消息没有有效缩略图或存储交付慢。要达到接近参考软件的体验，需要把这条链路做完整，并在同设备、同网络、相同缓存状态下验收。</p>
+<p>用户新增的聊天截图提出：“对方图片每个只下载一次，我们每次打开重新下载，CDN 和 OSS 流量大。”这提供了很明确的验证方向，但属于使用反馈，尚不是网络抓包证明。方案会直接验证第二次打开的图片响应体字节数，而不是只凭肉眼判断。</p>
+<p>本次不修改业务后端、旧 uni-app 或线上部署；UI 和功能继续以原 uni-app 为基准。优化方案不要求改聊天外观。</p>
+<h2 id="section-1">2. “只下载一次”、本地缓存、CDN 与 OSS 的关系</h2>
+<p>“只下载一次”应定义为：同一账号与授权范围、同一资源版本、同一图片规格，在本地有效缓存未被清除或淘汰时，再次打开不重新传输该图片的响应体。它不是永久保存所有图片的承诺；系统清理、用户清缓存、重装、缓存容量淘汰、切换原图规格或资源更新后，可能需要重新下载。</p>
+<div class="table-scroll"><table><thead><tr><th>层级</th><th>作用</th><th>命中后仍可能产生什么流量</th></tr></thead><tbody>
+<tr><td>手机内存缓存</td><td>直接显示解码后的图片</td><td>通常无需图片网络请求</td></tr>
+<tr><td>手机磁盘缓存</td><td>重启后仍可读取图片文件</td><td>有效且授权允许时可避免图片响应体下载；必要的权限校验另计</td></tr>
+<tr><td>HTTP 条件缓存</td><td>服务端验证文件是否变化</td><td>304 仍有请求和响应头，但没有整图响应体</td></tr>
+<tr><td>CDN 边缘缓存</td><td>就近分发，减少 OSS 回源</td><td>用户重新下载仍产生 CDN 下行流量及请求；具体账单按厂商计费</td></tr>
+<tr><td>OSS／对象存储</td><td>保存原图与派生图片，承担未命中回源</td><td>CDN 命中可减少回源；直连下载则仍从对象存储取图</td></tr>
+</tbody></table></div>
+<p>因此，购买 CDN 无法替代手机本地缓存；仅修手机缓存也不能保证首次打开很快。客户端负责减少重复传输，缩略图减少每次传输字节，CDN 优化第一次下载和跨设备访问。</p>
+<p>本项目确实包含 OSS 集成与 CDN 地址配置能力。是否已在生产生效、缓存命中率多少，不能从仓库配置模板得出。</p>
+<p>参考 APK 已确认把独立上传／下载域名配置交给 OpenIM，并在图片加载前调用 <code>resolveFileURL</code>。打包的备用下载域名是 <code>static.fitd5c.com</code>，上传域名是 <code>upload.fitd5c.com</code>；它们是 fallback 配置，不代表已观察到实际启用。另有阿里云 OSS 地址承载备用域名配置文件，不能据此认定聊天图片就存在该 OSS。仅凭下载域名也不能确认 CDN；没有实际响应与路由证据时，CDN 厂商、命中率和聊天对象存储归属仍未知。详见<a href="../../.analysis/media-performance-20261113/storage-cdn-audit.md">存储与 CDN 审计</a>。</p>
+<h2 id="section-2">3. 本次分析绑定的版本</h2>
+<div class="table-scroll"><table><thead><tr><th>对象</th><th>身份与验证范围</th></tr></thead><tbody>
+<tr><td>已交付 Android</td><td><code>IM-Android-0.3.0-parity.apk</code>，versionCode 4，SHA-256：<code>45602e64190280ec4f52d82772421df4f6f73e3cf8489fa253c2cc2f32b3b423</code></td></tr>
+<tr><td>当前 Android 源码</td><td>已与交付清单中 145 个源码／资源文件逐项核对，无差异；不把后续 iOS 修改当成 APK 内容</td></tr>
+<tr><td>参考软件</td><td>用户指定的 <code>YanChat-3.2.0.apk</code>，包名 <code>xkphtjvv.android</code>；SHA-256：<code>8144707b09d5e5260c65624b5efa0e0992e39a047cbaecf841a1f8d8a22f2f3d</code></td></tr>
+<tr><td>分析工具</td><td>REA 6.4.0、已有 JADX 0.7.1；工具缓存、临时目录和证据放 D 盘，未启动参考 APK 或访问其服务</td></tr>
+<tr><td>已有验证</td><td>Android 131 项单测通过、Lint 无错误、本地 SDK／页面冒烟通过；这些不是历史图片性能验收</td></tr>
+</tbody></table></div>
+<p>当前交付包为 Debug 测试包。不能将它与对方正式版的主观体验直接当成公平跑分；后续应使用配置明确、可分析且启用预期优化的性能构建，并保留原发布门禁。</p>
+<h2 id="section-3">4. 三个版本的已知差异</h2>
+<div class="table-scroll"><table><thead><tr><th>项目</th><th>原 uni-app</th><th>当前 Android 原生</th><th>参考 APK 的可验证事实</th></tr></thead><tbody>
+<tr><td>消息引擎</td><td>OpenIM 跨端适配</td><td>官方 OpenIM Android 查询与发送接口</td><td>定制 OpenIM Android／Core，并非已证实从零自研</td></tr>
+<tr><td>历史分页</td><td>已有分页与消息映射</td><td>SDK 每页 40 条，已有本地可读状态</td><td>REA 确认 <code>getAdvancedHistoryMessageList</code> 与分页游标</td></tr>
+<tr><td>聊天列表</td><td>uni-app 组件</td><td>Compose LazyColumn，稳定消息 ID 与解析缓存</td><td>原生 ViewBinding／RecyclerView，关闭 item animator</td></tr>
+<tr><td>图片地址</td><td>缩略图候选与 URL 转换</td><td>snapshot 优先，部分 URL 请求 360px 列表图</td><td>气泡调用统一图片封装；宽高先占位，按消息 ID 防复用错图</td></tr>
+<tr><td>缓存与队列</td><td>规范化缓存身份，前台队列，有限预取</td><td>已有内存／磁盘缓存，但完整 URL 作 key；共享 3 槽，取消与维护待补齐</td><td>实际封装执行 URL resolver → Glide load → 请求选项 → ImageView；尚不能证明永不重复下载</td></tr>
+<tr><td>网络性能</td><td>未在本轮测量</td><td>未采集本次慢图的分段耗时</td><td>无账号运行与网络响应，不能量化领先幅度</td></tr>
+</tbody></table></div>
+<p>REA 的 <code>ChatImageSizeHelper.bind</code>、<code>com.vchat.core.utils.j.b.f</code> 与 <code>j.b.j</code> 已形成实际图片调用链。封装显式选择 Glide 策略字段并设置请求选项，URL 解析异常时保留原地址。本轮未完整还原 Glide 全局缓存 key／容量配置、Go resolver 内部算法，也没有运行时冷暖缓存观察；因此不能把“对方每张图永远只下载一次”当成已被反编译证明的结论。</p>
+<p>不能只因参考软件使用 RecyclerView，就认定当前 Compose 必须全部更换。当前原生端已有列表复用；应先测帧时间与媒体管线，避免用大规模 UI 重写代替定位。</p>
+<h2 id="section-4">5. 当前原生版确实存在的优化缺口</h2>
+<p>以下为源码观察，不等同于已确认用户设备上的主因。详细 file:line 见<a href="../../.analysis/media-performance-20261113/current-pipeline-audit.md">当前链路审计</a>。</p>
+<div class="table-scroll"><table><thead><tr><th>代码事实</th><th>可能造成的体验／流量问题</th><th>对应改进</th></tr></thead><tbody>
+<tr><td><code>MediaLoader.kt:25/30/76</code> 用完整输入 URL 的 SHA-256 作磁盘 key</td><td>部分直签 URL 的签名或参数顺序变化，会把同一资源当成新图</td><td>使用受控、稳定、隔离的资源身份，下载仍使用有效授权 URL</td></tr>
+<tr><td>稳定 <code>/object/</code>、oss-media 入口也有缓存</td><td>这类入口的最终 302 签名轮换不会改变原输入 key</td><td>不能笼统认定每次打开全部缓存失效，必须按 URL 类型验证</td></tr>
+<tr><td><code>MediaLoader.kt:20/35</code> 所有媒体共用 3 槽，缺少当前可见优先级</td><td>离屏大图、头像或文件可能挤占当前聊天图</td><td>可见请求优先，大文件与预取限流，按实测调并发</td></tr>
+<tr><td>阻塞下载未在协程取消时立即关闭连接与读流</td><td>切会话或快速滑动后，旧任务继续占用资源</td><td>生命周期取消传递至网络 Call，释放连接与槽位</td></tr>
+<tr><td>每张图完成后扫描并排序整个缓存目录</td><td>文件多时增加维护开销</td><td>索引记录大小与访问时间，后台批量清理</td></tr>
+<tr><td>组件重新启动时先清空 visual 再查缓存</td><td>即使命中也可能短暂出现占位</td><td>内存命中直接出图，避免无意义清空与闪烁</td></tr>
+<tr><td>完整文件下载后才解码；下采样只影响本地解码</td><td>若实际收到大图，缩小 ImageView 并不会减少网络字节</td><td>确认真正的小规格响应，预览／原图按需下载</td></tr>
+<tr><td>stripe 锁覆盖下载，且解码缺少完整同资源合并</td><td>不同资源可能碰撞串行，相同资源可能重复解码</td><td>按精确资源 key 合并在途请求与解码任务</td></tr>
+</tbody></table></div>
+<p>Android 已有 24 MiB 内存缓存、384 MiB 磁盘容量控制、RGB565 和下采样；不能描述为“完全没有缓存”。图片消息也已兼容 camelCase／PascalCase，并优先 snapshot。当前最需要补齐的是缓存身份、调度、取消和实际缩图交付验证。</p>
+<p>首次安装的新原生 App 无法直接使用旧 uni-app 私有目录中的缓存。因此“旧版已看过的图”在新原生端第一次打开，仍可能是冷缓存。必须再打开第二次、重启后打开、断网打开，才能判断是否持久缓存失效。</p>
+<h2 id="section-5">6. 一次复现就应记录清楚的链路</h2>
+<pre><code>打开会话
+  → 必要的群历史可见边界校验
+  → OpenIM 本地历史查询 → 消息映射 → 列表出现
+  → 可见图片资源身份解析
+  → 内存命中／磁盘命中／进入下载队列
+  → 可信地址解析与重定向 → 首字节 → 响应体完成
+  → 写缓存 → 解码 → 图片像素显示</code></pre>
+<p>为每张可见图片记录资源 key 的不可逆摘要、规格、缓存层、队列等待、重定向次数、首字节时间、响应体字节、实际图片尺寸、解码时间、首帧时间与取消原因。URL 只记录受控类别和脱敏 host，不记录签名、Token、私人消息或原始完整路径。</p>
+<p>历史查询耗时与图片出图耗时分开：消息还没出现，重点查 SDK／消息映射／必要业务边界；文字已经出现但图片仍占位，重点查媒体缓存、下载与解码。当前代码没有“必须等全量同步完成才能读已有历史”的硬门槛；群 retention 与 purge 属于可见性约束，不为提速绕过。</p>
+<p>针对截图中的“重复下载”，固定选择 20 张旧图片，记录三轮：首次打开、退出重进、杀进程后重开。每轮都统计图片响应体字节、网络请求数、内存／磁盘命中率和出图耗时。302 授权请求、304 校验和整张图片 200 响应必须分开计数；仅看请求次数会误判。</p>
+<p>没有合适账号与真实慢图样本时，先做本地受控图片服务复现：同一内容轮换签名、参数顺序变化、稳定入口 302 变化、大图与小图、慢响应、缓存满和取消。它能验证客户端机制，但不能替代生产链路定位。</p>
+<h2 id="section-6">7. 推荐实现：保留消息内核，建设统一媒体层</h2>
+<p>Android 建议采用 Coil + OkHttp，接入现有 Compose；实施时固定经过兼容验证的版本，并保留静态图、GIF 与视频封面能力。也可以采用 Glide，但不同时维护两套互相独立的图片缓存。iOS 建议采用 SDWebImage + URLSession 对应能力，接口语义与缓存身份规则保持一致；实际版本、后台行为和真机性能需在 Mac 上验证。</p>
+<p>共享的是资源模型与行为合同，不是跨平台共享一个图片数据库。各平台使用自己的可靠加载库，业务通过统一 MediaRepository 请求资源。</p>
+<div class="table-scroll"><table><thead><tr><th>设计项</th><th>具体要求</th></tr></thead><tbody>
+<tr><td>稳定身份</td><td><code>环境 + 账号/授权作用域 + 存储来源 + objectID + 内容版本 + 规格</code>；不得只以文件名作为 key</td></tr>
+<tr><td>授权地址</td><td>资源身份与下载 URL 分离；签名刷新不改变可信对象身份，网络请求仍必须带有效授权</td></tr>
+<tr><td>未知 URL</td><td>不全局删除签名或鉴权参数；不能确认资源身份的外域地址保持保守策略</td></tr>
+<tr><td>缓存规格</td><td>列表、预览、原图区分；同一图的不同清晰度允许分别缓存；不能用模糊缩略图冒充原图</td></tr>
+<tr><td>冷／暖缓存</td><td>内存直接显示；磁盘异步读取并按显示尺寸解码；下载成功原子写入，失败不留下可命中的半文件</td></tr>
+<tr><td>在途合并</td><td>同账号、同资源、同规格的请求共享工作；一个消费者离屏不误取消仍可见的消费者</td></tr>
+<tr><td>调度</td><td>先屏内，再少量邻屏；远处历史不预下载；换会话取消无消费者任务；头像与大文件不饿死聊天列表</td></tr>
+<tr><td>容量维护</td><td>有界磁盘缓存、增量索引、后台清理；不要每下载一张图都全目录扫描</td></tr>
+<tr><td>可见性</td><td>切号隔离；退出、权限变化、群历史清理按既有政策清除索引与内容；缓存不能绕过消息可见规则</td></tr>
+<tr><td>诊断</td><td>通过功能开关和采样输出阶段指标，不输出用户内容；可回退旧加载器便于对比</td></tr>
+</tbody></table></div>
+<p>不要照搬“缓存 key 一律删 Token”的做法。业务 token 可能代表不同对象或权限；只有能从可信消息／服务端映射得到稳定对象身份时，才将身份与授权分离。现有旧端的规范化经验可以借鉴，但必须保留账号与环境隔离。</p>
+<h2 id="section-7">8. 真缩略图、旧消息与服务端兼容</h2>
+<p>现有业务 oss-media 已有列表 360px、quality 60、WebP，以及移动预览 960px 的规格实现。客户端写了 <code>width=360</code>，并不代表生产最终响应已经缩小；<code>/object/</code> 属于 OpenIM 对象服务，不能把业务 oss-media 的实现套给它。</p>
+<p>第一步按实际慢图来源抽样验证：snapshot 是否缺失或等于原图、最终 MIME／字节数／宽高、服务是否识别处理参数、是否经历多个重定向、是否实际 CDN 命中。GIF 单独制定首帧／动画策略，不能把动画全部变成静态图导致功能退化。</p>
+<p>若真实样本证实旧路径无法出缩略图，再新增受控兼容解析：只接受已验证存储来源和对象 key，校验现有访问范围，按规格白名单生成派生图，必要时后台按需补图。同一内容版本的同一规格复用结果，失败可回退合法原地址。不要在打开会话时同步扫描和转换全部历史图片。</p>
+<p>旧消息与旧客户端保持兼容：不批量改写线上消息内容，不删原图，不改变现有接口字段语义；新能力使用可选字段或新接口，通过开关只对测试客户端启用。先验证再灰度，保留回退路径。线上风险可控制，但未实测前不能承诺任何后端改动绝对无影响。</p>
+<p><code>storage_media.go</code> 的 <code>private,no-store</code> 针对临时签名 302；不要为了提速把过期 Location 公开长缓存。对象内容的缓存、派生图 key 和 CDN 策略独立配置；私有图片不能因此变公开。CDN 缓存键需与签名验证、规格和资源版本共同设计，不盲目忽略全部 query。</p>
+<p>流量核算至少区分：App 图片下行字节、CDN 下行字节、CDN 回源字节、OSS 直连与回源字节、缩略图处理和请求次数。各指标来自对应端，不能把客户端统计直接当作供应商账单。</p>
+<h2 id="section-8">9. 发送图片的单独优化</h2>
+<p>本次用户已明确主场景是历史旧图，但发送链路也有缺口：当前 Android 图片阶段主要做文件拷贝和尺寸读取，未做常规静图压缩；上传完成后才创建媒体消息并显示，发送者也可能再按远程地址取图。它们不能解释所有历史图片慢，但值得下一阶段处理。</p>
+<p>建议流程：选图 → 持久化媒体任务与本地预览 → 显示明确的上传中气泡 → 后台生成列表缩略图及合理压缩图 → 上传 → 使用稳定唯一标识创建 SDK 消息并提交 Outbox → 发送／确认。上传前的本地任务不能伪装为 SDK 已发送消息；回调要防切号、防重复提交，进程恢复后继续可追踪。</p>
+<p>列表优先本地文件，远程地址作为跨端资源；点击原图才下载原图。保留“原图”选项，GIF 不按静图压缩，处理 EXIF 方向和系统照片权限。发送状态不明时先查证，不盲目重发产生重复消息。</p>
+<h2 id="section-9">10. 是否需要自研 SDK</h2>
+<div class="table-scroll"><table><thead><tr><th>路线</th><th>适用条件</th><th>本次建议</th></tr></thead><tbody>
+<tr><td>自有 IMKit／媒体层 + 现有 OpenIM core</td><td>UI、缓存、调度、压缩、资源兼容、发送本地回显等问题</td><td>现在做，最贴合已确认缺口</td></tr>
+<tr><td>官方 SDK 升级或定点 fork</td><td>有可复现的 SDK 查询、同步、事务或回调缺陷，并验证服务协议兼容</td><td>依据 trace 与回归结果决定</td></tr>
+<tr><td>从零自研完整 IM 内核</td><td>长期愿意承担协议、ACK、顺序、去重、重试、多端同步、数据库迁移、推送及持续兼容</td><td>当前不建议，不能直接解决图片重复 HTTP 下载</td></tr>
+</tbody></table></div>
+<p>REA 已确认参考软件直接使用 OpenIM 消息查询，随包版本与 Go build info 显示定制 fork。它说明对方在 OpenIM 基础上做工程化，不说明必须复制其 fork，更不说明其 fork 可直接接我们现有服务。没有 fork 源码差异与互通测试，不能直接替换。</p>
+<p>SDK 治理继续遵守原方案：SDK 独占消息数据库；App 自有库只管理草稿、Outbox、媒体任务和索引；账号、环境与登录代次隔离；不自动删库“修同步”；不移除 retention／purge；不把应用缓存优化扩大为修改 SDK 内部 checkpoint。</p>
+<h2 id="section-10">11. 实施顺序与交付</h2>
+<p>以下是工作量估算，按一名熟悉项目的工程师计；真实样本、图片种类、依赖适配和设备条件会影响排期，不是已完成或固定日期承诺。</p>
+<div class="table-scroll"><table><thead><tr><th>阶段</th><th>预计投入</th><th>可评审交付与退出条件</th></tr></thead><tbody>
+<tr><td>P0 诊断与基线</td><td>1～2 个工作日</td><td>分段指标、重复打开三轮记录、URL 类型／缩图验证；明确主要耗时与重复字节来源</td></tr>
+<tr><td>P1 Android 媒体管线</td><td>3～5 个工作日</td><td>统一加载库、稳定隔离 key、持久缓存、在途合并、取消与优先队列、增量维护；受控回归通过</td></tr>
+<tr><td>P2 存储交付补齐</td><td>视 P0 结果约 2～4 个工作日</td><td>仅对确认的问题做可信旧路径兼容、派生图或 CDN 配置；旧端回归与回退演练</td></tr>
+<tr><td>P3 iOS 同等行为</td><td>Mac 可用后约 3～5 个工作日</td><td>模拟器与真机完成缓存、切号、前后台、照片权限及内存压力验证；Windows 静态检查不能代替此项</td></tr>
+<tr><td>P4 发送与重载场景</td><td>约 2～4 个工作日</td><td>本地预览、持久媒体任务、压缩、原图、上传恢复；发送幂等与现有业务功能回归</td></tr>
+</tbody></table></div>
+<p>先交付可诊断 Android APK 和指标报告，再交付优化 APK。只有受控对比证明改善后才推进后端改动与灰度。开发与缓存仍使用 D 盘，不影响原 uni-app UI 基准和既有账号／服务协议。</p>
+<p>Android 继续本地 Gradle 构建测试 APK；正式签名、生产渠道与发布检查另走原方案。iOS 由朋友的 Mac 按现有 <a href="../iOS-Mac验证步骤.md">Mac 验证步骤</a> 构建，性能验证需增加真机记录。采用原生后不再依赖 uni-app 云打包。</p>
+<h2 id="section-11">12. 验收：重复打开零整图下载，首次打开减少等待</h2>
+<p>以下为拟定目标，尚未实测达标。完成基线后确认设备、样本和阈值，保留失败样本与原始记录。</p>
+<div class="table-scroll"><table><thead><tr><th>场景</th><th>条件与目标</th></tr></thead><tbody>
+<tr><td>内存暖缓存</td><td>固定样本、页面可见开始到像素显示，P95 目标 ≤100ms；不重复传输图像响应体</td></tr>
+<tr><td>磁盘暖缓存</td><td>杀进程重开，缓存仍在且账号／权限有效，P95 目标 ≤250ms；同规格图片响应体字节为 0</td></tr>
+<tr><td>冷缓存小图</td><td>受控网络 20Mbps、RTT 80ms、静态列表图 ≤100KB、限定一屏数量，P95 暂定 ≤1s；真实生产按基线与网络另定</td></tr>
+<tr><td>真实旧图回归</td><td>同机同网、固定样本，与当前包对比 P50／P95；若确认是客户端瓶颈，以 P95 下降至少 50% 为初步目标，按测量校准</td></tr>
+<tr><td>签名轮换／参数顺序变化</td><td>可信同对象同规格复用缓存；未知签名不被破坏；内容版本更新确实获取新图</td></tr>
+<tr><td>快速滚动／切会话</td><td>当前可见项优先，无消费者离屏任务及时取消，不错图、不阻塞新会话</td></tr>
+<tr><td>容量与权限</td><td>大量文件下清理不阻塞显示；缓存满、写失败、切号、退出、群历史清理及权限变化均回归</td></tr>
+<tr><td>规格与动画</td><td>列表、预览、原图独立正确；GIF、视频封面、横竖图、EXIF 与超大图片均正确</td></tr>
+</tbody></table></div>
+<p>统计每组至少 50 个有效图片样本，跨多轮会话采样，分别报告 P50／P95 与成功率，不把缓存未命中、失败和超时从样本中静默删除。旧端、新端与参考软件的缓存状态必须标明；无参考账号和运行环境时，只报告我们自己的改善，不编造竞品 A/B 数字。</p>
+<p>滚动帧时间、峰值内存、耗电与网络流量作为并列指标，不能仅以“看起来快”通过。保留一键诊断导出与功能回退，先小范围测试再扩展。</p>
+<h2 id="section-12">13. 证据与尚未回答的问题</h2>
+<p>本轮 REA 证据见<a href="../../.analysis/media-performance-20261113/evidence/evidence-index.json">索引</a>与<a href="../../.analysis/media-performance-20261113/finding-ledger.md">发现台账</a>。既有 OpenIM／列表证据见<a href="../../.analysis/native-rea-recovery-20261112/finding-ledger.md">架构恢复台账</a>。普通源码／ZIP／DEX 分析在索引中单独标识，不冒充 REA 输出。</p>
+<p>已回答：当前原生端已有缓存与缩图选择；存在完整 URL 缓存身份、队列取消和缓存维护等缺口；参考软件属于定制 OpenIM，采用原生列表与图片封装。</p>
+<p>部分回答：参考 APK 图片封装与存储调用可通过静态代码追踪，但不等同于真实设备执行。具体补充以本轮台账为准。</p>
+<p>仍未知：用户慢图究竟命中哪类地址、第二次打开实际下载了多少字节、线上 CDN 是否生效、真实缓存命中／回源率、OpenIM 本地查询是否另有瓶颈，以及参考软件线上对象存储／CDN 的实际路由与命中率。当前没有参考账号、网络抓包、iOS IPA 或 Mac 运行结果，不能声称已完整还原对方所有平台性能机制。</p><footer>本文可离线打开，无外部字体、脚本、资源或业务请求。拟定性能阈值不是实测结果；完整边界与证据链接见正文。配套 Markdown 是同内容的可编辑版本。</footer></main></div></body></html>

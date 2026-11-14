@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation android:name="com.im.nativebootstrap.SDKSmokeInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.FullParityInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.media.MediaPipelineInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.UiParityInteractionInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.InstantMediaInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.ChatMediaRegressionInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+</manifest>

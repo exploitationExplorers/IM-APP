@@ -17,6 +17,21 @@ public struct UserProfile: Codable, Equatable, Sendable {
     public let status: String
     public let createdAt: String
     public let hasPassword: Bool
+
+    private enum CodingKeys: String, CodingKey { case id, phoneMasked, countryCode, publicId, nickname, avatar, bio, status, createdAt, hasPassword }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        countryCode = try c.decodeIfPresent(String.self, forKey: .countryCode) ?? ""
+        publicId = try c.decodeIfPresent(String.self, forKey: .publicId) ?? ""
+        nickname = try c.decodeIfPresent(String.self, forKey: .nickname) ?? ""
+        avatar = try c.decodeIfPresent(String.self, forKey: .avatar) ?? ""
+        phoneMasked = try c.decodeIfPresent(String.self, forKey: .phoneMasked) ?? ""
+        bio = try c.decodeIfPresent(String.self, forKey: .bio) ?? ""
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+        hasPassword = try c.decodeIfPresent(Bool.self, forKey: .hasPassword) ?? true
+    }
 }
 
 public struct AuthResult: Codable, Equatable, Sendable {
@@ -24,13 +39,19 @@ public struct AuthResult: Codable, Equatable, Sendable {
     public let refreshToken: String
     public let expiresIn: Int
     public let user: UserProfile
+    public init(accessToken: String, refreshToken: String, expiresIn: Int, user: UserProfile) {
+        self.accessToken = accessToken; self.refreshToken = refreshToken; self.expiresIn = expiresIn; self.user = user
+    }
 }
 
-/// 业务账号会话仅保存在内存；它不代表 IM SDK 已登录或消息库已经可读。
+/// 业务账号状态不代表 IM SDK 已登录或消息库已经可读；平台负责安全保存凭据。
 public struct BusinessAccountSession: Equatable, Sendable {
     public let authentication: AuthResult
     public let profile: UserProfile
     public let profileLoadWarning: String?
+    public init(authentication: AuthResult, profile: UserProfile, profileLoadWarning: String? = nil) {
+        self.authentication = authentication; self.profile = profile; self.profileLoadWarning = profileLoadWarning
+    }
 }
 
 public struct TokenPair: Codable, Equatable, Sendable {

@@ -1,7 +1,10 @@
 package com.im.nativebootstrap.data
 
+import com.im.nativebootstrap.chat.ChatEndpoints
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.google.gson.JsonElement
+import com.google.gson.JsonNull
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -12,7 +15,7 @@ object RuntimeEndpoints {
 
 // 凭据不是 data class，默认 toString 不会打印字段。
 class TokenPair(val accessToken: String, val refreshToken: String, val expiresIn: Long)
-class BusinessProfile(val businessUserId: String, val nickname: String, val publicId: String = "", val phoneMasked: String = "")
+class BusinessProfile(val businessUserId: String, val nickname: String, val publicId: String = "", val phoneMasked: String = "", val avatar: String = "", val bio: String = "", val countryCode: String = "+86", val hasPassword: Boolean = false)
 class AuthResult(val tokens: TokenPair, val profile: BusinessProfile) {
     val businessUserId: String get() = profile.businessUserId
     val nickname: String get() = profile.nickname
@@ -23,7 +26,7 @@ data class SMSReceipt(val retryAfterSec: Int, val expiresIn: Int)
 class APIRequest(val url: String, val headers: Map<String, String>, val body: String = "", val method: String = "POST")
 class APIResponse(val status: Int, val body: String)
 fun interface HTTPTransport { fun execute(request: APIRequest): APIResponse }
-class APIException(message: String) : Exception(message)
+class APIException(message: String, val httpStatus: Int? = null) : Exception(message)
 
 class URLConnectionTransport : HTTPTransport {
     override fun execute(request: APIRequest): APIResponse {
@@ -65,7 +68,20 @@ class NativeAPI(baseURL: String = RuntimeEndpoints.DEFAULT_API_BASE_URL, private
     fun smsLogin(countryCode: String, phone: String, code: String, deviceId: String): AuthResult =
         parseAuth(post("/auth/login/sms", fields("countryCode" to countryCode, "phone" to phone, "code" to code, "deviceId" to deviceId)))
 
+    fun register(countryCode: String, phone: String, code: String, password: String, deviceId: String): AuthResult =
+        parseAuth(post("/auth/register", fields("countryCode" to countryCode, "phone" to phone, "code" to code, "password" to password, "deviceId" to deviceId)))
+
     fun profile(accessToken: String): BusinessProfile = parseProfile(request("/me", token = accessToken, method = "GET"))
+
+    /** 业务页面共享真实请求：保留数组和 null，不把无返回值操作误判失败。 */
+    fun businessRequest(method: String, path: String, accessToken: String? = null, data: JsonObject? = null, query: Map<String, String> = emptyMap()): JsonElement {
+        require(path.startsWith("/") && !path.contains("://") && !path.contains("..") && !path.contains("?") && !path.contains("#"))
+        require(method in setOf("GET", "POST", "PATCH", "PUT", "DELETE"))
+        val suffix = if (query.isEmpty()) "" else query.entries.joinToString("&", prefix = "?") { (key, value) ->
+            java.net.URLEncoder.encode(key, "UTF-8") + "=" + java.net.URLEncoder.encode(value, "UTF-8")
+        }
+        return requestValue(path + suffix, data, accessToken, method)
+    }
 
     fun sendSms(countryCode: String, phone: String, deviceId: String): SMSReceipt {
         val value = post("/auth/sms/send", fields("countryCode" to countryCode, "phone" to phone, "scene" to "login", "deviceId" to deviceId))
@@ -75,14 +91,18 @@ class NativeAPI(baseURL: String = RuntimeEndpoints.DEFAULT_API_BASE_URL, private
     fun refreshToken(refreshToken: String, deviceId: String): TokenPair =
         parseTokens(post("/auth/token/refresh", fields("refreshToken" to refreshToken, "deviceId" to deviceId)))
 
-    // 仅保留后续 SDK 适配接口；业务登录流程不调用，避免额外签发 IM Token。
+    // 每次业务会话启动后单次申请 Android IM Token，分页和普通重连不重复签发。
     fun imToken(accessToken: String): IMCredentials {
         val body = JsonObject().apply { addProperty("platformId", 2) }
         val value = post("/im/token", body, accessToken)
         val platform = value.number("platform").toInt()
         if (platform != 2) throw APIException("IM 平台号与 Android 请求不一致")
-        val api = value.string("apiAddr")
-        val ws = value.string("wsAddr")
+        val api: String
+        val ws: String
+        try {
+            api = ChatEndpoints.normalize(base, value.string("apiAddr"), false)
+            ws = ChatEndpoints.normalize(base, value.string("wsAddr"), true)
+        } catch (_:IllegalArgumentException) { throw APIException("IM 地址必须为核准的 HTTPS / WSS 地址") }
         fun validEndpoint(url: String, scheme: String): Boolean {
             val uri = URI(url)
             return uri.scheme == scheme && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null && uri.query == null
@@ -96,6 +116,12 @@ class NativeAPI(baseURL: String = RuntimeEndpoints.DEFAULT_API_BASE_URL, private
     private fun post(path: String, data: JsonObject, token: String? = null): JsonObject = request(path, data, token)
 
     private fun request(path: String, data: JsonObject? = null, token: String? = null, method: String = "POST"): JsonObject {
+        val result = requestValue(path, data, token, method)
+        if (!result.isJsonObject) throw APIException("服务响应缺少结果")
+        return result.asJsonObject
+    }
+
+    private fun requestValue(path: String, data: JsonObject? = null, token: String? = null, method: String = "POST"): JsonElement {
         val headers = mutableMapOf("Accept" to "application/json")
         if (data != null) headers["Content-Type"] = "application/json"
         if (token != null) headers["Authorization"] = "Bearer $token"
@@ -106,14 +132,13 @@ class NativeAPI(baseURL: String = RuntimeEndpoints.DEFAULT_API_BASE_URL, private
         val envelope = try { JsonParser.parseString(response.body).takeIf { it.isJsonObject }?.asJsonObject } catch (_: Exception) { null }
         if (response.status !in 200..299) {
             val message = if (response.status in 400..499) serverMessage(envelope, secrets) else null
-            throw APIException(message ?: "请求失败（HTTP ${response.status}）")
+            throw APIException(message ?: "请求失败（HTTP ${response.status}）",response.status)
         }
         try {
             if (envelope == null) throw APIException("服务返回了无法解析的数据")
-            if (envelope.number("code") != 0L) throw APIException(serverMessage(envelope, secrets) ?: "服务未接受请求，请检查账号或稍后重试")
-            val result = envelope.get("data")
-            if (result == null || !result.isJsonObject) throw APIException("服务响应缺少结果")
-            return result.asJsonObject
+            val code=envelope.number("code")
+            if (code != 0L) throw APIException(serverMessage(envelope, secrets) ?: "服务未接受请求，请检查账号或稍后重试",if(code==401L||code==403L)code.toInt() else null)
+            return envelope.get("data") ?: JsonNull.INSTANCE
         } catch (e: APIException) {
             throw e
         } catch (_: Exception) {
@@ -138,6 +163,7 @@ class NativeAPI(baseURL: String = RuntimeEndpoints.DEFAULT_API_BASE_URL, private
     }
     private fun parseProfile(value: JsonObject): BusinessProfile = BusinessProfile(
         value.string("id"), value.string("nickname", allowBlank = true), value.optionalString("publicId"), value.optionalString("phoneMasked"),
+        value.optionalString("avatar"), value.optionalString("bio"), value.optionalString("countryCode").ifBlank { "+86" }, value.get("hasPassword")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean ?: false,
     )
     private fun parseTokens(value: JsonObject): TokenPair {
         val expiry = value.number("expiresIn")

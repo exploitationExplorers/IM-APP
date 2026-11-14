@@ -1,53 +1,58 @@
-# Android 原生启动工程
+# 易可聊 Android 原生工程
 
-当前实现 Kotlin + Compose 原型、现有后端业务登录与个人资料、业务账号代次隔离，以及独立的 IM 会话/同步状态核心。测试包版本为 `0.1.1-login`（versionCode 2），可覆盖前一版原生测试包。独立安装身份为 `com.im.nativebootstrap.staging`，不会覆盖旧 App；不能用这个测试包代替正式身份的历史数据迁移验收。
+当前开发版本 `0.3.0-parity` / versionCode `4`。Kotlin + Compose，核心聊天直接使用官方 OpenIM 原生 SDK。以现有 uni-app 的页面、素材、文字与操作为基准，不另做视觉设计。
 
-## 运行与验证
+测试应用身份 `com.im.nativebootstrap.staging` 与正式 uni-app 不同，可覆盖前一版原生测试包，不覆盖生产 App。当前未验证旧本地库覆盖迁移，Release 有明确阻断。未改旧前端/后端，未部署或发布。
 
-Windows 使用已有 `D:/JDK17`、`D:/Android/SDK`，在工程目录执行：
+## 构建和安装
+
+Windows 已有 `D:/JDK17`、`D:/Android/SDK`，从仓库根目录运行：
 
 ```powershell
-.\build.ps1
-# 已准备依赖缓存时：
-.\build.ps1 -Offline
-# 静态检查：
-.\build.ps1 -Tasks @(':app:lintDebug') -Offline
+./IM-APP-android/build.ps1 -Tasks @(':app:testDebugUnitTest', ':app:assembleDebug', ':app:lintDebug', ':app:assembleDebugAndroidTest') -Offline
 ```
 
-`build.ps1` 把 Gradle、Android 用户目录、临时文件均放在仓库旁的 `.native-cache/`（当前在 D 盘），不修改系统环境变量。优先使用 `.native-cache/tools/gradle-8.4`，否则使用项目 Wrapper。Android SDK 通过 `ANDROID_HOME` 指向已有 D 盘 SDK。JUnit 的标准 Maven 依赖为 4.13.2；本机缺 Maven 缓存时可将已有 Gradle 发行版中的 JUnit/Hamcrest 原件复用到未入库的 `.native-cache/maven/`，CI 正常使用公开 Maven 依赖。
+首次机器缺缓存时移除 `-Offline` 联网解析固定依赖。Gradle、Android 用户目录、临时文件与下载均使用 D 盘 `.native-cache/`，不改系统环境变量。现有 Gradle 8.4、AGP 8.2.2、Kotlin 2.0.21、Compose BOM 2024.06.00、API 34 是开发基线，不等于已符合当前商店分发要求。
 
-安装产物：`app/build/outputs/apk/debug/app-debug.apk`。Gradle 8.4、AGP 8.2.2、Kotlin 2.0.21、Compose BOM 2024.06.00、API 34 是当前机器可验证的原型基线，正式分发前必须重新核对当期商店要求、SDK/native 库兼容性与依赖升级。任何 Release 构建当前都会明确失败，待正式身份、签名与迁移门禁确认后专门开放。
+主包 `app/build/outputs/apk/debug/app-debug.apk`，测试包 `app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`。普通内测只安装主包；Instrumentation 验证才需同时安装测试包。
 
-## 两种验证入口
+```powershell
+D:/Android/SDK/platform-tools/adb.exe install -r IM-APP-android/app/build/outputs/apk/debug/app-debug.apk
+```
 
-- **本地样例**：长按登录页原 Logo，在“本地开发设置”进入样例；不联网、不登录。打开“交互测试”会话后输入文本，点击“传送”仅添加到当前内存，离开会话或退出样例清除。页面持续标明“不联网，不送达”。
-- **真实账号登录**：普通登录页可直接使用现有账号，无需配置地址。默认地址为 `https://www.xn--jprz53bj9s.com/api/v1`，即 `www.易可聊.com` 的既有 HTTPS 后端入口。用户已明确授权使用现有后端；本工程不修改后端或部署。Logo 长按仍可覆盖 HTTPS 地址，留空使用默认值，禁止明文 HTTP 与自动重定向。短信 API 适配保留，本轮不展示验证码登录。界面不显示或记录 token。
+原生工程不再使用 uni-app 云打包。正式 APK/AAB 签名、发行与后端兼容步骤见方案文档；本阶段不解除发布阻断。
 
-登录仅调用 `POST /auth/login` 与携带 Bearer 业务凭据的 `GET /me`，不主动申请 `/im/token`。资料 ID 必须与本次登录用户 ID 一致；资料加载失败或 ID 不匹配时，保留已经成功的业务认证，显示登录响应中的真实资料并提示。真实主界面的“我的”展示服务端昵称、账号与脱敏手机号，聊天/通讯录明确标示接入中；真实分支没有样例会话。
+## SDK 与接口
 
-业务登录不会把 `SessionCoordinator` 或 IM 标记为就绪；现有 IM Token API 仅保留给后续 SDK 适配。业务 token 仅驻留进程内存，密码提交后清空、不持久化；返回/退出登录/切换样例清除凭据与资料，并拒绝迟到请求结果。本机随机 deviceId 使用应用私有 SharedPreferences 持久化，以便进程重启后保持一致；不使用硬件标识。卸载或清除应用数据会重新生成，应用备份禁用。
+固定官方 `io.openim:android-sdk:3.8.3.5@aar` + `io.openim:core-sdk:3.8.3-patch10@aar`，Maven POM 不含传递依赖，wrapper/core 均须显式声明。Gson、Lifecycle Process 同样显式声明。坐标来源、官方标签和 SHA-256 见 `contracts/native-bootstrap/v1/sdk-dependencies.json`。
 
-HTTP 4xx 与业务错误只展示经过长度限制、控制字符清理和凭据过滤的 `message`，不回显原始响应。所有自动测试使用注入的 fake transport 和合成 fixture，不使用真实账号、不发送真实短信或生产写请求。
+Core 含四个 ABI；正式 AAB 分拆、体积与 16 KB 页兼容需专门验证。仓库服务声明 `v3.8.3-patch.16`，仍需核对线上实际版本、定制消息和互通，不能因为同为 3.8.3 就宣布兼容。
 
-## 已实现与后续门禁
+普通密码登录默认使用现有 `https://www.xn--jprz53bj9s.com/api/v1`，无需配置。区号、手机号、密码和协议按原版操作。Logo 长按中的 HTTPS 覆盖与离线样例保留给开发验证；样例持续标注“不联网、不送达”，不能证明真实 SDK 互通。
 
-- `SessionCoordinator` 在一个锁内捕获账号和 generation；退出/换号拒绝旧票据；每次同步另有 operation，旧同步结果不能完成后一次尝试。
-- 本地库和同步状态分离；失败、取消、超时保留明确状态；同步完成要求本地可读。没有删除 SDK 数据库的路径。
-- `NativeAPI` 实现密码登录、短信登录、短信申请、Token 刷新、个人资料 GET，以及单独保留的 Android IM Token 适配；业务登录不调用 IM Token 接口。业务 user.id 不作为 IM userId。
-- `BusinessSession` / `BusinessLoginFlow` 单独负责业务账号与内存凭据，使用锁和代次隔离登录/退出/换号。JUnit 覆盖默认 HTTPS 地址、GET 方法/header、资料 ID、资料失败回退、退出清凭据及迟到回调、稳定 deviceId、业务错误清理；原有 IM 状态与 API 测试保留。测试直接引用共享 `contracts/native-bootstrap/v1/fixtures/`。
+业务登录 `/auth/login` → Bearer `/me`，身份校验后独立申请平台 2 的 `/im/token` 并登录 SDK。AndroidKeyStore AES-GCM 加密/原子保存业务凭据，重启尝试恢复；不存密码。401 最多一次刷新并先保存旋转结果，资料身份不符拒绝接收。普通断线交 SDK 重连，不循环签发 Token，不自动删库。
 
-OpenIM SDK 选择/接入、真实离线开库、消息持久化、Outbox、媒体/历史分页、后台/推送、旧库迁移、真机性能与真实消息互通仍待后续实现和验证。本地样例不代替这些能力；本工程不要求部署或修改后端。
+## 当前实现
 
-## 本机验证记录
+补接通讯录、申请、标签、好友资料、扫码、建群/邀请/管理/公告、个人资料与头像裁剪、二维码、收藏、通知/聊天/隐私/安全/通用设置、反馈举报、注销、注册找回及群发等。具体页面行为和差异以 `contracts/ui-parity/v1/android-page-map.json` 为准；73 条原路由含一条 H5 下载站，不将该下载页当原生页面。
 
-已验证的首轮 UI 版本包含 13 项 JUnit 测试、Debug 构建与 Lint，正式 Release 构建按保护策略失败。本轮真实业务登录统一执行 `:app:testDebugUnitTest`、`:app:assembleDebug` 和 `:app:lintDebug`，3 分 20 秒退出 0；26 项测试全通过，Lint 0 错误 / 25 警告（含前述 2 项规则覆盖限制）。最终结果与 APK SHA-256 见 `.workflow/scratch/20261112-native-live-login/android-validation.json`，模拟器验证由根任务另行记录。
+聊天包含分页/实时消息、远程头像、图片/视频/语音/文件、引用/名片/表情/转发/收藏/撤回/删除、群 @、已读、置顶及搜索定位。图像在后台有界解码与缓存，媒体接受旧 camelCase/PascalCase，已知旧签名图片恢复稳定逻辑入口；未知签名地址不修改查询参数。GIF/播放器等仍需对应设备验收，不能仅凭编译判定可用。
 
-当前旧原型工具链下，Lint 报告包含依赖更新提示，且 Compose Runtime / Lifecycle 的部分自定义 lint 规则因分析 API 不兼容未执行。这不是完整静态覆盖或正式发布门禁通过；升级工具链和依赖后应再次运行完整 lint。自动化验证未使用真实账号，没有测真机帧率或 SDK 消息可靠性。默认服务入口支持用户主动登录，不代表真实账号链路和真实聊天已完成验收。
+全量已读与清历史遍历 SDK 分页；历史错误不冒充空页或结束。群 `minVisibleSeq/revision`、成员清理边界与本地墓碑单独持久并单调应用，不能把退出重登当作恢复被限制消息的方式。SDK 独占自己的数据库，自有状态文件与 SDK 表分离，账号/环境隔离，退出不删除消息库。
 
-## 首轮 UI 还原
+持久 Outbox 先原子写入、fsync 后再发送；进程中断/超时恢复为待核对，按 clientMsgID 查询，未知结果不盲重发。SDK 接受不等于对端送达或已读。保留 generation、房间 operation 与同步 attempt，拒绝旧回调推进新账号状态。
 
-用户要求保留现有 uni-app UI。当前以旧 `sign-in.vue` 和最终生效的 `auth-modern.scss`、`ImLegalConsent`、`ImCountryPicker`、`ImTabBar`、`ConversationItem`、`ChatBubble`、`ImMessageComposer`、聊天列表和 room 源码为基线，映射登录、导航、会话行和文本聊天。品牌“易可聊”与原 PNG/SVG 资产复用；普通页面移除原型标题、环境字段和 SDK 术语，开发入口隐藏在登录 Logo 长按。
+目前服务端 `LoggingPushService` 只记日志，注册 Token 不等于后台推送可下发。实时通话、厂商离线推送、现网定制协议、旧 App 原地升级与真实数据规模性能是单独门禁，当前不能称完整生产替换版本。
 
-`rpx` 按当前逻辑视口宽度 / 750 转为 dp/sp；auth-modern 中 px 作为固定逻辑尺寸。登录保留 56px Logo、26px 标题、52px 输入与原蓝色渐变，矮屏按旧媒体查询调整；输入组件使用 BasicTextField 自定义旧外观，避免 Material 默认卡片/输入框。底栏顺序为通讯录、聊天、我的，原 SVG 栅格图标；文本气泡颜色和圆角、输入区及“传送”文案沿用原组件。
+## 验证
 
-本轮未交付的注册、找回密码、好友/群、媒体/语音、表情和更多操作会如实提示未接入；协议与隐私原 HTML 通过禁用脚本的本地视图打开。通讯录仍为边界占位；“我的”在本轮补齐真实账号资料和退出登录。上一轮已由根任务核对同宽旧 H5 登录与 Android 截图、通过 20 项离线模拟器检查，不能据此声明全量 UI 或真机性能验收通过。
+单测和 Lint 覆盖本地可验证逻辑；静态检查/合成 UI 不替代账号互通与真机。安装主/测试 APK 后可断网执行：
+
+```powershell
+D:/Android/SDK/platform-tools/adb.exe shell am instrument -w com.im.nativebootstrap.staging.test/com.im.nativebootstrap.SDKSmokeInstrumentation
+D:/Android/SDK/platform-tools/adb.exe shell am instrument -w com.im.nativebootstrap.staging.test/com.im.nativebootstrap.FullParityInstrumentation
+```
+
+SDKSmoke 实际加载原生 Core，运行无凭据 init/查询错误/uninit/reinit。FullParity 实际检查 AndroidKeyStore 加密/重建/替换/篡改拒绝，以及图片缓存/下采样/坏缓存清理；用本地合成接口数据渲染实际个人中心、通讯录、设置/资料和图片消息截图，不提交真实账号，不连业务服务。
+
+结果需 `INSTRUMENTATION_CODE: -1` 且对应项目 passed，不能只看命令启动成功。最终包哈希、检查结果、旧 H5 对照与逐页差异见 `docs/原生功能与UI对齐-20261113/功能与UI对齐记录.html` 及 `.workflow/scratch/20261113-native-full-parity/verification.json`。测试截图不证明所有 73 路由运行通过。

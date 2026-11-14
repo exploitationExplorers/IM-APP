@@ -1,0 +1,1728 @@
+{
+  "platform": "iOS",
+  "routeCount": 73,
+  "nativeRoutes": 72,
+  "status": "in_progress",
+  "evidence": "源码对照；不将静态存在视为功能、类型检查或视觉通过",
+  "globalVerification": {
+    "projectStaticChecks": "8_passed",
+    "swiftSyntax": "tree_sitter_0_errors_at_latest_check",
+    "xctest": "not_run_no_Mac_or_Swift_toolchain",
+    "xcodeBuild": "not_run_no_Mac",
+    "simulator": "not_run",
+    "device": "not_run",
+    "pixelParity": "not_run"
+  },
+  "globalConstraints": [
+    "未改后端/旧uniapp/Android/共享contract；未部署、未Git提交",
+    "固定OpenIM 3.8.3-hotfix.15，单SDK owner、可靠Outbox不回退",
+    "下载/缓存均D盘",
+    "全部页面必须后续Mac编译和真机验收；含可见性/keyboard/大量历史/相册权限/网络取消"
+  ],
+  "pages": [
+    {
+      "route": "pages/download/index",
+      "originalSource": "IM-APP-fronend/src/pages/download/index.vue",
+      "originalSHA256": "f706c6329b270aa03b0cc7c0a2d1ce3f5841e5d6f6d02e4d735fb93fcc3d5199",
+      "nativeApplicability": "h5_only",
+      "implementation": "H5 external download page",
+      "files": [],
+      "behavior": "原H5下载落地页不编入iOS客户端",
+      "differences": [
+        "h5_only"
+      ],
+      "status": "h5_only",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "chooseLang(item.code)",
+        "closeLang",
+        "langOpen = !langOpen"
+      ]
+    },
+    {
+      "route": "pages/chat/index",
+      "originalSource": "IM-APP-fronend/src/pages/chat/index.vue",
+      "originalSHA256": "49354a3b4ff8884684508706e04ba2cfedaa270c9f9663b876682492d5b5ec6a",
+      "nativeApplicability": "ios",
+      "implementation": "SampleMainViewController.realAccount",
+      "files": [
+        "IM-APP-ios/IMNative/SampleMainViewController.swift"
+      ],
+      "behavior": "SDK会话全分页、头像、未读过滤、搜索、全量已读、置顶/免打扰/隐藏会话",
+      "differences": [
+        "原H5桌面分栏不适用；iOS长列表和滑动手势尚未真机验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "(open) => onSwipeChange(item, open)",
+        "closeMenus",
+        "go('/pages/contacts/add-friend')",
+        "go('/pages/group/create')",
+        "goAddGroup",
+        "onMarkAllRead",
+        "onMenuDelete",
+        "onMenuMute",
+        "onMenuPin",
+        "onMenuRead",
+        "onRefresherRefresh",
+        "onSearchFooterLoadMore",
+        "onSearchScrollToLower",
+        "openConversation",
+        "openSearchRow(row)",
+        "setFilter('all')",
+        "setFilter('unread')"
+      ]
+    },
+    {
+      "route": "pages/auth/sign-in",
+      "originalSource": "IM-APP-fronend/src/pages/auth/sign-in.vue",
+      "originalSHA256": "96b0014a183ecac2b088f531cc7821754f49cd7c90eabe9c5f7ffa209c3abcb2",
+      "nativeApplicability": "ios",
+      "implementation": "LoginViewController",
+      "files": [
+        "IM-APP-ios/IMNative/LoginViewController.swift"
+      ],
+      "behavior": "真实密码登录、Keychain恢复、刷新旋转、国家区号、协议、登录后进入单SDK owner",
+      "differences": [
+        "登录逐像素和软键盘尚未验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goForgot",
+        "goRegister",
+        "onLogin",
+        "onSendCode",
+        "showPassword = !showPassword",
+        "switchMode('password')",
+        "switchMode('sms')"
+      ]
+    },
+    {
+      "route": "pages/auth/sign-up",
+      "originalSource": "IM-APP-fronend/src/pages/auth/sign-up.vue",
+      "originalSHA256": "a54ac79e4dca4711167856e6ea965bc923920fe38ba945e7b2e62f1959cee964",
+      "nativeApplicability": "ios",
+      "implementation": "NativeAuthFlowController.register",
+      "files": [
+        "IM-APP-ios/IMNative/NativeAuthFlowController.swift"
+      ],
+      "behavior": "短信注册、同意协议、密码确认、注册后资料完善",
+      "differences": [
+        "国家地区目前5项；需核对原版完整列表"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goBack",
+        "onRegister",
+        "onSendCode",
+        "showPassword = !showPassword",
+        "showPasswordConfirm = !showPasswordConfirm"
+      ]
+    },
+    {
+      "route": "pages/auth/onboarding",
+      "originalSource": "IM-APP-fronend/src/pages/auth/onboarding.vue",
+      "originalSHA256": "a976954ba4c9d7b7e9b2ddfd001079ca52b42a25265492a70e392e4ddf2e5ada",
+      "nativeApplicability": "ios",
+      "implementation": "NativeOnboardingController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeAuthFlowController.swift"
+      ],
+      "behavior": "真实头像上传、昵称15字、PATCH me、跳过",
+      "differences": [
+        "头像选择和小屏键盘视觉尚需优化验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "chooseAvatar",
+        "onNicknameInput",
+        "skipLater",
+        "submitProfile"
+      ]
+    },
+    {
+      "route": "pages/auth/forgot-password",
+      "originalSource": "IM-APP-fronend/src/pages/auth/forgot-password.vue",
+      "originalSHA256": "b3e97599a724fedf29e05f1b5abd25e959efe576bfbe4adf6339b5e52e318c65",
+      "nativeApplicability": "ios",
+      "implementation": "NativeAuthFlowController.resetPassword",
+      "files": [
+        "IM-APP-ios/IMNative/NativeAuthFlowController.swift"
+      ],
+      "behavior": "SMS、手机号步骤、设置新密码、第二步返回第一步、真实reset API",
+      "differences": [
+        "原版梯度和间距尚未逐像素验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goBack",
+        "onNext",
+        "onSendCode",
+        "onSubmit",
+        "showPassword = !showPassword"
+      ]
+    },
+    {
+      "route": "pages/auth/agreement",
+      "originalSource": "IM-APP-fronend/src/pages/auth/agreement.vue",
+      "originalSHA256": "8b2c1414d3b61b77aa9de7ec7c063e4066d289ed7add864717a997da0c0b9f86",
+      "nativeApplicability": "ios",
+      "implementation": "LegalViewController.agreement",
+      "files": [
+        "IM-APP-ios/IMNative/LegalViewController.swift"
+      ],
+      "behavior": "加载原协议离线HTML、禁脚本、禁任意跳转",
+      "differences": [
+        "需核对正式发布文案及版本"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": []
+    },
+    {
+      "route": "pages/auth/privacy",
+      "originalSource": "IM-APP-fronend/src/pages/auth/privacy.vue",
+      "originalSHA256": "5869c11a170d8b1d3f22d1e0f5fa34cd9e38d9e95098d442eabb214d7d86d462",
+      "nativeApplicability": "ios",
+      "implementation": "LegalViewController.privacy",
+      "files": [
+        "IM-APP-ios/IMNative/LegalViewController.swift"
+      ],
+      "behavior": "加载原隐私离线HTML、禁脚本、禁任意跳转",
+      "differences": [
+        "需核对正式发布文案及版本"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": []
+    },
+    {
+      "route": "pages/contacts/index",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/index.vue",
+      "originalSHA256": "3996455b3e63901fb8cda2be156243748576cc8f1766400dff5d03223c0093e5",
+      "nativeApplicability": "ios",
+      "implementation": "NativeContactsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "原搜索与3入口、群卡、联系人分页、排序、直接进入聊天",
+      "differences": [
+        "群卡展开/折叠细节尚未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "closeMenus",
+        "go('/pages/contacts/add-friend')",
+        "go('/pages/contacts/groups')",
+        "go('/pages/contacts/new-friends')",
+        "go('/pages/contacts/tags')",
+        "go('/pages/group/create')",
+        "goAddGroup",
+        "onLoadMore",
+        "onRefresherRefresh",
+        "openContact(c)",
+        "openGroupChat(g)",
+        "setSort('chat')",
+        "setSort('name')",
+        "setSort('recent')"
+      ]
+    },
+    {
+      "route": "pages/mine/index",
+      "originalSource": "IM-APP-fronend/src/pages/mine/index.vue",
+      "originalSHA256": "49601c768effe1f9f380b75c2f9a3e801c7cb0b5044e26b94ba15b42e2295759",
+      "nativeApplicability": "ios",
+      "implementation": "NativeMineViewController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMineViewController.swift"
+      ],
+      "behavior": "原hero素材、头像昵称、资料入口、收藏设置、退出登录",
+      "differences": [
+        "仅原H5截图基准已保存；iOS像素一致性未验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "go('/pages/mine/profile')",
+        "go('/pages/mine/qrcode')",
+        "go(m.url)",
+        "onLogout"
+      ]
+    },
+    {
+      "route": "pages/chat/room",
+      "originalSource": "IM-APP-fronend/src/pages/chat/room.vue",
+      "originalSHA256": "36a4b8be15631ab8ee5224d27e4412eecb4c9e0959c990aae17453bfb61255bc",
+      "nativeApplicability": "ios",
+      "implementation": "NativeConversationViewController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeConversationViewController.swift"
+      ],
+      "behavior": "SDK分页气泡、Outbox可靠发送、图片视频语音文件、相机、引用/@/置顶/多选/收藏/转发/撤回/删除/名片/合并查看",
+      "differences": [
+        "富回复条仍用输入提示；原emoji面板仍为原生选择器；历史定位旧新缓存间gap展示待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "(e) => actions.openMenu(m, e)",
+        "actions.selecting.value ? actions.toggleSelect(m) : undefined",
+        "cancelVoiceDraft",
+        "checkMuteStatus",
+        "goBack",
+        "goToProfile",
+        "jumpToPinnedMessage",
+        "onConfirmSend",
+        "onEmoji",
+        "onPlus",
+        "onReachOldest",
+        "openAnnouncement",
+        "pickCamera",
+        "pickCard",
+        "pickFavorite",
+        "pickFile",
+        "pickImage",
+        "pickVideo",
+        "recording ? stopVoiceRecord() : sendVoiceDraft()",
+        "recording ? stopVoiceRecord() : undefined",
+        "sendVoiceDraft",
+        "startVoiceRecord",
+        "syncAtMentionFromInput"
+      ]
+    },
+    {
+      "route": "pages/chat/forward",
+      "originalSource": "IM-APP-fronend/src/pages/chat/forward.vue",
+      "originalSHA256": "a0503cd5425c0114c741145278e0f49b5e089019932cc50be75a7f52a7417562",
+      "nativeApplicability": "ios",
+      "implementation": "NativeForwardPickerController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeConversationViewController.swift"
+      ],
+      "behavior": "四类接收对象、媒体preserve、forward-batches、固定幂等键及atomic待确认恢复、任务管理",
+      "differences": [
+        "全部走服务端批次；未复刻少量text/image直接SDK快速路径"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "active = 'contacts'",
+        "active = 'groups'",
+        "active = 'recent'",
+        "active = 'tags'",
+        "loadMore",
+        "onSend",
+        "toggle(item)",
+        "toggleSelectAll"
+      ]
+    },
+    {
+      "route": "pages/chat/image-viewer",
+      "originalSource": "IM-APP-fronend/src/pages/chat/image-viewer.vue",
+      "originalSHA256": "3d975e0a3c16ae7899f9415eba0240da7ed63fab6aec7967aa347497bb94becc",
+      "nativeApplicability": "ios",
+      "implementation": "NativeImagePreviewController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMedia.swift"
+      ],
+      "behavior": "原生缩放、相邻图左右切换、保原字节相册保存、ownedLocal预览",
+      "differences": [
+        "动图32帧/12MB解码上限，超限显示首帧；帧延时按总时长均分"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "change",
+        "move(-1)",
+        "move(1)",
+        "safeBack()",
+        "save"
+      ]
+    },
+    {
+      "route": "pages/chat/video-viewer",
+      "originalSource": "IM-APP-fronend/src/pages/chat/video-viewer.vue",
+      "originalSHA256": "251e9d63d8107ab9317bc8dae2ef7cfb00f56ed7899825a26f3d7db66626b07b",
+      "nativeApplicability": "ios",
+      "implementation": "NativeVideoPreviewController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMedia.swift"
+      ],
+      "behavior": "AVPlayer播放、300MB有界下载保存Photos、离页暂停取消",
+      "differences": [
+        "原自绘视频控制条/分享布局未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": []
+    },
+    {
+      "route": "pages/chat/card-picker",
+      "originalSource": "IM-APP-fronend/src/pages/chat/card-picker.vue",
+      "originalSHA256": "19241ae42bd71cf45703da6e7eda11728862bbad1c961f8d5b35dd6966d91567",
+      "nativeApplicability": "ios",
+      "implementation": "NativeContactPickerController.selectionLimit=1",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "完整联系人分页和单选、resolver校验、真实SDKcard",
+      "differences": [
+        "原卡片选择视觉未逐像素验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onPick(contact)"
+      ]
+    },
+    {
+      "route": "pages/chat/favorite-picker",
+      "originalSource": "IM-APP-fronend/src/pages/chat/favorite-picker.vue",
+      "originalSHA256": "296ab32ad6b1b0622eb36f62c424bd1cbd8333abf471f5034bd6bae464340483",
+      "nativeApplicability": "ios",
+      "implementation": "NativeFavoritesController.onSelected",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "收藏分类分页、返回原类型文字/图片/视频/语音/文件消息",
+      "differences": [
+        "分类使用系统segmented外观"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goBack",
+        "load()",
+        "onMainAction",
+        "switchTab(tab.type)",
+        "toggle(item)",
+        "toggleManage"
+      ]
+    },
+    {
+      "route": "pages/contacts/report-user",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/report-user.vue",
+      "originalSHA256": "9dae329f3346ddd5e60d9128105b9f79d57b466bcff704021791f110697a89c2",
+      "nativeApplicability": "ios",
+      "implementation": "NativeReportController + NativeEvidenceFormController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeReportAndFeedback.swift"
+      ],
+      "behavior": "动态举报理由、描述、9图上传、真实reports API",
+      "differences": [
+        "理由和证据分两页，原版同页布局尚未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onSubmit",
+        "selectedId = item.id"
+      ]
+    },
+    {
+      "route": "pages/contacts/new-friends",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/new-friends.vue",
+      "originalSHA256": "498b240921a0c70d349b821eabf1fc4f6eb3e89bcf8e5fca1d87cadf095468e1",
+      "nativeApplicability": "ios",
+      "implementation": "NativeFriendRequestsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "真实申请sync、待处理与历史、接受拒绝",
+      "differences": [
+        "申请列表空/错误态和原卡片样式待真机对齐"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onAccept(item.id)",
+        "onReject(item.id)"
+      ]
+    },
+    {
+      "route": "pages/contacts/add-friend",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/add-friend.vue",
+      "originalSHA256": "44c045e3828641549e307cb9d7da1a5aa11de30a2636142e8b508b2020a65f86",
+      "nativeApplicability": "ios",
+      "implementation": "NativeAddFriendController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "publicId搜索、扫码入口、资料查看及真实申请",
+      "differences": [
+        "原搜索卡片视觉待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goScan",
+        "onSearch",
+        "onSendRequest",
+        "viewProfile"
+      ]
+    },
+    {
+      "route": "pages/contacts/add-group",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/add-group.vue",
+      "originalSHA256": "898cfb65cce12a268fe749e79acc1789a0c384e118f915e46eac6c22b96d193e",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupsController.joinGroup",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "输入群号校验、真实join、需审核转join-requests",
+      "differences": [
+        "复用原生字段编辑器，原专页插画/文案布局未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goScan",
+        "onJoin"
+      ]
+    },
+    {
+      "route": "pages/contacts/scan",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/scan.vue",
+      "originalSHA256": "807b2f1063743e3814173c1c4c4ad599c0fc19246e6149ba46c7e3ced79951e0",
+      "nativeApplicability": "ios",
+      "implementation": "NativeQRScannerController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeQRScannerController.swift"
+      ],
+      "behavior": "AVCapture相机扫码、相册识别、只解析业务数据、离页迟到守卫",
+      "differences": [
+        "扫码动画/遮罩与原版尚未逐像素还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "chooseFromAlbum",
+        "goBack",
+        "goMyQrcode"
+      ]
+    },
+    {
+      "route": "pages/contacts/scan-result",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/scan-result.vue",
+      "originalSHA256": "8c5a7f3e5a6b9caf2849ffc177128cd4b9eb4c62d2604e61c3f24d38dced2b1d",
+      "nativeApplicability": "ios",
+      "implementation": "NativeQRResultController.user",
+      "files": [
+        "IM-APP-ios/IMNative/NativeQRScannerController.swift"
+      ],
+      "behavior": "真实resolve、friend/pending/blocked/self关系及真实好友申请",
+      "differences": [
+        "结果页卡片视觉待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goBack",
+        "onPrimary"
+      ]
+    },
+    {
+      "route": "pages/contacts/scan-group-result",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/scan-group-result.vue",
+      "originalSHA256": "4802a43e0be9d408a2f8ee6e1780a8323239b853206195446f0a39f7fbe17364",
+      "nativeApplicability": "ios",
+      "implementation": "NativeQRResultController.group",
+      "files": [
+        "IM-APP-ios/IMNative/NativeQRScannerController.swift"
+      ],
+      "behavior": "resolve nextAction enter/join/apply、pending状态、真实qrcode join",
+      "differences": [
+        "结果页卡片视觉待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goBack",
+        "onPrimary"
+      ]
+    },
+    {
+      "route": "pages/contacts/user-profile",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/user-profile.vue",
+      "originalSHA256": "0e113800ba6a9579bbce4973ae49da4edc33f24c48a6ddcb5a98a3dd3ea96ac4",
+      "nativeApplicability": "ios",
+      "implementation": "NativeContactController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "先核对好友关系、用户资料脱敏groupId、加友/发消息/举报",
+      "differences": [
+        "原hero资料卡布局未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onAddFriend",
+        "onChat"
+      ]
+    },
+    {
+      "route": "pages/contacts/friend-detail",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/friend-detail.vue",
+      "originalSHA256": "bb20a9898dd1fef8a730df000299dd911a53e920a1fc153e13195ed618169f29",
+      "nativeApplicability": "ios",
+      "implementation": "NativeContactController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "真实好友详情、备注、标签、共同群、拉黑/删好友/聊天",
+      "differences": [
+        "原hero资料卡布局未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "closeMore",
+        "goAllGroups",
+        "goRemark",
+        "goTags",
+        "onMessage",
+        "onTogglePin",
+        "onToggleRecv",
+        "openGroup(g)"
+      ]
+    },
+    {
+      "route": "pages/contacts/friend-common-groups",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/friend-common-groups.vue",
+      "originalSHA256": "fe0aa1bff876092351d148529fd0ebaf0bfe6c1bf4d43b4aac1d00d7e40cb313",
+      "nativeApplicability": "ios",
+      "implementation": "NativeCommonGroupsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupExtras.swift"
+      ],
+      "behavior": "真实contact.commonGroups、群resolver后进入聊天",
+      "differences": [
+        "原列表视觉待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "openGroup(g)"
+      ]
+    },
+    {
+      "route": "pages/contacts/friend-remark",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/friend-remark.vue",
+      "originalSHA256": "94b8084fbfc5e1e810f2efaf29af1f81feb4335dfdc3d36a275b71629f70d758",
+      "nativeApplicability": "ios",
+      "implementation": "NativeContactController.editRemark",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "push原生字段编辑、PATCH contact remark",
+      "differences": [
+        "原计数和输入约束细节待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onSubmit"
+      ]
+    },
+    {
+      "route": "pages/contacts/friend-tags",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/friend-tags.vue",
+      "originalSHA256": "cecdc982bdd5e4e638799ff9bc9d4a423384e300d2139e5f64b7fc4b84f49691",
+      "nativeApplicability": "ios",
+      "implementation": "NativeTagsController(contactID)",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "真实tag选择、联系人tagIds保存",
+      "differences": [
+        "原复选chips布局未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "closeCreate",
+        "confirmCreate",
+        "goEditTags",
+        "onSubmit",
+        "openCreate",
+        "toggle(tag.id)"
+      ]
+    },
+    {
+      "route": "pages/contacts/tag-detail",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/tag-detail.vue",
+      "originalSHA256": "51bd2b9aad7695f36e278c7f5aa38d6ae725db1413a3f39c99cb0b40617ef7bb",
+      "nativeApplicability": "ios",
+      "implementation": "NativeTagMembersController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "真实标签成员、备注重命名、批量成员编辑",
+      "differences": [
+        "原标签详情视觉待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "closeMore",
+        "closeRename",
+        "confirmRename",
+        "goAddMembers",
+        "onDeleteTag",
+        "openContact(c)",
+        "openRename"
+      ]
+    },
+    {
+      "route": "pages/contacts/tag-add-members",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/tag-add-members.vue",
+      "originalSHA256": "3a39c6c0596f597f99eb791ed4d4dd9b6c6eab2d4b821417cbace167be6eb4cc",
+      "nativeApplicability": "ios",
+      "implementation": "NativeTagMembersController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "完整联系人分页、多选、PUT tag members",
+      "differences": [
+        "原添加成员视觉待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "contactStore.loadMoreContacts",
+        "onSubmit",
+        "toggle(c)",
+        "toggleAll",
+        "unselect(c.id)"
+      ]
+    },
+    {
+      "route": "pages/contacts/tags",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/tags.vue",
+      "originalSHA256": "9006278e5fd5728d6f7fb24784bf17cabf97ceaf437183c0699166106b7915f1",
+      "nativeApplicability": "ios",
+      "implementation": "NativeTagsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeContactsViewController.swift"
+      ],
+      "behavior": "真实标签列表、新建/改名/删除、成员管理",
+      "differences": [
+        "原布局待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "closeCreate",
+        "confirmCreate",
+        "onDelete",
+        "openCreate",
+        "openTag(tag)",
+        "toggleEdit"
+      ]
+    },
+    {
+      "route": "pages/contacts/groups",
+      "originalSource": "IM-APP-fronend/src/pages/contacts/groups.vue",
+      "originalSHA256": "2e508d037e1562b76c289a2a286c9b9b81d3c197f61533a2907ff41ad55bcc9b",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "真实群分页、创建、加入、群资料",
+      "differences": [
+        "原展开和分类筛选细节未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goCreate",
+        "openGroup(g)",
+        "tab = 'created'",
+        "tab = 'joined'"
+      ]
+    },
+    {
+      "route": "pages/group/create",
+      "originalSource": "IM-APP-fronend/src/pages/group/create.vue",
+      "originalSHA256": "3ee39e5d2f44c4c8c19baf7aaa48a588c78fcf07a6a289a6545b9b713f8e228e",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupsController.createGroup",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "完整联系人选择、名称编辑、真实POST groups",
+      "differences": [
+        "原一页创建布局拆为选择+名称页"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "contactStore.loadMoreContacts",
+        "onConfirmSelect",
+        "onCreate",
+        "setSort('chat')",
+        "setSort('name')",
+        "setSort('recent')",
+        "showSort = false",
+        "toggle(c)"
+      ]
+    },
+    {
+      "route": "pages/group/detail",
+      "originalSource": "IM-APP-fronend/src/pages/group/detail.vue",
+      "originalSHA256": "acd47e160700a658934cd01c20835371c08945358687686995bc5f0185971dd1",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "真实群详情、权限、头像/名称/群号/备注/昵称、QR、公告、媒体、管理、退出",
+      "differences": [
+        "群成员宫格和原资料卡未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goToAdmin",
+        "goToAnnouncement",
+        "goToEditGroupId",
+        "goToEditName",
+        "goToGroupQrcode",
+        "goToJoinRequests",
+        "goToMedia",
+        "goToMembers",
+        "goToMyNickname",
+        "goToRemark",
+        "goToReport",
+        "goToSearchHistory",
+        "onChooseAvatar",
+        "onClearHistory",
+        "onDismiss",
+        "onLeave",
+        "onRemoveDissolved",
+        "onTogglePin",
+        "onToggleRecv",
+        "selectJoinMode('approval')",
+        "selectJoinMode('open')",
+        "showJoinMode = false",
+        "showJoinMode = true"
+      ]
+    },
+    {
+      "route": "pages/group/members",
+      "originalSource": "IM-APP-fronend/src/pages/group/members.vue",
+      "originalSHA256": "6067c87fd378446fd47ed341c92dfafb8d57685be29115699a98a3ca97a680e2",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupMembersController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "真实40分页、资料、成员备注、角色/禁言/移除与删除消息",
+      "differences": [
+        "禁言时长仅提供1小时，原更多时长交互待补"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goInvite",
+        "onReachListEnd",
+        "openProfile(member)"
+      ]
+    },
+    {
+      "route": "pages/group/invite",
+      "originalSource": "IM-APP-fronend/src/pages/group/invite.vue",
+      "originalSHA256": "d964774b3767fbbb8b77af666f2e0aae1b7a79d2de250a45aaa205ec66171082",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupController.invite",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "联系人选择、真实group invitations",
+      "differences": [
+        "普通成员入口权限和原版需继续核对"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "contactStore.loadMoreContacts",
+        "onConfirm",
+        "setSort('chat')",
+        "setSort('name')",
+        "setSort('recent')",
+        "showSort = false",
+        "toggle(c)"
+      ]
+    },
+    {
+      "route": "pages/group/admin",
+      "originalSource": "IM-APP-fronend/src/pages/group/admin.vue",
+      "originalSHA256": "b60f42334ff67c6c6c6922e83a51a10c3828dbf4d956bad5a9e363675853584c",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupAdministrationController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupExtras.swift"
+      ],
+      "behavior": "真实管理开关、管理员、申请入口",
+      "differences": [
+        "通用原生行布局尚未逐像素验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goToAdmins",
+        "onToggleForbidAdd",
+        "onToggleMute"
+      ]
+    },
+    {
+      "route": "pages/group/admins",
+      "originalSource": "IM-APP-fronend/src/pages/group/admins.vue",
+      "originalSHA256": "eb619f17a454a9a25456d11742bd90e999e452fd22947a86e8229df056c99e75",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupAdministratorsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupExtras.swift"
+      ],
+      "behavior": "完整成员分页筛管理员、群主添加/撤销管理员",
+      "differences": [
+        "原管理员页视觉待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goAdd",
+        "onTapMember(member)"
+      ]
+    },
+    {
+      "route": "pages/group/admin-add",
+      "originalSource": "IM-APP-fronend/src/pages/group/admin-add.vue",
+      "originalSHA256": "3c03e1781ba31413bdaa48e837a934e2f67d32d25dc26c33ab0e72c39237d261",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupAdministratorsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupExtras.swift"
+      ],
+      "behavior": "真实普通成员选择、PUT member role",
+      "differences": [
+        "原多选交互未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onSubmit",
+        "toggle(member.id)"
+      ]
+    },
+    {
+      "route": "pages/group/join-requests",
+      "originalSource": "IM-APP-fronend/src/pages/group/join-requests.vue",
+      "originalSHA256": "44f21649e60ff8d7b4eb8feeaf2e8d92718116ca5a02b1d2e1cc36fc2bf32b56",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupRequestsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "真实申请列表、approve/reject",
+      "differences": [
+        "原批量/分组视觉待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onAccept(item)",
+        "onReject(item)"
+      ]
+    },
+    {
+      "route": "pages/group/edit-name",
+      "originalSource": "IM-APP-fronend/src/pages/group/edit-name.vue",
+      "originalSHA256": "e78f6a689a9c0156c7f581ca6a10be59ca79590bb5f503c66c00b9f9449e048f",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupController.editName",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "push原生字段编辑、settings/update",
+      "differences": [
+        "输入字数与原页样式待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onSubmit"
+      ]
+    },
+    {
+      "route": "pages/group/edit-group-id",
+      "originalSource": "IM-APP-fronend/src/pages/group/edit-group-id.vue",
+      "originalSHA256": "1fc81a2f5448dbb655ff0393981fd19a24acbc36e79467f6144b605aa428f27e",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupController.editPublicID",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "publicIdChangeUsed限制、一次修改确认、真实public-id/update",
+      "differences": [
+        "原前缀不可改/计数提示尚未还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "clearId",
+        "onConfirm",
+        "onInput"
+      ]
+    },
+    {
+      "route": "pages/group/announcement",
+      "originalSource": "IM-APP-fronend/src/pages/group/announcement.vue",
+      "originalSHA256": "d80c4c70037ea45d172e8e27b541ebdf98c0cf629bcdad1adca83061d5bfea30",
+      "nativeApplicability": "ios",
+      "implementation": "NativeAnnouncementsController + NativeAnnouncementEditor",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+        "IM-APP-ios/IMNative/NativeGroupExtras.swift"
+      ],
+      "behavior": "真实公告列表/详情、文本+9图上传、保留旧图、缩略图、编辑删除",
+      "differences": [
+        "长公告列表cell仍截断预览，详情原排版待完善"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "addImages",
+        "beginEdit(item)",
+        "onDelete(item)",
+        "onSubmit",
+        "previewImage(historyImages(item), i)",
+        "previewImage(images, i)",
+        "resetComposer"
+      ]
+    },
+    {
+      "route": "pages/group/remark",
+      "originalSource": "IM-APP-fronend/src/pages/group/remark.vue",
+      "originalSHA256": "1fb4e3ec837a2ed9667797f3718a5d164b48b6808d456e6472c9197fbb34d643",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupController.editRemark",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "原生字段编辑、真实PUT group remark",
+      "differences": [
+        "原计数与间距待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onSubmit"
+      ]
+    },
+    {
+      "route": "pages/group/qrcode",
+      "originalSource": "IM-APP-fronend/src/pages/group/qrcode.vue",
+      "originalSHA256": "e1d21d9026f52e00b8c8a75bc4d9e94a73f3fb2befb0e2f071af6d50c6d3a415",
+      "nativeApplicability": "ios",
+      "implementation": "NativeQRCodeController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMineViewController.swift"
+      ],
+      "behavior": "真实群QR payload、CoreImage二维码、系统分享",
+      "differences": [
+        "原卡片和过期刷新布局待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onSave",
+        "onShare"
+      ]
+    },
+    {
+      "route": "pages/group/my-nickname",
+      "originalSource": "IM-APP-fronend/src/pages/group/my-nickname.vue",
+      "originalSHA256": "96d2ad237c3838e46519a43521e531a2f7544d5b8e877aba0a9f6001e08d65d1",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupController.editMyNickname",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "原生字段编辑、真实PUT group/me/nickname",
+      "differences": [
+        "原计数与间距待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onSubmit"
+      ]
+    },
+    {
+      "route": "pages/group/media",
+      "originalSource": "IM-APP-fronend/src/pages/group/media.vue",
+      "originalSHA256": "eb6370a71e3359e4e9ed9845470052d06bd6f7dc6b4f8b1836c809585183530d",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSearchController.initialTypes",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSearchViewController.swift"
+      ],
+      "behavior": "SDK媒体类型查询、40分页、图片/视频/文件预览",
+      "differences": [
+        "原媒体网格当前为列表，视觉未完整还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onPreview(item)",
+        "tab = item.key"
+      ]
+    },
+    {
+      "route": "pages/group/search-history",
+      "originalSource": "IM-APP-fronend/src/pages/group/search-history.vue",
+      "originalSHA256": "4b43caa8248fc401831bf18f045db34f85e6da8c5744f325fc1b343f8b5c3785",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSearchController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSearchViewController.swift"
+      ],
+      "behavior": "真实SDK会话查询、40分页、定位消息或媒体预览",
+      "differences": [
+        "类型控件和列表视觉不同"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "loadMore",
+        "openResult(item)",
+        "results.length && searchCursor ? loadMore() : runSearch(keyword)"
+      ]
+    },
+    {
+      "route": "pages/group/report",
+      "originalSource": "IM-APP-fronend/src/pages/group/report.vue",
+      "originalSHA256": "69a1342c3f7bafedb1a828b05cbdc9b9728914ee33ee7912fbb2510b703c9250",
+      "nativeApplicability": "ios",
+      "implementation": "NativeReportController.group",
+      "files": [
+        "IM-APP-ios/IMNative/NativeReportAndFeedback.swift"
+      ],
+      "behavior": "群6类理由选择",
+      "differences": [
+        "原分类页视觉待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "chooseReason(reason)"
+      ]
+    },
+    {
+      "route": "pages/group/report-submit",
+      "originalSource": "IM-APP-fronend/src/pages/group/report-submit.vue",
+      "originalSHA256": "856b33df7adbdac6f8d4bcdc5e2b9598d2ce869e0d168b73d9de88cb4a9272e3",
+      "nativeApplicability": "ios",
+      "implementation": "NativeEvidenceFormController.groupReport",
+      "files": [
+        "IM-APP-ios/IMNative/NativeReportAndFeedback.swift"
+      ],
+      "behavior": "5至200字、9图、真实groups/reports",
+      "differences": [
+        "原文字/图片区间距待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "addImages",
+        "onSubmit",
+        "previewImage(i)"
+      ]
+    },
+    {
+      "route": "pages/group/leave",
+      "originalSource": "IM-APP-fronend/src/pages/group/leave.vue",
+      "originalSHA256": "7bdac10b0b39fcee1f9c9118a722f2560c17a9625bc99db719e78bd8388459fc",
+      "nativeApplicability": "ios",
+      "implementation": "NativeGroupController.leave",
+      "files": [
+        "IM-APP-ios/IMNative/NativeGroupsViewController.swift"
+      ],
+      "behavior": "区分群主解散与成员退出、明确确认、真实API",
+      "differences": [
+        "用系统确认弹窗替代原确认专页"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": []
+    },
+    {
+      "route": "pages/mine/profile",
+      "originalSource": "IM-APP-fronend/src/pages/mine/profile.vue",
+      "originalSHA256": "c953b00c63e5d043964b5317c82f9ecec08cc981d476654543a4bdffda2a2c46",
+      "nativeApplicability": "ios",
+      "implementation": "NativeProfileController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMineViewController.swift"
+      ],
+      "behavior": "头像上传、昵称/签名编辑、手机、聊天号复制、QR、注销",
+      "differences": [
+        "原版分组已按源还原，iOS像素与键盘待验"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goEditBio",
+        "goEditChatId",
+        "goEditNickname",
+        "goQrcode",
+        "onChooseAvatar",
+        "onDeleteAccount"
+      ]
+    },
+    {
+      "route": "pages/mine/account-deletion",
+      "originalSource": "IM-APP-fronend/src/pages/mine/account-deletion.vue",
+      "originalSHA256": "8a1b9290a3604fa4ecefce06b4bb67f7a815b4861fb7d9a1c5478000e0f0522f",
+      "nativeApplicability": "ios",
+      "implementation": "NativeAccountDeletionController + NativeDeletionVerifyController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeAccountDeletionController.swift"
+      ],
+      "behavior": "预览阻塞项、短信delete_account、确认文字、真实不可逆请求、独立本机清理",
+      "differences": [
+        "多步骤布局与原版不同；无真实测试账号不可执行验收"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "load",
+        "onBlockerTap(blocker)",
+        "onCodeInput",
+        "onSendCode",
+        "onSubmit",
+        "understood = !understood"
+      ]
+    },
+    {
+      "route": "pages/mine/edit-nickname",
+      "originalSource": "IM-APP-fronend/src/pages/mine/edit-nickname.vue",
+      "originalSHA256": "1ae475dc944ceb92663c807293269c266b1ad00cb431c5fd517a51877269bb03",
+      "nativeApplicability": "ios",
+      "implementation": "NativeProfileController.nickname",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMineViewController.swift"
+      ],
+      "behavior": "原生字段编辑、PATCH me",
+      "differences": [
+        "字数计数视觉待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "clearNickname",
+        "onConfirm",
+        "onNicknameInput"
+      ]
+    },
+    {
+      "route": "pages/mine/edit-chat-id",
+      "originalSource": "IM-APP-fronend/src/pages/mine/edit-chat-id.vue",
+      "originalSHA256": "04a9992aa53840ba6bccdd021a75f6a624ffe48fe07bd1ee1c756df3bad2d537",
+      "nativeApplicability": "ios",
+      "implementation": "NativeProfileController.publicID",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMineViewController.swift"
+      ],
+      "behavior": "一次修改确认、PUT me/public-id",
+      "differences": [
+        "原规则提示和计数未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "clearChatId",
+        "onChatIdInput",
+        "onConfirm"
+      ]
+    },
+    {
+      "route": "pages/mine/edit-bio",
+      "originalSource": "IM-APP-fronend/src/pages/mine/edit-bio.vue",
+      "originalSHA256": "cbb1e5acb4de332736360d62e2c388c8b0030f7fa43b4d27bfae6b23126833c2",
+      "nativeApplicability": "ios",
+      "implementation": "NativeTextEditorController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeBusinessUI.swift"
+      ],
+      "behavior": "原生多行编辑、PATCH me bio",
+      "differences": [
+        "原最大字数和计数待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "clearBio",
+        "onBioInput",
+        "onConfirm"
+      ]
+    },
+    {
+      "route": "pages/mine/qrcode",
+      "originalSource": "IM-APP-fronend/src/pages/mine/qrcode.vue",
+      "originalSHA256": "b31d5241fa410f4a8164b99b408e14713d5ff5a8b9a91a8ff826eb86f8a2ac49",
+      "nativeApplicability": "ios",
+      "implementation": "NativeQRCodeController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMineViewController.swift"
+      ],
+      "behavior": "真实me/qrcode、CoreImage二维码、系统分享",
+      "differences": [
+        "原卡片与过期刷新布局待核"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goScan",
+        "onSave",
+        "onShare"
+      ]
+    },
+    {
+      "route": "pages/mine/favorites",
+      "originalSource": "IM-APP-fronend/src/pages/mine/favorites.vue",
+      "originalSHA256": "7dd7a92ae332d1ea7d720a3f95d66da8377c543d7d42b68dae7e94f891a7c916",
+      "nativeApplicability": "ios",
+      "implementation": "NativeFavoritesController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "真实20分页/分类、会话日期分组、缩略图、预览、转发原消息核对、复制/确认删除",
+      "differences": [
+        "segmented和系统菜单外观不同；非媒体文本4行截断；原无多选"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "closeMenu",
+        "handleAction('copy', activeMenuItem)",
+        "handleAction('delete', activeMenuItem)",
+        "handleAction('forward', activeMenuItem)",
+        "loadMore",
+        "selectTab(item.type)"
+      ]
+    },
+    {
+      "route": "pages/mine/notifications",
+      "originalSource": "IM-APP-fronend/src/pages/mine/notifications.vue",
+      "originalSHA256": "895b827fcf48fb741490fffe7a68defd899512d6e80fd505356fc666d133fc16",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSettingsController.notifications",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "原白底96r行/40r边距、两section黑字/横线、真实本机开关联动前台通知",
+      "differences": [
+        "后端LoggingPushService为日志桩，后台APNs和语音邀请服务未接通"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onMessageChange",
+        "onNoDisturbChange",
+        "onSoundChange",
+        "onVibrationChange",
+        "onVoiceChange"
+      ]
+    },
+    {
+      "route": "pages/mine/chat-settings",
+      "originalSource": "IM-APP-fronend/src/pages/mine/chat-settings.vue",
+      "originalSHA256": "6b8f5124ab6a9f34858684da209240b2439c9579477fd3a3314cd62dc43e8ec3",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSettingsController.chat",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "原白底4连续行、回车发送、群发/表情、真实全会话清历史",
+      "differences": [
+        "清历史失败中止明确提示，未复制旧端静默仅清本地降级"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goEmotions",
+        "goMassAssistant",
+        "onClear",
+        "onEnterChange"
+      ]
+    },
+    {
+      "route": "pages/mine/mass-assistant",
+      "originalSource": "IM-APP-fronend/src/pages/mine/mass-assistant.vue",
+      "originalSHA256": "dec7b654347f425587848c13339a7ca90d14717595ac0478885e9bd44dd5e672",
+      "nativeApplicability": "ios",
+      "implementation": "NativeMassAssistantController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMassAndEmotions.swift"
+      ],
+      "behavior": "真实历史atomic own file、复用目标再建新群发、结果核对",
+      "differences": [
+        "原群发记录卡片视觉未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goCreate",
+        "onDelete",
+        "toggleEdit",
+        "toggleSelect(r.id)"
+      ]
+    },
+    {
+      "route": "pages/mine/mass-select-contacts",
+      "originalSource": "IM-APP-fronend/src/pages/mine/mass-select-contacts.vue",
+      "originalSHA256": "c423223c17f2c89c70fc0ef887a6cf7656bc7aa111ab05eded4834b4ca8967fc",
+      "nativeApplicability": "ios",
+      "implementation": "NativeMassTargetPicker",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMassAndEmotions.swift"
+      ],
+      "behavior": "recent/联系人/群/标签、完整分页、搜索、多选",
+      "differences": [
+        "原四tab视觉未逐像素验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "active = 'contacts'",
+        "active = 'groups'",
+        "active = 'recent'",
+        "active = 'tags'",
+        "loadMore",
+        "onConfirm",
+        "toggle(item)",
+        "toggleSelectAll"
+      ]
+    },
+    {
+      "route": "pages/mine/mass-compose",
+      "originalSource": "IM-APP-fronend/src/pages/mine/mass-compose.vue",
+      "originalSHA256": "fdd3337436e6f075f4bb29dbc15aa915310415c7d086a3714db2777f1b3bfa22",
+      "nativeApplicability": "ios",
+      "implementation": "NativeMassComposeController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMassAndEmotions.swift"
+      ],
+      "behavior": "文字/多图/语音/文件、编辑目标、先持久record再发送、取消退出停止",
+      "differences": [
+        "群发录音预览交互需继续对照；当前附件列表简化"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goEditTargets",
+        "onSend"
+      ]
+    },
+    {
+      "route": "pages/mine/mass-targets",
+      "originalSource": "IM-APP-fronend/src/pages/mine/mass-targets.vue",
+      "originalSHA256": "86173d494e4214e7fde8c810921a5a670e897ecffb02b8a1c80321140ed63c0b",
+      "nativeApplicability": "ios",
+      "implementation": "NativeMassTargetPicker",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMassAndEmotions.swift"
+      ],
+      "behavior": "编辑接收对象、真实数据与去重",
+      "differences": [
+        "原接收对象独立页当前复用选择器"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": []
+    },
+    {
+      "route": "pages/mine/privacy",
+      "originalSource": "IM-APP-fronend/src/pages/mine/privacy.vue",
+      "originalSHA256": "4873e3e267dec9097adcfa9d5961ff5099db0f9bab94c71c774db1a3cd012826",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSettingsController.privacy",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "真实GET/POST privacy、确认后开关状态、黑名单入口",
+      "differences": [
+        "iOS与原白底行间距仍待验证"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "goBlacklist",
+        "onFriendVerify",
+        "onGroupInviteVerify"
+      ]
+    },
+    {
+      "route": "pages/mine/blacklist",
+      "originalSource": "IM-APP-fronend/src/pages/mine/blacklist.vue",
+      "originalSHA256": "99f0575339e03493195ca9c2aae6c9ffd72366b7f873e3d2bd1df05b605bb90e",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSettingsController.blocked",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "真实blocked列表、解除拉黑",
+      "differences": [
+        "目前limit100无更多页，需核后端分页能力和大列表"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onPullDownRefresh",
+        "onUnblock(item)"
+      ]
+    },
+    {
+      "route": "pages/mine/security",
+      "originalSource": "IM-APP-fronend/src/pages/mine/security.vue",
+      "originalSHA256": "073a484af71f54886ba0df7ce9e1a1a00ef1387ad50e99a6b40a8726686b806f",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSecurityController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "原手机展示、旧密码眼睛、下一步、verify后新密码两字段和确认、仅闭包内持旧密码",
+      "differences": [
+        "原成功toast样式未复刻；刷新profile和返回场景需Mac验"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onNext",
+        "onOldPasswordInput",
+        "showOldPassword = !showOldPassword"
+      ]
+    },
+    {
+      "route": "pages/mine/reset-password",
+      "originalSource": "IM-APP-fronend/src/pages/mine/reset-password.vue",
+      "originalSHA256": "c57db99a9d5df9e24dddc55e980823f062957915cc9ee1f45354b8b3101ce356",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSecurityController.step1",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "新密码/确认密码、6字匹配、真实PUT me/password、返回清秘密",
+      "differences": [
+        "原页面用同controller步骤，返回栈语义需真机核对"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onConfirm",
+        "onConfirmPasswordInput",
+        "onPasswordInput",
+        "showConfirmPassword = !showConfirmPassword",
+        "showPassword = !showPassword"
+      ]
+    },
+    {
+      "route": "pages/mine/general",
+      "originalSource": "IM-APP-fronend/src/pages/mine/general.vue",
+      "originalSHA256": "13941e743ea2f881c63c00e5064872254753278c603b75dd61c56e0686287152",
+      "nativeApplicability": "ios",
+      "implementation": "NativeSettingsController.general",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "7连续白底原行、反馈/关于/图片缓存清理/重连/诊断，语言显示模式维持原提示",
+      "differences": [
+        "重新选线当前对现有SDK networkChanged重连，未虚构测速服务"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "closeClearModal",
+        "closeLineModal",
+        "confirmClearCache",
+        "confirmReselectLine",
+        "goAbout",
+        "goFeedback",
+        "onDebug",
+        "onDisplayMode",
+        "onLanguage",
+        "openClearModal",
+        "openLineModal"
+      ]
+    },
+    {
+      "route": "pages/mine/feedback",
+      "originalSource": "IM-APP-fronend/src/pages/mine/feedback.vue",
+      "originalSHA256": "3580cbe9b4727d61a87a4c661a3fc0366083996edc0aecff7cc5b7970543cfd7",
+      "nativeApplicability": "ios",
+      "implementation": "NativeEvidenceFormController.feedback",
+      "files": [
+        "IM-APP-ios/IMNative/NativeReportAndFeedback.swift"
+      ],
+      "behavior": "联系方式64、内容200、1图、上传后真实feedbacks",
+      "differences": [
+        "原纸张与示例插图未完全还原"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "chooseImage",
+        "onContentInput",
+        "onSubmit",
+        "removeImage"
+      ]
+    },
+    {
+      "route": "pages/mine/about",
+      "originalSource": "IM-APP-fronend/src/pages/mine/about.vue",
+      "originalSHA256": "d148fc5f338970a3166dbe39a870f7ff6a05db5f7132ed53f154eb98341f6257",
+      "nativeApplicability": "ios",
+      "implementation": "NativeAboutController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeSettingsViewController.swift"
+      ],
+      "behavior": "原logo/名字/版本/检查更新/协议、GET public/app-release canary只读",
+      "differences": [
+        "现有发布无应用identity，不能认定旧IPA/WGT兼容；原生AppStore/TestFlight发布待配置"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onCheckUpdate",
+        "openLegalDocument('agreement')",
+        "openLegalDocument('privacy')"
+      ]
+    },
+    {
+      "route": "pages/mine/emotions",
+      "originalSource": "IM-APP-fronend/src/pages/mine/emotions.vue",
+      "originalSHA256": "bdd3ae84d7bbb0ebfd297bcd250621e312fa3004184cb4a01bdff370de11be45",
+      "nativeApplicability": "ios",
+      "implementation": "NativeEmotionsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeMassAndEmotions.swift"
+      ],
+      "behavior": "真实列表/原GIFWebP字节上传/多选删除/图片预览或SDK发图",
+      "differences": [
+        "当前只取100条需分页扩展；动图遵守有界内存策略"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onDelete",
+        "onEmotionClick(item)",
+        "onUpload",
+        "toggleEdit"
+      ]
+    },
+    {
+      "route": "pages/mine/debug",
+      "originalSource": "IM-APP-fronend/src/pages/mine/debug.vue",
+      "originalSHA256": "27bce694c980b43b797e24b0d0de33bc097c10d179726667e0bebb6ee1ad570e",
+      "nativeApplicability": "ios",
+      "implementation": "NativeDiagnosticsController",
+      "files": [
+        "IM-APP-ios/IMNative/NativeDiagnosticsController.swift"
+      ],
+      "behavior": "SDK版本/状态/会话/Outbox专用诊断，安全摘要、手动核对、真实forward tasks",
+      "differences": [
+        "原uniapp JS调试字段不适用iOS，原生诊断有意替换"
+      ],
+      "status": "implemented_unverified_with_gaps",
+      "runtimeVerified": false,
+      "visualVerified": false,
+      "originalInteractions": [
+        "onSaveImage",
+        "runProbes"
+      ]
+    }
+  ]
+}
