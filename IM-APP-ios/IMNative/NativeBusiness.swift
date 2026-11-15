@@ -6,9 +6,10 @@ struct NativePage<Item: Decodable>: Decodable {
     let items: [Item]
     let nextCursor: String?
     let hasMore: Bool
-    private enum CodingKeys: String, CodingKey { case items, nextCursor, hasMore }
+    let total: Int?
+    private enum CodingKeys: String, CodingKey { case items, nextCursor, hasMore, total }
     init(from decoder: Decoder) throws {
-        if let array = try? decoder.singleValueContainer().decode([Item].self) { items = array; nextCursor = nil; hasMore = false; return }
+        if let array = try? decoder.singleValueContainer().decode([Item].self) { items = array; nextCursor = nil; hasMore = false; total = nil; return }
         if let text = try? decoder.singleValueContainer().decode(String.self), let data = text.data(using: .utf8), text.first == "[" || text.first == "{" {
             self = try JSONDecoder().decode(Self.self, from: data); return
         }
@@ -19,6 +20,7 @@ struct NativePage<Item: Decodable>: Decodable {
         items = try c.decode([Item].self, forKey: .items)
         nextCursor = try c.decodeIfPresent(String.self, forKey: .nextCursor)
         hasMore = try c.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
+        total = (try? c.decode(Int.self, forKey: .total)) ?? (try? c.decode(String.self, forKey: .total)).flatMap(Int.init)
     }
 }
 struct NativeTag: Decodable { let id: String; let name: String; let memberCount: Int? }

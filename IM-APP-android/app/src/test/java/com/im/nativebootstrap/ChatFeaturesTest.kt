@@ -60,7 +60,7 @@ class ChatFeaturesTest {
         override fun send(target:ChatTarget,serialized:String,done:(Result<ChatMessage>)->Unit) { sendCount++;sendDone=done;sendCallbacks+=done;sentNotice();sendStarted.countDown() }
         override fun createForward(source:ChatMessage,snapshot:JsonObject,target:ChatTarget):ChatMessage {
             val id="forward-${++forwardCreates}"
-            return created.copy(id=id,serialized="""{"clientMsgID":"$id","contentType":101,"textElem":{"content":"forwarded"}}""")
+            return created.copy(id=id,serialized=ForwardSnapshots.withSnapshot("""{"clientMsgID":"$id"}""",snapshot))
         }
         override fun find(target:ChatTarget,id:String,done:(Result<ChatMessage?>)->Unit)=done(Result.success(foundMessages[id]))
         override fun foreground(active:Boolean) {}
@@ -75,7 +75,7 @@ class ChatFeaturesTest {
         override fun groupMembers(target:ChatTarget,userIds:List<String>,done:(Result<List<ChatGroupMember>>)->Unit) { memberBatchCount++;memberBatch=userIds;memberBatchDone=done }
         override fun createRemoteImage(url:String,target:ChatTarget):ChatMessage { remoteImageUrl=url;return created }
     }
-    private inner class Harness(group:Boolean=false) {
+    private inner class Harness(group:Boolean=false,private val serialCallbacks:Boolean=false) {
         val root=temporary.newFolder()
         val groupTarget=ChatTarget("sg_12345678123412341234123456789abc",3,groupId="group")
         val gateway=Gateway(if(group)ChatConversation(groupTarget,"群","",1) else conversation)
@@ -84,7 +84,9 @@ class ChatFeaturesTest {
         val emitted=LinkedBlockingQueue<ChatState>()
         var deferCallbacks=false
         val deferred=LinkedBlockingQueue<()->Unit>()
-        val controller=ChatController(gateway,{ if(deferCallbacks)deferred.offer(it) else it() },{ ms,work -> timers+=ms to work },{ state=it;emitted.offer(it) })
+        private val testThread=Thread.currentThread()
+        // 竞态用例按生产调度契约回到同一线程，不能让业务 IO 直接覆盖测试线程的状态。
+        val controller=ChatController(gateway,{ if(deferCallbacks||(serialCallbacks&&Thread.currentThread()!=testThread))deferred.offer(it) else it() },{ ms,work -> timers+=ms to work },{ state=it;emitted.offer(it) })
         val directory=AccountStorage.directory(root,"https://service.invalid/api/v1","business","im")
         init {
             if(group)GroupRetention(File(directory,"group-retention.json"),AccountStorage.key("https://service.invalid/api/v1","business","im")).merge(listOf(RetentionWatermark(groupTarget.conversationId,10,1,"2026-11-13T00:00:00Z")))
@@ -93,11 +95,45 @@ class ChatFeaturesTest {
         fun awaitState(predicate:(ChatState)->Boolean):ChatState {
             val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
             while(System.nanoTime()<deadline) {
-                val next=emitted.poll(250,TimeUnit.MILLISECONDS) ?: continue
+                if(serialCallbacks&&!deferCallbacks)deferred.poll()?.invoke()
+                val next=emitted.poll(if(serialCallbacks)20 else 250,TimeUnit.MILLISECONDS) ?: continue
                 if(predicate(next))return next
             }
             error("expected chat state was not emitted")
         }
+    }
+    @Test fun cachedGroupBoundarySurvivesBackgroundFailureWithoutInterruptingHistoryOrWeakeningFilter() {
+        val h=Harness(true);h.controller.open(h.gateway.peerResult)
+        h.controller.attachBusiness(object:ChatBusiness {
+            override val baseUrl="https://service.invalid/api/v1"
+            override fun request(method:String,path:String,body:JsonObject?,query:Map<String,String>):JsonElement {
+                if(path=="/im/group-retention/states")throw IllegalStateException("offline fixture")
+                return JsonParser.parseString("""{"items":[],"canChat":true}""")
+            }
+        })
+        val refreshed=h.awaitState { it.historyDiagnostic=="群历史边界刷新失败" }
+        assertNull(refreshed.error)
+        h.gateway.historyDone(Result.success(HistoryPage(listOf(ChatMessage("hidden","old",false,5,seq=5),ChatMessage("visible","new",false,15,seq=15)),true)))
+        assertEquals(listOf("visible"),h.state.messages.map { it.id })
+        assertNull(h.state.error)
+        h.controller.logout()
+    }
+    @Test fun missingGroupBoundaryIsNotBypassedWhenRefreshFails() {
+        val h=Harness(serialCallbacks=true)
+        h.controller.attachBusiness(object:ChatBusiness {
+            override val baseUrl="https://service.invalid/api/v1"
+            override fun request(method:String,path:String,body:JsonObject?,query:Map<String,String>):JsonElement {
+                if(path=="/im/group-retention/states")throw IllegalStateException("offline fixture")
+                return JsonParser.parseString("""{"items":[],"canChat":true}""")
+            }
+        })
+        h.controller.open(ChatConversation(h.groupTarget,"uncached group","",0))
+        val failed=h.awaitState { it.historyDiagnostic=="群历史边界刷新失败" }
+        assertTrue(failed.messages.isEmpty())
+        assertEquals("暂时无法读取此群历史，请稍后重试。",failed.error)
+        h.gateway.events.messages(listOf(h.groupTarget to ChatMessage("must-not-leak","hidden",false,15,seq=15)))
+        assertTrue(h.state.messages.isEmpty())
+        h.controller.logout()
     }
     @Test fun resolvingConversationForSettingsDoesNotOpenOrReplaceCurrentRoom() {
         val h=Harness();h.controller.open(conversation)
@@ -109,7 +145,7 @@ class ChatFeaturesTest {
         assertTrue(h.state.messages.isEmpty())
     }
     @Test fun permissionUpdatesBlockAndUnblockInputAndIgnoreAnOldRoomResponse() {
-        val h=Harness(true);h.controller.open(h.gateway.peerResult)
+        val h=Harness(true,serialCallbacks=true);h.controller.open(h.gateway.peerResult)
         val entered=CountDownLatch(1);val release=CountDownLatch(1)
         var blocked=true;var delayOld=false
         h.controller.attachBusiness(object:ChatBusiness {
@@ -553,6 +589,44 @@ class ChatFeaturesTest {
         // 重复 SDK 回调不重复发出成功事件。
         h.gateway.sendCallbacks.last()(Result.success(plan.last().message.copy(status=2,seq=21)))
         assertEquals("",h.state.forwardSuccessId)
+    }
+    @Test fun multiRecipientVideoPreservesOnceAndTracksEachSdkIdWithoutServerBatch() {
+        val h=Harness();h.controller.open(conversation);h.gateway.resolveEachPeer=true
+        val preserveCalls=java.util.concurrent.atomic.AtomicInteger()
+        h.controller.attachBusiness(object:ChatBusiness {
+            override val baseUrl="https://service.invalid/api/v1"
+            override fun request(method:String,path:String,body:JsonObject?,query:Map<String,String>):JsonElement {
+                if(path.startsWith("/im/peers/"))return JsonParser.parseString("""{"canChat":true,"imUserId":"${path.substringAfterLast('/')}"}""")
+                assertEquals("/forward-media/preserve",path)
+                preserveCalls.incrementAndGet()
+                val preserved=body!!.getAsJsonObject("sourceSnapshot").deepCopy()
+                preserved.getAsJsonObject("content").addProperty("videoUrl","https://cdn.invalid/archive.mov")
+                return preserved
+            }
+        })
+        val video=ChatMessage("source-video","[视频]",true,1,2,2,"""{"clientMsgID":"source-video","contentType":104,"videoElem":{"videoUrl":"https://cdn.invalid/original.mov","videoType":"mov","videoUUID":"v1","snapshotUrl":"https://cdn.invalid/cover.jpg","snapshotUUID":"c1","duration":8,"videoSize":1024,"snapshotWidth":360,"snapshotHeight":640}}""")
+        val targets=listOf("first","second","third","fourth").map { ChatForwardTarget(it,it,"contact",businessUserId=it) }
+        h.controller.submitForward(listOf(video),ChatForwardSelection(targets),done={ assertTrue(it.isSuccess) })
+        h.awaitState { it.pendingForwards.singleOrNull()?.plan?.size==4&&it.outbox.size==4&&h.gateway.sendCallbacks.size==4 }
+        assertEquals(1,preserveCalls.get())
+        val plan=h.state.pendingForwards.single().plan
+        assertEquals(4,plan.map { it.message.id }.distinct().size)
+        plan.forEach {
+            val elem=JsonParser.parseString(it.message.serialized).asJsonObject.getAsJsonObject("videoElem")
+            assertEquals("https://cdn.invalid/archive.mov",elem["videoUrl"].asString)
+            assertEquals("mov",elem["videoType"].asString)
+            assertEquals("v1",elem["videoUUID"].asString)
+        }
+        h.gateway.sendCallbacks[0](Result.success(plan[0].message.copy(status=2,seq=7)))
+        h.gateway.sendCallbacks[1](Result.failure(ChatFailure(10001)))
+        h.gateway.sendCallbacks[2](Result.success(plan[2].message.copy(status=2,seq=10)))
+        h.gateway.sendCallbacks[3](Result.success(plan[3].message.copy(status=2,seq=11)))
+        assertEquals("",h.state.forwardSuccessId)
+        assertEquals(3,h.state.pendingForwards.single().plan.count { it.accepted })
+        assertEquals(4,h.gateway.sendCount)
+        h.gateway.events.messages(listOf(plan[1].target to plan[1].message.copy(status=2,seq=9)))
+        assertEquals("completed",h.state.pendingForwards.single().status)
+        assertEquals(4,h.gateway.sendCount)
     }
     private fun recoverPreparedForward(foundStatus:Int?,picture:Boolean=false):Harness {
         val h=Harness()

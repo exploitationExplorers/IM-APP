@@ -18,6 +18,9 @@ class ChatRuntimeTest {
         lateinit var login:(Result<Unit>)->Unit
         val pages=mutableListOf<Triple<Int,Int,(Result<List<ChatConversation>>)->Unit>>()
         val histories=mutableListOf<Triple<ChatTarget,String?,(Result<HistoryPage>)->Unit>>()
+        val localHistories=mutableListOf<Triple<ChatTarget,Int,(Result<HistoryPage>)->Unit>>()
+        val localAnchors=mutableListOf<Long>()
+        var supportsLocalHistory=false
         val sends=mutableListOf<Triple<ChatTarget,String,(Result<ChatMessage>)->Unit>>()
         val finds=mutableListOf<Pair<String,(Result<ChatMessage?>)->Unit>>()
         var beforeSend:(()->Unit)?=null
@@ -25,11 +28,17 @@ class ChatRuntimeTest {
         override fun start(userId:String,token:String,api:String,ws:String,directory:File,events:ChatEvents,done:(Result<Unit>)->Unit) { this.events=events;login=done }
         override fun conversations(offset:Int,count:Int,done:(Result<List<ChatConversation>>)->Unit) { pages+=Triple(offset,count,done) }
         override fun history(target:ChatTarget,cursor:String?,count:Int,done:(Result<HistoryPage>)->Unit) { histories+=Triple(target,cursor,done) }
+        override fun localHistory(target:ChatTarget,page:Int,count:Int,done:(Result<HistoryPage>)->Unit) {
+            if(supportsLocalHistory)localHistories+=Triple(target,page,done) else done(Result.failure(UnsupportedOperationException()))
+        }
+        override fun localHistory(target:ChatTarget,page:Int,count:Int,anchorTimeSeconds:Long,done:(Result<HistoryPage>)->Unit) { localAnchors+=anchorTimeSeconds;localHistory(target,page,count,done) }
         override fun createText(text:String,target:ChatTarget)=created
         override fun peer(imId:String,group:Boolean,done:(Result<ChatConversation>)->Unit) { done(Result.success(ChatConversation(ChatTarget("si_test",1,imId),"peer","",0))) }
         override fun send(target:ChatTarget,serialized:String,done:(Result<ChatMessage>)->Unit) { beforeSend?.invoke();sends+=Triple(target,serialized,done) }
         override fun find(target:ChatTarget,id:String,done:(Result<ChatMessage?>)->Unit) { finds+=id to done }
         override fun foreground(active:Boolean) {}
+        override fun setConversation(target:ChatTarget,pinned:Boolean?,muted:Boolean?,done:(Result<Unit>)->Unit) { done(Result.success(Unit)) }
+        override fun clearHistory(target:ChatTarget,done:(Result<Unit>)->Unit) { done(Result.success(Unit)) }
         override fun shutdown() {}
     }
     private inner class Harness {
@@ -59,6 +68,17 @@ class ChatRuntimeTest {
         assertEquals(StoreStatus.READABLE,h.state.store)
         assertEquals(SyncStatus.IDLE,h.state.sync)
     }
+    @Test fun startupEventsDoNotExposeAnIncompleteConversationListBeforeLocalSnapshot() {
+        val h=Harness()
+        h.gateway.events.conversations((1..8).map { conversation("early-$it",1_700_000_000_000L+it) })
+        assertTrue("SDK event subsets must not become the initial visible list",h.state.conversations.isEmpty())
+        h.gateway.login(Result.success(Unit))
+        assertTrue(h.state.conversations.isEmpty())
+        val complete=(1..30).map { conversation("local-$it",1_700_000_010_000L+it) }
+        h.gateway.pages.last().third(Result.success(complete))
+        assertTrue(h.state.ready)
+        assertEquals(complete.reversed(),h.state.conversations)
+    }
     @Test fun pagesUseSdkOffsetsAndMergeIncrementalEventsWithoutDuplicates() {
         val h=Harness();h.gateway.login(Result.success(Unit))
         h.gateway.pages.last().third(Result.success((0 until 30).map { conversation("id$it") }))
@@ -69,6 +89,73 @@ class ChatRuntimeTest {
         assertEquals(31,h.state.conversations.size)
         assertEquals(99L,h.state.conversations.first { it.target.conversationId=="id0" }.time)
         assertTrue(h.state.conversationsEnd)
+    }
+    @Test fun equalTimePagesAndReversedEventsKeepVisibleOrder() {
+        val h=Harness();h.gateway.login(Result.success(Unit))
+        val first=(30 downTo 1).map { conversation("id%02d".format(it)) }
+        h.gateway.pages.last().third(Result.success(first))
+        val order=first.map { it.target.conversationId }
+        assertEquals(order,h.state.conversations.map { it.target.conversationId })
+        h.gateway.events.conversations(first.reversed().map { it.copy(unread=2,muted=true) })
+        assertEquals(order,h.state.conversations.map { it.target.conversationId })
+        h.controller.loadConversations()
+        h.gateway.pages.last().third(Result.success(listOf(conversation("id00"))))
+        assertEquals(order+"id00",h.state.conversations.map { it.target.conversationId })
+        assertTrue(h.state.conversations.take(30).all { it.unread==2&&it.muted })
+    }
+    @Test fun refreshSnapshotCannotUndoEventsArrivingDuringQuery() {
+        val h=Harness();h.ready()
+        val old=conversation("peer").copy(unread=9)
+        h.gateway.events.conversations(listOf(old))
+        h.controller.loadConversations(true)
+        val changed=old.copy(unread=0,muted=true,pinned=true)
+        h.gateway.events.conversations(listOf(changed))
+        h.gateway.pages.last().third(Result.success(listOf(old)))
+        assertEquals(changed,h.state.conversations.single())
+    }
+    @Test fun newMessagesAndPinChangesStillMoveConversations() {
+        val first=conversation("first",20)
+        val second=conversation("second",10)
+        val old=listOf(first,second)
+        assertEquals(listOf("second","first"),mergeConversations(old,listOf(second.copy(time=30)),true).map { it.target.conversationId })
+        assertEquals(listOf("second","first"),mergeConversations(old,listOf(second.copy(pinned=true)),true).map { it.target.conversationId })
+        assertEquals(listOf("first","second"),mergeConversations(listOf(second.copy(pinned=true),first),listOf(second),true).map { it.target.conversationId })
+    }
+    @Test fun stalePinInQueryDoesNotReorderEqualTimeRowsAfterNewerUnpinEvent() {
+        val h=Harness();h.ready()
+        val first=conversation("first");val second=conversation("second")
+        h.gateway.events.conversations(listOf(first,second))
+        h.controller.loadConversations(true)
+        h.gateway.events.conversations(listOf(second.copy(unread=0,pinned=false)))
+        h.gateway.pages.last().third(Result.success(listOf(second.copy(pinned=true),first)))
+        assertEquals(listOf("first","second"),h.state.conversations.map { it.target.conversationId })
+        assertFalse(h.state.conversations.last().pinned)
+    }
+    @Test fun successfulLocalSettingsAreNotUndoneByAnInFlightQuery() {
+        val h=Harness();h.ready();val old=conversation().copy(unread=5)
+        h.gateway.events.conversations(listOf(old));h.controller.loadConversations(true)
+        h.controller.updateConversation(old,pinned=true,muted=true) { assertTrue(it.isSuccess) }
+        h.gateway.pages.last().third(Result.success(listOf(old)))
+        assertTrue(h.state.conversations.single().pinned)
+        assertTrue(h.state.conversations.single().muted)
+    }
+    @Test fun successfulLocalReadIsNotUndoneByAnInFlightQuery() {
+        val h=Harness();h.ready();val old=conversation().copy(unread=5)
+        h.gateway.events.conversations(listOf(old));h.controller.loadConversations(true)
+        h.controller.markConversationRead(old) { assertTrue(it.isSuccess) }
+        h.gateway.pages.last().third(Result.success(listOf(old)))
+        assertEquals(0,h.state.conversations.single().unread)
+    }
+    @Test fun successfulLocalClearIsNotUndoneByAnInFlightQuery() {
+        val h=Harness();h.ready();val old=conversation().copy(unread=5,latestSeq=42)
+        h.gateway.events.conversations(listOf(old));h.controller.loadConversations(true)
+        var completed=false
+        h.controller.clearConversation(old) { assertTrue(it.isSuccess);completed=true }
+        assertTrue(completed)
+        h.gateway.pages.last().third(Result.success(listOf(old)))
+        assertEquals("",h.state.conversations.single().preview)
+        assertEquals(0,h.state.conversations.single().unread)
+        assertEquals(0L,h.state.conversations.single().latestSeq)
     }
     @Test fun oldRoomAndReopenedRoomHistoryCallbacksAreRejected() {
         val h=Harness();h.open()
@@ -102,6 +189,110 @@ class ChatRuntimeTest {
         h.controller.loadHistory();old(Result.success(HistoryPage(listOf(message("late")),true)))
         assertTrue(h.state.messages.isEmpty())
         assertTrue(h.state.historyLoading)
+    }
+    @Test fun localPagesRemainReadableDuringSyncAndBlockedAdvancedHistory() {
+        val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
+        h.gateway.events.connection(ConnectionState.CONNECTED)
+        h.gateway.events.syncStarted()
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("local-new",2,30,30)),false)))
+        assertEquals(listOf("local-new"),h.state.messages.map { it.id })
+        assertFalse(h.state.historyLoading);assertFalse(h.state.historyEnd)
+        assertEquals(1,h.gateway.histories.size)
+        // 高级历史补洞仍不回调，本机第二页无需等待网络。
+        h.controller.loadHistory()
+        assertEquals(2,h.gateway.localHistories.last().second)
+        assertEquals(h.gateway.localAnchors.first(),h.gateway.localAnchors.last())
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("local-old",2,20,20)),true)))
+        assertEquals(listOf("local-old","local-new"),h.state.messages.map { it.id })
+        assertFalse(h.state.historyLoading);assertFalse(h.state.historyEnd)
+        h.timers.last { it.first==20_000L }.second()
+        assertEquals(2,h.state.messages.size);assertFalse(h.state.historyLoading)
+        assertEquals(SyncStatus.RUNNING,h.state.sync)
+    }
+    @Test fun remoteEndDoesNotHideRemainingLocalPagesFromAutomaticPagination() {
+        val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("recent",2,40,40)),false)))
+        h.gateway.histories.last().third(Result.success(HistoryPage(emptyList(),true)))
+        assertFalse(h.state.historyEnd)
+        val revision=h.state.historyRevision
+        h.controller.loadHistory()
+        assertEquals(2,h.gateway.localHistories.last().second)
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("older",2,20,20)),true)))
+        assertTrue(h.state.historyEnd)
+        assertTrue(h.state.historyRevision>revision)
+        assertEquals(listOf("older","recent"),h.state.messages.map { it.id })
+    }
+    @Test fun localPreviewEndStopsRepeatedEmptyQueriesButOnlyAdvancedCanFinishAllMessageTypes() {
+        val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("last-local",2,3)),true)))
+        assertFalse(h.state.historyEnd);assertFalse(h.state.historyLoading)
+        h.controller.loadHistory();assertEquals(1,h.gateway.localHistories.size)
+        // 用户请求完整历史，SDK高级历史仍可补出本地搜索不支持的表情/高级文本/系统类型。
+        assertEquals(1,h.gateway.histories.size)
+        val extra=listOf(115,117,1510).mapIndexed { index,type -> message("unsupported-$type",2,(4+index).toLong()).copy(serialized="""{"contentType":$type}""") }
+        h.gateway.histories.single().third(Result.success(HistoryPage(extra,false)))
+        assertEquals(4,h.state.messages.size)
+        assertFalse(h.state.historyEnd)
+        h.gateway.events.connection(ConnectionState.CONNECTED)
+        assertFalse(h.state.historyEnd)
+        assertEquals(2,h.gateway.histories.size)
+        h.gateway.histories.last().third(Result.success(HistoryPage(emptyList(),true)))
+        assertTrue(h.state.historyEnd);assertFalse(h.state.historyLoading)
+    }
+    @Test fun disconnectedSdkStillTriesFullLocalHistoryWithoutBlockingTheNextPreviewPage() {
+        val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
+        h.gateway.events.connection(ConnectionState.DISCONNECTED)
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("local-text",2,40)),false)))
+        assertEquals(1,h.gateway.histories.size)
+        assertFalse(h.state.historyLoading)
+        h.controller.loadHistory()
+        assertEquals(2,h.gateway.localHistories.last().second)
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("older-text",2,30)),true)))
+        assertEquals(2,h.state.messages.size);assertFalse(h.state.historyLoading)
+        // 网络补洞一直未返回也不阻塞本地第二页；完整渠道随后可补出本地系统消息。
+        val system=message("local-system",2,35).copy(serialized="""{"contentType":1510}""")
+        h.gateway.histories.single().third(Result.success(HistoryPage(listOf(system),true)))
+        assertEquals(3,h.state.messages.size);assertTrue(h.state.historyEnd)
+        assertFalse(h.state.historyLoading)
+    }
+    @Test fun authRequiredDisablesSendWithoutBlockingAlreadyReadableLocalHistory() {
+        val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
+        h.gateway.events.connection(ConnectionState.AUTH_REQUIRED)
+        assertFalse(h.state.ready);assertFalse(h.controller.send("blocked"))
+        assertEquals(StoreStatus.READABLE,h.state.store)
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("offline",2,10)),false)))
+        assertEquals("offline",h.state.messages.single().id)
+        h.controller.loadHistory()
+        assertEquals(2,h.gateway.localHistories.last().second)
+        assertTrue(h.gateway.histories.isEmpty())
+    }
+    @Test fun authExpiryDuringConversationQueryStillCompletesLocalReadWithoutRestoringSendAuthority() {
+        val h=Harness();h.gateway.login(Result.success(Unit))
+        val pending=h.gateway.pages.last().third
+        h.gateway.events.connection(ConnectionState.AUTH_REQUIRED)
+        pending(Result.success(listOf(conversation("cached-room"))))
+        assertEquals(StoreStatus.READABLE,h.state.store)
+        assertFalse(h.state.conversationsLoading)
+        assertFalse(h.state.ready);assertFalse(h.state.loggedIn)
+        assertEquals("cached-room",h.state.conversations.single().target.conversationId)
+        h.controller.loadConversations(true)
+        assertEquals(2,h.gateway.pages.size)
+        h.gateway.pages.last().third(Result.success(listOf(conversation("another-local-room"))))
+        assertFalse(h.state.conversationsLoading);assertFalse(h.state.ready)
+        assertFalse(h.controller.send("forbidden"));assertTrue(h.gateway.sends.isEmpty())
+    }
+    @Test fun oldLocalCallbackAndTimeoutCannotReplaceReopenedRoomOrKeepLoadingForever() {
+        val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
+        val old=h.gateway.localHistories.last().third
+        h.controller.closeRoom();h.controller.open(conversation())
+        old(Result.success(HistoryPage(listOf(message("stale")),true)))
+        assertTrue(h.state.messages.isEmpty());assertTrue(h.state.historyLoading)
+        h.timers.last { it.first==5_000L }.second()
+        assertFalse(h.state.historyLoading)
+        h.controller.loadHistory()
+        val retry=h.gateway.localHistories.last().third
+        retry(Result.success(HistoryPage(listOf(message("fresh")),false)))
+        assertEquals("fresh",h.state.messages.single().id)
     }
     @Test fun generationRejectsEventsAndResponsesAfterLogout() {
         val h=Harness();h.open()
@@ -138,7 +329,7 @@ class ChatRuntimeTest {
         h.gateway.beforeSend={ assertTrue(File(h.directory,"app-outbox.json").readText().contains("SENDING")) }
         assertTrue(h.controller.send("text"))
         assertEquals(OutboxState.SENDING,h.state.outbox.single().state)
-        h.gateway.sends.single().third(Result.failure(ChatFailure(10004)))
+        h.gateway.sends.single().third(Result.failure(ChatFailure(10001)))
         assertEquals(OutboxState.UNCERTAIN,h.state.outbox.single().state)
         h.controller.reconcile("sdk-id");h.gateway.finds.last().second(Result.success(message(status=3)))
         assertEquals(1,h.gateway.sends.size)
@@ -162,14 +353,53 @@ class ChatRuntimeTest {
     }
     @Test fun automaticReconciliationFindsLateAcceptanceWithoutResending() {
         val h=Harness();h.open();h.controller.send("text")
-        h.gateway.sends.single().third(Result.failure(ChatFailure(10004)))
-        assertEquals(10004,h.state.lastSendErrorCode)
+        h.gateway.sends.single().third(Result.failure(ChatFailure(10001)))
+        assertEquals(10001,h.state.lastSendErrorCode)
         h.timers.last { it.first==1_000L }.second()
         h.gateway.finds.last().second(Result.success(message(status=2,seq=10)))
         assertTrue(h.state.outbox.isEmpty());assertNull(h.state.error)
         assertEquals(1,h.gateway.sends.size)
         h.gateway.sends.single().third(Result.failure(ChatFailure(10004)))
         assertTrue(h.state.outbox.isEmpty());assertNull(h.state.error)
+    }
+    @Test fun sdkPreflightRejectionIsRetryableWhileTransportAndDuplicateErrorsRemainUncertain() {
+        for(code in listOf(10002,10004,10100,10101,10200,10205,10302,10400,10401)) {
+            val h=Harness();h.open();h.controller.send("text")
+            h.gateway.sends.single().third(Result.failure(ChatFailure(code)))
+            assertEquals("SDK $code",OutboxState.FAILED,h.state.outbox.single().state)
+            h.controller.reconcile("sdk-id");h.gateway.finds.last().second(Result.success(null))
+            assertEquals("Missing local row must not revoke a known rejection",OutboxState.FAILED,h.state.outbox.single().state)
+            assertEquals(1,h.gateway.sends.size)
+        }
+        for(code in listOf(10000,10001,10003,10005,10006,10204)) {
+            val h=Harness();h.open();h.controller.send("text")
+            h.gateway.sends.single().third(Result.failure(ChatFailure(code)))
+            assertEquals("SDK $code",OutboxState.UNCERTAIN,h.state.outbox.single().state)
+        }
+    }
+    @Test fun reconnectedSessionRechecksUncertainWithoutSendingOrRepeatedPopup() {
+        val h=Harness();h.open();h.controller.send("text")
+        h.gateway.sends.single().third(Result.failure(ChatFailure(10001)))
+        h.controller.closeRoom()
+        val before=h.gateway.finds.size
+        h.gateway.events.connection(ConnectionState.DISCONNECTED)
+        h.gateway.events.connection(ConnectionState.CONNECTED)
+        assertEquals(before+1,h.gateway.finds.size)
+        h.gateway.finds.last().second(Result.success(null))
+        assertNull(h.state.error);assertEquals(OutboxState.UNCERTAIN,h.state.outbox.single().state)
+        assertEquals(1,h.gateway.sends.size)
+        h.gateway.events.connection(ConnectionState.DISCONNECTED)
+        h.gateway.events.connection(ConnectionState.CONNECTED)
+        h.gateway.finds.last().second(Result.success(message(status=2,seq=42)))
+        assertTrue(h.state.outbox.isEmpty());assertEquals(1,h.gateway.sends.size)
+    }
+    @Test fun conversationLatestMessageConfirmsUncertainEvenWhenHistoryDoesNotReturnIt() {
+        val h=Harness();h.open();h.controller.send("text")
+        h.gateway.sends.single().third(Result.failure(ChatFailure(10001)))
+        h.gateway.events.conversations(listOf(conversation().copy(latestMessage=message(status=2,seq=42))))
+        assertTrue(h.state.outbox.isEmpty())
+        assertEquals(42L,h.state.messages.single().seq)
+        assertEquals(1,h.gateway.sends.size)
     }
     @Test fun userRetryReusesMessageIdAndChecksForAcceptanceFirst() {
         val h=Harness();h.open();h.controller.send("text")
@@ -188,11 +418,11 @@ class ChatRuntimeTest {
     }
     @Test fun oldReconciliationCannotFailANewerUncertainAttempt() {
         val h=Harness();h.open();h.controller.send("text")
-        h.gateway.sends.single().third(Result.failure(ChatFailure(10004)))
+        h.gateway.sends.single().third(Result.failure(ChatFailure(10001)))
         h.controller.reconcile("sdk-id");val stale=h.gateway.finds.last().second
         h.controller.reconcile("sdk-id");h.gateway.finds.last().second(Result.success(message(status=3)))
         h.controller.retryFailed("sdk-id");h.gateway.finds.last().second(Result.success(message(status=3)))
-        h.gateway.sends.last().third(Result.failure(ChatFailure(10004)))
+        h.gateway.sends.last().third(Result.failure(ChatFailure(10001)))
         assertEquals(OutboxState.UNCERTAIN,h.state.outbox.single().state)
         stale(Result.success(message(status=3)))
         assertEquals(OutboxState.UNCERTAIN,h.state.outbox.single().state)

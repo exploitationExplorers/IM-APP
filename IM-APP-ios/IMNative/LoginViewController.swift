@@ -381,6 +381,12 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
             do {
                 guard var saved = try await NativeSessionVault.shared.load() else { self.finishAuthentication(operationID); return }
                 let configuration = try saved.validate()
+                if let credential = saved.imCredential, (try? credential.validated(businessUserID: saved.profile.id, configuration: configuration)) != nil {
+                    // 已确认过的账号先恢复本机库；资料与 token 的网络状态不阻挡本地历史。
+                    self.serverAddress = configuration.baseURL.absoluteString
+                    try await self.activate(saved.account, configuration: configuration, operationID: operationID)
+                    self.finishAuthentication(operationID); return
+                }
                 let api = APIClient(configuration: configuration)
                 var profile: UserProfile?
                 var needsRefresh = saved.expiresAt <= Date().addingTimeInterval(60)

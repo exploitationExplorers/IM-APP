@@ -34,7 +34,7 @@ def main():
         for path in (ROOT / folder).rglob('*'):
             if path.is_file() and path.suffix in {'.json', '.py', '.md'}:
                 files[path.relative_to(ROOT).as_posix()] = path.read_bytes()
-    for path in [ROOT / 'docs/iOS-Mac验证步骤.md', ROOT / 'docs/原生功能与UI对齐-20261113/功能与UI对齐记录.md',
+    for path in [ROOT / 'docs/iOS-Mac验证步骤.md', ROOT / 'docs/给Mac端AI的iOS验证指令.md', ROOT / 'docs/原生功能与UI对齐-20261113/功能与UI对齐记录.md',
                  ROOT / 'docs/原生功能与UI对齐-20261113/问题修复与验证-20261114.md',
                  ROOT / 'docs/原生分发与更新操作.md']:
         files[path.relative_to(ROOT).as_posix()] = path.read_bytes()

@@ -8,11 +8,13 @@ struct SavedBusinessLogin: Codable, Sendable {
     let authentication: AuthResult
     let profile: UserProfile
     let expiresAt: Date
+    var imCredential: IMBootstrapCredential?
 
     init(account: BusinessAccountSession, configuration: APIConfiguration, expiresAt: Date? = nil) {
         schema = 1; apiBaseURL = configuration.baseURL.absoluteString
         authentication = account.authentication; profile = account.profile
         self.expiresAt = expiresAt ?? Date().addingTimeInterval(TimeInterval(account.authentication.expiresIn))
+        imCredential = nil
     }
     func validate() throws -> APIConfiguration {
         guard schema == 1, !profile.id.isEmpty, profile.id == authentication.user.id,
@@ -33,7 +35,7 @@ enum NativeVaultError: LocalizedError {
     }
 }
 
-/// 首次解锁后可用、不可云同步的 Keychain 项；不保存密码或 SDK Token。
+/// 首次解锁后可用、不可云同步的 Keychain 项；不保存密码。
 actor NativeSessionVault {
     static let shared = NativeSessionVault()
     private let service = (Bundle.main.bundleIdentifier ?? "com.im.nativebootstrap.staging") + ".business.login"
@@ -61,11 +63,21 @@ actor NativeSessionVault {
 
     func save(_ saved: SavedBusinessLogin, expectedRefreshToken: String? = nil) throws {
         try Task.checkCancellation()
+        var saved = saved
+        let existing: SavedBusinessLogin?
+        do { existing = try load() }
+        catch NativeVaultError.invalid {
+            // 用户重新完成登录时允许替换损坏旧项；后台刷新仍必须匹配旧会话。
+            guard expectedRefreshToken == nil else { throw NativeVaultError.invalid }
+            existing = nil
+        }
         if let expected = expectedRefreshToken {
-            guard let existing = try load(), existing.profile.id == saved.profile.id,
+            guard let existing = existing, existing.profile.id == saved.profile.id,
                   existing.apiBaseURL == saved.apiBaseURL,
                   existing.authentication.refreshToken == expected else { throw CancellationError() }
         }
+        if saved.imCredential == nil, let old = existing, old.profile.id == saved.profile.id, old.apiBaseURL == saved.apiBaseURL,
+           expectedRefreshToken != nil || old.authentication.refreshToken == saved.authentication.refreshToken { saved.imCredential = old.imCredential }
         _ = try saved.validate()
         let data = try JSONEncoder().encode(saved)
         guard data.count <= 256 * 1024 else { throw NativeVaultError.invalid }
@@ -76,6 +88,14 @@ actor NativeSessionVault {
             status = SecItemAdd(query.merging(updates) { _, new in new } as CFDictionary, nil)
         }
         guard status == errSecSuccess else { throw NativeVaultError.unavailable }
+    }
+
+    func saveIMCredential(_ credential: IMBootstrapCredential, expectedRefreshToken: String) throws {
+        guard var saved = try load(), saved.profile.id == credential.businessUserID, saved.apiBaseURL == credential.apiBaseURL,
+              saved.authentication.refreshToken == expectedRefreshToken else { throw CancellationError() }
+        _ = try credential.validated(businessUserID: saved.profile.id, configuration: saved.validate())
+        saved.imCredential = credential
+        try save(saved, expectedRefreshToken: expectedRefreshToken)
     }
 
     func clear(expectedUserID: String? = nil, expectedRefreshToken: String? = nil) throws {

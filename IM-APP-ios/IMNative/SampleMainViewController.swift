@@ -1,12 +1,34 @@
 import UIKit
 import IMCore
 
+private final class NativeUnreadBadge: UILabel {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor(hex: 0xef4444); textColor = .white; textAlignment = .center
+        clipsToBounds = true; adjustsFontSizeToFitWidth = true; minimumScaleFactor = 0.7; isHidden = true
+        isAccessibilityElement = true
+    }
+    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
+    func setCount(_ count: Int, muted: Bool = false) {
+        text = muted ? nil : ConversationUnreadBadge.text(count); isHidden = count <= 0
+        accessibilityLabel = count > 0 ? "\(count) 条未读消息" : nil
+        setNeedsLayout()
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews(); layer.cornerRadius = bounds.height / 2
+        font = .systemFont(ofSize: bounds.height == 16 ? 10 : bounds.height * 0.62)
+    }
+}
+
 private final class ConversationRowCell: UITableViewCell {
     let avatar = NativeRemoteImageView()
     let name = UILabel()
     let preview = UILabel()
     let time = UILabel()
     let line = UIView()
+    private let unread = NativeUnreadBadge()
+    var unreadCount = 0 { didSet { unread.setCount(unreadCount, muted: muted); setNeedsLayout() } }
+    var muted = false { didSet { unread.setCount(unreadCount, muted: muted); setNeedsLayout() } }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -14,7 +36,7 @@ private final class ConversationRowCell: UITableViewCell {
         avatar.image = NativeUITheme.image("uni_avatar_1")
         avatar.contentMode = .scaleAspectFill
         avatar.clipsToBounds = true
-        [avatar, name, preview, time, line].forEach { contentView.addSubview($0) }
+        [avatar, name, preview, time, unread, line].forEach { contentView.addSubview($0) }
         name.text = "样例会话"
         preview.text = "这是本机样例会话，不会发送到服务器。"
         name.textColor = UIColor(hex: 0x111111)
@@ -38,7 +60,9 @@ private final class ConversationRowCell: UITableViewCell {
         time.frame = CGRect(x: bounds.width - r(104), y: r(29), width: r(64), height: r(34))
         time.textAlignment = .right
         time.font = .systemFont(ofSize: r(24))
-        preview.frame = CGRect(x: bodyX, y: r(79), width: bodyWidth, height: r(36))
+        let badgeDiameter: CGFloat = muted ? 6 : 16
+        unread.frame = CGRect(x: bounds.width - r(40) - badgeDiameter, y: r(97) - badgeDiameter / 2, width: badgeDiameter, height: badgeDiameter)
+        preview.frame = CGRect(x: bodyX, y: r(79), width: max(0, bodyWidth - (unread.isHidden ? 0 : badgeDiameter + 8)), height: r(36))
         preview.font = .systemFont(ofSize: r(26))
         line.frame = CGRect(x: 0, y: bounds.height - r(1), width: bounds.width, height: r(1))
     }
@@ -72,6 +96,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     private var tabs: [UIButton] = []
     private var tabImages: [UIImageView] = []
     private var tabLabels: [UILabel] = []
+    private let chatUnread = NativeUnreadBadge()
     private var currentTab = 1
     private var unreadOnly = false
     private var latestPreview = "这是本机样例会话，不会发送到服务器。"
@@ -81,6 +106,12 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     private let loadMore = UIButton(type: .system)
     private var contactsPage: NativeContactsViewController?
     private var minePage: NativeMineViewController?
+    private struct RenderedConversation: Equatable {
+        let conversation: NativeConversation
+        let preview: String
+        let unread: Int
+    }
+    private var renderedConversations: [RenderedConversation] = []
 
     init(mode: NativeMainMode = .localSample) {
         self.mode = mode
@@ -198,6 +229,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             label.textAlignment = .center
             button.addSubview(icon)
             button.addSubview(label)
+            if index == 1 { button.addSubview(chatUnread) }
             tabbar.addSubview(button)
             tabs.append(button)
             tabImages.append(icon)
@@ -234,6 +266,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             tabLabels[index].frame = CGRect(x: 0, y: r(66), width: width / 3, height: r(32))
             tabLabels[index].font = .systemFont(ofSize: r(24))
         }
+        chatUnread.frame = CGRect(x: width / 6 + r(10), y: r(3), width: r(50), height: r(32))
         table.frame = CGRect(x: 0, y: filter.frame.maxY + r(8), width: width, height: max(0, tabbar.frame.minY - filter.frame.maxY - r(8)))
         table.rowHeight = r(144) + r(1)
         empty.frame = CGRect(x: r(40), y: searchBox.frame.maxY + r(100), width: width - r(80), height: r(140))
@@ -285,6 +318,8 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             tabImages[index].image = NativeUITheme.image("uni_tab_" + names[index] + (currentTab == index ? "_active" : ""))
             tabLabels[index].textColor = currentTab == index ? NativeUITheme.primary : NativeUITheme.body
         }
+        let unreadTotal = chat?.conversations.reduce(0) { total, item in min(100, total + min(100, max(0, self.chat?.conversationUnread(item) ?? 0))) } ?? 0
+        chatUnread.setCount(unreadTotal)
         let chat = currentTab == 1
         searchBox.isHidden = !chat
         filter.isHidden = !chat
@@ -304,9 +339,37 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             empty.text = chat ? "暂无对话…" : (currentTab == 0 ? "通讯录页面尚未接入\n当前仅提供聊天页面本地样例" : "个人中心页面尚未接入\n当前仅提供聊天页面本地样例")
             empty.isHidden = chat && hasVisibleConversation
         }
-        table.reloadData()
+        if self.chat == nil { table.reloadData() }
+        else { updateConversationRows() }
         if self.chat?.loadingConversations != true { conversationRefresh.endRefreshing() }
         view.setNeedsLayout()
+    }
+
+    private func updateConversationRows() {
+        guard let service = chat else { return }
+        let next = visibleConversations.map { RenderedConversation(conversation: $0, preview: service.conversationPreview($0), unread: service.conversationUnread($0)) }
+        guard next != renderedConversations else { return }
+        let previous = renderedConversations
+        renderedConversations = next
+        if previous.map({ $0.conversation.id }) == next.map({ $0.conversation.id }) {
+            let changed = next.indices.filter { next[$0] != previous[$0] }.map { IndexPath(row: $0, section: 0) }
+            UIView.performWithoutAnimation { table.reloadRows(at: changed, with: .none) }
+            return
+        }
+        let atTop = table.contentOffset.y <= -table.adjustedContentInset.top + 1
+        let anchor = table.indexPathsForVisibleRows?.first.flatMap { index -> (String, CGFloat)? in
+            guard index.row < previous.count else { return nil }
+            return (previous[index.row].conversation.id, table.rectForRow(at: index).minY - table.contentOffset.y)
+        }
+        UIView.performWithoutAnimation {
+            table.reloadData(); table.layoutIfNeeded()
+            // 顶部保持跟随真正的新消息；浏览旧会话时保留当前行与像素偏移。
+            if !atTop, let anchor = anchor, let row = next.firstIndex(where: { $0.conversation.id == anchor.0 }) {
+                let proposed = table.rectForRow(at: IndexPath(row: row, section: 0)).minY - anchor.1
+                let maximum = max(-table.adjustedContentInset.top, table.contentSize.height - table.bounds.height + table.adjustedContentInset.bottom)
+                table.contentOffset.y = min(maximum, max(-table.adjustedContentInset.top, proposed))
+            }
+        }
     }
 
     @objc private func selectTab(_ sender: UIButton) { currentTab = sender.tag; refreshTab(); if currentTab == 0 { contactsPage?.reloadContent() } }
@@ -383,10 +446,11 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             let item = visibleConversations[indexPath.row]
             cell.name.text = item.title.isEmpty ? "聊天" : item.title
             let unread = chat?.conversationUnread(item) ?? 0
-            cell.preview.text = (unread > 0 ? "[\(unread)] " : "") + (chat?.conversationPreview(item) ?? "")
+            cell.muted = item.muted; cell.unreadCount = unread
+            cell.preview.text = chat?.conversationPreview(item) ?? ""
             if let chat = chat { cell.avatar.load(item.avatar, policy: chat.business.media, placeholder: item.type == 3 ? "uni_group_default" : "uni_avatar_default") }
             cell.time.text = item.timestamp > 0 ? Date(timeIntervalSince1970: Double(item.timestamp) / 1000).formatted(date: .omitted, time: .shortened) : ""
-        } else { cell.preview.text = latestPreview }
+        } else { cell.muted = false; cell.unreadCount = 0; cell.preview.text = latestPreview }
         return cell
     }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

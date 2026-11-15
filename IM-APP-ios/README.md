@@ -2,9 +2,9 @@
 
 当前开发版本 `0.3.0 (4)`，Swift / UIKit，iOS 15 起。测试 Bundle ID 为 `com.im.nativebootstrap.staging`。以现有 uni-app 的页面、文案、素材与业务操作为基准；核心聊天使用官方 OpenIM SDK。未修改旧前端或后端，未部署或发布。
 
-## 在朋友的 Mac 上验证
+## 在 Mac 上验证
 
-解压配套 `IM-iOS-0.3.0-mac-check.zip`，在解压后的根目录执行：
+解压配套 `IM-iOS-0.3.0-mac-ai-20261115.zip`，先阅读 [Mac 验证步骤](../docs/iOS-Mac验证步骤.md)，可把 [AI 执行指令](../docs/给Mac端AI的iOS验证指令.md) 交给 Mac 上的 AI。环境准备后，在解压后的根目录执行：
 
 ```bash
 bash IM-APP-ios/scripts/verify_on_mac.sh
@@ -48,7 +48,7 @@ SDK 独占自己的历史数据库，应用不读写私有表、不建立第二�
 
 ## 验收与发布
 
-本机 Windows 无 Xcode：核心 XCTest、CocoaPods、Xcode 编译、iPhone 真机、真实账号互通与性能验收均不能在此声称通过。当前静态执行记录与 Android 合成截图见逐页对齐文档；iOS 运行结果需由朋友的 Mac 回传日志补齐。
+本机 Windows 无 Xcode：核心 XCTest、CocoaPods、Xcode 编译、iPhone 真机、真实账号互通与性能验收均不能在此声称通过。当前静态执行记录与 Android 合成截图见逐页对齐文档；iOS 运行结果需由 Mac 回传日志补齐。
 
 Mac 编译成功后仍须验证：旧/新端媒体互通、头像/旧图片、分页和搜索定位、群权限/保留边界、登录恢复与切号、锁屏/前后台、断网与强杀期间同步/发送、磁盘不足、长历史性能。使用授权内测账号；同账号同平台登录会遵守现网 OpenIM 互踢策略。
 

@@ -16,7 +16,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** 仅保存业务会话 JSON，不保存密码；调用方在 IO 队列解析和校验账号/环境。 */
+/** 保存会话 JSON，不保存密码；业务与 SDK 使用独立命名空间，调用方校验账号/环境。 */
 class SecureSessionStore(context: Context, namespace: String = "business_session") {
     private val file: AtomicFile
     private val alias: String

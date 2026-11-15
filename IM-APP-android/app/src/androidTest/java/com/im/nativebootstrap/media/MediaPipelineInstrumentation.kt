@@ -24,7 +24,7 @@ class MediaPipelineInstrumentation : Instrumentation() {
     override fun onCreate(arguments: Bundle?) { restartOnly = arguments?.getString("restart") == "true"; super.onCreate(arguments); start() }
     override fun onStart() {
         val result = Bundle()
-        try { runBlocking { withTimeout(90_000) { if(restartOnly)verifyRestart() else { verify();verifyOwnUpload() } } }; result.putString("mediaPipeline", if(restartOnly)"passed: process restart disk cache, zero network allowed" else "passed: cold/memory/disk/loader-recreate/signature/scope/singleflight/cancel/no-store/redirect/bad-image/local-upload; localhost HTTPS only"); finish(Activity.RESULT_OK, result) }
+        try { runBlocking { withTimeout(90_000) { if(restartOnly)verifyRestart() else { verify();verifyOwnUpload();verifyOfflineHistory() } } }; result.putString("mediaPipeline", if(restartOnly)"passed: process restart expired disk cache, zero network allowed" else "passed: cold/memory/disk/loader-recreate/signature/scope/singleflight/cancel/no-store/redirect/bad-image/local-upload/expired-offline-cache/network-queue-bypass; localhost HTTPS only"); finish(Activity.RESULT_OK, result) }
         catch (error: Throwable) { result.putString("mediaPipeline", "failed: ${error.javaClass.simpleName}: ${error.message}"); finish(Activity.RESULT_CANCELED, result) }
     }
     private suspend fun verifyOwnUpload() {
@@ -53,6 +53,41 @@ class MediaPipelineInstrumentation : Instrumentation() {
         val pipeline = MediaImagePipeline(targetContext,client,File(targetContext.cacheDir,fixture[0]),observeNetwork=false)
         try { check(pipeline.load(targetContext,fixture[1],fixture[2],128).bitmap != null);check(requests == 0) }
         finally { pipeline.close() }
+    }
+    private suspend fun verifyOfflineHistory() {
+        val cert=HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val trusted=HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate).build()
+        val server=MockWebServer().apply { useHttps(HandshakeCertificates.Builder().heldCertificate(cert).build().sslSocketFactory(),false);start() }
+        val client=MediaHttp.images.newBuilder().sslSocketFactory(trusted.sslSocketFactory(),trusted.trustManager).build()
+        val directory=File(targetContext.cacheDir,"media-test-${UUID.randomUUID()}")
+        val pipeline=MediaImagePipeline(targetContext,client,directory,observeNetwork=false)
+        val base=server.url("/api/v1").toString()
+        val account=MediaCacheIdentity.scope(base,"offline-history-a")
+        val address=server.url("/object/already-viewed.png").toString()
+        val id=MediaCacheIdentity.key(address,account,base)
+        val bytes=ByteArrayOutputStream().also { output -> Bitmap.createBitmap(96,64,Bitmap.Config.ARGB_8888).also { bitmap -> bitmap.eraseColor(android.graphics.Color.MAGENTA);bitmap.compress(Bitmap.CompressFormat.PNG,100,output);bitmap.recycle() } }.toByteArray()
+        try {
+            server.enqueue(MockResponse().setHeader("Content-Type","image/png").setHeader("Cache-Control","public, max-age=0").setHeader("Date","Wed, 01 Jan 2020 00:00:00 GMT").setBody(Buffer().write(bytes)))
+            check(pipeline.load(targetContext,address,id,360).bitmap!=null)
+            pipeline.loader.memoryCache!!.clear()
+            // 4 个永不响应的新图占满联网槽，已有磁盘字节仍应立刻解码，不能排在网络后面。
+            coroutineScope {
+                val blocked=(1..4).map { index ->
+                    val url=server.url("/object/blocked-$index.png").toString()
+                    server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+                    async { pipeline.load(targetContext,url,MediaCacheIdentity.key(url,account,base),360) }
+                }
+                try {
+                    withTimeout(5_000) { while(server.requestCount<5)delay(10) }
+                    check(withTimeout(2_000) { pipeline.cached(targetContext,id,360) }?.bitmap!=null)
+                    check(server.requestCount==5) { "Expired image cache performed a network validation" }
+                    check(pipeline.cached(targetContext,MediaCacheIdentity.key(address,MediaCacheIdentity.scope(base,"offline-history-b"),base),360)==null) { "Other account read existing history image bytes" }
+                } finally { blocked.forEach { it.cancelAndJoin() } }
+            }
+            // 下一次 Instrumentation 杀进程重启后，读取这张过期图；HTTP 请求被测试客户端直接拒绝。
+            File(targetContext.filesDir,"media-restart-fixture.txt").writeText("${directory.name}\n$address\n$id\n")
+            File(targetContext.cacheDir,"media-offline-history.txt").writeText("expiredDisk=passed\nnetworkQueueBypass=passed\notherAccountMiss=passed\nrequests=${server.requestCount}\n")
+        } finally { pipeline.close();client.dispatcher.cancelAll();server.shutdown() }
     }
     private suspend fun verify() {
         val cert = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()

@@ -39,6 +39,12 @@ struct NativeHistoryPage {
     let messages: [ChatTextItem]
     let isEnd: Bool
     let lastMinSeq: Int
+    let isLocalPreview: Bool
+    let localExhausted: Bool
+    init(messages: [ChatTextItem], isEnd: Bool, lastMinSeq: Int, isLocalPreview: Bool = false, localExhausted: Bool = false) {
+        self.messages = messages; self.isEnd = isEnd; self.lastMinSeq = lastMinSeq
+        self.isLocalPreview = isLocalPreview; self.localExhausted = localExhausted
+    }
 }
 struct NativeSearchHit { let conversationID: String; let title: String; let message: ChatTextItem }
 struct NativeSearchPage { let items: [NativeSearchHit]; let hasMore: Bool }
@@ -115,6 +121,16 @@ final class NativeIMService {
     private var conversationOffset = 0
     private var conversationRequest: UUID?
     private var conversationChangesDuringRequest: [NativeConversation] = []
+    private var conversationHiddenDuringRequest = Set<String>()
+    private var conversationRefreshSeen: Set<String>?
+    private var pendingConversationReset = false
+    private var conversationStartup = ConversationStartupGate<NativeConversation>()
+    private var conversationSnapshotCount = 0
+    private var conversationSnapshotMilliseconds = 0
+    private var bufferedStartupEventCount = 0
+    var conversationStartupDiagnosticLines: [String] {
+        ["conversationSnapshotReady=\(conversationStartup.ready)", "conversationStartupBufferedRows=\(bufferedStartupEventCount)", "conversationFullSnapshotRows=\(conversationSnapshotCount)", "conversationSnapshotMs=\(conversationSnapshotMilliseconds)"]
+    }
     private var outbox: PersistentOutbox?
     private(set) var outboxEntries: [OutboxEntry] = []
     private(set) var messages: [String: [ChatTextItem]] = [:]
@@ -132,6 +148,13 @@ final class NativeIMService {
     private var notifiedIDs = Set<String>()
     private var retentionTask: Task<Void, Never>?
     private var groupVisibilityReady = Set<String>()
+    private var visibilityRefreshTasks: [String: Task<Void, Never>] = [:]
+    private var historyRefreshTasks: [String: Task<Void, Never>] = [:]
+    private var localHistoryCursors: [String: [String: (position: Int, page: Int, exhausted: Bool)]] = [:]
+    private var completedHistoryPages: [String: [String: NativeHistoryPage]] = [:]
+    private var historyRequests: [String: (conversation: NativeConversation, cursor: String)] = [:]
+    private var historyVersions: [String: UUID] = [:]
+    private var retentionRefreshTask: Task<Void, Never>?
     private var pinSyncTime: [String: Int64] = [:]
 
     init(account: BusinessAccountSession, configuration: APIConfiguration) {
@@ -174,7 +197,16 @@ final class NativeIMService {
             try require(current)
             ticket = created
             // 每个本次业务会话只签发一次；资源未就绪、断线和前后台切换都不循环申请。
-            let token = try await api.imToken(accessToken: account.authentication.accessToken)
+            let saved = try await NativeSessionVault.shared.load()
+            let cached = saved?.authentication.refreshToken == account.authentication.refreshToken
+                ? saved?.imCredential.flatMap { try? $0.validated(businessUserID: account.profile.id, configuration: configuration) } : nil
+            let token: IMToken
+            if let cached = cached { token = cached }
+            else {
+                token = try await api.imToken(accessToken: account.authentication.accessToken)
+                try require(current)
+                try await NativeSessionVault.shared.saveIMCredential(IMBootstrapCredential(businessUserID: account.profile.id, apiBaseURL: configuration.baseURL.absoluteString, token: token), expectedRefreshToken: account.authentication.refreshToken)
+            }
             try require(current)
             imUserID = token.userId
             _ = await coordinator.authenticationSucceeded(created, businessUserID: account.profile.id, imUserID: token.userId)
@@ -203,7 +235,7 @@ final class NativeIMService {
             if let storageDirectory = storageDirectory {
                 visibilityLedger = try GroupVisibilityLedger(file: storageDirectory.appendingPathComponent("outbox/visibility.json"), owner: namespace)
                 visibility = await visibilityLedger!.snapshot()
-                groupVisibilityReady = Set(visibility.floors.keys)
+                groupVisibilityReady = Set(visibility.floors.keys.filter { visibility.hasConfirmedBoundary($0) })
             }
             outboxEntries = await storage.1.snapshot()
             try require(current)
@@ -281,6 +313,10 @@ final class NativeIMService {
         queuedEvents.removeAll()
         reconciliationTasks.values.forEach { $0.cancel() }; reconciliationTasks.removeAll()
         forwardTasks.values.forEach { $0.cancel() }; forwardTasks.removeAll()
+        visibilityRefreshTasks.values.forEach { $0.cancel() }; visibilityRefreshTasks.removeAll()
+        historyRefreshTasks.values.forEach { $0.cancel() }; historyRefreshTasks.removeAll(); localHistoryCursors.removeAll()
+        completedHistoryPages.removeAll(); historyRequests.removeAll(); historyVersions.removeAll()
+        retentionRefreshTask?.cancel(); retentionRefreshTask = nil
         forwardNotices.removeAll()
         // unInitSDK 同步释放旧核心，再允许新owner初始化；不等待迟到的旧logout回调去unInit新核心。
         if initialized, Self.current === self {
@@ -292,7 +328,7 @@ final class NativeIMService {
         if Self.current === self { Self.current = nil }
         await coordinator.logout()
         await NativeImageCache.shared.invalidateSession()
-        messages.removeAll(); conversations.removeAll(); outboxEntries.removeAll(); outbox = nil
+        messages.removeAll(); conversations.removeAll(); conversationRefreshSeen = nil; pendingConversationReset = false; conversationStartup = ConversationStartupGate(); outboxEntries.removeAll(); outbox = nil
         lastError = "已退出聊天会话"
         publish(); observers.removeAll()
     }
@@ -327,24 +363,56 @@ final class NativeIMService {
     }
 
     func loadConversations(reset: Bool = false) async {
-        guard isActive, loggedIn, !loadingConversations, reset || !conversationsEnd else { return }
+        guard isActive, loggedIn else { return }
+        if loadingConversations { if reset { pendingConversationReset = true }; return }
+        let fullSnapshot = reset || !conversationStartup.ready
+        guard fullSnapshot || !conversationsEnd else { return }
         let current = generation, requestID = UUID()
-        conversationRequest = requestID; conversationChangesDuringRequest = []; loadingConversations = true; publish()
-        defer { if conversationRequest == requestID { loadingConversations = false; publish() } }
+        let requestStarted = ProcessInfo.processInfo.systemUptime
+        let queryStart = conversations
+        conversationRequest = requestID; conversationChangesDuringRequest = []; conversationHiddenDuringRequest = []; loadingConversations = true; publish()
+        defer {
+            if conversationRequest == requestID {
+                loadingConversations = false
+                let refreshAgain = pendingConversationReset; pendingConversationReset = false
+                publish()
+                if refreshAgain, isActive, generation == current {
+                    Task { [weak self] in await self?.loadConversations(reset: true) }
+                }
+            }
+        }
         do {
-            let offset = reset ? 0 : conversationOffset
-            let result = try await call { bridge.conversations(offset: offset, count: 40, completion: $0) }
+            let offset = fullSnapshot ? 0 : conversationOffset
+            let result: [String: Any]
+            if fullSnapshot { result = try await call { bridge.allConversations(completion: $0) } }
+            else { result = try await call { bridge.conversations(offset: offset, count: 40, completion: $0) } }
             try require(current)
+            guard conversationRequest == requestID else { return }
             let rows = (result["items"] as? [[String: Any]] ?? []).compactMap(NativeConversation.init)
-            if reset { conversations = [] }
-            mergeConversations(rows)
-            mergeConversations(conversationChangesDuringRequest)
+            let localChanges = ConversationRefreshPolicy.changesSince(start: queryStart, current: conversations, identity: { $0.id })
+            let resolved: [NativeConversation]
+            if fullSnapshot && !conversationStartup.ready {
+                resolved = conversationStartup.complete(snapshot: rows, changes: conversationChangesDuringRequest + localChanges, identity: { $0.id })
+            } else { resolved = ConversationRefreshPolicy.resolve(page: rows, changes: conversationChangesDuringRequest + localChanges, identity: { $0.id }) }
+            mergeConversations(resolved, replacing: fullSnapshot)
+            conversations.removeAll { conversationHiddenDuringRequest.contains($0.id) }
+            if fullSnapshot { conversationRefreshSeen = Set(rows.map(\.id)) }
+            else if conversationRefreshSeen != nil { conversationRefreshSeen?.formUnion(rows.map(\.id)) }
+            conversationRefreshSeen?.formUnion(resolved.map(\.id))
+            conversationRefreshSeen?.subtract(conversationHiddenDuringRequest)
             conversationOffset = offset + rows.count
-            conversationsEnd = rows.count < 40
+            conversationsEnd = fullSnapshot || rows.count < 40
+            if conversationsEnd, let completeIDs = conversationRefreshSeen {
+                conversations.removeAll { !completeIDs.contains($0.id) }; conversationRefreshSeen = nil
+            }
+            if fullSnapshot {
+                conversationSnapshotCount = rows.count
+                conversationSnapshotMilliseconds = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
+            }
             localReadable = true; storeLabel = "本地可读"; lastError = nil
             if let ticket = ticket { _ = await coordinator.updateLocalStore(.readable, for: ticket) }
             await advanceSyncIfReadable()
-            do { try await refreshRetentionBatch() } catch { if isActive { lastError = "群消息可见性暂未更新，请稍后重试。" } }
+            scheduleRetentionRefresh()
         } catch {
             guard isActive, generation == current else { return }
             lastError = error.localizedDescription
@@ -352,13 +420,18 @@ final class NativeIMService {
         }
     }
 
-    private func mergeConversations(_ rows: [NativeConversation]) {
-        var byID = Dictionary(conversations.map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
+    private func mergeConversations(_ rows: [NativeConversation], replacing: Bool = false) {
+        let previous = conversations.map(\.id)
+        let previousIDs = Set(previous)
+        var byID: [String: NativeConversation] = replacing ? [:] : Dictionary(conversations.map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
         for row in rows { byID[row.id] = row }
-        conversations = byID.values.sorted {
-            if $0.pinned != $1.pinned { return $0.pinned }
-            return $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp > $1.timestamp
-        }
+        let candidates = replacing ? rows : conversations + rows.filter { !previousIDs.contains($0.id) }
+        let order = ConversationOrderPolicy.orderedIDs(candidates.map { source in
+            let row = byID[source.id] ?? source
+            return ConversationOrderEntry(id: row.id, pinned: row.pinned, timestamp: row.timestamp)
+        }, previous: previous)
+        var seen = Set<String>()
+        conversations = order.filter { seen.insert($0).inserted }.compactMap { byID[$0] }
     }
 
     func openConversation(target: String, type: Int) async throws -> NativeConversation {
@@ -367,28 +440,74 @@ final class NativeIMService {
         let result = try await call { bridge.conversation(target: target, type: type, completion: $0) }
         try require(current)
         guard let conversation = NativeConversation(result), conversation.canOpen else { throw NativeChatError.invalidMessage }
-        mergeConversations([conversation]); publish(); return conversation
+        if conversationStartup.receive([conversation]) { mergeConversations([conversation]) }
+        publish(); return conversation
     }
 
     func history(_ conversation: NativeConversation, cursor: String) async throws -> NativeHistoryPage {
         let current = generation
         guard conversation.canOpen, loggedIn else { throw NativeChatError.unavailable }
-        if conversation.type == 3 { try await refreshGroupVisibility(conversation) }
-        let result = try await call { bridge.history(conversation: conversation.id, cursor: cursor, count: 40, completion: $0) }
-        let items = (result["items"] as? [[String: Any]] ?? []).compactMap(Self.item)
-        let isEnd = result["isEnd"] as? Bool ?? false
-        // 空页或重复游标却没有isEnd时按可重试错误处理，绝不能吞掉历史。
-        if !isEnd && (items.isEmpty || (!cursor.isEmpty && items.allSatisfy { $0.id == cursor })) { throw NativeChatError.noCursor }
-        for item in items.sorted(by: { $0.timestamp < $1.timestamp }) where NativeMessagePin.control(item) != nil { try await applyPinControl(item, conversation: conversation) }
+        if conversation.type == 3 {
+            if visibility.hasConfirmedBoundary(conversation.id) { scheduleVisibilityRefresh(conversation) }
+            else { try await refreshGroupVisibility(conversation) }
+        }
         try require(current)
+        if let completed = completedHistoryPage(conversation, cursor: cursor) { return completed }
+        scheduleHistoryRefresh(conversation, cursor: cursor)
+        let version = historyVersions[conversation.id]
+        let cursorTime = messages[conversation.id]?.first(where: { $0.id == cursor })?.timestamp
+        let position = cursorTime.map { Int($0 / 1000) + 1 } ?? (Int(Date().timeIntervalSince1970) + 1)
+        let anchor = localHistoryCursors[conversation.id]?[cursor] ?? (position: position, page: 1, exhausted: false)
+        if anchor.exhausted { return NativeHistoryPage(messages: [], isEnd: false, lastMinSeq: 0, isLocalPreview: true, localExhausted: true) }
+        let result = try await call { bridge.localHistory(conversation: conversation.id, position: anchor.position, page: anchor.page, count: 40, completion: $0) }
+        let items = (result["items"] as? [[String: Any]] ?? []).compactMap(Self.item)
+        let exhausted = result["localExhausted"] as? Bool ?? false
+        try require(current)
+        guard historyVersions[conversation.id] == version else { throw NativeChatError.inactive }
+        localHistoryCursors[conversation.id, default: [:]][cursor] = (anchor.position, anchor.page + 1, exhausted)
         mergeMessages(items, conversationID: conversation.id)
         localReadable = true; storeLabel = "本地可读"
         if let ticket = ticket { _ = await coordinator.updateLocalStore(.readable, for: ticket) }
         try require(current)
-        await reconcile(conversationID: conversation.id)
-        try require(current)
         publish()
-        return NativeHistoryPage(messages: items, isEnd: isEnd, lastMinSeq: (result["lastMinSeq"] as? NSNumber)?.intValue ?? 0)
+        // 搜索不支持所有消息类型，不能推进正式 SDK 游标或宣称到达历史开头。
+        return NativeHistoryPage(messages: items, isEnd: false, lastMinSeq: 0, isLocalPreview: true, localExhausted: exhausted)
+    }
+
+    func completedHistoryPage(_ conversation: NativeConversation, cursor: String) -> NativeHistoryPage? {
+        completedHistoryPages[conversation.id]?[cursor]
+    }
+
+    private func scheduleHistoryRefresh(_ conversation: NativeConversation, cursor: String) {
+        let key = conversation.id + "|" + cursor
+        historyRequests[key] = (conversation, cursor)
+        guard historyRefreshTasks[key] == nil, completedHistoryPages[conversation.id]?[cursor] == nil else { return }
+        let current = generation, version = historyVersions[conversation.id] ?? UUID()
+        historyVersions[conversation.id] = version
+        historyRefreshTasks[key] = Task { [weak self] in
+            guard let self = self else { return }
+            defer { if self.generation == current, self.historyVersions[conversation.id] == version { self.historyRefreshTasks[key] = nil } }
+            do {
+                let result = try await self.call { self.bridge.history(conversation: conversation.id, cursor: cursor, count: 40, completion: $0) }
+                try self.require(current)
+                guard self.historyVersions[conversation.id] == version else { return }
+                let items = (result["items"] as? [[String: Any]] ?? []).compactMap(Self.item)
+                let isEnd = result["isEnd"] as? Bool ?? false
+                if !isEnd && (items.isEmpty || (!cursor.isEmpty && items.allSatisfy { $0.id == cursor })) { throw NativeChatError.noCursor }
+                self.completedHistoryPages[conversation.id, default: [:]][cursor] = NativeHistoryPage(messages: items, isEnd: isEnd, lastMinSeq: (result["lastMinSeq"] as? NSNumber)?.intValue ?? 0)
+                self.mergeMessages(items, conversationID: conversation.id); self.publish()
+                for item in items where NativeMessagePin.control(item) != nil {
+                    try self.require(current)
+                    guard self.historyVersions[conversation.id] == version else { return }
+                    try await self.applyPinControl(item, conversation: conversation)
+                }
+                guard self.historyVersions[conversation.id] == version else { return }
+                await self.reconcile(conversationID: conversation.id)
+            } catch {
+                // 高级接口补洞失败不覆盖已读本地记录，不伪造结束；下拉或重连可重试。
+                guard self.isActive, self.generation == current, !Task.isCancelled else { return }
+            }
+        }
     }
 
     private static func item(_ data: [String: Any]) -> ChatTextItem? {
@@ -664,18 +783,24 @@ final class NativeIMService {
         struct RetentionResult: Decodable { let items: [GroupRetentionState] }
         let states: RetentionResult = try await business.request("im/group-retention/states", query: [URLQueryItem(name: "conversationIds", value: conversation.id)])
         try require(current)
-        visibility = try await ledger.apply(states.items); try require(current)
+        guard states.items.contains(where: { $0.conversationId == conversation.id && $0.minVisibleSeq >= 0 && $0.revision >= 0 }) else { throw NativeChatError.unavailable }
+        visibility = try await ledger.apply(states.items.filter { $0.conversationId == conversation.id }); try require(current)
         let target: NativeGroupPeer = try await business.request("im/groups/by-im/\(conversation.target)"); try require(current)
         groupTargets[conversation.id] = target
         struct Purges: Decodable { let items: [GroupMessagePurge] }
         let purges: Purges = try await business.request("groups/\(target.businessGroupId)/message-purges"); try require(current)
         visibility = try await ledger.applyPurges(purges.items, conversationID: conversation.id); try require(current)
+        guard visibility.hasConfirmedBoundary(conversation.id) else { throw NativeChatError.unavailable }
         groupVisibilityReady.insert(conversation.id)
         messages[conversation.id] = (messages[conversation.id] ?? []).filter { visibility.permits($0, conversationID: conversation.id) }
         publish()
     }
     func markRead(_ conversation: NativeConversation) async throws {
+        let current = generation
         _ = try await call { bridge.markRead(conversation.id, completion: $0) }
+        try require(current)
+        await loadConversations(reset: true)
+        try require(current)
         if conversation.type == 3 { try await business.change("im/group-read-cursors/report", body: ["conversationId": .string(conversation.id)]) }
     }
     func recall(_ item: ChatTextItem, in conversation: NativeConversation, reason: String? = nil) async throws {
@@ -695,6 +820,10 @@ final class NativeIMService {
     func clearHistory(_ conversation: NativeConversation) async throws {
         let current = generation; let peer = try await businessPeerID(conversation); try require(current)
         try await business.change("im/conversation-messages/clear", body: ["peerType": .string(conversation.type == 3 ? "group" : "c2c"), "peerId": .string(peer)]); try require(current)
+        historyVersions[conversation.id] = UUID(); completedHistoryPages[conversation.id] = nil; localHistoryCursors[conversation.id] = nil
+        for key in Array(historyRequests.keys) where historyRequests[key]?.conversation.id == conversation.id {
+            historyRefreshTasks[key]?.cancel(); historyRefreshTasks[key] = nil; historyRequests[key] = nil
+        }
         let ids = Set((messages[conversation.id] ?? []).map(\.id) + outboxEntries.filter { $0.conversationID == conversation.id }.map(\.clientMsgID))
         if let ledger = visibilityLedger { visibility = try await ledger.hide(ids); try require(current) }
         deletedIDs.formUnion(ids); messages[conversation.id] = []; publish()
@@ -704,7 +833,7 @@ final class NativeIMService {
     func mute(_ conversation: NativeConversation) async throws { try await setMuted(!conversation.muted, conversation: conversation) }
     func setPinned(_ value: Bool, conversation: NativeConversation) async throws { let current = generation; _ = try await call { bridge.pin(conversation.id, pinned: value, completion: $0) }; try require(current); await loadConversations(reset: true) }
     func setMuted(_ value: Bool, conversation: NativeConversation) async throws { let current = generation; _ = try await call { bridge.mute(conversation.id, muted: value, completion: $0) }; try require(current); await loadConversations(reset: true) }
-    func hide(_ conversation: NativeConversation) async throws { let current = generation; _ = try await call { bridge.hide(conversation.id, completion: $0) }; try require(current); conversations.removeAll { $0.id == conversation.id }; publish() }
+    func hide(_ conversation: NativeConversation) async throws { let current = generation; _ = try await call { bridge.hide(conversation.id, completion: $0) }; try require(current); if loadingConversations { conversationHiddenDuringRequest.insert(conversation.id) }; conversations.removeAll { $0.id == conversation.id }; publish() }
     func search(_ keyword: String, conversation: NativeConversation?, types: [Int] = [], page: Int = 1) async throws -> [NativeSearchHit] {
         try await searchPage(keyword, conversation: conversation, types: types, page: page).items
     }
@@ -794,19 +923,21 @@ final class NativeIMService {
             await reconcile(conversationID: entry.conversationID)
         } catch {
             guard isActive, generation == current else { throw error }
-            // 发送回调失败或超时不能证明服务器未收；只允许核对，不自动重发。
-            try? await outbox.transition(entry.clientMsgID, to: .uncertain)
+            // 本地明确拒绝可手动重试，网络/未知错误仍不得自动重发。
+            let nativeError = error as NSError
+            let rejected = nativeError.domain == "NativeOpenIM" && SendFailurePolicy.rejectedBeforeSubmission(nativeError.code)
+            try? await outbox.transition(entry.clientMsgID, to: rejected ? .failed : .uncertain)
             if isActive, generation == current {
                 let native = error as NSError
                 lastSendErrorCode = native.domain == "NativeOpenIM" ? native.code : nil
                 let code = lastSendErrorCode.map { "（SDK \($0)）" } ?? ""
-                lastError = "发送结果待核对" + code + "，正在查询本地记录。"
+                lastError = rejected ? "消息未发送，请稍后点按重试。" : "发送结果待确认" + code + "。"
             }
             await refreshOutbox()
             await reconcile(conversationID: entry.conversationID)
             try require(current)
             if messages[entry.conversationID]?.contains(where: { $0.id == entry.clientMsgID && $0.status == 2 }) == true { return }
-            scheduleReconciliation(entry.conversationID)
+            if !rejected { scheduleReconciliation(entry.conversationID) }
             throw error
         }
         await refreshOutbox()
@@ -937,9 +1068,30 @@ final class NativeIMService {
         for start in stride(from: 0, to: ids.count, by: 50) {
             let batch = Array(ids[start..<min(start + 50, ids.count)])
             let result: Result = try await business.request("im/group-retention/states", query: [URLQueryItem(name: "conversationIds", value: batch.joined(separator: ","))]); try require(current)
-            visibility = try await ledger.apply(result.items); try require(current); groupVisibilityReady.formUnion(batch)
+            visibility = try await ledger.apply(result.items.filter { batch.contains($0.conversationId) }); try require(current)
+            groupVisibilityReady.formUnion(batch.filter { visibility.hasConfirmedBoundary($0) })
         }
         for id in messages.keys { messages[id] = (messages[id] ?? []).filter { visibility.permits($0, conversationID: id) } }; publish()
+    }
+    private func scheduleRetentionRefresh() {
+        guard retentionRefreshTask == nil else { return }
+        let current = generation
+        retentionRefreshTask = Task { [weak self] in
+            guard let self = self else { return }
+            defer { if self.generation == current { self.retentionRefreshTask = nil } }
+            do { try await self.refreshRetentionBatch() }
+            catch { /* 失败保留已确认水位，不阻塞本地会话首屏。 */ }
+        }
+    }
+    private func scheduleVisibilityRefresh(_ conversation: NativeConversation) {
+        guard visibilityRefreshTasks[conversation.id] == nil else { return }
+        let current = generation
+        visibilityRefreshTasks[conversation.id] = Task { [weak self] in
+            guard let self = self else { return }
+            defer { if self.generation == current { self.visibilityRefreshTasks[conversation.id] = nil } }
+            do { try await self.refreshGroupVisibility(conversation) }
+            catch { /* 离线继续使用已持久确认的 floor 与成员清理快照。 */ }
+        }
     }
     func conversationPreview(_ conversation: NativeConversation) -> String {
         if conversation.type == 3, !groupVisibilityReady.contains(conversation.id) { return "" }
@@ -991,6 +1143,7 @@ final class NativeIMService {
         case "connecting": connection = "连接中"
         case "connected":
             connection = "已连接"
+            for request in Array(historyRequests.values) { scheduleHistoryRefresh(request.conversation, cursor: request.cursor) }
             for id in Set(outboxEntries.filter { $0.state == .uncertain }.map(\.conversationID)) { await reconcile(conversationID: id); guard isActive, generation == eventGeneration else { return } }
         case "connectFailed": connection = "连接中断，等待 SDK 重连"
         case "kicked", "tokenExpired", "tokenInvalid":
@@ -1012,12 +1165,15 @@ final class NativeIMService {
             }
         case "syncFinish":
             await finishSync(.completed)
-            if loggedIn && !loadingConversations { await loadConversations(reset: true) }
+            for request in Array(historyRequests.values) { scheduleHistoryRefresh(request.conversation, cursor: request.cursor) }
+            if loggedIn { await loadConversations(reset: true) }
         case "syncFailed": await finishSync(.failed("SDK 同步失败"))
         case "syncProgress": syncLabel = "同步中 \((payload["progress"] as? NSNumber)?.intValue ?? 0)%"
         case "conversations":
             let changed = (payload["items"] as? [[String: Any]] ?? []).compactMap(NativeConversation.init)
+            guard conversationStartup.receive(changed) else { bufferedStartupEventCount += changed.count; break }
             if loadingConversations { conversationChangesDuringRequest.append(contentsOf: changed) }
+            conversationRefreshSeen?.formUnion(changed.map(\.id))
             mergeConversations(changed)
         case "message":
             if let item = Self.item(payload) {

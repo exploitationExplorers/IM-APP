@@ -36,9 +36,37 @@ final class NativeGroupAdministrationController: NativeBusinessListController {
 final class NativeGroupAdministratorsController: NativeBusinessListController, UISearchResultsUpdating {
     private let service: NativeIMService; private let group: NativeGroup; private let adding: Bool
     private var members: [NativeGroupMember] = []; private var selected = Set<String>(); private let search = UISearchController(searchResultsController: nil)
-    init(service: NativeIMService, group: NativeGroup, adding: Bool = false) { self.service = service; self.group = group; self.adding = adding; super.init(title: adding ? "新增管理员" : "群组管理员", context: service.business) }
+    private let footer = UIView(); private let confirmButton = UIButton(type: .system)
+    init(service: NativeIMService, group: NativeGroup, adding: Bool = false) { self.service = service; self.group = group; self.adding = adding; super.init(title: adding ? "新增群组管理员" : "群组管理员", context: service.business) }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
-    override func viewDidLoad() { super.viewDidLoad(); search.searchResultsUpdater = self; search.obscuresBackgroundDuringPresentation = false; navigationItem.searchController = search; if group.isOwner { navigationItem.rightBarButtonItem = UIBarButtonItem(title: adding ? "保存" : "新增", style: .plain, target: self, action: #selector(right)) } }
+    override func viewDidLoad() {
+        super.viewDidLoad(); search.searchResultsUpdater = self; search.obscuresBackgroundDuringPresentation = false; search.searchBar.placeholder = "搜索"; navigationItem.searchController = search
+        if !adding, group.isOwner { navigationItem.rightBarButtonItem = UIBarButtonItem(title: "新增", style: .plain, target: self, action: #selector(right)) }
+        if adding {
+            view.backgroundColor = .white; tableView.backgroundColor = .white
+            tableView.register(NativeAdministratorCandidateCell.self, forCellReuseIdentifier: "admin-candidate")
+            footer.backgroundColor = .white; footer.addSubview(confirmButton); tableView.addSubview(footer)
+            confirmButton.setTitle("确认", for: .normal); confirmButton.setTitleColor(.white, for: .normal)
+            confirmButton.backgroundColor = NativeUITheme.primary; confirmButton.addTarget(self, action: #selector(right), for: .touchUpInside)
+            confirmButton.isEnabled = false; confirmButton.alpha = 0.45
+        }
+    }
+    override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); layoutConfirmation() }
+    override func scrollViewDidScroll(_ scrollView: UIScrollView) { layoutConfirmation() }
+    private func layoutConfirmation() {
+        guard adding, isViewLoaded else { return }
+        let r = tableView.bounds.width / 750, bottom = tableView.safeAreaInsets.bottom, height = 144 * r + bottom
+        if abs(tableView.contentInset.bottom - height) > 0.5 { tableView.contentInset.bottom = height; tableView.verticalScrollIndicatorInsets.bottom = height }
+        footer.frame = CGRect(x: 0, y: tableView.contentOffset.y + tableView.bounds.height - height, width: tableView.bounds.width, height: height)
+        confirmButton.frame = CGRect(x: 32 * r, y: 24 * r, width: tableView.bounds.width - 64 * r, height: 96 * r)
+        confirmButton.layer.cornerRadius = 16 * r; confirmButton.titleLabel?.font = .systemFont(ofSize: 30 * r, weight: .medium)
+        tableView.bringSubviewToFront(footer)
+    }
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        guard adding else { return super.tableView(tableView, cellForRowAt: indexPath) }
+        let cell = tableView.dequeueReusableCell(withIdentifier: "admin-candidate", for: indexPath) as! NativeAdministratorCandidateCell
+        cell.configure(sections[indexPath.section][indexPath.row], policy: context.media); return cell
+    }
     override func reloadContent() {
         perform { [self] in
             var all: [NativeGroupMember] = []; var cursor: String?; var seen = Set<String>()
@@ -47,7 +75,7 @@ final class NativeGroupAdministratorsController: NativeBusinessListController, U
                 let page: NativePage<NativeGroupMember> = try await context.request("group-members", query: query); all += page.items
                 guard page.hasMore else { break }; guard let next = page.nextCursor, seen.insert(next).inserted else { throw APIError.invalidResponse }; cursor = next
             } while true
-            members = all; render()
+            var unique = Set<String>(); members = all.filter { unique.insert($0.id).inserted }; render()
         }
     }
     func updateSearchResults(for searchController: UISearchController) { render() }
@@ -55,15 +83,52 @@ final class NativeGroupAdministratorsController: NativeBusinessListController, U
         let text = search.searchBar.text ?? ""
         let filtered = members.filter { (adding ? $0.role == "member" : $0.role == "owner" || $0.role == "admin") && (text.isEmpty || $0.name.localizedCaseInsensitiveContains(text)) }
         setRows([filtered.map { member in NativeBusinessRow(title: member.name, detail: member.role == "owner" ? "群主" : member.role == "admin" ? "管理员" : "", avatar: member.avatar, checked: adding ? selected.contains(member.id) : nil, action: { [weak self] in
-            guard let self = self, self.group.isOwner else { return }
+            guard let self = self, self.group.isOwner, !self.working else { return }
             if self.adding { if self.selected.contains(member.id) { self.selected.remove(member.id) } else { self.selected.insert(member.id) }; self.render() }
             else if member.role == "admin" { self.confirm("确定取消「\(member.name)」的管理员身份吗？", destructiveTitle: "取消管理员") { self.perform { try await self.context.change("groups/\(self.group.id)/members/\(member.id)/role", method: "PUT", body: ["role": .string("member")]); self.scheduleReload() } } }
-        }) }])
+        }) }], titles: adding ? ["可选成员 (\(filtered.count))"] : [])
+        confirmButton.isEnabled = group.isOwner && !selected.isEmpty && !working
+        confirmButton.alpha = confirmButton.isEnabled ? 1 : 0.45
     }
     @objc private func right() {
         if !adding { push(NativeGroupAdministratorsController(service: service, group: group, adding: true)); return }
-        guard !selected.isEmpty else { return }
-        perform { [self] in for id in selected.sorted() { try await context.change("groups/\(group.id)/members/\(id)/role", method: "PUT", body: ["role": .string("admin")]); selected.remove(id) }; navigationController?.popViewController(animated: true) }
+        guard group.isOwner, !selected.isEmpty, !working else { return }
+        confirmButton.isEnabled = false; confirmButton.alpha = 0.45
+        perform { [self] in
+            do {
+                for id in selected.sorted() {
+                    try await context.change("groups/\(group.id)/members/\(id)/role", method: "PUT", body: ["role": .string("admin")])
+                    selected.remove(id); members.removeAll { $0.id == id }
+                }
+                navigationController?.popViewController(animated: true)
+            } catch { render(); confirmButton.isEnabled = !selected.isEmpty; confirmButton.alpha = confirmButton.isEnabled ? 1 : 0.45; throw error }
+        }
+    }
+}
+
+private final class NativeAdministratorCandidateCell: UITableViewCell {
+    private let avatar = NativeRemoteImageView(); private let name = UILabel(); private let selection = UIView()
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        [avatar, name, selection].forEach { contentView.addSubview($0) }; selectionStyle = .none
+        avatar.contentMode = .scaleAspectFill; avatar.clipsToBounds = true; name.lineBreakMode = .byTruncatingTail
+        name.textColor = UIColor(hex: 0x1d1d1d); selection.layer.borderWidth = 1; backgroundColor = .white
+    }
+    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
+    override func prepareForReuse() { super.prepareForReuse(); avatar.cancel(); name.text = nil }
+    func configure(_ row: NativeBusinessRow, policy: MediaURLPolicy) {
+        name.text = row.title; avatar.load(row.avatar ?? "", policy: policy, placeholder: "uni_avatar_default")
+        let selected = row.checked == true
+        selection.backgroundColor = selected ? NativeUITheme.primary : .clear
+        selection.layer.borderColor = (selected ? NativeUITheme.primary : UIColor(hex: 0xc8ccd6)).cgColor
+        isAccessibilityElement = true; accessibilityLabel = row.title; accessibilityTraits = selected ? [.button, .selected] : .button
+        accessibilityValue = selected ? "已选择" : "未选择"; setNeedsLayout()
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews(); let r = bounds.width / 750, height = contentView.bounds.height
+        avatar.frame = CGRect(x: 32 * r, y: (height - 88 * r) / 2, width: 88 * r, height: 88 * r); avatar.layer.cornerRadius = 44 * r
+        name.font = .systemFont(ofSize: 30 * r); name.frame = CGRect(x: 140 * r, y: 0, width: max(0, bounds.width - 232 * r), height: height)
+        selection.frame = CGRect(x: bounds.width - 72 * r, y: (height - 40 * r) / 2, width: 40 * r, height: 40 * r); selection.layer.cornerRadius = 20 * r
     }
 }
 

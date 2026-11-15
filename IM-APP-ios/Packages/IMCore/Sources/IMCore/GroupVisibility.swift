@@ -15,6 +15,8 @@ public struct GroupVisibility: Codable, Equatable, Sendable {
     public var purges: [String: [String: Int64]] = [:]
     public var hiddenMessageIDs = Set<String>()
     public init() {}
+    /// 保留水位与成员清理快照都曾确认，才允许离线展示群历史。
+    public func hasConfirmedBoundary(_ conversationID: String) -> Bool { floors[conversationID] != nil && purges[conversationID] != nil }
     public func permits(_ item: ChatTextItem, conversationID: String) -> Bool {
         if hiddenMessageIDs.contains(item.id) { return false }
         if item.seq > 0, let floor = floors[conversationID], item.seq < floor.minVisibleSeq { return false }

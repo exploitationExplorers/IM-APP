@@ -44,7 +44,7 @@ private fun stickerUI(action:()->Unit) { if(Looper.myLooper()==Looper.getMainLoo
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun NativeEmojiStickerPanel(callbacks:NativeChatCallbacks,selectEmoji:(String)->Unit,selectSticker:(String)->Unit,manage:()->Unit,close:()->Unit={}) {
+fun NativeEmojiStickerPanel(callbacks:NativeChatCallbacks,selectEmoji:(String)->Unit,selectSticker:(String)->Unit,manage:()->Unit,onClose:()->Unit={}) {
     val context=LocalContext.current
     val factor=LocalConfiguration.current.screenWidthDp/750f
     fun rpx(value:Int)=(value*factor).dp
@@ -105,11 +105,11 @@ fun NativeEmojiStickerPanel(callbacks:NativeChatCallbacks,selectEmoji:(String)->
                         drawCircle(ink,10*unit,Offset(12*unit,12*unit),style=Stroke(1.4f*unit))
                         drawCircle(ink,unit,Offset(8*unit,9*unit));drawCircle(ink,unit,Offset(16*unit,9*unit))
                         drawArc(ink,0f,180f,false,Offset(6*unit,7*unit),Size(12*unit,10*unit),style=Stroke(1.4f*unit,cap=StrokeCap.Round))
-                    } else drawPath(Path().apply { moveTo(12*unit,21*unit);cubicTo(3*unit,15*unit,0f,8*unit,5*unit,4*unit);cubicTo(8*unit,2*unit,11*unit,4*unit,12*unit,6*unit);cubicTo(13*unit,4*unit,16*unit,2*unit,19*unit,4*unit);cubicTo(24*unit,8*unit,21*unit,15*unit,12*unit,21*unit);close() },ink)
+                    } else drawPath(Path().apply { moveTo(12*unit,21*unit);cubicTo(3*unit,15*unit,0f,8*unit,5*unit,4*unit);cubicTo(8*unit,2*unit,11*unit,4*unit,12*unit,6*unit);cubicTo(13*unit,4*unit,16*unit,2*unit,19*unit,4*unit);cubicTo(24*unit,8*unit,21*unit,15*unit,12*unit,21*unit);this.close() },ink)
                 }
             }
             Spacer(Modifier.weight(1f))
-            Box(Modifier.size(rpx(64)).clip(CircleShape).semantics { contentDescription="关闭表情面板" }.clickable(onClick=close),contentAlignment=Alignment.Center) { Text("×",fontSize=(32*factor).sp,color=Color(0xFF666666)) }
+            Box(Modifier.size(rpx(64)).clip(CircleShape).semantics { contentDescription="关闭表情面板" }.clickable(onClick=onClose),contentAlignment=Alignment.Center) { Text("×",fontSize=(32*factor).sp,color=Color(0xFF666666)) }
         }
         if(uploading)Text("表情上传中…",Modifier.padding(horizontal=14.dp,vertical=6.dp),fontSize=12.sp,color=Color.Gray)
         error?.let { Text(it,Modifier.fillMaxWidth().clickable(enabled=!loading) { if(tab==1)load(page==0) }.padding(10.dp),fontSize=12.sp,color=Color(0xFF9B6C2F)) }

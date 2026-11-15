@@ -103,11 +103,19 @@ final class MediaAndVisibilityTests: XCTestCase {
         _ = try await ledger.apply([GroupRetentionState(conversationId: "g", minVisibleSeq: 100, revision: 2)])
         let current = try await ledger.apply([GroupRetentionState(conversationId: "g", minVisibleSeq: 10, revision: 3), GroupRetentionState(conversationId: "g", minVisibleSeq: 500, revision: 1)])
         XCTAssertEqual(current.floors["g"]?.minVisibleSeq, 100)
+        XCTAssertFalse(current.hasConfirmedBoundary("g"))
         XCTAssertFalse(current.permits(ChatTextItem(id: "old", senderID: "a", text: "", timestamp: 9999999999999, status: 2, seq: 99), conversationID: "g"))
         XCTAssertTrue(current.permits(ChatTextItem(id: "new", senderID: "a", text: "", timestamp: 1, status: 2, seq: 100), conversationID: "g"))
         let recovered = try GroupVisibilityLedger(file: file, owner: "env/account")
         let snapshot = await recovered.snapshot(); XCTAssertEqual(snapshot, current)
         XCTAssertThrowsError(try GroupVisibilityLedger(file: file, owner: "env/other"))
+        let confirmed = try await recovered.applyPurges([], conversationID: "g")
+        XCTAssertTrue(confirmed.hasConfirmedBoundary("g"))
+        XCTAssertFalse(confirmed.hasConfirmedBoundary("unseen"))
+        let reopened = try GroupVisibilityLedger(file: file, owner: "env/account")
+        let reopenedState = await reopened.snapshot()
+        XCTAssertTrue(reopenedState.hasConfirmedBoundary("g"))
+        XCTAssertFalse(reopenedState.permits(ChatTextItem(id: "hidden-by-floor", senderID: "a", text: "", timestamp: 1, status: 2, seq: 99), conversationID: "g"))
     }
     func testMemberPurgeDoesNotHideMessagesAfterRejoiningAndHiddenIDsSurviveRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -116,6 +124,7 @@ final class MediaAndVisibilityTests: XCTestCase {
         let file = directory.appendingPathComponent("visibility.json"), user = "01234567-89ab-cdef-0123-456789abcdef"
         let ledger = try GroupVisibilityLedger(file: file, owner: "owner")
         let state = try await ledger.applyPurges([GroupMessagePurge(userId: user, purgedAt: "2026-01-01T00:00:00Z")], conversationID: "g")
+        XCTAssertFalse(state.hasConfirmedBoundary("g"))
         let threshold: Int64 = 1767225600000
         XCTAssertFalse(state.permits(ChatTextItem(id: "before", senderID: user.replacingOccurrences(of: "-", with: ""), text: "", timestamp: threshold, status: 2), conversationID: "g"))
         XCTAssertTrue(state.permits(ChatTextItem(id: "after", senderID: user, text: "", timestamp: threshold + 1, status: 2), conversationID: "g"))

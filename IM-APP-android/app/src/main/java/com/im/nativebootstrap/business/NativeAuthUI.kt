@@ -79,7 +79,7 @@ import kotlinx.coroutines.delay
                     password.length<6->note="请设置至少 6 位密码"
                     register&&password!=confirm->note="两次输入的密码不一致"
                     register->{model.login(endpoint,country,phone,password,true,code);password="";confirm=""}
-                    else->{resetBusy=true;model.authRequest(endpoint,"/auth/password/reset",obj("phone" to phone,"countryCode" to country,"code" to code,"password" to password)){result->resetBusy=false;result.fold({password="";note="密码已重置，请使用新密码登录";back()},{error->note=error.message?:"重置失败";if(note.contains("验证码")){step=1;code=""}})}}
+                    else->{resetBusy=true;model.authRequest(endpoint,"/auth/password/reset",obj("phone" to phone,"countryCode" to country,"code" to code,"password" to password)){result->resetBusy=false;result.fold({password="";NativeNotices.show("密码已重置，请使用新密码登录");back()},{error->note=error.message?:"重置失败";if(note.contains("验证码")){step=1;code=""}})}}
                 }
             },contentAlignment=Alignment.Center){Text(if(state.busy||resetBusy)"提交中…" else if(register)"注册" else if(step==1)"下一步" else "确认",fontSize=16.sp,color=Color(0xFF0A2FC2),fontWeight=FontWeight.Medium)}
             Spacer(Modifier.height(36.dp))

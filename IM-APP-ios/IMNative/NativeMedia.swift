@@ -153,7 +153,7 @@ actor NativeImageCache {
         guard expectedEpoch == epoch, !Task.isCancelled, sourceIdentity != destinationIdentity else { return }
         let sourceKey = resourceKey(sourceIdentity), key = resourceKey(destinationIdentity)
         let source = directory.appendingPathComponent(sourceKey), destination = directory.appendingPathComponent(key)
-        // 仅复制已缓存且未过期的同规格内容，不发起额外网络下载。
+        // 仅复制已缓存的同规格内容，不发起额外网络下载。
         if valid(source), !valid(destination) {
             do {
                 guard expectedEpoch == epoch, !Task.isCancelled else { return }
@@ -210,7 +210,8 @@ actor NativeImageCache {
         }
     }
     private func valid(_ file: URL) -> Bool {
-        guard let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]), let size = values.fileSize, size > 0, size <= 30 * 1024 * 1024, let date = values.contentModificationDate, date > Date().addingTimeInterval(-7 * 86400) else { try? FileManager.default.removeItem(at: file); return false }; return true
+        // 历史图片不按年龄强制失效；磁盘上限与文件数由已有 LRU 维护。
+        guard let values = try? file.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize, size > 0, size <= 30 * 1024 * 1024 else { try? FileManager.default.removeItem(at: file); return false }; return true
     }
     private func trim(protecting key: String) {
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]) else { return }

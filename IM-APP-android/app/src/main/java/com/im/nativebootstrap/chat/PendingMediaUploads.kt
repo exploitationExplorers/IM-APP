@@ -18,7 +18,7 @@ data class PendingMediaUpload(
 ) {
     fun media()=LocalMedia(File(path),name,mime,kind,duration=duration,width=width,height=height,snapshot=snapshotPath.takeIf(String::isNotBlank)?.let(::File)?.takeIf(File::isFile))
     fun placeholder()=if(kind==MediaKind.VIDEO)ChatMessage(id,"[视频]",true,time,1,0,
-        """{"clientMsgID":"$id","contentType":104,"videoElem":{"duration":$duration,"snapshotWidth":$width,"snapshotHeight":$height}}}""")
+        """{"clientMsgID":"$id","contentType":104,"videoElem":{"duration":$duration,"snapshotWidth":$width,"snapshotHeight":$height}}""")
         else ChatMessage(id,"[图片]",true,time,1,0,"""{"clientMsgID":"$id","contentType":102,"pictureElem":{"sourcePicture":{"width":$width,"height":$height}}}""")
 }
 private data class MediaUploadDocument(val schema:Int=1,val owner:String="",val entries:List<PendingMediaUpload> = emptyList())

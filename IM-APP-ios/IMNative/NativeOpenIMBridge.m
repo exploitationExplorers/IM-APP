@@ -143,6 +143,12 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
     } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
 }
 
+- (void)allConversations:(NativeIMResult)completion {
+    [OIMManager.manager getAllConversationListWithOnSuccess:^(NSArray<OIMConversationInfo *> *items) {
+        completion(@{@"items": ConversationList(items ?: @[])}, nil);
+    } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
+}
+
 - (void)conversationTarget:(NSString *)target type:(NSInteger)type completion:(NativeIMResult)completion {
     if ((type != 1 && type != 3) || !target.length) { completion(nil, NativeError(-1)); return; }
     [OIMManager.manager getOneConversationWithSessionType:(OIMConversationType)type sourceID:target onSuccess:^(OIMConversationInfo *item) {
@@ -161,6 +167,31 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
     [OIMManager.manager getAdvancedHistoryMessageList:request onSuccess:^(OIMGetAdvancedHistoryMessageListInfo *result) {
         if (!result || result.errCode != 0) { completion(nil, NativeError(result ? result.errCode : -1)); return; }
         completion(@{@"items": MessageList(result.messageList ?: @[]), @"isEnd": @(result.isEnd), @"lastMinSeq": @(result.lastMinSeq)}, nil);
+    } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
+}
+
+- (void)localHistoryConversation:(NSString *)conversation position:(NSInteger)position page:(NSInteger)page count:(NSInteger)count completion:(NativeIMResult)completion {
+    if (!conversation.length || position <= 0 || page < 1 || count < 1 || count > 40) { completion(nil, NativeError(-1)); return; }
+    OIMSearchParam *request = [OIMSearchParam new];
+    request.conversationID = conversation; request.keywordList = @[];
+    // 仅搜索官方 filterMsg 支持的类型，避免未支持类型占用 SQL 页后被过滤。
+    // 这是本地预览，完整历史及结束水位仍由 advanced history 确认。
+    request.messageTypeList = @[@101,@102,@103,@104,@105,@106,@107,@108,@109,@110,@114];
+    request.searchTimePosition = position; request.searchTimePeriod = 0; request.pageIndex = page; request.count = count;
+    [OIMManager.manager searchLocalMessages:request onSuccess:^(OIMSearchResultInfo *result) {
+        if (!result) { completion(nil, NativeError(-1)); return; }
+        NSMutableArray *items = [NSMutableArray new];
+        NSInteger localCount = 0;
+        for (OIMSearchResultItemInfo *group in result.searchResultItems) {
+            if (![group.conversationID isEqualToString:conversation]) continue;
+            localCount += group.messageList.count;
+            for (OIMMessageInfo *message in group.messageList) {
+                // 搜索不执行高级历史的阅后即焚过滤；此类消息仅由完整 SDK 通道展示。
+                if (message.attachedInfoElem.isPrivateChat || !message.clientMsgID.length) continue;
+                [items addObject:MessageData(message)];
+            }
+        }
+        completion(@{@"items": items, @"localExhausted": @(localCount < count)}, nil);
     } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
 }
 

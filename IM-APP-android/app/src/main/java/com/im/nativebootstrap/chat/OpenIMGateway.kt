@@ -113,6 +113,12 @@ class OpenIMGateway(private val application:Application):ChatGateway {
     override fun conversations(offset:Int,count:Int,done:(Result<List<ChatConversation>>)->Unit) {
         client.conversationManager.getConversationListSplit(base<List<ConversationInfo>> { result -> done(result.map { it.mapNotNull(::conversation) }) },offset.toLong(),count.toLong())
     }
+    override fun initialConversations(count:Int,done:(Result<ConversationSnapshotPage>)->Unit) {
+        // 官方接口读取完整本地会话表；首屏不能由无序增量子集或前 30 条拼出来。
+        client.conversationManager.getAllConversationList(base<List<ConversationInfo>> { result ->
+            done(result.map { ConversationSnapshotPage(it.mapNotNull(::conversation),true) })
+        })
+    }
     override fun watchPeer(userId:String?,done:(Result<Boolean?>)->Unit) {
         if(!initialized) { done(Result.success(null));return }
         val previous=watchedPeer
@@ -138,8 +144,24 @@ class OpenIMGateway(private val application:Application):ChatGateway {
     override fun history(target:ChatTarget,cursor:String?,count:Int,done:(Result<HistoryPage>)->Unit) {
         val start=cursor?.let { Message().apply { clientMsgID=it } }
         client.messageManager.getAdvancedHistoryMessageList(base<AdvancedMessage> { result ->
-            done(result.fold(onSuccess={ page -> if(page.errCode!=0) Result.failure(ChatFailure(page.errCode)) else Result.success(HistoryPage(page.messageList.orEmpty().filter { !it.clientMsgID.isNullOrBlank() && it.status!=4 }.map(::map),page.isEnd,page.lastMinSeq)) },onFailure={ Result.failure(it) }))
+            done(result.fold(onSuccess={ page ->
+                OpenIMHistoryResults.page(page,::map)
+            },onFailure={ Result.failure(it) }))
         },target.conversationId,start,count,ViewType.History)
+    }
+    override fun localHistory(target:ChatTarget,page:Int,count:Int,done:(Result<HistoryPage>)->Unit) {
+        localHistory(target,page,count,(System.currentTimeMillis()+999)/1000,done)
+    }
+    override fun localHistory(target:ChatTarget,page:Int,count:Int,anchorTimeSeconds:Long,done:(Result<HistoryPage>)->Unit) {
+        require(target.supported()&&page>=1&&count in 1..100)
+        // 固定 Core 的 searchLocalMessages 直接读本地表，不经过高级历史的网络补洞。
+        // filterMsg 会二次过滤其它类型；仅查询明确支持的类型，防止 SQL 分页后被过滤成假短页。
+        // 表情、高级文本、系统/撤回等仍由高级历史渠道补齐，本地短页不代表完整历史结束。
+        val types=(101..110).toList()+114
+        client.messageManager.searchLocalMessages(base<SearchResult> { result -> done(result.map { value ->
+            val rows=value.searchResultItems.orEmpty().filter { it.conversationID==target.conversationId }.flatMap { it.messageList.orEmpty() }
+            HistoryPage(rows.filter(OpenIMHistoryResults::previewSafe).map(::map),rows.size<count)
+        }) },target.conversationId,emptyList(),0,emptyList(),types,anchorTimeSeconds.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),0,page,count)
     }
     override fun createText(text:String,target:ChatTarget):ChatMessage {
         require(target.supported())

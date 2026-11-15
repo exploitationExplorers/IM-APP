@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <instrumentation android:name="com.im.nativebootstrap.SDKSmokeInstrumentation"
         android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.ConversationStartupInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.AdminPickerInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
     <instrumentation android:name="com.im.nativebootstrap.FullParityInstrumentation"
         android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
     <instrumentation android:name="com.im.nativebootstrap.media.MediaPipelineInstrumentation"
@@ -10,5 +14,11 @@
     <instrumentation android:name="com.im.nativebootstrap.InstantMediaInstrumentation"
         android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
     <instrumentation android:name="com.im.nativebootstrap.ChatMediaRegressionInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.HistoryUiParityInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.media.OfflineHistoryImageInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.BootstrapOfflineInstrumentation"
         android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
 </manifest>

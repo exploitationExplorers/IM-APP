@@ -39,6 +39,10 @@ def main():
     parser.add_argument('--ui-interaction',action='store_true')
     parser.add_argument('--instant-media',action='store_true')
     parser.add_argument('--chat-media-regression',action='store_true')
+    parser.add_argument('--history-ui-parity',action='store_true')
+    parser.add_argument('--admin-picker',action='store_true')
+    parser.add_argument('--conversation-startup',action='store_true')
+    parser.add_argument('--offline-upgrade-report',help='本轮离线覆盖升级通过记录，纳入同包交付门禁')
     args=parser.parse_args()
     WORK,OUT=Path(args.work).resolve(),Path(args.output).resolve()
     if ROOT not in WORK.parents or ROOT not in OUT.parents:
@@ -64,6 +68,14 @@ def main():
         report['source_files'] = json.loads((WORK / 'frozen-source.json').read_text(encoding='utf-8'))
         assert all(digest(ROOT / row['path']) == row['sha256'] for row in report['source_files']), 'Android changed after source freeze'
         report['apk_sha256'], report['test_apk_sha256'] = digest(APK), digest(TEST)
+        if args.offline_upgrade_report:
+            upgrade_path=Path(args.offline_upgrade_report).resolve()
+            assert ROOT in upgrade_path.parents
+            upgrade=json.loads(upgrade_path.read_text(encoding='utf-8'))
+            assert upgrade['status']=='passed' and upgrade['airplane_mode_during_test'] is True
+            assert upgrade['new_sha256']==upgrade['installed_sha256']==report['apk_sha256']
+            assert all(key in upgrade for key in ('old-seed','old-sdk','upgraded-sdk','upgraded-bootstrap','upgraded-image'))
+            report['offline_upgrade']=upgrade
         for path in (APK, TEST):
             assert 'Success' in call('install', '-r', str(path))
         print('Installed exact frozen APK and test APK', flush=True)
@@ -91,17 +103,53 @@ def main():
         assert verification.returncode == 0, verification.stdout + verification.stderr
         report['device'] = json.loads((OUT / 'android-device.json').read_text(encoding='utf-8'))
         assert report['device']['status'] == 'passed' and report['device']['apk_sha256'] == report['apk_sha256']
+        if args.conversation_startup:
+            assert 'fullLocalSnapshot=passed:' in (OUT/'SDKSmokeInstrumentation.txt').read_text(encoding='utf-8')
         print('SDK, Keystore, GIF and 14 synthetic pages verified', flush=True)
         if args.ui_interaction:
             output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.UiParityInteractionInstrumentation')
             (OUT/'ui-interaction.txt').write_text(output,encoding='utf-8')
             assert all(marker in output for marker in ('directory=passed:','messageMenu=passed:','INSTRUMENTATION_CODE: -1')),output
             report['ui_interaction']=output.strip().splitlines()
-            for name in ('contacts-scrolled','message-menu','message-multi'):
+            for name in ('contacts-scrolled','message-menu','message-multi','centered-copy-notice'):
                 data=call('exec-out','run-as',PACKAGE,'cat','cache/ui-interaction-'+name+'.png',binary=True)
                 assert data.startswith(b'\x89PNG\r\n\x1a\n')
                 (OUT/('ui-'+name+'.png')).write_bytes(data)
             print('Directory scrolling and message menu interactions verified',flush=True)
+        if args.history_ui_parity:
+            output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.HistoryUiParityInstrumentation')
+            (OUT/'history-ui-parity.txt').write_text(output,encoding='utf-8')
+            required=('privacySwitches=passed:','contactPagination=passed:','userPullRefresh=passed:','continuousHistory=passed:','unreadBadges=passed:','historyUiParity=passed:','INSTRUMENTATION_CODE: -1')
+            assert all(marker in output for marker in required),output
+            report['history_ui_parity']=output.strip().splitlines()
+            for name in ('privacy-off-360-font130','privacy-saved','contact-pagination-count','directory-user-pull-refresh','history-anchor-page1','history-200-messages','unread-circles'):
+                data=call('exec-out','run-as',PACKAGE,'cat','cache/history-ui-'+name+'.png',binary=True)
+                assert data.startswith(b'\x89PNG\r\n\x1a\n')
+                (OUT/('history-ui-'+name+'.png')).write_bytes(data)
+            (OUT/'history-ui-contact-requests.txt').write_text(call('shell','run-as',PACKAGE,'cat','cache/history-ui-contact-requests.txt'),encoding='utf-8')
+            print('Unread badges, continuous history, contacts count and privacy switches verified',flush=True)
+        if args.admin_picker:
+            output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.AdminPickerInstrumentation')
+            (OUT/'admin-picker.txt').write_text(output,encoding='utf-8')
+            assert 'adminPicker=passed:' in output and 'INSTRUMENTATION_CODE: -1' in output,output
+            report['admin_picker']=output.strip().splitlines()
+            for name in ('initial','scrolled-fixed-confirm','search-selection-retained'):
+                data=call('exec-out','run-as',PACKAGE,'cat','cache/admin-picker-'+name+'.png',binary=True)
+                assert data.startswith(b'\x89PNG\r\n\x1a\n')
+                (OUT/('admin-picker-'+name+'.png')).write_bytes(data)
+            print('Admin picker avatar, fixed confirm, scrolling and search selection verified',flush=True)
+        if args.conversation_startup:
+            output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.ConversationStartupInstrumentation')
+            (OUT/'conversation-startup.txt').write_text(output,encoding='utf-8')
+            assert 'conversationStartup=passed:' in output and 'INSTRUMENTATION_CODE: -1' in output,output
+            report['conversation_startup']=output.strip().splitlines()
+            for name in ('publishes','frames','visible','diagnostics'):
+                (OUT/('conversation-startup-'+name+'.txt')).write_text(call('shell','run-as',PACKAGE,'cat','cache/conversation-startup-'+name+'.txt'),encoding='utf-8')
+            for name in ('offline-full-first-screen','stable-after-sync-refresh','real-message-promoted','last-local-conversation'):
+                data=call('exec-out','run-as',PACKAGE,'cat','cache/conversation-startup-'+name+'.png',binary=True)
+                assert data.startswith(b'\x89PNG\r\n\x1a\n')
+                (OUT/('conversation-startup-'+name+'.png')).write_bytes(data)
+            print('Complete 243-conversation startup, sync updates and real message promotion verified',flush=True)
         if args.instant_media:
             output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.InstantMediaInstrumentation')
             (OUT/'instant-media.txt').write_text(output,encoding='utf-8')
@@ -115,12 +163,13 @@ def main():
         if args.chat_media_regression:
             output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.ChatMediaRegressionInstrumentation')
             (OUT/'chat-media-regression.txt').write_text(output,encoding='utf-8')
-            assert all(marker in output for marker in ('chatMediaRegression=passed:','emojiInteraction=passed:','videoPlayback=passed:','INSTRUMENTATION_CODE: -1')),output
+            assert all(marker in output for marker in ('chatMediaRegression=passed:','emojiInteraction=passed:','videoPlayback=passed:','localVideoUI=passed:','INSTRUMENTATION_CODE: -1')),output
             report['chat_media_regression']=output.strip().splitlines()
-            for name in ('emoji-panel','portrait-bubble','playing','landscape-bubble'):
+            for name in ('emoji-panel','portrait-bubble','playing','landscape-bubble','video-pending-before-cover','video-local-sent'):
                 data=call('exec-out','run-as',PACKAGE,'cat','cache/chat-media-'+name+'.png',binary=True)
                 assert data.startswith(b'\x89PNG\r\n\x1a\n')
                 (OUT/('chat-media-'+name+'.png')).write_bytes(data)
+            (OUT/'chat-media-player-samples.txt').write_text(call('shell','run-as',PACKAGE,'cat','cache/chat-media-player-samples.txt'),encoding='utf-8')
             print('Emoji keyboard interaction and actual local video playback verified',flush=True)
         call('shell', 'am', 'force-stop', PACKAGE)
         call('shell', 'am', 'start', '-n', PACKAGE + '/com.im.nativebootstrap.MainActivity')

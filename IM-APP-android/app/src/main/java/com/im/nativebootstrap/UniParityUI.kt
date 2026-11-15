@@ -53,6 +53,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -361,7 +362,10 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
         Row(Modifier.fillMaxWidth().background(Color.White).height(s.dp(144)).padding(vertical = s.dp(16)), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             val tabs = listOf(Triple("contacts", "通讯录", if (tab == "contacts") R.drawable.uni_tab_contacts_active else R.drawable.uni_tab_contacts), Triple("chat", "聊天", if (tab == "chat") R.drawable.uni_tab_chat_active else R.drawable.uni_tab_chat), Triple("mine", "我的", if (tab == "mine") R.drawable.uni_tab_mine_active else R.drawable.uni_tab_mine))
             tabs.forEach { (id, name, image) -> Column(Modifier.widthIn(min = s.dp(120)).fillMaxHeight().clickable { changeTab(id) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Image(painterResource(image), null, Modifier.size(s.dp(48)))
+                Box(Modifier.size(s.dp(48))) {
+                    Image(painterResource(image), null, Modifier.fillMaxSize())
+                    if(id=="chat")NativeUnreadBadge(state.chat.conversations.sumOf { it.unread.coerceAtLeast(0).toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true)
+                }
                 Text(name, Modifier.padding(top = s.dp(4)), color = if (tab == id) Primary else Ink, fontSize = s.text(24), lineHeight = s.text(32))
             } }
         }
@@ -412,7 +416,7 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
                                 Text(item.title,Modifier.weight(1f),fontSize=s.text(32),fontWeight=FontWeight.Medium,maxLines=1,overflow=TextOverflow.Ellipsis)
                                 if(item.time>0)Text(java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(if(item.time<10_000_000_000L)item.time*1000 else item.time)),fontSize=s.text(22),color=Color(0xFF999999))
                             }
-                            Row(Modifier.padding(top=s.dp(12)),verticalAlignment=Alignment.CenterVertically){Text(item.preview,Modifier.weight(1f),fontSize=s.text(26),color=Color(0xFF999999),maxLines=1,overflow=TextOverflow.Ellipsis);if(item.muted)Text("免打扰",fontSize=s.text(20),color=Hint);if(item.unread>0)Text(if(item.unread>99)"99+" else item.unread.toString(),Modifier.padding(start=s.dp(8)).clip(CircleShape).background(Color(0xFFEF4444)).padding(horizontal=s.dp(10),vertical=s.dp(2)),fontSize=s.text(22),color=Color.White)}
+                            Row(Modifier.fillMaxWidth().padding(top=s.dp(12)),verticalAlignment=Alignment.CenterVertically){Text(item.preview,Modifier.weight(1f),fontSize=s.text(26),color=Color(0xFF999999),maxLines=1,overflow=TextOverflow.Ellipsis);if(item.muted)Text("免打扰",fontSize=s.text(20),color=Hint);if(item.unread>0){Spacer(Modifier.width(s.dp(8)));NativeUnreadBadge(item.unread,s,muted=item.muted)}}
                         }
                     }
                     }
@@ -521,11 +525,23 @@ private fun UniChat(state: BootstrapState, model: BootstrapViewModel, s: UniScal
 }
 
 @Composable
+internal fun NativeUnreadBadge(count:Int,s:UniScale,modifier:Modifier=Modifier,wide:Boolean=false,muted:Boolean=false) {
+    if(count<=0)return
+    val label=if(count>99)"99+" else count.toString()
+    val height=if(muted)6.dp else 16.dp
+    val fontScale=LocalDensity.current.fontScale
+    Box(modifier.size(width=if(wide&&count>99)26.dp else height,height=height).clip(CircleShape).background(Color(0xFFEF4444)).semantics { contentDescription=if(muted)"免打扰，有未读消息" else "未读 $label" },contentAlignment=Alignment.Center) {
+        if(!muted)Text(label,fontSize=((if(count>99)8f else 10f)/fontScale).sp,lineHeight=(12f/fontScale).sp,color=Color.White,maxLines=1,softWrap=false,textAlign=TextAlign.Center,style=TextStyle(platformStyle=PlatformTextStyle(includeFontPadding=false)))
+    }
+}
+
+@Composable
 private fun ChatStatus(state:BootstrapState,model:BootstrapViewModel,s:UniScale) {
     val chat=state.chat
     val connection=when(chat.connection) { ConnectionState.IDLE->"聊天待连接";ConnectionState.CONNECTING->"连接中";ConnectionState.CONNECTED->"已连接";ConnectionState.DISCONNECTED->"连接中断，正在重连";ConnectionState.AUTH_REQUIRED->"聊天登录已失效" }
     val store=when(chat.store) { StoreStatus.CLOSED->"本地记录未打开";StoreStatus.OPENING->"本地记录准备中";StoreStatus.READABLE->"本地记录可读";StoreStatus.FAILED->"本地记录暂不可用" }
     val sync=when(chat.sync) { SyncStatus.IDLE->"等待同步";SyncStatus.RUNNING->"同步中";SyncStatus.COMPLETED->"同步完成";SyncStatus.FAILED->"同步未完成";SyncStatus.TIMED_OUT->"同步超时";SyncStatus.CANCELLED->"同步已取消" }
+    if(chat.connection==ConnectionState.CONNECTED&&chat.store==StoreStatus.READABLE&&chat.sync==SyncStatus.COMPLETED&&chat.error==null)return
     Column(Modifier.fillMaxWidth().background(Color(0xFFF3F4F7)).padding(horizontal=s.dp(24),vertical=s.dp(8))) {
         Text("$connection · $store · $sync",fontSize=s.text(21),color=Hint)
         chat.error?.let { Text(it,Modifier.clickable(enabled=chat.loggedIn) { if(chat.active==null) model.loadConversations(true) else model.loadHistory() }.padding(top=s.dp(6)),fontSize=s.text(24),color=Primary) }

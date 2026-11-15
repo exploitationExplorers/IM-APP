@@ -15,6 +15,119 @@ class BusinessParityTest {
     private val tokens=TokenPair("synthetic-access","synthetic-refresh",86400)
     private suspend fun awaitReady(controller:BusinessController) {withTimeout(5000){while(controller.state.value.loading)delay(10)}}
 
+    @Test fun adminPickerUsesOnlyOrdinaryMembersAndSearchesAllDisplayNames() {
+        val ordinary=obj("id" to "eligible","role" to " Member ","memberRemark" to "业务备注","groupNickname" to "群内名称","nickname" to "原昵称")
+        val people=listOf(ordinary,obj("id" to "owner","role" to "owner"),obj("id" to "admin","role" to "admin"),obj("id" to "missing","role" to ""),obj("role" to "member"))
+        assertEquals(listOf("eligible"),adminCandidates(people).map{it.identifier()})
+        for(query in listOf("业务"," 群内 ","原昵称"))assertEquals("eligible",adminCandidates(people,query).single().identifier())
+        assertTrue(adminCandidates(people,"不存在").isEmpty())
+        assertEquals("业务备注",adminMemberName(ordinary))
+        ordinary.remove("memberRemark");assertEquals("群内名称",adminMemberName(ordinary))
+        ordinary.remove("groupNickname");assertEquals("原昵称",adminMemberName(ordinary))
+    }
+
+    @Test fun addingAdminsBlocksDuplicateSubmissionAndUsesGroupRoleContract() = runBlocking {
+        val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        val writes=java.util.Collections.synchronizedList(mutableListOf<Triple<String,String,JsonObject?>>())
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        val controller=BusinessController(scope,{method,path,body,_->
+            if(method=="PUT") {writes+=Triple(method,path,body);entered.countDown();check(release.await(4,TimeUnit.SECONDS))}
+            JsonArray()
+        },{_,_,_,_->},{})
+        try {
+            controller.addAdmins("group",emptySet());assertTrue(writes.isEmpty())
+            controller.addAdmins("group",setOf("member-a"));assertTrue(entered.await(3,TimeUnit.SECONDS))
+            controller.addAdmins("group",setOf("member-a"));release.countDown();awaitReady(controller)
+            assertEquals(1,writes.size)
+            assertEquals("/groups/group/members/member-a/role",writes.single().second)
+            assertEquals("admin",writes.single().third!!.text("role"))
+        } finally {release.countDown();scope.cancel()}
+    }
+
+    @Test fun contactPaginationKeepsFirstPageTotalAndQueryStartsANewCount() = runBlocking {
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        val controller=BusinessController(scope,{_,path,_,query->when(path){
+            "/contacts"->when {
+                query["keyword"]=="other"->JsonParser.parseString("""{"items":[{"id":"matched"}],"total":1,"hasMore":false}""")
+                query["cursor"].isNullOrBlank()->JsonParser.parseString("""{"items":[{"id":"first"},{"id":"second"}],"total":120,"hasMore":true,"nextCursor":"second"}""")
+                query["cursor"]=="second"->JsonParser.parseString("""{"items":[{"id":"second"},{"id":"third"}],"total":0,"hasMore":true,"nextCursor":"third"}""")
+                else->JsonParser.parseString("""{"items":[],"total":0,"hasMore":false}""")
+            }
+            else->JsonArray()
+        }},{_,_,_,_->},{})
+        try {
+            controller.refresh();awaitReady(controller);assertEquals(120,controller.state.value.total)
+            controller.refresh(true);awaitReady(controller)
+            assertEquals(listOf("first","second","third"),controller.state.value.items.map{it.identifier()})
+            assertEquals(120,controller.state.value.total)
+            controller.refresh(true);awaitReady(controller);assertEquals(120,controller.state.value.total)
+            controller.query("other");awaitReady(controller)
+            assertEquals(1,controller.state.value.total);assertEquals("matched",controller.state.value.items.single().identifier())
+        } finally {scope.cancel()}
+    }
+
+    @Test fun legacyContactPagesWithoutTotalCountAccumulatedUniquePeople() = runBlocking {
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        val controller=BusinessController(scope,{_,path,_,query->when {
+            path!="/contacts"->JsonArray()
+            query["cursor"].isNullOrBlank()->JsonParser.parseString("""{"items":[{"id":"first"},{"id":"second"}],"hasMore":true,"nextCursor":"second"}""")
+            else->JsonParser.parseString("""{"items":[{"id":"second"},{"id":"third"}],"total":0,"hasMore":false}""")
+        }},{_,_,_,_->},{})
+        try {
+            controller.refresh();awaitReady(controller);assertEquals(2,controller.state.value.total)
+            controller.refresh(true);awaitReady(controller);assertEquals(3,controller.state.value.total)
+        } finally {scope.cancel()}
+    }
+
+    @Test fun privacyRequiresLoadedValuesAndFailedSaveKeepsBothServerSettings() = runBlocking {
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        val posts=java.util.Collections.synchronizedList(mutableListOf<JsonObject>())
+        var unavailable=true
+        val controller=BusinessController(scope,{method,path,body,_->when {
+            path!="/me/privacy-settings"->JsonNull.INSTANCE
+            method=="POST"->{posts+=body!!.deepCopy();throw APIException("synthetic save failed")}
+            unavailable->throw APIException("synthetic load failed")
+            else->obj("requireFriendApproval" to true,"requireGroupApproval" to false)
+        }},{_,_,_,_->},{})
+        try {
+            controller.open("privacy");awaitReady(controller)
+            controller.savePrivacy("requireGroupApproval",true);awaitReady(controller)
+            assertTrue(posts.isEmpty())
+            unavailable=false;controller.refresh();awaitReady(controller)
+            assertTrue(controller.state.value.detail.flag("requireFriendApproval"))
+            assertFalse(controller.state.value.detail.flag("requireGroupApproval",true))
+            controller.savePrivacy("requireGroupApproval",true);awaitReady(controller)
+            assertEquals(1,posts.size)
+            assertTrue(posts.single().flag("requireFriendApproval"))
+            assertTrue(posts.single().flag("requireGroupApproval"))
+            assertFalse(controller.state.value.detail.flag("requireGroupApproval",true))
+            assertNotNull(controller.state.value.error)
+        } finally {scope.cancel()}
+    }
+
+    @Test fun groupPrivacySwitchSavesBothBooleansAndReloadsConfirmedState() = runBlocking {
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        var stored=obj("requireFriendApproval" to true,"requireGroupApproval" to false)
+        val posts=java.util.Collections.synchronizedList(mutableListOf<JsonObject>())
+        val controller=BusinessController(scope,{method,path,body,_->
+            check(path=="/me/privacy-settings")
+            if(method=="POST") {stored=body!!.deepCopy();posts+=stored.deepCopy()}
+            stored.deepCopy()
+        },{_,_,_,_->},{})
+        try {
+            controller.open("privacy");awaitReady(controller)
+            assertTrue(controller.state.value.privacyEditable)
+            controller.savePrivacy("requireGroupApproval",true);awaitReady(controller)
+            assertTrue(controller.state.value.detail.flag("requireGroupApproval"))
+            assertTrue(controller.state.value.detail.flag("requireFriendApproval"))
+            controller.savePrivacy("requireGroupApproval",false);awaitReady(controller)
+            assertEquals(2,posts.size)
+            assertTrue(posts.last().flag("requireFriendApproval"))
+            assertFalse(posts.last().flag("requireGroupApproval",true))
+            assertFalse(controller.state.value.detail.flag("requireGroupApproval",true))
+        } finally {scope.cancel()}
+    }
+
     @Test fun sessionRoundTripKeepsRealExpiryAndNoPassword() {
         val now=1_700_000_000_000L
         val encoded=SessionPersistenceCodec.encode("https://api.invalid",tokens,user,now)

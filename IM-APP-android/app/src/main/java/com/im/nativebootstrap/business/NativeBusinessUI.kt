@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.BlendMode
@@ -28,6 +29,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -278,6 +281,7 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
         if(uploadNote.isNotBlank())Section(uploadNote)
         if(r.page=="security")Security(state,controller,Modifier.weight(1f))
         else if(r.page=="announcements")NativeAnnouncements(state,controller,model,Modifier.weight(1f))
+        else if(r.page=="admin-add")AdminMemberPicker(state,controller,Modifier.weight(1f))
         else NativePullRefresh(state.loading,{controller.refresh()},Modifier.weight(1f)) {Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             when(r.page) {
                 "mass-assistant","mass-select","mass-targets","mass-compose" -> MassPage(r.page,model,controller)
@@ -405,13 +409,6 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
                     state.items.filter{(r.page!="admins"||it.text("role") in listOf("owner","admin"))&&(state.keyword.isBlank()||it.displayName().contains(state.keyword,true))}.forEach{p->PersonRow(p,when(p.text("role")){"owner"->"群主";"admin"->"管理员";else->if(p.flag("isMuted"))"已禁言" else ""}){controller.open("member",p.identifier(),r.id,p)}}
                     ListFooter(state,controller,"暂无成员")
                 }
-                "admin-add" -> {
-                    var selected by remember(r){mutableStateOf(emptySet<String>())}
-                    SearchBox(state.keyword,auto=true){controller.query(it)}
-                    state.items.filter{it.text("role")=="member"&&(state.keyword.isBlank()||(it.displayName()+it.text("memberRemark")+it.text("nickname")).contains(state.keyword,true))}.forEach{member->CheckRow(member.displayName(),member.identifier() in selected){selected=if(it)selected+member.identifier() else selected-member.identifier()}}
-                    Action("确定（${selected.size}）",selected.isNotEmpty()&&!state.loading){controller.addAdmins(r.id,selected)}
-                    ListFooter(state,controller,"暂无可添加的成员")
-                }
                 "member" -> {
                     PersonRow(d,d.text("role")){}
                     RowItem("查看个人资料"){controller.open("user",r.id,r.context)}
@@ -460,7 +457,7 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
                     Action("保存",!state.loading){if(r.page=="edit-chat-id")controller.mutate("PUT","/me/public-id",obj("publicId" to value),true) else controller.saveProfile(if(key=="nickname")value else d.text("nickname"),if(key=="bio")value else d.text("bio"))}
                 }
                 "blacklist" -> {SearchBox(state.keyword){controller.query(it)};state.items.forEach{p->PersonRow(p,p.text("publicId"),trailing={TextButton(onClick={confirm="将该用户移出黑名单？" to {controller.mutate("DELETE","/contacts/${encoded(p.identifier())}/block")}}){Text("移出",color=Blue)}}){controller.open("user",p.identifier())}};ListFooter(state,controller,"暂无黑名单用户")}
-                "privacy" -> {ToggleRow("加我为好友需验证",d.flag("requireFriendApproval"),!state.loading){controller.savePrivacy("requireFriendApproval",it)};ToggleRow("邀请我加入群聊需验证",d.flag("requireGroupApproval",true),!state.loading){controller.savePrivacy("requireGroupApproval",it)};RowItem("黑名单"){controller.open("blacklist")}}
+                "privacy" -> {PrivacyToggleRow("加我为好友需验证",d.flag("requireFriendApproval",true),state.privacyEditable){controller.savePrivacy("requireFriendApproval",it)};PrivacyToggleRow("邀请我加入群聊需验证",d.flag("requireGroupApproval",true),state.privacyEditable){controller.savePrivacy("requireGroupApproval",it)};RowItem("黑名单"){controller.open("blacklist")}}
                 "favorites" -> Favorites(state,controller,model){text,action->confirm=text to action}
                 "security" -> Security(state,controller)
                 "reset-password" -> {
@@ -521,6 +518,39 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
     modal?.let{(title,save)->AlertDialog(onDismissRequest={modal=null},title={Text(title)},text={Input("",modalText,{modalText=it})},confirmButton={TextButton(enabled=modalText.isNotBlank(),onClick={modal=null;save(modalText)}){Text("保存")}},dismissButton={TextButton(onClick={modal=null}){Text("取消")}})}
 }
 
+@Composable internal fun AdminMemberPicker(state:BusinessState,controller:BusinessController,modifier:Modifier=Modifier) {
+    val s=scale()
+    var keyword by remember(state.route){mutableStateOf("")}
+    var selected by remember(state.route){mutableStateOf(emptySet<String>())}
+    val eligible=remember(state.items){adminCandidates(state.items)}
+    val filtered=remember(eligible,keyword){adminCandidates(eligible,keyword)}
+    val allowedIds=remember(eligible){eligible.map{it.identifier()}.toSet()}
+    LaunchedEffect(allowedIds){selected=selected.intersect(allowedIds)}
+    val canChoose=!state.loading
+    Column(modifier.fillMaxWidth().background(Color.White)) {
+        SearchBox(keyword,original=true,auto=true){keyword=it}
+        Text("可选成员 (${if(state.loading&&state.items.isEmpty())"…" else filtered.size})",Modifier.fillMaxWidth().padding(start=(32*s).dp,end=(32*s).dp,bottom=(12*s).dp),fontSize=(32*s).sp,fontWeight=FontWeight.Bold,color=Body)
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(bottom=(16*s).dp)) {
+            items(filtered,key={"admin-candidate:"+it.identifier()}) {member->
+                val id=member.identifier();val checked=id in selected
+                Row(Modifier.fillMaxWidth().toggleable(checked,enabled=canChoose,role=androidx.compose.ui.semantics.Role.Checkbox,onValueChange={value->selected=if(value)selected+id else selected-id}).padding(horizontal=(32*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy((20*s).dp)) {
+                    SharedAvatar(member.text("avatar").ifBlank{member.text("Avatar")},Modifier.size((88*s).dp).clip(CircleShape).semantics {contentDescription=adminMemberName(member)+"的头像"})
+                    Text(adminMemberName(member),Modifier.weight(1f),fontSize=(30*s).sp,color=Color(0xFF1D1D1D),maxLines=1,overflow=TextOverflow.Ellipsis)
+                    Box(Modifier.size((40*s).dp).clip(CircleShape).border((2*s).dp,if(checked)Blue else Color(0xFFC8CCD6),CircleShape).background(if(checked)Blue else Color.Transparent).semantics {contentDescription="选择"+adminMemberName(member)})
+                }
+            }
+            if(filtered.isEmpty())item(key="admin-picker-empty") {Text(if(state.loading)"加载中…" else if(eligible.isEmpty())"暂无可设为管理员的普通成员" else "无匹配成员",Modifier.fillMaxWidth().padding(horizontal=(40*s).dp,vertical=(120*s).dp).wrapContentWidth(),fontSize=(28*s).sp,color=Muted)}
+        }
+        // 确认入口独立于长名单，滚动和搜索时始终留在底部。
+        val canSubmit=selected.isNotEmpty()&&!state.loading
+        Box(Modifier.fillMaxWidth().padding(horizontal=(32*s).dp,vertical=(24*s).dp)) {
+            Box(Modifier.fillMaxWidth().height((96*s).dp).clip(RoundedCornerShape((16*s).dp)).background(Blue).alpha(if(canSubmit)1f else .45f).clickable(enabled=canSubmit){controller.addAdmins(state.route.id,selected.intersect(allowedIds))}.semantics {contentDescription="确认添加管理员"},contentAlignment=Alignment.Center) {
+                Text(if(state.loading&&selected.isNotEmpty())"保存中…" else if(selected.isEmpty())"确认" else "确认（${selected.size}）",fontSize=(32*s).sp,fontWeight=FontWeight.SemiBold,color=Color.White)
+            }
+        }
+    }
+}
+
 @Composable private fun CheckRow(title:String,checked:Boolean,change:(Boolean)->Unit) {Row(Modifier.fillMaxWidth().background(Color.White).clickable{change(!checked)}.padding(horizontal=18.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically){Text(title,Modifier.weight(1f),fontSize=16.sp,color=Body);Checkbox(checked,change,colors=CheckboxDefaults.colors(checkedColor=Blue))}}
 @Composable private fun NotificationSection(title:String) {
     val s=scale()
@@ -536,6 +566,19 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
         if(chevron)Text("›",fontSize=(32*s).sp,color=Color(0xFFC8CCD6))
     }
 }
+@Composable internal fun PrivacyToggleRow(title:String,checked:Boolean,enabled:Boolean=true,change:(Boolean)->Unit) {
+    val s=scale()
+    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(Color.White).padding(horizontal=(40*s).dp,vertical=(16*s).dp),verticalAlignment=Alignment.CenterVertically) {
+        Text(title,Modifier.weight(1f).padding(end=(24*s).dp),fontSize=(30*s).sp,lineHeight=(44*s).sp,color=Color(0xFF111111))
+        // 开关独立占位，长标题及系统字体放大只换行，不挤掉关闭态轨道。
+        Box(Modifier.size((56*s).dp,(36*s).dp),contentAlignment=Alignment.Center) {
+            Switch(checked=checked,onCheckedChange=change,enabled=enabled,
+                modifier=Modifier.requiredSize(52.dp,32.dp).scale(56*s/52f).semantics {contentDescription=title},
+                colors=SwitchDefaults.colors(checkedThumbColor=Color.White,checkedTrackColor=Color(0xFF153DCC),uncheckedThumbColor=Color.White,uncheckedTrackColor=Color(0xFFD2D7E0),uncheckedBorderColor=Color(0xFFD2D7E0)))
+        }
+    }
+}
+
 @Composable internal fun ToggleRow(title:String,checked:Boolean,enabled:Boolean=true,compact:Boolean=false,change:(Boolean)->Unit) {
     val s=scale()
     val offset by androidx.compose.animation.core.animateFloatAsState(if(checked)20f else 0f,label="switch")

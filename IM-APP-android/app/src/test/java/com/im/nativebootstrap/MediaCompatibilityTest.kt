@@ -177,6 +177,17 @@ class MediaCompatibilityTest {
         assertThrows(IllegalArgumentException::class.java) { ForwardSnapshots.freeze("""{"contentType":1501}""") }
         assertThrows(IllegalArgumentException::class.java) { ForwardSnapshots.freeze("""{"contentType":105,"fileElem":{"filePath":"/data/private"}}""") }
     }
+    @Test fun videoForwardRetainsContainerAndIdsFromLegacyContentThroughSdkGson() {
+        val raw="""{"clientMsgID":"source","ContentType":104,"VideoElem":{},"Content":{"VideoElem":{"VideoURL":"https://cdn.invalid/a.mov","VideoUUID":"video-id","VideoType":"mov","VideoSize":1024,"SnapshotURL":"https://cdn.invalid/c.jpg","SnapshotUUID":"cover-id","SnapshotWidth":360,"SnapshotHeight":640,"VideoPath":"/private/a.mov"}}}"""
+        val snapshot=ForwardSnapshots.freeze(raw)
+        val sdk=Gson().fromJson(ForwardSnapshots.withSnapshot(raw,snapshot),Message::class.java).videoElem
+        assertEquals("mov",sdk.videoType);assertEquals("video-id",sdk.videoUUID);assertEquals("cover-id",sdk.snapshotUUID)
+        assertEquals("https://cdn.invalid/a.mov",sdk.videoUrl)
+        assertEquals("",sdk.videoPath);assertEquals(360,sdk.snapshotWidth)
+    }
+    @Test fun videoWithoutUploadedCoverIsRejectedBeforeCreatingAForwardTask() {
+        assertThrows(IllegalArgumentException::class.java) { ForwardSnapshots.freeze("""{"contentType":104,"videoElem":{"videoUrl":"https://cdn.invalid/a.mp4"}}""") }
+    }
     @Test fun businessUserIdsRoundTripWithoutAcceptingArbitraryPeerNames() {
         assertEquals("12345678-1234-1234-1234-123456789abc",businessUserId("12345678123412341234123456789abc"))
         assertEquals("",businessUserId("../../user"))

@@ -15,9 +15,10 @@ final class NativeDiagnosticsController: NativeBusinessListController {
         setRows([status, [NativeBusinessRow(title: "复制诊断摘要", action: { [weak self] in
             guard let self = self else { return }
             let summary = "iOS native 0.3.0\nSDK 3.8.3-hotfix.15\n" + self.service.statusText + "\nconversations=\(self.service.conversations.count)\noutbox=\(self.service.outboxEntries.count)\nlastSendSDKCode=\(self.service.lastSendErrorCode.map(String.init) ?? "none")"
+            let startup = self.service.conversationStartupDiagnosticLines.joined(separator: "\n")
             Task { @MainActor [weak self] in
                 let media = await NativeImageCache.shared.diagnosticLines()
-                UIPasteboard.general.string = summary + "\n" + media.joined(separator: "\n")
+                UIPasteboard.general.string = summary + "\n" + startup + "\n" + media.joined(separator: "\n")
                 self?.showNativeNotice("已复制，不包含账号密码、Token 或聊天内容。")
             }
         }), NativeBusinessRow(title: "核对待发结果", action: { [weak self] in guard let self = self else { return }; self.perform { for id in Set(self.service.outboxEntries.map(\.conversationID)) { await self.service.reconcile(conversationID: id) }; self.scheduleReload() } }), NativeBusinessRow(title: "转发任务", action: { [weak self] in guard let self = self else { return }; self.push(NativeForwardTasksController(context: self.context, service: self.service)) })]])

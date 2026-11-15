@@ -18,6 +18,7 @@ data class ChatMessageMenu(val canManage:Boolean=false,val senderInGroup:Boolean
 data class ChatConversation(val target: ChatTarget, val title: String, val preview: String, val time: Long, val unread: Int = 0, val pinned: Boolean = false, val avatar: String = "", val latestSeq: Long = 0, val muted: Boolean = false, val pinnedMessage:PinnedChatMessage?=null,val latestMessage:ChatMessage?=null)
 data class ChatMessage(val id: String, val text: String, val mine: Boolean, val time: Long, val status: Int = 2, val seq: Long = 0, val serialized: String = "", val sender: String = "")
 data class HistoryPage(val messages: List<ChatMessage>, val end: Boolean, val lastMinSeq: Int = 0)
+data class ConversationSnapshotPage(val items: List<ChatConversation>, val end: Boolean)
 data class ChatSearchPage(val messages: List<ChatMessage>, val page: Int, val end: Boolean)
 data class ChatGlobalHit(val conversation:ChatConversation,val message:ChatMessage)
 data class ChatGlobalSearchPage(val hits:List<ChatGlobalHit>,val page:Int,val end:Boolean)
@@ -44,7 +45,12 @@ interface ChatGateway {
     fun watchPeer(userId:String?,done:(Result<Boolean?>)->Unit) { done(Result.success(null)) }
     fun start(userId: String, token: String, api: String, ws: String, directory: File, events: ChatEvents, done: (Result<Unit>) -> Unit)
     fun conversations(offset: Int, count: Int, done: (Result<List<ChatConversation>>) -> Unit)
+    fun initialConversations(count:Int,done:(Result<ConversationSnapshotPage>)->Unit) {
+        conversations(0,count) { result -> done(result.map { ConversationSnapshotPage(it,it.size<count) }) }
+    }
     fun history(target: ChatTarget, cursor: String?, count: Int, done: (Result<HistoryPage>) -> Unit)
+    fun localHistory(target:ChatTarget,page:Int,count:Int,done:(Result<HistoryPage>)->Unit) { done(Result.failure(UnsupportedOperationException("本地历史查询不可用"))) }
+    fun localHistory(target:ChatTarget,page:Int,count:Int,anchorTimeSeconds:Long,done:(Result<HistoryPage>)->Unit) = localHistory(target,page,count,done)
     fun createText(text: String, target: ChatTarget): ChatMessage
     fun send(target: ChatTarget, serialized: String, done: (Result<ChatMessage>) -> Unit)
     fun find(target: ChatTarget, id: String, done: (Result<ChatMessage?>) -> Unit)
@@ -90,8 +96,15 @@ object AccountStorage {
     fun key(environment: String, businessId: String, imId: String): String = MessageDigest.getInstance("SHA-256").digest((URI(environment.trim()).normalize().toASCIIString().trimEnd('/') + "\u0000" + businessId + "\u0000" + imId).toByteArray()).joinToString("") { "%02x".format(it) }
     fun directory(root: File, environment: String, businessId: String, imId: String) = File(root, key(environment,businessId,imId)).apply { check(mkdirs() || isDirectory) }
 }
-fun mergeConversations(old: List<ChatConversation>, incoming: List<ChatConversation>): List<ChatConversation> =
-    (old + incoming).groupBy { it.target.conversationId }.values.map { versions -> versions.reduce { chosen,next -> if(next.time>=chosen.time)next else chosen } }.sortedWith(compareByDescending<ChatConversation> { it.pinned }.thenByDescending { it.time }.thenBy { it.target.conversationId })
+fun mergeConversations(old: List<ChatConversation>, incoming: List<ChatConversation>, authoritative: Boolean = false): List<ChatConversation> {
+    // 同时间沿用已显示的次序；分页和增量通知不应把新见到的会话插到同时间行前面。
+    val rows = old.associateByTo(linkedMapOf()) { it.target.conversationId }
+    incoming.forEach { next ->
+        val previous = rows[next.target.conversationId]
+        if (authoritative || previous == null || next.time >= previous.time) rows[next.target.conversationId] = next
+    }
+    return rows.values.sortedWith(compareByDescending<ChatConversation> { it.pinned }.thenByDescending { it.time })
+}
 fun mergeMessages(old: List<ChatMessage>, incoming: List<ChatMessage>): List<ChatMessage> {
     val result = old.associateBy { it.id }.toMutableMap()
     incoming.filter { it.id.isNotBlank() }.forEach { next ->

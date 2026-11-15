@@ -3,6 +3,121 @@ import Foundation
 @testable import IMCore
 
 final class ChatReliabilityTests: XCTestCase {
+    func testStartupEventsCannotPublishPartialConversationSubset() {
+        var startup = ConversationStartupGate<ConversationOrderEntry>()
+        let early = ConversationOrderEntry(id: "B", pinned: false, timestamp: 10)
+        XCTAssertFalse(startup.receive([early])); XCTAssertFalse(startup.ready)
+        XCTAssertEqual(startup.buffered.count, 1)
+        // 本地查询失败不调用 complete，缓冲仍保留；后续本地重试不依赖联网同步完成。
+        XCTAssertFalse(startup.ready); XCTAssertEqual(startup.buffered, [early])
+        let full = ["A", "B", "C"].map { ConversationOrderEntry(id: $0, pinned: false, timestamp: 10) }
+        let completed = startup.complete(snapshot: full, changes: [], identity: { $0.id })
+        XCTAssertEqual(completed.map(\.id), ["A", "B", "C"])
+        XCTAssertTrue(startup.ready); XCTAssertTrue(startup.buffered.isEmpty)
+        XCTAssertTrue(startup.receive([ConversationOrderEntry(id: "D", pinned: false, timestamp: 20)]))
+    }
+
+    func testStartupSnapshotRetainsLatestBufferedFieldsAndNewMessage() {
+        var startup = ConversationStartupGate<ConversationOrderEntry>()
+        let old = ConversationOrderEntry(id: "A", pinned: false, timestamp: 10)
+        let fresh = ConversationOrderEntry(id: "A", pinned: true, timestamp: 20)
+        let new = ConversationOrderEntry(id: "B", pinned: false, timestamp: 30)
+        XCTAssertFalse(startup.receive([fresh, new]))
+        let result = startup.complete(snapshot: [old], changes: [], identity: { $0.id })
+        XCTAssertEqual(result, [fresh, new])
+        XCTAssertEqual(ConversationOrderPolicy.orderedIDs(result, previous: []), ["A", "B"])
+        var empty = ConversationStartupGate<ConversationOrderEntry>()
+        XCTAssertTrue(empty.complete(snapshot: [], changes: [], identity: { $0.id }).isEmpty)
+        XCTAssertTrue(empty.ready)
+    }
+
+    func testConversationPagePreservesLocalChangesWithoutSDKEvent() {
+        struct Row: Equatable { let id: String; let unread: Int; let pinned: Bool; let muted: Bool }
+        let before = Row(id: "A", unread: 5, pinned: false, muted: false)
+        let after = Row(id: "A", unread: 0, pinned: true, muted: true)
+        let added = Row(id: "B", unread: 0, pinned: false, muted: false)
+        let changes = ConversationRefreshPolicy.changesSince(start: [before], current: [after, added], identity: { $0.id })
+        let resolved = ConversationRefreshPolicy.resolve(page: [before], changes: changes, identity: { $0.id })
+        XCTAssertEqual(resolved, [after, added])
+        XCTAssertTrue(ConversationRefreshPolicy.changesSince(start: [before], current: [before], identity: { $0.id }).isEmpty)
+    }
+
+    func testConversationPageCannotTemporarilyReorderLatestUnpinnedEvent() {
+        let stale = [ConversationOrderEntry(id: "B", pinned: true, timestamp: 10), ConversationOrderEntry(id: "A", pinned: false, timestamp: 10)]
+        let event = ConversationOrderEntry(id: "B", pinned: false, timestamp: 10)
+        let resolved = ConversationRefreshPolicy.resolve(page: stale, changes: [event], identity: { $0.id })
+        XCTAssertEqual(resolved.first(where: { $0.id == "B" }), event)
+        XCTAssertEqual(ConversationOrderPolicy.orderedIDs(resolved, previous: ["A", "B"]), ["A", "B"])
+        // 完整列表替换时也必须保留读取期间新增的会话与最新事件字段。
+        let added = ConversationOrderEntry(id: "C", pinned: false, timestamp: 20)
+        let replacement = ConversationRefreshPolicy.resolve(page: stale, changes: [event, added], identity: { $0.id })
+        XCTAssertEqual(ConversationOrderPolicy.orderedIDs(replacement, previous: ["A", "B", "C"]), ["C", "A", "B"])
+        XCTAssertEqual(replacement.first(where: { $0.id == "B" })?.pinned, false)
+    }
+
+    func testConversationEqualTimesKeepExistingThenSDKOrder() {
+        let entries = ["new-B", "old-A", "new-A", "old-B"].map { ConversationOrderEntry(id: $0, pinned: false, timestamp: 10) }
+        XCTAssertEqual(ConversationOrderPolicy.orderedIDs(entries, previous: ["old-B", "old-A"]), ["old-B", "old-A", "new-B", "new-A"])
+        XCTAssertEqual(ConversationOrderPolicy.orderedIDs(entries, previous: []), entries.map(\.id))
+    }
+
+    func testConversationRealMessageAndPinStillMoveToTop() {
+        let entries = [ConversationOrderEntry(id: "old-A", pinned: false, timestamp: 10), ConversationOrderEntry(id: "new-message", pinned: false, timestamp: 20), ConversationOrderEntry(id: "pinned", pinned: true, timestamp: 1)]
+        XCTAssertEqual(ConversationOrderPolicy.orderedIDs(entries, previous: ["old-A", "new-message", "pinned"]), ["pinned", "new-message", "old-A"])
+        let unpinned = entries.map { ConversationOrderEntry(id: $0.id, pinned: false, timestamp: $0.timestamp) }
+        XCTAssertEqual(ConversationOrderPolicy.orderedIDs(unpinned, previous: ["pinned", "new-message", "old-A"]), ["new-message", "old-A", "pinned"])
+    }
+
+    func testHistoryPrefetchRequiresUpwardInteractionAndAllowsDecelerationBeforeTop() {
+        XCTAssertTrue(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 300, viewportHeight: 600, movingTowardHistory: true, interacting: true, canLoad: true))
+        XCTAssertFalse(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 300, viewportHeight: 600, movingTowardHistory: true, interacting: false, canLoad: true))
+        XCTAssertFalse(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 300, viewportHeight: 600, movingTowardHistory: false, interacting: true, canLoad: true))
+        XCTAssertFalse(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 300, viewportHeight: 600, movingTowardHistory: true, interacting: true, canLoad: false))
+        XCTAssertFalse(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 500, viewportHeight: 600, movingTowardHistory: true, interacting: true, canLoad: true))
+    }
+
+    func testUnreadBadgeCapsCountsAndHidesZero() {
+        XCTAssertNil(ConversationUnreadBadge.text(0)); XCTAssertNil(ConversationUnreadBadge.text(-1))
+        XCTAssertEqual(ConversationUnreadBadge.text(1), "1"); XCTAssertEqual(ConversationUnreadBadge.text(99), "99")
+        XCTAssertEqual(ConversationUnreadBadge.text(100), "99+")
+    }
+
+    func testContactTotalSurvivesZeroInLaterPagesAndCountsUniqueLoadedRows() {
+        XCTAssertEqual(ContactCountPolicy.total(reported: 120, previous: nil, loaded: 50, reset: true), 120)
+        XCTAssertEqual(ContactCountPolicy.total(reported: 0, previous: 120, loaded: 100, reset: false), 120)
+        XCTAssertEqual(ContactCountPolicy.total(reported: 0, previous: 120, loaded: 130, reset: false), 130)
+        XCTAssertEqual(ContactCountPolicy.total(reported: 0, previous: 120, loaded: 4, reset: true), 4)
+        XCTAssertEqual(ContactCountPolicy.total(reported: nil, previous: nil, loaded: 6, reset: true), 6)
+    }
+
+    func testSendPreflightRejectionDoesNotMisclassifyTransportOrRepeatedMessage() {
+        for code in [10002, 10004, 10100, 10101, 10200, 10205, 10302, 10400, 10401] {
+            XCTAssertTrue(SendFailurePolicy.rejectedBeforeSubmission(code))
+        }
+        for code in [10000, 10001, 10003, 10005, 10006, 10204, -1] {
+            XCTAssertFalse(SendFailurePolicy.rejectedBeforeSubmission(code))
+        }
+    }
+    func testBootstrapCredentialReopensOnlyMatchingAccountEnvironmentAndPlatform() throws {
+        let user = "01234567-89ab-cdef-0123-456789abcdef"
+        let config = try APIConfiguration(baseURL: "https://business.invalid")
+        func credential(userID: String = "0123456789abcdef0123456789abcdef", platform: Int = 1, api: String = "https://im.invalid", ws: String = "wss://im.invalid") -> IMBootstrapCredential {
+            let token = IMToken(userId: userID, token: "sdk-test-ticket", platform: platform, expireSec: 1, apiAddr: api, wsAddr: ws)
+            return IMBootstrapCredential(businessUserID: user, apiBaseURL: config.baseURL.absoluteString, token: token, savedAt: Date(timeIntervalSince1970: 1))
+        }
+        // 过期时间不授予在线发送权限，但不能阻挡相同身份的本机开库。
+        let saved = credential()
+        XCTAssertEqual(try saved.validated(businessUserID: user, configuration: config).userId, user.replacingOccurrences(of: "-", with: ""))
+        let restored = try JSONDecoder().decode(IMBootstrapCredential.self, from: JSONEncoder().encode(saved))
+        XCTAssertEqual(restored, saved)
+        XCTAssertThrowsError(try saved.validated(businessUserID: "11234567-89ab-cdef-0123-456789abcdef", configuration: config))
+        XCTAssertThrowsError(try saved.validated(businessUserID: user, configuration: APIConfiguration(baseURL: "https://other.invalid")))
+        XCTAssertThrowsError(try credential(userID: "1123456789abcdef0123456789abcdef").validated(businessUserID: user, configuration: config))
+        XCTAssertThrowsError(try credential(platform: 2).validated(businessUserID: user, configuration: config))
+        XCTAssertThrowsError(try credential(api: "http://unknown.invalid").validated(businessUserID: user, configuration: config))
+        XCTAssertThrowsError(try credential(ws: "wss://user:password@im.invalid").validated(businessUserID: user, configuration: config))
+    }
+
     func testForwardBatchReceiptRequiresExplicitQueueAndCompleteIdentifiers() {
         XCTAssertTrue(ForwardBatchReceiptPolicy.isAccepted(status: "queued", batchID: "batch-1", taskIDs: ["task-1", "task-2"]))
         for status in ["", "success", "completed"] { XCTAssertFalse(ForwardBatchReceiptPolicy.isAccepted(status: status, batchID: "batch-1", taskIDs: ["task-1"])) }

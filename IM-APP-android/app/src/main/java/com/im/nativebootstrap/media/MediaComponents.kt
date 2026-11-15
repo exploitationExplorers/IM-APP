@@ -41,11 +41,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
 
 @Composable
-fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:ContentScale=ContentScale.Fit,description:String="图片",fallbackRes:Int?=null,fallbackUrls:List<String> = emptyList(),localDraft:java.io.File?=null,onDimensions:(Int,Int)->Unit={_,_->},retryOnTap:Boolean=true) {
+fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:ContentScale=ContentScale.Fit,description:String="图片",fallbackRes:Int?=null,fallbackUrls:List<String> = emptyList(),localDraft:java.io.File?=null,onDimensions:(Int,Int)->Unit={_,_->},retryOnTap:Boolean=true,cacheUrls:List<String> = emptyList()) {
     val context=LocalContext.current
     val access by MediaLoader.access.collectAsState()
     val candidates=remember(url,fallbackUrls) { (listOf(url)+fallbackUrls).filter(String::isNotBlank).distinct() }
-    var visual by remember(candidates,edge,access) { mutableStateOf(candidates.firstNotNullOfOrNull { MediaLoader.peek(it,edge) }) }
+    val cachedCandidates=remember(candidates,cacheUrls) { (candidates+cacheUrls).filter(String::isNotBlank).distinct() }
+    var visual by remember(cachedCandidates,edge,access) { mutableStateOf(cachedCandidates.firstNotNullOfOrNull { MediaLoader.peek(it,edge) }) }
     var failure by remember(url,edge,access) { mutableStateOf(false) }
     var retry by remember(url) { mutableIntStateOf(0) }
     val dimensionsCallback by rememberUpdatedState(onDimensions)
@@ -54,7 +55,7 @@ fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:Co
         val height=value.bitmap?.height ?: value.animation?.intrinsicHeight ?: 0
         if(width>0&&height>0)dimensionsCallback(width,height)
     } }
-    LaunchedEffect(candidates,edge,retry,access,localDraft) {
+    LaunchedEffect(candidates,cachedCandidates,edge,retry,access,localDraft) {
         val started=System.nanoTime()
         failure=false
         if(visual==null) {
@@ -64,6 +65,12 @@ fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:Co
                 catch(_:Exception) { failure=true }
             }
             if(visual!=null)return@LaunchedEffect
+            for(candidate in cachedCandidates) {
+                try { visual=MediaLoader.cached(context,candidate,edge) }
+                catch(cancelled:CancellationException) { throw cancelled }
+                catch(_:Exception) { /* 坏缓存不阻塞其他同消息候选。 */ }
+                if(visual!=null)return@LaunchedEffect
+            }
             for(candidate in candidates) {
                 try {
                     visual=withTimeout(20_000) { MediaLoader.load(context,candidate,edge) }
@@ -101,7 +108,7 @@ fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:Co
 fun SharedAvatar(url:String,modifier:Modifier=Modifier,group:Boolean=false) {
     val transformed=remember(url) { MediaURLs.image(url,ImageVariant.AVATAR) }
     if(transformed.isEmpty()) Image(painterResource(if(group)R.drawable.uni_group_default else R.drawable.uni_avatar_default),"头像",modifier.clip(CircleShape),contentScale=ContentScale.Crop)
-    else RemoteMediaImage(transformed,modifier.clip(CircleShape),128,ContentScale.Crop,"头像",if(group)R.drawable.uni_group_default else R.drawable.uni_avatar_default)
+    else RemoteMediaImage(transformed,modifier.clip(CircleShape),128,ContentScale.Crop,"头像",if(group)R.drawable.uni_group_default else R.drawable.uni_avatar_default,cacheUrls=listOf(url))
 }
 
 @Composable
@@ -114,7 +121,7 @@ fun ImagePreview(url:String,onDismiss:()->Unit,onSave:()->Unit,previous:(()->Uni
             RemoteMediaImage(MediaURLs.image(url,ImageVariant.PREVIEW),Modifier.fillMaxSize().pointerInput(url) { detectTransformGestures { _,pan,change,_ ->
                 zoom=(zoom*change).coerceIn(1f,4f)
                 offsetX=if(zoom==1f)0f else offsetX+pan.x;offsetY=if(zoom==1f)0f else offsetY+pan.y
-            } }.graphicsLayer(scaleX=zoom,scaleY=zoom,translationX=offsetX,translationY=offsetY),960)
+            } }.graphicsLayer(scaleX=zoom,scaleY=zoom,translationX=offsetX,translationY=offsetY),960,cacheUrls=listOf(url))
             Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp),horizontalArrangement=Arrangement.SpaceBetween) {
                 TextButton(onClick=onDismiss) { Text("关闭",color=Color.White) }
                 TextButton(onClick=onSave) { Text("保存原图",color=Color.White) }

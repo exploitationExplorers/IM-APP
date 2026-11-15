@@ -1,0 +1,35 @@
+# 给 Mac 端 AI 的 iOS 验证指令
+
+把下面整段发给能操作 Mac 终端和本地文件的 AI，工作目录设为源码 ZIP 解压后的根目录。先安装并打开一次完整 Xcode；Apple ID 登录、系统密码、设备信任由机主完成。
+
+```text
+请在当前 Mac 上实际完成此 IM 原生 iOS 工程的本地验证。不要只给计划，持续执行到能够测试、编译、启动；遇到确实需要机主操作的系统弹窗时说明具体步骤，继续完成不依赖该操作的工作。
+
+先完整阅读 README-Mac.md、docs/iOS-Mac验证步骤.md、IM-APP-ios/README.md、IM-APP-ios/scripts/verify_on_mac.sh 和 HANDOFF-MANIFEST.json。以当前源码实际内容为准；先用主文档的 Python 命令校验 manifest 中每个文件的 SHA256，再修改任何源码。
+
+本任务授权：检查 Xcode/macOS/Swift/Ruby 环境；在确认现有环境后准备工程所需 Bundler/CocoaPods 依赖；运行工程静态检查、IMCore Swift 测试、Pods 安装和 Debug 模拟器编译；启动可用 iPhone 模拟器，安装并启动实际 App；修复阻止这些步骤的最小源码兼容问题并重测。不要擅自升级 OpenIM SDK/Core、切换架构或用替身 SDK 通过构建。安装系统工具需要权限时按本机授权机制处理，不能读取或保存系统密码。
+
+第一步记录 uname -m、sw_vers、xcode-select -p、xcodebuild -version、swift、Ruby、Bundler 版本。完整 Xcode 应为活动开发目录，不能用只有 CommandLineTools 的环境冒充。不要默认启用 Rosetta，依赖架构应和实际 Mac 匹配。
+
+按主文档执行 bash IM-APP-ios/scripts/verify_on_mac.sh。检查实际执行的测试数量、每阶段退出码和 verification/mac/result.json。Scheme 没有配置 XCTest target，不能把空 xcodebuild test 当测试通过；核心测试用 swift test --package-path IM-APP-ios/Packages/IMCore。失败时保留完整日志，先修第一个根错误，重跑受影响阶段，最终重跑脚本生成真实结果。
+
+模拟器编译通过后，选择已安装 runtime 的可用 iPhone Simulator UUID，按主文档 simctl 命令启动、安装 .native-cache/DerivedData/Build/Products/Debug-iphonesimulator/IMNative.app 并运行 com.im.nativebootstrap.staging。保存启动截图和崩溃/控制台证据。若 AI 无 GUI 能力，明确列出需机主完成的点击步骤，不能假报已点击或通过。
+
+真机阶段：请机主 USB 连接 iPhone、解锁信任、启用开发者模式，在 Xcode 中登录 Apple ID 并选择签名 Team。只能做本地 Debug Run；不发布、不上传 App Store/TestFlight、不修改后端。免费签名可用于当前可用的本地调试，签名有效期以 Xcode 实际提示为准。Bundle ID/Team 改动会影响沙盒身份，不能把新安装当覆盖升级通过。密码、验证码、私钥、证书均不写入聊天或日志。
+
+登录使用现有 HTTPS 后端的专用测试账号；由机主在设备输入，代码中不得写死真实账号或 Token。未经指定不要给真实联系人发测试消息。没有账号时先完成编译、启动和未登录页面验证，把依赖登录的项目标为未测。
+
+逐项执行主文档 P0/P1 验收矩阵并保留证据，重点：
+1. 本地库同步中仍能读已有记录；首次联网登录保存后，飞行模式强杀重开仍能看到允许显示的本地记录。已有原生包覆盖安装后再次验证，不卸载、不清库。
+2. 大量历史连续向上滚动自动分页，加载前后可见消息不跳动，不能显示要求反复点击的加载文字。
+3. 首屏读取完整本地会话快照，SDK 的少量会话事件先到时不能提前展示不完整列表；不等待联网同步完成。随后同步/已读通知到来时，同时间且置顶状态相同的已有行顺序保持；真实新消息和置顶变化仍正确排序，不被稳定排序吞掉。分别验证联网冷启动、飞行模式冷启动、243 条以上本地会话，并录制启动到同步完成的画面。
+4. 图片发送先有本地预览；视频选择/录制后占位、封面、播放按真实流程验证。断网能播放已保留本地文件，不把从未下载的媒体当缓存命中。
+5. 图片、视频分别转发给 1 人和 4 人，核实每个接收账号实际收到且可打开，提示不能仅凭 HTTP 提交成功。iOS 目前多人视频仍走服务端批量路径，Android 的直接分发优化不能视为 iOS 已实现。
+6. 未决发送先按消息 ID 核对，不盲重发。验证菜单、未读红圆/免打扰红点、联系人多页总数、两个隐私开关独立保存、居中短提示。
+7. 添加管理员页有头像、昵称和圆形选择框；长名单可滚动，搜索前后保留选择，底部确认始终可点击；仅对机主指定测试群执行权限变更。
+8. 账号切换与群历史可见边界不能串数据，已清理或无权限历史不能复活。
+
+边界：保留 SDK 私有数据库和所有未决发送；不直接 SQL 改表、不重置沙盒、不绕过鉴权/群边界、不把失败改成功、不删除 Release/Archive 阻断。不要部署后端或向他人发送消息。仅当前端运行不等于 APNs 推送通过，现有日志推送实现和正式发布、实时音视频、旧 uni-app 数据迁移需单独标未接通/未测。
+
+最终写 verification/mac/AI-验证结果.md：环境、manifest 结果、真实测试数、构建和模拟器/真机启动结果、每个 P0/P1 的通过/失败/未测、证据路径、首个错误、最小修改及重测、剩余阻塞。回传 verification/mac/、依赖锁文件和源码差异，先去掉凭据和私人消息正文。不得仅凭 Windows 静态检查或核心测试通过宣称 iOS 功能全部通过。
+```

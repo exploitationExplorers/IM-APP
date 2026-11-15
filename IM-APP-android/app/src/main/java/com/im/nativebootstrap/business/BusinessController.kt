@@ -14,7 +14,14 @@ data class BusinessState(
     val cursor: String = "", val hasMore: Boolean = false,
     val keyword: String = "", val sort: String = "recent",
     val groups:List<JsonObject> = emptyList(),val friendRequests:Int=0,val total:Int=0,
-) { val route get() = stack.last(); val subpage get() = stack.size > 1 }
+) {
+    val route get() = stack.last()
+    val subpage get() = stack.size > 1
+    val privacyEditable get() = route.page=="privacy"&&!loading&&error==null&&
+        listOf("requireFriendApproval","requireGroupApproval").all { key->
+            detail.get(key)?.let { it.isJsonPrimitive&&it.asJsonPrimitive.isBoolean }==true
+        }
+}
 
 fun obj(vararg fields: Pair<String, Any?>): JsonObject = JsonObject().apply {
     fields.forEach { (key, value) -> when(value) {
@@ -33,6 +40,15 @@ fun JsonObject.identifier():String = text("id").ifBlank { text("ID") }
 fun JsonObject.displayName():String = text("remark").ifBlank { text("displayName") }.ifBlank { text("groupNickname") }.ifBlank { text("nickname") }.ifBlank { text("name") }.ifBlank { text("Nickname") }.ifBlank { text("Name") }
 fun encoded(value:String):String = java.net.URLEncoder.encode(value,"UTF-8").replace("+","%20")
 fun canOpenBusinessChat(target:JsonObject,group:Boolean):Boolean = target.flag("canChat")||(group&&target.text("denyReason") in setOf("member_muted","group_muted")&&target.text("imGroupId").isNotBlank())
+
+internal fun adminMemberName(member:JsonObject):String = member.text("memberRemark").ifBlank {member.text("groupNickname")}.ifBlank {member.text("nickname")}.ifBlank {"成员"}
+internal fun adminCandidates(members:List<JsonObject>,keyword:String=""):List<JsonObject> {
+    val query=keyword.trim()
+    return members.filter {member->
+        member.identifier().isNotBlank()&&member.text("role").trim().equals("member",ignoreCase=true)&&
+            (query.isBlank()||listOf("memberRemark","groupNickname","nickname").any {member.text(it).contains(query,ignoreCase=true)})
+    }
+}
 
 /** UI 按业务页面组织，JSON 仅为接口边界；不会把响应原文呈现为调试界面。 */
 class BusinessController(
@@ -128,6 +144,9 @@ class BusinessController(
                 if(contact!=null)detail=detail.deepCopy().apply{contact.entrySet().forEach{add(it.key,it.value)};addProperty("_isFriend",true)}
             }
             if(route.page=="friend-tags")detail=s.detail
+            if(route.page=="privacy"&&!listOf("requireFriendApproval","requireGroupApproval").all { key->detail.get(key)?.let { it.isJsonPrimitive&&it.asJsonPrimitive.isBoolean }==true }) {
+                throw APIException("隐私设置未读取完整，请重试。")
+            }
             if(route.page=="tag-add-members") {
                 val existing=call("GET","/contact-tags/${encoded(route.id)}/members")
                 detail=detail.deepCopy().apply {add("existingMembers",JsonArray().apply{elements(existing).forEach{add(it.identifier())}})}
@@ -158,7 +177,10 @@ class BusinessController(
                 groups=groupsRequest.await().getOrElse{emptyList()}.filter{it.text("status")!="dismissed"}
                 pending=requestsRequest.await().getOrNull()?.let{if(it.isJsonObject)elements(it.asJsonObject.get("pending")).size else elements(it).count{item->item.text("status")=="pending"}}?:0
             }
-            mutable.value=mutable.value.copy(detail=detail,items=if(more)(s.items+items).distinctBy { it.identifier().ifBlank{it.toString()} } else items,cursor=endCursor,hasMore=hasMore,loading=false,error=null,groups=groups,friendRequests=pending,total=detail.text("total").toIntOrNull()?:items.size)
+            val mergedItems=if(more)(s.items+items).distinctBy { it.identifier().ifBlank{it.toString()} } else items
+            // 服务端只在首页统计总数，后续游标页的 total=0 不能覆盖已知总数。
+            val total=maxOf(if(more)s.total else 0,detail.text("total").toIntOrNull()?:0,mergedItems.size)
+            mutable.value=mutable.value.copy(detail=detail,items=mergedItems,cursor=endCursor,hasMore=hasMore,loading=false,error=null,groups=groups,friendRequests=pending,total=total)
             if(route.page=="group"&&route.context!="lookup"&&!detail.flag("_dissolved"))enrichGroup(route,generation,requestVersion)
         }
     }
@@ -293,6 +315,7 @@ class BusinessController(
         }
     }
     fun addAdmins(groupId:String,userIds:Set<String>) {
+        if(mutable.value.loading||groupId.isBlank()||userIds.isEmpty())return
         launch {
             var saved=0;val failed=mutableListOf<String>()
             for(id in userIds) {
@@ -307,7 +330,10 @@ class BusinessController(
         }
     }
     fun savePrivacy(key:String,value:Boolean) {
-        val current=mutable.value.detail
+        val state=mutable.value
+        if(!state.privacyEditable||key !in listOf("requireFriendApproval","requireGroupApproval"))return
+        val current=state.detail
+        if(current.flag(key)==value)return
         mutate("POST","/me/privacy-settings",obj("requireFriendApproval" to if(key=="requireFriendApproval")value else current.flag("requireFriendApproval"),"requireGroupApproval" to if(key=="requireGroupApproval")value else current.flag("requireGroupApproval",true)))
     }
     fun createGroup(name:String,members:Set<String>) {

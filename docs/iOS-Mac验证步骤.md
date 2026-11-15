@@ -1,33 +1,100 @@
-# iOS 原生版 Mac 与 iPhone 验证步骤
+# 在新 Mac 上验证 iOS 原生版
 
-适用版本：0.3.0 / build 4，最新配套 `IM-iOS-0.3.0-media-fixes-20261114-mac-check.zip`。Windows 已做工程静态与 Swift 语法检查，尚未执行 Xcode/Swift 编译，不将其记作 iOS 已通过。本包以现有 uni-app 的功能与 UI 为基准，仍有差异的页面见逐页清单；最新本地图片气泡、转发和更新入口见 `docs/历史图片性能优化方案-20261113/即时图片发送与原生更新-20261114.md`，前一轮修复保留于 `docs/原生功能与UI对齐-20261113/问题修复与验证-20261114.md`。
+更新日期：2026-11-15。工程：Swift / UIKit，iOS 15 起；版本 `0.3.0 (4)`，测试 Bundle ID `com.im.nativebootstrap.staging`。配套源码包：`IM-iOS-0.3.0-startup-20261115-mac.zip`。
 
-本次额外检查：键盘切换表情面板、收藏表情加载和发送；图片转发给单聊与群聊、接收方实际收到、只有真实完成才出现“转发成功”；竖横视频卡片等比展示、点击直接播放、本地与远端视频、退出停止。聊天页不应再出现本地转发任务或批次进度文案。当前 79 个 XCTest 方法尚未运行，必须执行下述 Mac 验证命令后再记录结果。
+这份文档可以交给 Mac 上有终端和文件访问能力的 AI 执行。最短流程：安装 Xcode → 解压源码 → 在 AI 中打开解压目录 → 发送同目录的《给Mac端AI的iOS验证指令.md》。AI 可以准备依赖、测试、编译和安装模拟器；Apple ID 登录、管理员密码、iPhone 信任和真机触摸操作由你完成。
 
-本轮优先复测：已有账号本地库同步后进入聊天，连续收发文本与图片；图片转发给自己、好友和群；长按菜单与多选；通讯录从快捷入口滑到最后一位联系人。发送结果不确定时显示“待核对”，这不是审核状态；先核对再重试，避免重复发送。记录诊断页的 SDK 数字错误码，不在公开日志中贴 token。
+## 1. 你先准备这几样
 
-## 1. 准备 Mac
+1. 在 Mac App Store 安装**完整 Xcode**，使用这台 Mac 的 macOS 能支持的稳定版本。最低需要支持 Swift 5.9 的 Xcode 15；iPhone 系统比 Xcode 支持的新时，升级到支持该 iOS 的 Xcode/macOS。
+2. 打开 Xcode 一次，按引导完成许可证、附加组件安装。在 Xcode → Settings → Components（部分版本叫 Platforms）安装一个 iOS Simulator runtime。
+3. 下载并传到 Mac：`IM-iOS-0.3.0-startup-20261115-mac.zip`。用 Finder 解压到例如 `~/Developer/IM-iOS-0.3.0-startup-20261115-mac`，不放 iCloud 自动同步目录。
+4. 在 Mac 的 Codex 或其他具备本地终端能力的 AI 中打开这个文件夹。网页聊天 AI 只能指导，不能直接替你运行终端。
+5. 首轮模拟器编译不需要付费 Apple Developer 会员，也不需要后端部署。后面测 iPhone 再准备 Apple ID、USB 线和专用内测账号。
 
-安装完整 Xcode 15 或以上版本，打开一次完成许可证与组件安装，在 Settings → Platforms / Components 安装一个 iOS Simulator。需要 Python 3、受维护的 Ruby（建议 3.3）和 Bundler；Gemfile 固定 CocoaPods 1.16.2。系统 Ruby 太旧时使用团队版本管理器或 Homebrew，按其安装提示设置 PATH。
+解压后正确的根目录应包含：
+
+```text
+README-Mac.md
+HANDOFF-MANIFEST.json
+IM-APP-ios/
+  IMNative.xcodeproj/
+  IMNative/
+  Packages/IMCore/
+  Podfile
+  Gemfile
+  scripts/verify_on_mac.sh
+contracts/
+docs/
+  iOS-Mac验证步骤.md
+  给Mac端AI的iOS验证指令.md
+```
+
+本包是当前工作区源码快照，不是 IPA，不包含账号、证书、Pods 和构建缓存；只拉远程旧分支可能缺少本轮修改。iOS 最新代码已做语法和工程静态检查，**尚未在 Xcode 编译或在 iPhone 运行**，第一次 Mac 编译可能发现需要继续修复的类型或链接错误。
+
+## 2. 检查环境和交接文件
+
+打开终端，输入 `cd ` 后把解压文件夹拖进终端，再回车。确认当前目录有 `IM-APP-ios`，执行：
 
 ```bash
-sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+pwd
+uname -m
+sw_vers
+xcode-select -p
 xcodebuild -version
-swift --version
+xcrun swift --version
 python3 --version
 ruby --version
 bundle --version
 ```
 
-只有 `xcode-select` 切换可能需要管理员权限；不要用 sudo 向系统 Ruby 强装依赖。模拟器编译不用生产证书或付费会员。
+如果开发目录指向 `CommandLineTools`，切换到实际安装的 Xcode；下面假设应用名为 Xcode.app：
 
-## 2. 解压本次交接包
+```bash
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+```
 
-把 ZIP 传给朋友，在 Mac 本地工作目录解压，终端进入能看到 `IM-APP-ios`、`contracts` 和 `README-Mac.md` 的目录。包内是本次工作区源码快照，包含新增业务与媒体页面、Keychain 登录恢复、固定 SDK 依赖声明、测试与逐页清单，不包含账号、证书、后端、Android APK 和 Windows 缓存。
+管理员密码由你在 Mac 系统提示中输入。许可证或首次组件未完成时，先打开 Xcode 完成引导，不让 AI读取或保存密码。
 
-本次改动尚未提交，单独拉远程旧分支可能缺少本次代码。解压后保留 `HANDOFF-MANIFEST.json`，便于核对文件与结果属于同一份源码。
+验证 ZIP 内各文件与 manifest 一致，须在**修改源码前**执行：
 
-## 3. 一键执行可自动化检查
+```bash
+python3 - <<'PY'
+import hashlib, json
+from pathlib import Path
+root = Path.cwd().resolve()
+manifest = json.loads((root / 'HANDOFF-MANIFEST.json').read_text())
+for item in manifest['files']:
+    path = (root / item['path']).resolve()
+    if root not in path.parents:
+        raise SystemExit('Manifest path outside source root')
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
+        raise SystemExit('Source mismatch: ' + item['path'])
+print('Source manifest verified:', len(manifest['files']), 'files')
+PY
+```
+
+若有不匹配，先区分传输损坏和你在 Mac 上已有的修改，不能为通过检查覆盖已有开发内容。AI 修复后保留修改记录，原 manifest 仅代表收到的源码快照，不重新伪装为原始快照。
+
+## 3. 安装 Ruby / Bundler 依赖
+
+需要 Python 3、受维护的 Ruby 和 Bundler，建议 Ruby 3.3。Gemfile 已固定 CocoaPods `1.16.2`。先检查已有版本，不重复安装，不使用 `sudo gem install` 修改系统 Ruby。
+
+如果已用 Homebrew 管理环境但没有合适的 Ruby：
+
+```bash
+brew install ruby@3.3
+export PATH="$(brew --prefix ruby@3.3)/bin:$PATH"
+ruby --version
+gem install bundler --no-document
+bundle --version
+```
+
+上面的 PATH 只对当前终端生效；换终端需重新设置，确认正常后可由 AI 按当前 shell 配置持久 PATH。如果没有 Homebrew，由你按 Homebrew 官方安装说明安装，或让 AI 使用现有 Ruby 版本管理器。涉及系统密码时你自己操作，不把密码发给 AI。Python 3 缺失时同样使用已有工具安装，避免同时维护多套环境。
+
+Apple Silicon 优先使用原生 arm64 工具链；不要一开始就开 Rosetta 或全局排除 arm64，只有实际 SDK 架构诊断证明必要时才做局部调整。
+
+## 4. 一键测试与编译
 
 在解压根目录执行：
 
@@ -35,76 +102,149 @@ bundle --version
 bash IM-APP-ios/scripts/verify_on_mac.sh
 ```
 
-脚本依次执行环境记录、8 项工程静态检查、全部 Swift 核心测试、Bundler、固定 CocoaPods 依赖安装、无分发签名的模拟器 Debug 编译。任何一步失败立即停在该步，`verification/mac/` 保留日志与 `result.json`。日志显示的实际测试数量与失败数是验收依据，不能用源码中有多少个测试方法冒充运行通过。
+脚本依次执行：环境记录 → 工程静态检查 → `IMCore` 全部 Swift 测试 → Bundler → CocoaPods → 不带分发签名的模拟器 Debug 构建。失败即停，不继续假报成功。日志位于 `verification/mac/`，总结果为 `verification/mac/result.json`；保留失败日志，修复后再运行。
 
-首次 `pod install` 后保留 Podfile.lock；OpenIMSDK / OpenIMSDKCore 应均为 `3.8.3-hotfix.15`，不要自行改成 latest。CI 工作流存在不代表已经在远端执行。
+固定依赖：
 
-脚本不登录、不发送消息、不发布、不上架。核心测试与模拟器编译通过后，还须执行以下 UI 和真机检查。
+- OpenIMSDK：`3.8.3-hotfix.15`。
+- OpenIMSDKCore：`3.8.3-hotfix.15`。
+- CocoaPods：`1.16.2`。
 
-## 4. 手动编译和启动（需要排查时）
+首次安装成功后保留 `IM-APP-ios/Podfile.lock`、`Gemfile.lock`。不要为让编译变绿自动升级 SDK 或修改为 latest。
 
-逐条成功后再继续：
+成功标准：实际核心测试 0 失败，模拟器日志出现 `BUILD SUCCEEDED`，`result.json` 的 `status` 为 `passed`。当前有 90 个 XCTest 方法的源码计数，**实际运行数量以 Mac 测试日志为准**。这一步不包含 UI 自动化、真机 SDK 同步、真实收发或 APNs。
+
+需要单独定位失败时，按阶段执行：
 
 ```bash
+# 在解压根目录
 set -o pipefail
 mkdir -p verification/mac
 python3 IM-APP-ios/scripts/verify_project.py 2>&1 | tee verification/mac/project-check.log
 swift test --package-path IM-APP-ios/Packages/IMCore 2>&1 | tee verification/mac/core-tests.log
-cd IM-APP-ios
-bundle config set --local path vendor/bundle
-bundle install 2>&1 | tee ../verification/mac/bundle-install.log
-bundle exec pod install --repo-update 2>&1 | tee ../verification/mac/pod-install.log
-xcodebuild -workspace IMNative.xcworkspace -scheme IMNative \
-  -sdk iphonesimulator -configuration Debug \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath ../.native-cache/DerivedData CODE_SIGNING_ALLOWED=NO build \
-  2>&1 | tee ../verification/mac/simulator-build.log
-open IMNative.xcworkspace
 ```
 
-必须打开 `.xcworkspace`，选择 `IMNative` Scheme 与已安装的 iPhone 模拟器，Command-R。空 TestAction 不替代单独的 `swift test`。当前 Release/Archive 有明确阻断，本阶段使用 Debug；不要为了产生 IPA 删除阻断脚本。
+上一步成功后，再安装依赖和构建：
 
-普通登录默认对接现有 HTTPS 后端，使用专用内测账号；原版隐藏的短信登录入口继续隐藏，注册/找回密码仍走验证码。Logo 长按中的本地样例不联网、不送达，只验证隔离的演示流程。
+```bash
+cd IM-APP-ios
+bundle config set --local path vendor/bundle
+bundle install
+bundle exec pod install --repo-update
+xcodebuild -workspace IMNative.xcworkspace -scheme IMNative   -sdk iphonesimulator -configuration Debug   -destination 'generic/platform=iOS Simulator'   -derivedDataPath ../.native-cache/DerivedData   CODE_SIGNING_ALLOWED=NO build
+cd ..
+```
 
-## 5. 连接朋友的 iPhone
+这份精简手动命令用于排查；需要完整日志时优先运行一键脚本。Scheme 当前没有 App XCTest target，不能把 `xcodebuild test` 的空 TestAction 当核心测试执行；核心测试用上面的 `swift test`。
 
-iPhone 使用 iOS 15 或以上，通过 USB 连接，允许“信任此电脑”，按系统要求打开开发者模式。Xcode Settings → Accounts 添加测试用 Apple ID。Target `IMNative` → Signing & Capabilities 勾选 Automatically manage signing，选择自己的 Team、该 iPhone，点击 Run。
+## 5. 在模拟器里打开 App
 
-如果 staging Bundle ID 无法注册，仅在朋友的本地副本中改为唯一测试 ID 并记录。变更 ID 会创建另一套沙盒，不能据此验收旧 App 覆盖升级。免费个人 Team 的开发测试受设备、能力与签名有效期限制；TestFlight/APNs 需按团队开发者计划配置。先用 USB Debug，无需先导出 IPA。
+最方便的方法：
 
-用两个专用账号分别登录原生端和旧客户端，避免用客户正在使用的同平台账号触发现有互踢。真实测试会写现有服务；本轮不需要部署后端。
+```bash
+open IM-APP-ios/IMNative.xcworkspace
+```
 
-## 6. 按旧版逐页验收
+在 Xcode 顶部选择 Scheme `IMNative` 和已安装的 iPhone Simulator，按 `Command-R`。**打开 .xcworkspace，不是单独打开 .xcodeproj**。模拟器阶段不选真机，不填写生产证书。
 
-| 范围 | 操作与检查 |
-| --- | --- |
-| UI 与返回 | 同机对照旧版通讯录/聊天/我的、各子页面；核对图标、文字、间距、菜单、返回位置、键盘和空/错状态；不能只看首页 |
-| 认证 | 密码登录、注册/找回、协议与区号、完善资料、退出；杀进程后 Keychain 恢复；失效凭据与离线错误有明确提示，不删除消息库 |
-| 图片与头像 | 历史签名图片、稳定代理地址、群头像、个人头像；列表滚动、图片预览/缩放/保存；图片权限拒绝与网络失败可重试 |
-| 真实收发 | 原生与旧端双向文本、图片、视频、语音、文件、名片、表情；接收端不能依赖发送者本地路径；已提交不冒充对端已读 |
-| 历史与群规则 | 多页历史无重复/跳漏；水位限制、成员清除记录、撤回/删除/引用/转发/收藏、已读与置顶；不可重新露出无权查看的旧消息 |
-| 通讯录与群 | 搜索/分页/排序、申请与标签、扫码、建群/邀请、管理权限/公告/禁言/入群审核；分别覆盖群主/管理员/普通成员 |
-| 设置 | 回车发送实际生效；隐私设置保存失败恢复；清图片缓存保留聊天/待发；清历史有明确范围与确认；群发失败不自动重复发送 |
-| 断网恢复 | 会话中飞行模式→恢复；消息/历史保留，错误不冒充空历史；重连后继续同步与收发 |
-| 待发中断 | 发送时断网/强杀，再开同账号；先核对 clientMsgID，不盲重发，待核对状态保留 |
-| 锁屏/后台 | 锁屏期间另一账号发消息，解锁回前台；恢复同步、开库正常，不自动清库 |
-| 重启首次解锁 | 重启 iPhone，首次解锁后打开，检查文件保护和同账号本地状态恢复 |
-| 账号切换 | A→退出→B→A；无串号，A 的本地历史和未决发送没有被退出删除 |
-| 长历史性能 | 大量真实历史、多媒体列表滚动、快速进出页面；用 Instruments Time Profiler/Allocations 和 Xcode Memory 记录卡顿、CPU、峰值内存及崩溃，不凭主观感受宣称达标 |
+AI 也可用命令启动。先列设备，选一个 available 的 iPhone UUID：
 
-不要用卸载重装代替强杀恢复，卸载会删沙盒。现有 `LoggingPushService` 只记日志，登记 Token 不等于 APNs 真下发；杀进程推送、实时音视频、旧版覆盖升级、定制协议和性能规模分别验收，不能用前台收到消息代替后台推送测试。
+```bash
+xcrun simctl list devices available
+```
 
-## 7. 回传证据
+把下面 UUID 替换为实际设备值；如果设备已经 Booted，跳过 boot：
 
-提供 Mac 芯片、macOS/Xcode/Ruby、iPhone/模拟器型号与 iOS 版本；`verification/mac/` 日志、Podfile.lock/Gemfile.lock；逐项通过/失败/未测；失败操作顺序、时间、错误码、截图。编译错误提供完整上下文，崩溃从 Xcode Devices and Simulators → View Device Logs 导出。
+```bash
+task_sim_udid="替换为实际模拟器UUID"
+xcrun simctl boot "$task_sim_udid"
+xcrun simctl bootstatus "$task_sim_udid" -b
+open -a Simulator
+xcrun simctl install "$task_sim_udid" .native-cache/DerivedData/Build/Products/Debug-iphonesimulator/IMNative.app
+xcrun simctl launch "$task_sim_udid" com.im.nativebootstrap.staging
+xcrun simctl io "$task_sim_udid" screenshot verification/mac/simulator-launch.png
+```
 
-去掉密码、Token、手机号和私人聊天正文；不发送 Apple ID 密码、签名私钥。模拟器构建成功只证明能构建，iOS 本地库与同步是否改善必须以 iPhone 的真实 SDK、故障恢复和数据规模结果判断。
+如果 generic build 产物不能安装，先检查设备 runtime/架构，再用 `-destination "platform=iOS Simulator,id=$task_sim_udid"` 对选定模拟器重新构建，沿用相同 DerivedData；不能通过移除聊天 SDK 来回避链接问题。
 
+先检查启动、登录表单、协议、返回、键盘、表情面板、列表布局及短提示。Logo 长按里的本地样例不联网、不送达，不能拿样例聊天成功证明真实 SDK 已通。
 
-## 2026-11-14 追加验收：菜单与录像
+## 6. USB 安装到你的 iPhone
 
-- 逐项点击图片/视频长按菜单：撤回、转发、引用、保存、加入表情、收藏、置顶、删除及多选。确认真实接口结果，撤回超时等服务端拒绝仍应显示失败。
-- 成功和错误短提示应在窗口中间约 3 秒后消失，无顶部固定操作提示；删除、收藏、撤回的确认框仍需确认。
-- 相册/录像确认后，应先出现本地准备占位；封面生成和上传在后台。断网时不可提前显示发送成功，结果不明不可盲目重发。
-- 本机视频复制完成后点击占位应播放本地文件；发送 ACK 后、退出重进及应用重启后仍检查本机副本，不能额外下载同一视频。
-- 同时覆盖大视频、无封面/无时长、上传失败、账号切换、后台恢复、照片/iCloud 权限。首帧、封面就绪、上传 ACK 分别计时；不把约 1 秒的目标当已测结果。
+1. iPhone 用 USB 连 Mac，在手机上选择“信任”，按系统要求输入手机密码。iOS 16 及以上如要求，打开 设置 → 隐私与安全性 → 开发者模式并重启确认。
+2. Xcode → Settings → Accounts 添加你的测试 Apple ID；账号登录和双重验证由你完成。
+3. 打开 workspace，Target `IMNative` → Signing & Capabilities → Automatically manage signing，选择自己的 Team；顶部运行目标改为你的 iPhone。
+4. 用 **Debug / Run**，按 `Command-R`。首次构建可能需要 Xcode 下载对应 Device Support。
+5. 如果手机提示未受信任的开发者，按系统提示到“VPN 与设备管理”等相应入口信任。记录 Xcode/macOS/iPhone/iOS 版本和本次 Bundle ID。
+
+若现有测试 Bundle ID 无法由你的 Team 注册，可在本地测试副本用唯一 ID（例如 `com.yourteam.imnative.dev`）运行，但要记录变更。更换 Bundle ID 会新建沙盒，**不能拿它证明覆盖升级保留本地库**。静态检查固定了 staging 身份；因本地签名更换 ID 产生的检查差异要如实记录，不能删检查冒充原身份通过。
+
+免费个人 Team 可用于受限制的 USB 开发测试，签名/能力/有效期受 Apple 限制；个人免费签名通常需约 7 天重新运行安装。App 测试不等于可以发给所有人安装。TestFlight/正式分发后续使用开发者团队配置；本轮不需要导出 IPA。
+
+工程目前有 Release/Archive 阻断，验证期间保留它，不能为得到安装包删掉阻断。新版原生 iOS 使用 Xcode 构建，与 uni-app 云打包无关。
+
+## 7. 真机优先验收：本地库、历史与媒体
+
+普通登录默认对接现有 HTTPS 后端，不需要启动本地后端。使用专用内测账号和测试群；测试消息、隐私设置会写现有服务，不动客户日常账号。同账号同平台双开可能互踢，互通测试用 A/B 两个专用账号。账号在设备上输入，密码和 Token 不放指令或日志。
+
+按下面顺序测，每项标记通过、失败或未测，并保存证据：
+
+| 编号 | 操作 | 预期与记录 |
+| --- | --- | --- |
+| P0-01 | 联网首次登录，等待同步；打开已有长历史会话 | 真实 SDK 成功开库，记录同步完成/失败时间和数字错误码，无自动清库 |
+| P0-02 | 连续上滑 5～10 页，快速往返最新与旧记录 | 自动预读，无“点击加载更早”按钮、重复和漏消息，追加旧页不把阅读位置拉走 |
+| P0-03 | 先实际浏览文字和缓存图片，再强杀 App，开启飞行模式重启 | 同账号已有本地资料/会话/文字/缓存图片可读；记录首屏耗时；从未下载的媒体不要求离线可见 |
+| P0-04 | 恢复网络，另一专用账号发送新消息，再进入前台 | 正常增量同步，无重复收发、历史清空、长时间卡住；失败保留数据和诊断 |
+| P0-05 | 发送文本、图片、横竖视频，点本机视频 | 图片/视频先出现本地气泡和 loading，封面比例正确；本机副本可播放；发送状态依据真实 ACK，不冒充已读 |
+| P0-06 | A 发图片/视频给 B，B 实际查看和播放 | 接收端拿到远程资源，不依赖 A 的本地路径；记录上传、封面、播放各耗时 |
+| P0-07 | 分别转图片和视频给 1 人、4 人、测试群 | 接收方逐一检查收到和播放，失败/未知不假报成功，不整批盲重发。iOS 多人视频仍走原服务端批量路径，不能套用 Android 0.3.7 的通过结论 |
+| P0-08 | 发送中断网/强杀，再开 | 未决结果先按 ID 核对，不自动重复发送；记录待核对与 SDK 错误码 |
+| P1-01 | 会话有 1、52、100+ 未读，另开免打扰会话 | 普通小红圆、99+；免打扰小点，聊天 Tab 总未读；已读后更新 |
+| P1-02 | 通讯录滚动多页、搜索、返回 | 联系人标题不变为 0，数量与接口/已加载数据一致，快捷入口和群卡同列表滚动 |
+| P1-03 | 两个隐私开关分别关/开，退出再进；模拟保存失败 | 两开关始终可见，修改一项不改变另一项，保存后回读正确、失败保值 |
+| P1-04 | 图片/视频/文字长按及多选菜单逐项操作 | 撤回、引用、转发、收藏、置顶、删除、保存等按权限执行；短提示居中自动消失 |
+| P1-05 | A→退出→B→A，锁屏后台再恢复，重启手机首次解锁 | 不串号，A 本地历史和未决状态保留；前后台同步正常 |
+| P1-06 | 管理员清理群历史/成员消息，再刷新和离线重启 | 保留业务可见边界，迟到历史不能复活已隐藏内容；未知边界不放开历史 |
+| P1-07 | 冷启动会话页，再同步、分页和更新已读状态 | 同时间、同置顶状态的已有会话不换序；真实新消息及置顶仍正确移动，未变化内容不整表重刷 |
+| P1-08 | 添加管理员页长名单、搜索、勾选和返回 | 头像及圆形选框完整，搜索保留选择，底部确认始终可用；只操作指定测试群 |
+
+不要用“卸载重装”代替“强杀重开”。同一原生 Bundle ID、Team、设备上覆盖 Run 后再测断网，才是原生沙盒保留测试；当前 staging 包不能覆盖旧正式 uni-app，也未证明旧版 uni-app 数据迁移成功。
+
+本机票据需要先联网成功登录保存一次。旧快照未保存 SDK 票据时，不能直接跳过首次联网要求。图片已下载、有缓存字节、从未下载、缓存被清理/损坏应分开记录。
+
+## 8. 性能与当前未验收范围
+
+核心问题在 iOS 本地库同步，至少用一台真实 iPhone 和真实长期测试账号验证，模拟器跑通不等于真机通过。记录手机型号、系统、消息数量级、网络条件、进入会话到文字/图片出现的时间、同步时长、快速滚动卡顿和内存。
+
+先用 Debug 的 Xcode Memory Gauge 与运行日志定位问题；需要 Instruments Time Profiler / Allocations 时，以本地 Debug 构建 Attach 到运行进程。当前 Scheme 的 Profile 指向 Release，会触发现有阻断，不能为测性能偷偷删除阻断。不要把 Debug 的单次时间当发布版本性能指标。
+
+现有后端 APNs 服务是日志实现；登记推送 Token 不等于后台真正下发。杀进程推送、实时音视频、正式签名分发、旧版迁移分别列未测/未接通，不能用前台收到消息替代推送验证。
+
+## 9. 失败时交给 AI 怎么处理
+
+- 环境/许可证问题：先修环境，保留原源码，不无依据修改 SDK 版本。
+- Swift 编译/ObjC selector/链接错误：保存首个根错误上下文，做最小兼容修复，重跑受影响测试和构建；不要用 SDK 替身、注释业务或跳过测试让日志变绿。
+- Pods 网络失败：区分 DNS、代理、证书、版本不存在与架构错误，保留完整日志，不反复删整个项目或清消息库。
+- 真机签名/信任：让你完成账号或系统弹窗；不读取 Keychain 私钥、不上传证书。
+- 本地库/消息问题：保留沙盒和错误码，先查账号/环境/SDK 生命周期/回调代次，不卸载、不删库、不直接改 SDK 私有表、不盲重发未知消息。
+- AI 没有 GUI/设备控制能力：继续做测试和编译，把具体手动页面、操作与预期列给你，不把未执行动作标通过。
+
+## 10. 回传什么
+
+将 `verification/mac/`、依赖锁文件、AI 修改的文件/差异及下表结果交回；日志先去掉密码、Token、手机号和私人聊天正文。不要回传签名证书、私钥、Apple ID 密码或整个带账号数据的沙盒。
+
+```text
+Mac 芯片 / macOS / Xcode：
+iPhone 型号 / iOS / Bundle ID / Team 是否一致：
+源码包名 / manifest 核对结果：
+核心测试：实际执行 __ 项，通过 __，失败 __。
+模拟器构建 / 启动：通过 / 失败 / 未测。
+iPhone Debug 安装 / 首次登录：通过 / 失败 / 未测。
+P0-01 ～ P0-08：逐项结果、证据路径。
+P1-01 ～ P1-08：逐项结果、证据路径。
+主要失败：复现顺序、时间、SDK 数字码、首个错误上下文。
+AI 修改：文件、原因、验证结果。
+仍未测 / 阻塞项：
+```
+
+最后由 AI 在 `verification/mac/AI-验证结果.md` 汇总实际结果。`result.json=passed` 只代表脚本内核心测试与模拟器编译，不代表上表真机功能全部通过。

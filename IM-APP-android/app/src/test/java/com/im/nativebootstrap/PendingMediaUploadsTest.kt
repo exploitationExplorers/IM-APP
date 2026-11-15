@@ -8,6 +8,9 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import com.google.gson.JsonParser
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonToken
+import java.io.StringReader
 
 class PendingMediaUploadsTest {
     @get:Rule val temporary=TemporaryFolder()
@@ -65,6 +68,30 @@ class PendingMediaUploadsTest {
         assertEquals(9L,playable.duration);assertEquals(360,playable.width)
         assertArrayEquals(byteArrayOf(8,6,4,2),playable.file.readBytes())
         assertThrows(IllegalStateException::class.java) { SentLocalVideos(File(root,"sent-videos.json"),"other-owner") }
+    }
+    @Test fun videoPlaceholderIsOneStrictJsonDocumentAndParsesAsVideoBeforeAndAfterMetadata() {
+        val root=temporary.newFolder()
+        val source=File(root,"clip.mp4").apply { writeBytes(byteArrayOf(1,2,3)) }
+        val queue=PendingMediaUploads(File(root,"media-uploads.json"),"owner")
+        val pending=queue.put(target,LocalMedia(source,"clip.mp4","video/mp4",MediaKind.VIDEO))
+        listOf(pending,pending.copy(width=360,height=640,duration=12)).forEach { item ->
+            val placeholder=item.placeholder()
+            JsonReader(StringReader(placeholder.serialized)).use { reader ->
+                reader.isLenient=false
+                reader.skipValue()
+                // 多余的右括号或第二个 JSON 值必须失败，不能只读取第一个对象就通过。
+                assertEquals(JsonToken.END_DOCUMENT,reader.peek())
+            }
+            val raw=JsonParser.parseString(placeholder.serialized).asJsonObject
+            assertEquals(104,raw["contentType"].asInt)
+            assertEquals(item.id,raw["clientMsgID"].asString)
+            val parsed=MessageContents.parse(placeholder.serialized,placeholder.text)
+            assertEquals(104,parsed.type)
+            assertEquals(item.width,parsed.width);assertEquals(item.height,parsed.height)
+            assertEquals(item.duration,parsed.duration)
+            assertEquals("",parsed.url);assertEquals("",parsed.thumbnail)
+            assertEquals(1,placeholder.status);assertEquals(0L,placeholder.seq)
+        }
     }
     @Test fun oldImageQueueWithoutVideoFieldsRestoresAndVideoSizeLimitRejectsBeforePlaceholder() {
         val root=temporary.newFolder();val file=File(root,"media-uploads.json")

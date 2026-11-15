@@ -29,6 +29,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.im.nativebootstrap.core.SecureSessionStore
 import com.im.nativebootstrap.core.SessionPersistenceCodec
+import com.im.nativebootstrap.core.StoredIMSession
 import com.im.nativebootstrap.data.TokenPair
 
 data class SampleMessage(val id: String, val text: String, val mine: Boolean)
@@ -73,6 +74,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
     private var imDiagnosticWS=""
     fun diagnosticEndpoints()=DiagnosticEndpoints(businessBaseURL,imDiagnosticAPI,imDiagnosticWS,com.im.nativebootstrap.media.MediaURLs.remote(mutableState.value.profile?.avatar.orEmpty()))
     private val secureStore=SecureSessionStore(application)
+    private val imSecureStore=SecureSessionStore(application,"im_session")
     private val credentialIO=java.util.concurrent.Executors.newSingleThreadExecutor { task->Thread(task,"native-credentials").apply{isDaemon=true} }
     private val refreshLock=Any()
     val business = BusinessController(viewModelScope, { method, path, data, query -> businessRequest(method,path,data,query) },
@@ -85,6 +87,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         val tag=operation
         val tokens=businessSession.currentTokens()?:return
         val profile=businessSession.currentProfile()?:return
+        if(tokens.expiresIn<=0)return // 离线恢复不延长旧 Token 的服务端有效期。
         val value=SessionPersistenceCodec.encode(businessBaseURL,tokens,profile)
         credentialIO.execute { if(tag==operation)try {secureStore.save(value)} catch(_:Exception){main.post{if(tag==operation)mutableState.value=mutableState.value.copy(notice="登录状态未能安全保存，下次启动需要重新登录。")}} }
     }
@@ -95,18 +98,36 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 val cached=withContext(Dispatchers.IO){secureStore.load()} ?: run {if(tag==operation)mutableState.value=BootstrapState();return@launch}
                 val stored=SessionPersistenceCodec.decode(cached)
-                val base=stored.baseURL;val api=NativeAPI(base)
+                val base=stored.baseURL
+                if(tag!=operation)return@launch
+                businessBaseURL=base
+                businessSession.restore(stored.tokens,stored.profile)
+                com.im.nativebootstrap.media.MediaLoader.setScope(base,stored.profile.businessUserId)
+                mutableState.value=BootstrapState(authenticated=true,profile=stored.profile,chat=ChatState(sessionTag=tag,connection=ConnectionState.CONNECTING))
+                val localIM=withContext(Dispatchers.IO) {
+                    runCatching { imSecureStore.load()?.let { StoredIMSession.decode(it,base,stored.profile.businessUserId) } }.getOrNull()
+                }
+                // 本机已有的 SDK 凭据先开库；资料校验不再挡住离线历史首屏。
+                if(localIM!=null)startChatSession(base,stored.profile,tag,localIM)
+                val api=NativeAPI(base)
                 var credentials=stored.tokens
                 var refreshed=false
                 var warning:String?=null
                 var user:BusinessProfile?=null
                 withContext(Dispatchers.IO) {
                     fun refreshOnce() {
-                        if(refreshed)throw APIException("登录已失效，请重新登录",401)
-                        credentials=api.refreshToken(credentials.refreshToken,deviceId);refreshed=true
-                        if(tag!=operation)throw java.util.concurrent.CancellationException()
-                        val rotated=SessionPersistenceCodec.encode(base,credentials,stored.profile)
-                        credentialIO.submit { secureStore.save(rotated) }.get()
+                        synchronized(refreshLock) {
+                            if(refreshed)throw APIException("登录已失效，请重新登录",401)
+                            if(tag!=operation)throw java.util.concurrent.CancellationException()
+                            val current=businessSession.currentTokens()?:throw java.util.concurrent.CancellationException()
+                            if(current.accessToken!=credentials.accessToken) { credentials=current;refreshed=true;return }
+                            val next=api.refreshToken(credentials.refreshToken,deviceId)
+                            if(tag!=operation || !businessSession.replaceTokens(stored.profile.businessUserId,current.accessToken,next))throw java.util.concurrent.CancellationException()
+                            credentials=next;refreshed=true
+                            val rotated=SessionPersistenceCodec.encode(base,credentials,stored.profile)
+                            credentialIO.submit { if(tag==operation)secureStore.save(rotated) }.get()
+                            if(tag!=operation)throw java.util.concurrent.CancellationException()
+                        }
                     }
                     if(credentials.expiresIn<=30)refreshOnce()
                     user=try {api.profile(credentials.accessToken)} catch(e:Exception) {
@@ -119,24 +140,39 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                 if(loaded.businessUserId!=stored.profile.businessUserId)throw APIException("登录身份校验失败，请重新登录",401)
                 if(tag!=operation)return@launch
                 businessBaseURL=base
-                businessSession.restore(credentials,loaded)
-                com.im.nativebootstrap.media.MediaLoader.setScope(base,loaded.businessUserId)
-                mutableState.value=BootstrapState(authenticated=true,profile=loaded,profileWarning=warning,chat=ChatState(sessionTag=tag,connection=ConnectionState.CONNECTING))
-                persistSession();startChatSession(base,loaded,tag)
+                businessSession.replaceTokens(loaded.businessUserId,stored.tokens.accessToken,credentials)
+                businessSession.replaceProfile(loaded)
+                mutableState.value=mutableState.value.copy(profile=loaded,profileWarning=warning)
+                // 资料刷新不延长原来的绝对过期时间，也不覆盖并发请求刚轮换的凭据。
+                credentialIO.execute { if(tag==operation)runCatching {
+                    secureStore.load()?.let { raw ->
+                        if(SessionPersistenceCodec.decode(raw).profile.businessUserId==loaded.businessUserId&&tag==operation)
+                            secureStore.save(SessionPersistenceCodec.withProfile(raw,loaded))
+                    }
+                } }
+                if(localIM==null)startChatSession(base,loaded,tag)
             } catch(_:kotlinx.coroutines.CancellationException) {} catch(e:Exception) {
                 if(tag==operation) {
-                    businessSession.logout()
-                    mutableState.value=BootstrapState(notice=if(e is APIException)e.message.orEmpty() else "登录恢复未完成，请联网后重试登录。")
+                    val rejected=e is APIException&&e.httpStatus in listOf(401,403)
+                    if(rejected || !mutableState.value.authenticated) {
+                        businessSession.logout()
+                        chatAction { chatController.logout() }
+                        mutableState.value=BootstrapState(notice=if(e is APIException)e.message.orEmpty() else "登录恢复未完成，请联网后重试登录。")
+                    } else mutableState.value=mutableState.value.copy(profileWarning="当前显示本机资料，联网后可刷新。")
                     // 网络失败保留加密凭据，明确认证拒绝才撤销本机认证；绝不操作消息库。
-                    if(e is APIException&&e.httpStatus in listOf(401,403))credentialIO.execute{secureStore.clear()}
+                    if(rejected)credentialIO.execute{if(tag==operation){secureStore.clear();imSecureStore.clear()}}
                 }
             } finally {if(tag==operation)loginJob=null}
         }
     }
-    private suspend fun startChatSession(baseURL:String,profile:BusinessProfile,tag:Long) {
+    private suspend fun startChatSession(baseURL:String,profile:BusinessProfile,tag:Long,cached:com.im.nativebootstrap.data.IMCredentials?=null) {
         try {
-            val credentials=withContext(Dispatchers.IO) { businessSession.withAccessToken(profile.businessUserId){NativeAPI(baseURL).imToken(it)} }
+            val credentials=cached ?: withContext(Dispatchers.IO) { businessSession.withAccessToken(profile.businessUserId){NativeAPI(baseURL).imToken(it)} }
             if(tag!=operation||credentials==null)return
+            if(cached==null) {
+                val value=StoredIMSession.encode(baseURL,profile.businessUserId,credentials)
+                credentialIO.execute { if(tag==operation)runCatching { imSecureStore.save(value) } }
+            }
             imDiagnosticAPI=credentials.apiAddr;imDiagnosticWS=credentials.wsAddr
             chatAction {
                 if(tag==operation) {
@@ -183,7 +219,8 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                     val next=api.refreshToken(current.refreshToken,deviceId)
                     if(tag!=operation || !businessSession.replaceTokens(user.businessUserId,current.accessToken,next))throw java.util.concurrent.CancellationException()
                     val rotated=SessionPersistenceCodec.encode(base,next,user)
-                    credentialIO.submit { secureStore.save(rotated) }.get()
+                    credentialIO.submit { if(tag==operation)secureStore.save(rotated) }.get()
+                    if(tag!=operation)throw java.util.concurrent.CancellationException()
                     next
                 }
             }
@@ -603,7 +640,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         chatAction { chatController.attachIncoming(null);chatController.logout();chatController.attachBusiness(null) }
         mutableState.value = BootstrapState()
         credentialIO.execute {
-            try{secureStore.clear()}catch(_:Exception){}
+            try{secureStore.clear();imSecureStore.clear()}catch(_:Exception){}
             if(oldTokens!=null)try{NativeAPI(oldBase).businessRequest("POST","/auth/logout",data=obj("refreshToken" to oldTokens.refreshToken))}catch(_:Exception){}
         }
     }

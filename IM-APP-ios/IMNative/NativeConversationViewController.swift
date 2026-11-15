@@ -30,6 +30,8 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var cursor = ""
     private var isEnd = false
     private var loading = false
+    private var awaitingHistoryCursor: String?
+    private var hasLocalHistoryPreview = false
     private var submitting = false
     private var loadOperation: UUID?
     private var headerHeight: NSLayoutConstraint!
@@ -49,6 +51,8 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var dateSeparators: [String: String] = [:]; private let latest = UIButton(type: .system)
     private var historyTask: Task<Void, Never>?; private var actionTask: Task<Void, Never>?; private var roleTask: Task<Void, Never>?
     private var canManageGroup = false; private var autoHistoryAllowed = true; private var processingCards = Set<String>()
+    private var lastHistoryOffset = CGFloat.zero
+    private var lastAutomaticHistoryRequest: String?
     private struct PendingAttachment {
         let id: UUID; let file: URL; let kind: Int; let filename: String
         init(id: UUID = UUID(), file: URL, kind: Int, filename: String) { self.id = id; self.file = file; self.kind = kind; self.filename = filename }
@@ -194,6 +198,12 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     }
     private func render(scrollToBottom: Bool = false) {
         guard isViewLoaded, dataSource != nil else { return }
+        var completedInitialHistory = false
+        if let requested = awaitingHistoryCursor, requested == cursor,
+           let page = service.completedHistoryPage(conversation, cursor: requested) {
+            completedInitialHistory = requested.isEmpty
+            applyHistoryPage(page); awaitingHistoryCursor = nil
+        }
         if navigationController?.topViewController === self, presentedViewController == nil, let result = service.takeForwardNotice(in: conversation.id) { showForwardResult(result) }
         notice.text = service.sendRestriction(conversation) ?? service.pinnedMessage(in: conversation).map { "置顶：" + $0.preview } ?? ""; notice.isHidden = notice.text?.isEmpty != false; view.setNeedsLayout()
         if multiSelecting { heading.text = "已选 \(selectedIDs.count) 条"; more.setTitle("转发", for: .normal) } else { heading.text = conversation.title; more.setTitle("⋯", for: .normal) }
@@ -216,7 +226,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         let anchorID = visibleIndex.flatMap { dataSource.itemIdentifier(for: $0) }
         let anchorDistance = visibleIndex.flatMap { collection.layoutAttributesForItem(at: $0)?.frame.minY }.map { $0 - collection.contentOffset.y }
         let nearBottom = collection.contentOffset.y + collection.bounds.height >= collection.contentSize.height - 80
-        let followBottom = scrollToBottom || (!loading && nearBottom && dataSource.snapshot().itemIdentifiers.last != items.last?.id)
+        let followBottom = scrollToBottom || completedInitialHistory || (!loading && nearBottom && dataSource.snapshot().itemIdentifiers.last != items.last?.id)
         let previous = Set(dataSource.snapshot().itemIdentifiers)
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>(); snapshot.appendSections([0]); snapshot.appendItems(items.map(\.id))
         snapshot.reconfigureItems(items.map(\.id).filter(previous.contains))
@@ -238,16 +248,16 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private func loadOlder() async {
         guard !loading, !isEnd, service.isActive else { refresh.endRefreshing(); return }
         let operation = UUID(); loadOperation = operation; loading = true
-        let initial = cursor.isEmpty
+        let requested = cursor, initial = cursor.isEmpty && !hasLocalHistoryPreview
+        awaitingHistoryCursor = requested
         defer { if loadOperation == operation { loading = false; refresh.endRefreshing() } }
         do {
-            let page = try await service.history(conversation, cursor: cursor)
+            let page = try await service.history(conversation, cursor: requested)
             guard loadOperation == operation, service.isActive else { return }
-            let oldest = page.messages.min { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp }
-            if let oldest = oldest, oldest.id != cursor { cursor = oldest.id }
-            else if !page.isEnd { showNativeNotice("历史游标未推进，请稍后重试。"); return }
-            isEnd = page.isEnd
-            refresh.attributedTitle = NSAttributedString(string: isEnd ? "已到历史开头" : "下拉加载更早消息")
+            if page.isLocalPreview {
+                hasLocalHistoryPreview = hasLocalHistoryPreview || !page.messages.isEmpty
+                if page.localExhausted { autoHistoryAllowed = false }
+            } else if cursor == requested { applyHistoryPage(page); awaitingHistoryCursor = nil }
             render(scrollToBottom: initial)
         } catch {
             guard loadOperation == operation, service.isActive else { return }
@@ -256,12 +266,32 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         }
     }
 
-    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { autoHistoryAllowed = true }
+    private func applyHistoryPage(_ page: NativeHistoryPage) {
+        guard !page.isLocalPreview else { return }
+        if let oldest = page.messages.min(by: { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp }) { cursor = oldest.id }
+        isEnd = page.isEnd
+        autoHistoryAllowed = true
+        refresh.attributedTitle = nil
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        autoHistoryAllowed = true; lastAutomaticHistoryRequest = nil; lastHistoryOffset = scrollView.contentOffset.y
+    }
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateLatestButton()
-        guard scrollView === collection, collection.isDragging, autoHistoryAllowed, !loading, !isEnd, !cursor.isEmpty,
-              scrollView.contentOffset.y < -scrollView.adjustedContentInset.top + 120 else { return }
-        historyTask?.cancel(); historyTask = Task { [weak self] in await self?.loadOlder() }
+        let towardHistory = scrollView.contentOffset.y < lastHistoryOffset
+        lastHistoryOffset = scrollView.contentOffset.y
+        guard scrollView === collection, historyTask == nil,
+              HistoryViewportPolicy.shouldPrefetch(distanceFromTop: Double(scrollView.contentOffset.y + scrollView.adjustedContentInset.top), viewportHeight: Double(scrollView.bounds.height), movingTowardHistory: towardHistory, interacting: scrollView.isDragging || scrollView.isDecelerating, canLoad: autoHistoryAllowed && !loading && !isEnd && (!cursor.isEmpty || hasLocalHistoryPreview)) else { return }
+        // 同一次手势中，游标和已显示的最早消息都没有推进时不重复请求；新手势可重试。
+        let fingerprint = cursor + "|" + (dataSource.snapshot().itemIdentifiers.first ?? "")
+        guard fingerprint != lastAutomaticHistoryRequest else { return }
+        lastAutomaticHistoryRequest = fingerprint
+        historyTask = Task { [weak self] in
+            guard let self = self else { return }
+            defer { self.historyTask = nil }
+            await self.loadOlder()
+        }
     }
     private func updateLatestButton() { guard isViewLoaded, collection != nil else { return }; latest.isHidden = collection.contentSize.height - collection.contentOffset.y - collection.bounds.height < 140 }
     @objc private func returnLatest() { guard let id = dataSource.snapshot().itemIdentifiers.last, let index = dataSource.indexPath(for: id) else { return }; collection.scrollToItem(at: index, at: .bottom, animated: true) }

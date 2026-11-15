@@ -11,8 +11,10 @@ typedef void (^NativeIMEvent)(NSString *name, NSDictionary<NSString *, id> *payl
 - (void)logout:(NativeIMResult)completion NS_SWIFT_NAME(logout(completion:));
 - (void)shutdown NS_SWIFT_NAME(shutdown());
 - (void)conversationsOffset:(NSInteger)offset count:(NSInteger)count completion:(NativeIMResult)completion NS_SWIFT_NAME(conversations(offset:count:completion:));
+- (void)allConversations:(NativeIMResult)completion NS_SWIFT_NAME(allConversations(completion:));
 - (void)conversationTarget:(NSString *)target type:(NSInteger)type completion:(NativeIMResult)completion NS_SWIFT_NAME(conversation(target:type:completion:));
 - (void)historyConversation:(NSString *)conversation cursor:(NSString *)cursor count:(NSInteger)count completion:(NativeIMResult)completion NS_SWIFT_NAME(history(conversation:cursor:count:completion:));
+- (void)localHistoryConversation:(NSString *)conversation position:(NSInteger)position page:(NSInteger)page count:(NSInteger)count completion:(NativeIMResult)completion NS_SWIFT_NAME(localHistory(conversation:position:page:count:completion:));
 - (nullable NSDictionary<NSString *, id> *)createText:(NSString *)text NS_SWIFT_NAME(createText(_:));
 - (nullable NSDictionary<NSString *, id> *)unpack:(NSString *)serialized NS_SWIFT_NAME(unpack(_:));
 - (nullable NSDictionary<NSString *, id> *)createMedia:(NSInteger)kind path:(NSString *)path filename:(NSString *)filename duration:(NSInteger)duration snapshot:(NSString *)snapshot NS_SWIFT_NAME(createMedia(kind:path:filename:duration:snapshot:));

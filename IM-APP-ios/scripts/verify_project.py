@@ -76,7 +76,7 @@ class IOSProjectStaticTests(unittest.TestCase):
         if (research / "OIMManager+Message.h").is_file():
             expected = {
                 "OIMManager+Message.h": ["+ (OIMMessageInfo *)createTextMessage:", "- (void)sendMessage:", "- (void)getAdvancedHistoryMessageList:", "- (void)findMessageList:"],
-                "OIMManager+Conversation.h": ["getConversationListSplitWithOffset:", "getOneConversationWithSessionType:"],
+                "OIMManager+Conversation.h": ["getAllConversationListWithOnSuccess:", "getConversationListSplitWithOffset:", "getOneConversationWithSessionType:"],
                 "OIMManager+Connection.h": ["initSDKWithConfig:", "- (void)unInitSDK;"],
                 "OIMSearchParam.h": ["NSString *startClientMsgID", "clientMsgIDList"],
                 "core-Open_im_sdk.objc.h": ["Open_im_sdkSetAppBackgroundStatus(", "Open_im_sdkNetworkStatusChanged("],
@@ -85,6 +85,9 @@ class IOSProjectStaticTests(unittest.TestCase):
                 header = (research / name).read_text(encoding="utf-8")
                 for signature in signatures: self.assertIn(signature, header, name + ": " + signature)
         bridge = (IOS / "IMNative/NativeOpenIMBridge.m").read_text(encoding="utf-8")
+        self.assertIn("[OIMManager.manager getAllConversationListWithOnSuccess:", bridge)
+        header = (IOS / "IMNative/NativeOpenIMBridge.h").read_text(encoding="utf-8")
+        self.assertIn("NS_SWIFT_NAME(allConversations(completion:))", header)
         self.assertIn("request.startClientMsgID = cursor", bridge)
         self.assertNotIn("request.lastMinSeq =", bridge)
         self.assertIn("result.status != OIMMessageStatusSendSuccess", bridge)

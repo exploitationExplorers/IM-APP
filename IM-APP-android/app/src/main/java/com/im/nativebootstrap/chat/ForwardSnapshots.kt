@@ -40,7 +40,13 @@ object ForwardSnapshots {
                 jsonBody("sourcePath" to "","sourcePicture" to source,"bigPicture" to picture(boxes[1],source),"snapshotPicture" to picture(boxes[2],source))
             }
             103 -> jsonBody("soundPath" to "","sourceUrl" to parsed.url,"duration" to parsed.duration,"dataSize" to parsed.size)
-            104 -> jsonBody("videoPath" to "","videoUrl" to parsed.url,"videoType" to "mp4","videoSize" to parsed.size,"duration" to parsed.duration,"snapshotPath" to "","snapshotUrl" to parsed.thumbnail,"snapshotWidth" to parsed.width,"snapshotHeight" to parsed.height)
+            104 -> {
+                val stored=parseObject(raw.field("content","Content")) ?: JsonObject()
+                val candidates=listOfNotNull(parseObject(raw.get("videoElem")),parseObject(raw.get("VideoElem")),parseObject(stored.get("videoElem")),parseObject(stored.get("VideoElem")))+stored
+                fun metadata(vararg names:String)=candidates.firstNotNullOfOrNull { it.string(*names).trim().takeIf(String::isNotBlank) }.orEmpty()
+                require(parsed.thumbnail.isNotBlank()) { "视频封面尚未上传完成，暂不能转发" }
+                jsonBody("videoPath" to "","videoUrl" to parsed.url,"videoUUID" to metadata("videoUUID","VideoUUID"),"videoType" to metadata("videoType","VideoType").ifBlank { "mp4" },"videoSize" to parsed.size,"duration" to parsed.duration,"snapshotPath" to "","snapshotUrl" to parsed.thumbnail,"snapshotUUID" to metadata("snapshotUUID","SnapshotUUID"),"snapshotWidth" to parsed.width,"snapshotHeight" to parsed.height)
+            }
             105 -> jsonBody("filePath" to "","sourceUrl" to parsed.url,"fileName" to parsed.fileName,"fileSize" to parsed.size)
             108 -> jsonBody("userID" to parsed.cardUserId,"nickname" to parsed.cardName,"faceURL" to parsed.thumbnail)
             107 -> {

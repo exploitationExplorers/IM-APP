@@ -68,11 +68,16 @@ fun NativeDebugPage(model:BootstrapViewModel) {
         add("画面尺寸：${config.screenWidthDp} × ${config.screenHeightDp}")
         add("连接：${app.chat.connection}；本地库：${app.chat.store}；同步：${app.chat.sync}；待核对：${app.chat.outbox.size}")
         app.chat.lastSendErrorCode?.let { add("最近发送 SDK 错误码：$it") }
+        app.chat.historyDiagnostic?.let { add("最近历史同步：$it") }
+        if(app.chat.conversationDiagnostics.isNotEmpty()) {
+            add("会话列表变化（代号每次启动重新生成）：")
+            addAll(app.chat.conversationDiagnostics)
+        }
         probes.forEach{add("${it.label} ${it.host} ${it.ms?:"—"} ms ${if(it.ok)"可达" else "未完成"} ${it.detail}")}
         meta?.let{value->add("设备：${value.device}");add("网络：${value.network}");add("储存：${value.storage}");add("媒体："+value.media.joinToString("、"));value.permissions.forEach{add("${it.first}：${it.second}")};value.capabilities.forEach{add("${it.first}：${it.second}")}}
         add("最近 API 采样："+history.joinToString("；"){it.first+" "+it.second.ms+" ms"})
         addAll(com.im.nativebootstrap.media.MediaMetrics.report())
-        add("诊断内容已隐藏账号标识，不含密码、令牌、消息、文件路径或带签名地址。")
+        add("诊断内容已隐藏账号标识，不含密码、令牌、消息正文、文件路径或带签名地址。")
     }
     fun toast(text:String){NativeNotices.show(text)}
     val saveFile=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")){uri->if(uri!=null)scope.launch {
@@ -133,6 +138,7 @@ fun NativeDebugPage(model:BootstrapViewModel) {
             Spacer(Modifier.height((28*s).dp));(value.permissions+value.capabilities).chunked(2).forEach{pair->Row(horizontalArrangement=Arrangement.spacedBy((24*s).dp)){pair.forEach{(key,value)->Row(Modifier.weight(1f).padding(vertical=(8*s).dp)){Text(key,Modifier.weight(1f),fontSize=(24*s).sp,color=muted);Text(value,fontSize=(24*s).sp,color=ink)}}}}
         }
         InfoRow("本地数据库",app.chat.store.name);InfoRow("同步状态",app.chat.sync.name);InfoRow("聊天连接",app.chat.connection.name);InfoRow("待核对发送",app.chat.outbox.size.toString())
+        InfoRow("会话列表采样",app.chat.conversationDiagnostics.size.toString()+" 条；复制摘要可查看启动变化")
         InfoRow("现在时间",now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
         if(endpoints.imApi.isNotBlank())InfoRow("OpenIM API",NativeDiagnostics.host(endpoints.imApi))
         if(endpoints.imWs.isNotBlank())InfoRow("OpenIM WS",NativeDiagnostics.host(endpoints.imWs))

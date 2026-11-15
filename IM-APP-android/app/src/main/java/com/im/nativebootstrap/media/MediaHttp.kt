@@ -51,6 +51,11 @@ internal object MediaHttp {
     private val locks = ConcurrentHashMap<String, Pair<Any, Int>>()
     private var lastTrim = 0L
     fun cancelDownloads() { calls.forEach(Call::cancel) }
+    fun cachedFile(context:Context,id:String,max:Long):File? {
+        if(!id.matches(Regex("[0-9a-f]{64}")))return null
+        return File(context.cacheDir,"media-files-v2/$id").takeIf { it.isFile&&it.length() in 1..max }
+            ?.also { it.setLastModified(System.currentTimeMillis()) }
+    }
     fun download(context: Context, url: String, id: String, max: Long, active: () -> Boolean, images: DiskCache?): File {
         val lock = synchronized(guard) { val old = locks[id]; (old?.first ?: Any()).also { locks[id] = it to ((old?.second ?: 0) + 1) } }
         try { synchronized(lock) {

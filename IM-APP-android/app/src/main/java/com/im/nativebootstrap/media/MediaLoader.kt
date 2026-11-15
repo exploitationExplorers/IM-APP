@@ -11,6 +11,7 @@ import coil.decode.ImageDecoderDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.ErrorResult
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import coil.size.Scale
@@ -56,6 +57,7 @@ internal class MediaImagePipeline(context: Context, client: okhttp3.OkHttpClient
     private val flights = mutableMapOf<String, Flight>()
     private val imageSlots = Semaphore(4)
     private val avatarSlots = Semaphore(1)
+    private val cacheSlots = Semaphore(2)
     fun peek(id: String, edge: Int): MediaVisual? = loader.memoryCache?.get(MemoryCache.Key(memoryKey(id, edge)))
         ?.let { MediaVisual(bitmap = it.bitmap) }
     fun alias(source:String,destination:String) {
@@ -92,37 +94,66 @@ internal class MediaImagePipeline(context: Context, client: okhttp3.OkHttpClient
         }
     }
     private suspend fun execute(context: Context, url: String, id: String, edge: Int,local:File?,discardLocal:()->Unit): MediaVisual {
+        cached(context,id,edge,local,discardLocal)?.let { return it }
         val queuedAt = System.nanoTime()
         suspend fun scheduled(): MediaVisual = imageSlots.withPermit {
             MediaMetrics.record(id,"QUEUE",(System.nanoTime()-queuedAt)/1_000_000)
-            decodeRequest(context,url,id,edge,local,discardLocal)
+            decodeRequest(context,url,id,edge)
         }
         // 头像最多占一个图片槽，给正在查看的聊天图保留资源；离屏取消自动移除等待者。
         return if(edge <= 128)avatarSlots.withPermit { scheduled() } else scheduled()
     }
-    private suspend fun decodeRequest(context: Context, url: String, id: String, edge: Int,local:File?,discardLocal:()->Unit): MediaVisual {
+    /** 已有字节先显示；HTTP 新鲜度只决定联网取图，不阻塞离线历史展示。 */
+    suspend fun cached(context:Context,id:String,edge:Int,local:File?=null,discardLocal:()->Unit={}):MediaVisual? = withContext(Dispatchers.IO) {
+        peek(id,edge)?.let { MediaMetrics.record(id,"MEMORY_CACHE",0);return@withContext it }
+        cacheSlots.withPermit {
+            peek(id,edge)?.let { return@withPermit it }
+            if(local!=null) {
+                try { return@withPermit decodeCachedFile(context,local,id,edge,"LOCAL_CACHE") }
+                catch(cancelled:CancellationException) { throw cancelled }
+                catch(_:Exception) { discardLocal();MediaMetrics.record(id,"LOCAL_CORRUPT",0) }
+            }
+            val snapshot=loader.diskCache?.openSnapshot(id) ?: return@withPermit null
+            var corrupt=false
+            val result=snapshot.use {
+                try { decodeCachedFile(context,it.data.toFile(),id,edge,"DISK_CACHE") }
+                catch(cancelled:CancellationException) { throw cancelled }
+                catch(_:Exception) { corrupt=true;null }
+            }
+            if(corrupt)loader.diskCache?.remove(id)
+            result
+        }
+    }
+    private suspend fun decodeCachedFile(context:Context,file:File,id:String,edge:Int,layer:String):MediaVisual {
+        val started=System.nanoTime()
+        val result=loader.execute(ImageRequest.Builder(context.applicationContext).data(file)
+            .diskCacheKey(id).memoryCacheKey(memoryKey(id,edge)).size(edge.coerceIn(32,1920))
+            .diskCachePolicy(CachePolicy.DISABLED).networkCachePolicy(CachePolicy.DISABLED)
+            .scale(Scale.FIT).allowHardware(false).allowRgb565(true).build())
+        if(result is ErrorResult)throw result.throwable
+        MediaMetrics.record(id,layer,(System.nanoTime()-started)/1_000_000)
+        return visual((result as SuccessResult).drawable)
+    }
+    private fun visual(drawable:android.graphics.drawable.Drawable):MediaVisual = when(drawable) {
+        is BitmapDrawable -> MediaVisual(bitmap=drawable.bitmap)
+        is Animatable -> MediaVisual(animation=drawable)
+        else -> MediaVisual(bitmap=drawable.toBitmap())
+    }
+    private suspend fun decodeRequest(context: Context, url: String, id: String, edge: Int): MediaVisual {
         val started = System.nanoTime()
         try {
-            val result = loader.execute(ImageRequest.Builder(context.applicationContext).data(local ?: url)
+            val result = loader.execute(ImageRequest.Builder(context.applicationContext).data(url)
                 .diskCacheKey(id).memoryCacheKey(memoryKey(id, edge)).size(edge.coerceIn(32, 1920))
                 .scale(Scale.FIT).allowHardware(false).allowRgb565(true).build())
             if (result is ErrorResult) throw result.throwable
             result as SuccessResult
             MediaMetrics.record(id, result.dataSource.name, (System.nanoTime() - started) / 1_000_000)
-            return when (val drawable = result.drawable) {
-                is BitmapDrawable -> MediaVisual(bitmap = drawable.bitmap)
-                is Animatable -> MediaVisual(animation = drawable)
-                else -> MediaVisual(bitmap = drawable.toBitmap())
-            }
+            return visual(result.drawable)
         } catch (cancelled: CancellationException) {
             MediaMetrics.record(id, "CANCELLED", (System.nanoTime() - started) / 1_000_000); throw cancelled
         } catch (error: Throwable) {
-            loader.diskCache?.remove(id)
-            if(local!=null) {
-                discardLocal()
-                MediaMetrics.record(id,"LOCAL_CORRUPT",(System.nanoTime()-started)/1_000_000)
-                return decodeRequest(context,url,id,edge,null,{})
-            }
+            // 网络失败不删除并发写入的有效项；只由纯本地解码确认坏数据后移除该项。
+            cached(context,id,edge)?.let { return it }
             MediaMetrics.record(id, "FAILED", (System.nanoTime() - started) / 1_000_000)
             throw error
         }
@@ -182,8 +213,8 @@ object MediaLoader {
         if(captured.clearing||captured.scope!=MediaCacheIdentity.scope(base,account))return
         val old=MessageContents.parse(source.serialized,source.text)
         val fresh=MessageContents.parse(preserved.toString())
-        if(old.type!=102||fresh.type!=102)return
-        val pairs=listOf(old.url to fresh.url,old.thumbnail.ifBlank { old.url } to fresh.thumbnail.ifBlank { fresh.url })
+        if(old.type!=fresh.type||old.type !in setOf(102,104))return
+        val pairs=if(old.type==104)listOf(old.thumbnail to fresh.thumbnail) else listOf(old.url to fresh.url,old.thumbnail.ifBlank { old.url } to fresh.thumbnail.ifBlank { fresh.url })
         pairs.filter { it.first.isNotBlank()&&it.second.isNotBlank() }.forEach { (from,to) ->
             ImageVariant.entries.forEach { variant ->
                 if(captured!=state.value)return
@@ -219,10 +250,35 @@ object MediaLoader {
             check(!captured.clearing && captured == state.value) { "媒体会话已变化" }
             val url = MediaURLs.remote(raw, captured.base)
             require(url.isNotEmpty()) { "媒体地址不受支持" }
-            val local=withContext(Dispatchers.IO) { localCopies(context).get(captured.scope,id(url,captured)) }
-            val value = images(context).load(context, url, id(url, captured), edge,local) { localCopies(context).discard(captured.scope,id(url,captured)) }
+            val key=id(url,captured)
+            val own=withContext(Dispatchers.IO) { localCopies(context).get(captured.scope,key) }
+            val local=own ?: withContext(Dispatchers.IO) { MediaHttp.cachedFile(context,key,32L*1024*1024) }
+            val value = images(context).load(context, url, key, edge,local) {
+                if(own!=null)localCopies(context).discard(captured.scope,key) else local?.delete()
+            }
             ensureActive()
             if (captured != state.value) throw CancellationException("媒体会话已变化")
+            value
+        } finally { pending.remove(job) }
+    }
+    /** 仅查当前账号内存与磁盘，供多候选图在任何联网请求之前完成缓存探测。 */
+    suspend fun cached(context:Context,raw:String,edge:Int):MediaVisual? = coroutineScope {
+        val captured=state.value
+        val job=currentCoroutineContext().job
+        pending[job]=captured.generation
+        try {
+            ensureActive()
+            if(captured.clearing)return@coroutineScope null
+            val url=MediaURLs.remote(raw,captured.base)
+            if(url.isBlank())return@coroutineScope null
+            val key=id(url,captured)
+            val own=withContext(Dispatchers.IO) { localCopies(context).get(captured.scope,key) }
+            val local=own ?: withContext(Dispatchers.IO) { MediaHttp.cachedFile(context,key,32L*1024*1024) }
+            val value=images(context).cached(context,key,edge,local) {
+                if(own!=null)localCopies(context).discard(captured.scope,key) else local?.delete()
+            }
+            ensureActive()
+            if(captured!=state.value)throw CancellationException("媒体会话已变化")
             value
         } finally { pending.remove(job) }
     }

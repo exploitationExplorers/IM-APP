@@ -64,7 +64,7 @@ class UiParityInteractionInstrumentation:Instrumentation() {
             result.putString("directory","passed: shortcuts and group cards scroll with contacts; search stays fixed")
 
             val target=ChatTarget("si_menu-fixture",1,userId="fixture-peer")
-            val message=ChatMessage("fixture-menu-message","菜单行为验证文本",true,System.currentTimeMillis(),seq=10,
+            val message=ChatMessage("fixture-menu-message","菜单行为验证文本",true,System.currentTimeMillis(),seq=0,
                 serialized="""{"clientMsgID":"fixture-menu-message","contentType":101,"textElem":{"content":"菜单行为验证文本"},"sendID":"fixture-self"}""",sender="测试发送者")
             val actions=CopyOnWriteArrayList<ChatAction>()
             val state=ChatState(ready=true,loggedIn=true,connection=ConnectionState.CONNECTED,active=ChatConversation(target,"菜单交互验证","",1),historyEnd=true,messages=listOf(message))
@@ -115,14 +115,20 @@ class UiParityInteractionInstrumentation:Instrumentation() {
             click("仅为我置顶")
             await("pin callback") { actions.contains(ChatAction.PIN_SELF) }
             openMenu();click("多选")
-            await("multi toolbar") { findText("删除(1)")!=null&&findText("转发(1)")!=null }
+            await("multi toolbar") { findText("删除(1)")!=null&&findText("转发(1)")!=null&&findText("撤回(1)")!=null }
             screenshot("message-multi")
+            click("撤回(1)")
+            await("multi seq0 recall confirmation") { findText("撤回 1 条消息")!=null }
+            click("撤回")
+            await("multi seq0 callback and failure notice") { recalls==listOf(message.id,message.id)&&findText("撤回未完成，1 条消息保留选择，可核对或重试")!=null }
+            check(findText(message.text)!=null&&findText("删除(1)")!=null) { "Failed multi recall removed message or cleared selection" }
+            await("multi failure notice expires") { findText("撤回未完成，1 条消息保留选择，可核对或重试")==null }
             click("删除(1)")
             await("multi delete confirmation") { findText("删除 1 条本地消息？")!=null }
             click("删除")
             await("delete callback") { actions.contains(ChatAction.DELETE_LOCAL) }
             check(actions.count { it==ChatAction.DELETE_LOCAL }==1) { "Selection dispatched duplicate delete" }
-            result.putString("messageMenu","passed: long press, system copy/selection, centered 3s notice, failed recall callback leaves message and expires notice, quote, favorite callback, pin scope/callback, multi toolbar and one delete dispatch")
+            result.putString("messageMenu","passed: long press, system copy/selection, centered 3s notice, confirmed seq0 single and multi recall both dispatch callbacks; failure preserves message and multi selection; quote, favorite, pin, one delete dispatch")
             result.putString("scope","Synthetic local UI callbacks only; production server actions and media permissions are not exercised")
             finish(Activity.RESULT_OK,result)
         } catch(error:Throwable) {

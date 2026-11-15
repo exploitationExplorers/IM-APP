@@ -29,6 +29,8 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
         val result=Bundle();var activity:MainActivity?=null
         val fixtureBase="https://127.0.0.1:1/api/v1";val account="chat-media-regression"
         try {
+            File(targetContext.cacheDir,"chat-media-clicks.txt").writeText("")
+            File(targetContext.cacheDir,"chat-media-player-samples.txt").writeText("")
             MediaLoader.setScope(fixtureBase,account)
             val url="https://127.0.0.1:1/object/regression-video.mp4"
             val video=File(File(targetContext.cacheDir,"media-files-v2").apply { mkdirs() },MediaLoader.id(url))
@@ -50,14 +52,23 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
             check(input.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             // 真正唤出 IME，再切面板；测试环境若禁用 IME 不能冒充键盘路径通过。
             await("system keyboard shown") { var visible=false;runOnMainSync { visible=ViewCompat.getRootWindowInsets(screen.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime())==true };visible }
+            diagnostic("before-emoji",screen)
             clickDescription("表情")
+            diagnostic("after-emoji-click",screen)
             await("emoji grid") { findText("😀")!=null&&findDescription("收藏表情")!=null }
+            repeat(12) {
+                waitForIdleSync()
+                check(findText("😀")!=null&&findDescription("收藏表情")!=null) { "Emoji panel dismissed itself while drawing tab icons" }
+                SystemClock.sleep(100)
+            }
             val panel=bounds(findDescription("表情面板") ?: error("Missing emoji panel"))
             check(panel.height()>100&&panel.bottom<=screen.resources.displayMetrics.heightPixels) { "Emoji panel is clipped below screen" }
             clickText("😀")
             await("emoji inserted in actual editor") { findEditable()?.text?.toString()?.contains("😀")==true }
+            waitForIdleSync()
             clickDescription("收藏表情")
-            await("real sticker load callback") { stickerLoads.get()>0&&findText("点击 + 添加表情")!=null }
+            try { await("real sticker load callback") { stickerLoads.get()>0&&findText("点击 + 添加表情")!=null } }
+            catch(error:Throwable) { diagnostic("sticker-load-failure-${stickerLoads.get()}",screen);throw error }
             check(stickerSends.get()==0)
             screenshot("emoji-panel")
             clickDescription("关闭表情面板")
@@ -69,22 +80,24 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
             screenshot("portrait-bubble")
             clickDescription("视频消息")
             var player:NativeVideoPlayerView?=null
-            await("native video dialog") { runOnMainSync { player=findPlayer(screen.window.decorView) ?: findPlayerFromWindows() };player!=null }
-            await("real MediaPlayer prepared") { var ready=false;runOnMainSync { ready=player?.prepared==true };ready }
-            var startedAt=0
-            runOnMainSync { startedAt=player?.playbackPosition ?: 0 }
-            await("actual playback position advances") { var playing=false;runOnMainSync { playing=player?.playing==true&&(player?.playbackPosition ?: 0)>startedAt+250 };playing }
+            awaitMedia("native video dialog") { runOnMainSync { player=findPlayer(screen.window.decorView) ?: findPlayerFromWindows() };player!=null }
+            awaitMedia("real MediaPlayer prepared") { samplePlayback("cached-preparing",player).first }
+            val startedAt=samplePlayback("cached-baseline",player).third
+            awaitMedia("actual playback position advances") { val sample=samplePlayback("cached-playing",player);sample.first&&sample.second&&sample.third>startedAt+250 }
             screenshot("playing")
-            check(uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
-            await("video released after dismiss") { var stopped=false;runOnMainSync { stopped=player?.prepared==false };stopped }
+            // 原生 MediaController 会先消费系统 Back；直接点预览返回按钮验证释放。
+            clickText("‹")
+            awaitMedia("video released after dismiss") { !samplePlayback("cached-released",player).first }
             fun verifyOwnedPlayback(label:String) {
                 clickDescription("视频消息")
                 var ownedPlayer:NativeVideoPlayerView?=null
-                await("$label opens native player") { runOnMainSync { ownedPlayer=findPlayerFromWindows() };ownedPlayer!=null }
-                await("$label local decode prepares") { var ready=false;runOnMainSync { ready=ownedPlayer?.prepared==true };ready }
-                await("$label plays private local bytes") { var advancing=false;runOnMainSync { advancing=ownedPlayer?.playing==true&&(ownedPlayer?.playbackPosition ?: 0)>200 };advancing }
-                check(uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
-                await("$label closes decoder") { var stopped=false;runOnMainSync { stopped=ownedPlayer?.prepared==false };stopped }
+                awaitMedia("$label opens native player") { runOnMainSync { ownedPlayer=findPlayerFromWindows() };ownedPlayer!=null }
+                awaitMedia("$label local decode prepares") { samplePlayback("$label preparing",ownedPlayer).first }
+                val baseline=samplePlayback("$label baseline",ownedPlayer).third
+                awaitMedia("$label plays private local bytes") { val sample=samplePlayback(label,ownedPlayer);sample.first&&sample.second&&sample.third>baseline+250 }
+                // MediaController 的浮层可先消费系统 Back；点预览自己的返回按钮才验证关闭播放器。
+                clickText("‹")
+                awaitMedia("$label closes decoder") { !samplePlayback("$label released",ownedPlayer).first }
             }
             val owner=File(targetContext.filesDir,"native-chat/"+"c".repeat(64)+"/upload-images").apply { mkdirs() }
             val uploadID="upload-"+java.util.UUID.randomUUID()
@@ -97,11 +110,15 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
             val acknowledged=portrait.copy(id="video-local-ack",serialized=portrait.serialized.replace("video-portrait","video-local-ack").replace(url,"https://127.0.0.1:1/object/not-in-download-cache.mp4"))
             render(state.copy(messages=listOf(acknowledged),localSentMedia=mapOf(acknowledged.id to pending.media()),mediaOwnerDirectory=owner.path))
             await("ACK leaves local mapping and removes uploading spinner") { findDescription("视频消息")!=null&&findDescription("视频正在发送")==null }
+            screenshot("video-local-sent")
             verifyOwnedPlayback("acknowledged video without remote download")
             result.putString("localVideoUI","passed: zero-metadata pending video bubble appears with sending indicator; private local bytes play before upload and after ACK under a different uncached remote URL")
             val landscape=portrait.copy(id="video-landscape",serialized=portrait.serialized.replace("video-portrait","video-landscape").replace("\"SnapshotWidth\":160,\"SnapshotHeight\":240","\"SnapshotWidth\":240,\"SnapshotHeight\":160"))
             render(state.copy(messages=listOf(landscape)))
-            await("landscape bubble") { findDescription("视频消息")!=null }
+            // setContent 后旧竖屏节点可能仍在可访问树中；等待新横屏布局提交再测量。
+            await("landscape bubble") {
+                findDescription("视频消息")?.let { node -> val rect=bounds(node);rect.width()>rect.height()&&kotlin.math.abs(rect.width().toFloat()/rect.height()-240f/160)<.03f }==true
+            }
             val landscapeRect=bounds(findDescription("视频消息")!!)
             check(landscapeRect.width()>landscapeRect.height()&&kotlin.math.abs(landscapeRect.width().toFloat()/landscapeRect.height()-1.5f)<.03f) { "Landscape ratio changed: $landscapeRect" }
             check(findText("查看本次转发任务进度")==null&&findDescription("转发任务")==null)
@@ -111,6 +128,7 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
             result.putString("scope","Local encoded MP4 placed in account-scoped downloaded-media cache; no backend, remote transport or production video compatibility claimed")
             finish(Activity.RESULT_OK,result)
         } catch(error:Throwable) {
+            activity?.let { runCatching { diagnostic("failed-stage",it) } }
             runCatching { screenshot("failure") }
             result.putString("chatMediaRegression","failed: ${error.javaClass.simpleName}: ${error.message}")
             finish(Activity.RESULT_CANCELED,result)
@@ -165,18 +183,47 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
         return if(android.os.Build.VERSION.SDK_INT>=29)android.view.inspector.WindowInspector.getGlobalWindowViews().firstNotNullOfOrNull(::findPlayer) else null
     }
     private fun findPlayer(view:View):NativeVideoPlayerView? {
-        if(view is NativeVideoPlayerView)return view
+        if(view is NativeVideoPlayerView&&view.isAttachedToWindow&&view.visibility==View.VISIBLE)return view
         if(view is ViewGroup)for(index in 0 until view.childCount)findPlayer(view.getChildAt(index))?.let { return it }
         return null
     }
     private fun await(label:String,predicate:()->Boolean) { repeat(100) { waitForIdleSync();if(predicate())return;SystemClock.sleep(80) };error("Timed out: $label") }
+    // 视频开始即持续绘帧，等待 UI 完全空闲可能直到短视频播完才返回。
+    private fun awaitMedia(label:String,predicate:()->Boolean) {
+        val deadline=SystemClock.elapsedRealtime()+8_000
+        while(SystemClock.elapsedRealtime()<deadline) { if(predicate())return;SystemClock.sleep(40) }
+        error("Timed out: $label")
+    }
+    private fun samplePlayback(label:String,player:NativeVideoPlayerView?):Triple<Boolean,Boolean,Int> {
+        var sample=Triple(false,false,0)
+        var identity=0
+        runOnMainSync { if(player!=null) { identity=System.identityHashCode(player);sample=Triple(player.prepared,player.playing,player.playbackPosition) } }
+        File(targetContext.cacheDir,"chat-media-player-samples.txt").appendText("${SystemClock.elapsedRealtime()} $label player=$identity prepared=${sample.first} playing=${sample.second} position=${sample.third}\n")
+        return sample
+    }
     private fun findText(value:String)=find(uiAutomation.rootInActiveWindow) { it.isVisibleToUser&&it.text?.toString()==value }
     private fun findDescription(value:String)=find(uiAutomation.rootInActiveWindow) { it.isVisibleToUser&&it.contentDescription?.toString()?.split(", ")?.contains(value)==true }
     private fun findEditable()=find(uiAutomation.rootInActiveWindow) { it.isVisibleToUser&&it.isEditable }
     private fun find(node:AccessibilityNodeInfo?,predicate:(AccessibilityNodeInfo)->Boolean):AccessibilityNodeInfo? { if(node==null)return null;if(predicate(node))return node;for(index in 0 until node.childCount)find(node.getChild(index),predicate)?.let { return it };return null }
     private fun clickText(value:String)=click(findText(value) ?: error("Missing text: $value"))
     private fun clickDescription(value:String)=click(findDescription(value) ?: error("Missing description: $value"))
-    private fun click(node:AccessibilityNodeInfo) { var current:AccessibilityNodeInfo?=node;while(current!=null) { if(current.actionList.any { it.id==AccessibilityNodeInfo.ACTION_CLICK }) {check(current.performAction(AccessibilityNodeInfo.ACTION_CLICK));return};current=current.parent };error("Missing clickable ancestor") }
+    private fun click(node:AccessibilityNodeInfo) { var current:AccessibilityNodeInfo?=node;while(current!=null) { File(targetContext.cacheDir,"chat-media-clicks.txt").appendText("candidate package=${current.packageName} class=${current.className} text=${current.text} desc=${current.contentDescription} bounds=${bounds(current)} actions=${current.actionList.joinToString { it.id.toString() }}\n");if(current.actionList.any { it.id==AccessibilityNodeInfo.ACTION_CLICK }) {check(current.performAction(AccessibilityNodeInfo.ACTION_CLICK));return};current=current.parent };error("Missing clickable ancestor") }
     private fun bounds(node:AccessibilityNodeInfo)=Rect().also { node.getBoundsInScreen(it) }
     private fun screenshot(name:String) { val bitmap=uiAutomation.takeScreenshot() ?: error("No screenshot");File(targetContext.cacheDir,"chat-media-$name.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) };bitmap.recycle() }
+    private fun diagnostic(name:String,screen:MainActivity) {
+        waitForIdleSync()
+        screenshot(name)
+        val tree=StringBuilder()
+        runOnMainSync {
+            val decor=screen.window.decorView
+            tree.append("activity=${System.identityHashCode(screen)} decor=${decor.width}x${decor.height} ime=${ViewCompat.getRootWindowInsets(decor)?.isVisible(WindowInsetsCompat.Type.ime())} focus=${decor.findFocus()?.javaClass?.simpleName} finishing=${screen.isFinishing} destroyed=${screen.isDestroyed}\n")
+        }
+        fun node(value:AccessibilityNodeInfo?,depth:Int) {
+            if(value==null)return
+            tree.append(" ".repeat(depth)).append(value.className).append(" package=").append(value.packageName).append(" text=").append(value.text).append(" desc=").append(value.contentDescription).append(" state=").append(if(android.os.Build.VERSION.SDK_INT>=30)value.stateDescription else "unknown").append(" visible=").append(value.isVisibleToUser).append(" bounds=").append(bounds(value)).append(" actions=").append(value.actionList.joinToString { it.id.toString() }).append('\n')
+            for(index in 0 until value.childCount)node(value.getChild(index),depth+1)
+        }
+        node(uiAutomation.rootInActiveWindow,0)
+        File(targetContext.cacheDir,"chat-media-$name.txt").writeText(tree.toString())
+    }
 }

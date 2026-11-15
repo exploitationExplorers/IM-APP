@@ -5,6 +5,7 @@ import IMCore
 final class NativeContactsViewController: NativeBusinessListController {
     private let service: NativeIMService
     private var contacts: [NativeContact] = []
+    private var contactTotal = 0
     private var cursor: String?
     private var sort = "recent"
     private let search = UITextField()
@@ -43,7 +44,11 @@ final class NativeContactsViewController: NativeBusinessListController {
             do {
                 let page = try await self.context.contacts(keyword: keyword, sort: order, cursor: next)
                 guard self.requestID == id else { return }
-                if reset { self.contacts = [] }; self.contacts += page.items; self.cursor = page.nextCursor
+                if reset { self.contacts = [] }
+                var seenContacts = Set(self.contacts.map(\.id))
+                self.contacts += page.items.filter { seenContacts.insert($0.id).inserted }
+                self.contactTotal = ContactCountPolicy.total(reported: page.total, previous: self.contactTotal, loaded: self.contacts.count, reset: reset)
+                self.cursor = page.nextCursor
                 if reset {
                     do {
                         var values: [NativeGroup] = []; var cursor: String?; var seen = Set<String>()
@@ -105,7 +110,7 @@ final class NativeContactsViewController: NativeBusinessListController {
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         let width = view.bounds.width, r: (CGFloat) -> CGFloat = { NativeUITheme.rpx($0, width: width) }
         let header = UIView(frame: CGRect(x: 0, y: 0, width: width, height: r(64))); header.backgroundColor = .white
-        let title = NativeUITheme.label("联络人 (\(contacts.count))", size: r(28), weight: .bold); title.frame = CGRect(x: r(40), y: 0, width: width / 2, height: r(48)); header.addSubview(title)
+        let title = NativeUITheme.label("联络人 (\(contactTotal))", size: r(28), weight: .bold); title.frame = CGRect(x: r(40), y: 0, width: width / 2, height: r(48)); header.addSubview(title)
         let button = UIButton(type: .system); button.setTitle(sort == "name" ? "名字 ▾" : sort == "chat" ? "最近聊天 ▾" : "最近加入（默认） ▾", for: .normal); button.setTitleColor(NativeUITheme.secondary, for: .normal); button.titleLabel?.font = .systemFont(ofSize: r(24)); button.frame = CGRect(x: width / 2, y: 0, width: width / 2 - r(32), height: r(48)); button.addAction(UIAction { [weak self, weak button] _ in if let button = button { self?.showSort(button) } }, for: .touchUpInside); header.addSubview(button); return header
     }
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat { NativeUITheme.rpx(64, width: view.bounds.width) }
