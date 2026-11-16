@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onLaunch, onShow } from '@dcloudio/uni-app'
+import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { useChatSettingsStore } from '@/stores/chatSettings'
@@ -12,6 +12,7 @@ import { warmMediaCache } from '@/utils/mediaCache'
 import { initPerfMonitoring } from '@/utils/perf'
 import { clearLoginPassword } from '@/utils/login-phone'
 import { clearOldPassword } from '@/utils/password-state'
+import { setIMBackgroundStatus } from '@/utils/openim'
 
 onLaunch(() => {
   setAuthExpiredHandler(() => {
@@ -54,11 +55,18 @@ onShow(() => {
   void checkAndPromptAppUpdate()
   // 回前台对齐聊天偏好（回车发送等），避免内存态被冲掉后开关自己变回去
   useChatSettingsStore().hydrate(true)
+  // 告知 SDK 已回前台：core 会唤醒数据补拉（iOS 后台冻结后靠这个恢复同步）
+  setIMBackgroundStatus(false)
   if (getToken()) {
     void useContactStore().loadFriendRequests().catch(() => undefined)
     // 回到前台补拉：漏掉推送时靠这一步自愈（内部有 3 秒节流）
     void useChatStore().resyncAfterResume()
   }
+})
+
+onHide(() => {
+  // 告知 SDK 进后台：iOS 挂起前把状态落给长连接管理器，避免回前台后同步状态错乱
+  setIMBackgroundStatus(true)
 })
 </script>
 

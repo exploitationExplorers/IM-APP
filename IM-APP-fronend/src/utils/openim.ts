@@ -898,6 +898,20 @@ export async function reconnectOpenIM(): Promise<void> {
   await ensureIMLogin()
 }
 
+/**
+ * 通知 SDK 当前前后台状态（仅 App 原生桥支持）。
+ *
+ * iOS 进后台后进程很快被系统冻结：不告知 SDK，回前台不会触发数据补拉，
+ * 分钟级的首次全量同步会被反复打断。core 收到 isBackground=false 会
+ * 唤醒数据同步（TriggerCmdWakeUpDataSync）。失败静默：不阻塞前后台切换。
+ */
+export function setIMBackgroundStatus(isBackground: boolean): void {
+  if (!isApp() || !imUserId.value) return
+  void imCall(IMMethods.SetAppBackgroundStatus, { isBackground }).catch((e) => {
+    devLog('[im] setAppBackgroundStatus failed', e)
+  })
+}
+
 /** 订阅 SDK 事件，返回取消订阅函数 */
 export function onIMEvent<T>(event: IMEvents, handler: (data: T) => void): () => void {
   const wrapped = (payload: Record<string, unknown>) => {
@@ -925,14 +939,37 @@ function parseEventData<T>(payload: Record<string, unknown>): T {
 // ---------------------------------------------------------------------------
 
 export async function getConversationList(offset = 0, count = 200): Promise<ConversationItem[]> {
-  try {
-    return await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
-  } catch (e) {
-    if (!isDatabaseClosedError(e) && !(isApp() && isLocalDatabaseWriteError(e))) throw e
-    await reopenClosedSdkDatabase()
-    return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      return await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+    } catch (e) {
+      lastErr = e
+      // 本地库被关/写失败：Logout→Login 重开后再试
+      if (isDatabaseClosedError(e) || (isApp() && isLocalDatabaseWriteError(e))) {
+        await reopenClosedSdkDatabase()
+        continue
+      }
+      // 10004/10005 资源未就绪：大账号首次全量同步要数分钟，先退避重试跨过窗口
+      if (isSdkResourceNotReady(e) && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt))
+        continue
+      }
+      // 预算耗尽仍 10004：不把资源未就绪抛给页面（上层会把 10004 当失败处理），
+      // 返回本地已有列表（可能为空），OnSyncServerFinish 后 stores/chat.ts 会自动重拉。
+      if (isSdkResourceNotReady(e)) {
+        console.warn('[im] conversation list before resource ready, render local only', e)
+        return []
+      }
+      throw e
+    }
   }
+  throw lastErr instanceof Error ? lastErr : new Error('getConversationList 重试后仍失败')
 }
+
+/** 资源未就绪触发重登的冷却期：大账号全量同步要数分钟，频繁 Logout→Login 会关掉本地库并从头同步，越登越慢 */
+const RESOURCE_RELOGIN_COOLDOWN_MS = 120_000
+let lastResourceReloginAt = 0
 
 /**
  * 按业务目标取会话，OpenIM 会在不存在时新建，无需先建群或建会话。
@@ -943,7 +980,8 @@ export async function getConversationList(offset = 0, count = 200): Promise<Conv
  * 修复策略：
  * 1. 先指数退避重试 4 次（300→600→1200→2400ms），自动跨过资源未就绪的窗口。
  * 2. 若仍 10004，多半是内存登录缓存认为已连上但 SDK 实际已掉线/资源从未同步，
- *    此时清空本地缓存并重新登录，再最后试一次。
+ *    此时清空本地缓存并重新登录，再最后试一次；冷却期内不再重复重登，
+ *    只提示「还在同步」，等 OnSyncServerFinish 自动恢复。
  * 3. 非 10004 的错误（如目标不可聊）立即上抛。
  */
 export async function getOneConversation(
@@ -966,8 +1004,13 @@ export async function getOneConversation(
         await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)))
         continue
       }
+      // 冷却期内不再重登：Logout 会关库，Login 又把大账号从头同步，反复重登只会更慢
+      if (Date.now() - lastResourceReloginAt < RESOURCE_RELOGIN_COOLDOWN_MS) {
+        throw new Error('聊天记录还在同步，请稍后再试')
+      }
       // 重试耗尽：清缓存、重新登录并等待资源同步完成后再最后试一次。
       // 否则 doLogin 的缓存复用分支会跳过同步等待，仍可能立即 10004。
+      lastResourceReloginAt = Date.now()
       resetLoginCache()
       await ensureIMLogin()
       await waitForSync(5000)
