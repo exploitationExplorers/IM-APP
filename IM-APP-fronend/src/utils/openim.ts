@@ -690,6 +690,9 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
 
 async function initAppSdk(imToken: IMTokenResult): Promise<void> {
   if (!isApp()) return
+  // 必须在 InitSDK / Login 之前订阅：登录触发的 OnSyncServerStart/Progress
+  // 早于任何业务页面调用，注册晚了整轮同步的进度事件就全丢了（页面只会显示「请稍候」）。
+  setupConnectionWatchers()
   const epoch = loginEpoch
   // SDK 在目录内按 userID 区分数据库；换号不会改变原生桥首次接收的 dataDir。
   const ownerId = appSdkDirectory?.ownerId || imToken.userId

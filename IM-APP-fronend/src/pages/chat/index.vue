@@ -526,6 +526,13 @@ const filtered = computed(() => {
 const showSyncPending = computed(
   () => !filtered.value.length && filterKey.value === 'all' && imSyncing.value,
 )
+/** 进度条宽度：0% 时也留一点，避免看起来像没反应 */
+const syncBannerPercent = computed(() => Math.min(100, Math.max(3, imSyncProgress.value)))
+const syncBannerText = computed(() => {
+  const p = imSyncProgress.value
+  if (p >= 100) return '消息同步完成'
+  return p > 0 ? `正在同步消息 ${p}%` : '正在同步消息…'
+})
 const syncEmptyTitle = computed(() => {
   const p = imSyncProgress.value
   return p > 0 && p < 100 ? `正在同步聊天记录 ${p}%，请稍候…` : '正在同步聊天记录，请稍候…'
@@ -1040,6 +1047,21 @@ watchEffect(() => {
         placeholder="搜索聊天 / 关键词"
       />
 
+      <view
+        v-if="imSyncing"
+        class="sync-banner"
+      >
+        <view class="sync-banner-bar">
+          <view
+            class="sync-banner-fill"
+            :style="{ width: syncBannerPercent + '%' }"
+          />
+        </view>
+        <view class="sync-banner-text">
+          {{ syncBannerText }}
+        </view>
+      </view>
+
       <view class="filter-row">
         <view
           v-if="chatStore.totalUnread > 0"
@@ -1431,6 +1453,33 @@ watchEffect(() => {
   font-size: 24rpx;
   line-height: 1.6;
   color: #9aa0ad;
+}
+
+.sync-banner {
+  margin: 12rpx 24rpx 4rpx;
+  padding: 16rpx 20rpx;
+  background: #f2f6ff;
+  border-radius: 12rpx;
+}
+
+.sync-banner-bar {
+  height: 6rpx;
+  border-radius: 3rpx;
+  background: rgba(59, 124, 255, 0.16);
+  overflow: hidden;
+}
+
+.sync-banner-fill {
+  height: 100%;
+  border-radius: 3rpx;
+  background: #3b7cff;
+  transition: width 0.3s ease;
+}
+
+.sync-banner-text {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #4a5670;
 }
 
 .search-footer {
