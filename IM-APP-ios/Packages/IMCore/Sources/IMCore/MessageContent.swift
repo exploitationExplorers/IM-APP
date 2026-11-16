@@ -68,7 +68,9 @@ public struct ForwardMessageSnapshot: Codable, Equatable, Sendable {
         for key in ["sourcePicture", "bigPicture", "snapshotPicture"] {
             guard case .object(let from)? = source[key], case .object(let to)? = destination[key],
                   case .string(let original)? = from["url"], case .string(let rewritten)? = to["url"], !original.isEmpty, !rewritten.isEmpty else { continue }
-            copies.append((original, rewritten))
+            if !copies.contains(where: { $0.source == original && $0.destination == rewritten }) {
+                copies.append((original, rewritten))
+            }
         }
         return copies
     }

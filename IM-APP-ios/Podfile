@@ -8,3 +8,31 @@ target 'IMNative' do
   pod 'OpenIMSDK', '3.8.3-hotfix.15'
   pod 'OpenIMSDKCore', '3.8.3-hotfix.15'
 end
+
+# Match the app deployment floor; recent Xcode rejects older Pod targets.
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |configuration|
+      deployment_target = configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+      if deployment_target.nil? || Gem::Version.new(deployment_target) < Gem::Version.new('15.0')
+        configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      end
+    end
+  end
+end
+
+# Make the SDK build order explicit; GUI builds can otherwise skip Pods.
+# Resolve the generated target after every install instead of pinning its UUID.
+post_integrate do |installer|
+  installer.aggregate_targets.each do |aggregate|
+    next unless aggregate.name == 'Pods-IMNative'
+    project = aggregate.user_project
+    pods_target = installer.pods_project.targets.find { |target| target.name == aggregate.name }
+    raise 'Missing Pods-IMNative target' unless pods_target
+    unless project.reference_for_path(installer.pods_project.path)
+      project.main_group.new_reference(installer.pods_project.path.to_s)
+    end
+    aggregate.user_targets.each { |target| target.add_dependency(pods_target) }
+    project.save
+  end
+end

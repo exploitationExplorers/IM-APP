@@ -126,7 +126,7 @@ public enum IMEndpointPolicy {
         let business = URLComponents(url: businessBaseURL, resolvingAgainstBaseURL: false)
         let legacyScheme = webSocket ? "ws" : "http"
         let legacyPath = webSocket ? "/openim-ws" : "/openim-api"
-        guard business?.scheme?.lowercased() == "https", business?.host?.lowercased() == "www.xn--jprz53bj9s.com",
+        guard business?.scheme?.lowercased() == "https", business?.url?.host?.lowercased() == "www.xn--jprz53bj9s.com",
               business?.port == nil || business?.port == 443,
               source.scheme?.lowercased() == legacyScheme, host == "8.154.44.197",
               source.port == nil || source.port == 80,

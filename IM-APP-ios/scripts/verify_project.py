@@ -21,10 +21,12 @@ class IOSProjectStaticTests(unittest.TestCase):
         cls.project = PROJECT.read_text(encoding="utf-8")
 
     def test_project_object_references_are_defined(self):
-        definitions = re.findall(r"^\s*([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{", self.project, re.M)
+        definitions = re.findall(r"^\s*([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{\s*isa\s*=", self.project, re.M)
         references = set(re.findall(r"\b[A-F0-9]{24}\b", self.project))
         self.assertEqual(len(definitions), len(set(definitions)))
-        self.assertEqual(references, set(definitions))
+        # Cross-project target/product proxies reference IDs defined by Pods.
+        external = set(re.findall(r"remoteGlobalIDString = ([A-F0-9]{24});", self.project))
+        self.assertEqual(references - external, set(definitions))
         # 忽略字符串和注释后检查 OpenStep 容器配对，不声称完成编译器语义检查。
         stripped = re.sub(r'"(?:\\.|[^"\\])*"', '""', self.project)
         stripped = re.sub(r"/\*.*?\*/|//[^\n]*", "", stripped, flags=re.S)
@@ -40,7 +42,7 @@ class IOSProjectStaticTests(unittest.TestCase):
         source_phase = re.search(r"isa = PBXSourcesBuildPhase;.*?files = \((.*?)\);", self.project, re.S).group(1)
         sources = sorted((IOS / "IMNative").glob("*.swift")) + sorted((IOS / "IMNative").glob("*.m"))
         for source in sources:
-            reference = re.search(r"([A-F0-9]{24})\s*=\s*\{isa = PBXFileReference;[^}]*path = " + re.escape(source.name) + r";", self.project)
+            reference = re.search(r"([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{\s*isa = PBXFileReference;[^}]*path = " + re.escape(source.name) + r";", self.project)
             self.assertIsNotNone(reference, source.name)
             build = re.search(r"([A-F0-9]{24})\s*/\*.*?\*/\s*=\s*\{isa = PBXBuildFile; fileRef = " + reference.group(1), self.project)
             self.assertIsNotNone(build, source.name)
@@ -48,8 +50,8 @@ class IOSProjectStaticTests(unittest.TestCase):
         self.assertIn("path = Info.plist", self.project)
 
     def test_app_links_local_core_package_and_scheme(self):
-        self.assertIn("isa = XCLocalSwiftPackageReference; relativePath = Packages/IMCore", self.project)
-        self.assertIn("packageProductDependencies = (AC0000000000000000000001", self.project)
+        self.assertRegex(self.project, r"isa = XCLocalSwiftPackageReference;\s*relativePath = Packages/IMCore")
+        self.assertRegex(self.project, r"packageProductDependencies = \(\s*AC0000000000000000000001")
         self.assertIn("productRef = AC0000000000000000000001", self.project)
         self.assertIn("import IMCore", (IOS / "IMNative/LoginViewController.swift").read_text(encoding="utf-8"))
         scheme = ET.parse(IOS / "IMNative.xcodeproj/xcshareddata/xcschemes/IMNative.xcscheme")
@@ -128,7 +130,7 @@ class IOSProjectStaticTests(unittest.TestCase):
     def test_ui_assets_are_bundled_and_referenced_files_exist(self):
         resources = re.search(r"isa = PBXResourcesBuildPhase;.*?files = \((.*?)\);", self.project, re.S).group(1)
         for name in ["Assets.xcassets", "Legal"]:
-            reference = re.search(r"([A-F0-9]{24})\s*=\s*\{isa = PBXFileReference;[^}]*path = " + re.escape(name) + r";", self.project)
+            reference = re.search(r"([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{\s*isa = PBXFileReference;[^}]*path = " + re.escape(name) + r";", self.project)
             self.assertIsNotNone(reference, name)
             build = re.search(r"([A-F0-9]{24})\s*/\*.*?\*/\s*=\s*\{isa = PBXBuildFile; fileRef = " + reference.group(1), self.project)
             self.assertIsNotNone(build, name)
@@ -156,8 +158,13 @@ class IOSProjectStaticTests(unittest.TestCase):
         self.assertIn("decisionHandler(.cancel)", source)
 
     def test_release_guard_rejects_release_and_archive(self):
-        encoded = re.search(r'shellScript = ("(?:\\.|[^"\\])*");', self.project).group(1)
-        script = json.loads(encoded)
+        # CocoaPods inserts its own shell phases; execute only the release guard.
+        guard = re.search(
+            r'isa = PBXShellScriptBuildPhase;(?:(?!\n\s*};).)*?'
+            r'name = "Block unconfigured production release";(?:(?!\n\s*};).)*?'
+            r'shellScript = ("(?:\\.|[^"\\])*");', self.project, re.S)
+        self.assertIsNotNone(guard, "Release/Archive guard phase must exist")
+        script = json.loads(guard.group(1))
         shell = "/bin/sh" if os.name != "nt" else r"C:\Program Files\Git\bin\bash.exe"
         if not Path(shell).is_file():
             self.skipTest("本机无可执行 POSIX shell；发布脚本运行待验证")

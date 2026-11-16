@@ -42,7 +42,7 @@ final class NativeMentionPicker: NativeBusinessListController, UISearchResultsUp
 @MainActor
 final class NativeMergedMessagesController: NativeBusinessListController {
     private let service: NativeIMService; private let source: ChatTextItem; private let depth: Int
-    private var children: [[String: Any]]?; private var loaded: [ChatTextItem] = []
+    private var mergedMessages: [[String: Any]]?; private var loaded: [ChatTextItem] = []
     init(service: NativeIMService, source: ChatTextItem, depth: Int = 0) { self.service = service; self.source = source; self.depth = depth; super.init(title: "聊天记录", context: service.business) }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func reloadContent() {
@@ -52,17 +52,17 @@ final class NativeMergedMessagesController: NativeBusinessListController {
             var raw = merge["multiMessage"] ?? merge["MultiMessage"]
             if let text = raw as? String, let data = text.data(using: .utf8) { raw = try JSONSerialization.jsonObject(with: data) }
             guard let children = raw as? [[String: Any]] else { throw APIError.invalidResponse }
-            if self.children == nil { self.children = children; try loadMore() } else { render() }
+            if self.mergedMessages == nil { self.mergedMessages = children; try loadMore() } else { render() }
         } catch { showNativeNotice(error.localizedDescription) }
     }
     private func loadMore() throws {
-        guard let children = children else { return }
+        guard let children = mergedMessages else { return }
         let next = try children.dropFirst(loaded.count).prefix(40).map { value -> ChatTextItem in let data = try JSONSerialization.data(withJSONObject: value); guard let item = service.unpackMessage(String(decoding: data, as: UTF8.self)) else { throw APIError.invalidResponse }; return item }
         loaded += next; render()
     }
     private func render() {
         var rows = loaded.map { item in NativeBusinessRow(title: item.senderName + "：" + item.text, detail: Date(timeIntervalSince1970: Double(item.timestamp) / 1000).formatted(), avatar: item.avatar, action: { [weak self] in self?.open(item) }) }
-        if loaded.count < (children?.count ?? 0) { rows.append(NativeBusinessRow(title: "加载更多", detail: "\(loaded.count)/\(children?.count ?? 0)", action: { [weak self] in do { try self?.loadMore() } catch { self?.showNativeNotice(error.localizedDescription) } })) }; setRows([rows])
+        if loaded.count < (mergedMessages?.count ?? 0) { rows.append(NativeBusinessRow(title: "加载更多", detail: "\(loaded.count)/\(mergedMessages?.count ?? 0)", action: { [weak self] in do { try self?.loadMore() } catch { self?.showNativeNotice(error.localizedDescription) } })) }; setRows([rows])
     }
     private func open(_ item: ChatTextItem) {
         if item.contentType == 107 { push(NativeMergedMessagesController(service: service, source: item, depth: depth + 1)); return }
