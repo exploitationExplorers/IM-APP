@@ -6,7 +6,10 @@ workspace 'IMNative'
 target 'IMNative' do
   use_frameworks! :linkage => :static
   pod 'OpenIMSDK', '3.8.3-hotfix.15'
-  pod 'OpenIMSDKCore', '3.8.3-hotfix.15'
+  # 内存修复版 core（yike memfix，ee4469a）：:podspec 覆盖下载源指向自维护产物。
+  # 回滚：删掉 :podspec => 参数即回到官方 3.8.3-hotfix.15 产物。
+  # 外部 podspec 不再重复传版本参数；版本由 podspec 和包装层依赖固定。
+  pod 'OpenIMSDKCore', :podspec => 'podspecs/OpenIMSDKCore.podspec'
 end
 
 # Match the app deployment floor; recent Xcode rejects older Pod targets.

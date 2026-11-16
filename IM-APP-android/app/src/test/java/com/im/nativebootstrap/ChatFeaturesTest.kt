@@ -753,11 +753,12 @@ class ChatFeaturesTest {
     @Test fun queuedServerForwardOnlyAnnouncesSuccessAfterMatchedCompleteCountsAndIgnoresOptionalCacheFailure() {
         val response=java.util.concurrent.atomic.AtomicReference(serverProgress())
         val h=queuedServerForward(response,cacheFails=true)
+        val id=h.state.pendingForwards.single().id
         assertEquals("processing",queryLocalForward(h).status)
         assertEquals("",h.state.forwardSuccessId)
         response.set(serverProgress("completed",success=2,pending=0))
         assertEquals("completed",queryLocalForward(h).status)
-        assertEquals(h.state.pendingForwards.single().id,h.state.forwardSuccessId)
+        assertEquals(id,h.awaitState { it.forwardSuccessId==id }.forwardSuccessId)
     }
     @Test fun mismatchedOrIncompleteServerCompletionNeverAnnouncesSuccess() {
         val invalid=listOf(
@@ -779,9 +780,10 @@ class ChatFeaturesTest {
     @Test fun matchedServerPartialFailureReportsFailureRatherThanSuccess() {
         val raw=serverProgress("partially_completed",success=1,pending=0).apply { addProperty("failedCount",1) }
         val h=queuedServerForward(java.util.concurrent.atomic.AtomicReference(raw))
+        val id=h.state.pendingForwards.single().id
         assertEquals("failed",queryLocalForward(h).status)
         assertEquals("",h.state.forwardSuccessId)
-        assertEquals(h.state.pendingForwards.single().id,h.state.forwardFailureId)
+        assertEquals(id,h.awaitState { it.forwardFailureId==id }.forwardFailureId)
     }
     @Test fun groupMenuDoesNotGrantAdministratorsAuthorityOverOtherAdmins() {
         val h=Harness(true);h.controller.open(h.gateway.peerResult)
@@ -948,5 +950,15 @@ class ChatFeaturesTest {
         val callbacks=mutableListOf<Boolean>()
         assertFalse(h.controller.sendMedia(LocalMedia(File(h.root,"draft"),"draft","audio/mp4",MediaKind.VOICE)) { callbacks+=it })
         assertEquals(listOf(false),callbacks);assertEquals(0,h.gateway.sendCount)
+    }
+    @Test fun roomReadRequestsAreCoalescedWithinTheBurstWindow() {
+        val h=Harness()
+        h.controller.open(h.gateway.peerResult)
+        val before=h.gateway.readCount
+        val target=h.gateway.peerResult.target
+        h.gateway.events.messages(listOf(target to ChatMessage("burst-1","a",false,100,seq=1)))
+        h.gateway.events.messages(listOf(target to ChatMessage("burst-2","b",false,101,seq=2)))
+        assertEquals("A burst must not issue one SDK markRead per message",before,h.gateway.readCount)
+        h.controller.logout()
     }
 }

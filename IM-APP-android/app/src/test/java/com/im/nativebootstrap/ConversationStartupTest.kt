@@ -120,7 +120,7 @@ class ConversationStartupTest {
         h.gateway.events.conversations(rows.takeLast(9))
         h.gateway.login(Result.success(Unit))
         h.gateway.events.conversations(rows.take(7).map {it.copy(unread=3)})
-        assertTrue(h.publishes.all {it.conversations.isEmpty()})
+        assertTrue("Sync events must be visible before the final snapshot",h.publishes.any {it.conversations.isNotEmpty()})
         h.gateway.snapshots.single()(Result.success(ConversationSnapshotPage(rows.shuffled(java.util.Random(17)),true)))
         val expected=rows.sortedWith(compareByDescending<ChatConversation>{it.pinned}.thenByDescending {it.time})
         assertEquals(expected.map {it.target},h.state.conversations.map {it.target})
@@ -131,11 +131,12 @@ class ConversationStartupTest {
         assertEquals(SyncStatus.RUNNING,h.state.sync)
         assertEquals(ConnectionState.DISCONNECTED,h.state.connection)
         assertTrue(h.state.conversationsEnd)
+        val afterSnapshot=h.publishes.size
         h.controller.loadConversations()
         assertEquals(1,h.gateway.snapshots.size)
         for(batch in rows.chunked(27).reversed())h.gateway.events.conversations(batch.reversed().map {it.copy(unread=5)})
         assertEquals(expected.map {it.target},h.state.conversations.map {it.target})
-        assertTrue(h.publishes.filter {it.conversations.isNotEmpty()}.all {it.conversations.size==243})
+        assertTrue(h.publishes.drop(afterSnapshot).filter {it.conversations.isNotEmpty()}.all {it.conversations.size==243})
         h.gateway.events.syncFinished()
         assertEquals(2,h.gateway.snapshots.size)
         assertEquals(243,h.state.conversations.size)
@@ -145,6 +146,15 @@ class ConversationStartupTest {
         h.gateway.events.conversations(listOf(newMessage))
         assertEquals(newMessage.target,h.state.conversations[3].target)
     }
+    @Test fun syncProgressSnapshotShowsRowsBeforeLoginOrInitialQueryCompletes() {
+        val h=Harness();h.gateway.events.syncStarted()
+        val rows=(1..5).map(::row)
+        h.gateway.events.conversationSnapshot(rows)
+        assertEquals(5,h.state.conversations.size)
+        assertEquals(rows.first().target,h.state.conversations.first {it.target==rows.first().target}.target)
+        assertTrue(h.state.conversations.any {it.target==rows.last().target})
+        assertFalse(h.state.ready)
+    }
     @Test fun snapshotFailureCanRetryAndEventsDuringRetryOverrideStaleRows() {
         val h=Harness();h.gateway.login(Result.success(Unit))
         h.gateway.snapshots.single()(Result.failure(ChatFailure(10004)))
@@ -153,7 +163,7 @@ class ConversationStartupTest {
         h.controller.loadConversations(true)
         val changed=row(1).copy(pinned=true,unread=7,time=row(2).time+1000)
         h.gateway.events.conversations(listOf(changed))
-        assertTrue(h.state.conversations.isEmpty())
+        assertEquals(listOf(changed),h.state.conversations)
         h.gateway.snapshots.last()(Result.success(ConversationSnapshotPage(listOf(row(2),row(1)),true)))
         assertEquals(changed,h.state.conversations.first())
         assertTrue(h.state.ready)

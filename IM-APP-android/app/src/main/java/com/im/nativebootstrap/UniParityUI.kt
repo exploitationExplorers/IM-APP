@@ -317,7 +317,7 @@ private fun LegalSheet(kind: String, dismiss: () -> Unit) {
 @Composable
 internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniScale, tab: String, changeTab: (String) -> Unit, toast: (String) -> Unit,onSearch:()->Unit={},businessController:BusinessController=model.business) {
     val rows=state.chat.conversations
-    val unreadTotal=remember(rows) {rows.sumOf {it.unread.coerceAtLeast(0).toLong()}.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()}
+    val unreadSummary=remember(rows) {chatUnreadSummary(rows)}
     val contactOrder=remember(rows) {rows.filter {it.target.sessionType==1}.map {businessUserId(it.target.userId)}}
     var addMenu by remember { mutableStateOf(false) }
     var moreMenu by remember{mutableStateOf(false)}
@@ -367,7 +367,7 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
             tabs.forEach { (id, name, image) -> Column(Modifier.widthIn(min = s.dp(120)).fillMaxHeight().clickable { changeTab(id) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Box(Modifier.size(s.dp(48))) {
                     Image(painterResource(image), null, Modifier.fillMaxSize())
-                    if(id=="chat")NativeUnreadBadge(unreadTotal,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true)
+                    if(id=="chat")NativeUnreadBadge(if(unreadSummary.mutedOnly)1 else unreadSummary.count,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true,muted=unreadSummary.mutedOnly)
                 }
                 Text(name, Modifier.padding(top = s.dp(4)), color = if (tab == id) Primary else Ink, fontSize = s.text(24), lineHeight = s.text(32))
             } }
@@ -386,6 +386,8 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
     val visibleRows=remember(state.chat.conversations,filterUnread,query) {
         if(!filterUnread&&query.isBlank())state.chat.conversations else state.chat.conversations.filter {(!filterUnread||it.unread>0)&&(query.isBlank()||it.title.contains(query,true)||it.preview.contains(query,true))}
     }
+    val loadingEmpty=!state.sample&&state.chat.conversations.isEmpty()&&state.chat.error==null&&
+        (state.chat.conversationsLoading||state.chat.sync==SyncStatus.RUNNING)
     val hasUnread=remember(state.chat.conversations) {state.chat.conversations.any {it.unread>0}}
     val searchGroups=remember(hits) {hits.groupBy {it.conversation.target.conversationId}.values.toList()}
     fun searchMore(reset:Boolean=false){
@@ -437,7 +439,9 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
                     }
                     item{Text(if(searching)"搜索中…" else if(searchError.isNotBlank())searchError+" · 重试" else if(searchEnd)"没有更多了" else "点击查找更早的聊天记录",Modifier.fillMaxWidth().clickable(enabled=!searching){searchMore()}.padding(s.dp(28)).wrapContentWidth(),fontSize=s.text(24),color=Hint)}
                 }
-                if(state.chat.conversations.isEmpty()||!state.chat.conversationsEnd)item {
+                if(loadingEmpty) {
+                    items(count=6,key={"conversation-skeleton-$it"}) { ConversationSkeletonRow(s) }
+                } else if(state.chat.conversations.isEmpty()||!state.chat.conversationsEnd)item {
                     val syncingEmpty=state.chat.conversations.isEmpty()&&state.chat.sync==SyncStatus.RUNNING
                     Text(when {syncingEmpty->"正在同步会话…";state.chat.conversationsLoading->"正在读取…";state.chat.conversations.isEmpty()&&state.chat.error!=null->"会话读取未完成，点击重试";state.chat.conversations.isEmpty()&&state.chat.sync==SyncStatus.IDLE&&state.chat.connection in setOf(ConnectionState.CONNECTING,ConnectionState.CONNECTED)->"正在准备会话…";state.chat.conversations.isEmpty()->"暂无对话";else->"加载更多会话" },Modifier.fillMaxWidth().clickable(enabled=state.chat.loggedIn&&!state.chat.conversationsLoading&&!syncingEmpty) { model.loadConversations(state.chat.conversations.isEmpty()) }.padding(s.dp(32)).wrapContentWidth(),fontSize=s.text(26),color=Hint)
                 }
@@ -455,6 +459,17 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
                 Text("本地样例，仅在本机内存中", Modifier.padding(top = s.dp(12)), fontSize = s.text(26), color = Color(0xFF999999), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         } else Text(if (state.sample) "暂无对话…" else "聊天功能接入中", Modifier.fillMaxWidth().padding(vertical = s.dp(80)).wrapContentWidth(), fontSize = s.text(32))
+    }
+}
+
+@Composable
+private fun ConversationSkeletonRow(s:UniScale) {
+    Row(Modifier.fillMaxWidth().padding(horizontal=s.dp(40),vertical=s.dp(24)),verticalAlignment=Alignment.CenterVertically) {
+        Box(Modifier.size(s.dp(96)).clip(CircleShape).background(Color(0xFFEDF0F5)))
+        Column(Modifier.weight(1f).padding(start=s.dp(24))) {
+            Box(Modifier.fillMaxWidth(.46f).height(s.dp(24)).clip(RoundedCornerShape(s.dp(6))).background(Color(0xFFEDF0F5)))
+            Box(Modifier.fillMaxWidth(.76f).padding(top=s.dp(16)).height(s.dp(20)).clip(RoundedCornerShape(s.dp(6))).background(Color(0xFFF2F4F8)))
+        }
     }
 }
 
@@ -543,6 +558,15 @@ internal fun NativeUnreadBadge(count:Int,s:UniScale,modifier:Modifier=Modifier,w
     Box(modifier.size(width=if(wide&&count>99)26.dp else height,height=height).clip(CircleShape).background(Color(0xFFEF4444)).semantics { contentDescription=if(muted)"免打扰，有未读消息" else "未读 $label" },contentAlignment=Alignment.Center) {
         if(!muted)Text(label,fontSize=((if(count>99)8f else 10f)/fontScale).sp,lineHeight=(12f/fontScale).sp,color=Color.White,maxLines=1,softWrap=false,textAlign=TextAlign.Center,style=TextStyle(platformStyle=PlatformTextStyle(includeFontPadding=false)))
     }
+}
+
+internal data class ChatUnreadSummary(val count:Int,val mutedOnly:Boolean)
+
+/** 底部聊天角标只累计非免打扰未读；只有免打扰未读时退化为红点。 */
+internal fun chatUnreadSummary(items:List<ChatConversation>):ChatUnreadSummary {
+    val count=items.asSequence().filterNot {it.muted}.sumOf {it.unread.coerceAtLeast(0).toLong()}.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    val mutedOnly=count==0&&items.any {it.muted&&it.unread>0}
+    return ChatUnreadSummary(count,mutedOnly)
 }
 
 @Composable

@@ -48,6 +48,13 @@ class GroupPurgesTest {
         assertEquals("",store.conversation(old).preview)
         assertEquals("新消息",store.conversation(old.copy(preview="新消息",latestMessage=message(boundary+1))).preview)
     }
+    @Test fun lightweightConversationLatestUsesSenderIdWithoutSerializedJson() {
+        val store=GroupPurges(File(temporary.newFolder(),"purges.json"),"owner")
+        store.merge(group,listOf(GroupMessagePurge(user,boundary)))
+        val latest=ChatMessage("latest","历史",false,boundary-1,seq=10,serialized="",senderId=imId,contentType=101)
+        assertFalse(store.permits(target,latest))
+        assertTrue(store.permits(target,latest.copy(time=boundary)))
+    }
     @Test fun malformedDuplicateAndNonBusinessMemberRecordsAreRejectedAsOneBatch() {
         val valid="""{"userId":"$user","purgedAt":"$stamp"}"""
         assertEquals(boundary,GroupPurges.parse(JsonParser.parseString("[$valid]").asJsonArray).single().beforeMillis)

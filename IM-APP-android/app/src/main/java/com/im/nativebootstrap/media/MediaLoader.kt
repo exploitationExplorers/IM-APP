@@ -15,6 +15,7 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import coil.size.Scale
+import com.im.nativebootstrap.PerfLog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -56,7 +57,7 @@ internal class MediaImagePipeline(context: Context, client: okhttp3.OkHttpClient
     private data class Flight(val task: Deferred<MediaVisual>, var consumers: Int, var animationClaimed: Boolean = false)
     private val flights = mutableMapOf<String, Flight>()
     private val imageSlots = Semaphore(4)
-    private val avatarSlots = Semaphore(1)
+    private val avatarSlots = Semaphore(3)
     private val cacheSlots = Semaphore(2)
     fun peek(id: String, edge: Int): MediaVisual? = loader.memoryCache?.get(MemoryCache.Key(memoryKey(id, edge)))
         ?.let { MediaVisual(bitmap = it.bitmap) }
@@ -148,6 +149,7 @@ internal class MediaImagePipeline(context: Context, client: okhttp3.OkHttpClient
             if (result is ErrorResult) throw result.throwable
             result as SuccessResult
             MediaMetrics.record(id, result.dataSource.name, (System.nanoTime() - started) / 1_000_000)
+            if(edge<=128)PerfLog.mark("media:avatar-ok","host=${runCatching {java.net.URI(url).host}.getOrNull().orEmpty()} src=${result.dataSource.name}")
             return visual(result.drawable)
         } catch (cancelled: CancellationException) {
             MediaMetrics.record(id, "CANCELLED", (System.nanoTime() - started) / 1_000_000); throw cancelled
@@ -155,6 +157,7 @@ internal class MediaImagePipeline(context: Context, client: okhttp3.OkHttpClient
             // 网络失败不删除并发写入的有效项；只由纯本地解码确认坏数据后移除该项。
             cached(context,id,edge)?.let { return it }
             MediaMetrics.record(id, "FAILED", (System.nanoTime() - started) / 1_000_000)
+            if(edge<=128)PerfLog.mark("media:avatar-failed","host=${runCatching {java.net.URI(url).host}.getOrNull().orEmpty()}")
             throw error
         }
     }

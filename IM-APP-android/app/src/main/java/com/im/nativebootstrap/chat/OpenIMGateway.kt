@@ -1,7 +1,14 @@
 package com.im.nativebootstrap.chat
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
+import com.im.nativebootstrap.PerfLog
+import com.im.nativebootstrap.data.APIRequest
+import com.im.nativebootstrap.data.URLConnectionTransport
 import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import io.openim.android.sdk.OpenIMClient
 import io.openim.android.sdk.enums.LogLevel
 import io.openim.android.sdk.enums.ViewType
@@ -9,6 +16,7 @@ import io.openim.android.sdk.listener.*
 import io.openim.android.sdk.models.*
 import open_im_sdk.Open_im_sdk
 import java.io.File
+import java.net.URI
 import java.util.UUID
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
@@ -17,6 +25,8 @@ import java.util.concurrent.RejectedExecutionException
 import com.im.nativebootstrap.media.MediaKind
 import com.im.nativebootstrap.media.UploadedMedia
 import com.im.nativebootstrap.media.MessageContents
+import com.im.nativebootstrap.media.field
+import com.im.nativebootstrap.media.parseObject
 import com.im.nativebootstrap.media.obj
 import com.im.nativebootstrap.media.string
 import com.im.nativebootstrap.media.number
@@ -54,12 +64,34 @@ class OpenIMGateway(private val application:Application):ChatGateway {
     private var initialized=false
     private val conversationMapping=ConversationMappingQueue()
     private var watchedPeer:String?=null
+    private val liveHandler=Handler(Looper.getMainLooper())
+    private val liveLock=Any()
+    private val liveBatch=mutableListOf<Pair<ChatTarget,ChatMessage>>()
+    private var liveScheduled=false
+    private var liveEvents:ChatEvents?=null
+    private val syncSnapshotLock=Any()
+    private var syncSnapshotInFlight=false
+    private var syncSnapshotAt=0L
+    private val flushLive=object:Runnable {
+        override fun run()=flushLiveMessages()
+    }
     private fun <T> base(done:(Result<T>)->Unit)=object:OnBase<T> {
         override fun onSuccess(data:T) { done(Result.success(data)) }
         override fun onError(code:Int,error:String?) { done(Result.failure(ChatFailure(code))) }
     }
     override fun start(userId:String,token:String,api:String,ws:String,directory:File,events:ChatEvents,done:(Result<Unit>)->Unit) {
+        PerfLog.mark("gateway:start-begin")
         this.userId=userId
+        synchronized(liveLock) {
+            liveHandler.removeCallbacks(flushLive)
+            liveBatch.clear()
+            liveScheduled=false
+            liveEvents=events
+        }
+        synchronized(syncSnapshotLock) {
+            syncSnapshotInFlight=false
+            syncSnapshotAt=0L
+        }
         val mappingOwner=conversationMapping.bind(userId)
         try {
             val config=InitConfig(api,ws,directory.absolutePath).apply {
@@ -76,15 +108,28 @@ class OpenIMGateway(private val application:Application):ChatGateway {
                 override fun onUserTokenInvalid(error:String?)=events.connection(ConnectionState.AUTH_REQUIRED)
             })
             check(initialized) { "聊天初始化失败" }
+            PerfLog.mark("gateway:init-sdk-done")
             client.userInfoManager.setOnUserListener(object:OnUserListener {
                 override fun onUserStatusChanged(status:UsersOnlineStatus?) { status?.userID?.takeIf { it.isNotBlank() }?.let { events.peerStatus(it,status.status==1) } }
             })
             client.conversationManager.setOnConversationListener(object:OnConversationListener {
                 override fun onConversationChanged(items:MutableList<ConversationInfo>?)=enqueueConversations(mappingOwner,items.orEmpty().toList(),events::conversations)
                 override fun onNewConversation(items:MutableList<ConversationInfo>?)=enqueueConversations(mappingOwner,items.orEmpty().toList(),events::conversations)
-                override fun onSyncServerStart(reinstalled:Boolean)=conversationMapping.execute(mappingOwner) {events.syncStarted()}
-                override fun onSyncServerProgress(progress:Long)=conversationMapping.execute(mappingOwner) {events.syncProgress(progress)}
-                override fun onSyncServerFinish(reinstalled:Boolean)=conversationMapping.execute(mappingOwner) {events.syncFinished()}
+                override fun onSyncServerStart(reinstalled:Boolean) {
+                    PerfLog.mark("gateway:sync-start")
+                    conversationMapping.execute(mappingOwner) {events.syncStarted()}
+                    publishConversationSnapshot(mappingOwner,events)
+                }
+                override fun onSyncServerProgress(progress:Long) {
+                    PerfLog.mark("gateway:sync-progress", "value=$progress")
+                    conversationMapping.execute(mappingOwner) {events.syncProgress(progress)}
+                    publishConversationSnapshot(mappingOwner,events)
+                }
+                override fun onSyncServerFinish(reinstalled:Boolean) {
+                    PerfLog.mark("gateway:sync-finish")
+                    conversationMapping.execute(mappingOwner) {events.syncFinished()}
+                    publishConversationSnapshot(mappingOwner,events,force=true)
+                }
                 override fun onSyncServerFailed(reinstalled:Boolean)=conversationMapping.execute(mappingOwner) {events.syncFailed()}
             })
             client.messageManager.setAdvancedMsgListener(object:OnAdvanceMsgListener {
@@ -92,8 +137,11 @@ class OpenIMGateway(private val application:Application):ChatGateway {
                 override fun onRecvGroupMessageReadReceipt(receipt:GroupMessageReceipt?) { events.read(receipt?.groupMessageReadInfo.orEmpty().filter { it.hasReadCount>0 }.mapNotNull { it.clientMsgID?.takeIf(String::isNotEmpty) }) }
                 override fun onRecvMessageRevokedV2(info:RevokedInfo?) { info?.clientMsgID?.takeIf { it.isNotBlank() }?.let { events.tombstone(it,false) } }
                 override fun onMsgDeleted(message:Message?) { message?.clientMsgID?.takeIf { it.isNotBlank() }?.let { events.tombstone(it,true) } }
-                override fun onRecvNewMessage(message:Message?) { message?.let { incoming(it,events,true) } }
-                override fun onRecvOfflineNewMessage(messages:MutableList<Message>?) { messages.orEmpty().forEach { incoming(it,events) } }
+                override fun onRecvNewMessage(message:Message?) { message?.let { enqueueRealtime(it,events) } }
+                override fun onRecvOfflineNewMessage(messages:MutableList<Message>?) {
+                    val items=messages.orEmpty().mapNotNull { prepareIncoming(it,events) }
+                    if(items.isNotEmpty())events.messages(items)
+                }
             })
             client.groupManager.setOnGroupListener(object:OnGroupListener {
                 override fun onGroupMemberAdded(info:GroupMembersInfo?) { info?.groupID?.let(events::groupChanged) }
@@ -101,12 +149,17 @@ class OpenIMGateway(private val application:Application):ChatGateway {
                 override fun onGroupMemberInfoChanged(info:GroupMembersInfo?) { info?.groupID?.let(events::groupChanged) }
                 override fun onGroupInfoChanged(info:GroupInfo?) { info?.groupID?.let(events::groupChanged) }
             })
-            client.login(base<String> { result -> done(result.map { Unit }) },userId,token)
+            fetchRemoteConversationSnapshot(token,api,events)
+            client.login(base<String> { result ->
+                PerfLog.mark("gateway:login-callback", "success=${result.isSuccess}")
+                done(result.map { Unit })
+            },userId,token)
+            PerfLog.mark("gateway:login-invoked")
         } catch (_:Exception) { done(Result.failure(IllegalStateException("聊天初始化未完成，请稍后重试。"))) }
     }
-    private fun incoming(message:Message,events:ChatEvents,realtime:Boolean=false) {
-        val target=target(message) ?: return
-        if(message.clientMsgID.isNullOrBlank()) return
+    private fun prepareIncoming(message:Message,events:ChatEvents):Pair<ChatTarget,ChatMessage>? {
+        val target=target(message) ?: return null
+        if(message.clientMsgID.isNullOrBlank()) return null
         if(message.contentType in 1501..1520&&target.sessionType==3)events.groupChanged(target.groupId)
         if(message.contentType==110) {
             val payload=runCatching { JsonParser.parseString(message.customElem?.data.orEmpty()).asJsonObject }.getOrNull()
@@ -116,11 +169,161 @@ class OpenIMGateway(private val application:Application):ChatGateway {
                 if(value!=null||payload.string("action","Action")=="unpin") {
                     applyRemotePin(target,value,message.seq.toLong(),stamp,events)
                 }
-                return
+                return null
             }
         }
-        val items=listOf(target to map(message))
-        if(realtime)events.liveMessages(items) else events.messages(items)
+        return target to map(message)
+    }
+    private fun enqueueRealtime(message:Message,events:ChatEvents) {
+        val item=prepareIncoming(message,events) ?: return
+        synchronized(liveLock) {
+            liveEvents=events
+            liveBatch.add(item)
+            if(!liveScheduled) {
+                liveScheduled=true
+                liveHandler.postDelayed(flushLive,LIVE_BATCH_MS)
+            }
+        }
+    }
+    private fun flushLiveMessages() {
+        val batch=synchronized(liveLock) {
+            if(liveBatch.isEmpty()) {
+                liveScheduled=false
+                return
+            }
+            val copy=liveBatch.toList()
+            liveBatch.clear()
+            liveScheduled=false
+            copy
+        }
+        liveEvents?.liveMessages(batch)
+    }
+    private fun publishConversationSnapshot(owner:ConversationMappingQueue.Owner,events:ChatEvents,force:Boolean=false) {
+        if(!conversationMapping.active(owner))return
+        val now=System.currentTimeMillis()
+        synchronized(syncSnapshotLock) {
+            if(syncSnapshotInFlight)return
+            if(!force&&now-(syncSnapshotAt.takeIf { it>0 } ?: 0)<400)return
+            syncSnapshotInFlight=true
+            syncSnapshotAt=now
+        }
+        client.conversationManager.getConversationListSplit(base<List<ConversationInfo>> { result ->
+            synchronized(syncSnapshotLock) {syncSnapshotInFlight=false}
+            result.onSuccess { items ->
+                enqueueConversations(owner,items) {rows->
+                    PerfLog.mark("gateway:snapshot-rows", "count=${rows.size}")
+                    if(rows.isNotEmpty())events.conversationSnapshot(rows)
+                }
+            }
+        },0,SYNC_SNAPSHOT_COUNT)
+    }
+    private fun fetchRemoteConversationSnapshot(token:String,address:String,events:ChatEvents) {
+        val owner=userId
+        if(owner.isBlank()||token.isBlank()||address.isBlank())return
+        Thread {
+            val enriched=runCatching { fetchSortedRemoteConversations(address,token,owner,emptyMap()) }.onFailure {PerfLog.mark("gateway:remote-sorted-failed")}.getOrDefault(emptyList())
+            if(enriched.isNotEmpty()) {
+                PerfLog.mark("gateway:remote-sorted","count=${enriched.size}")
+                PerfLog.mark("gateway:remote-sorted-avatars",
+                    "empty=${enriched.count {it.avatar.isBlank()}} http=${enriched.count {it.avatar.startsWith("http://")}} "+
+                        "https=${enriched.count {it.avatar.startsWith("https://")}} "+
+                        "httpHosts="+enriched.filter {it.avatar.startsWith("http://")}.mapNotNull {runCatching {URI(it.avatar).host}.getOrNull()}.distinct().joinToString(",")+" "+
+                        "httpPaths="+enriched.filter {it.avatar.startsWith("http://")}.mapNotNull {runCatching {URI(it.avatar).path.orEmpty().split('/').filter(String::isNotEmpty).take(3).joinToString("/")}.getOrNull()}.distinct().take(3).joinToString(",")+" "+
+                        "invalid="+enriched.count {runCatching {com.im.nativebootstrap.media.MediaURLs.image(it.avatar,com.im.nativebootstrap.media.ImageVariant.AVATAR)}.getOrDefault("").isBlank()&&it.avatar.isNotBlank()})
+                events.conversationSnapshot(enriched)
+            }
+            val all=runCatching { fetchAllRemoteConversations(address,token,owner) }.onFailure {PerfLog.mark("gateway:remote-all-failed")}.getOrDefault(emptyList())
+            val byId=all.associateByTo(LinkedHashMap()) {it.target.conversationId}
+            enriched.forEach {byId[it.target.conversationId]=it}
+            val rows=byId.values.toList()
+            PerfLog.mark("gateway:remote-snapshot","all=${all.size} enriched=${enriched.size} merged=${rows.size}")
+            PerfLog.mark("gateway:remote-avatars",
+                "empty=${rows.count {it.avatar.isBlank()}} http=${rows.count {it.avatar.startsWith("http://")}} "+
+                    "hosts="+rows.mapNotNull { runCatching { URI(it.avatar).host }.getOrNull() }.distinct().take(5).joinToString(","))
+            if(rows.isNotEmpty())events.conversationSnapshot(rows)
+        }.apply{isDaemon=true;name="openim-conversation-rest"}.start()
+    }
+    private fun openIMConversationRequest(address:String,token:String,path:String,fields:(JsonObject)->Unit):JsonObject {
+        val operation=UUID.randomUUID().toString()
+        val body=JsonObject().apply {
+            addProperty("operationID",operation)
+            fields(this)
+        }
+        val response=URLConnectionTransport().execute(APIRequest(
+            address.trimEnd('/')+path,
+            mapOf("Accept" to "application/json","Content-Type" to "application/json","token" to token,"operationID" to operation),
+            body.toString(),
+            "POST",
+        ))
+        check(response.status in 200..299) { "HTTP ${response.status}" }
+        val root=JsonParser.parseString(response.body).asJsonObject
+        check((root.get("errCode")?.asInt ?: -1)==0) { "errCode" }
+        return root.getAsJsonObject("data") ?: error("missing data")
+    }
+    private fun fetchAllRemoteConversations(address:String,token:String,owner:String):List<ChatConversation> {
+        val data=openIMConversationRequest(address,token,"/conversation/get_all_conversations") {it.addProperty("ownerUserID",owner)}
+        return (data.getAsJsonArray("conversations") ?: JsonArray()).mapNotNull { element ->
+            runCatching {gson.fromJson(element,ConversationInfo::class.java)}.getOrNull()?.let {conversation(it,owner)}
+        }
+    }
+    private fun fetchSortedRemoteConversations(address:String,token:String,owner:String,base:Map<String,ChatConversation>):List<ChatConversation> {
+        val data=openIMConversationRequest(address,token,"/conversation/get_sorted_conversation_list") {
+            it.addProperty("userID",owner)
+            it.add("pagination",JsonObject().apply {
+                addProperty("pageNumber",1)
+                addProperty("showNumber",100)
+            })
+        }
+        val elems=data.getAsJsonArray("conversationElems") ?: JsonArray()
+        if(elems.size()>0)PerfLog.mark("gateway:remote-sorted-fields",elems[0].asJsonObject.keySet().joinToString(","))
+        return elems.mapNotNull { enrichedConversation(it.asJsonObject,owner,base) }
+    }
+    private fun enrichedConversation(element:JsonObject,owner:String,base:Map<String,ChatConversation>):ChatConversation? {
+        val id=element.string("conversationID","ConversationID")
+        if(id.isBlank())return null
+        val msg=parseObject(element.field("msgInfo","MsgInfo")) ?: JsonObject()
+        val sessionType=msg.number("sessionType","SessionType").toInt().takeIf {it==1||it==3} ?: if(id.startsWith("sg_"))3 else 1
+        val send=msg.string("sendID","SendID")
+        val recv=msg.string("recvID","RecvID")
+        val group=msg.string("groupID","GroupID")
+        val peer=if(sessionType==1)if(send==owner)recv else send else ""
+        val old=base[id]
+        val title=if(sessionType==3)msg.string("groupName","GroupName").ifBlank{"群聊"} else msg.string("senderName","SenderName").ifBlank{"聊天"}
+        val avatar=if(sessionType==3)msg.string("groupFaceURL","GroupFaceURL") else msg.string("senderFaceUrl","SenderFaceUrl","faceURL","FaceURL")
+        val type=msg.number("contentType","ContentType").toInt()
+        val content=msg.string("content","Content")
+        val preview=remotePreview(type,content)
+        val time=msg.number("latestMsgRecvTime","LatestMsgRecvTime").takeIf {it>0} ?: msg.number("sendTime","SendTime").takeIf {it>0} ?: old?.time ?: 0
+        return ChatConversation(
+            ChatTarget(id,sessionType,peer,group),
+            title,
+            preview.ifBlank {old?.preview.orEmpty()},
+            time,
+            element.get("unreadCount")?.asInt ?: old?.unread ?: 0,
+            (element.get("isPinned") ?: element.get("IsPinned"))?.asBoolean ?: old?.pinned ?: false,
+            avatar,
+            msg.number("seq","Seq").takeIf {it>0} ?: old?.latestSeq ?: 0,
+            (element.get("recvMsgOpt")?.asInt ?: 0)!=0,
+            old?.pinnedMessage,
+            old?.latestMessage,
+        )
+    }
+    private fun remotePreview(type:Int,content:String)=when(type) {
+        101->runCatching {
+            val raw=JsonParser.parseString(content)
+            parseObject(raw)?.string("content","Content").orEmpty().ifBlank {content}
+        }.getOrDefault(content)
+        102->"[图片]"
+        103->"[语音]"
+        104->"[视频]"
+        105->"[文件]"
+        106->"[提及消息]"
+        107->"[合并消息]"
+        108->"[名片]"
+        109->"[位置]"
+        110->"[自定义消息]"
+        114->"[引用消息]"
+        else->if(type>=1000)"[系统消息]" else content
     }
     private fun target(message:Message):ChatTarget? {
         val type=message.sessionType
@@ -129,15 +332,53 @@ class OpenIMGateway(private val application:Application):ChatGateway {
         val id=client.conversationManager.getConversationIDBySessionType(peer,type)
         return ChatTarget(id,type,if(type==1)peer else "",if(type==3)peer else "")
     }
-    private fun summary(message:Message):String = if(message.status==4) "[消息已删除]" else if(message.contentType==101) message.textElem?.content.orEmpty() else when(message.contentType) {
-        102->"[图片]";103->"[语音]";104->"[视频]";105->"[文件]";106->"[提及消息]";107->"[合并消息]";108->"[名片]";109->"[位置]";110->MessageContents.parse(gson.toJson(message)).text.ifBlank { "[自定义消息]" };114->"[引用消息]";else->if(message.contentType>=1000) ChatSystemMessages.format(gson.toJson(message)) else "[暂未支持的消息]"
+    private fun summary(message:Message,serialized:String?=null):String = if(message.status==4) "[消息已删除]" else if(message.contentType==101) message.textElem?.content.orEmpty() else when(message.contentType) {
+        102->"[图片]";103->"[语音]";104->"[视频]";105->"[文件]";106->"[提及消息]";107->"[合并消息]";108->"[名片]";109->"[位置]";110->MessageContents.parse(serialized ?: gson.toJson(message)).text.ifBlank { "[自定义消息]" };114->"[引用消息]";else->if(message.contentType>=1000) ChatSystemMessages.format(serialized ?: gson.toJson(message)) else "[暂未支持的消息]"
     }
-    private fun map(message:Message,owner:String=userId)=ChatMessage(message.clientMsgID.orEmpty(),summary(message),message.sendID==owner,if(message.sendTime>0)message.sendTime else message.createTime,message.status,message.seq.toLong(),gson.toJson(message),message.senderNickname.orEmpty())
+    private fun map(message:Message,owner:String=userId):ChatMessage {
+        val serialized=gson.toJson(message)
+        val pinSync=message.contentType==110&&runCatching {
+            val raw=JsonParser.parseString(serialized).asJsonObject
+            raw.number("contentType","ContentType")==110L&&parseObject(raw.obj("customElem","CustomElem").field("data","Data"))?.string("businessKey","BusinessKey")=="message_pin"
+        }.getOrDefault(false)
+        return ChatMessage(
+            message.clientMsgID.orEmpty(),
+            summary(message,serialized),
+            message.sendID==owner,
+            if(message.sendTime>0)message.sendTime else message.createTime,
+            message.status,
+            message.seq.toLong(),
+            serialized,
+            message.senderNickname.orEmpty(),
+            contentType=message.contentType,
+            senderId=message.sendID.orEmpty(),
+            pinSync=pinSync,
+        )
+    }
+
+    private fun conversationLatest(message:Message,serialized:String,owner:String)=ChatMessage(
+        message.clientMsgID.orEmpty(),
+        summary(message,serialized),
+        message.sendID==owner,
+        if(message.sendTime>0)message.sendTime else message.createTime,
+        message.status,
+        message.seq.toLong(),
+        // 会话行只保留展示/确认需要的轻量字段，不常驻完整消息 JSON。
+        serialized="",
+        sender=message.senderNickname.orEmpty(),
+        contentType=message.contentType,
+        senderId=message.sendID.orEmpty(),
+    )
+
+    private fun conversationLatestOrNull(parsed:Message?,raw:String?,owner:String):ChatMessage? {
+        if(parsed==null||raw==null)return null
+        return runCatching { conversationLatest(parsed,raw,owner) }.getOrNull()
+    }
     private fun conversation(info:ConversationInfo,owner:String=userId):ChatConversation? {
         if(info.conversationID.isNullOrBlank()) return null
         val raw=info.latestMsg?.takeIf {it.isNotBlank()}
         val parsed=runCatching {raw?.let {gson.fromJson(it,Message::class.java)}}.getOrNull()
-        val latest=runCatching {parsed?.let {map(it,owner)}}.getOrNull()
+        val latest=conversationLatestOrNull(parsed,raw,owner)
         val preview=latest?.text ?: if(raw!=null)"[消息]" else ""
         val latestSeq=parsed?.seq?.toLong() ?: 0
         val pinned=runCatching { JsonParser.parseString(info.ex.orEmpty()).asJsonObject.get("pinnedMessage")?.let { gson.fromJson(it,PinnedChatMessage::class.java) }?.takeIf { !it.clientMsgID.isNullOrBlank() } }.getOrNull()
@@ -381,10 +622,24 @@ class OpenIMGateway(private val application:Application):ChatGateway {
         },UUID.randomUUID().toString(),!active)
     }
     override fun shutdown() {
+        synchronized(liveLock) {
+            liveHandler.removeCallbacks(flushLive)
+            liveBatch.clear()
+            liveScheduled=false
+            liveEvents=null
+        }
+        synchronized(syncSnapshotLock) {
+            syncSnapshotInFlight=false
+            syncSnapshotAt=0L
+        }
         conversationMapping.close()
         if(initialized) client.unInit()
         initialized=false
         watchedPeer=null
         userId=""
+    }
+    companion object {
+        private const val LIVE_BATCH_MS=24L
+        private const val SYNC_SNAPSHOT_COUNT=50L
     }
 }

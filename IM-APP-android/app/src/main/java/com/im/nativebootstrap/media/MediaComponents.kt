@@ -107,8 +107,12 @@ fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:Co
 @Composable
 fun SharedAvatar(url:String,modifier:Modifier=Modifier,group:Boolean=false) {
     val transformed=remember(url) { MediaURLs.image(url,ImageVariant.AVATAR) }
+    val candidates=remember(transformed,url) {
+        (listOf(transformed,MediaURLs.remote(url),MediaURLs.remote(url,com.im.nativebootstrap.data.RuntimeEndpoints.DEFAULT_API_BASE_URL)))
+            .filter(String::isNotBlank).distinct()
+    }
     if(transformed.isEmpty()) Image(painterResource(if(group)R.drawable.uni_group_default else R.drawable.uni_avatar_default),"头像",modifier.clip(CircleShape),contentScale=ContentScale.Crop)
-    else RemoteMediaImage(transformed,modifier.clip(CircleShape),128,ContentScale.Crop,"头像",if(group)R.drawable.uni_group_default else R.drawable.uni_avatar_default,cacheUrls=listOf(url))
+    else RemoteMediaImage(candidates.first(),modifier.clip(CircleShape),128,ContentScale.Crop,"头像",if(group)R.drawable.uni_group_default else R.drawable.uni_avatar_default,fallbackUrls=candidates.drop(1),cacheUrls=listOf(url))
 }
 
 @Composable

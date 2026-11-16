@@ -109,7 +109,10 @@ object MediaURLs {
         if(resolved.userInfo!=null||resolved.host.isNullOrBlank()) return ""
         if(resolved.scheme.equals("https",true)) return resolved.toASCIIString()
         // 历史 MinIO/IP 只按已知部署路径转到同一业务源，不全局放行明文网络。
-        if(resolved.scheme=="http"&&resolved.host=="8.154.44.197"&&!signed(resolved)&&listOf("/object/","/minio/","/openim/","/openim-api/").any { resolved.path.startsWith(it) }) {
+        val legacyMinioPath=resolved.path.startsWith("/minio/im-uploads/")
+        if(resolved.scheme=="http"&&!signed(resolved)&&
+            (resolved.host=="8.154.44.197"||legacyMinioPath)&&
+            listOf("/object/","/minio/","/openim/","/openim-api/").any { resolved.path.startsWith(it) }) {
             return origin(base)+resolved.rawPath+(resolved.rawQuery?.let { "?$it" } ?: "")
         }
         ""

@@ -60,6 +60,17 @@ class BusinessSession {
 
 /** 每次业务登录只调用 auth/login（或显式短信登录）与 me，不申请 IM Token。 */
 class BusinessLoginFlow(private val session: BusinessSession) {
+    /**
+     * 首登快速路径：只完成认证并写入会话，随后由 ViewModel 立即打开聊天骨架。
+     * 资料校验与 IM Token 不应阻塞首屏。
+     */
+    fun authenticate(attempt: BusinessLoginAttempt, api: NativeAPI, country: String, phone: String, secret: String, deviceId: String, password: Boolean, registerCode: String? = null): BusinessProfile? {
+        if (!session.accepts(attempt)) return null
+        val auth = if (registerCode != null) api.register(country, phone, registerCode, secret, deviceId) else if (password) api.passwordLogin(country, phone, secret, deviceId) else api.smsLogin(country, phone, secret, deviceId)
+        if (!session.accepts(attempt)) return null
+        return if (session.complete(attempt, auth.tokens, auth.profile)) auth.profile else null
+    }
+
     fun login(attempt: BusinessLoginAttempt, api: NativeAPI, country: String, phone: String, secret: String, deviceId: String, password: Boolean, registerCode: String? = null): BusinessLoginResult? {
         if (!session.accepts(attempt)) return null
         val auth = if (registerCode != null) api.register(country, phone, registerCode, secret, deviceId) else if (password) api.passwordLogin(country, phone, secret, deviceId) else api.smsLogin(country, phone, secret, deviceId)

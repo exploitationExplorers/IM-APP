@@ -440,11 +440,14 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         }
         next()
     }
+    val reversedMessages=remember(state.messages) { state.messages.asReversed() }
+    val uploadsById=remember(state.mediaUploads) { state.mediaUploads.associateBy { it.id } }
+    val outboxById=remember(state.outbox) { state.outbox.associateBy { it.id } }
     val latestId=state.messages.lastOrNull()?.id
     var presenceNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(state.active?.target) { while(true) { delay(60_000);presenceNow=System.currentTimeMillis() } }
-    LaunchedEffect(latestId) { if(list.firstVisibleItemIndex<3) list.animateScrollToItem(0) }
-    LaunchedEffect(state.focusMessageId) { state.focusMessageId?.let { id -> val index=state.messages.asReversed().indexOfFirst { it.id==id };if(index>=0)list.animateScrollToItem(index) } }
+    LaunchedEffect(latestId) { if(list.firstVisibleItemIndex<3) list.scrollToItem(0) }
+    LaunchedEffect(state.focusMessageId) { state.focusMessageId?.let { id -> val index=reversedMessages.indexOfFirst { it.id==id };if(index>=0)list.animateScrollToItem(index) } }
     LaunchedEffect(state.forwardSuccessId,state.forwardFailureId) {
         if(state.forwardSuccessId.isNotBlank())NativeNotices.show("转发成功")
         if(state.forwardFailureId.isNotBlank())NativeNotices.show(if(state.pendingForwards.firstOrNull { it.id==state.forwardFailureId }?.status=="uncertain")"转发结果待确认，请稍后查看" else "转发未完成，请稍后重试")
@@ -457,12 +460,14 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         snapshotFlow {
             val current=historyState
             HistoryLoadSignal(list.isScrollInProgress,list.firstVisibleItemIndex>0||list.firstVisibleItemScrollOffset>0,
-                current.messages.isNotEmpty()&&list.layoutInfo.visibleItemsInfo.any { it.index>=current.messages.lastIndex-8 },current.historyLoading,current.historyEnd,current.historyRevision,current.messages.size)
+                current.messages.isNotEmpty()&&list.layoutInfo.visibleItemsInfo.any { it.index>=current.messages.lastIndex-5 },current.historyLoading,current.historyEnd,current.historyRevision,current.messages.size)
         }.collect { signal -> if(gate.shouldLoad(signal))historyCallback() }
     }
-    LaunchedEffect(list,state.active?.target,state.messages) {
+    val currentMessages by rememberUpdatedState(state.messages)
+    LaunchedEffect(list,state.active?.target) {
         if(state.active?.target?.sessionType==3)snapshotFlow {
-            list.layoutInfo.visibleItemsInfo.mapNotNull { item -> state.messages.asReversed().getOrNull(item.index)?.let { MessageContents.parse(it.serialized,it.text).senderId.takeIf(String::isNotBlank) } }.distinct()
+            val messages=currentMessages.asReversed()
+            list.layoutInfo.visibleItemsInfo.mapNotNull { item -> messages.getOrNull(item.index)?.let { it.senderId.ifBlank { MessageContents.parse(it.serialized,it.text).senderId }.takeIf(String::isNotBlank) } }.distinct()
         }.distinctUntilChanged().collect { ids -> if(ids.isNotEmpty())callbacks.onLoadGroupMembers(ids) }
     }
     Column(Modifier.fillMaxSize().background(ChatGray).statusBarsPadding().navigationBarsPadding().then(if(!emoji&&!plus)Modifier.imePadding() else Modifier)) {
@@ -498,14 +503,14 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             TextButton(enabled=media.file.absolutePath !in retryingMedia,onClick={ failedMedia=failedMedia.filterNot { it.file==media.file };media.file.delete();media.snapshot?.delete() }) { Text("移除草稿") }
         } }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(),state=list,reverseLayout=true,contentPadding=PaddingValues(vertical=rpx(20))) {
-            itemsIndexed(state.messages.asReversed(),key={ _,message -> message.id }) { index,message ->
+            itemsIndexed(reversedMessages,key={ _,message -> message.id },contentType={ _,message -> message.contentType }) { index,message ->
                 // 倒序列表中每条消息只提供一个布局根，日期与气泡按正常顺序排布。
                 Column(Modifier.fillMaxWidth()) {
                 val content=remember(message.serialized,message.text) { MessageContents.parse(message.serialized,message.text) }
-                val upload=state.mediaUploads.firstOrNull { it.id==message.id }
+                val upload=uploadsById[message.id]
                 val localVideo=if(content.type==104)(upload?.media() ?: state.localSentMedia[message.id]) else null
                 var bubbleBounds by remember(message.id) { mutableStateOf<Rect?>(null) }
-                val older=state.messages.asReversed().getOrNull(index+1)
+                val older=reversedMessages.getOrNull(index+1)
                 if(older==null||chatDayKey(older.time)!=chatDayKey(message.time))Box(Modifier.fillMaxWidth().padding(vertical=rpx(12)),contentAlignment=Alignment.Center) { Text(chatDayLabel(message.time),Modifier.clip(RoundedCornerShape(rpx(12))).background(Color(0xFFD8DBE2)).padding(horizontal=rpx(18),vertical=rpx(7)),color=Color(0xFF7A8090),fontSize=(22*factor).sp) }
                 val legacySystem=content.senderId=="imAdmin"&&(content.text=="新群创建成功，一起来聊天吧"||Regex("^(群主|管理员)清除了「.+」的全部消息$").matches(content.text))
                 if(message.serialized.isBlank()||content.type>=1000||content.type==0||legacySystem) {
@@ -542,7 +547,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                 }
                             },onLongClick={ if(!multi) { if(upload!=null)uploadMenu=upload else { selectedAnchor=bubbleBounds?.let { Offset(it.center.x,it.bottom) };selected=message } } }).then(if(isVisual)Modifier else Modifier.padding(horizontal=rpx(22),vertical=rpx(18)))) {
                                 when(content.type) {
-                                    104 -> VideoMessageBubble(content,localPoster=localVideo?.snapshot,sending=upload?.state==MediaUploadState.UPLOADING||state.outbox.any { it.id==message.id&&it.state in setOf(OutboxState.PENDING,OutboxState.SENDING) })
+                                    104 -> VideoMessageBubble(content,localPoster=localVideo?.snapshot,sending=upload?.state==MediaUploadState.UPLOADING||outboxById[message.id]?.state==OutboxState.PENDING||outboxById[message.id]?.state==OutboxState.SENDING)
                                     102 -> {
                                         val maxWidth=210f*factor/.52f
                                         val width=if(content.width>0&&content.height>0)minOf(maxWidth,maxOf(90f,maxWidth*content.width/content.height)) else 170f
@@ -552,7 +557,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                             else Box(Modifier.fillMaxSize().background(Color(0xFFCDD3E0)),contentAlignment=Alignment.Center) { Text("视频",color=ChatHint) }
                                             if(content.type==104)Text("▶",Modifier.align(Alignment.Center).background(Color(0x77000000),CircleShape).padding(14.dp),color=Color.White,fontSize=24.sp)
                                             if(content.type==104)Text(duration(content.duration),Modifier.align(Alignment.BottomEnd).padding(6.dp),color=Color.White,fontSize=12.sp)
-                                            if(upload?.state==MediaUploadState.UPLOADING||state.outbox.any { it.id==message.id&&it.state in setOf(OutboxState.PENDING,OutboxState.SENDING) })Box(Modifier.align(Alignment.Center).size(38.dp).background(Color(0x66000000),CircleShape).semantics { contentDescription="图片正在发送" },contentAlignment=Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp),strokeWidth=2.dp,color=Color.White) }
+                                            if(upload?.state==MediaUploadState.UPLOADING||outboxById[message.id]?.state==OutboxState.PENDING||outboxById[message.id]?.state==OutboxState.SENDING)Box(Modifier.align(Alignment.Center).size(38.dp).background(Color(0x66000000),CircleShape).semantics { contentDescription="图片正在发送" },contentAlignment=Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp),strokeWidth=2.dp,color=Color.White) }
                                         }
                                     }
                                     103 -> Row(Modifier.widthIn(min=90.dp,max=180.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) { Text(if(playing==message.id) "■ 播放中" else "◖)))",color=foreground);Text("${content.duration}″",color=foreground) }
@@ -579,7 +584,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                             Row(Modifier.padding(top=rpx(5)),verticalAlignment=Alignment.CenterVertically) {
                                 Text(chatTime(message.time),color=ChatHint,fontSize=(20*factor).sp)
                                 if(message.mine) {
-                                    val pending=state.outbox.firstOrNull { it.id==message.id }
+                                    val pending=outboxById[message.id]
                                     val read=content.read||message.id in state.readMessageIds||(message.seq>0&&message.seq<=state.maxOtherReadSeq)
                                     val status=if(upload!=null)if(upload.state==MediaUploadState.FAILED)"上传失败，点按重试" else "" else when(pending?.state) { OutboxState.PENDING,OutboxState.SENDING -> "◷";OutboxState.UNCERTAIN -> "待核对";OutboxState.FAILED -> "发送失败，点按重试";else -> if(message.status==2||message.seq>0)if(read)"✓✓" else "✓" else "◷" }
                                     Text("  $status",Modifier.clickable(enabled=pending!=null||upload?.state==MediaUploadState.FAILED) { if(upload!=null)callbacks.onRetryUpload(upload.id) else if(pending?.state==OutboxState.FAILED)callbacks.onRetryFailed(message.id) else callbacks.onReconcile(message.id) },color=if(pending?.state==OutboxState.FAILED||upload?.state==MediaUploadState.FAILED)Color(0xFFE54D4D) else if(read)ChatBlue else ChatHint,fontSize=(20*factor).sp)
@@ -697,7 +702,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             contentType=content.type,mine=message.mine,group=state.active?.target?.sessionType==3,
             canManage=memberMenu.canManage,canRecall=memberMenu.canRecall&&canRecall(message),senderInGroup=memberMenu.senderInGroup,
             muted=memberMenu.muted,pinned=state.active?.pinnedMessage?.clientMsgID==message.id,
-            delivery=state.outbox.firstOrNull { it.id==message.id }?.state,
+            delivery=outboxById[message.id]?.state,
         ))
         val options=entries.map { entry -> ChatMenuOption(entry) {
             selected=null
@@ -806,7 +811,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     video?.let { url ->
         val message=videoMessage?.takeIf { MessageContents.parse(it.serialized,it.text).url==url }
         val content=message?.let { MessageContents.parse(it.serialized,it.text) }
-        val ownMedia=message?.let { current->state.mediaUploads.firstOrNull { it.id==current.id }?.media() ?: state.localSentMedia[current.id] } ?: videoLocal
+        val ownMedia=message?.let { current->uploadsById[current.id]?.media() ?: state.localSentMedia[current.id] } ?: videoLocal
         VideoPreview(url,{ video=null;videoMessage=null;videoLocal=null },{ notice=it },poster=content?.thumbnail.orEmpty(),sender=message?.sender?.ifBlank { if(message.mine)"我" else "视频" } ?: "视频",time=message?.let { chatDayLabel(it.time)+" "+chatTime(it.time) }.orEmpty(),onSave={ saveVideo(url,ownMedia?.file) },onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { { video=null;videoMessage=null;videoLocal=null;forward=it } },onDelete=message?.takeUnless { it.id.startsWith("upload-") }?.let { { video=null;videoMessage=null;videoLocal=null;confirmDelete=it } },localFile=ownMedia?.file,localPoster=ownMedia?.snapshot,allowedLocalDirectory=state.mediaOwnerDirectory.takeIf(String::isNotBlank)?.let(::File))
     }
     merge?.let { message -> AlertDialog(onDismissRequest={ merge=null },title={ Text("聊天记录") },text={ Column(Modifier.verticalScroll(rememberScrollState())) {

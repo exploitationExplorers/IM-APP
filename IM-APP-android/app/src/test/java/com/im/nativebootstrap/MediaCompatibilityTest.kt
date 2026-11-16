@@ -95,6 +95,7 @@ class MediaCompatibilityTest {
     }
     @Test fun legacyKnownIpUsesHttpsOriginAndOtherCleartextAndSchemesAreRejected() {
         assertEquals("https://service.invalid/object/a.jpg?x=1",MediaURLs.remote("http://8.154.44.197:9000/object/a.jpg?x=1",base))
+        assertEquals("https://service.invalid/minio/im-uploads/uploads/avatar.jpg?x=1",MediaURLs.remote("http://8.154.44.197/minio/im-uploads/uploads/avatar.jpg?x=1",base))
         assertEquals("",MediaURLs.remote("http://evil.invalid/a.jpg",base))
         assertEquals("",MediaURLs.remote("file:///data/private/a.jpg",base))
         assertEquals("",MediaURLs.remote("content://media/a",base))

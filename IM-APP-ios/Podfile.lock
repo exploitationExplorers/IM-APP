@@ -34,19 +34,22 @@ PODS:
 
 DEPENDENCIES:
   - OpenIMSDK (= 3.8.3-hotfix.15)
-  - OpenIMSDKCore (= 3.8.3-hotfix.15)
+  - OpenIMSDKCore (from `podspecs/OpenIMSDKCore.podspec`)
 
 SPEC REPOS:
   trunk:
     - MJExtension
     - OpenIMSDK
-    - OpenIMSDKCore
+
+EXTERNAL SOURCES:
+  OpenIMSDKCore:
+    :podspec: podspecs/OpenIMSDKCore.podspec
 
 SPEC CHECKSUMS:
   MJExtension: e97d164cb411aa9795cf576093a1fa208b4a8dd8
   OpenIMSDK: d5ae9e085788fd0b93e0325e6ca47465c6c8a733
-  OpenIMSDKCore: dfd50302d7a89eee148a4873f60bc26569e98008
+  OpenIMSDKCore: dcf46e6fe08b93913fa1dcd1271d779f4a679aa6
 
-PODFILE CHECKSUM: ff595bb22bb6f4632d68092faacbd31354729359
+PODFILE CHECKSUM: 76c65b99707def9a39da5f6c9fc856e89f3260b0
 
 COCOAPODS: 1.16.2

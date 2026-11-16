@@ -33,7 +33,8 @@ class GroupPurges(private val file:File,private val owner:String) {
     fun permits(target:ChatTarget,message:ChatMessage):Boolean {
         if(target.sessionType!=3||message.mine)return true
         val rules=values[target.conversationId] ?: return true
-        val sender=businessUserId(MessageContents.parse(message.serialized,message.text).senderId)
+        // 映射阶段已保存 senderId；旧记录/测试消息没有该字段时才回退解析原始 JSON。
+        val sender=businessUserId(message.senderId.ifBlank { MessageContents.parse(message.serialized,message.text).senderId })
         val boundary=rules[sender] ?: return true
         val millis=if(message.time in 1 until 10_000_000_000L)message.time*1000 else message.time
         return millis>=boundary
