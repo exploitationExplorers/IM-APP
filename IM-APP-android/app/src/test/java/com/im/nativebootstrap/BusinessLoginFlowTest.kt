@@ -12,6 +12,20 @@ class BusinessLoginFlowTest {
     private fun profile() = APIResponse(200, fixture("profile-success.json"))
     private fun login(session: BusinessSession, api: NativeAPI) = BusinessLoginFlow(session).login(session.beginLogin(), api, "+86", "13000000000", "synthetic-password", "synthetic-device", true)
 
+    @Test fun authenticateWritesSessionBeforeProfileAndIMTokenForFastFirstScreen() {
+        val session = BusinessSession()
+        val requests = mutableListOf<String>()
+        val api = NativeAPI(transport = HTTPTransport { request ->
+            requests += request.url
+            if (request.url.endsWith("/auth/login")) auth() else error("Fast authentication must stop after /auth/login")
+        })
+        val profile = BusinessLoginFlow(session).authenticate(session.beginLogin(), api, "+86", "13000000000", "synthetic-password", "synthetic-device", true)
+        assertEquals("business-fixture-user", profile!!.businessUserId)
+        assertEquals(listOf("https://www.xn--jprz53bj9s.com/api/v1/auth/login"), requests)
+        assertTrue(session.hasCredentials())
+        assertEquals("business-fixture-user", session.currentProfile()!!.businessUserId)
+    }
+
     @Test fun loginRequestsOnlyAuthAndMeAndUsesLoadedRealProfile() {
         val session = BusinessSession()
         val requests = mutableListOf<APIRequest>()

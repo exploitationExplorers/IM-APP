@@ -16,7 +16,20 @@ data class ChatGroupMember(val userId:String,val role:String,val muted:Boolean,v
 
 data class ChatMessageMenu(val canManage:Boolean=false,val senderInGroup:Boolean=false,val muted:Boolean=false,val canRecall:Boolean=false,val publicName:String="")
 data class ChatConversation(val target: ChatTarget, val title: String, val preview: String, val time: Long, val unread: Int = 0, val pinned: Boolean = false, val avatar: String = "", val latestSeq: Long = 0, val muted: Boolean = false, val pinnedMessage:PinnedChatMessage?=null,val latestMessage:ChatMessage?=null)
-data class ChatMessage(val id: String, val text: String, val mine: Boolean, val time: Long, val status: Int = 2, val seq: Long = 0, val serialized: String = "", val sender: String = "")
+data class ChatMessage(
+    val id: String,
+    val text: String,
+    val mine: Boolean,
+    val time: Long,
+    val status: Int = 2,
+    val seq: Long = 0,
+    val serialized: String = "",
+    val sender: String = "",
+    // 在 SDK 映射阶段整理一次，列表/群成员清理不再重复解析 serialized。
+    val contentType: Int = 0,
+    val senderId: String = "",
+    val pinSync: Boolean = false,
+)
 data class HistoryPage(val messages: List<ChatMessage>, val end: Boolean, val lastMinSeq: Int = 0)
 data class ConversationSnapshotPage(val items: List<ChatConversation>, val end: Boolean)
 data class ChatSearchPage(val messages: List<ChatMessage>, val page: Int, val end: Boolean)
@@ -31,6 +44,8 @@ interface ChatEvents {
     fun peerStatus(userId:String,online:Boolean) {}
     fun connection(state: ConnectionState)
     fun conversations(items: List<ChatConversation>)
+    /** 同步进行中的本地完整快照；先于登录/最终同步完成展示，后续仍以正式快照校准。 */
+    fun conversationSnapshot(items: List<ChatConversation>) { conversations(items) }
     fun messages(items: List<Pair<ChatTarget, ChatMessage>>)
     fun liveMessages(items: List<Pair<ChatTarget, ChatMessage>>) { messages(items) }
     fun tombstone(id: String, deleted: Boolean)
@@ -117,11 +132,64 @@ fun mergeConversations(old: List<ChatConversation>, incoming: List<ChatConversat
     if(!changed&&!needsSort)return old
     return if(needsSort)rows.values.sortedWith(compareByDescending<ChatConversation> { it.pinned }.thenByDescending { it.time }) else rows.values.toList()
 }
+private val messageOrder = compareBy<ChatMessage> { it.time }.thenBy { it.id }
+
+private fun preferredMessage(previous: ChatMessage, next: ChatMessage): ChatMessage =
+    if (previous.seq > next.seq || (previous.status == 2 && next.status != 2)) previous else next
+
 fun mergeMessages(old: List<ChatMessage>, incoming: List<ChatMessage>): List<ChatMessage> {
-    val result = old.associateBy { it.id }.toMutableMap()
-    incoming.filter { it.id.isNotBlank() }.forEach { next ->
-        val previous = result[next.id]
-        result[next.id] = if (previous != null && (previous.seq > next.seq || (previous.status == 2 && next.status != 2))) previous else next
+    if (incoming.isEmpty()) return old
+    val fresh = incoming.filter { it.id.isNotBlank() }
+    if (fresh.isEmpty()) return old
+    val incomingById = LinkedHashMap<String, ChatMessage>(fresh.size)
+    fresh.forEach { next ->
+        val previous = incomingById[next.id]
+        incomingById[next.id] = if (previous != null) preferredMessage(previous, next) else next
     }
-    return result.values.sortedWith(compareBy<ChatMessage> { it.time }.thenBy { it.id })
+    if (old.isEmpty()) return incomingById.values.sortedWith(messageOrder)
+    val oldById = old.associateBy { it.id }
+    if (oldById.size != old.size) return mergeMessagesSlow(old, incomingById)
+
+    val allExisting = incomingById.keys.all { it in oldById }
+    if (allExisting) {
+        var timeChanged = false
+        val replaced = old.map { previous ->
+            val next = incomingById[previous.id]
+            if (next == null) previous
+            else {
+                if (next.time != previous.time) timeChanged = true
+                preferredMessage(previous, next)
+            }
+        }
+        // 同一时间位置的送达/已读/状态更新不需要重新排序。
+        if (!timeChanged) return replaced
+    } else if (incomingById.keys.none { it in oldById } && incomingById.values.all { it.time > old.last().time }) {
+        // 实时消息最常见的路径：全部是新消息且时间在尾部，直接追加。
+        return old + incomingById.values.sortedWith(messageOrder)
+    }
+    return mergeMessagesSlow(old, incomingById)
+}
+
+private fun mergeMessagesSlow(old: List<ChatMessage>, incoming: Map<String, ChatMessage>): List<ChatMessage> {
+    val result = old.associateBy { it.id }.toMutableMap()
+    incoming.values.forEach { next ->
+        val previous = result[next.id]
+        result[next.id] = if (previous != null) preferredMessage(previous, next) else next
+    }
+    return result.values.sortedWith(messageOrder)
+}
+
+/** 撤回/删除标记只需要覆盖近期可见记录，避免长会话把墓碑集合无限放大。 */
+internal class TombstoneWindow(private val limit: Int) {
+    private val values = LinkedHashMap<String, Boolean>()
+    operator fun get(id: String): Boolean? = values[id]
+    operator fun contains(id: String): Boolean = values.containsKey(id)
+    operator fun set(id: String, deleted: Boolean) {
+        values.remove(id)
+        values[id] = deleted
+        while (values.size > limit) values.remove(values.keys.first())
+    }
+    fun containsKey(id: String): Boolean = values.containsKey(id)
+    fun clear() = values.clear()
+    val size: Int get() = values.size
 }

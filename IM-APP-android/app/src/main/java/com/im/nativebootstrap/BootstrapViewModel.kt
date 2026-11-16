@@ -31,6 +31,8 @@ import com.im.nativebootstrap.core.SecureSessionStore
 import com.im.nativebootstrap.core.SessionPersistenceCodec
 import com.im.nativebootstrap.core.StoredIMSession
 import com.im.nativebootstrap.data.TokenPair
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 data class SampleMessage(val id: String, val text: String, val mine: Boolean)
 data class BootstrapState(
@@ -48,6 +50,8 @@ data class BootstrapState(
 class BootstrapViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableState = MutableStateFlow(BootstrapState())
     val state = mutableState.asStateFlow()
+    private val pendingChat = AtomicReference<ChatState?>(null)
+    private val chatPublishScheduled = AtomicBoolean(false)
     private val businessSession = BusinessSession()
     private val loginFlow = BusinessLoginFlow(businessSession)
     @Volatile private var operation = 0L
@@ -57,7 +61,18 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
     private val chatController=ChatController(OpenIMGateway(application),
         { action -> if(!chatExecutor.isShutdown) try { chatExecutor.execute(action) } catch (_:RejectedExecutionException) {} },
         { delay, action -> if(!chatExecutor.isShutdown) try { chatExecutor.schedule(action,delay,TimeUnit.MILLISECONDS) } catch (_:RejectedExecutionException) {} },
-        { chat -> main.post { if(chat.sessionTag==operation && mutableState.value.authenticated) mutableState.value=mutableState.value.copy(chat=chat,chatOpen=chat.active!=null) } },
+        { chat ->
+            pendingChat.set(chat)
+            // 消息突发时只保留最新快照，避免主线程排队执行多次深度状态发布。
+            if(chatPublishScheduled.compareAndSet(false,true)) {
+                main.post {
+                    chatPublishScheduled.set(false)
+                    val next=pendingChat.getAndSet(null) ?: return@post
+                    if(next.sessionTag==mutableState.value.chat.sessionTag&&next.revision<mutableState.value.chat.revision) return@post
+                    if(next.sessionTag==operation && mutableState.value.authenticated) mutableState.value=mutableState.value.copy(chat=next,chatOpen=next.active!=null)
+                }
+            }
+        },
     )
     private fun chatAction(action:()->Unit) {
         if(chatExecutor.isShutdown) return
@@ -166,9 +181,11 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
     private suspend fun startChatSession(baseURL:String,profile:BusinessProfile,tag:Long,cached:com.im.nativebootstrap.data.IMCredentials?=null) {
+        PerfLog.mark("chat-session:start")
         try {
             val credentials=cached ?: withContext(Dispatchers.IO) { businessSession.withAccessToken(profile.businessUserId){NativeAPI(baseURL).imToken(it)} }
             if(tag!=operation||credentials==null)return
+            PerfLog.mark("im-token:ready", "cached=${cached!=null}")
             if(cached==null) {
                 val value=StoredIMSession.encode(baseURL,profile.businessUserId,credentials)
                 credentialIO.execute { if(tag==operation)runCatching { imSecureStore.save(value) } }
@@ -176,6 +193,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
             imDiagnosticAPI=credentials.apiAddr;imDiagnosticWS=credentials.wsAddr
             chatAction {
                 if(tag==operation) {
+                    PerfLog.mark("chat-controller:queued-start")
                     chatController.attachBusiness(object:ChatBusiness {
                         override val baseUrl=baseURL
                         override fun prepareMedia(media:com.im.nativebootstrap.media.LocalMedia):com.im.nativebootstrap.media.LocalMedia {
@@ -197,6 +215,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                     })
                     chatController.attachIncoming { message -> main.post { if(tag==operation&&mutableState.value.authenticated)settings.incoming(message,foregroundActive) } }
                     chatController.start(AccountIdentity(profile.businessUserId,credentials.imUserId),baseURL,credentials.token,credentials.apiAddr,credentials.wsAddr,File(getApplication<Application>().filesDir,"native-chat"),tag)
+                    PerfLog.mark("chat-controller:start-called")
                     chatController.foreground(foregroundActive)
                 }
             }
@@ -254,6 +273,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun login(baseURL: String, country: String, phone: String, secret: String, password: Boolean, registerCode: String? = null) {
         if (mutableState.value.busy) return
+        PerfLog.mark("login:start")
         operation += 1
         val activeOperation = operation
         businessBaseURL=baseURL
@@ -263,15 +283,19 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         mutableState.value = BootstrapState(busy = true, notice = "正在登录")
         loginJob = viewModelScope.launch {
             try {
-                val result = withContext(Dispatchers.IO) {
-                    loginFlow.login(attempt, NativeAPI(baseURL), country, phone, secret, deviceId, password, registerCode)
+                val profile = withContext(Dispatchers.IO) {
+                    loginFlow.authenticate(attempt, NativeAPI(baseURL), country, phone, secret, deviceId, password, registerCode)
                 }
-                if (activeOperation != operation || result == null) return@launch
-                com.im.nativebootstrap.media.MediaLoader.setScope(baseURL,result.profile.businessUserId)
-                mutableState.value = BootstrapState(authenticated = true, profile = result.profile, profileWarning = result.profileWarning,chat=ChatState(sessionTag=activeOperation,connection=ConnectionState.CONNECTING))
+                if (activeOperation != operation || profile == null) return@launch
+                PerfLog.mark("login:auth-returned")
+                com.im.nativebootstrap.media.MediaLoader.setScope(baseURL,profile.businessUserId)
+                mutableState.value = BootstrapState(authenticated = true, profile = profile,chat=ChatState(sessionTag=activeOperation,connection=ConnectionState.CONNECTING))
+                PerfLog.mark("login:home-published")
                 persistSession()
                 if(registerCode!=null)business.open("onboarding")
-                startChatSession(baseURL,result.profile,activeOperation)
+                // 业务登录成功即进入聊天骨架；资料校验与 IM Token/SDK 登录并行。
+                viewModelScope.launch { startChatSession(baseURL,profile,activeOperation) }
+                viewModelScope.launch { verifyLoginProfile(activeOperation) }
             } catch (_: kotlinx.coroutines.CancellationException) {
                 // 退出/换号先使业务代次失效；迟到网络结果不会进入新账号。
             } catch (error: Exception) {
@@ -281,6 +305,26 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                 mutableState.value = BootstrapState(notice = message ?: "请求未完成")
             } finally {
                 if (activeOperation == operation) loginJob = null
+            }
+        }
+    }
+
+    private suspend fun verifyLoginProfile(tag:Long) {
+        try {
+            val result=withContext(Dispatchers.IO) { businessRequest("GET","/me") }
+            if(tag!=operation)return
+            val id=(result as? JsonObject)?.identifier().orEmpty()
+            val expected=businessSession.currentProfile()?.businessUserId.orEmpty()
+            if(id.isNotBlank()&&expected.isNotBlank()&&id!=expected)throw APIException("登录身份校验失败，请重新登录",401)
+        } catch (_:kotlinx.coroutines.CancellationException) {
+        } catch (e:Exception) {
+            if(tag!=operation)return
+            if(e is APIException&&e.httpStatus in listOf(401,403)) {
+                businessSession.logout()
+                chatAction { chatController.logout() }
+                mutableState.value=BootstrapState(notice=e.message?.ifBlank { "登录已失效，请重新登录" } ?: "登录已失效，请重新登录")
+            } else {
+                mutableState.value=mutableState.value.copy(profileWarning="个人资料加载失败，当前显示本次登录资料。")
             }
         }
     }

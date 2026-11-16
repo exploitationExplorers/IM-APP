@@ -68,16 +68,29 @@ class ChatRuntimeTest {
         assertEquals(StoreStatus.READABLE,h.state.store)
         assertEquals(SyncStatus.IDLE,h.state.sync)
     }
-    @Test fun startupEventsDoNotExposeAnIncompleteConversationListBeforeLocalSnapshot() {
+    @Test fun initialLocalSnapshotDoesNotEraseProvisionalRows() {
         val h=Harness()
-        h.gateway.events.conversations((1..8).map { conversation("early-$it",1_700_000_000_000L+it) })
-        assertTrue("SDK event subsets must not become the initial visible list",h.state.conversations.isEmpty())
+        val early=(1..8).map { conversation("early-$it",1_700_000_000_000L+it) }
+        h.gateway.events.conversations(early)
+        assertEquals(early.map {it.target}.toSet(),h.state.conversations.map {it.target}.toSet())
+        assertFalse(h.state.ready)
         h.gateway.login(Result.success(Unit))
-        assertTrue(h.state.conversations.isEmpty())
+        assertEquals(8,h.state.conversations.size)
         val complete=(1..30).map { conversation("local-$it",1_700_000_010_000L+it) }
         h.gateway.pages.last().third(Result.success(complete))
         assertTrue(h.state.ready)
-        assertEquals(complete.reversed(),h.state.conversations)
+        assertEquals(38,h.state.conversations.size)
+        assertTrue(h.state.conversations.any {it.target.conversationId.startsWith("early-")})
+        assertTrue(h.state.conversations.any {it.target.conversationId.startsWith("local-")})
+    }
+    @Test fun emptyInitialLocalSnapshotKeepsServerConversationSnapshot() {
+        val h=Harness()
+        val remote=(1..12).map { conversation("remote-$it",1_700_000_020_000L+it) }
+        h.gateway.events.conversationSnapshot(remote)
+        h.gateway.login(Result.success(Unit))
+        h.gateway.pages.last().third(Result.success(emptyList()))
+        assertEquals(12,h.state.conversations.size)
+        assertTrue(h.state.conversations.all {it.target.conversationId.startsWith("remote-")})
     }
     @Test fun pagesUseSdkOffsetsAndMergeIncrementalEventsWithoutDuplicates() {
         val h=Harness();h.gateway.login(Result.success(Unit))
@@ -508,6 +521,34 @@ class ChatRuntimeTest {
         assertEquals(OutboxState.UNCERTAIN,h.state.outbox.single().state)
         assertEquals(1,h.gateway.sends.size)
         assertEquals("sdk-id",h.gateway.finds.last().first)
+    }
+    @Test fun tailAppendAndAcknowledgementDoNotRequireFullReordering() {
+        val base=listOf(message("m1",status=2,seq=1,time=1),message("m2",status=2,seq=2,time=2))
+        val appended=mergeMessages(base,listOf(message("m3",status=1,seq=0,time=3)))
+        assertEquals(listOf("m1","m2","m3"),appended.map { it.id })
+        val acknowledged=mergeMessages(appended,listOf(message("m3",status=2,seq=3,time=3)))
+        assertEquals(2,acknowledged.last().status)
+        assertEquals(3L,acknowledged.last().seq)
+        val lateDuplicate=mergeMessages(acknowledged,listOf(message("m3",status=1,seq=0,time=3)))
+        assertEquals(3L,lateDuplicate.last().seq)
+        assertEquals(2,lateDuplicate.last().status)
+        val duplicateBatch=mergeMessages(emptyList(),listOf(message("m4",status=2,seq=5,time=4),message("m4",status=1,seq=0,time=4)))
+        assertEquals(5L,duplicateBatch.single().seq)
+        assertEquals(2,duplicateBatch.single().status)
+    }
+    @Test fun tombstoneWindowKeepsOnlyRecentEntries() {
+        val window=TombstoneWindow(3)
+        window["first"]=true
+        window["second"]=false
+        window["third"]=true
+        window["fourth"]=false
+        assertEquals(3,window.size)
+        assertNull(window["first"])
+        assertEquals(false,window["fourth"])
+        window["second"]=true
+        assertEquals(true,window["second"])
+        window.clear()
+        assertEquals(0,window.size)
     }
     @Test fun previousPageTimerCannotCancelTheFollowingPage() {
         val h=Harness();h.gateway.login(Result.success(Unit))
