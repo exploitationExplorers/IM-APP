@@ -75,6 +75,23 @@ public struct ConversationStartupGate<Row> {
     }
 }
 
+public struct EmptyConversationReloadBudget {
+    public private(set) var attempts = 0
+    private var startedAt: TimeInterval?
+    public init() {}
+    public mutating func begin(now: TimeInterval) { startedAt = now; attempts = 0 }
+    public mutating func cancel() { startedAt = nil }
+    public func withinWindow(now: TimeInterval) -> Bool {
+        guard let start = startedAt else { return false }
+        return now >= start && now - start < 45
+    }
+    public mutating func reserve(now: TimeInterval, connected: Bool, loggedIn: Bool, syncing: Bool, empty: Bool) -> TimeInterval? {
+        guard connected, loggedIn, syncing, empty, attempts < 12, withinWindow(now: now) else { return nil }
+        attempts += 1
+        return attempts == 1 ? 0.35 : min(4, Double(attempts - 1))
+    }
+}
+
 /// 由平台安全仓保存的 SDK 开库票据；业务账号、环境、平台必须同时匹配。
 public struct IMBootstrapCredential: Codable, Equatable, Sendable {
     public let businessUserID: String

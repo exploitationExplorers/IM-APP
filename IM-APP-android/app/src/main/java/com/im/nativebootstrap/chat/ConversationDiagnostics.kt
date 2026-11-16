@@ -8,10 +8,18 @@ class ConversationDiagnostics(private val clock:()->Long={System.nanoTime()/1_00
     private val lines=ArrayDeque<String>()
     private var started=clock()
     private var salt=UUID.randomUUID().toString()
-    fun reset() {lines.clear();started=clock();salt=UUID.randomUUID().toString()}
-    fun report()=lines.toList()
-    private fun add(value:String) {lines.addLast("+${(clock()-started).coerceAtLeast(0)}ms $value");while(lines.size>64)lines.removeFirst()}
-    private fun alias(id:String)=MessageDigest.getInstance("SHA-256").digest((salt+id).toByteArray()).take(4).joinToString(""){"%02x".format(it)}
+    private var cachedReport:List<String>?=emptyList()
+    private val aliases=linkedMapOf<String,String>()
+    fun reset() {lines.clear();aliases.clear();cachedReport=emptyList();started=clock();salt=UUID.randomUUID().toString()}
+    fun report():List<String> = cachedReport ?: lines.toList().also {cachedReport=it}
+    private fun add(value:String) {lines.addLast("+${(clock()-started).coerceAtLeast(0)}ms $value");while(lines.size>64)lines.removeFirst();cachedReport=null}
+    private fun alias(id:String):String = aliases[id] ?: run {
+        val bytes=MessageDigest.getInstance("SHA-256").digest((salt+id).toByteArray())
+        val hex="0123456789abcdef"
+        val value=buildString(8) {for(index in 0..3) {val byte=bytes[index].toInt() and 255;append(hex[byte ushr 4]);append(hex[byte and 15])}}
+        if(aliases.size>=64)aliases.remove(aliases.keys.first())
+        aliases[id]=value;value
+    }
     fun phase(source:String) {add(source)}
     fun input(source:String,rows:List<ChatConversation>) {
         val milliseconds=rows.count {it.time>=10_000_000_000L}
@@ -19,7 +27,7 @@ class ConversationDiagnostics(private val clock:()->Long={System.nanoTime()/1_00
         add("$source rows=${rows.size} ms=$milliseconds sec=$seconds zero=${rows.size-milliseconds-seconds}")
     }
     fun changed(source:String,before:List<ChatConversation>,next:List<ChatConversation>) {
-        if(before==next)return
+        if(before===next||before==next)return
         val previous=before.associateBy {it.target.conversationId}
         val positions=before.mapIndexed {index,item->item.target.conversationId to index}.toMap()
         val current=next.associateBy {it.target.conversationId}

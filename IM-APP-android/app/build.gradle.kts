@@ -37,8 +37,8 @@ android {
         applicationId = "com.im.nativebootstrap.staging"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.3.9-startup"
+        versionCode = 14
+        versionName = "0.3.10-autoload"
         buildConfigField("String", "NATIVE_UPDATE_MANIFEST_URL", kotlinString(nativeManifestURL))
         buildConfigField("String", "NATIVE_DOWNLOAD_PAGE_URL", kotlinString(nativeDownloadPageURL))
         testInstrumentationRunner = "com.im.nativebootstrap.SDKSmokeInstrumentation"

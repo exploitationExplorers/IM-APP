@@ -31,7 +31,9 @@ class GroupRetention(private val file:File,private val owner:String) {
     fun conversation(item:ChatConversation):ChatConversation {
         val min=values[item.target.conversationId]?.minVisibleSeq ?: return item
         if(item.target.sessionType!=3||item.latestSeq<=0) return item
-        return item.copy(preview=if(item.latestSeq<min) "" else item.preview,unread=minOf(item.unread,maxOf(0L,item.latestSeq-min+1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()))
+        val preview=if(item.latestSeq<min) "" else item.preview
+        val unread=minOf(item.unread,maxOf(0L,item.latestSeq-min+1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        return if(preview==item.preview&&unread==item.unread)item else item.copy(preview=preview,unread=unread)
     }
     fun merge(incoming:List<RetentionWatermark>) {
         val next=values.toMutableMap()
@@ -49,7 +51,8 @@ class GroupRetention(private val file:File,private val owner:String) {
         values=next
     }
     companion object {
-        fun supported(id:String)=Regex("^sg_[0-9a-f]{32}$").matches(id)
+        private val supportedID=Regex("^sg_[0-9a-f]{32}$")
+        fun supported(id:String)=supportedID.matches(id)
         private fun positive(raw:JsonObject,key:String):Long {
             val value=raw.get(key)
             require(value?.isJsonPrimitive==true&&value.asJsonPrimitive.isNumber&&Regex("^[0-9]+$").matches(value.toString())) { "群历史边界不是安全整数" }

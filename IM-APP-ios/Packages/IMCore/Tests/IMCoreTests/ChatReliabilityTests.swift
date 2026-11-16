@@ -3,6 +3,41 @@ import Foundation
 @testable import IMCore
 
 final class ChatReliabilityTests: XCTestCase {
+    func testEmptyConversationSnapshotBeforeSyncCanReloadWithoutManualRefresh() {
+        var budget = EmptyConversationReloadBudget()
+        XCTAssertNil(budget.reserve(now: 0.105, connected: true, loggedIn: true, syncing: false, empty: true))
+        budget.begin(now: 0.713)
+        XCTAssertEqual(budget.reserve(now: 0.713, connected: true, loggedIn: true, syncing: true, empty: true), 0.35)
+        XCTAssertEqual(budget.reserve(now: 1.1, connected: true, loggedIn: true, syncing: true, empty: true), 1)
+        XCTAssertNil(budget.reserve(now: 2.1, connected: true, loggedIn: true, syncing: true, empty: false))
+        XCTAssertEqual(budget.attempts, 2)
+    }
+
+    func testEmptyConversationProgressDoesNotResetBudgetOrPollForever() {
+        var budget = EmptyConversationReloadBudget(); budget.begin(now: 1)
+        for index in 0..<12 {
+            XCTAssertNotNil(budget.reserve(now: 1 + Double(index), connected: true, loggedIn: true, syncing: true, empty: true))
+        }
+        XCTAssertNil(budget.reserve(now: 14, connected: true, loggedIn: true, syncing: true, empty: true))
+        XCTAssertEqual(budget.attempts, 12)
+        budget.begin(now: 20)
+        XCTAssertNil(budget.reserve(now: 65, connected: true, loggedIn: true, syncing: true, empty: true))
+        XCTAssertFalse(budget.withinWindow(now: 65))
+    }
+
+    func testEmptyConversationFailureTimeoutAndLogoutStopProgressRetries() {
+        var budget = EmptyConversationReloadBudget(); budget.begin(now: 1)
+        XCTAssertNotNil(budget.reserve(now: 1, connected: true, loggedIn: true, syncing: true, empty: true))
+        budget.cancel()
+        XCTAssertNil(budget.reserve(now: 2, connected: true, loggedIn: true, syncing: true, empty: true))
+        budget.begin(now: 3)
+        XCTAssertNil(budget.reserve(now: 3, connected: false, loggedIn: true, syncing: true, empty: true))
+        XCTAssertNil(budget.reserve(now: 3, connected: true, loggedIn: false, syncing: true, empty: true))
+        XCTAssertNil(budget.reserve(now: 3, connected: true, loggedIn: true, syncing: false, empty: true))
+        XCTAssertNil(budget.reserve(now: 3, connected: true, loggedIn: true, syncing: true, empty: false))
+        XCTAssertEqual(budget.attempts, 0)
+    }
+
     func testStartupEventsCannotPublishPartialConversationSubset() {
         var startup = ConversationStartupGate<ConversationOrderEntry>()
         let early = ConversationOrderEntry(id: "B", pinned: false, timestamp: 10)

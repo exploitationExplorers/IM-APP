@@ -42,6 +42,8 @@ def main():
     parser.add_argument('--history-ui-parity',action='store_true')
     parser.add_argument('--admin-picker',action='store_true')
     parser.add_argument('--conversation-startup',action='store_true')
+    parser.add_argument('--conversation-mapping',action='store_true')
+    parser.add_argument('--conversation-autoload',action='store_true')
     parser.add_argument('--offline-upgrade-report',help='本轮离线覆盖升级通过记录，纳入同包交付门禁')
     args=parser.parse_args()
     WORK,OUT=Path(args.work).resolve(),Path(args.output).resolve()
@@ -150,6 +152,25 @@ def main():
                 assert data.startswith(b'\x89PNG\r\n\x1a\n')
                 (OUT/('conversation-startup-'+name+'.png')).write_bytes(data)
             print('Complete 243-conversation startup, sync updates and real message promotion verified',flush=True)
+        if args.conversation_mapping:
+            output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.ConversationMappingInstrumentation')
+            (OUT/'conversation-mapping.txt').write_text(output,encoding='utf-8')
+            assert 'conversationMapping=passed:' in output and 'INSTRUMENTATION_CODE: -1' in output,output
+            report['conversation_mapping']=output.strip().splitlines()
+            (OUT/'conversation-mapping-metrics.txt').write_text(call('shell','run-as',PACKAGE,'cat','cache/conversation-mapping-metrics.txt'),encoding='utf-8')
+            print('Production conversation mapping worker verified with 1500 synthetic rows',flush=True)
+        if args.conversation_autoload:
+            output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.ConversationAutoloadInstrumentation')
+            (OUT/'conversation-autoload.txt').write_text(output,encoding='utf-8')
+            assert 'conversationAutoload=passed:' in output and 'INSTRUMENTATION_CODE: -1' in output,output
+            report['conversation_autoload']=output.strip().splitlines()
+            for name in ('publishes','compositions','steps','diagnostics','visible','scroll'):
+                (OUT/('conversation-autoload-'+name+'.txt')).write_text(call('shell','run-as',PACKAGE,'cat','cache/conversation-autoload-'+name+'.txt'),encoding='utf-8')
+            for name in ('syncing-empty','recovered-2000','new-message-protected','metadata-stable','scrolled-local-list'):
+                data=call('exec-out','run-as',PACKAGE,'cat','cache/conversation-autoload-'+name+'.png',binary=True)
+                assert data.startswith(b'\x89PNG\r\n\x1a\n')
+                (OUT/('conversation-autoload-'+name+'.png')).write_bytes(data)
+            print('Empty-before-sync automatic recovery and actual 2000-conversation UI verified',flush=True)
         if args.instant_media:
             output=call('shell','am','instrument','-w',PACKAGE+'.test/com.im.nativebootstrap.InstantMediaInstrumentation')
             (OUT/'instant-media.txt').write_text(output,encoding='utf-8')

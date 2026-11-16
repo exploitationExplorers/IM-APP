@@ -155,16 +155,21 @@ class SDKSmokeInstrumentation:Instrumentation() {
         fixtureStage="offline-restart-conversations"
         val conversations=awaitSdk<List<ConversationInfo>> { sdk.conversationManager.getConversationListSplit(it,0,30) }
         check(conversations.any { it.conversationID==conversationId })
+        // 同一 runner 也用于旧 APK 建立覆盖升级基线；旧版没有新增 Gateway 方法。
+        if(application.packageManager.getPackageInfo(application.packageName,0).longVersionCode>=13) {
         fixtureStage="offline-restart-full-snapshot-gateway"
         val snapshotLatch=CountDownLatch(1)
         var complete:Result<com.im.nativebootstrap.chat.ConversationSnapshotPage>?=null
-        com.im.nativebootstrap.chat.OpenIMGateway(application).initialConversations(30) {
+        val snapshotGateway=com.im.nativebootstrap.chat.OpenIMGateway(application)
+        snapshotGateway.initialConversations(30) {
             complete=it;snapshotLatch.countDown()
         }
-        check(snapshotLatch.await(10,TimeUnit.SECONDS)) {"Full local snapshot gateway callback timed out"}
+        try {check(snapshotLatch.await(10,TimeUnit.SECONDS)) {"Full local snapshot gateway callback timed out"}}
+        finally {snapshotGateway.shutdown()}
         val full=complete!!.getOrThrow()
         check(full.end&&full.items.any {it.target.conversationId==conversationId&&it.latestMessage?.id==expected}) {"Full snapshot did not include the persisted SDK conversation and exact message"}
         output.putString("fullLocalSnapshot","passed: production gateway getAllConversationList reads persisted SDK conversation and latest ID after loopback-only restart")
+        }
         fixtureStage="offline-final-logout"
         awaitSdk<String> { sdk.logout(it) }
         sdk.unInit()

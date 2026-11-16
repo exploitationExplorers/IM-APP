@@ -7,6 +7,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 class ConversationStartupTest {
     @get:Rule val temporary=TemporaryFolder()
@@ -28,9 +30,88 @@ class ConversationStartupTest {
     private inner class Harness {
         val gateway=Gateway()
         val publishes=mutableListOf<ChatState>()
-        val controller=ChatController(gateway,{it()},{_,_->},{publishes+=it})
+        val timers=mutableListOf<Pair<Long,()->Unit>>()
+        val callbacks=LinkedBlockingQueue<()->Unit>()
+        val thread=Thread.currentThread()
+        val controller=ChatController(gateway,{if(Thread.currentThread()===thread)it() else callbacks.offer(it)},{ms,work->timers+=ms to work},{publishes+=it})
         val state get()=publishes.last()
         init {controller.start(AccountIdentity("business","im-user"),"https://service.invalid","not-a-token","https://im.invalid","wss://im.invalid",temporary.newFolder())}
+    }
+    @Test fun manyGroupBoundaryBatchesShareOneFullReadAndUnchangedEventsDoNotRepublish() {
+        val h=Harness();h.gateway.login(Result.success(Unit))
+        val groups=(1..201).map {index->row(index).copy(target=ChatTarget("sg_"+index.toString(16).padStart(32,'0'),3,groupId="group-$index"))}
+        h.gateway.snapshots.first()(Result.success(ConversationSnapshotPage(groups,true)))
+        var requests=0
+        h.controller.attachBusiness(object:ChatBusiness {
+            override val baseUrl="https://business.invalid"
+            override fun request(method:String,path:String,body:com.google.gson.JsonObject?,query:Map<String,String>):com.google.gson.JsonElement {
+                check(path=="/im/group-retention/states")
+                synchronized(this) {requests++}
+                return com.google.gson.JsonParser.parseString("""{"items":[]}""")
+            }
+        })
+        val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+        while(h.gateway.snapshots.size<2&&System.nanoTime()<deadline)h.callbacks.poll(100,TimeUnit.MILLISECONDS)?.invoke()
+        assertEquals(5,requests)
+        assertEquals("201 groups must not trigger five full queries",2,h.gateway.snapshots.size)
+        h.gateway.snapshots.last()(Result.success(ConversationSnapshotPage(groups,true)))
+        val before=h.publishes.size
+        val rows=h.state.conversations
+        repeat(100) {h.gateway.events.conversations(rows.reversed())}
+        assertEquals(before,h.publishes.size)
+        assertSame(rows,h.state.conversations)
+    }
+    @Test fun syncFinishDuringInitialQueryAutomaticallyRereadsAfterTheStaleEmptyResult() {
+        val h=Harness();h.gateway.events.syncStarted();h.gateway.login(Result.success(Unit))
+        h.gateway.events.syncFinished()
+        assertEquals(1,h.gateway.snapshots.size)
+        h.gateway.snapshots.first()(Result.success(ConversationSnapshotPage(emptyList(),true)))
+        assertEquals("A sync completion received during a query requires a fresh local read",2,h.gateway.snapshots.size)
+        h.gateway.snapshots.last()(Result.success(ConversationSnapshotPage((1..243).map(::row),true)))
+        assertEquals(243,h.state.conversations.size)
+        assertEquals(SyncStatus.COMPLETED,h.state.sync)
+    }
+    @Test fun initialEmptyStoreDuringSyncAutomaticallyReadsAgainWithoutManualRefresh() {
+        val h=Harness();h.gateway.events.connection(ConnectionState.CONNECTED);h.gateway.events.syncStarted();h.gateway.login(Result.success(Unit))
+        h.gateway.snapshots.first()(Result.success(ConversationSnapshotPage(emptyList(),true)))
+        val recovery=h.timers.firstOrNull {it.first in 500L..5_000L}
+        assertNotNull("Syncing empty store needs an automatic local recovery read",recovery)
+        recovery!!.second()
+        assertEquals(2,h.gateway.snapshots.size)
+        h.gateway.snapshots.last()(Result.success(ConversationSnapshotPage((1..243).map(::row),true)))
+        assertEquals(243,h.state.conversations.size)
+        assertEquals(SyncStatus.RUNNING,h.state.sync)
+    }
+    @Test fun emptySnapshotBeforeSyncStartRecoversAndRefreshRequestsAreCoalesced() {
+        val h=Harness();h.gateway.events.connection(ConnectionState.CONNECTED);h.gateway.login(Result.success(Unit))
+        h.gateway.snapshots.first()(Result.success(ConversationSnapshotPage(emptyList(),true)))
+        assertTrue(h.state.ready)
+        h.gateway.events.syncStarted()
+        h.timers.single {it.first==1_000L}.second()
+        assertEquals(2,h.gateway.snapshots.size)
+        repeat(50) {h.controller.loadConversations(true)}
+        h.gateway.snapshots[1](Result.success(ConversationSnapshotPage((1..1000).map(::row),true)))
+        assertEquals(3,h.gateway.snapshots.size)
+        h.gateway.snapshots.last()(Result.success(ConversationSnapshotPage((1..1000).map(::row),true)))
+        assertEquals(1000,h.state.conversations.size)
+        assertFalse(h.state.conversationsLoading)
+    }
+    @Test fun emptyRecoveryStopsAfterBudgetOrLogoutAndIgnoresOldTimer() {
+        val h=Harness();h.gateway.events.connection(ConnectionState.CONNECTED);h.gateway.login(Result.success(Unit))
+        h.gateway.snapshots.first()(Result.success(ConversationSnapshotPage(emptyList(),true)))
+        h.gateway.events.syncStarted()
+        repeat(12) {
+            val recovery=h.timers.last {it.first in 1_000L..5_000L};recovery.second()
+            h.gateway.snapshots.last()(Result.success(ConversationSnapshotPage(emptyList(),true)))
+        }
+        val reads=h.gateway.snapshots.size
+        h.gateway.events.syncProgress(50)
+        assertEquals(reads,h.gateway.snapshots.size)
+        assertEquals(12,h.timers.count {it.first in 1_000L..5_000L})
+        h.controller.logout()
+        h.timers.first {it.first==1_000L}.second()
+        assertEquals(reads,h.gateway.snapshots.size)
+        assertTrue(h.state.conversations.isEmpty())
     }
     @Test fun completeLocalSnapshotIsVisibleOfflineWithoutWaitingForSyncOrPagination() {
         val h=Harness();val rows=(1..243).map(::row)

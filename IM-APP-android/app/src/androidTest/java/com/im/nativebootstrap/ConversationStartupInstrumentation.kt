@@ -41,6 +41,11 @@ class ConversationStartupInstrumentation:Instrumentation() {
         val gateway=StartupGateway()
         val state=mutableStateOf(ChatState())
         val timers=mutableListOf<Pair<Long,()->Unit>>()
+        fun saveEvidence() {
+            File(targetContext.cacheDir,"conversation-startup-publishes.txt").writeText(publishes.joinToString("\n") {"${it.ms}ms count=${it.ids.size} order=${it.ids.joinToString(",")}"})
+            File(targetContext.cacheDir,"conversation-startup-frames.txt").writeText(frames.joinToString("\n") {"${it.ms}ms count=${it.ids.size} order=${it.ids.joinToString(",")}"})
+            File(targetContext.cacheDir,"conversation-startup-diagnostics.txt").writeText(state.value.conversationDiagnostics.joinToString("\n"))
+        }
         uiAutomation.serviceInfo=uiAutomation.serviceInfo.apply {flags=flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS}
         try {
             // 专用无账号设备；不清理真实凭据，也不让 ViewModel 恢复任何服务端会话。
@@ -155,16 +160,16 @@ class ConversationStartupInstrumentation:Instrumentation() {
             result.putString("scope","Synthetic SDK only; no login/backend network calls; elapsed publication/composition samples are local regression evidence, not real-device performance benchmarks")
             result.putInt("localConversationCount",243)
             result.putLong("firstNonemptyPublishMs",publishes.first {it.ids.isNotEmpty()}.ms)
+            // finish 会结束测试进程，证据必须在发完成信号之前落盘。
+            saveEvidence()
             finish(Activity.RESULT_OK,result)
         } catch(error:Throwable) {
             runCatching {screenshot("failure")}
             runCatching {File(targetContext.cacheDir,"conversation-startup-failure.txt").writeText(error.stackTraceToString()+"\n"+tree(uiAutomation.rootInActiveWindow))}
             result.putString("conversationStartup","failed: ${error.javaClass.simpleName}: ${error.message}")
+            runCatching {saveEvidence()}
             finish(Activity.RESULT_CANCELED,result)
         } finally {
-            File(targetContext.cacheDir,"conversation-startup-publishes.txt").writeText(publishes.joinToString("\n") {"${it.ms}ms count=${it.ids.size} order=${it.ids.joinToString(",")}"})
-            File(targetContext.cacheDir,"conversation-startup-frames.txt").writeText(frames.joinToString("\n") {"${it.ms}ms count=${it.ids.size} order=${it.ids.joinToString(",")}"})
-            File(targetContext.cacheDir,"conversation-startup-diagnostics.txt").writeText(state.value.conversationDiagnostics.joinToString("\n"))
             runOnMainSync {controller?.logout();models?.clear();activity?.finish()}
         }
     }

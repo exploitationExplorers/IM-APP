@@ -85,6 +85,12 @@ class ChatController(
     private var conversationOperation=0L
     private val conversationChangesDuringRequest=linkedMapOf<String,ChatConversation>()
     private var initialConversationSnapshotLoaded=false
+    private var pendingConversationRefresh=false
+    private var conversationRecoveryScheduled=false
+    private var conversationRecoveryGeneration=0L
+    private var conversationRecoveryAttempts=0
+    private var conversationVisibilityDirty=true
+    private var retentionRefreshNeedsRead=false
     private val conversationDiagnostics=ConversationDiagnostics()
     private var roomGeneration = 0L
     private var historyOperation=0L
@@ -142,18 +148,43 @@ class ChatController(
     private fun historyExhausted()=remoteHistoryEnd&&(localHistorySupported!=true||localHistoryEnd)
     private fun permits(target:ChatTarget,message:ChatMessage)=retention?.permits(target,message)!=false&&purges?.permits(target,message)!=false
     private fun visible(messages:List<ChatMessage>)=messages.filterNot { tombstones[it.id]==true||MessageContents.isPinSync(it.serialized) }.filter { message -> snapshot.active?.target?.let { target -> (message.seq<=0||boundaryReady(target))&&permits(target,message) } != false }.map { if(tombstones.containsKey(it.id)) it.copy(text="[消息已撤回]",serialized="",status=2) else it }
-    fun attachBusiness(value:ChatBusiness?) { business=value;value?.let { MediaURLs.businessBase=it.baseUrl };refreshRetention(snapshot.conversations);snapshot.active?.target?.let { refreshGroupPurges(it) } }
+    fun attachBusiness(value:ChatBusiness?) { business=value;conversationVisibilityDirty=true;value?.let { MediaURLs.businessBase=it.baseUrl };refreshRetention(snapshot.conversations);snapshot.active?.target?.let { refreshGroupPurges(it) } }
     fun attachIncoming(listener:((ChatMessage)->Unit)?) { incomingListener=listener }
 
 
     private fun current(t: SessionTicket) = coordinator.accepts(t)
+    private fun cancelConversationRecovery() {conversationRecoveryGeneration++;conversationRecoveryScheduled=false}
+    private fun scheduleConversationRecovery() {
+        val t=ticket ?: return
+        if(conversationRecoveryScheduled||conversationRecoveryAttempts>=12||!snapshot.loggedIn||authRevoked||snapshot.connection!=ConnectionState.CONNECTED||coordinator.snapshot().sync!=SyncStatus.RUNNING||snapshot.conversations.isNotEmpty())return
+        conversationRecoveryScheduled=true
+        val generation=conversationRecoveryGeneration
+        val delay=when(conversationRecoveryAttempts) {0->1_000L;1->2_000L;else->5_000L}
+        after(delay) {dispatch {
+            if(!current(t)||generation!=conversationRecoveryGeneration)return@dispatch
+            conversationRecoveryScheduled=false
+            if(!snapshot.loggedIn||authRevoked||snapshot.connection!=ConnectionState.CONNECTED||coordinator.snapshot().sync!=SyncStatus.RUNNING||snapshot.conversations.isNotEmpty())return@dispatch
+            conversationRecoveryAttempts++
+            conversationDiagnostics.phase("empty-sync-recovery attempt=$conversationRecoveryAttempts")
+            loadConversations(true)
+        }}
+    }
+    private fun finishConversationRead() {
+        if(pendingConversationRefresh) {pendingConversationRefresh=false;loadConversations(true)}
+        else scheduleConversationRecovery()
+    }
     private fun emit(next: ChatState = snapshot,source:String="state") {
         val previousConversations=snapshot.conversations
         val core = coordinator.snapshot()
         val id=next.active?.target?.conversationId.orEmpty()
         val uploads=mediaUploads?.all().orEmpty()
         val localMessages=uploads.filter { it.target.conversationId==id }.map { it.placeholder() }
-        snapshot = next.copy(pendingForwards=pendingForwards?.all().orEmpty(),mediaUploads=uploads,localSentMedia=sentVideos?.all().orEmpty(),mediaOwnerDirectory=mediaUploads?.ownerDirectory().orEmpty(),messages=mergeMessages(next.messages.filterNot { it.id.startsWith("upload-") },localMessages),store=core.store,sync=core.sync,outbox=outbox?.all().orEmpty(),showPinnedBanner=next.active?.pinnedMessage?.let { presentation?.dismissed(id,"pin",pinPresentationKey(it))!=true } ?: true,showAnnouncementBanner=presentation?.dismissed(id,"announcement",next.groupAnnouncement)!=true,conversations=next.conversations.map { if(!boundaryReady(it.target)) it.copy(preview="",unread=0) else purges?.conversation(retention?.conversation(it) ?: it) ?: retention?.conversation(it) ?: it })
+        val conversations=if(!conversationVisibilityDirty&&next.conversations===previousConversations)previousConversations else {
+            val visible=next.conversations.map { if(!boundaryReady(it.target)) {if(it.preview.isEmpty()&&it.unread==0)it else it.copy(preview="",unread=0)} else purges?.conversation(retention?.conversation(it) ?: it) ?: retention?.conversation(it) ?: it }
+            if(visible.indices.all {visible[it]===next.conversations[it]})next.conversations else visible
+        }
+        conversationVisibilityDirty=false
+        snapshot = next.copy(pendingForwards=pendingForwards?.all().orEmpty(),mediaUploads=uploads,localSentMedia=sentVideos?.all().orEmpty(),mediaOwnerDirectory=mediaUploads?.ownerDirectory().orEmpty(),messages=mergeMessages(next.messages.filterNot { it.id.startsWith("upload-") },localMessages),store=core.store,sync=core.sync,outbox=outbox?.all().orEmpty(),showPinnedBanner=next.active?.pinnedMessage?.let { presentation?.dismissed(id,"pin",pinPresentationKey(it))!=true } ?: true,showAnnouncementBanner=presentation?.dismissed(id,"announcement",next.groupAnnouncement)!=true,conversations=conversations)
         conversationDiagnostics.changed(source,previousConversations,snapshot.conversations)
         snapshot=snapshot.copy(conversationDiagnostics=conversationDiagnostics.report())
         changed(snapshot)
@@ -188,6 +219,7 @@ class ChatController(
                     if(current(t)) {
                         if(state==ConnectionState.AUTH_REQUIRED) authRevoked=true
                         emit(snapshot.copy(connection=state,ready=snapshot.ready&&!authRevoked,loggedIn=snapshot.loggedIn&&!authRevoked,error=if(authRevoked) "聊天登录已失效，请退出后重新登录。" else snapshot.error))
+                        if(state==ConnectionState.CONNECTED)scheduleConversationRecovery() else cancelConversationRecovery()
                         if(state==ConnectionState.CONNECTED&&!authRevoked)reconcilePending()
                         if(state==ConnectionState.CONNECTED&&!authRevoked&&localHistorySupported==true)snapshot.active?.let { active ->
                             emit(snapshot.copy(historyEnd=historyExhausted()))
@@ -201,7 +233,8 @@ class ChatController(
                     val confirmed=items.mapNotNull { item -> item.latestMessage?.takeIf { msg -> msg.mine&&(msg.status==2||msg.seq>0)&&outbox?.all()?.any { it.id==msg.id&&it.target==item.target }==true } }
                     confirmed.forEach(::acceptEvidence)
                     if(snapshot.conversationsLoading)items.forEach { conversationChangesDuringRequest[it.target.conversationId]=it }
-                    emit(snapshot.copy(conversations=if(initialConversationSnapshotLoaded)mergeConversations(snapshot.conversations,items,authoritative=true) else snapshot.conversations,messages=mergeMessages(snapshot.messages,visible(confirmed.filter { msg -> items.any { it.target==snapshot.active?.target&&it.latestMessage?.id==msg.id } })),error=if(confirmed.isNotEmpty())null else snapshot.error),"sdk-event")
+                    val merged=if(initialConversationSnapshotLoaded)mergeConversations(snapshot.conversations,items,authoritative=true) else snapshot.conversations
+                    if(merged!==snapshot.conversations||confirmed.isNotEmpty())emit(snapshot.copy(conversations=merged,messages=if(confirmed.isEmpty())snapshot.messages else mergeMessages(snapshot.messages,visible(confirmed.filter { msg -> items.any { it.target==snapshot.active?.target&&it.latestMessage?.id==msg.id } })),error=if(confirmed.isNotEmpty())null else snapshot.error),"sdk-event")
                     refreshRetention(items)
                 } } }
                 override fun read(ids:List<String>) { dispatch { if(current(t)) emit(snapshot.copy(readMessageIds=snapshot.readMessageIds+ids)) } }
@@ -236,17 +269,24 @@ class ChatController(
                 override fun syncStarted() { dispatch {
                     if(!current(t)) return@dispatch
                     conversationDiagnostics.phase("sync-start")
+                    cancelConversationRecovery();conversationRecoveryAttempts=0
                     syncFinishedBeforeStore=false
                     val attempt=coordinator.beginSync(t) ?: return@dispatch
                     syncAttempt=attempt
                     emit()
+                    scheduleConversationRecovery()
                     after(90_000) { dispatch { if(current(t) && syncAttempt===attempt) { coordinator.failSync(attempt,SyncStatus.TIMED_OUT,"同步超时"); syncAttempt=null; syncFinishedBeforeStore=false; emit(snapshot.copy(error="同步暂未完成，可继续读取已保存的聊天。")) } } }
                 } }
+                override fun syncProgress(progress:Long) {dispatch {
+                    if(current(t))scheduleConversationRecovery()
+                }}
                 override fun syncFinished() { dispatch {
                     if(!current(t)) return@dispatch
                     conversationDiagnostics.phase("sync-finish")
                     val attempt=syncAttempt ?: return@dispatch
-                    if(coordinator.snapshot().store==StoreStatus.READABLE) { coordinator.completeSync(attempt);syncAttempt=null;loadConversations(true) } else syncFinishedBeforeStore=true
+                    cancelConversationRecovery()
+                    if(coordinator.snapshot().store==StoreStatus.READABLE) { coordinator.completeSync(attempt);syncAttempt=null;loadConversations(true) }
+                    else {syncFinishedBeforeStore=true;if(snapshot.loggedIn)loadConversations(true)}
                     reconcilePending()
                     emit()
                 } }
@@ -256,6 +296,7 @@ class ChatController(
                     syncAttempt?.let { coordinator.failSync(it,SyncStatus.FAILED,"同步未完成") }
                     syncAttempt=null
                     syncFinishedBeforeStore=false
+                    cancelConversationRecovery()
                     emit(snapshot.copy(error="同步未完成，可重试读取；不会删除聊天记录。"))
                 } }
             }
@@ -277,7 +318,8 @@ class ChatController(
     }
     fun loadConversations(refresh: Boolean=false) {
         val t=ticket ?: return
-        if((!snapshot.loggedIn&&snapshot.store!=StoreStatus.READABLE) || (snapshot.conversationsLoading && !refresh) || (snapshot.conversationsEnd && !refresh)) return
+        if((!snapshot.loggedIn&&snapshot.store!=StoreStatus.READABLE) || (snapshot.conversationsEnd && !refresh)) return
+        if(snapshot.conversationsLoading) {if(refresh)pendingConversationRefresh=true;return}
         if(refresh) { pageGeneration+=1;offset=0 }
         val version=pageGeneration
         val query=++conversationOperation
@@ -286,7 +328,7 @@ class ChatController(
         val requestedOffset=offset
         conversationDiagnostics.phase(if(refresh)"local-snapshot-request" else "local-page-request offset=$requestedOffset")
         emit(snapshot.copy(conversationsLoading=true,error=null))
-        after(20_000) { dispatch { if(current(t)&&pageGeneration==version&&conversationOperation==query&&snapshot.conversationsLoading) { pageGeneration+=1;emit(snapshot.copy(conversationsLoading=false,error="会话读取超时，可点击刷新重试。")) } } }
+        after(20_000) { dispatch { if(current(t)&&pageGeneration==version&&conversationOperation==query&&snapshot.conversationsLoading) { pageGeneration+=1;emit(snapshot.copy(conversationsLoading=false,error="会话读取超时，可点击刷新重试。"));finishConversationRead() } } }
         val resultHandler:(Result<ConversationSnapshotPage>)->Unit = { result -> dispatch {
             if(!current(t)||version!=pageGeneration||conversationOperation!=query) return@dispatch
             result.fold(onSuccess={ response ->
@@ -307,9 +349,11 @@ class ChatController(
                 initialConversationSnapshotLoaded=true
                 conversationChangesDuringRequest.clear()
                 emit(snapshot.copy(ready=!authRevoked&&snapshot.loggedIn,conversations=merged,conversationsLoading=false,conversationsEnd=response.end),if(refresh)"local-snapshot" else "local-page")
+                if(merged.isNotEmpty())cancelConversationRecovery()
                 refreshRetention(page)
                 if(snapshot.active!=null&&!snapshot.historyLoading&&snapshot.messages.isEmpty())loadHistory()
-            },onFailure={ emit(snapshot.copy(conversationsLoading=false,error=it.message ?: "会话读取失败，可重试。")) })
+                finishConversationRead()
+            },onFailure={ emit(snapshot.copy(conversationsLoading=false,error=it.message ?: "会话读取失败，可重试。"));finishConversationRead() })
         } }
         if(refresh)gateway.initialConversations(30,resultHandler)
         else gateway.conversations(requestedOffset,30) { result -> resultHandler(result.map { ConversationSnapshotPage(it,it.size<30) }) }
@@ -954,7 +998,7 @@ class ChatController(
             }
             dispatch {
                 if(!current(t)) return@dispatch
-                val persisted=runCatching { refreshedPurges?.let { purges?.merge(active.target.conversationId,it);emit(snapshot.copy(messages=visible(snapshot.messages))) } }
+                val persisted=runCatching { refreshedPurges?.let { purges?.merge(active.target.conversationId,it);conversationVisibilityDirty=true;emit(snapshot.copy(messages=visible(snapshot.messages))) } }
                 if(persisted.isFailure) {
                     emit(snapshot.copy(error="服务端已处理成员消息，但本机清理边界暂未保存，请检查空间后刷新聊天。"))
                     done(Result.failure(IllegalStateException("服务端已处理，本机清理边界暂未保存，请检查空间后刷新，勿重复操作")))
@@ -1448,12 +1492,13 @@ class ChatController(
                     retentionInFlight.removeAll(batch.toSet())
                     result.fold(onSuccess={ states ->
                         retention?.merge(states)
+                        conversationVisibilityDirty=true
+                        retentionRefreshNeedsRead=true
                         historyChecks?.mark(batch)
                         batch.forEach { retentionFresh[it]=System.currentTimeMillis() }
                         retentionChecked.addAll(batch)
                         emit(snapshot.copy(messages=visible(snapshot.messages)))
                         if(snapshot.active?.target?.conversationId in batch)loadHistory()
-                        loadConversations(true)
                     },onFailure={
                         // 已验证的本地边界继续生效；后台刷新失败保留诊断，避免打断浏览。
                         batch.forEach { retentionFresh[it]=System.currentTimeMillis() }
@@ -1461,6 +1506,8 @@ class ChatController(
                         val blocked=active?.conversationId in batch&&active!=null&&!boundaryReady(active)
                         emit(snapshot.copy(historyDiagnostic="群历史边界刷新失败",error=if(blocked)"暂时无法读取此群历史，请稍后重试。" else snapshot.error))
                     })
+                    // 所有分批边界校验共用一次完整本地重读，避免每 50 个群触发全表扫描。
+                    if(retentionInFlight.isEmpty()&&retentionRefreshNeedsRead) {retentionRefreshNeedsRead=false;loadConversations(true)}
                 }
             }
         }
@@ -1483,6 +1530,7 @@ class ChatController(
                 purgeInFlight.remove(id)
                 result.fold(onSuccess={ rules ->
                     purges?.merge(id,rules)
+                    conversationVisibilityDirty=true
                     purgeFresh[id]=System.currentTimeMillis()
                     emit(snapshot.copy(messages=visible(snapshot.messages)))
                 },onFailure={
@@ -1607,7 +1655,7 @@ class ChatController(
                     } }
                     dispatch {
                         if(!current(t)) { return@dispatch }
-                        boundaries.fold(onSuccess={ values -> retention?.merge(values);retentionChecked.addAll(ids);ids.forEach { retentionFresh[it]=System.currentTimeMillis() };deliver() },onFailure={ done(Result.failure(IllegalStateException("群历史边界暂不可校验，请稍后重试搜索"))) })
+                        boundaries.fold(onSuccess={ values -> retention?.merge(values);conversationVisibilityDirty=true;retentionChecked.addAll(ids);ids.forEach { retentionFresh[it]=System.currentTimeMillis() };deliver() },onFailure={ done(Result.failure(IllegalStateException("群历史边界暂不可校验，请稍后重试搜索"))) })
                     }
                 }
             },onFailure={ done(Result.failure(it)) })
@@ -1798,6 +1846,8 @@ class ChatController(
     fun logout() {
         conversationDiagnostics.reset()
         initialConversationSnapshotLoaded=false
+        pendingConversationRefresh=false;cancelConversationRecovery();conversationRecoveryAttempts=0
+        conversationVisibilityDirty=true;retentionRefreshNeedsRead=false
         conversationChangesDuringRequest.clear()
         presentation=null;membersOperation++;membersLoading=false;wantedMembers=emptyList();checkedMembers.clear()
         coordinator.logout();ticket=null;syncAttempt=null;outbox=null;mediaUploads=null;sentVideos=null;pendingForwards=null;runningForwards.clear();announcedForwards.clear();uploadAttempts.clear();retention=null;historyChecks=null;purges=null;purgeFresh.clear();purgeInFlight.clear();retentionFresh.clear();retentionInFlight.clear();retentionChecked.clear();readReporting.clear();readReported.clear();clearing.clear();uploadingTargets.clear();notified.clear();ownIMId="";pageGeneration+=1;roomGeneration+=1;remoteHistoryOperation++;remoteHistoryLoading=false;cursor=null;offset=0
