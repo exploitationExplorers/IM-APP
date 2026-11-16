@@ -893,8 +893,8 @@ function tickSyncPolling() {
     return
   }
   syncPollTicksLeft -= 1
-  // 轮询失败不弹 toast：同步中途读库本来就可能拿不到数据
-  void chatStore.loadConversations().catch(() => undefined)
+  // 只读本地库：同步期间别再做黑名单/退群/备注这些网络对账，也别重登
+  void chatStore.loadConversations({ localOnly: true }).catch(() => undefined)
   syncPollTimer = setTimeout(tickSyncPolling, SYNC_POLL_INTERVAL_MS)
 }
 

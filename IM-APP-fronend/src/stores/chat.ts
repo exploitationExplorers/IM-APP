@@ -980,7 +980,15 @@ export const useChatStore = defineStore('chat', () => {
     retentionTimer = undefined
   }
 
-  async function loadConversations() {
+  /**
+   * 拉会话列表。
+   *
+   * `localOnly`：同步进行中的轻量轮询用——只读本地库并刷新列表，
+   * 不做黑名单对账、退群校验、入群申请对账、在线状态订阅这些网络/额外开销，
+   * 也不在 10004 时重登（重登会关库，大账号要从头同步，比等下去更糟）。
+   */
+  async function loadConversations(options: { localOnly?: boolean } = {}) {
+    const localOnly = !!options.localOnly
     perfMarkStart('chat:load-conversations')
     loading.value = true
     try {
@@ -988,7 +996,7 @@ export const useChatStore = defineStore('chat', () => {
       syncHiddenIdsFromStorage()
       syncBlockedPeerKeysFromStorage()
       // 黑名单对齐与拉会话并行：别串行等 blocked 再 getConversationList（图里那条常拖慢进首页）
-      const blockedSync = syncBlockedPeersFromServer()
+      const blockedSync = localOnly ? Promise.resolve() : syncBlockedPeersFromServer()
       subscribeRealtime()
       let list
       try {
@@ -996,6 +1004,8 @@ export const useChatStore = defineStore('chat', () => {
       } catch (e) {
         const msg = (e as Error)?.message || ''
         if (msg.includes('10004') || msg.includes('10005')) {
+          // 轻量轮询不重登：等 OnSyncServerFinish 统一刷新即可
+          if (localOnly) return
           invalidateIMLoginCache()
           await ensureIMLogin()
           syncHiddenIdsFromStorage()
@@ -1009,8 +1019,10 @@ export const useChatStore = defineStore('chat', () => {
       }
       // ★ 必须先对账再过滤：仍留在 exitedGroupIds 里的会话会被下面的 filter 直接筛掉，
       //   那样就永远没机会做成员校验恢复了（见 reconcileExitedGroups）。
-      await reconcileExitedGroups(list)
-      await groupRetention.sync(list.map((item) => String(item.conversationID || (item as unknown as Record<string, unknown>).ConversationID || '')))
+      if (!localOnly) {
+        await reconcileExitedGroups(list)
+        await groupRetention.sync(list.map((item) => String(item.conversationID || (item as unknown as Record<string, unknown>).ConversationID || '')))
+      }
       const prevById = new Map(conversations.value.map((c) => [c.id, c]))
       const mappedConversations = list.map((item) => {
         const mapped = decorateConversation(toConversation(item))
@@ -1035,12 +1047,14 @@ export const useChatStore = defineStore('chat', () => {
         (conv) => reopenedIds.has(conv.id) && !visibleIds.has(conv.id) && shouldShowConversation(conv),
       )
       conversations.value = sortConversations([...visible, ...carried])
-      await reconcileJoinRequestHighlights()
-      refreshOnlineStatus().catch(() => undefined)
-      // 备注索引与通讯录分页解耦：拉全量备注后再盖一次会话标题
-      void useContactStore()
-        .ensureRemarkIndex()
-        .then(() => applyContactRemarks())
+      if (!localOnly) {
+        await reconcileJoinRequestHighlights()
+        refreshOnlineStatus().catch(() => undefined)
+        // 备注索引与通讯录分页解耦：拉全量备注后再盖一次会话标题
+        void useContactStore()
+          .ensureRemarkIndex()
+          .then(() => applyContactRemarks())
+      }
     } finally {
       loading.value = false
       perfMarkEnd('chat:load-conversations')
