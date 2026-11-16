@@ -172,6 +172,17 @@ let connected = false
  */
 let serverSyncReady = false
 
+/**
+ * 服务端同步（会话 / 离线消息）进行中标记与进度 0-100。
+ *
+ * 大账号首次同步要跑几分钟，这期间本地库里还没有会话，`GetConversationListSplit`
+ * 会返回空数组（或 10004），页面如果直接按空列表渲染就会显示「无聊天消息」——
+ * 用户会以为数据丢了。这里把 core 的 OnSyncServerStart/Progress/Finish 暴露成响应式状态，
+ * 让列表页在空列表 + 同步中时显示进度提示，等 Finish 后 stores/chat.ts 自动重拉。
+ */
+export const imSyncing = ref(false)
+export const imSyncProgress = ref(0)
+
 /** 断线后还在排队的发送，连上就立刻继续，不用干等满退避时间 */
 const reconnectWaiters = new Set<() => void>()
 
@@ -207,6 +218,8 @@ function resetLoginCache() {
   tokenExpireAt = 0
   connected = false
   serverSyncReady = false
+  imSyncing.value = false
+  imSyncProgress.value = 0
   boundAccessToken = ''
 }
 
@@ -833,6 +846,36 @@ export async function ensureIMLogin(): Promise<string> {
  */
 let connectionWatchersReady = false
 
+/** 同步进度回调形态不一：App 原生插件 `{ progress }`、H5 直接给数字、极少数包成 `{ data }` */
+function normalizeSyncProgress(payload: unknown): number {
+  let raw: unknown = payload
+  if (raw && typeof raw === 'object' && 'progress' in (raw as Record<string, unknown>)) {
+    raw = (raw as Record<string, unknown>).progress
+  }
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n)) return imSyncProgress.value
+  return Math.max(0, Math.min(100, Math.round(n)))
+}
+
+/**
+ * 同步看门狗：iOS 进后台被冻结时 Finish 事件可能丢，
+ * 不能因为一个没到的 Finish 就把「正在同步」永远挂在页面上。
+ */
+let syncWatchdog: ReturnType<typeof setTimeout> | undefined
+
+function armSyncWatchdog() {
+  if (syncWatchdog !== undefined) clearTimeout(syncWatchdog)
+  syncWatchdog = setTimeout(() => {
+    syncWatchdog = undefined
+    imSyncing.value = false
+  }, 20 * 60 * 1000)
+}
+
+function clearSyncWatchdog() {
+  if (syncWatchdog !== undefined) clearTimeout(syncWatchdog)
+  syncWatchdog = undefined
+}
+
 /**
  * 订阅 SDK 连接生命周期事件（只注册一次）。
  * 这是修复「errCode=10004 资源未加载」的关键：OpenIM 服务端不稳定会断连，
@@ -855,12 +898,26 @@ function setupConnectionWatchers() {
   // 同步生命周期：供 waitForSync 短路；UI 层另听 Finish 强制重拉。
   onIMEvent(IMEvents.OnSyncServerStart, () => {
     serverSyncReady = false
+    imSyncing.value = true
+    imSyncProgress.value = 0
+    armSyncWatchdog()
+  })
+  // 原生插件回调是 { errMsg, errCode, progress }，H5 直接给数字，统一归一化
+  onIMEvent<unknown>(IMEvents.OnSyncServerProgress, (payload) => {
+    imSyncing.value = true
+    imSyncProgress.value = normalizeSyncProgress(payload)
+    armSyncWatchdog()
   })
   onIMEvent(IMEvents.OnSyncServerFinish, () => {
     serverSyncReady = true
+    imSyncing.value = false
+    imSyncProgress.value = 100
+    clearSyncWatchdog()
   })
   onIMEvent(IMEvents.OnSyncServerFailed, () => {
     serverSyncReady = false
+    imSyncing.value = false
+    clearSyncWatchdog()
   })
   // 被其它端踢下线：SDK 会自动 logout，本地缓存作废，下次必须重新登录。
   onIMEvent(IMEvents.OnKickedOffline, () => {
@@ -942,7 +999,14 @@ export async function getConversationList(offset = 0, count = 200): Promise<Conv
   let lastErr: unknown
   for (let attempt = 0; attempt <= 2; attempt++) {
     try {
-      return await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+      const list = await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+      // 空列表且本轮服务端同步还没结束：说明会话还没写进本地库，不是真的没会话。
+      // 标记同步中，让页面显示「正在同步」而不是「无聊天消息」，Finish 后自动重拉。
+      if (!list.length && !serverSyncReady) {
+        imSyncing.value = true
+        armSyncWatchdog()
+      }
+      return list
     } catch (e) {
       lastErr = e
       // 本地库被关/写失败：Logout→Login 重开后再试
@@ -956,9 +1020,11 @@ export async function getConversationList(offset = 0, count = 200): Promise<Conv
         continue
       }
       // 预算耗尽仍 10004：不把资源未就绪抛给页面（上层会把 10004 当失败处理），
-      // 返回本地已有列表（可能为空），OnSyncServerFinish 后 stores/chat.ts 会自动重拉。
+      // 返回本地已有列表（可能为空），并标记同步中，OnSyncServerFinish 后 stores/chat.ts 自动重拉。
       if (isSdkResourceNotReady(e)) {
-        console.warn('[im] conversation list before resource ready, render local only', e)
+        devWarn('[im] conversation list before resource ready, render local only', e)
+        imSyncing.value = true
+        armSyncWatchdog()
         return []
       }
       throw e

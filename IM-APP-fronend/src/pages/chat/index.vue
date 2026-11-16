@@ -24,6 +24,8 @@ import { setConversationRecvOpt } from '@/utils/openim'
 import { resolveIMGroupByIM } from '@/api/im'
 import {
   ensureLocalConversationHistory,
+  imSyncProgress,
+  imSyncing,
   messageSearchPreview,
   searchConversationMessagesPage,
   searchLocalMessages,
@@ -517,6 +519,18 @@ const filtered = computed(() => {
     )
 })
 
+/**
+ * 空列表 + 服务端同步未完成 ≠ 没有会话。
+ * 大账号首次同步时会话还没写进本地库，这里改成显示同步进度，避免「无聊天消息」误导。
+ */
+const showSyncPending = computed(
+  () => !filtered.value.length && filterKey.value === 'all' && imSyncing.value,
+)
+const syncEmptyTitle = computed(() => {
+  const p = imSyncProgress.value
+  return p > 0 && p < 100 ? `正在同步聊天记录 ${p}%，请稍候…` : '正在同步聊天记录，请稍候…'
+})
+
 /** 搜索时按「每条命中消息一行」展开，同一会话里的历史都列出来 */
 const searchRows = computed(() => {
   const k = keyword.value.trim()
@@ -854,6 +868,51 @@ onMounted(startJoinRequestPolling)
 onHide(stopJoinRequestPolling)
 onUnload(stopJoinRequestPolling)
 
+/**
+ * 同步进行中且列表仍为空时，每 15 秒轻量重拉一次本地会话表。
+ * 会话是在离线消息同步之前就写进本地库的，靠这一步能提前把列表顶出来，
+ * 不必干等 OnSyncServerFinish（大账号要等好几分钟）。最多轮询 10 分钟。
+ */
+const SYNC_POLL_INTERVAL_MS = 15_000
+const SYNC_POLL_MAX_TICKS = 40
+let syncPollTimer: ReturnType<typeof setTimeout> | undefined
+let syncPollTicksLeft = 0
+
+function stopSyncPolling() {
+  if (syncPollTimer !== undefined) {
+    clearTimeout(syncPollTimer)
+    syncPollTimer = undefined
+  }
+  syncPollTicksLeft = 0
+}
+
+function tickSyncPolling() {
+  syncPollTimer = undefined
+  if (!imSyncing.value || chatStore.conversations.length || syncPollTicksLeft <= 0) {
+    syncPollTicksLeft = 0
+    return
+  }
+  syncPollTicksLeft -= 1
+  // 轮询失败不弹 toast：同步中途读库本来就可能拿不到数据
+  void chatStore.loadConversations().catch(() => undefined)
+  syncPollTimer = setTimeout(tickSyncPolling, SYNC_POLL_INTERVAL_MS)
+}
+
+function startSyncPollingIfNeeded() {
+  if (!imSyncing.value || chatStore.conversations.length) return
+  syncPollTicksLeft = SYNC_POLL_MAX_TICKS
+  if (syncPollTimer === undefined) syncPollTimer = setTimeout(tickSyncPolling, SYNC_POLL_INTERVAL_MS)
+}
+
+watch(imSyncing, (syncing) => {
+  if (syncing) startSyncPollingIfNeeded()
+  else stopSyncPolling()
+})
+
+onShow(startSyncPollingIfNeeded)
+onHide(stopSyncPolling)
+onUnload(stopSyncPolling)
+
 watch(
   () => contactStore.pendingDesktopChat?.token,
   (token) => {
@@ -1111,7 +1170,20 @@ watchEffect(() => {
           v-else-if="keyword.trim() ? !searchRows.length : !filtered.length"
           class="empty"
         >
-          {{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}
+          <template v-if="showSyncPending">
+            <view class="empty-sync-title">
+              {{ syncEmptyTitle }}
+            </view>
+            <view class="empty-sync-sub">
+              首次同步数据量大时需要几分钟，保持 App 在前台会自动完成
+            </view>
+            <view class="empty-sync-sub">
+              也可以下拉刷新，先看已经同步下来的会话
+            </view>
+          </template>
+          <template v-else>
+            {{ keyword.trim() ? '无匹配聊天' : '无聊天消息' }}
+          </template>
         </view>
       </scroll-view>
     </view>
@@ -1347,6 +1419,18 @@ watchEffect(() => {
   color: #212121;
   padding: 80rpx 40rpx;
   font-size: 32rpx;
+}
+
+.empty-sync-title {
+  font-size: 30rpx;
+  color: #3b4150;
+}
+
+.empty-sync-sub {
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #9aa0ad;
 }
 
 .search-footer {
