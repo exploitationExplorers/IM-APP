@@ -1,0 +1,11 @@
+Updating local specs repositories
+Analyzing dependencies
+Downloading dependencies
+Installing MJExtension (3.4.2)
+Installing OpenIMSDK (3.8.3-hotfix.15)
+Installing OpenIMSDKCore (3.8.3-hotfix.15)
+Generating Pods project
+Integrating client project
+
+[!] Please close any current Xcode sessions and use `IMNative.xcworkspace` for this project from now on.
+Pod installation complete! There are 2 dependencies from the Podfile and 3 total pods installed.

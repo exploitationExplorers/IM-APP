@@ -1,0 +1,11 @@
+Analyzing dependencies
+Fetching podspec for `OpenIMSDKCore` from `podspecs/OpenIMSDKCore.podspec`
+Downloading dependencies
+Installing OpenIMSDKCore 3.8.3-hotfix.15
+Generating Pods project
+Integrating client project
+Pod installation complete! There are 2 dependencies from the Podfile and 3 total pods installed.
+
+[!] Unable to read the license file `LICENSE` for the spec `OpenIMSDKCore (3.8.3-hotfix.15)`
+
+[!] Unable to read the license file `LICENSE` for the spec `OpenIMSDKCore (3.8.3-hotfix.15)`

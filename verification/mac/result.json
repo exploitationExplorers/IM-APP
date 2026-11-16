@@ -1,0 +1,10 @@
+{
+  "status": "failed",
+  "last_step": "core_tests",
+  "machine": "arm64",
+  "macOS": "27.2.1",
+  "scope": "Swift core tests and unsigned iOS Simulator Debug build only",
+  "real_account_interoperability": "not_run",
+  "iPhone_database_sync": "not_run",
+  "release_or_deployment": "not_run"
+}
