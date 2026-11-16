@@ -1,0 +1,71 @@
+name: OpenIM SDK Core build
+
+# 用途：把自改的 openim-sdk-core（tag v3.8.3-yike.1，含大账号内存修复）
+# 编译成 iOS xcframework。产物为 artifact，手动下载后传到 ECS 静态目录，
+# 再由 iOS 壳的自维护 podspec 指向该地址。
+#
+# 使用：GitHub Actions 页面手动触发，填入：
+#   sdk_repo: 你们 fork 的 openim-sdk-core 仓库地址（含 yike/3.8.3-patch.15-memfix 分支）
+#   sdk_ref:  v3.8.3-yike.1
+# 不填参数时默认克隆官方 openimsdk/openim-sdk-core @ v3.8.3-patch.15（未打补丁，仅作对照产物）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_repo:
+        description: 'openim-sdk-core 仓库地址（含补丁 tag/分支）'
+        required: false
+        default: 'https://github.com/openimsdk/openim-sdk-core.git'
+      sdk_ref:
+        description: 'tag 或分支'
+        required: false
+        default: 'v3.8.3-patch.15'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-core-build-${{ github.ref }}
+
+jobs:
+  ios-xcframework:
+    runs-on: macos-15
+    env:
+      SDK_REF: ${{ github.event.inputs.sdk_ref || 'v3.8.3-patch.15' }}
+    steps:
+      - name: Clone SDK source
+        run: |
+          git clone --depth 1 --branch "$SDK_REF" \
+            "${{ github.event.inputs.sdk_repo || 'https://github.com/openimsdk/openim-sdk-core.git' }}" \
+            sdk-core
+          git -C sdk-core log --oneline -3
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sdk-core/go.mod
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+
+      - name: Build iOS xcframework
+        working-directory: sdk-core
+        run: make ios
+
+      - name: Package with checksum
+        run: |
+          cd sdk-core/build
+          zip -qry ../OpenIMCore_$SDK_REF.xcframework.zip OpenIMCore.xcframework
+          cd ..
+          shasum -a 256 OpenIMCore_$SDK_REF.xcframework.zip > OpenIMCore_$SDK_REF.xcframework.zip.sha256
+          cat OpenIMCore_$SDK_REF.xcframework.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework-${{ github.event.inputs.sdk_ref || 'v3.8.3-patch.15' }}
+          path: |
+            sdk-core/OpenIMCore_*.xcframework.zip
+            sdk-core/OpenIMCore_*.xcframework.zip.sha256
+          if-no-files-found: error
