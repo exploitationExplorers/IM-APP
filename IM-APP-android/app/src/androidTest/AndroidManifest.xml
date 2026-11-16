@@ -3,6 +3,10 @@
         android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
     <instrumentation android:name="com.im.nativebootstrap.ConversationStartupInstrumentation"
         android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.ConversationMappingInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
+    <instrumentation android:name="com.im.nativebootstrap.ConversationAutoloadInstrumentation"
+        android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
     <instrumentation android:name="com.im.nativebootstrap.AdminPickerInstrumentation"
         android:targetPackage="com.im.nativebootstrap.staging" android:functionalTest="true" />
     <instrumentation android:name="com.im.nativebootstrap.FullParityInstrumentation"

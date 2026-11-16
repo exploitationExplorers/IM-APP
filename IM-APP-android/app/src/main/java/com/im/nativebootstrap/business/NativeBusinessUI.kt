@@ -144,6 +144,13 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
     }
 }
 
+internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>,identity:(T)->String):List<T> {
+    val ranks=HashMap<String,Int>(chatOrder.size)
+    chatOrder.forEachIndexed {index,id->ranks.putIfAbsent(id,index)}
+    // 只解析每个联系人一次，缺失项保持原顺序，不在比较器中反复扫描全部会话。
+    return items.map {it to (ranks[identity(it)] ?: Int.MAX_VALUE)}.sortedBy {it.second}.map {it.first}
+}
+
 @Composable fun ContactsHome(controller:BusinessController,chatOrder:List<String> = emptyList()) {
     val state by controller.state.collectAsStateWithLifecycle()
     var sortOpen by remember{mutableStateOf(false)}
@@ -153,6 +160,9 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
         layout.totalItemsCount>0&&(layout.visibleItemsInfo.lastOrNull()?.index ?: -1)>=layout.totalItemsCount-3
     } }
     val s=scale()
+    val contacts=remember(state.items,state.sort,chatOrder) {
+        if(state.sort=="chat")orderByRecentConversations(state.items,chatOrder) {it.identifier()} else state.items
+    }
     LaunchedEffect(Unit){controller.root("contacts");controller.refresh()}
     LaunchedEffect(nearEnd,state.cursor,state.hasMore,state.loading,state.error) {
         if(nearEnd&&state.hasMore&&!state.loading&&state.error==null)controller.refresh(true)
@@ -186,7 +196,7 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
         }
         BusinessStatus(state,controller)
         } }
-            items(if(state.sort=="chat")state.items.sortedBy{person->chatOrder.indexOf(person.identifier()).takeIf{it>=0}?:Int.MAX_VALUE} else state.items,key={"contact:"+it.identifier()},contentType={"contact"}) { person -> Row(Modifier.fillMaxWidth().height((128*s).dp).clickable{controller.open("friend",person.identifier())}.padding(horizontal=(40*s).dp),verticalAlignment=Alignment.CenterVertically) {
+            items(contacts,key={"contact:"+it.identifier()},contentType={"contact"}) { person -> Row(Modifier.fillMaxWidth().height((128*s).dp).clickable{controller.open("friend",person.identifier())}.padding(horizontal=(40*s).dp),verticalAlignment=Alignment.CenterVertically) {
                 SharedAvatar(person.text("avatar"),Modifier.size((96*s).dp).clip(CircleShape));Text(person.displayName(),Modifier.weight(1f).padding(start=(32*s).dp),fontSize=(34*s).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)
             } }
             item(key="directory-footer",contentType="footer") { ListFooter(state,controller,"暂无联系人");if(!state.loading&&!state.hasMore&&state.items.isNotEmpty())Text("没有更多了",Modifier.fillMaxWidth().padding(vertical=(30*s).dp).wrapContentWidth(),fontSize=(24*s).sp,color=Muted) }

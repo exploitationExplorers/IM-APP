@@ -28,6 +28,7 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
     override fun onStart() {
         val result=Bundle();var activity:MainActivity?=null
         val fixtureBase="https://127.0.0.1:1/api/v1";val account="chat-media-regression"
+        uiAutomation.serviceInfo=uiAutomation.serviceInfo.apply {flags=flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS}
         try {
             File(targetContext.cacheDir,"chat-media-clicks.txt").writeText("")
             File(targetContext.cacheDir,"chat-media-player-samples.txt").writeText("")
@@ -201,9 +202,14 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
         File(targetContext.cacheDir,"chat-media-player-samples.txt").appendText("${SystemClock.elapsedRealtime()} $label player=$identity prepared=${sample.first} playing=${sample.second} position=${sample.third}\n")
         return sample
     }
-    private fun findText(value:String)=find(uiAutomation.rootInActiveWindow) { it.isVisibleToUser&&it.text?.toString()==value }
-    private fun findDescription(value:String)=find(uiAutomation.rootInActiveWindow) { it.isVisibleToUser&&it.contentDescription?.toString()?.split(", ")?.contains(value)==true }
-    private fun findEditable()=find(uiAutomation.rootInActiveWindow) { it.isVisibleToUser&&it.isEditable }
+    // MediaController 可成为活动窗口；返回按钮仍在下层可见的预览窗口中。
+    private fun findVisible(predicate:(AccessibilityNodeInfo)->Boolean):AccessibilityNodeInfo? {
+        val visible:(AccessibilityNodeInfo)->Boolean={it.isVisibleToUser&&it.packageName?.toString()==targetContext.packageName&&predicate(it)}
+        return find(uiAutomation.rootInActiveWindow,visible) ?: uiAutomation.windows.firstNotNullOfOrNull {find(it.root,visible)}
+    }
+    private fun findText(value:String)=findVisible {it.text?.toString()==value}
+    private fun findDescription(value:String)=findVisible {it.contentDescription?.toString()?.split(", ")?.contains(value)==true}
+    private fun findEditable()=findVisible {it.isEditable}
     private fun find(node:AccessibilityNodeInfo?,predicate:(AccessibilityNodeInfo)->Boolean):AccessibilityNodeInfo? { if(node==null)return null;if(predicate(node))return node;for(index in 0 until node.childCount)find(node.getChild(index),predicate)?.let { return it };return null }
     private fun clickText(value:String)=click(findText(value) ?: error("Missing text: $value"))
     private fun clickDescription(value:String)=click(findDescription(value) ?: error("Missing description: $value"))
@@ -224,6 +230,7 @@ class ChatMediaRegressionInstrumentation:Instrumentation() {
             for(index in 0 until value.childCount)node(value.getChild(index),depth+1)
         }
         node(uiAutomation.rootInActiveWindow,0)
+        uiAutomation.windows.forEach {window->tree.append("window id=${window.id} layer=${window.layer} active=${window.isActive}\n");node(window.root,0)}
         File(targetContext.cacheDir,"chat-media-$name.txt").writeText(tree.toString())
     }
 }

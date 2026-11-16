@@ -316,6 +316,9 @@ private fun LegalSheet(kind: String, dismiss: () -> Unit) {
 
 @Composable
 internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniScale, tab: String, changeTab: (String) -> Unit, toast: (String) -> Unit,onSearch:()->Unit={},businessController:BusinessController=model.business) {
+    val rows=state.chat.conversations
+    val unreadTotal=remember(rows) {rows.sumOf {it.unread.coerceAtLeast(0).toLong()}.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()}
+    val contactOrder=remember(rows) {rows.filter {it.target.sessionType==1}.map {businessUserId(it.target.userId)}}
     var addMenu by remember { mutableStateOf(false) }
     var moreMenu by remember{mutableStateOf(false)}
     Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding()) {
@@ -339,7 +342,7 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
         Box(Modifier.weight(1f)) {
             when (tab) {
                 "chat" -> ConversationList(state, model, s, toast,onSearch)
-                "contacts" -> if(!state.sample)ContactsHome(businessController,state.chat.conversations.filter{it.target.sessionType==1}.map{businessUserId(it.target.userId)}) else Column(Modifier.fillMaxSize()) {
+                "contacts" -> if(!state.sample)ContactsHome(businessController,contactOrder) else Column(Modifier.fillMaxSize()) {
                     Search(s, "搜索", "", {}, toast)
                     Text(if (state.sample) "当前本地样例没有通讯录。" else "通讯录功能接入中。", Modifier.align(Alignment.CenterHorizontally).padding(top = s.dp(80)), fontSize = s.text(28), color = Hint)
                 }
@@ -364,7 +367,7 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
             tabs.forEach { (id, name, image) -> Column(Modifier.widthIn(min = s.dp(120)).fillMaxHeight().clickable { changeTab(id) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Box(Modifier.size(s.dp(48))) {
                     Image(painterResource(image), null, Modifier.fillMaxSize())
-                    if(id=="chat")NativeUnreadBadge(state.chat.conversations.sumOf { it.unread.coerceAtLeast(0).toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true)
+                    if(id=="chat")NativeUnreadBadge(unreadTotal,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true)
                 }
                 Text(name, Modifier.padding(top = s.dp(4)), color = if (tab == id) Primary else Ink, fontSize = s.text(24), lineHeight = s.text(32))
             } }
@@ -380,6 +383,11 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
     var filters by remember{mutableStateOf(false)}
     var swipe by remember{mutableStateOf<String?>(null)}
     var hits by remember{mutableStateOf(emptyList<ChatGlobalHit>())};var searchPage by remember{mutableIntStateOf(0)};var searchEnd by remember{mutableStateOf(false)};var searching by remember{mutableStateOf(false)};var searchError by remember{mutableStateOf("")};var searchVersion by remember{mutableIntStateOf(0)}
+    val visibleRows=remember(state.chat.conversations,filterUnread,query) {
+        if(!filterUnread&&query.isBlank())state.chat.conversations else state.chat.conversations.filter {(!filterUnread||it.unread>0)&&(query.isBlank()||it.title.contains(query,true)||it.preview.contains(query,true))}
+    }
+    val hasUnread=remember(state.chat.conversations) {state.chat.conversations.any {it.unread>0}}
+    val searchGroups=remember(hits) {hits.groupBy {it.conversation.target.conversationId}.values.toList()}
     fun searchMore(reset:Boolean=false){
         if(query.isBlank()||searching&&!reset)return
         if(reset){searchVersion++;hits=emptyList();searchPage=0;searchEnd=false}
@@ -398,7 +406,7 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
     Column(Modifier.fillMaxSize()) {
         Search(s, "搜索聊天 / 关键词", query, { query = it }, toast)
         Row(Modifier.fillMaxWidth().padding(start = s.dp(40), end = s.dp(40), bottom = s.dp(8)), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            if(!state.sample&&state.chat.conversations.any{it.unread>0})Text("全部已读",Modifier.weight(1f).clickable{model.markLoadedConversationsRead(toast)},color=Primary,fontSize=s.text(24))
+            if(!state.sample&&hasUnread)Text("全部已读",Modifier.weight(1f).clickable{model.markLoadedConversationsRead(toast)},color=Primary,fontSize=s.text(24))
             Box {
                 Text(if(filterUnread)"未读" else "全部", Modifier.clickable { filters=true }, color = Hint, fontSize = s.text(24), lineHeight = s.text(40))
                 androidx.compose.material3.DropdownMenu(filters,{filters=false}){listOf(false to "全部",true to "未读").forEach{(unread,label)->androidx.compose.material3.DropdownMenuItem(text={Text(label)},onClick={filterUnread=unread;filters=false})}}
@@ -407,14 +415,15 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
         }
         if(!state.sample) {
             NativePullRefresh(state.chat.conversationsLoading,{model.loadConversations(true)},Modifier.weight(1f)){LazyColumn(Modifier.fillMaxSize()) {
-                items(state.chat.conversations.filter { (!filterUnread||it.unread>0)&&(query.isBlank()||it.title.contains(query,true)||it.preview.contains(query,true)) },key={ it.target.conversationId }) { item ->
+                items(visibleRows,key={ it.target.conversationId }) { item ->
                     NativeConversationSwipe(swipe==item.target.conversationId,{swipe=item.target.conversationId},{swipe=null},item.pinned,s.dp(140),{model.updateConversation(item,pinned=!item.pinned,done=result)},{model.hideConversation(item,result)}) {
                     Row(Modifier.fillMaxWidth().background(if(item.pinned)Color(0xFFF3F4F7) else Color.White).combinedClickable(onClick={if(swipe!=null)swipe=null else model.openRealChat(item)},onLongClick={selected=item}).padding(horizontal=s.dp(40),vertical=s.dp(24)),verticalAlignment=Alignment.CenterVertically) {
                         SharedAvatar(item.avatar,Modifier.size(s.dp(96)).clip(CircleShape),item.target.sessionType==3)
                         Column(Modifier.weight(1f).padding(start=s.dp(24))) {
                             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
                                 Text(item.title,Modifier.weight(1f),fontSize=s.text(32),fontWeight=FontWeight.Medium,maxLines=1,overflow=TextOverflow.Ellipsis)
-                                if(item.time>0)Text(java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(if(item.time<10_000_000_000L)item.time*1000 else item.time)),fontSize=s.text(22),color=Color(0xFF999999))
+                                val timeLabel=remember(item.time) {if(item.time>0)java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(if(item.time<10_000_000_000L)item.time*1000 else item.time)) else ""}
+                                if(timeLabel.isNotEmpty())Text(timeLabel,fontSize=s.text(22),color=Color(0xFF999999))
                             }
                             Row(Modifier.fillMaxWidth().padding(top=s.dp(12)),verticalAlignment=Alignment.CenterVertically){Text(item.preview,Modifier.weight(1f),fontSize=s.text(26),color=Color(0xFF999999),maxLines=1,overflow=TextOverflow.Ellipsis);if(item.muted)Text("免打扰",fontSize=s.text(20),color=Hint);if(item.unread>0){Spacer(Modifier.width(s.dp(8)));NativeUnreadBadge(item.unread,s,muted=item.muted)}}
                         }
@@ -422,14 +431,15 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
                     }
                 }
                 if(query.isNotBlank()) {
-                    items(hits.groupBy{it.conversation.target.conversationId}.values.toList(),key={"search:"+it.first().conversation.target.conversationId}){matches->
+                    items(searchGroups,key={"search:"+it.first().conversation.target.conversationId}){matches->
                         val hit=matches.first()
                         Row(Modifier.fillMaxWidth().clickable{model.openSearchHit(hit)}.padding(horizontal=s.dp(40),vertical=s.dp(20)),verticalAlignment=Alignment.CenterVertically){SharedAvatar(hit.conversation.avatar,Modifier.size(s.dp(96)),hit.conversation.target.sessionType==3);Column(Modifier.weight(1f).padding(start=s.dp(24))){Text(hit.conversation.title,fontSize=s.text(32));Text("${matches.size} 条相关聊天记录",fontSize=s.text(24),color=Hint);Text(hit.message.text,maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=s.text(26),color=Hint)}}
                     }
                     item{Text(if(searching)"搜索中…" else if(searchError.isNotBlank())searchError+" · 重试" else if(searchEnd)"没有更多了" else "点击查找更早的聊天记录",Modifier.fillMaxWidth().clickable(enabled=!searching){searchMore()}.padding(s.dp(28)).wrapContentWidth(),fontSize=s.text(24),color=Hint)}
                 }
-                item {
-                    Text(when { state.chat.conversationsLoading->"正在读取…";state.chat.conversations.isEmpty()->"暂无对话，点击重试读取";state.chat.conversationsEnd->"已显示全部会话";else->"加载更多会话" },Modifier.fillMaxWidth().clickable(enabled=state.chat.loggedIn&&!state.chat.conversationsLoading) { model.loadConversations(state.chat.conversations.isEmpty()) }.padding(s.dp(32)).wrapContentWidth(),fontSize=s.text(26),color=Hint)
+                if(state.chat.conversations.isEmpty()||!state.chat.conversationsEnd)item {
+                    val syncingEmpty=state.chat.conversations.isEmpty()&&state.chat.sync==SyncStatus.RUNNING
+                    Text(when {syncingEmpty->"正在同步会话…";state.chat.conversationsLoading->"正在读取…";state.chat.conversations.isEmpty()&&state.chat.error!=null->"会话读取未完成，点击重试";state.chat.conversations.isEmpty()&&state.chat.sync==SyncStatus.IDLE&&state.chat.connection in setOf(ConnectionState.CONNECTING,ConnectionState.CONNECTED)->"正在准备会话…";state.chat.conversations.isEmpty()->"暂无对话";else->"加载更多会话" },Modifier.fillMaxWidth().clickable(enabled=state.chat.loggedIn&&!state.chat.conversationsLoading&&!syncingEmpty) { model.loadConversations(state.chat.conversations.isEmpty()) }.padding(s.dp(32)).wrapContentWidth(),fontSize=s.text(26),color=Hint)
                 }
             }
             }

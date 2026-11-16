@@ -10,6 +10,10 @@ import io.openim.android.sdk.models.*
 import open_im_sdk.Open_im_sdk
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.RejectedExecutionException
 import com.im.nativebootstrap.media.MediaKind
 import com.im.nativebootstrap.media.UploadedMedia
 import com.im.nativebootstrap.media.MessageContents
@@ -18,12 +22,37 @@ import com.im.nativebootstrap.media.string
 import com.im.nativebootstrap.media.number
 import com.google.gson.JsonParser
 
+/** SDK 回调在主线程；模型映射按账号顺序在工作线程完成，换账号时立即切走旧队列。 */
+internal class ConversationMappingQueue {
+    internal class Owner(val userId:String,val executor:ThreadPoolExecutor)
+    private fun create(userId:String)=Owner(userId,ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,LinkedBlockingQueue()) { task ->
+        Thread(task,"openim-conversation-map").apply {isDaemon=true}
+    })
+    @Volatile private var current:Owner?=create("")
+    @Synchronized fun bind(userId:String):Owner {
+        val previous=current
+        val next=create(userId)
+        current=next
+        previous?.executor?.shutdownNow()
+        return next
+    }
+    fun owner()=current
+    fun active(owner:Owner)=current===owner&&!Thread.currentThread().isInterrupted
+    fun execute(owner:Owner,work:(()->Boolean)->Unit) {
+        if(!active(owner))return
+        try {owner.executor.execute {if(active(owner))work {active(owner)}}}
+        catch(_:RejectedExecutionException) { /* 已取消的账号任务不向新账号回传。 */ }
+    }
+    @Synchronized fun close() {val previous=current;current=null;previous?.executor?.shutdownNow()}
+}
+
 /** 仅此适配器引用官方 SDK。错误只保留数字，不回显原 SDK 字符串/JSON/凭据。 */
 class OpenIMGateway(private val application:Application):ChatGateway {
     private val client get()=OpenIMClient.getInstance()
     private val gson=Gson()
     private var userId=""
     private var initialized=false
+    private val conversationMapping=ConversationMappingQueue()
     private var watchedPeer:String?=null
     private fun <T> base(done:(Result<T>)->Unit)=object:OnBase<T> {
         override fun onSuccess(data:T) { done(Result.success(data)) }
@@ -31,6 +60,7 @@ class OpenIMGateway(private val application:Application):ChatGateway {
     }
     override fun start(userId:String,token:String,api:String,ws:String,directory:File,events:ChatEvents,done:(Result<Unit>)->Unit) {
         this.userId=userId
+        val mappingOwner=conversationMapping.bind(userId)
         try {
             val config=InitConfig(api,ws,directory.absolutePath).apply {
                 logLevel=LogLevel.Fatal
@@ -50,11 +80,12 @@ class OpenIMGateway(private val application:Application):ChatGateway {
                 override fun onUserStatusChanged(status:UsersOnlineStatus?) { status?.userID?.takeIf { it.isNotBlank() }?.let { events.peerStatus(it,status.status==1) } }
             })
             client.conversationManager.setOnConversationListener(object:OnConversationListener {
-                override fun onConversationChanged(items:MutableList<ConversationInfo>?)=events.conversations(items.orEmpty().mapNotNull(::conversation))
-                override fun onNewConversation(items:MutableList<ConversationInfo>?)=events.conversations(items.orEmpty().mapNotNull(::conversation))
-                override fun onSyncServerStart(reinstalled:Boolean)=events.syncStarted()
-                override fun onSyncServerFinish(reinstalled:Boolean)=events.syncFinished()
-                override fun onSyncServerFailed(reinstalled:Boolean)=events.syncFailed()
+                override fun onConversationChanged(items:MutableList<ConversationInfo>?)=enqueueConversations(mappingOwner,items.orEmpty().toList(),events::conversations)
+                override fun onNewConversation(items:MutableList<ConversationInfo>?)=enqueueConversations(mappingOwner,items.orEmpty().toList(),events::conversations)
+                override fun onSyncServerStart(reinstalled:Boolean)=conversationMapping.execute(mappingOwner) {events.syncStarted()}
+                override fun onSyncServerProgress(progress:Long)=conversationMapping.execute(mappingOwner) {events.syncProgress(progress)}
+                override fun onSyncServerFinish(reinstalled:Boolean)=conversationMapping.execute(mappingOwner) {events.syncFinished()}
+                override fun onSyncServerFailed(reinstalled:Boolean)=conversationMapping.execute(mappingOwner) {events.syncFailed()}
             })
             client.messageManager.setAdvancedMsgListener(object:OnAdvanceMsgListener {
                 override fun onRecvC2CReadReceipt(receipts:MutableList<C2CReadReceiptInfo>?) { events.read(receipts.orEmpty().flatMap { it.msgIDList.orEmpty() }) }
@@ -101,22 +132,38 @@ class OpenIMGateway(private val application:Application):ChatGateway {
     private fun summary(message:Message):String = if(message.status==4) "[消息已删除]" else if(message.contentType==101) message.textElem?.content.orEmpty() else when(message.contentType) {
         102->"[图片]";103->"[语音]";104->"[视频]";105->"[文件]";106->"[提及消息]";107->"[合并消息]";108->"[名片]";109->"[位置]";110->MessageContents.parse(gson.toJson(message)).text.ifBlank { "[自定义消息]" };114->"[引用消息]";else->if(message.contentType>=1000) ChatSystemMessages.format(gson.toJson(message)) else "[暂未支持的消息]"
     }
-    private fun map(message:Message)=ChatMessage(message.clientMsgID.orEmpty(),summary(message),message.sendID==userId,if(message.sendTime>0)message.sendTime else message.createTime,message.status,message.seq.toLong(),gson.toJson(message),message.senderNickname.orEmpty())
-    private fun conversation(info:ConversationInfo):ChatConversation? {
+    private fun map(message:Message,owner:String=userId)=ChatMessage(message.clientMsgID.orEmpty(),summary(message),message.sendID==owner,if(message.sendTime>0)message.sendTime else message.createTime,message.status,message.seq.toLong(),gson.toJson(message),message.senderNickname.orEmpty())
+    private fun conversation(info:ConversationInfo,owner:String=userId):ChatConversation? {
         if(info.conversationID.isNullOrBlank()) return null
-        val preview=try { info.latestMsg?.takeIf { it.isNotBlank() }?.let { summary(gson.fromJson(it,Message::class.java)) }.orEmpty() } catch (_:Exception) { "[消息]" }
-        val latestSeq=runCatching { info.latestMsg?.takeIf { it.isNotBlank() }?.let { gson.fromJson(it,Message::class.java).seq.toLong() } ?: 0 }.getOrDefault(0)
+        val raw=info.latestMsg?.takeIf {it.isNotBlank()}
+        val parsed=runCatching {raw?.let {gson.fromJson(it,Message::class.java)}}.getOrNull()
+        val latest=runCatching {parsed?.let {map(it,owner)}}.getOrNull()
+        val preview=latest?.text ?: if(raw!=null)"[消息]" else ""
+        val latestSeq=parsed?.seq?.toLong() ?: 0
         val pinned=runCatching { JsonParser.parseString(info.ex.orEmpty()).asJsonObject.get("pinnedMessage")?.let { gson.fromJson(it,PinnedChatMessage::class.java) }?.takeIf { !it.clientMsgID.isNullOrBlank() } }.getOrNull()
-        val latest=runCatching { info.latestMsg?.takeIf { it.isNotBlank() }?.let { map(gson.fromJson(it,Message::class.java)) } }.getOrNull()
         return ChatConversation(ChatTarget(info.conversationID,info.conversationType,info.userID.orEmpty(),info.groupID.orEmpty()),info.showName?.ifBlank { "聊天" } ?: "聊天",preview,info.latestMsgSendTime,info.unreadCount,info.isPinned,info.faceURL.orEmpty(),latestSeq,info.recvMsgOpt!=0,pinned,latest)
     }
+    private fun enqueueConversations(owner:ConversationMappingQueue.Owner,items:List<ConversationInfo>,done:(List<ChatConversation>)->Unit) {
+        conversationMapping.execute(owner) {active->
+            val mapped=ArrayList<ChatConversation>(items.size)
+            for(item in items) {
+                if(!active())return@execute
+                conversation(item,owner.userId)?.let(mapped::add)
+            }
+            if(active())done(mapped)
+        }
+    }
     override fun conversations(offset:Int,count:Int,done:(Result<List<ChatConversation>>)->Unit) {
-        client.conversationManager.getConversationListSplit(base<List<ConversationInfo>> { result -> done(result.map { it.mapNotNull(::conversation) }) },offset.toLong(),count.toLong())
+        val owner=conversationMapping.owner() ?: return done(Result.failure(IllegalStateException("聊天已关闭")))
+        client.conversationManager.getConversationListSplit(base<List<ConversationInfo>> { result ->
+            result.fold(onSuccess={enqueueConversations(owner,it) {rows->done(Result.success(rows))}},onFailure={error->conversationMapping.execute(owner) {done(Result.failure(error))}})
+        },offset.toLong(),count.toLong())
     }
     override fun initialConversations(count:Int,done:(Result<ConversationSnapshotPage>)->Unit) {
         // 官方接口读取完整本地会话表；首屏不能由无序增量子集或前 30 条拼出来。
+        val owner=conversationMapping.owner() ?: return done(Result.failure(IllegalStateException("聊天已关闭")))
         client.conversationManager.getAllConversationList(base<List<ConversationInfo>> { result ->
-            done(result.map { ConversationSnapshotPage(it.mapNotNull(::conversation),true) })
+            result.fold(onSuccess={enqueueConversations(owner,it) {rows->done(Result.success(ConversationSnapshotPage(rows,true)))}},onFailure={error->conversationMapping.execute(owner) {done(Result.failure(error))}})
         })
     }
     override fun watchPeer(userId:String?,done:(Result<Boolean?>)->Unit) {
@@ -334,6 +381,7 @@ class OpenIMGateway(private val application:Application):ChatGateway {
         },UUID.randomUUID().toString(),!active)
     }
     override fun shutdown() {
+        conversationMapping.close()
         if(initialized) client.unInit()
         initialized=false
         watchedPeer=null

@@ -1,6 +1,6 @@
 # 在新 Mac 上验证 iOS 原生版
 
-更新日期：2026-11-15。工程：Swift / UIKit，iOS 15 起；版本 `0.3.0 (4)`，测试 Bundle ID `com.im.nativebootstrap.staging`。配套源码包：`IM-iOS-0.3.0-startup-20261115-mac.zip`。
+更新日期：2026-11-16。工程：Swift / UIKit，iOS 15 起；版本 `0.3.0 (4)`，测试 Bundle ID `com.im.nativebootstrap.staging`。配套源码包：`IM-iOS-0.3.0-autoload-20261116-mac.zip`。
 
 这份文档可以交给 Mac 上有终端和文件访问能力的 AI 执行。最短流程：安装 Xcode → 解压源码 → 在 AI 中打开解压目录 → 发送同目录的《给Mac端AI的iOS验证指令.md》。AI 可以准备依赖、测试、编译和安装模拟器；Apple ID 登录、管理员密码、iPhone 信任和真机触摸操作由你完成。
 
@@ -8,7 +8,7 @@
 
 1. 在 Mac App Store 安装**完整 Xcode**，使用这台 Mac 的 macOS 能支持的稳定版本。最低需要支持 Swift 5.9 的 Xcode 15；iPhone 系统比 Xcode 支持的新时，升级到支持该 iOS 的 Xcode/macOS。
 2. 打开 Xcode 一次，按引导完成许可证、附加组件安装。在 Xcode → Settings → Components（部分版本叫 Platforms）安装一个 iOS Simulator runtime。
-3. 下载并传到 Mac：`IM-iOS-0.3.0-startup-20261115-mac.zip`。用 Finder 解压到例如 `~/Developer/IM-iOS-0.3.0-startup-20261115-mac`，不放 iCloud 自动同步目录。
+3. 下载并传到 Mac：`IM-iOS-0.3.0-autoload-20261116-mac.zip`。用 Finder 解压到例如 `~/Developer/IM-iOS-0.3.0-autoload-20261116-mac`，不放 iCloud 自动同步目录。
 4. 在 Mac 的 Codex 或其他具备本地终端能力的 AI 中打开这个文件夹。网页聊天 AI 只能指导，不能直接替你运行终端。
 5. 首轮模拟器编译不需要付费 Apple Developer 会员，也不需要后端部署。后面测 iPhone 再准备 Apple ID、USB 线和专用内测账号。
 
@@ -112,7 +112,7 @@ bash IM-APP-ios/scripts/verify_on_mac.sh
 
 首次安装成功后保留 `IM-APP-ios/Podfile.lock`、`Gemfile.lock`。不要为让编译变绿自动升级 SDK 或修改为 latest。
 
-成功标准：实际核心测试 0 失败，模拟器日志出现 `BUILD SUCCEEDED`，`result.json` 的 `status` 为 `passed`。当前有 90 个 XCTest 方法的源码计数，**实际运行数量以 Mac 测试日志为准**。这一步不包含 UI 自动化、真机 SDK 同步、真实收发或 APNs。
+成功标准：实际核心测试 0 失败，模拟器日志出现 `BUILD SUCCEEDED`，`result.json` 的 `status` 为 `passed`。当前有 93 个 XCTest 方法的源码计数，**实际运行数量以 Mac 测试日志为准**。这一步不包含 UI 自动化、真机 SDK 同步、真实收发或 APNs。
 
 需要单独定位失败时，按阶段执行：
 
@@ -205,8 +205,12 @@ xcrun simctl io "$task_sim_udid" screenshot verification/mac/simulator-launch.pn
 | P1-04 | 图片/视频/文字长按及多选菜单逐项操作 | 撤回、引用、转发、收藏、置顶、删除、保存等按权限执行；短提示居中自动消失 |
 | P1-05 | A→退出→B→A，锁屏后台再恢复，重启手机首次解锁 | 不串号，A 本地历史和未决状态保留；前后台同步正常 |
 | P1-06 | 管理员清理群历史/成员消息，再刷新和离线重启 | 保留业务可见边界，迟到历史不能复活已隐藏内容；未知边界不放开历史 |
-| P1-07 | 冷启动会话页，再同步、分页和更新已读状态 | 同时间、同置顶状态的已有会话不换序；真实新消息及置顶仍正确移动，未变化内容不整表重刷 |
+| P1-07 | 243 条以上本地会话，分别联网/飞行模式冷启动，录制到同步完成，再更新已读状态 | 首屏为完整本地快照，不能先显示 SDK 事件子集再整批替换；不等同步完成；同时间、同置顶状态的已有会话不换序，真实新消息及置顶仍正确移动 |
 | P1-08 | 添加管理员页长名单、搜索、勾选和返回 | 头像及圆形选框完整，搜索保留选择，底部确认始终可用；只操作指定测试群 |
+
+本轮另需复现首次查询为空、之后才开始 SDK 同步的时序：不下拉刷新，观察是否自动补读到会话。同步中为空时应显示同步状态；失败、超时、断网或退出后不得无限补读，旧账号回调不能写入新账号。保留过程中的诊断摘要和录屏，不能只以最终出现会话判定通过。
+
+大量会话验收提高到 2000 条以上：反复进入列表并连续滚动，更新已读等元数据时不整批换序，真实新消息仍正确上移。Windows 上的合成 Android 数据不能代替这项 iPhone 验收；本轮 iOS 的 3 项新增自动补读测试也必须在 Mac 实际执行。
 
 不要用“卸载重装”代替“强杀重开”。同一原生 Bundle ID、Team、设备上覆盖 Run 后再测断网，才是原生沙盒保留测试；当前 staging 包不能覆盖旧正式 uni-app，也未证明旧版 uni-app 数据迁移成功。
 

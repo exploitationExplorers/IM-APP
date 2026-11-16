@@ -94,6 +94,10 @@ final class NativeIMService {
     private var pendingSync: SyncState?
     private var syncing = false
     private var syncTimeout: Task<Void, Never>?
+    private var sdkConnected = false
+    private var emptyConversationBudget = EmptyConversationReloadBudget()
+    private var emptyConversationTask: Task<Void, Never>?
+    private var emptyConversationTaskID: UUID?
     private var pending: [UUID: NativeReply] = [:]
     private var observers: [UUID: () -> Void] = [:]
     private var initialized = false
@@ -129,7 +133,7 @@ final class NativeIMService {
     private var conversationSnapshotMilliseconds = 0
     private var bufferedStartupEventCount = 0
     var conversationStartupDiagnosticLines: [String] {
-        ["conversationSnapshotReady=\(conversationStartup.ready)", "conversationStartupBufferedRows=\(bufferedStartupEventCount)", "conversationFullSnapshotRows=\(conversationSnapshotCount)", "conversationSnapshotMs=\(conversationSnapshotMilliseconds)"]
+        ["conversationSnapshotReady=\(conversationStartup.ready)", "conversationStartupBufferedRows=\(bufferedStartupEventCount)", "conversationFullSnapshotRows=\(conversationSnapshotCount)", "conversationSnapshotMs=\(conversationSnapshotMilliseconds)", "conversationAutoReloadAttempts=\(emptyConversationBudget.attempts)"]
     }
     private var outbox: PersistentOutbox?
     private(set) var outboxEntries: [OutboxEntry] = []
@@ -304,7 +308,7 @@ final class NativeIMService {
     private func performStop() async {
         guard !stopped else { return }
         stopped = true; generation = UUID(); loggedIn = false
-        syncTimeout?.cancel(); syncTimeout = nil; monitor.cancel()
+        syncTimeout?.cancel(); syncTimeout = nil; cancelEmptyConversationReload(); sdkConnected = false; monitor.cancel()
         retentionTask?.cancel(); retentionTask = nil
         for token in notifications { NotificationCenter.default.removeObserver(token) }
         notifications.removeAll()
@@ -378,7 +382,7 @@ final class NativeIMService {
                 publish()
                 if refreshAgain, isActive, generation == current {
                     Task { [weak self] in await self?.loadConversations(reset: true) }
-                }
+                } else { scheduleEmptyConversationReload() }
             }
         }
         do {
@@ -416,7 +420,34 @@ final class NativeIMService {
         } catch {
             guard isActive, generation == current else { return }
             lastError = error.localizedDescription
+            cancelEmptyConversationReload()
             // resource not ready 不是同步完成，也不触发取token/删库/循环登录。
+        }
+    }
+
+    private func cancelEmptyConversationReload(clearBudget: Bool = true) {
+        emptyConversationTask?.cancel(); emptyConversationTask = nil; emptyConversationTaskID = nil
+        if clearBudget { emptyConversationBudget.cancel() }
+    }
+
+    private func scheduleEmptyConversationReload() {
+        guard isActive, !needsAuthentication, !loadingConversations, emptyConversationTask == nil,
+              let delay = emptyConversationBudget.reserve(now: ProcessInfo.processInfo.systemUptime, connected: sdkConnected, loggedIn: loggedIn, syncing: syncing && pendingSync == nil, empty: conversations.isEmpty) else { return }
+        let current = generation, sequence = syncEventSequence, taskID = UUID()
+        emptyConversationTaskID = taskID
+        emptyConversationTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
+            guard let self = self, !Task.isCancelled, self.isActive, self.generation == current,
+                  self.syncEventSequence == sequence, self.sdkConnected, self.loggedIn, !self.needsAuthentication,
+                  self.syncing, self.pendingSync == nil, self.conversations.isEmpty,
+                  self.emptyConversationBudget.withinWindow(now: ProcessInfo.processInfo.systemUptime) else {
+                if let self = self, self.emptyConversationTaskID == taskID { self.emptyConversationTask = nil; self.emptyConversationTaskID = nil }
+                return
+            }
+            await self.loadConversations(reset: true)
+            guard self.emptyConversationTaskID == taskID else { return }
+            self.emptyConversationTask = nil; self.emptyConversationTaskID = nil
+            self.scheduleEmptyConversationReload()
         }
     }
 
@@ -1140,22 +1171,27 @@ final class NativeIMService {
         let eventGeneration = generation
         guard isActive else { return }
         switch name {
-        case "connecting": connection = "连接中"
+        case "connecting": sdkConnected = false; connection = "连接中"; cancelEmptyConversationReload(clearBudget: false)
         case "connected":
-            connection = "已连接"
+            sdkConnected = true; connection = "已连接"
+            scheduleEmptyConversationReload()
             for request in Array(historyRequests.values) { scheduleHistoryRefresh(request.conversation, cursor: request.cursor) }
             for id in Set(outboxEntries.filter { $0.state == .uncertain }.map(\.conversationID)) { await reconcile(conversationID: id); guard isActive, generation == eventGeneration else { return } }
-        case "connectFailed": connection = "连接中断，等待 SDK 重连"
+        case "connectFailed": sdkConnected = false; connection = "连接中断，等待 SDK 重连"; cancelEmptyConversationReload()
         case "kicked", "tokenExpired", "tokenInvalid":
             needsAuthentication = true
+            cancelEmptyConversationReload()
             connection = name == "kicked" ? "账号已在其他设备登录" : "聊天凭据失效"
             lastError = connection + "，请退出后重新登录。"
             // 由用户重新登录触发新 token；当前绝不重登循环。
         case "syncStart":
+            cancelEmptyConversationReload()
+            emptyConversationBudget.begin(now: ProcessInfo.processInfo.systemUptime)
             if let old = attempt { _ = await coordinator.finishSync(.cancelled, attempt: old) }
             syncEventSequence &+= 1
             syncing = true; pendingSync = nil; attempt = nil; syncLabel = "同步中"
             await advanceSyncIfReadable()
+            scheduleEmptyConversationReload()
             let sequence = syncEventSequence, current = generation
             syncTimeout?.cancel()
             syncTimeout = Task { [weak self] in
@@ -1168,13 +1204,18 @@ final class NativeIMService {
             for request in Array(historyRequests.values) { scheduleHistoryRefresh(request.conversation, cursor: request.cursor) }
             if loggedIn { await loadConversations(reset: true) }
         case "syncFailed": await finishSync(.failed("SDK 同步失败"))
-        case "syncProgress": syncLabel = "同步中 \((payload["progress"] as? NSNumber)?.intValue ?? 0)%"
+        case "syncProgress":
+            syncLabel = "同步中 \((payload["progress"] as? NSNumber)?.intValue ?? 0)%"
+            scheduleEmptyConversationReload()
         case "conversations":
             let changed = (payload["items"] as? [[String: Any]] ?? []).compactMap(NativeConversation.init)
-            guard conversationStartup.receive(changed) else { bufferedStartupEventCount += changed.count; break }
+            guard conversationStartup.receive(changed) else { bufferedStartupEventCount += changed.count; return }
             if loadingConversations { conversationChangesDuringRequest.append(contentsOf: changed) }
             conversationRefreshSeen?.formUnion(changed.map(\.id))
+            let previous = conversations
             mergeConversations(changed)
+            if conversations == previous { return }
+            if !conversations.isEmpty { cancelEmptyConversationReload() }
         case "message":
             if let item = Self.item(payload) {
                 let type = (payload["sessionType"] as? NSNumber)?.intValue ?? 0
@@ -1232,6 +1273,7 @@ final class NativeIMService {
     }
 
     private func finishSync(_ state: SyncState) async {
+        cancelEmptyConversationReload()
         syncTimeout?.cancel(); syncTimeout = nil
         guard syncing else { return }
         guard let attempt = attempt else {

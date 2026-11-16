@@ -35,6 +35,7 @@ interface ChatEvents {
     fun liveMessages(items: List<Pair<ChatTarget, ChatMessage>>) { messages(items) }
     fun tombstone(id: String, deleted: Boolean)
     fun syncStarted()
+    fun syncProgress(progress:Long) {}
     fun syncFinished()
     fun syncFailed()
     fun read(ids: List<String>) {}
@@ -99,11 +100,22 @@ object AccountStorage {
 fun mergeConversations(old: List<ChatConversation>, incoming: List<ChatConversation>, authoritative: Boolean = false): List<ChatConversation> {
     // 同时间沿用已显示的次序；分页和增量通知不应把新见到的会话插到同时间行前面。
     val rows = old.associateByTo(linkedMapOf()) { it.target.conversationId }
+    var changed=false
+    var needsSort=false
+    for(index in 1 until old.size) {
+        val a=old[index-1];val b=old[index]
+        if((!a.pinned&&b.pinned)||(a.pinned==b.pinned&&a.time<b.time)) {needsSort=true;break}
+    }
     incoming.forEach { next ->
         val previous = rows[next.target.conversationId]
-        if (authoritative || previous == null || next.time >= previous.time) rows[next.target.conversationId] = next
+        if ((authoritative || previous == null || next.time >= previous.time)&&previous!=next) {
+            changed=true
+            if(previous==null||previous.time!=next.time||previous.pinned!=next.pinned)needsSort=true
+            rows[next.target.conversationId] = next
+        }
     }
-    return rows.values.sortedWith(compareByDescending<ChatConversation> { it.pinned }.thenByDescending { it.time })
+    if(!changed&&!needsSort)return old
+    return if(needsSort)rows.values.sortedWith(compareByDescending<ChatConversation> { it.pinned }.thenByDescending { it.time }) else rows.values.toList()
 }
 fun mergeMessages(old: List<ChatMessage>, incoming: List<ChatMessage>): List<ChatMessage> {
     val result = old.associateBy { it.id }.toMutableMap()
