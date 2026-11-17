@@ -135,6 +135,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     var selectedAnchor by remember { mutableStateOf<Offset?>(null) }
     var invite by remember { mutableStateOf<GroupMessageCard?>(null) }
     var acceptingInvite by remember { mutableStateOf(false) }
+    var handledInviteLabels by remember(state.active?.target) { mutableStateOf<Map<String,String>>(emptyMap()) }
     var forward by remember { mutableStateOf<ChatMessage?>(null) }
     var multi by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -582,7 +583,11 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                             SharedAvatar(card.avatar,Modifier.size(rpx(100)),group=true)
                                             Text(card.groupName+(if(card.count>0)" (${card.count} 人)" else ""),Modifier.padding(top=rpx(16)),fontSize=(29*factor).sp,color=foreground,fontWeight=FontWeight.SemiBold)
                                             Text(if(message.mine)"你邀请对方加入群聊" else "邀请你加入群聊",Modifier.padding(top=rpx(10)),fontSize=(24*factor).sp,color=foreground.copy(alpha=.7f))
-                                            if(!message.mine)Text("点击申请入群",Modifier.padding(top=rpx(18)).clickable { invite=card },color=ChatBlue,fontSize=(26*factor).sp)
+                                           if(!message.mine) {
+                                               val handled=handledInviteLabels[card.token]
+                                               if(handled!=null) Text(handled,Modifier.padding(top=rpx(18)),color=ChatHint,fontSize=(26*factor).sp)
+                                               else Text("点击申请入群",Modifier.padding(top=rpx(18)).clickable { invite=card },color=ChatBlue,fontSize=(26*factor).sp)
+                                           }
                                         } else {
                                             Row(verticalAlignment=Alignment.CenterVertically) { SharedAvatar(card.avatar,Modifier.size(rpx(76)));Column(Modifier.padding(start=rpx(16))) { Text(card.applicantName,color=foreground,fontWeight=FontWeight.SemiBold);Text("申请加入 ${card.groupName}",color=foreground.copy(alpha=.7f),fontSize=(24*factor).sp) } }
                                             Text("去审核",Modifier.padding(top=rpx(20)).clickable { callbacks.onOpenJoinRequests(card.groupId) },color=ChatBlue,fontSize=(26*factor).sp)
@@ -685,6 +690,11 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         callbacks.onAcceptGroupInvite(card.token) { result -> onUI {
             acceptingInvite=false
             result.fold(onSuccess={ value ->
+                handledInviteLabels=handledInviteLabels+(card.token to when(value.nextAction) {
+                    "joined" -> "已加入群聊"
+                    "already_member" -> "已加入群聊"
+                    else -> "已提交申请"
+                })
                 invite=null
                 when(value.nextAction) {
                     "joined","already_member" -> { notice=if(value.nextAction=="joined")"已加入群聊" else "你已在群中";callbacks.onOpenBusinessGroup(value.groupId.ifBlank { card.groupId }) }

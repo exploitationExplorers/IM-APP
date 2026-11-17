@@ -1873,6 +1873,11 @@ func (r *GroupRepo) AcceptInvitation(ctx context.Context, uid, token string) (mo
 		return models.ApplyGroupInvitationResult{}, err
 	}
 	if alreadyMember {
+		// 已在群内的用户再次打开旧卡片时也应把邀请标记为已处理，
+		// 避免 token 永远停留在 pending 并反复出现在历史卡片中。
+		_, _ = r.DB.Exec(ctx, `
+			UPDATE group_invitations SET status='accepted', handled_at=COALESCE(handled_at,NOW())
+			WHERE token=$1 AND invitee_id=$2::uuid AND status='pending'`, token, uid)
 		g, gerr := r.GetByID(ctx, groupID, uid)
 		if gerr != nil {
 			return models.ApplyGroupInvitationResult{NextAction: "already_member"}, nil
