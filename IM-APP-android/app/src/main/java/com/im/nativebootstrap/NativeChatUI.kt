@@ -443,10 +443,18 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     val reversedMessages=remember(state.messages) { state.messages.asReversed() }
     val uploadsById=remember(state.mediaUploads) { state.mediaUploads.associateBy { it.id } }
     val outboxById=remember(state.outbox) { state.outbox.associateBy { it.id } }
+    var initialLatestScrollDone by remember(state.active?.target) { mutableStateOf(false) }
     val latestId=state.messages.lastOrNull()?.id
     var presenceNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(state.active?.target) { while(true) { delay(60_000);presenceNow=System.currentTimeMillis() } }
-    LaunchedEffect(latestId) { if(list.firstVisibleItemIndex<3) list.scrollToItem(0) }
+    LaunchedEffect(state.active?.target,state.messages.isNotEmpty(),state.focusMessageId) {
+        if(!initialLatestScrollDone&&state.focusMessageId==null&&state.messages.isNotEmpty()) {
+            withFrameNanos {}
+            list.scrollToItem(0)
+            initialLatestScrollDone=true
+        }
+    }
+    LaunchedEffect(latestId) { if(state.focusMessageId==null&&list.firstVisibleItemIndex<3) list.scrollToItem(0) }
     LaunchedEffect(state.focusMessageId) { state.focusMessageId?.let { id -> val index=reversedMessages.indexOfFirst { it.id==id };if(index>=0)list.animateScrollToItem(index) } }
     LaunchedEffect(state.forwardSuccessId,state.forwardFailureId) {
         if(state.forwardSuccessId.isNotBlank())NativeNotices.show("转发成功")
