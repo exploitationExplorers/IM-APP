@@ -333,7 +333,7 @@ class OpenIMGateway(private val application:Application):ChatGateway {
         return ChatTarget(id,type,if(type==1)peer else "",if(type==3)peer else "")
     }
     private fun summary(message:Message,serialized:String?=null):String = if(message.status==4) "[消息已删除]" else if(message.contentType==101) message.textElem?.content.orEmpty() else when(message.contentType) {
-        102->"[图片]";103->"[语音]";104->"[视频]";105->"[文件]";106->"[提及消息]";107->"[合并消息]";108->"[名片]";109->"[位置]";110->MessageContents.parse(serialized ?: gson.toJson(message)).text.ifBlank { "[自定义消息]" };114->"[引用消息]";else->if(message.contentType>=1000) ChatSystemMessages.format(serialized ?: gson.toJson(message)) else "[暂未支持的消息]"
+        102->"[图片]";103->"[语音]";104->"[视频]";105->"[文件]";106->"[提及消息]";107->"[合并消息]";108->"[名片]";109->"[位置]";110->MessageContents.parse(serialized ?: gson.toJson(message)).text.ifBlank { "[自定义消息]" };114->MessageContents.parse(serialized ?: gson.toJson(message)).text.ifBlank { "[引用消息]" };else->if(message.contentType>=1000) ChatSystemMessages.format(serialized ?: gson.toJson(message)) else "[暂未支持的消息]"
     }
     private fun map(message:Message,owner:String=userId):ChatMessage {
         val serialized=gson.toJson(message)
