@@ -1,0 +1,26 @@
+{
+  "date": "2026-11-16",
+  "repository": "/Users/Admin1/Developer/IM-APP-github",
+  "branch": "codex/native-bootstrap",
+  "baseline": "ac5bdbf1f32c725d48ae5385dc7819157633dc9b",
+  "android_reference": "6806486ae40c88dd8060d5964ea4abefd2eb7045",
+  "git_fetch": "success; no newer remote commit at fetch time",
+  "static_tests": {
+    "count": 8,
+    "status": "passed"
+  },
+  "swift_core_tests": {
+    "count": 96,
+    "status": "passed"
+  },
+  "debug_builds": {
+    "iphoneos": "passed; unsigned",
+    "iphonesimulator": "passed; unsigned"
+  },
+  "simulator_launch": "blocked; CoreSimulatorService connection refused in current execution environment",
+  "device_install_and_runtime": "not_run",
+  "real_account_regression": "not_run",
+  "commit_and_push": "not_requested; not_run",
+  "sdk_version_change": false,
+  "evidence": "/Users/Admin1/Developer/IM-APP-github/.native-cache/verification/ios-android-parity-20261116"
+}

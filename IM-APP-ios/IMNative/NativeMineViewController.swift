@@ -18,12 +18,12 @@ final class NativeMineViewController: UIViewController {
     private let nickname = UILabel()
     private let edit = NativeUITheme.imageButton("uni_mine_icon_edit", accessibility: "编辑资料")
     private let qr = NativeUITheme.imageButton("uni_mine_icon_qrcode", accessibility: "我的二维码")
-    private var menu: [UIButton] = []
+    private var menu: [NativeMineMenuButton] = []
     init(service: NativeIMService) { self.service = service; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() {
         super.viewDidLoad(); view.backgroundColor = UIColor(hex: 0xf5f6f8); view.addSubview(scroll)
-        scroll.contentInsetAdjustmentBehavior = .never; scroll.addSubview(hero); hero.backgroundColor = NativeUITheme.primary
+        scroll.contentInsetAdjustmentBehavior = .never; NativeUITheme.useCustomScrollEdges(scroll); scroll.addSubview(hero); hero.backgroundColor = NativeUITheme.primary
         [background, heading, avatar, nickname, edit, qr].forEach { hero.addSubview($0) }
         background.contentMode = .scaleAspectFill; background.clipsToBounds = true; background.alpha = 1
         avatar.clipsToBounds = true; avatar.contentMode = .scaleAspectFill; avatar.layer.borderWidth = 2; avatar.layer.borderColor = UIColor.white.cgColor
@@ -31,11 +31,8 @@ final class NativeMineViewController: UIViewController {
         edit.addTarget(self, action: #selector(openProfile), for: .touchUpInside); qr.addTarget(self, action: #selector(openQR), for: .touchUpInside)
         let entries = [("我的收藏", "uni_mine_icon_favorites"), ("通知设置", "uni_mine_icon_notifications"), ("聊天设置", "uni_mine_icon_chat_settings"), ("隐私", "uni_mine_icon_privacy"), ("安全", "uni_mine_icon_security"), ("通用", "uni_mine_icon_general"), ("退出", "uni_mine_icon_logout")]
         for (index, entry) in entries.enumerated() {
-            let button = UIButton(type: .custom); button.backgroundColor = .white; button.tag = index
-            let icon = UIImageView(image: NativeUITheme.image(entry.1)); icon.tag = 1; icon.contentMode = .scaleAspectFit
-            let label = NativeUITheme.label(entry.0, size: 16, color: index == 6 ? UIColor(hex: 0xdc2828) : NativeUITheme.body); label.tag = 2
-            let chevron = UIImageView(image: NativeUITheme.image("uni_mine_icon_chevron")); chevron.tag = 3; chevron.contentMode = .scaleAspectFit; chevron.isHidden = index == 6
-            [icon, label, chevron].forEach { button.addSubview($0) }; button.addTarget(self, action: #selector(openMenu(_:)), for: .touchUpInside)
+            let button = NativeMineMenuButton(title: entry.0, icon: entry.1, logout: index == 6); button.tag = index
+            button.addTarget(self, action: #selector(openMenu(_:)), for: .touchUpInside)
             scroll.addSubview(button); menu.append(button)
         }; refreshProfile()
     }
@@ -51,12 +48,9 @@ final class NativeMineViewController: UIViewController {
         nickname.frame = CGRect(x: r(48), y: avatar.frame.maxY + r(8), width: r(160), height: r(48)); nickname.font = .boldSystemFont(ofSize: r(32))
         edit.frame = CGRect(x: width - r(48 + 64 + 4 + 64), y: top + r(220), width: r(64), height: r(64))
         qr.frame = CGRect(x: edit.frame.maxX + r(4), y: edit.frame.minY, width: r(64), height: r(64))
+        [edit, qr].forEach { $0.imageEdgeInsets = UIEdgeInsets(top: r(12), left: r(12), bottom: r(12), right: r(12)) }
         for index in menu.indices {
             menu[index].frame = CGRect(x: 0, y: hero.frame.maxY + CGFloat(index) * r(96) + (index == 6 ? r(16) : 0), width: width, height: r(96))
-            menu[index].viewWithTag(1)?.frame = CGRect(x: r(32), y: r(28), width: r(40), height: r(40))
-            menu[index].viewWithTag(2)?.frame = CGRect(x: r(88), y: 0, width: width - r(176), height: r(96))
-            (menu[index].viewWithTag(2) as? UILabel)?.font = .systemFont(ofSize: r(32))
-            menu[index].viewWithTag(3)?.frame = CGRect(x: width - r(72), y: r(28), width: r(40), height: r(40))
         }; scroll.contentSize = CGSize(width: width, height: (menu.last?.frame.maxY ?? 0) + 16)
     }
     @objc private func openProfile() { navigationController?.pushViewController(NativeProfileController(context: service.business, service: service), animated: true) }
@@ -72,6 +66,29 @@ final class NativeMineViewController: UIViewController {
         if sender.tag == 4 { navigationController?.pushViewController(NativeSecurityController(context: service.business), animated: true); return }
         let kinds: [NativeSettingsController.Kind] = [.notifications, .chat, .privacy, .security, .general]
         navigationController?.pushViewController(NativeSettingsController(context: service.business, service: service, kind: kinds[sender.tag - 1]), animated: true)
+    }
+}
+
+/// 菜单序号只用于路由；子控件通过引用布局，避免 viewWithTag 命中按钮自身。
+private final class NativeMineMenuButton: UIButton {
+    private let icon = UIImageView()
+    private let name = UILabel()
+    private let chevron = UIImageView(image: NativeUITheme.image("uni_mine_icon_chevron"))
+    init(title: String, icon asset: String, logout: Bool) {
+        super.init(frame: .zero)
+        backgroundColor = .white; icon.image = NativeUITheme.image(asset); name.text = title
+        name.textColor = logout ? UIColor(hex: 0xdc2828) : NativeUITheme.body
+        icon.contentMode = .scaleAspectFit; chevron.contentMode = .scaleAspectFit; chevron.isHidden = logout
+        [icon, name, chevron].forEach { addSubview($0) }
+        accessibilityLabel = title; accessibilityIdentifier = "mineMenu_" + asset
+    }
+    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
+    override func layoutSubviews() {
+        super.layoutSubviews(); let r = bounds.width / 750
+        icon.frame = CGRect(x: 32 * r, y: 28 * r, width: 40 * r, height: 40 * r)
+        name.frame = CGRect(x: 88 * r, y: 0, width: max(0, bounds.width - 176 * r), height: bounds.height)
+        name.font = .systemFont(ofSize: 32 * r)
+        chevron.frame = CGRect(x: bounds.width - 72 * r, y: 28 * r, width: 40 * r, height: 40 * r)
     }
 }
 

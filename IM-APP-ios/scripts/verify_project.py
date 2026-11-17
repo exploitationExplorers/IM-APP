@@ -116,7 +116,13 @@ class IOSProjectStaticTests(unittest.TestCase):
         self.assertNotIn("api.imToken", login)
         self.assertNotIn("authenticationSucceeded", login)
         service = (IOS / "IMNative/NativeIMService.swift").read_text(encoding="utf-8")
-        self.assertEqual(service.count("api.imToken("), 1)
+        # IM 签发经过同一业务 owner 和 401 刷新；普通读取不能自行签发。
+        self.assertNotIn("api.imToken(", service)
+        self.assertEqual(service.count("business.imToken("), 2)  # 启动及独立的单次认证恢复
+        business = (IOS / "IMNative/NativeBusiness.swift").read_text(encoding="utf-8")
+        self.assertEqual(business.count('request("im/token"'), 1)
+        self.assertIn('body: ["platformId": .number(1)]', business)
+        self.assertIn("credentialRecoveryBudget.reserve(failure)", service)
         # 媒体临时文件可以清理，但SDK目录/账号数据库不得自动删除。
         self.assertNotRegex(service, r"removeItem\s*\(\s*at:\s*(?:storageDirectory|sdkDirectory|namespace|root|directory)\b")
         self.assertNotIn('removeItem(atPath:', service)

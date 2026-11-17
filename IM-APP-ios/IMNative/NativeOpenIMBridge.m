@@ -7,6 +7,7 @@
 @interface NativeOpenIMBridge () <OIMConversationListener, OIMAdvancedMsgListener>
 @property(nonatomic, copy, nullable) NativeIMEvent events;
 @property(nonatomic, assign) BOOL alive;
+@property(nonatomic, assign) BOOL loginInFlight;
 @end
 
 @implementation NativeOpenIMBridge
@@ -17,7 +18,36 @@ static NSError *NativeError(NSInteger code) {
         [NSString stringWithFormat:@"聊天请求失败（%ld），请稍后重试。", (long)code]}];
 }
 
-static NSDictionary *MessageData(OIMMessageInfo *message) {
+static NSError *NativeReadError(NSInteger code, NSString *message, NSString *operation) {
+    NSString *text = message.lowercaseString ?: @"";
+    NSString *reason = @"unknown";
+    if (code == 1506) reason = @"kicked";
+    else if ((code >= 1501 && code <= 1505) || code == 1507) reason = @"authentication";
+    else if ([text containsString:@"not logged in"] || [text containsString:@"not login"]) reason = @"notLoggedIn";
+    else if ([text containsString:@"not initialized"] || [text containsString:@"not init"]) reason = @"notInitialized";
+    else if ([text containsString:@"token"] && ([text containsString:@"expired"] || [text containsString:@"invalid"])) reason = @"authentication";
+    else if (code == 10004 || [text containsString:@"resource load"] || [text containsString:@"initialization incomplete"]) reason = @"resourceNotReady";
+    else if ([text containsString:@"database is locked"] || [text containsString:@"database is busy"]) reason = @"storageBusy";
+    else if ([text containsString:@"no such table"] || [text containsString:@"no such column"]) reason = @"storageSchema";
+    else if ([text containsString:@"database disk image is malformed"] || [text containsString:@"file is not a database"]) reason = @"storageCorrupt";
+    else if ([text containsString:@"permission denied"] || [text containsString:@"unable to open database"]) reason = @"storageAccess";
+    else if ([text containsString:@"no space left"] || [text containsString:@"database or disk is full"]) reason = @"storageFull";
+    else if ([text containsString:@"deadline exceeded"] || [text containsString:@"timeout"] || [text containsString:@"timed out"]) reason = @"timeout";
+    else if ([text containsString:@"network"] || [text containsString:@"websocket"] || [text containsString:@"connection refused"]) reason = @"network";
+    // 不保存原始 message，只传递固定操作名和错误分类。
+    NSMutableDictionary *info = [NativeError(code).userInfo mutableCopy];
+    info[@"NativeIMReason"] = reason; info[@"NativeIMOperation"] = operation;
+    return [NSError errorWithDomain:@"NativeOpenIM" code:code userInfo:info];
+}
+
+static NSInteger CredentialErrorCode(NSString *message) {
+    // 仅提取白名单错误码，绝不将原始消息（可能带票据）传入 Swift 或持久化。
+    NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:@"(?:errCode|code)[\\\"']?\\s*[:=]\\s*(150[1-7])\\b" options:NSRegularExpressionCaseInsensitive error:nil];
+    NSTextCheckingResult *match = [pattern firstMatchInString:message ?: @"" options:0 range:NSMakeRange(0, message.length)];
+    return match.numberOfRanges > 1 ? [[message substringWithRange:[match rangeAtIndex:1]] integerValue] : 0;
+}
+
+static NSString *MessageText(OIMMessageInfo *message) {
     NSString *text;
     switch (message.contentType) {
         case OIMMessageContentTypeText: text = message.textElem.content ?: @""; break;
@@ -34,6 +64,11 @@ static NSDictionary *MessageData(OIMMessageInfo *message) {
         default: text = message.contentType >= 1000 ? @"[系统通知]" : @"[此类型消息待支持]"; break;
     }
     if (message.status == OIMMessageStatusRevoke) text = @"[消息已撤回]";
+    return text;
+}
+
+static NSDictionary *MessageData(OIMMessageInfo *message) {
+    NSString *text = MessageText(message);
     NSString *url = @"", *thumbnail = @"", *local = @"", *filename = @"";
     NSInteger duration = 0;
     if (message.contentType == OIMMessageContentTypeImage) {
@@ -72,7 +107,7 @@ static NSDictionary *ConversationData(OIMConversationInfo *conversation) {
              @"avatar": conversation.faceURL ?: @"", @"muted": @(conversation.recvMsgOpt != 0),
              @"latestSeq": @(conversation.latestMsg.seq), @"latestSender": conversation.latestMsg.sendID ?: @"",
              @"timestamp": @(conversation.latestMsgSendTime), @"pinned": @(conversation.isPinned),
-             @"preview": conversation.latestMsg ? MessageData(conversation.latestMsg)[@"text"] : @"暂无消息"};
+             @"preview": conversation.latestMsg ? MessageText(conversation.latestMsg) : @"暂无消息"};
 }
 
 static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
@@ -106,9 +141,9 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
         onConnecting:^{ [weak emit:@"connecting" payload:@{}]; }
         onConnectFailure:^(NSInteger code, NSString *msg) { [weak emit:@"connectFailed" payload:@{@"code": @(code)}]; }
         onConnectSuccess:^{ [weak emit:@"connected" payload:@{}]; }
-        onKickedOffline:^{ [weak emit:@"kicked" payload:@{}]; }
-        onUserTokenExpired:^{ [weak emit:@"tokenExpired" payload:@{}]; }
-        onUserTokenInvalid:^(NSString *msg) { [weak emit:@"tokenInvalid" payload:@{}]; }];
+        onKickedOffline:^{ [weak emit:@"kicked" payload:@{@"code": @1506}]; }
+        onUserTokenExpired:^{ [weak emit:@"tokenExpired" payload:@{@"code": @1501}]; }
+        onUserTokenInvalid:^(NSString *msg) { [weak emit:@"tokenInvalid" payload:@{@"code": @(CredentialErrorCode(msg))}]; }];
     if (initialized) {
         [OIMManager.callbacker addConversationListener:self];
         [OIMManager.callbacker addAdvancedMsgListener:self];
@@ -117,36 +152,46 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
 }
 
 - (void)loginUserID:(NSString *)userID token:(NSString *)token completion:(NativeIMResult)completion {
+    if (self.loginInFlight) { completion(nil, NativeReadError(-1, @"login in progress", @"login")); return; }
+    self.loginInFlight = YES;
     [OIMManager.manager login:userID token:token onSuccess:^(NSString *data) {
+        self.loginInFlight = NO;
         completion(@{}, nil);
-    } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
+    } onFailure:^(NSInteger code, NSString *msg) { self.loginInFlight = NO; completion(nil, NativeReadError(code, msg, @"login")); }];
 }
+
+- (NSInteger)loginStatus { return [OIMManager.manager getLoginStatus]; }
+- (BOOL)loginPending { return self.loginInFlight; }
 
 - (void)logout:(NativeIMResult)completion {
     [OIMManager.manager logoutWithOnSuccess:^(NSString *data) { completion(@{}, nil); }
                                   onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
 }
 
-- (void)shutdown {
+- (BOOL)shutdown {
     NSAssert(NSThread.isMainThread, @"SDK singleton 必须在主队列串行操作");
+    // 固定版 Core 的 unInit 不替代 logout；旧库/线程释放前禁止重置全局实例。
+    NSInteger status = [self loginStatus];
+    if (self.loginInFlight || status == 2 || status == 3) return NO;
     self.alive = NO;
     self.events = nil;
     [OIMManager.callbacker removeConversationListener:self];
     [OIMManager.callbacker removeAdvancedMsgListener:self];
     [OIMManager.manager unInitSDK];
     OIMManager.manager.token = nil;
+    return YES;
 }
 
 - (void)conversationsOffset:(NSInteger)offset count:(NSInteger)count completion:(NativeIMResult)completion {
     [OIMManager.manager getConversationListSplitWithOffset:offset count:count onSuccess:^(NSArray<OIMConversationInfo *> *items) {
         completion(@{@"items": ConversationList(items ?: @[])}, nil);
-    } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
+    } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeReadError(code, msg, @"conversationPage")); }];
 }
 
 - (void)allConversations:(NativeIMResult)completion {
     [OIMManager.manager getAllConversationListWithOnSuccess:^(NSArray<OIMConversationInfo *> *items) {
         completion(@{@"items": ConversationList(items ?: @[])}, nil);
-    } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
+    } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeReadError(code, msg, @"conversationSnapshot")); }];
 }
 
 - (void)conversationTarget:(NSString *)target type:(NSInteger)type completion:(NativeIMResult)completion {

@@ -126,6 +126,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         if case .realAccount(let chat) = mode { return chat.account }
         return nil
     }
+    override var preferredStatusBarStyle: UIStatusBarStyle { currentTab == 2 && realAccount != nil ? .lightContent : .darkContent }
     private var chat: NativeIMService? {
         if case .realAccount(let chat) = mode { return chat }
         return nil
@@ -167,6 +168,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .white
+        NativeUITheme.useCustomScrollEdges(table)
         [header, sampleNotice, searchBox, filter, table, empty, profilePanel, tabbar].forEach { view.addSubview($0) }
         [titleLabel, more, add].forEach { header.addSubview($0) }
         titleLabel.textColor = NativeUITheme.body
@@ -311,6 +313,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     }
 
     private func refreshTab() {
+        setNeedsStatusBarAppearanceUpdate()
         let names = ["contacts", "chat", "mine"]
         let titles = ["通讯录", "聊天", "我的"]
         titleLabel.text = titles[currentTab]
@@ -331,7 +334,9 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         filter.setTitle(unreadOnly ? "未读 ▾" : "全部 ▾", for: .normal)
         if realAccount != nil {
             sampleNotice.text = self.chat?.statusText
-            empty.text = self.chat?.loadingConversations == true ? "正在读取会话…" : "暂无符合条件的会话\n点击上方状态可重新读取"
+            if self.chat?.loadingConversations == true { empty.text = "正在读取会话…" }
+            else if self.chat?.conversations.isEmpty == true, self.chat?.lastError != nil { empty.text = "会话暂未读取成功\n点击上方状态重试" }
+            else { empty.text = "暂无符合条件的会话\n点击上方状态可重新读取" }
             empty.isHidden = !chat || !visibleConversations.isEmpty
             loadMore.isEnabled = self.chat?.loadingConversations != true
             table.tableFooterView = self.chat?.conversationsEnd == false ? loadMore : nil
@@ -424,7 +429,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
 
     @objc private func refreshRealConversations() {
         guard let chat = chat else { return }
-        Task { await chat.loadConversations(reset: true) }
+        Task { await chat.retryConversations() }
     }
     @objc private func loadMoreConversations() {
         guard let chat = chat else { return }

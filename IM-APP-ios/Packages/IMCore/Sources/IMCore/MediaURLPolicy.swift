@@ -79,6 +79,19 @@ public struct MediaURLPolicy: Sendable {
         return raw.hasPrefix("/") ? url.absoluteString : raw
     }
 
+    /// 缩略图失败后仍可读取原地址；不能再次变换备用地址而丢掉回退路径。
+    public func imageCandidates(_ raw: String, variant: Variant = .list, fallbacks: [String] = []) -> [String] {
+        var seen = Set<String>()
+        return ([raw] + fallbacks).flatMap { source -> [String] in
+            let value = source.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { return [] }
+            return [image(value, variant: variant), absolute(value)?.absoluteString ?? value]
+        }.filter { candidate in
+            guard absolute(candidate)?.scheme?.lowercased() == "https" else { return false }
+            return seen.insert(cacheIdentity(candidate)).inserted
+        }
+    }
+
     public func original(_ raw: String) -> String {
         guard let url = absolute(raw), var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return raw }
         if signature(parts) {

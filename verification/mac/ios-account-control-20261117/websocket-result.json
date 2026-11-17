@@ -1,0 +1,10 @@
+{
+  "case": "failing_case",
+  "platform": 1,
+  "sdk_invoked": false,
+  "business_code": 0,
+  "im_business_code": 0,
+  "websocket_http": 200,
+  "websocket_code": 1507,
+  "checked_at_utc": "2026-11-17T06:01:14.205479+00:00"
+}

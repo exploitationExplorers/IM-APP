@@ -228,6 +228,8 @@ public struct APIClient: Sendable {
             let response = try await transport.send(request)
             try Task.checkCancellation()
             guard (200..<300).contains(response.status) else {
+                // 业务响应通常 code=1；不能丢掉 HTTP 401/403，否则平台无法刷新或撤销认证。
+                if (response.status == 401 || response.status == 403), accessToken != nil || path == "auth/token/refresh" { throw APIError.httpStatus(response.status) }
                 if let failure = try? JSONDecoder().decode(BusinessFailure.self, from: response.body), failure.code != 0 {
                     throw APIError.business(code: failure.code, message: safeMessage(failure.message))
                 }

@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-17",
+  "ui_revision": "20261117-ui6",
+  "core_tests": 131,
+  "core_failures": 0,
+  "project_static_checks": 8,
+  "diff_check": "passed",
+  "app_rebuilt_this_turn": false,
+  "native_sdk_connection_verified": false,
+  "native_ui_verified": false,
+  "backend_patch_backed_up_and_removed": true,
+  "backend_included_in_commit": false,
+  "push_performed": false
+}

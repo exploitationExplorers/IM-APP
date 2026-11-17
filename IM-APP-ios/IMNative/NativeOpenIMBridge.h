@@ -8,8 +8,10 @@ typedef void (^NativeIMEvent)(NSString *name, NSDictionary<NSString *, id> *payl
 @interface NativeOpenIMBridge : NSObject
 - (BOOL)initializeAPI:(NSString *)api ws:(NSString *)ws directory:(NSString *)directory events:(NativeIMEvent)events NS_SWIFT_NAME(initialize(api:ws:directory:events:));
 - (void)loginUserID:(NSString *)userID token:(NSString *)token completion:(NativeIMResult)completion NS_SWIFT_NAME(login(userID:token:completion:));
+- (NSInteger)loginStatus NS_SWIFT_NAME(loginStatus());
+- (BOOL)loginPending NS_SWIFT_NAME(loginPending());
 - (void)logout:(NativeIMResult)completion NS_SWIFT_NAME(logout(completion:));
-- (void)shutdown NS_SWIFT_NAME(shutdown());
+- (BOOL)shutdown NS_SWIFT_NAME(shutdown());
 - (void)conversationsOffset:(NSInteger)offset count:(NSInteger)count completion:(NativeIMResult)completion NS_SWIFT_NAME(conversations(offset:count:completion:));
 - (void)allConversations:(NativeIMResult)completion NS_SWIFT_NAME(allConversations(completion:));
 - (void)conversationTarget:(NSString *)target type:(NSInteger)type completion:(NativeIMResult)completion NS_SWIFT_NAME(conversation(target:type:completion:));

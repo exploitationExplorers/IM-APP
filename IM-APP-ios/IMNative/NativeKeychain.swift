@@ -7,7 +7,7 @@ struct SavedBusinessLogin: Codable, Sendable {
     let apiBaseURL: String
     let authentication: AuthResult
     let profile: UserProfile
-    let expiresAt: Date
+    var expiresAt: Date
     var imCredential: IMBootstrapCredential?
 
     init(account: BusinessAccountSession, configuration: APIConfiguration, expiresAt: Date? = nil) {
@@ -61,7 +61,7 @@ actor NativeSessionVault {
         return saved
     }
 
-    func save(_ saved: SavedBusinessLogin, expectedRefreshToken: String? = nil) throws {
+    func save(_ saved: SavedBusinessLogin, expectedRefreshToken: String? = nil, preserveIMCredential: Bool = true) throws {
         try Task.checkCancellation()
         var saved = saved
         let existing: SavedBusinessLogin?
@@ -76,7 +76,11 @@ actor NativeSessionVault {
                   existing.apiBaseURL == saved.apiBaseURL,
                   existing.authentication.refreshToken == expected else { throw CancellationError() }
         }
-        if saved.imCredential == nil, let old = existing, old.profile.id == saved.profile.id, old.apiBaseURL == saved.apiBaseURL,
+        if let old = existing, old.profile.id == saved.profile.id, old.apiBaseURL == saved.apiBaseURL,
+           old.authentication.accessToken == saved.authentication.accessToken {
+            saved.expiresAt = min(old.expiresAt, saved.expiresAt)
+        }
+        if preserveIMCredential, saved.imCredential == nil, let old = existing, old.profile.id == saved.profile.id, old.apiBaseURL == saved.apiBaseURL,
            expectedRefreshToken != nil || old.authentication.refreshToken == saved.authentication.refreshToken { saved.imCredential = old.imCredential }
         _ = try saved.validate()
         let data = try JSONEncoder().encode(saved)
@@ -96,6 +100,13 @@ actor NativeSessionVault {
         _ = try credential.validated(businessUserID: saved.profile.id, configuration: saved.validate())
         saved.imCredential = credential
         try save(saved, expectedRefreshToken: expectedRefreshToken)
+    }
+
+    func clearIMCredential(expectedUserID: String, apiBaseURL: String, expectedRefreshToken: String, token: String) throws {
+        guard var saved = try load(), saved.profile.id == expectedUserID, saved.apiBaseURL == apiBaseURL,
+              saved.authentication.refreshToken == expectedRefreshToken, saved.imCredential?.token.token == token else { return }
+        saved.imCredential = nil
+        try save(saved, expectedRefreshToken: expectedRefreshToken, preserveIMCredential: false)
     }
 
     func clear(expectedUserID: String? = nil, expectedRefreshToken: String? = nil) throws {

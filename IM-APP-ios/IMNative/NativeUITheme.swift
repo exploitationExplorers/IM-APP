@@ -6,9 +6,18 @@ enum NativeUITheme {
     static let body = UIColor(hex: 0x212121)
     static let secondary = UIColor(hex: 0x636e86)
     static let sampleNotice = "本地样例 · 不联网 · 不送达"
+    static let uiRevision = "20261117-ui6"
 
     /// Vue 的 rpx 按实际窗口逻辑宽度换算，px 保持逻辑尺寸。
     static func rpx(_ value: CGFloat, width: CGFloat) -> CGFloat { value * width / 750 }
+
+    /// 自绘导航栏、个人中心 hero 不叠加系统自动生成的滚动边缘模糊。
+    static func useCustomScrollEdges(_ scrollView: UIScrollView) {
+        if #available(iOS 26.0, *) {
+            scrollView.topEdgeEffect.isHidden = true
+            scrollView.bottomEdgeEffect.isHidden = true
+        }
+    }
 
     static func label(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular, color: UIColor = body) -> UILabel {
         let label = UILabel()

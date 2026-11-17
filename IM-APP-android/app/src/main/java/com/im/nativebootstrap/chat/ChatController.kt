@@ -582,19 +582,43 @@ class ChatController(
         var persisted=false
         try {
             ensureCanSend(active.target)
-            val preserved=quote?.let { preserveQuote(it) }
             val mentions=snapshot.mentions.filter { text.contains("@${it.name}") }
             if(mentions.any { it.userId=="AtAllTag" }) {
                 val api=business ?: error("业务服务尚未就绪")
                 check(api.request("GET","/im/groups/by-im/${active.target.groupId}").asJsonObject.string("role") in setOf("owner","admin")) { "仅群主或管理员可 @所有人" }
             }
-            val message=if(mentions.isNotEmpty())gateway.createMention(text.trim(),mentions.map { it.userId to it.name },preserved,active.target) else if(preserved==null) gateway.createText(text.trim(),active.target) else gateway.createQuote(text.trim(),preserved,active.target)
+            val message=if(mentions.isNotEmpty())gateway.createMention(text.trim(),mentions.map { it.userId to it.name },quote,active.target) else if(quote==null) gateway.createText(text.trim(),active.target) else gateway.createQuote(text.trim(),quote,active.target)
             val entry=outbox!!.put(active.target,message)
             persisted=true
             emit(snapshot.copy(messages=mergeMessages(snapshot.messages,listOf(message)),error=null,mentions=emptyList()))
-            submit(t,entry)
+            if(quote==null) submit(t,entry) else preserveQuoteThenSubmit(t,entry)
         } catch (_:Exception) { emit(snapshot.copy(error=if(persisted) "消息已保存，结果待核对。" else "消息未提交。待发记录保存失败或聊天资源未就绪，请重试。")) }
         return persisted
+    }
+
+    private fun preserveQuoteThenSubmit(t:SessionTicket,entry:OutboxEntry) {
+        val api=business
+        if(api==null) { submit(t,entry);return }
+        val source=entry.message
+        businessIO.execute {
+            val result=runCatching {
+                val preserved=preserveQuote(source)
+                val updated=outbox?.update(entry.id,OutboxState.PENDING,preserved)
+                if(updated==null)error("引用消息已确认或已消失")
+                preserved
+            }
+            dispatch {
+                if(!current(t)||outbox?.all()?.none { it.id==entry.id }!=false)return@dispatch
+                result.fold(onSuccess={ preserved ->
+                    val fresh=outbox?.all()?.firstOrNull { it.id==entry.id&&it.state==OutboxState.PENDING } ?: return@dispatch
+                    emit(snapshot.copy(messages=if(snapshot.active?.target==entry.target)mergeMessages(snapshot.messages,listOf(preserved)) else snapshot.messages))
+                    submit(t,fresh)
+                },onFailure={ error ->
+                    if(outbox?.all()?.firstOrNull { it.id==entry.id }?.state==OutboxState.PENDING)outbox?.update(entry.id,OutboxState.FAILED)
+                    emit(snapshot.copy(error=if(snapshot.active?.target?.conversationId==entry.target.conversationId)"引用媒体仍在保护中，请稍后点按重试。" else snapshot.error))
+                })
+            }
+        }
     }
     private fun enqueueVisualMedia(media:LocalMedia,queued:(Boolean)->Unit):Boolean {
         val active=snapshot.active
@@ -1942,8 +1966,10 @@ class ChatController(
                     acceptEvidence(found)
                     emit(snapshot.copy(error=null,messages=if(snapshot.active?.target==entry.target)mergeMessages(snapshot.messages,visible(listOf(found))) else snapshot.messages))
                 } else if(found==null||found.id==id&&found.status==3) {
-                    try { ensureCanSend(entry.target);submit(t,entry) }
-                    catch(_:Exception) { emit(snapshot.copy(error="暂不可重试，请检查连接及会话权限。")) }
+                    try {
+                        if(MessageContents.parse(entry.message.serialized).type==114) preserveQuoteThenSubmit(t,entry)
+                        else { ensureCanSend(entry.target);submit(t,entry) }
+                    } catch(_:Exception) { emit(snapshot.copy(error="暂不可重试，请检查连接及会话权限。")) }
                 } else { outbox?.update(id,OutboxState.UNCERTAIN);emit(snapshot.copy(error="发送结果仍需核对，未重复发送。")) }
             },onFailure={ emit(snapshot.copy(error="暂时无法核对，未重复发送。")) })
         } }

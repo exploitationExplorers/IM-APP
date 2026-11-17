@@ -204,6 +204,18 @@ class BusinessController(
             }
         }
     }
+    // 群详情页停留期间定时对账入群申请数，新申请无需下拉刷新即可看到角标。
+    fun refreshPendingJoinCount() {
+        val route=mutable.value.route
+        if(route.page!="group"||route.context=="lookup")return
+        scope.launch {
+            val result=runCatching{call("GET","/groups/${encoded(route.id)}/join-requests")}
+            if(mutable.value.route!=route)return@launch
+            val detail=mutable.value.detail.deepCopy()
+            result.fold({rows->detail.addProperty("_pendingJoinCount",elements(rows).count{it.text("status").ifBlank{"pending"}=="pending"});detail.remove("_pendingError")},{error->if(error is CancellationException)throw error;detail.addProperty("_pendingError",true)})
+            mutable.value=mutable.value.copy(detail=detail)
+        }
+    }
     fun openGroupPreviewMember(member:JsonObject,myIds:Set<String>) {
         val route=mutable.value.route;val id=member.identifier()
         if(id.isBlank()||route.page!="group")return

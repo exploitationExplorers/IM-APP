@@ -145,6 +145,11 @@ final class NativeBusinessContext {
         let fresh: UserProfile = try await request("me")
         guard fresh.id == userID else { throw APIError.profileMismatch }; profile = fresh
     }
+    func imToken() async throws -> IMToken {
+        let raw: IMToken = try await request("im/token", method: "POST", body: ["platformId": .number(1)])
+        return try IMBootstrapCredential(businessUserID: userID, apiBaseURL: configuration.baseURL.absoluteString, token: raw)
+            .validForLogin(businessUserID: userID, configuration: configuration)
+    }
     private func expired(_ error: Error) -> Bool {
         if let apiError = error as? APIError { switch apiError { case .httpStatus(401), .business(code: 401, message: _): return true; default: return false } }; return false
     }

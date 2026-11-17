@@ -9,12 +9,15 @@ final class NativeDiagnosticsController: NativeBusinessListController {
     override func reloadContent() {
         let groups = Dictionary(grouping: service.outboxEntries, by: { $0.state.rawValue })
         var status = [NativeBusinessRow(title: "客户端", detail: "iOS 原生 0.3.0"), NativeBusinessRow(title: "聊天 SDK", detail: "3.8.3-hotfix.15"), NativeBusinessRow(title: "当前状态", detail: service.statusText), NativeBusinessRow(title: "已载入会话", detail: "\(service.conversations.count)")]
+        status.insert(NativeBusinessRow(title: "界面修订", detail: NativeUITheme.uiRevision), at: 1)
+        status.append(NativeBusinessRow(title: "聊天平台", detail: "iOS / 1"))
         if let code = service.lastSendErrorCode { status.append(NativeBusinessRow(title: "最近发送错误码", detail: "SDK \(code)")) }
+        if let failure = service.lastSDKReadFailure { status.append(NativeBusinessRow(title: "最近聊天读取", detail: "\(failure.operation) / SDK \(failure.code) / \(failure.reason.rawValue)")) }
         let labels = ["prepared": "已保存待发", "sending": "发送中", "accepted": "已受理", "uncertain": "结果待核对", "failed": "明确未发送"]
         status += groups.keys.sorted().map { NativeBusinessRow(title: labels[$0] ?? $0, detail: "\(groups[$0]?.count ?? 0)") }
         setRows([status, [NativeBusinessRow(title: "复制诊断摘要", action: { [weak self] in
             guard let self = self else { return }
-            let summary = "iOS native 0.3.0\nSDK 3.8.3-hotfix.15\n" + self.service.statusText + "\nconversations=\(self.service.conversations.count)\noutbox=\(self.service.outboxEntries.count)\nlastSendSDKCode=\(self.service.lastSendErrorCode.map(String.init) ?? "none")"
+            let summary = "iOS native 0.3.0\nUI " + NativeUITheme.uiRevision + "\nSDK 3.8.3-hotfix.15\n" + self.service.statusText + "\nconversations=\(self.service.conversations.count)\noutbox=\(self.service.outboxEntries.count)\nlastSendSDKCode=\(self.service.lastSendErrorCode.map(String.init) ?? "none")"
             let startup = self.service.conversationStartupDiagnosticLines.joined(separator: "\n")
             Task { @MainActor [weak self] in
                 let media = await NativeImageCache.shared.diagnosticLines()

@@ -57,6 +57,7 @@ class PersistentOutbox(private val file: File, private val owner: String) {
             OutboxState.FAILED -> setOf(OutboxState.SENDING,OutboxState.UNCERTAIN,OutboxState.ACCEPTED)
             OutboxState.ACCEPTED -> setOf(OutboxState.ACCEPTED)
         }
+        val repairAllowed=current.state==OutboxState.SENDING&&state==OutboxState.PENDING&&message!=null&&message.id==current.message.id
         require(state==current.state || state in allowed) { "待发状态不能跳转" }
         val next = entries.map { if (it.id == id) it.copy(state=state,message=message ?: it.message,updatedAt=System.currentTimeMillis()) else it }
         persist(next)

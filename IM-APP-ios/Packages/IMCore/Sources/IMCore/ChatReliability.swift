@@ -1,6 +1,15 @@
 import Foundation
 
 public enum HistoryViewportPolicy {
+    /// 首屏只定位一次；迟到的历史补洞不能打断已经开始阅读的用户。
+    public static func shouldFollowBottom(explicit: Bool, initial: Bool, userInteracted: Bool, appended: Bool, nearBottom: Bool, interacting: Bool) -> Bool {
+        explicit || (initial && !userInteracted) || (appended && nearBottom && !interacting)
+    }
+
+    public static func restoredOffset(anchorMinY: Double, distanceFromTop: Double, gestureDelta: Double, minimum: Double, maximum: Double) -> Double {
+        min(max(minimum, maximum), max(minimum, anchorMinY - distanceFromTop + gestureDelta))
+    }
+
     /// 提前读取一段视口内的历史，惯性滚动与手指拖动使用同一门限。
     public static func shouldPrefetch(distanceFromTop: Double, viewportHeight: Double, movingTowardHistory: Bool, interacting: Bool, canLoad: Bool) -> Bool {
         let threshold = max(160, min(640, viewportHeight * 0.75))
@@ -105,10 +114,75 @@ public struct IMBootstrapCredential: Codable, Equatable, Sendable {
         guard businessUserID == expectedUser, apiBaseURL == configuration.baseURL.absoluteString,
               GroupVisibility.businessUserID(token.userId) == expectedUser.lowercased(), token.platform == 1,
               !token.token.isEmpty, token.expireSec > 0, savedAt.timeIntervalSince1970.isFinite else { throw APIError.invalidCredentials }
-        _ = try IMEndpointPolicy.resolve(token.apiAddr, webSocket: false, businessBaseURL: configuration.baseURL)
-        _ = try IMEndpointPolicy.resolve(token.wsAddr, webSocket: true, businessBaseURL: configuration.baseURL)
+        let api = try IMEndpointPolicy.resolve(token.apiAddr, webSocket: false, businessBaseURL: configuration.baseURL)
+        let ws = try IMEndpointPolicy.resolve(token.wsAddr, webSocket: true, businessBaseURL: configuration.baseURL)
         // 这里只验证本机开库身份；发送权限、token 有效性仍由 SDK 和服务端判断。
+        return IMToken(userId: token.userId, token: token.token, platform: token.platform, expireSec: token.expireSec, apiAddr: api, wsAddr: ws)
+    }
+
+    /// 本机开库身份与在线票据有效期分开判断；重启不能重新延长原票据。
+    public func validForLogin(businessUserID: String, configuration: APIConfiguration, now: Date = Date()) throws -> IMToken {
+        let token = try validated(businessUserID: businessUserID, configuration: configuration)
+        let age = now.timeIntervalSince(savedAt)
+        guard age.isFinite, age >= -60, TimeInterval(token.expireSec) - max(0, age) > 60 else { throw APIError.invalidCredentials }
+        // JWT 的 exp 仅用于提前拒绝过期票据，不能替代服务端验签。
+        let parts = token.token.split(separator: ".", omittingEmptySubsequences: false)
+        if parts.count == 3 {
+            var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+            payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+            if let data = Data(base64Encoded: payload),
+               let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let expiry = claims["exp"] as? NSNumber {
+                guard expiry.doubleValue.isFinite, expiry.doubleValue > now.timeIntervalSince1970 + 60 else { throw APIError.invalidCredentials }
+            }
+        }
         return token
+    }
+}
+
+/// SDK 失效通知可能重复到达；每次业务登录最多恢复一次，真实互踢必须由用户重新登录。
+public struct IMCredentialRecoveryBudget: Sendable {
+    public enum Failure: String, Sendable { case expired, invalid, kicked }
+    public private(set) var attempts = 0
+    public private(set) var kicked = false
+    public init() {}
+    public mutating func reserve(_ failure: Failure) -> Bool {
+        if failure == .kicked { kicked = true }
+        guard !kicked, attempts == 0 else { return false }
+        attempts += 1
+        return true
+    }
+}
+
+public enum IMCredentialRecoveryError: LocalizedError, Equatable {
+    case sdkBusy, unchangedCredential, connectionNotReady
+    public var errorDescription: String? {
+        switch self {
+        case .sdkBusy: return "聊天 SDK 上一次会话尚未退出，聊天记录已保留。"
+        case .unchangedCredential: return "服务仍返回同一张失效的 iOS 聊天票据，需要重新签发。"
+        case .connectionNotReady: return "聊天本地登录完成，在线连接尚未确认，请稍后重试。"
+        }
+    }
+    public static func requireReplacement(_ token: String, rejected: String?) throws {
+        if token == rejected { throw Self.unchangedCredential }
+    }
+}
+
+/// Token 失效回调先通知 App，再由 SDK 异步退出；必须等到状态 1 后才能重登。
+public enum OpenIMSessionBarrier {
+    @MainActor
+    public static func waitForLogout(timeout: TimeInterval = 25,
+        status: () throws -> Int,
+        now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        pause: () async throws -> Void = { try await Task.sleep(nanoseconds: 50_000_000) }) async throws {
+        let started = now()
+        while true {
+            try Task.checkCancellation()
+            let current = try status()
+            if current == 1 { return }
+            guard current == 2 || current == 3, now() - started < timeout else { throw IMCredentialRecoveryError.sdkBusy }
+            try await pause()
+        }
     }
 }
 
@@ -288,15 +362,37 @@ public struct ChatTextItem: Equatable, Sendable {
     }
     public func read() -> ChatTextItem { ChatTextItem(id: id, senderID: senderID, text: text, timestamp: timestamp, status: status, seq: seq, avatar: avatar, senderName: senderName, contentType: contentType, isRead: true, serialized: serialized, media: media) }
     public static func merge(_ old: [ChatTextItem], _ incoming: [ChatTextItem]) -> [ChatTextItem] {
-        var byID = Dictionary(old.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        func precedes(_ lhs: ChatTextItem, _ rhs: ChatTextItem) -> Bool {
+            lhs.timestamp == rhs.timestamp ? lhs.id < rhs.id : lhs.timestamp < rhs.timestamp
+        }
+        var byID: [String: ChatTextItem] = [:]
+        var ordered = true
+        for (index, item) in old.enumerated() {
+            if byID[item.id] != nil || (index > 0 && precedes(item, old[index - 1])) { ordered = false }
+            byID[item.id] = item
+        }
+        let baseline = ordered ? old : byID.values.sorted(by: precedes)
+        var changed: [String: ChatTextItem] = [:]
         for item in incoming where !item.id.isEmpty {
             // 迟到的历史 sending 不能把实时 success 降级。
             if let prior = byID[item.id] {
                 if prior.status == 4 && item.status != 4 { continue }
                 if prior.status == 2 && item.status != 2 && item.status != 4 { continue }
             }
+            if byID[item.id] != item { changed[item.id] = item }
             byID[item.id] = item
         }
-        return byID.values.sorted { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp }
+        guard !changed.isEmpty else { return baseline }
+        // 已排序的历史只做线性合并，单条消息不再触发整段历史排序。
+        let retained = baseline.filter { changed[$0.id] == nil }
+        let additions = changed.values.sorted(by: precedes)
+        var result: [ChatTextItem] = []; result.reserveCapacity(retained.count + additions.count)
+        var left = 0, right = 0
+        while left < retained.count && right < additions.count {
+            if precedes(retained[left], additions[right]) { result.append(retained[left]); left += 1 }
+            else { result.append(additions[right]); right += 1 }
+        }
+        result.append(contentsOf: retained[left...]); result.append(contentsOf: additions[right...])
+        return result
     }
 }

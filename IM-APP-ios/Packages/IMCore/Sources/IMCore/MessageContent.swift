@@ -146,6 +146,33 @@ public struct ForwardMessageSnapshot: Codable, Equatable, Sendable {
 }
 
 /// 封面几何与播放时长从真实视频元数据读取，兼容旧 App 的 JSON content。
+public struct ImageMessageMetadata: Equatable, Sendable {
+    public let width: Double
+    public let height: Double
+    public var hasDimensions: Bool { width > 0 && height > 0 }
+    public init(serialized: String) {
+        let root = MessagePayload.object(serialized) ?? [:]
+        let stored = MessagePayload.object(MessagePayload.value(root, "content")) ?? [:]
+        let direct = MessagePayload.object(MessagePayload.value(root, "pictureElem"))
+        let embedded = MessagePayload.object(MessagePayload.value(stored, "pictureElem"))
+        let sources = [direct, embedded, stored].compactMap { $0 }
+        let pictures = sources.flatMap { value in ["sourcePicture", "bigPicture", "snapshotPicture"].compactMap { MessagePayload.object(MessagePayload.value(value, $0)) } }
+        let size = (pictures + sources).first { MessagePayload.number($0, "width") > 0 && MessagePayload.number($0, "height") > 0 }
+        width = Double(size.map { MessagePayload.number($0, "width") } ?? 0)
+        height = Double(size.map { MessagePayload.number($0, "height") } ?? 0)
+    }
+    /// 与 Android 图片气泡使用相同逻辑点尺寸；缺失元数据时优先使用已加载图片比例。
+    public func fitted(viewportWidth: Double, loadedWidth: Double = 0, loadedHeight: Double = 0) -> (width: Double, height: Double) {
+        guard viewportWidth.isFinite, viewportWidth > 0 else { return (0, 0) }
+        let sourceWidth = hasDimensions ? width : loadedWidth
+        let sourceHeight = hasDimensions ? height : loadedHeight
+        guard sourceWidth.isFinite, sourceHeight.isFinite, sourceWidth > 0, sourceHeight > 0 else { return (170, 160) }
+        let maximum = 210 * (viewportWidth / 750) / 0.52
+        let fittedWidth = min(maximum, max(90, maximum * sourceWidth / sourceHeight))
+        return (fittedWidth, min(260, max(80, fittedWidth * sourceHeight / sourceWidth)))
+    }
+}
+
 public struct VideoMessageMetadata: Equatable, Sendable {
     public let hasDimensions: Bool
     public let width: Double
@@ -207,10 +234,12 @@ public struct BusinessMessageCard: Equatable, Sendable {
 
 public struct MessageQuoteReference: Equatable, Sendable {
     public let id: String; public let sender: String; public let summary: String; public let image: String
+    public let replyText: String
     public init?(serialized: String) {
         guard let root = MessagePayload.object(serialized) else { return nil }
         let type = MessagePayload.number(root, "contentType"); guard [106, 114].contains(type) else { return nil }
         let element = MessagePayload.object(MessagePayload.value(root, type == 106 ? "atTextElem" : "quoteElem")) ?? MessagePayload.object(MessagePayload.value(root, "content")) ?? [:]
+        replyText = MessagePayload.text(element, "text")
         guard let quoted = MessagePayload.object(MessagePayload.value(element, "quoteMessage")) else { return nil }
         let id = MessagePayload.text(quoted, "clientMsgID"); guard !id.isEmpty else { return nil }; self.id = id
         sender = MessagePayload.text(quoted, "senderNickname")

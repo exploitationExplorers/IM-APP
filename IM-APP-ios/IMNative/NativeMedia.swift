@@ -316,8 +316,7 @@ final class NativeRemoteImageView: UIImageView {
     private var loaded = false
     private var failedOwnedIdentities: [String] = []
     func load(_ raw: String, policy: MediaURLPolicy, variant: MediaURLPolicy.Variant = .avatar, placeholder: String = "uni_avatar_default", fallbacks: [String] = []) {
-        var seen = Set<String>()
-        let candidates = ([raw] + fallbacks).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.map { policy.image($0, variant: variant) }.filter { seen.insert(policy.cacheIdentity($0)).inserted }
+        let candidates = policy.imageCandidates(raw, variant: variant, fallbacks: fallbacks)
         let identity = candidates.map { policy.cacheIdentity($0) }.joined(separator: "\n")
         if represented == identity, loaded || task != nil { refreshAnimationRegistration(); return }
         NativeAnimationVisibility.shared.remove(self); task?.cancel(); loaded = false; accessibilityLabel = nil; represented = identity
@@ -458,21 +457,7 @@ final class NativeImagePreviewController: UIViewController, UIScrollViewDelegate
                 }
                 defer { if ownedLocal == nil { try? FileManager.default.removeItem(at: file) } }
                 try Task.checkCancellation()
-                let photo = try await Task.detached(priority: .userInitiated) { () -> URL in
-                    guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary), let type = CGImageSourceGetType(source) as String? else { throw APIError.invalidResponse }
-                    let originals: Set<String> = ["public.jpeg", "public.png", "public.heic", "public.heif", "com.compuserve.gif", "public.tiff"]
-                    if originals.contains(type) { return file }
-                    guard type.lowercased().contains("webp") else { throw APIError.business(code: -1, message: "此图片格式暂不能保存到相册。") }
-                    // 仅WebP转换，不进入缩图缓存；最大4096边长，防止超大解码占满内存。
-                    guard let bitmap = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 4096, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { throw APIError.invalidResponse }
-                    let output = file.appendingPathExtension("jpg")
-                    guard let destination = CGImageDestinationCreateWithURL(output as CFURL, "public.jpeg" as CFString, 1, nil) else { throw APIError.invalidResponse }
-                    CGImageDestinationAddImage(destination, bitmap, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
-                    guard CGImageDestinationFinalize(destination) else { throw APIError.invalidResponse }; return output
-                }.value
-                defer { if photo != file { try? FileManager.default.removeItem(at: photo) } }
-                try Task.checkCancellation()
-                try await PHPhotoLibrary.shared().performChanges { let options = PHAssetResourceCreationOptions(); options.shouldMoveFile = false; if let source = CGImageSourceCreateWithURL(photo as CFURL, nil) { options.uniformTypeIdentifier = CGImageSourceGetType(source) as String? }; PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: photo, options: options) }
+                try await NativePhotoLibrary.saveImage(file)
                 showNativeNotice("已保存到相册。")
             } catch { if !Task.isCancelled, view.window != nil { showNativeNotice(error.localizedDescription) } }
         }
@@ -583,17 +568,23 @@ enum NativeMediaExport {
             try FileManager.default.copyItem(at: file, to: named); defer { try? FileManager.default.removeItem(at: named) }
             try Task.checkCancellation(); try await PHPhotoLibrary.shared().performChanges { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: named) }; return
         }
-        let output = try await Task.detached(priority: .userInitiated) { () -> (URL, String) in
-            guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary), let type = CGImageSourceGetType(source) as String? else { throw APIError.invalidResponse }
-            if ["public.jpeg", "public.png", "public.heic", "public.heif", "com.compuserve.gif", "public.tiff"].contains(type) { return (file, type) }
-            guard type.lowercased().contains("webp"), let bitmap = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 4096, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { throw APIError.invalidResponse }
-            let result = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
-            guard let destination = CGImageDestinationCreateWithURL(result as CFURL, "public.jpeg" as CFString, 1, nil) else { throw APIError.invalidResponse }
-            CGImageDestinationAddImage(destination, bitmap, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
-            guard CGImageDestinationFinalize(destination) else { try? FileManager.default.removeItem(at: result); throw APIError.invalidResponse }; return (result, "public.jpeg")
-        }.value
-        defer { if output.0 != file { try? FileManager.default.removeItem(at: output.0) } }
+        try await NativePhotoLibrary.saveImage(file)
+    }
+}
+
+@MainActor
+private enum NativePhotoLibrary {
+    static func saveImage(_ file: URL) async throws {
+        let resource = try await Task.detached(priority: .userInitiated) { try PhotoLibraryResource.prepare(file: file) }.value
+        // Photos 异步读取资源，必须保留有类型扩展名的副本直到事务完成。
+        defer { try? FileManager.default.removeItem(at: resource.fileURL) }
         try Task.checkCancellation()
-        try await PHPhotoLibrary.shared().performChanges { let options = PHAssetResourceCreationOptions(); options.shouldMoveFile = false; options.uniformTypeIdentifier = output.1; PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: output.0, options: options) }
+        try await PHPhotoLibrary.shared().performChanges {
+            let options = PHAssetResourceCreationOptions()
+            options.shouldMoveFile = false
+            options.uniformTypeIdentifier = resource.uniformTypeIdentifier
+            options.originalFilename = resource.originalFilename
+            PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: resource.fileURL, options: options)
+        }
     }
 }

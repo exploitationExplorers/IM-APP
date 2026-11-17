@@ -256,6 +256,8 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
         },{message->model.openPeerMessage(r.context,true,"群聊","",message)});return
     }
     var confirm by remember(r){mutableStateOf<Pair<String,()->Unit>?>(null)}
+    var muteTarget by remember(r){mutableStateOf<Pair<String,JsonObject>?>(null)}
+    var removeTarget by remember(r){mutableStateOf<Pair<String,JsonObject>?>(null)}
     var modal by remember(r){mutableStateOf<Pair<String,(String)->Unit>?>(null)}
     var modalText by remember(r){mutableStateOf("")}
     var attachments by remember(r){mutableStateOf(emptyList<ImageAttachment>())}
@@ -284,7 +286,12 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
         Row(Modifier.fillMaxWidth().height((96*pageScale).dp).background(Color.White).padding(horizontal=(32*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
             Box(Modifier.width((72*pageScale).dp).fillMaxHeight().clickable{controller.back()},contentAlignment=Alignment.CenterStart){Image(painterResource(R.drawable.uni_icon_back),"返回",Modifier.size((44*pageScale).dp))}
             Text(routeTitles[r.page].orEmpty(),Modifier.weight(1f),fontSize=(40*pageScale).sp,fontWeight=FontWeight.Bold,textAlign=androidx.compose.ui.text.style.TextAlign.Center,color=Body)
-            Box(Modifier.width((72*pageScale).dp),contentAlignment=Alignment.CenterEnd){if(r.page=="tags")Text("新增",Modifier.clickable{modal="新建标签" to { name->controller.mutate("POST","/contact-tags",obj("name" to name)) };modalText=""},color=Blue,fontSize=(28*pageScale).sp)}
+            val myIds=setOfNotNull(model.state.value.profile?.businessUserId,model.state.value.profile?.publicId)
+            val canInviteMembers=r.page=="members"&&state.items.firstOrNull{it.identifier() in myIds}?.text("role") in listOf("owner","admin")
+            Box(Modifier.width((72*pageScale).dp),contentAlignment=Alignment.CenterEnd){
+                if(r.page=="tags")Text("新增",Modifier.clickable{modal="新建标签" to { name->controller.mutate("POST","/contact-tags",obj("name" to name)) };modalText=""},color=Blue,fontSize=(28*pageScale).sp)
+                else if(canInviteMembers)Text("新增",Modifier.clickable{controller.open("invite",r.id)},color=Blue,fontSize=(28*pageScale).sp)
+            }
         }
         BusinessStatus(state,controller)
         if(uploading)LinearProgressIndicator(Modifier.fillMaxWidth(),color=Blue)
@@ -420,7 +427,20 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                 "members","admins" -> {
                     SearchBox(state.keyword){controller.query(it)}
                     if(r.page=="admins")RowItem("添加管理员"){controller.open("admin-add",r.id)}
-                    state.items.filter{(r.page!="admins"||it.text("role") in listOf("owner","admin"))&&(state.keyword.isBlank()||it.displayName().contains(state.keyword,true))}.forEach{p->PersonRow(p,when(p.text("role")){"owner"->"群主";"admin"->"管理员";else->if(p.flag("isMuted"))"已禁言" else ""}){controller.open("member",p.identifier(),r.id,p)}}
+                    val memberMyIds=setOfNotNull(model.state.value.profile?.businessUserId,model.state.value.profile?.publicId)
+                    val memberMyRole=state.items.firstOrNull{it.identifier() in memberMyIds}?.text("role")
+                    val memberCanManage=memberMyRole in listOf("owner","admin")
+                    // 与 H5 members.vue 的 canActOn 一致：owner 可管 admin/member，admin 只可管 member；群主和自己不可操作
+                    fun canActOn(p:JsonObject)=memberCanManage&&p.identifier() !in memberMyIds&&p.text("role")!="owner"&&(memberMyRole=="owner"||p.text("role")=="member")
+                    state.items.filter{(r.page!="admins"||it.text("role") in listOf("owner","admin"))&&(state.keyword.isBlank()||it.displayName().contains(state.keyword,true))}.forEach{p->
+                        val memberActions:(@Composable ()->Unit)?=if(r.page=="members"&&canActOn(p)){{
+                            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Text(if(p.flag("isMuted"))"解禁" else "禁言",Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFFEE2E2)).clickable{if(p.flag("isMuted"))controller.mutate("POST","/group-members/unmute",obj("groupId" to r.id,"memberUserId" to p.identifier())) else muteTarget=r.id to p}.padding(horizontal=12.dp,vertical=6.dp),color=Red,fontSize=13.sp)
+                                Text("移除",Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFF1F3F7)).clickable{removeTarget=r.id to p}.padding(horizontal=12.dp,vertical=6.dp),color=Muted,fontSize=13.sp)
+                            }
+                        }} else null
+                        PersonRow(p,when(p.text("role")){"owner"->"群主";"admin"->"管理员";else->if(p.flag("isMuted"))"已禁言" else ""},trailing=memberActions){controller.open("member",p.identifier(),r.id,p)}
+                    }
                     ListFooter(state,controller,"暂无成员")
                 }
                 "member" -> {
@@ -529,6 +549,9 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
         }}
     }
     confirm?.let{(text,action)->AlertDialog(onDismissRequest={confirm=null},title={Text("提示")},text={Text(text)},confirmButton={TextButton(onClick={confirm=null;action()}){Text("确认")}},dismissButton={TextButton(onClick={confirm=null}){Text("取消")}})}
+    // 禁言时长档位与 H5 constants/mute.ts 保持一致（上限 30 天）
+    muteTarget?.let{(groupId,member)->AlertDialog(onDismissRequest={muteTarget=null},title={Text("禁言 ${member.displayName().ifBlank{"该成员"}}")},text={Column{listOf("10分钟" to 600,"1小时" to 3600,"12小时" to 43200,"1天" to 86400,"7天" to 604800,"30天" to 2592000).forEach{(label,seconds)->Text(label,Modifier.fillMaxWidth().clickable{muteTarget=null;controller.mutate("POST","/group-members/mute",obj("groupId" to groupId,"memberUserId" to member.identifier()).apply{addProperty("mutedSeconds",seconds)})}.padding(vertical=12.dp),fontSize=16.sp)}}},confirmButton={TextButton(onClick={muteTarget=null}){Text("取消")}})}
+    removeTarget?.let{(groupId,member)->AlertDialog(onDismissRequest={removeTarget=null},title={Text("移除 ${member.displayName().ifBlank{"该成员"}}")},text={Column{Text("移除并删除其消息",Modifier.fillMaxWidth().clickable{removeTarget=null;controller.mutate("DELETE","/groups/${encoded(groupId)}/members/${encoded(member.identifier())}",obj("deleteMessages" to true))}.padding(vertical=12.dp),color=Red,fontSize=16.sp);Text("仅移除成员",Modifier.fillMaxWidth().clickable{removeTarget=null;controller.mutate("DELETE","/groups/${encoded(groupId)}/members/${encoded(member.identifier())}",obj("deleteMessages" to false))}.padding(vertical=12.dp),fontSize=16.sp)}},confirmButton={TextButton(onClick={removeTarget=null}){Text("取消")}})}
     modal?.let{(title,save)->AlertDialog(onDismissRequest={modal=null},title={Text(title)},text={Input("",modalText,{modalText=it})},confirmButton={TextButton(enabled=modalText.isNotBlank(),onClick={modal=null;save(modalText)}){Text("保存")}},dismissButton={TextButton(onClick={modal=null}){Text("取消")}})}
 }
 

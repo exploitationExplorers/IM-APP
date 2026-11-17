@@ -1,0 +1,66 @@
+{
+  "checked_at_utc": "2026-11-17T05:58:24Z",
+  "client_source": "IM-APP-ios/Packages/IMCore",
+  "cases": [
+    {
+      "case": "working_control",
+      "business_login": "ok",
+      "profile_loaded": true,
+      "platform": 1,
+      "sdk_invoked": false,
+      "keychain_used": false,
+      "checks": [
+        {
+          "attempt": 1,
+          "conversation_code": 0,
+          "conversation_count": 13,
+          "conversation_http": 200,
+          "identity_platform_endpoint_expiry_validation": "ok",
+          "parse_code": 0,
+          "parse_http": 200,
+          "parsed_identity_matches": true,
+          "parsed_platform_matches": true
+        },
+        {
+          "attempt": 2,
+          "conversation_code": 0,
+          "conversation_count": 13,
+          "conversation_http": 200,
+          "identity_platform_endpoint_expiry_validation": "ok",
+          "parse_code": 0,
+          "parse_http": 200,
+          "parsed_identity_matches": true,
+          "parsed_platform_matches": true,
+          "same_ticket_as_previous_request": true
+        }
+      ]
+    },
+    {
+      "case": "failing_case",
+      "business_login": "ok",
+      "profile_loaded": true,
+      "platform": 1,
+      "sdk_invoked": false,
+      "keychain_used": false,
+      "checks": [
+        {
+          "attempt": 1,
+          "conversation_code": 1507,
+          "conversation_http": 200,
+          "identity_platform_endpoint_expiry_validation": "ok",
+          "parse_code": 1507,
+          "parse_http": 200
+        },
+        {
+          "attempt": 2,
+          "conversation_code": 1507,
+          "conversation_http": 200,
+          "identity_platform_endpoint_expiry_validation": "ok",
+          "parse_code": 1507,
+          "parse_http": 200,
+          "same_ticket_as_previous_request": true
+        }
+      ]
+    }
+  ]
+}

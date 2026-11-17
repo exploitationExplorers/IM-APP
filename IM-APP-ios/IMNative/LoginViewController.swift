@@ -354,10 +354,12 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
         guard activeOperationID == operationID else { throw CancellationError() }
         let chat = NativeIMService(account: account, configuration: configuration)
         startingChat = chat
+        // 业务身份已校验并保存，先展示聊天骨架；SDK 开库/同步进度在主页面更新。
+        credential.text = ""; view.endEditing(true)
+        navigationController?.setViewControllers([self, SampleMainViewController(mode: .realAccount(chat))], animated: true)
         await chat.start()
         guard !Task.isCancelled, activeOperationID == operationID else { await chat.stop(); throw CancellationError() }
-        startingChat = nil; credential.text = ""; view.endEditing(true)
-        navigationController?.setViewControllers([self, SampleMainViewController(mode: .realAccount(chat))], animated: true)
+        startingChat = nil
     }
 
     private func finishAuthentication(_ operationID: UUID) {
@@ -381,29 +383,33 @@ final class LoginViewController: UIViewController, UITextViewDelegate {
             do {
                 guard var saved = try await NativeSessionVault.shared.load() else { self.finishAuthentication(operationID); return }
                 let configuration = try saved.validate()
-                if let credential = saved.imCredential, (try? credential.validated(businessUserID: saved.profile.id, configuration: configuration)) != nil {
-                    // 已确认过的账号先恢复本机库；资料与 token 的网络状态不阻挡本地历史。
-                    self.serverAddress = configuration.baseURL.absoluteString
-                    try await self.activate(saved.account, configuration: configuration, operationID: operationID)
-                    self.finishAuthentication(operationID); return
-                }
                 let api = APIClient(configuration: configuration)
                 var profile: UserProfile?
                 var needsRefresh = saved.expiresAt <= Date().addingTimeInterval(60)
-                if !needsRefresh {
-                    do { profile = try await api.currentUser(accessToken: saved.authentication.accessToken, expectedUserID: saved.profile.id) }
-                    catch { if self.isUnauthorized(error) { needsRefresh = true } else { throw error } }
-                }
-                if needsRefresh {
-                    let previousRefreshToken = saved.authentication.refreshToken
-                    let tokens = try await api.refreshToken(RefreshTokenRequest(refreshToken: saved.authentication.refreshToken, deviceId: self.deviceID))
-                    try Task.checkCancellation()
-                    guard self.activeOperationID == operationID else { throw CancellationError() }
-                    let auth = AuthResult(accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresIn: tokens.expiresIn, user: saved.profile)
-                    saved = SavedBusinessLogin(account: BusinessAccountSession(authentication: auth, profile: saved.profile), configuration: configuration)
-                    // 先保存旋转后的 refreshToken；资料请求暂时失败不能丢掉新凭据。
-                    try await NativeSessionVault.shared.save(saved, expectedRefreshToken: previousRefreshToken)
-                    profile = try await api.currentUser(accessToken: tokens.accessToken, expectedUserID: saved.profile.id)
+                do {
+                    if !needsRefresh {
+                        do { profile = try await api.currentUser(accessToken: saved.authentication.accessToken, expectedUserID: saved.profile.id) }
+                        catch { if self.isUnauthorized(error) { needsRefresh = true } else { throw error } }
+                    }
+                    if needsRefresh {
+                        let previousRefreshToken = saved.authentication.refreshToken
+                        let tokens = try await api.refreshToken(RefreshTokenRequest(refreshToken: saved.authentication.refreshToken, deviceId: self.deviceID))
+                        try Task.checkCancellation()
+                        guard self.activeOperationID == operationID else { throw CancellationError() }
+                        let auth = AuthResult(accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresIn: tokens.expiresIn, user: saved.profile)
+                        let cachedCredential = saved.imCredential
+                        saved = SavedBusinessLogin(account: BusinessAccountSession(authentication: auth, profile: saved.profile), configuration: configuration)
+                        saved.imCredential = cachedCredential
+                        // 先保存旋转后的 refreshToken；资料请求暂时失败不能丢掉新凭据。
+                        try await NativeSessionVault.shared.save(saved, expectedRefreshToken: previousRefreshToken)
+                        profile = try await api.currentUser(accessToken: tokens.accessToken, expectedUserID: saved.profile.id)
+                    }
+                } catch {
+                    // 只在临时断网时恢复已确认身份；401/403 和身份不匹配不能走离线兜底。
+                    guard let failure = error as? APIError, failure == .transport || failure == .timedOut,
+                          let credential = saved.imCredential,
+                          (try? credential.validated(businessUserID: saved.profile.id, configuration: configuration)) != nil else { throw error }
+                    profile = saved.profile
                 }
                 try Task.checkCancellation()
                 guard self.activeOperationID == operationID, let profile = profile else { throw CancellationError() }

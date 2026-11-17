@@ -1,0 +1,63 @@
+{
+  "checked_on": "2026-11-17",
+  "request_order": [
+    1,
+    2
+  ],
+  "same_business_session_per_case": true,
+  "cases": [
+    {
+      "case": "working_control",
+      "business_http": 200,
+      "business_code": 0,
+      "platforms": [
+        {
+          "platform": 1,
+          "issue_http": 200,
+          "issue_code": 0,
+          "parse_http": 200,
+          "parse_code": 0,
+          "conversations_http": 200,
+          "conversations_code": 0,
+          "conversation_count": 13
+        },
+        {
+          "platform": 2,
+          "issue_http": 200,
+          "issue_code": 0,
+          "parse_http": 200,
+          "parse_code": 0,
+          "conversations_http": 200,
+          "conversations_code": 0,
+          "conversation_count": 13
+        }
+      ]
+    },
+    {
+      "case": "failing_case",
+      "business_http": 200,
+      "business_code": 0,
+      "platforms": [
+        {
+          "platform": 1,
+          "issue_http": 200,
+          "issue_code": 0,
+          "parse_http": 200,
+          "parse_code": 1507,
+          "conversations_http": 200,
+          "conversations_code": 1507
+        },
+        {
+          "platform": 2,
+          "issue_http": 200,
+          "issue_code": 0,
+          "parse_http": 200,
+          "parse_code": 0,
+          "conversations_http": 200,
+          "conversations_code": 0,
+          "conversation_count": 766
+        }
+      ]
+    }
+  ]
+}

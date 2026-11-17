@@ -12,7 +12,7 @@ data class MessageContent(
     val type: Int = 101, val text: String = "", val url: String = "", val thumbnail: String = "",
     val width: Int = 0, val height: Int = 0, val duration: Long = 0, val size: Long = 0,
     val fileName: String = "", val avatar: String = "", val senderId: String = "", val read: Boolean = false,
-    val quoteText: String = "", val cardUserId: String = "", val cardName: String = "",val quoteId:String="",
+    val quoteText: String = "", val quoteThumbnail: String = "", val cardUserId: String = "", val cardName: String = "",val quoteId:String="",
     val groupCard:GroupMessageCard?=null,
     val imageAlternatives:List<String> = emptyList(),
 )
@@ -31,6 +31,43 @@ internal fun parseObject(raw: JsonElement?): JsonObject? {
     return null
 }
 private fun remote(vararg values: String) = values.map(String::trim).firstOrNull { it.startsWith("https://",true) || it.startsWith("http://",true) || it.startsWith("/object/") || it.startsWith("/api/") }.orEmpty()
+
+internal fun quoteMedia(quote: JsonObject, base: MessageContent): MessageContent {
+    val type = quote.number("contentType","ContentType").toInt()
+    val stored = parseObject(quote.field("content","Content")) ?: JsonObject()
+    fun elem(vararg names: String) = parseObject(quote.field(*names)) ?: stored
+    return when(type) {
+        102 -> {
+            var picture=elem("pictureElem","PictureElem")
+            if(listOf("sourcePicture","SourcePicture","bigPicture","BigPicture","snapshotPicture","SnapshotPicture").all { picture.obj(it).string("url","Url","URL").isBlank() }&&stored.size()>0)
+                picture=stored.obj("pictureElem","PictureElem").takeIf { it.size()>0 } ?: stored
+            val source=picture.obj("sourcePicture","SourcePicture")
+            val big=picture.obj("bigPicture","BigPicture")
+            val snapshot=picture.obj("snapshotPicture","SnapshotPicture")
+            base.copy(
+                text="[图片]",
+                url=remote(source.string("url","Url","URL"),big.string("url","Url","URL"),snapshot.string("url","Url","URL"),picture.string("sourcePath","SourcePath")),
+                thumbnail=remote(snapshot.string("url","Url","URL"),big.string("url","Url","URL"),source.string("url","Url","URL"),picture.string("sourcePath","SourcePath")),
+                width=source.number("width","Width").toInt().takeIf { it>0 } ?: big.number("width","Width").toInt(),
+                height=source.number("height","Height").toInt().takeIf { it>0 } ?: big.number("height","Height").toInt()
+            )
+        }
+        104 -> {
+            var video=elem("videoElem","VideoElem")
+            fun videoURL(value:JsonObject)=remote(value.string("videoUrl","VideoUrl","videoURL","VideoURL","video_url","sourceUrl","SourceUrl","url","URL"),value.string("videoPath","VideoPath"))
+            if(videoURL(video).isBlank()&&stored.size()>0)video=stored.obj("videoElem","VideoElem").takeIf { it.size()>0 } ?: stored
+            base.copy(
+                text="[视频]",
+                url=videoURL(video),
+                thumbnail=remote(video.string("snapshotUrl","SnapshotUrl","snapshotURL","SnapshotURL","snapshot_url","coverUrl","CoverUrl","thumbUrl","ThumbUrl"),video.string("snapshotPath","SnapshotPath")),
+                duration=video.number("duration","Duration"),
+                width=video.number("snapshotWidth","SnapshotWidth","videoWidth","VideoWidth","width","Width").toInt().takeIf { it in 1..100_000 } ?: 0,
+                height=video.number("snapshotHeight","SnapshotHeight","videoHeight","VideoHeight","height","Height").toInt().takeIf { it in 1..100_000 } ?: 0
+            )
+        }
+        else -> base
+    }
+}
 
 /** 兼容历史 App 桥的 PascalCase；接收端绝不加载消息中的发送端本地路径。 */
 object MessageContents {
@@ -72,8 +109,9 @@ object MessageContents {
             106,114 -> elem(if(type==114) "quoteElem" else "atTextElem",if(type==114) "QuoteElem" else "AtTextElem").let {
                 val quote=it.obj("quoteMessage","QuoteMessage")
                 val quoteType=quote.number("contentType","ContentType").toInt()
-                val summary=when(quoteType) { 101 -> quote.obj("textElem","TextElem").string("content","Content");102 -> "[图片]";103 -> "[语音]";104 -> "[视频]";105 -> "[文件]";else -> "[引用消息]" }
-                result.copy(text=it.string("text","Text"),quoteText=if(quote.size()>0) quote.string("senderNickname","SenderNickname")+"："+summary else "",quoteId=quote.string("clientMsgID","ClientMsgID"))
+                val media=quoteMedia(quote,result)
+                val summary=when(quoteType) { 101 -> quote.obj("textElem","TextElem").string("content","Content");102,104 -> media.text;103 -> "[语音]";105 -> "[文件]";else -> "[引用消息]" }
+                result.copy(text=it.string("text","Text"),quoteText=if(quote.size()>0) quote.string("senderNickname","SenderNickname")+"："+summary else "",quoteThumbnail=media.thumbnail,quoteId=quote.string("clientMsgID","ClientMsgID"))
             }
             108 -> elem("cardElem","CardElem").let { result.copy(cardUserId=it.string("userID","UserID"),cardName=it.string("nickname","Nickname"),thumbnail=it.string("faceURL","FaceURL")) }
             107 -> elem("mergeElem","MergeElem").let { result.copy(text=it.string("title","Title").ifEmpty { "聊天记录" }) }
