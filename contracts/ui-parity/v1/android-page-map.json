@@ -218,8 +218,8 @@
       "route": "pages/contacts/add-group",
       "source": "IM-APP-fronend/src/pages/contacts/add-group.vue",
       "source_sha256": "898cfb65cce12a268fe749e79acc1789a0c384e118f915e46eac6c22b96d193e",
-      "implementation": "business/NativeBusinessUI.kt / add-group + group(lookup)",
-      "behavior": "页内扫一扫、群号查群、按joinMode真实加入或申请；可查看群资料。",
+      "implementation": "business/NativeBusinessUI.kt / add-group + BusinessController.lookupGroup",
+      "behavior": "页内扫一扫；输入群号后按旧版直接 POST /groups/:id/join，审核群转提交 join-requests；成功后进入群详情。",
       "differences": [],
       "runtimeVerified": false,
       "status": "implemented_pending_runtime"

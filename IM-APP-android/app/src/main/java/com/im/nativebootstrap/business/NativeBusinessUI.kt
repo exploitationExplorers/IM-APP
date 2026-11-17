@@ -323,7 +323,11 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                         Action("添加到通讯录",!state.loading){controller.mutate("POST","/friend-requests",obj("toUserId" to d.identifier(),"message" to message))}
                     }
                 }
-                "add-group" -> {RowItem("扫一扫"){controller.open("scan")};SearchBox(placeholder="请输入群号"){controller.lookupGroup(it)}}
+                "add-group" -> {
+                    RowItem("扫一扫"){controller.open("scan")}
+                    SearchBox(placeholder="输入群号，如 qun_xxxx"){controller.lookupGroup(it)}
+                    Text("输入对方群资料里的群号（qun_ 开头）。也可扫群二维码。",Modifier.padding(horizontal=16.dp,vertical=8.dp),fontSize=12.sp,color=Muted)
+                }
                 "requests" -> {
                     state.items.forEach{request->
                         val from=request.child("fromUser");val pending=request.text("status")=="pending"

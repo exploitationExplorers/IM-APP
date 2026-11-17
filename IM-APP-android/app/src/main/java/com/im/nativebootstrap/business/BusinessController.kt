@@ -243,8 +243,30 @@ class BusinessController(
         }
     }
     fun lookupGroup(publicId:String) {
-        if(publicId.isBlank())return
-        open("group",publicId.trim(),"lookup")
+        val id=publicId.trim()
+        if(id.isBlank())return
+        // 与 uni-app / iOS 一致：群号走加入接口，不能把公开号当已入群去拉 /groups/detail。
+        if(!Regex("^(qun_[A-Za-z0-9]{6,20}|\\d+)$").matches(id)) {
+            reportError("请输入正确的群号")
+            return
+        }
+        launch {
+            try {
+                val group=call("POST","/groups/${encoded(id)}/join").asJsonObject
+                mutable.value=mutable.value.copy(loading=false)
+                open("group",group.identifier().ifBlank{id})
+            } catch(error:APIException) {
+                val message=error.message.orEmpty()
+                if(message.contains("审核")) {
+                    val request=call("POST","/groups/${encoded(id)}/join-requests",obj("remark" to ""))
+                    val requestId=if(request.isJsonObject)request.asJsonObject.identifier() else ""
+                    if(requestId.isBlank())throw APIException("提交入群申请失败")
+                    mutable.value=mutable.value.copy(loading=false,notice="已提交入群申请",error=null)
+                    return@launch
+                }
+                throw APIException(if(message=="加入失败"||message.isBlank())"群不存在或无法加入" else message,error.httpStatus)
+            }
+        }
     }
     fun resolveQr(raw:String) {
         if(raw.isBlank())return

@@ -365,7 +365,7 @@ Android 使用 AndroidKeyStore 加密保存登录信息，iOS 使用不可云同
 | pages/contacts/report-user | business/NativeBusinessUI.kt / report-user；GET report-reasons，选择 reasonId、说明、证据图片，POST reports targetType/user/evidenceFileIds。 | 代码中未登记额外差异；仍需运行验收 | 待验收 |
 | pages/contacts/new-friends | business/NativeBusinessUI.kt / requests；POST /friend-requests/sync；pending/recent 状态，接受/拒绝真实接口；打开来源资料。 | 代码中未登记额外差异；仍需运行验收 | 待验收 |
 | pages/contacts/add-friend | business/NativeBusinessUI.kt / add-friend；页内扫一扫，GET users/search publicId nullable 结果与真实 friend-requests。 | 代码中未登记额外差异；仍需运行验收 | 待验收 |
-| pages/contacts/add-group | business/NativeBusinessUI.kt / add-group + group(lookup)；页内扫一扫、群号查群、按joinMode真实加入或申请；可查看群资料。 | 代码中未登记额外差异；仍需运行验收 | 待验收 |
+| pages/contacts/add-group | business/NativeBusinessUI.kt / add-group + BusinessController.lookupGroup；页内扫一扫；输入群号后按旧版直接 POST /groups/:id/join，审核群转提交 join-requests；成功后进入群详情。 | 代码中未登记额外差异；仍需运行验收 | 待验收 |
 | pages/contacts/scan | business/NativeBusinessUI.kt / scan + NativeQr.kt；Journeyapps 相机扫码、相册 ZXing 识别、我的二维码入口、可粘贴 payload；URL/JSON/裸 token 兼容。 | 系统扫码 Activity 替代旧扫描框；照片方向/相册格式仍需实机覆盖。 | 待验收 |
 | pages/contacts/scan-result | business/NativeBusinessUI.kt / scan-result；POST /users/qrcode/resolve；好友进入会话，非好友真实申请。 | 代码中未登记额外差异；仍需运行验收 | 待验收 |
 | pages/contacts/scan-group-result | business/NativeBusinessUI.kt / scan-group-result；POST /groups/qrcode/resolve；按 nextAction 进入/加入/申请，调用 qrcode/join。 | 代码中未登记额外差异；仍需运行验收 | 待验收 |

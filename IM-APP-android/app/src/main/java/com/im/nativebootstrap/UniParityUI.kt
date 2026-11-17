@@ -427,7 +427,12 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
                                 val timeLabel=remember(item.time) {if(item.time>0)java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(if(item.time<10_000_000_000L)item.time*1000 else item.time)) else ""}
                                 if(timeLabel.isNotEmpty())Text(timeLabel,fontSize=s.text(22),color=Color(0xFF999999))
                             }
-                            Row(Modifier.fillMaxWidth().padding(top=s.dp(12)),verticalAlignment=Alignment.CenterVertically){Text(item.preview,Modifier.weight(1f),fontSize=s.text(26),color=Color(0xFF999999),maxLines=1,overflow=TextOverflow.Ellipsis);if(item.muted)Text("免打扰",fontSize=s.text(20),color=Hint);if(item.unread>0){Spacer(Modifier.width(s.dp(8)));NativeUnreadBadge(item.unread,s,muted=item.muted)}}
+                            Row(Modifier.fillMaxWidth().padding(top=s.dp(12)),verticalAlignment=Alignment.CenterVertically){
+                                Text(if(item.joinRequestPending&&item.preview.isBlank())"[入群申请]" else item.preview,Modifier.weight(1f),fontSize=s.text(26),color=Color(0xFF999999),maxLines=1,overflow=TextOverflow.Ellipsis)
+                                if(item.muted)Text("免打扰",fontSize=s.text(20),color=Hint)
+                                if(item.joinRequestPending){Spacer(Modifier.width(s.dp(8)));Box(Modifier.size(s.dp(16)).background(Color(0xFFFA5151),CircleShape))}
+                                else if(item.unread>0){Spacer(Modifier.width(s.dp(8)));NativeUnreadBadge(item.unread,s,muted=item.muted)}
+                            }
                         }
                     }
                     }

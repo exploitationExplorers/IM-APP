@@ -149,6 +149,12 @@ class OpenIMGateway(private val application:Application):ChatGateway {
                 override fun onGroupMemberInfoChanged(info:GroupMembersInfo?) { info?.groupID?.let(events::groupChanged) }
                 override fun onGroupInfoChanged(info:GroupInfo?) { info?.groupID?.let(events::groupChanged) }
             })
+            // 与 uni-app OnRecvCustomBusinessMessage 对齐：入群申请靠业务通知，不是普通聊天气泡。
+            client.setCustomBusinessListener(object:OnCustomBusinessListener {
+                override fun onRecvCustomBusinessMessage(raw:String?) {
+                    parseJoinRequestConversationId(raw)?.let { id -> events.joinRequestHighlights(setOf(id)) }
+                }
+            })
             fetchRemoteConversationSnapshot(token,api,events)
             client.login(base<String> { result ->
                 PerfLog.mark("gateway:login-callback", "success=${result.isSuccess}")
@@ -306,6 +312,7 @@ class OpenIMGateway(private val application:Application):ChatGateway {
             (element.get("recvMsgOpt")?.asInt ?: 0)!=0,
             old?.pinnedMessage,
             old?.latestMessage,
+            old?.joinRequestPending==true,
         )
     }
     private fun remotePreview(type:Int,content:String)=when(type) {
@@ -642,4 +649,29 @@ class OpenIMGateway(private val application:Application):ChatGateway {
         private const val LIVE_BATCH_MS=24L
         private const val SYNC_SNAPSHOT_COUNT=50L
     }
+}
+
+/** 解析 OpenIM 业务通知；仅接受带 sg_ 会话号的入群申请，与 uni-app 一致。 */
+internal fun parseJoinRequestConversationId(raw:String?):String? {
+    if(raw.isNullOrBlank())return null
+    val root=runCatching { JsonParser.parseString(raw).takeIf { it.isJsonObject }?.asJsonObject }.getOrNull() ?: return null
+    fun JsonObject.text(vararg keys:String):String {
+        for(key in keys) {
+            val field=get(key) ?: continue
+            if(field.isJsonPrimitive&&field.asJsonPrimitive.isString) {
+                val value=field.asString
+                if(value.isNotBlank())return value
+            }
+        }
+        return ""
+    }
+    if(root.text("key","Key")!="group_join_request")return null
+    val dataField=root.get("data") ?: root.get("Data") ?: return null
+    val data=when {
+        dataField.isJsonObject -> dataField.asJsonObject
+        dataField.isJsonPrimitive && dataField.asJsonPrimitive.isString ->
+            runCatching { JsonParser.parseString(dataField.asString).takeIf { it.isJsonObject }?.asJsonObject }.getOrNull()
+        else -> null
+    } ?: return null
+    return data.text("groupConversationId","GroupConversationId","groupConversationID").takeIf { it.startsWith("sg_") }
 }

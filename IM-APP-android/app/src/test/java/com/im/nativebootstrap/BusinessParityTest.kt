@@ -300,6 +300,44 @@ class BusinessParityTest {
             assertTrue(controller.state.value.detail.flag("_dissolved"))
         }finally{release.countDown();scope.cancel()}
     }
+    @Test fun lookupGroupJoinsByPublicIdInsteadOfOpeningMemberDetail() = runBlocking {
+        val requests=java.util.Collections.synchronizedList(mutableListOf<String>())
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        val controller=BusinessController(scope,{method,path,_,query->
+            requests+="$method $path"
+            when {
+                method=="POST"&&path=="/groups/qun_r1qeh83vl05bm5/join"->obj("id" to "qun_r1qeh83vl05bm5","name" to "测试群","joinMode" to "open")
+                path=="/groups/detail"&&query["groupId"]=="qun_r1qeh83vl05bm5"->obj("id" to "qun_r1qeh83vl05bm5","name" to "测试群","joinMode" to "open","myRole" to "member")
+                path=="/group-members"->JsonParser.parseString("{\"items\":[],\"hasMore\":false}")
+                else->JsonNull.INSTANCE
+            }
+        },{_,_,_,_->},{})
+        controller.lookupGroup(" bad ");awaitReady(controller)
+        assertEquals("请输入正确的群号",controller.state.value.error)
+        assertTrue(requests.isEmpty())
+        controller.lookupGroup("qun_r1qeh83vl05bm5");awaitReady(controller)
+        assertEquals("POST /groups/qun_r1qeh83vl05bm5/join",requests.first())
+        assertTrue(requests.contains("GET /groups/detail"))
+        assertFalse(requests.any{it.contains("/dissolved")})
+        assertEquals("group",controller.state.value.route.page)
+        assertEquals("qun_r1qeh83vl05bm5",controller.state.value.route.id)
+        assertEquals("",controller.state.value.route.context)
+        scope.cancel()
+    }
+    @Test fun lookupGroupSubmitsJoinRequestWhenApprovalRequired() = runBlocking {
+        val requests=java.util.Collections.synchronizedList(mutableListOf<String>())
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        val controller=BusinessController(scope,{method,path,_,_,->
+            requests+="$method $path"
+            if(method=="POST"&&path.endsWith("/join"))throw APIException("该群需要管理员审核，请提交入群申请",409)
+            if(method=="POST"&&path.endsWith("/join-requests"))obj("id" to "request-1","status" to "pending") else JsonNull.INSTANCE
+        },{_,_,_,_->},{})
+        controller.lookupGroup("qun_needReview");awaitReady(controller)
+        assertEquals(listOf("POST /groups/qun_needReview/join","POST /groups/qun_needReview/join-requests"),requests.toList())
+        assertEquals("已提交入群申请",controller.state.value.notice)
+        assertEquals("contacts",controller.state.value.route.page)
+        scope.cancel()
+    }
     @Test fun returningToMassDraftTrimsStackAndGroupsRestoreOwnerTab() = runBlocking {
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
         val controller=BusinessController(scope,{_,_,_,_->JsonArray()},{_,_,_,_->},{})
