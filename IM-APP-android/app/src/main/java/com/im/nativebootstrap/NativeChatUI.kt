@@ -182,6 +182,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     var merge by remember { mutableStateOf<ChatMessage?>(null) }
     var showMentions by remember { mutableStateOf(false) }
     var atStart by remember { mutableIntStateOf(-1) }
+    var composerCursor by remember { mutableStateOf<Int?>(null) }
     val player=remember { VoicePlayer() }
     val recorder=remember { VoiceRecorder(context) }
     DisposableEffect(Unit) { onDispose { voiceOperation++;player.stop();recorder.release();if(!voiceWorking)voiceDraft?.file?.delete() } }
@@ -400,10 +401,14 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         callbacks.onSendText(draft,reply) { accepted -> onUI { if(accepted&&text==draft) { text="";quoted=null } } }
     }
     fun updateDraft(value:String) {
-        text=value.take(6000).replace('＠','@')
+        val previous=text
+        val next=value.take(6000).replace('＠','@')
+        text=next
         if(state.active?.target?.sessionType==3) {
-            val match=Regex("(^|[\\s\\n])@([^\\s@]*)$").find(text)
-            if(match!=null) { atStart=text.length-match.groupValues[2].length-1;showMentions=true;plus=false;composerPanels.setEmoji(false) }
+            val addedAt=next.count {it=='@'}>previous.count {it=='@'}
+            val match=Regex("(^|[\\s\\n])@([^\\s@]*)$").find(next)
+            if(addedAt&&match!=null) { atStart=next.length-match.groupValues[2].length-1;showMentions=true;plus=false;composerPanels.setEmoji(false) }
+            else if(showMentions&&match==null) showMentions=false
         }
     }
     fun deleteSelected() {
@@ -643,6 +648,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             }
         }
         else NativeMessageComposer(text,state.ready,state.ready&&!state.uploading&&!voiceWorking,enterToSend,emoji,::updateDraft,
+            composerCursor,{composerCursor=null},
             onEditorTap={ composerPanels.setEmoji(false);plus=false },
             onEmojiChange={ open -> composerPanels.setEmoji(open);plus=false;voiceMode=false },
             onToggleMore={ plus=!plus;composerPanels.setEmoji(false) },
@@ -812,7 +818,9 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             if(result.isSuccess) {
                 val start=atStart.coerceIn(0,text.length)
                 val rest=text.substring(start).replaceFirst(Regex("^@[^\\s@]*"),"")
-                text=text.take(start)+"@${choice.name} "+rest;showMentions=false
+                text=text.take(start)+"@${choice.name} "+rest
+                composerCursor=(start+1+choice.name.length+1).coerceIn(0,text.length)
+                showMentions=false
             } else notice=result.exceptionOrNull()?.message ?: "成员选择失败"
         } }
     })

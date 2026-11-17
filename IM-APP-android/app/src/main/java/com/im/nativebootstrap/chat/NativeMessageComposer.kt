@@ -33,8 +33,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.im.nativebootstrap.R
@@ -56,6 +58,8 @@ internal fun NativeMessageComposer(
     enterToSend:Boolean,
     emojiOpen:Boolean,
     onTextChange:(String)->Unit,
+    cursorRequest:Int?=null,
+    onCursorHandled:()->Unit={},
     onEditorTap:()->Unit,
     onEmojiChange:(Boolean)->Unit,
     onToggleMore:()->Unit,
@@ -67,12 +71,24 @@ internal fun NativeMessageComposer(
     val focus=LocalFocusManager.current
     val keyboard=LocalSoftwareKeyboardController.current
     val currentEditorTap by rememberUpdatedState(onEditorTap)
+    var value by remember { mutableStateOf(TextFieldValue(text)) }
+    LaunchedEffect(text) {
+        if(value.text!=text) {
+            value=TextFieldValue(text,TextRange((cursorRequest?:text.length).coerceIn(0,text.length)))
+        }
+    }
+    LaunchedEffect(cursorRequest) {
+        cursorRequest?.let { position ->
+            if(value.text==text) value=value.copy(selection=TextRange(position.coerceIn(0,value.text.length)))
+            onCursorHandled()
+        }
+    }
     Row(Modifier.fillMaxWidth().background(Color(0xFFF7F7F7)).padding(horizontal=rpx(20),vertical=rpx(16)),verticalAlignment=Alignment.Bottom,horizontalArrangement=Arrangement.spacedBy(rpx(12))) {
         Box(Modifier.size(rpx(64)).clickable(enabled=canStartVoice,onClick=onStartVoice),contentAlignment=Alignment.Center) {
             Image(painterResource(R.drawable.uni_icon_mic),"语音输入",Modifier.size(rpx(44)))
         }
         Row(Modifier.weight(1f).heightIn(min=rpx(72)).clip(RoundedCornerShape(rpx(36))).background(Color.White),verticalAlignment=Alignment.Bottom) {
-            BasicTextField(text,onTextChange,Modifier.weight(1f).heightIn(min=rpx(72),max=160.dp).padding(start=rpx(16),top=rpx(8),bottom=rpx(8)).pointerInput(Unit) {
+            BasicTextField(value,{ next -> value=next;onTextChange(next.text) },Modifier.weight(1f).heightIn(min=rpx(72),max=160.dp).padding(start=rpx(16),top=rpx(8),bottom=rpx(8)).pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed=false,pass=PointerEventPass.Initial)
                     currentEditorTap()
