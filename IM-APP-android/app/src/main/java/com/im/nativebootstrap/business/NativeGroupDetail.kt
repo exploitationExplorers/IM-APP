@@ -75,6 +75,10 @@ private val GroupBlue=Color(0xFF1E88FF)
         if(!lookup&&!dissolved)loadSettings()
         else if(dissolved)conversation=model.state.value.chat.conversations.firstOrNull{it.target.conversationId==d.text("conversationId")}
     }
+    // 群主/管理员停留在群详情时每 5 秒对账一次入群申请数，新申请直接刷新角标（1、2、3…）
+    LaunchedEffect(r,manager,lookup,dissolved){
+        while(manager&&!lookup&&!dissolved){kotlinx.coroutines.delay(5000);c.refreshPendingJoinCount()}
+    }
     fun finish(result:Result<String>){busy=false;if(c.routeVersion!=routeVersion)return;result.fold({toast(it);c.back()},{note=it.message?:"操作未完成，请重试"})}
     fun updateSetting(pinned:Boolean?=null,muted:Boolean?=null){
         val current=conversation?:return
@@ -109,7 +113,11 @@ private val GroupBlue=Color(0xFF1E88FF)
     }
     if(manager&&!lookup)GroupCard {
         GroupInfoRow("群组管理"){c.open("group-admin",r.id)}
-        GroupInfoRow("入群申请",if(d.flag("_pendingError"))"数量未加载" else d.text("_pendingJoinCount").takeIf{it!="0"}.orEmpty()){c.open("join-requests",r.id)}
+        // 待审数量用红色圆角标（同聊天 tab 样式），有几条显示几；为 0 不显示
+        val pendingJoin=d.text("_pendingJoinCount").toIntOrNull()?:0
+        GroupInfoRow("入群申请",if(d.flag("_pendingError"))"数量未加载" else "",trailing={
+            if(pendingJoin>0)Box(Modifier.padding(end=(12*s).dp).size((36*s).dp).clip(CircleShape).background(Color(0xFFEF4444)),contentAlignment=Alignment.Center){Text(pendingJoin.toString(),color=Color.White,fontSize=(22*s).sp,fontWeight=FontWeight.Bold)}
+        }){c.open("join-requests",r.id)}
         GroupInfoRow("入群方式",if(d.text("joinMode")=="approval")"私密群（申请入群）" else "公开群（扫码入群）",last=true){joinSheet=true}
     }
     GroupCard {
