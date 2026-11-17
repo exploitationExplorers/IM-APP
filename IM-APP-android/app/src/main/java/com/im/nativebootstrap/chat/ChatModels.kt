@@ -135,7 +135,12 @@ fun mergeConversations(old: List<ChatConversation>, incoming: List<ChatConversat
 private val messageOrder = compareBy<ChatMessage> { it.time }.thenBy { it.id }
 
 private fun preferredMessage(previous: ChatMessage, next: ChatMessage): ChatMessage =
-    if (previous.seq > next.seq || (previous.status == 2 && next.status != 2)) previous else next
+    when {
+        previous.serialized.isNotBlank() && next.serialized.isBlank() -> previous
+        previous.serialized.isBlank() && next.serialized.isNotBlank() -> next
+        previous.seq > next.seq || (previous.status == 2 && next.status != 2) -> previous
+        else -> next
+    }
 
 fun mergeMessages(old: List<ChatMessage>, incoming: List<ChatMessage>): List<ChatMessage> {
     if (incoming.isEmpty()) return old

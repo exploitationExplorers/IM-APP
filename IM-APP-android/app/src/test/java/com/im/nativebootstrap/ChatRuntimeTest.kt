@@ -522,6 +522,26 @@ class ChatRuntimeTest {
         assertEquals(1,h.gateway.sends.size)
         assertEquals("sdk-id",h.gateway.finds.last().first)
     }
+    @Test fun conversationSummaryNeverReplacesFullMessagePayload() {
+        val h=Harness();h.open()
+        h.controller.send("text")
+        val accepted=message("sdk-id",status=2,seq=9,time=10)
+        h.gateway.sends.single().third(Result.success(accepted))
+        val summary=accepted.copy(serialized="",text="文本")
+        h.gateway.events.conversations(listOf(conversation().copy(latestMessage=summary,latestSeq=9)))
+        assertEquals(accepted.serialized,h.state.messages.single().serialized)
+        assertEquals(accepted.contentType,h.state.messages.single().contentType)
+    }
+    @Test fun mergeMessagesPrefersFullPayloadOverConversationSummary() {
+        val full=message("sdk-id",status=2,seq=9,time=10).copy(
+            contentType=101,
+            serialized="""{"clientMsgID":"sdk-id","contentType":101,"textElem":{"content":"文本"}}""",
+        )
+        val summary=full.copy(serialized="")
+        val merged=mergeMessages(listOf(full),listOf(summary)).single()
+        assertEquals(full.serialized,merged.serialized)
+        assertEquals(101,merged.contentType)
+    }
     @Test fun tailAppendAndAcknowledgementDoNotRequireFullReordering() {
         val base=listOf(message("m1",status=2,seq=1,time=1),message("m2",status=2,seq=2,time=2))
         val appended=mergeMessages(base,listOf(message("m3",status=1,seq=0,time=3)))
