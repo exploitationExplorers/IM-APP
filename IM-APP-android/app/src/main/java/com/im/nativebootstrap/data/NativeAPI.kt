@@ -23,7 +23,15 @@ class AuthResult(val tokens: TokenPair, val profile: BusinessProfile) {
 class IMCredentials(val imUserId: String, val token: String, val platform: Int, val expireSec: Long, val apiAddr: String, val wsAddr: String)
 
 data class SMSReceipt(val retryAfterSec: Int, val expiresIn: Int)
-class APIRequest(val url: String, val headers: Map<String, String>, val body: String = "", val method: String = "POST")
+internal const val DEFAULT_API_READ_TIMEOUT_MS = 15_000
+internal const val FORWARD_MEDIA_READ_TIMEOUT_MS = 75_000
+class APIRequest(
+    val url: String,
+    val headers: Map<String, String>,
+    val body: String = "",
+    val method: String = "POST",
+    val readTimeoutMs: Int = DEFAULT_API_READ_TIMEOUT_MS,
+)
 class APIResponse(val status: Int, val body: String)
 fun interface HTTPTransport { fun execute(request: APIRequest): APIResponse }
 class APIException(message: String, val httpStatus: Int? = null) : Exception(message)
@@ -35,7 +43,7 @@ class URLConnectionTransport : HTTPTransport {
             connection.requestMethod = request.method
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 15_000
-            connection.readTimeout = 15_000
+            connection.readTimeout = request.readTimeoutMs
             connection.doOutput = request.method != "GET"
             request.headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
             if (connection.doOutput) connection.outputStream.use { it.write(request.body.toByteArray(Charsets.UTF_8)) }
@@ -80,7 +88,8 @@ class NativeAPI(baseURL: String = RuntimeEndpoints.DEFAULT_API_BASE_URL, private
         val suffix = if (query.isEmpty()) "" else query.entries.joinToString("&", prefix = "?") { (key, value) ->
             java.net.URLEncoder.encode(key, "UTF-8") + "=" + java.net.URLEncoder.encode(value, "UTF-8")
         }
-        return requestValue(path + suffix, data, accessToken, method)
+        val readTimeoutMs = if (path == "/forward-media/preserve") FORWARD_MEDIA_READ_TIMEOUT_MS else DEFAULT_API_READ_TIMEOUT_MS
+        return requestValue(path + suffix, data, accessToken, method, readTimeoutMs)
     }
 
     fun sendSms(countryCode: String, phone: String, deviceId: String): SMSReceipt {
@@ -121,11 +130,17 @@ class NativeAPI(baseURL: String = RuntimeEndpoints.DEFAULT_API_BASE_URL, private
         return result.asJsonObject
     }
 
-    private fun requestValue(path: String, data: JsonObject? = null, token: String? = null, method: String = "POST"): JsonElement {
+    private fun requestValue(
+        path: String,
+        data: JsonObject? = null,
+        token: String? = null,
+        method: String = "POST",
+        readTimeoutMs: Int = DEFAULT_API_READ_TIMEOUT_MS,
+    ): JsonElement {
         val headers = mutableMapOf("Accept" to "application/json")
         if (data != null) headers["Content-Type"] = "application/json"
         if (token != null) headers["Authorization"] = "Bearer $token"
-        val response = transport.execute(APIRequest(base + path, headers, data?.toString().orEmpty(), method))
+        val response = transport.execute(APIRequest(base + path, headers, data?.toString().orEmpty(), method, readTimeoutMs))
         val secrets = listOfNotNull(token) + listOf("password", "code", "accessToken", "refreshToken").mapNotNull { name ->
             data?.get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
         }

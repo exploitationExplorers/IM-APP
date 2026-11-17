@@ -76,6 +76,17 @@ class NativeAPITest {
         val api = NativeAPI("https://staging.example.invalid", HTTPTransport { APIResponse(200, fixture("im-token-success.json").replace("\"platform\":2", "\"platform\":1")) })
         assertThrows(APIException::class.java) { api.imToken("synthetic-token") }
     }
+    @Test fun forwardMediaPreservationAllowsArchiveTimeoutWindow() {
+        val requests = mutableListOf<APIRequest>()
+        val api = NativeAPI(transport = HTTPTransport { request ->
+            requests += request
+            APIResponse(200, """{"code":0,"data":{}}""")
+        })
+        api.businessRequest("POST", "/forward-media/preserve", accessToken = "synthetic-token", data = com.google.gson.JsonObject())
+        api.businessRequest("GET", "/me", accessToken = "synthetic-token")
+        assertEquals(75_000, requests[0].readTimeoutMs)
+        assertEquals(15_000, requests[1].readTimeoutMs)
+    }
 
     @Test fun defaultHttpsOriginAndProfileGetMatchExistingBackend() {
         val requests = mutableListOf<APIRequest>()

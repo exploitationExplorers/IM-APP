@@ -256,7 +256,8 @@ class ChatController(
                     if(snapshot.conversationsLoading)items.forEach { conversationChangesDuringRequest[it.target.conversationId]=it }
                     // 首登同步期间先显示 SDK 已落地的会话；正式本地快照返回后再校准。
                     val merged=mergeConversations(snapshot.conversations,items,authoritative=initialConversationSnapshotLoaded)
-                    if(merged!==snapshot.conversations||confirmed.isNotEmpty())emit(snapshot.copy(conversations=merged,messages=if(confirmed.isEmpty())snapshot.messages else mergeMessages(snapshot.messages,visible(confirmed.filter { msg -> items.any { it.target==snapshot.active?.target&&it.latestMessage?.id==msg.id } })),error=if(confirmed.isNotEmpty())null else snapshot.error),"sdk-event")
+                    val confirmedMessages=confirmed.filter { it.serialized.isNotBlank() }
+                    if(merged!==snapshot.conversations||confirmed.isNotEmpty())emit(snapshot.copy(conversations=merged,messages=if(confirmedMessages.isEmpty())snapshot.messages else mergeMessages(snapshot.messages,visible(confirmedMessages.filter { msg -> items.any { it.target==snapshot.active?.target&&it.latestMessage?.id==msg.id } })),error=if(confirmed.isNotEmpty())null else snapshot.error),"sdk-event")
                     refreshRetention(items)
                 } } }
                 override fun conversationSnapshot(items:List<ChatConversation>) { dispatch { if(current(t)&&items.isNotEmpty()) {

@@ -134,7 +134,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     var uploadMenu by remember { mutableStateOf<PendingMediaUpload?>(null) }
     var selectedAnchor by remember { mutableStateOf<Offset?>(null) }
     var invite by remember { mutableStateOf<GroupMessageCard?>(null) }
-    var acceptingInvite by remember { mutableStateOf(false) }
+    var handledInviteLabels by remember(state.active?.target) { mutableStateOf<Map<String,String>>(emptyMap()) }
     var forward by remember { mutableStateOf<ChatMessage?>(null) }
     var multi by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -182,6 +182,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     var merge by remember { mutableStateOf<ChatMessage?>(null) }
     var showMentions by remember { mutableStateOf(false) }
     var atStart by remember { mutableIntStateOf(-1) }
+    var composerCursor by remember { mutableStateOf<Int?>(null) }
     val player=remember { VoicePlayer() }
     val recorder=remember { VoiceRecorder(context) }
     DisposableEffect(Unit) { onDispose { voiceOperation++;player.stop();recorder.release();if(!voiceWorking)voiceDraft?.file?.delete() } }
@@ -400,10 +401,14 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         callbacks.onSendText(draft,reply) { accepted -> onUI { if(accepted&&text==draft) { text="";quoted=null } } }
     }
     fun updateDraft(value:String) {
-        text=value.take(6000).replace('＠','@')
+        val previous=text
+        val next=value.take(6000).replace('＠','@')
+        text=next
         if(state.active?.target?.sessionType==3) {
-            val match=Regex("(^|[\\s\\n])@([^\\s@]*)$").find(text)
-            if(match!=null) { atStart=text.length-match.groupValues[2].length-1;showMentions=true;plus=false;composerPanels.setEmoji(false) }
+            val addedAt=next.count {it=='@'}>previous.count {it=='@'}
+            val match=Regex("(^|[\\s\\n])@([^\\s@]*)$").find(next)
+            if(addedAt&&match!=null) { atStart=next.length-match.groupValues[2].length-1;showMentions=true;plus=false;composerPanels.setEmoji(false) }
+            else if(showMentions&&match==null) showMentions=false
         }
     }
     fun deleteSelected() {
@@ -443,10 +448,18 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     val reversedMessages=remember(state.messages) { state.messages.asReversed() }
     val uploadsById=remember(state.mediaUploads) { state.mediaUploads.associateBy { it.id } }
     val outboxById=remember(state.outbox) { state.outbox.associateBy { it.id } }
+    var initialLatestScrollDone by remember(state.active?.target) { mutableStateOf(false) }
     val latestId=state.messages.lastOrNull()?.id
     var presenceNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(state.active?.target) { while(true) { delay(60_000);presenceNow=System.currentTimeMillis() } }
-    LaunchedEffect(latestId) { if(list.firstVisibleItemIndex<3) list.scrollToItem(0) }
+    LaunchedEffect(state.active?.target,state.messages.isNotEmpty(),state.focusMessageId) {
+        if(!initialLatestScrollDone&&state.focusMessageId==null&&state.messages.isNotEmpty()) {
+            withFrameNanos {}
+            list.scrollToItem(0)
+            initialLatestScrollDone=true
+        }
+    }
+    LaunchedEffect(latestId) { if(state.focusMessageId==null&&list.firstVisibleItemIndex<3) list.scrollToItem(0) }
     LaunchedEffect(state.focusMessageId) { state.focusMessageId?.let { id -> val index=reversedMessages.indexOfFirst { it.id==id };if(index>=0)list.animateScrollToItem(index) } }
     LaunchedEffect(state.forwardSuccessId,state.forwardFailureId) {
         if(state.forwardSuccessId.isNotBlank())NativeNotices.show("转发成功")
@@ -566,10 +579,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                     107 -> Column { Text("聊天记录",color=foreground,fontWeight=FontWeight.Medium);Text(content.text,color=foreground,fontSize=12.sp) }
                                     110 -> content.groupCard?.let { card -> Column(Modifier.widthIn(min=rpx(300),max=rpx(460)),horizontalAlignment=Alignment.CenterHorizontally) {
                                         if(card.kind=="group_invite") {
-                                            SharedAvatar(card.avatar,Modifier.size(rpx(100)),group=true)
-                                            Text(card.groupName+(if(card.count>0)" (${card.count} 人)" else ""),Modifier.padding(top=rpx(16)),fontSize=(29*factor).sp,color=foreground,fontWeight=FontWeight.SemiBold)
-                                            Text(if(message.mine)"你邀请对方加入群聊" else "邀请你加入群聊",Modifier.padding(top=rpx(10)),fontSize=(24*factor).sp,color=foreground.copy(alpha=.7f))
-                                            if(!message.mine)Text("点击申请入群",Modifier.padding(top=rpx(18)).clickable { invite=card },color=ChatBlue,fontSize=(26*factor).sp)
+                                            GroupInviteCard(card,message.mine,foreground,handledInviteLabels[card.token]) { invite=card }
                                         } else {
                                             Row(verticalAlignment=Alignment.CenterVertically) { SharedAvatar(card.avatar,Modifier.size(rpx(76)));Column(Modifier.padding(start=rpx(16))) { Text(card.applicantName,color=foreground,fontWeight=FontWeight.SemiBold);Text("申请加入 ${card.groupName}",color=foreground.copy(alpha=.7f),fontSize=(24*factor).sp) } }
                                             Text("去审核",Modifier.padding(top=rpx(20)).clickable { callbacks.onOpenJoinRequests(card.groupId) },color=ChatBlue,fontSize=(26*factor).sp)
@@ -635,6 +645,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             }
         }
         else NativeMessageComposer(text,state.ready,state.ready&&!state.uploading&&!voiceWorking,enterToSend,emoji,::updateDraft,
+            composerCursor,{composerCursor=null},
             onEditorTap={ composerPanels.setEmoji(false);plus=false },
             onEmojiChange={ open -> composerPanels.setEmoji(open);plus=false;voiceMode=false },
             onToggleMore={ plus=!plus;composerPanels.setEmoji(false) },
@@ -666,19 +677,9 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         },{ composerPanels.setEmoji(false);callbacks.onManageStickers() },onClose={ composerPanels.setEmoji(false) })
         }
     }
-    invite?.let { card -> AlertDialog(onDismissRequest={ if(!acceptingInvite)invite=null },title={ Text("确认加入群聊？") },text={ Text(card.groupName) },confirmButton={ TextButton(enabled=!acceptingInvite,onClick={
-        acceptingInvite=true
-        callbacks.onAcceptGroupInvite(card.token) { result -> onUI {
-            acceptingInvite=false
-            result.fold(onSuccess={ value ->
-                invite=null
-                when(value.nextAction) {
-                    "joined","already_member" -> { notice=if(value.nextAction=="joined")"已加入群聊" else "你已在群中";callbacks.onOpenBusinessGroup(value.groupId.ifBlank { card.groupId }) }
-                    "pending_approval" -> notice="已提交入群申请，等待管理员审核"
-                }
-            },onFailure={ invite=null;notice=it.message ?: "申请失败" })
-        } }
-    }) { Text(if(acceptingInvite)"处理中…" else "确认") } },dismissButton={ TextButton(enabled=!acceptingInvite,onClick={ invite=null }) { Text("取消") } }) }
+    invite?.let { card -> GroupInviteDialog(card,callbacks,{ invite=null },{ value ->
+        handledInviteLabels=handledInviteLabels+(card.token to value)
+    },{ notice=it }) }
     uploadMenu?.let { upload ->
         val mediaName=if(upload.kind==MediaKind.VIDEO)"视频" else "图片"
         AlertDialog(onDismissRequest={ uploadMenu=null },title={ Text(if(upload.state==MediaUploadState.FAILED)"${mediaName}未发送" else "${mediaName}正在发送") },text={ Text(if(upload.state==MediaUploadState.FAILED)"本地${mediaName}已保留，可重试上传或删除草稿。" else "${mediaName}上传完成后会继续发送，无需重复选择。") },confirmButton={ if(upload.state==MediaUploadState.FAILED)TextButton(onClick={ uploadMenu=null;callbacks.onRetryUpload(upload.id) }) { Text("重试") } else TextButton(onClick={ uploadMenu=null }) { Text("知道了") } },dismissButton={ if(upload.state==MediaUploadState.FAILED)TextButton(onClick={ uploadMenu=null;callbacks.onDiscardUpload(upload.id) }) { Text("删除草稿") } })
@@ -804,7 +805,9 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             if(result.isSuccess) {
                 val start=atStart.coerceIn(0,text.length)
                 val rest=text.substring(start).replaceFirst(Regex("^@[^\\s@]*"),"")
-                text=text.take(start)+"@${choice.name} "+rest;showMentions=false
+                text=text.take(start)+"@${choice.name} "+rest
+                composerCursor=(start+1+choice.name.length+1).coerceIn(0,text.length)
+                showMentions=false
             } else notice=result.exceptionOrNull()?.message ?: "成员选择失败"
         } }
     })
@@ -1202,6 +1205,58 @@ fun NativeGlobalChatSearch(
             item { TextButton(onClick={ load() },enabled=!loading&&!end&&keyword.isNotBlank(),modifier=Modifier.fillMaxWidth()) { Text(if(loading)"搜索中…" else if(end)if(hits.isEmpty())"未找到消息" else "没有更多记录" else if(keyword.isBlank())"请输入关键字" else "加载更多") } }
         }
     }
+}
+
+@Composable
+private fun GroupInviteCard(
+    card:GroupMessageCard,
+    mine:Boolean,
+    foreground:Color,
+    handledLabel:String?,
+    onRequest:()->Unit,
+) {
+    val factor=LocalConfiguration.current.screenWidthDp/750f
+    fun rpx(value:Int)=(value*factor).dp
+    SharedAvatar(card.avatar,Modifier.size(rpx(100)),group=true)
+    Text(card.groupName+(if(card.count>0)" (${card.count} 人)" else ""),Modifier.padding(top=rpx(16)),fontSize=(29*factor).sp,color=foreground,fontWeight=FontWeight.SemiBold)
+    Text(if(mine)"你邀请对方加入群聊" else "邀请你加入群聊",Modifier.padding(top=rpx(10)),fontSize=(24*factor).sp,color=foreground.copy(alpha=.7f))
+    if(!mine) {
+        if(handledLabel!=null) Text(handledLabel,Modifier.padding(top=rpx(18)),color=ChatHint,fontSize=(26*factor).sp)
+        else Text("点击申请入群",Modifier.padding(top=rpx(18)).clickable(onClick=onRequest),color=ChatBlue,fontSize=(26*factor).sp)
+    }
+}
+
+@Composable
+private fun GroupInviteDialog(
+    card:GroupMessageCard,
+    callbacks:NativeChatCallbacks,
+    onDismiss:()->Unit,
+    onAccepted:(String)->Unit,
+    onNotice:(String)->Unit,
+) {
+    var accepting by remember(card.token) { mutableStateOf(false) }
+    AlertDialog(onDismissRequest={ if(!accepting)onDismiss() },title={ Text("确认加入群聊？") },text={ Text(card.groupName) },confirmButton={
+        TextButton(enabled=!accepting,onClick={
+            accepting=true
+            callbacks.onAcceptGroupInvite(card.token) { result -> onUI {
+                accepting=false
+                result.fold(onSuccess={ value ->
+                    onAccepted(when(value.nextAction) {
+                        "joined","already_member" -> "已加入群聊"
+                        else -> "已提交申请"
+                    })
+                    onDismiss()
+                    when(value.nextAction) {
+                        "joined","already_member" -> {
+                            onNotice(if(value.nextAction=="joined")"已加入群聊" else "你已在群中")
+                            callbacks.onOpenBusinessGroup(value.groupId.ifBlank { card.groupId })
+                        }
+                        "pending_approval" -> onNotice("已提交入群申请，等待管理员审核")
+                    }
+                },onFailure={ onDismiss();onNotice(it.message ?: "申请失败") })
+            } }
+        }) { Text(if(accepting)"处理中…" else "确认") }
+    },dismissButton={ TextButton(enabled=!accepting,onClick=onDismiss) { Text("取消") } })
 }
 
 @Composable
