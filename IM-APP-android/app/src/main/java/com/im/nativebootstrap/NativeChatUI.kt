@@ -130,6 +130,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     fun rpx(value:Int)=(value*factor).dp
     var text by remember(state.active?.target) { mutableStateOf("") }
     var quoted by remember(state.active?.target) { mutableStateOf<ChatMessage?>(null) }
+    var sending by remember(state.active?.target) { mutableStateOf(false) }
     var selected by remember { mutableStateOf<ChatMessage?>(null) }
     var uploadMenu by remember { mutableStateOf<PendingMediaUpload?>(null) }
     var selectedAnchor by remember { mutableStateOf<Offset?>(null) }
@@ -396,9 +397,13 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         }
     }
     fun submitText() {
-        if(!state.ready||text.isBlank()||state.sendBlockedReason!=null)return
+        if(!state.ready||text.isBlank()||state.sendBlockedReason!=null||sending)return
+        sending=true
         val draft=text;val reply=quoted
-        callbacks.onSendText(draft,reply) { accepted -> onUI { if(accepted&&text==draft) { text="";quoted=null } } }
+        callbacks.onSendText(draft,reply) { accepted -> onUI {
+            sending=false
+            if(accepted&&text==draft) { text="";quoted=null }
+        } }
     }
     fun updateDraft(value:String) {
         val previous=text
@@ -586,7 +591,16 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                         }
                                     } } ?: Text(content.text.ifBlank { "[自定义消息]" },color=foreground)
                                     else -> Column {
-                                        if(content.quoteText.isNotEmpty())Text(content.quoteText,Modifier.clickable(enabled=content.quoteId.isNotEmpty()) { callbacks.onAction(ChatMessage(content.quoteId,"",false,0),ChatAction.OPEN_MESSAGE) { result -> onUI { if(result.isFailure)notice=result.exceptionOrNull()?.message ?: "引用消息暂不可定位" } } }.padding(bottom=rpx(10)),color=foreground.copy(alpha=.65f),maxLines=2,fontSize=(23*factor).sp)
+                                        if(content.quoteText.isNotEmpty())Row(Modifier.clickable(enabled=content.quoteId.isNotEmpty()) { callbacks.onAction(ChatMessage(content.quoteId,"",false,0),ChatAction.OPEN_MESSAGE) { result -> onUI { if(result.isFailure)notice=result.exceptionOrNull()?.message ?: "引用消息暂不可定位" } } }.clip(RoundedCornerShape(rpx(8))).background(if(message.mine)Color(0x22FFFFFF) else Color(0xFFEFF1F5)).padding(rpx(8)),verticalAlignment=Alignment.CenterVertically) {
+                                            if(content.quoteThumbnail.isNotEmpty())RemoteMediaImage(MediaURLs.image(content.quoteThumbnail),Modifier.size(rpx(64)),scale=ContentScale.Crop,description="引用封面",retryOnTap=false,cacheUrls=listOf(content.quoteThumbnail))
+                                            Column(Modifier.padding(start=if(content.quoteThumbnail.isNotEmpty())rpx(8) else 0.dp)) {
+                                                val name=content.quoteText.substringBefore("：")
+                                                val summary=content.quoteText.substringAfter("：",missingDelimiterValue="")
+                                                Text(name,color=if(message.mine)foreground else ChatBlue,fontSize=(22*factor).sp,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                                if(summary.isNotEmpty())Text(summary,color=foreground.copy(alpha=.8f),fontSize=(22*factor).sp,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                            }
+                                        }
+                                        if(content.quoteText.isNotEmpty())Spacer(Modifier.height(rpx(10)))
                                         Text(if(content.type in setOf(101,106,114))content.text else message.text,color=foreground,fontSize=(30*factor).sp,lineHeight=(43*factor).sp)
                                     }
                                 }
@@ -644,7 +658,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                 drawLine(Color.White,Offset(size.width*.67f,size.height*.46f),Offset(center,size.height*.28f),stroke,StrokeCap.Round)
             }
         }
-        else NativeMessageComposer(text,state.ready,state.ready&&!state.uploading&&!voiceWorking,enterToSend,emoji,::updateDraft,
+        else NativeMessageComposer(text,state.ready,state.ready&&!state.uploading&&!voiceWorking&&!sending,enterToSend,emoji,::updateDraft,
             composerCursor,{composerCursor=null},
             onEditorTap={ composerPanels.setEmoji(false);plus=false },
             onEmojiChange={ open -> composerPanels.setEmoji(open);plus=false;voiceMode=false },
