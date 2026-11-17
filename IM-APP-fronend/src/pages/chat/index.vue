@@ -87,6 +87,8 @@ watch(
 const filterLabel = computed(() => (filterKey.value === 'unread' ? '未读' : '全部'))
 
 const activeSwipeId = ref<string | null>(null)
+/** 从通讯录点进的会话：未读筛选里暂时没有它时，不要被自动选中顶成另一个群 */
+const openedFromOutside = ref(false)
 const convMenu = ref<{ item: Conversation; x: number; y: number } | null>(null)
 let convMenuOpenedAt = 0
 
@@ -617,6 +619,7 @@ function openSearchRow(row: { item: Conversation; clientMsgId: string }) {
 }
 
 async function openConversation(item: Conversation) {
+  openedFromOutside.value = false
   showAddMenu.value = false
   showFilter.value = false
   const hits = messageHitMeta.value.get(item.id)?.messages || []
@@ -801,6 +804,7 @@ async function consumePendingDesktopChat() {
   if (!isDesktop.value) return
   const pending = contactStore.takePendingDesktopChat()
   if (!pending) return
+  openedFromOutside.value = true
   try {
     if (!chatStore.conversations.length) {
       await chatStore.loadConversations()
@@ -824,6 +828,7 @@ async function consumePendingDesktopChat() {
         pinned: false,
       } as Conversation)
     if (isDissolvedGroupConversation(candidate)) {
+      openedFromOutside.value = false
       notifyGroupUnavailable(true)
       return
     }
@@ -832,6 +837,7 @@ async function consumePendingDesktopChat() {
     } catch (e) {
       const msg = (e as Error)?.message || ''
       if (isGroupUnavailableError(msg)) {
+        openedFromOutside.value = false
         notifyGroupUnavailable(true)
         return
       }
@@ -841,9 +847,11 @@ async function consumePendingDesktopChat() {
   } catch (e) {
     const msg = (e as Error)?.message || ''
     if (isGroupUnavailableError(msg)) {
+      openedFromOutside.value = false
       notifyGroupUnavailable(true)
       return
     }
+    openedFromOutside.value = false
     uni.showToast({ title: msg || '打开会话失败', icon: 'none' })
   }
 }
@@ -931,6 +939,11 @@ watch(
 /** PC 宽屏：默认选中第一条可用会话，跳过已解散群聊 */
 watchEffect(() => {
   if (!isDesktop.value) return
+  if (openedFromOutside.value && selectedConv.value) {
+    const stillThere = chatStore.conversations.some((c) => c.id === selectedConv.value!.id)
+    if (stillThere) return
+    openedFromOutside.value = false
+  }
   const list = filtered.value
   if (!list.length) {
     selectedConv.value = null

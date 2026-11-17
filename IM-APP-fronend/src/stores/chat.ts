@@ -134,6 +134,11 @@ export const useChatStore = defineStore('chat', () => {
    */
   let activeConversationId = ''
   let sessionGeneration = 0
+  /**
+   * 本机会话置顶意图。网页 SDK 后续推送常把 isPinned 写成 false，
+   * 这里记住用户刚刚的操作，直到换账号。
+   */
+  const pinHold = new Map<string, boolean>()
   let retentionTimer: ReturnType<typeof setTimeout> | undefined
 
   function sanitizeRetentionPreview(conv: Conversation): Conversation {
@@ -739,9 +744,16 @@ export const useChatStore = defineStore('chat', () => {
     incoming.forEach((conv) => {
       const idx = merged.findIndex((c) => c.id === conv.id)
       if (idx >= 0) merged[idx] = keepNewerPreview(merged[idx], conv)
-      else merged.push(conv)
+      else merged.push(applyPinHold(conv))
     })
     conversations.value = sortConversations(merged.filter(shouldShowConversation))
+  }
+
+  function applyPinHold(conv: Conversation): Conversation {
+    if (!pinHold.has(conv.id)) return conv
+    const held = pinHold.get(conv.id) === true
+    if (conv.pinned === held) return conv
+    return { ...conv, pinned: held }
   }
 
   /** SDK 会话预览偶发滞后时，不要把本地刚发出的 [图片] 盖回旧文本 */
@@ -764,6 +776,9 @@ export const useChatStore = defineStore('chat', () => {
         merged = { ...merged, unreadCount: 0 }
       }
     }
+    // 网页 SDK 的 setConversation 不会把 isPinned 写回本地缓存。
+    // 群发或新消息随后推来的会话快照带 isPinned:false，会把刚置顶的群打回原位。
+    merged = applyPinHold(merged)
     // 本地刚写入的置顶横幅优先于 SDK 尚未带回 ex 的会话快照
     const prevPinAt = prev.pinnedMessage?.pinnedAt || 0
     const nextPinAt = next.pinnedMessage?.pinnedAt || 0
@@ -1027,7 +1042,7 @@ export const useChatStore = defineStore('chat', () => {
       const mappedConversations = list.map((item) => {
         const mapped = decorateConversation(toConversation(item))
         const prev = prevById.get(mapped.id)
-        return prev ? keepNewerPreview(prev, mapped) : mapped
+        return prev ? keepNewerPreview(prev, mapped) : applyPinHold(mapped)
       })
       const legacyAdminJoinRequestIds = mappedConversations
         .filter(isLegacyAdminJoinRequestConversation)
@@ -1566,11 +1581,16 @@ export const useChatStore = defineStore('chat', () => {
     const conv = conversations.value.find((c) => c.id === conversationId)
     if (!conv) return
     const next = !conv.pinned
-    // 乐观更新：先翻本地值，失败再回滚
+    const hadHold = pinHold.has(conversationId)
+    const prevHold = pinHold.get(conversationId)
+    // 乐观更新：先翻本地值，失败再回滚。hold 挡住随后到来的旧快照。
+    pinHold.set(conversationId, next)
     patchConversation(conversationId, { pinned: next })
     try {
       await setConversationPin(conversationId, next)
     } catch (e) {
+      if (hadHold && prevHold !== undefined) pinHold.set(conversationId, prevHold)
+      else pinHold.delete(conversationId)
       patchConversation(conversationId, { pinned: !next })
       throw new Error((e as Error)?.message || '置顶失败')
     }
@@ -2131,6 +2151,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function reset() {
     sessionGeneration++
+    pinHold.clear()
     unsubscribeRealtime()
     conversations.value = []
     messagesMap.value = {}

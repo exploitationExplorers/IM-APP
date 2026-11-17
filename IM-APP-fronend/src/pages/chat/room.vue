@@ -729,6 +729,16 @@ async function dismissPinnedBanner() {
 let groupMetaLoadedAt = 0
 
 onShow(() => {
+  if (!props.embedded) {
+    const query = currentRoomQuery()
+    const nextConv = String(query.conversationId || '')
+    const nextTarget = String(query.targetId || '')
+    const convChanged = !!nextConv && nextConv !== activeConversationId.value
+    const targetChanged = !!nextTarget && nextTarget !== businessId.value
+    if (convChanged || targetChanged) {
+      void bootstrapRoom(query)
+    }
+  }
   // 回到前台的「补拉当前会话」由 chatStore.resyncAfterResume 统一负责
   // （本组件在桌面端是内嵌的，收不到页面级 onShow，所以统一走 store 那条路径，
   //  见下方 watch(conversationId, ...) 的报备）。这里不再重复拉一次。
@@ -904,7 +914,20 @@ function roomOpenErrorText(e: unknown): string {
   return message
 }
 
+let roomBootToken = 0
+
+function currentRoomQuery(): Record<string, string | undefined> {
+  const pages = getCurrentPages()
+  const page = pages[pages.length - 1] as unknown as {
+    options?: Record<string, string | undefined>
+    $page?: { options?: Record<string, string | undefined> }
+  }
+  return page?.options || page?.$page?.options || {}
+}
+
 async function bootstrapRoom(query: Record<string, string | undefined>) {
+  const bootToken = ++roomBootToken
+  const stillThisRoom = () => bootToken === roomBootToken
   roomExited = false
   roomFirstMessagesMarked = false
   perfMarkStart('chat:room-first-messages')
@@ -982,6 +1005,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     })()
 
     const conv = await enterTask
+    if (!stillThisRoom()) return
     convRef.value = conv
     activeConversationId.value = conv.id
     if (!query?.title) roomTitle.value = conv.title
@@ -1001,6 +1025,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     }
 
     await Promise.all([loadTask, groupMetaTask])
+    if (!stillThisRoom()) return
     if (chatType.value === 'group') {
       try {
         await chatStore.assertConversationAccessible(conv)
