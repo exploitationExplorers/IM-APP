@@ -1,0 +1,9 @@
+{
+  "IM-APP-ios/Packages/IMCore/Sources/IMCore/APIClient.swift": "9ea5ac1bd65c98acdfd81ab31de9365535c45168747b12779e79a73d5004b90f",
+  "IM-APP-ios/Packages/IMCore/Sources/IMCore/APIModels.swift": "5beb82e71bf8da501722b82e750e57a52bb959a42f70d2ed14761e6c05265507",
+  "IM-APP-ios/Packages/IMCore/Sources/IMCore/ChatReliability.swift": "4f10a1259f31d63afeadcd9f2bdda036d58e8542634ebb52b052532e9f97ebc0",
+  "IM-APP-ios/IMNative/NativeIMService.swift": "56f8212cbdfa46708f1181471c66c85169d0ebf2aa745470f14605f1885e043b",
+  "IM-APP-ios/IMNative/NativeOpenIMBridge.m": "23a7c43da0489b7c0ae9f532837a7558e500100b96c7305bfde591b2f7007844",
+  "IM-APP-android/app/src/main/java/com/im/nativebootstrap/data/NativeAPI.kt": "606e7c16704b32fea59884ec1687535e457b0ab29c0d856dbc393697048201d8",
+  "IM-APP-android/app/src/main/java/com/im/nativebootstrap/chat/OpenIMGateway.kt": "123a063dd9440bf304f8611e1150c02ac75e6dcd379fc33cfe4fbe9baed2d8eb"
+}

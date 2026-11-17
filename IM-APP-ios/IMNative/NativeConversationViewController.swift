@@ -6,8 +6,33 @@ import AVKit
 import AudioToolbox
 import ImageIO
 
+private final class NativeComposerActionButton: UIButton {
+    private let iconBox = UIView()
+    private let iconView = UIImageView()
+    private let caption = UILabel()
+    init(title: String, icon: String) {
+        super.init(frame: .zero)
+        accessibilityLabel = title; isAccessibilityElement = true
+        iconBox.backgroundColor = .white; iconBox.isUserInteractionEnabled = false
+        iconView.image = NativeUITheme.image(icon); iconView.contentMode = .scaleAspectFit
+        caption.text = title; caption.textColor = UIColor(hex: 0x666666); caption.textAlignment = .center
+        addSubview(iconBox); iconBox.addSubview(iconView); addSubview(caption)
+    }
+    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let scale = bounds.width / 140
+        iconBox.frame = CGRect(x: (bounds.width - 100 * scale) / 2, y: 0, width: 100 * scale, height: 100 * scale)
+        iconBox.layer.cornerRadius = 20 * scale
+        iconView.frame = iconBox.bounds.insetBy(dx: 22 * scale, dy: 22 * scale)
+        caption.frame = CGRect(x: 0, y: 112 * scale, width: bounds.width, height: 32 * scale)
+        caption.font = .systemFont(ofSize: 24 * scale)
+    }
+    override var isHighlighted: Bool { didSet { iconBox.alpha = isHighlighted ? 0.55 : 1 } }
+}
+
 @MainActor
-final class NativeConversationViewController: UIViewController, UICollectionViewDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UITextFieldDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+final class NativeConversationViewController: UIViewController, UICollectionViewDelegateFlowLayout, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UITextFieldDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     private let service: NativeIMService
     private let conversation: NativeConversation
     private let header = UIView()
@@ -15,6 +40,11 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private let heading = UILabel()
     private let more = UIButton(type: .system)
     private let notice = UILabel()
+    private let pinTitle = UILabel()
+    private let pinLine = UIView()
+    private let dismissPin = UIButton(type: .system)
+    private var dismissedPinID: String?
+    private var showingPin = false
     private let composer = UIView()
     private let mic = NativeUITheme.imageButton("uni_icon_mic", accessibility: "语音")
     private let inputBox = UIView()
@@ -26,6 +56,29 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var collection: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     private var displayed: [String: ChatTextItem] = [:]
+    private struct RenderedRow: Equatable {
+        let message: ChatTextItem
+        let date: String?
+        let status: String
+        let sending: Bool
+        let preparing: Bool
+        let selected: Bool
+    }
+    private var renderedRows: [String: RenderedRow] = [:]
+    private struct MeasuredRow {
+        let row: RenderedRow; let width: CGFloat; let mediaSize: CGSize?; let height: CGFloat
+    }
+    private let sizingCell = NativeMessageCell(frame: .zero)
+    private var measuredRows: [String: MeasuredRow] = [:]
+    private var mediaSizes: [String: CGSize] = [:]
+    private var pendingMediaSizes: [String: CGSize] = [:]
+    private var applyingSnapshot = false
+    private var renderPending = false
+    private var bottomPending = false
+    private var positionedInitialMessages = false
+    private var userInteracted = false
+    private var scrollGestureRevision: UInt64 = 0
+    private var historyReloadRevision: UInt64 = 0
     private var observer: UUID?
     private var cursor = ""
     private var isEnd = false
@@ -42,7 +95,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var recordingURL: URL?
     private var voiceDraft: (url: URL, duration: Int)?; private var voiceTimer: Task<Void, Never>?; private var voicePlayer: AVAudioPlayer?
     private let voicePanel = UIView(); private let voiceLabel = UILabel(); private let voiceCancel = UIButton(type: .system); private let voiceAction = UIButton(type: .system); private let voicePlay = UIButton(type: .system)
-    private let attachmentPanel = UIView(); private var attachmentButtons: [UIButton] = []; private var attachmentsVisible = false
+    private let attachmentPanel = UIView(); private var attachmentButtons: [NativeComposerActionButton] = []; private var attachmentsVisible = false
     private var emojiPanel: NativeEmojiPanel!; private var emojiVisible = false
     private var readTask: Task<Void, Never>?
     private let focusID: String?; private var focusPending: Bool; private var focusedInitially = false
@@ -84,17 +137,19 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         super.viewWillDisappear(animated)
         if let observer = observer { service.removeObserver(observer) }
         observer = nil; loadOperation = nil; loading = false; refresh.endRefreshing()
-        emojiPanel?.setVisible(false); historyTask?.cancel(); roleTask?.cancel(); actionTask?.cancel()
+        emojiPanel?.setVisible(false); historyTask?.cancel(); historyTask = nil; roleTask?.cancel(); actionTask?.cancel()
         recorder?.stop(); recorder = nil; recordingURL = nil; voiceTimer?.cancel(); voiceTimer = nil; voicePlayer?.stop(); voicePlayer = nil; try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation); readTask?.cancel(); readTask = nil
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor(hex: 0xe6e8ee)
-        let item = NSCollectionLayoutItem(layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(72)))
-        let group = NSCollectionLayoutGroup.vertical(layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(72)), subitems: [item])
-        collection = UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewCompositionalLayout(section: NSCollectionLayoutSection(group: group)))
+        let layout = UICollectionViewFlowLayout()
+        layout.estimatedItemSize = .zero; layout.minimumLineSpacing = 0; layout.minimumInteritemSpacing = 0
+        collection = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collection.backgroundColor = view.backgroundColor
+        NativeUITheme.useCustomScrollEdges(collection)
+        collection.contentInsetAdjustmentBehavior = .never
         collection.delegate = self
         collection.keyboardDismissMode = .interactive
         collection.alwaysBounceVertical = true
@@ -107,7 +162,10 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         contentViews.forEach { $0.translatesAutoresizingMaskIntoConstraints = false; view.addSubview($0) }
         latest.setTitle("↓ 最新", for: .normal); latest.backgroundColor = .white; latest.setTitleColor(NativeUITheme.primary, for: .normal); latest.layer.cornerRadius = 18; latest.layer.shadowOpacity = 0.1; latest.layer.shadowRadius = 6; latest.isHidden = true; latest.addTarget(self, action: #selector(returnLatest), for: .touchUpInside); view.addSubview(latest)
         header.backgroundColor = .white
-        [back, heading, more, notice].forEach { header.addSubview($0) }
+        [back, heading, more, notice, pinTitle, pinLine, dismissPin].forEach { header.addSubview($0) }
+        pinTitle.textColor = NativeUITheme.primary; pinLine.backgroundColor = NativeUITheme.primary
+        dismissPin.setTitle("×", for: .normal); dismissPin.setTitleColor(NativeUITheme.secondary, for: .normal); dismissPin.accessibilityLabel = "隐藏置顶提示"
+        dismissPin.addAction(UIAction { [weak self] _ in guard let self = self else { return }; self.dismissedPinID = self.service.pinnedMessage(in: self.conversation)?.id; self.render() }, for: .touchUpInside)
         back.setImage(NativeUITheme.image("uni_icon_back"), for: .normal); back.setTitleColor(NativeUITheme.body, for: .normal)
         back.accessibilityLabel = "返回"; back.addTarget(self, action: #selector(goBack), for: .touchUpInside)
         heading.text = conversation.title.isEmpty ? "聊天" : conversation.title
@@ -122,7 +180,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         composer.addSubview(quoteBar); [quoteThumb, quoteName, quoteText, quoteClose].forEach { quoteBar.addSubview($0) }; quoteBar.backgroundColor = .white; quoteThumb.contentMode = .scaleAspectFill; quoteThumb.clipsToBounds = true; quoteName.font = .boldSystemFont(ofSize: 12); quoteText.font = .systemFont(ofSize: 12); quoteText.textColor = NativeUITheme.secondary; quoteClose.setTitle("×", for: .normal); quoteClose.setTitleColor(.gray, for: .normal); quoteClose.addAction(UIAction { [weak self] _ in self?.quoteDraft = nil; self?.input.placeholder = "输入消息" }, for: .touchUpInside); updateQuoteBar()
         composer.addSubview(voicePanel); [voiceLabel, voiceCancel, voiceAction, voicePlay].forEach { voicePanel.addSubview($0) }; voicePanel.isHidden = true
         voiceLabel.textAlignment = .center; voiceCancel.setTitle("取消", for: .normal); voiceCancel.addTarget(self, action: #selector(cancelVoice), for: .touchUpInside); voiceAction.addTarget(self, action: #selector(voiceActionTapped), for: .touchUpInside); voicePlay.setTitle("▶ 试听", for: .normal); voicePlay.addTarget(self, action: #selector(previewVoice), for: .touchUpInside)
-        composer.addSubview(attachmentPanel); attachmentPanel.isHidden = true; configureAttachments()
+        composer.addSubview(attachmentPanel); attachmentPanel.backgroundColor = UIColor(hex: 0xf0f0f0); attachmentPanel.isHidden = true; configureAttachments()
         emojiPanel = NativeEmojiPanel(context: service.business, onEmoji: { [weak self] value in self?.input.insertText(value); self?.inputChanged() }, onSticker: { [weak self] sticker in self?.sendSticker(sticker) }, onAdd: { [weak self] in self?.openStickerUpload() }, onDelete: { [weak self] sticker in self?.deleteSticker(sticker) }, onClose: { [weak self] in self?.emojiVisible = false; self?.emojiPanel.setVisible(false); self?.view.setNeedsLayout() }); composer.addSubview(emojiPanel); emojiPanel.setVisible(false)
         mic.addTarget(self, action: #selector(toggleRecording), for: .touchUpInside)
         inputBox.backgroundColor = .white; inputBox.addSubview(input); inputBox.addSubview(emoji)
@@ -130,7 +188,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         input.accessibilityIdentifier = "realMessageInput"
         input.delegate = self; input.returnKeyType = .send
         input.addTarget(self, action: #selector(inputChanged), for: .editingChanged)
-        emoji.setTitle("☺", for: .normal); emoji.setTitleColor(UIColor(hex: 0x666666), for: .normal)
+        emoji.setImage(UIImage(systemName: "face.smiling"), for: .normal); emoji.tintColor = UIColor(hex: 0x666666)
         emoji.addTarget(self, action: #selector(showEmoji), for: .touchUpInside)
         plus.setTitle("＋", for: .normal); plus.setTitleColor(NativeUITheme.body, for: .normal)
         plus.addTarget(self, action: #selector(showAttachments), for: .touchUpInside)
@@ -150,7 +208,10 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         ])
         dataSource = UICollectionViewDiffableDataSource<Int, String>(collectionView: collection) { [weak self] collection, index, id in
             guard let self = self, let message = self.displayed[id], let cell = collection.dequeueReusableCell(withReuseIdentifier: "message", for: index) as? NativeMessageCell else { return nil }
-            cell.configure(message: message, service: self.service, date: self.dateSeparators[id], preparing: self.attachmentPreviews.values.contains { $0.id == id && $0.status != 3 })
+            cell.configure(message: message, service: self.service, date: self.dateSeparators[id], preparing: self.attachmentPreviews.values.contains { $0.id == id && $0.status != 3 }, group: self.conversation.type == 3, resolvedMediaSize: self.mediaSizes[id], onMediaSizeResolved: { [weak self] size in
+                guard let self = self, self.mediaSizes[id] != size else { return }
+                self.pendingMediaSizes[id] = size; self.applyPendingMediaSizes()
+            })
             cell.onAvatarTap = { [weak self] in self?.openSender(message) }
             cell.onQuoteTap = { [weak self] in guard let self = self, let reference = MessageQuoteReference(serialized: message.serialized) else { return }; self.locate(reference.id) }
             cell.contentView.backgroundColor = self.selectedIDs.contains(id) ? NativeUITheme.primary.withAlphaComponent(0.12) : .clear
@@ -167,25 +228,35 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         let quoteOffset = quoteDraft == nil ? CGFloat.zero : r(92)
         let failedDrafts = pendingAttachments.filter { !pendingMediaIDs.contains($0.id) }
         let draftOffset = failedDrafts.isEmpty ? CGFloat.zero : r(72)
-        headerHeight.constant = top + r(110) + (notice.isHidden ? 0 : r(72)); composerHeight.constant = r(hasVoice ? 180 : emojiVisible ? 650 : attachmentsVisible ? 456 : 108) + quoteOffset + draftOffset
+        let attachmentRows = (attachmentButtons.count + 3) / 4
+        let attachmentHeight = CGFloat(24 + attachmentRows * 144 + max(0, attachmentRows - 1) * 28 + 32)
+        headerHeight.constant = top + r(110) + (notice.isHidden ? 0 : r(showingPin ? 100 : 72)); composerHeight.constant = r(hasVoice ? 180 : emojiVisible ? 650 : attachmentsVisible ? 108 + attachmentHeight : 108) + quoteOffset + draftOffset
+        // keyboardLayoutGuide 停在安全区上缘，底部延续输入面板颜色。
+        view.backgroundColor = attachmentsVisible && !hasVoice ? attachmentPanel.backgroundColor : composer.backgroundColor
         back.frame = CGRect(x: r(26), y: top + r(29), width: r(52), height: r(52)); back.titleLabel?.font = .systemFont(ofSize: r(52))
         heading.frame = CGRect(x: r(78), y: top + r(28), width: width - r(156), height: r(54)); heading.font = .systemFont(ofSize: r(34), weight: .bold)
         more.frame = CGRect(x: width - r(78), y: top + r(29), width: r(52), height: r(52)); more.titleLabel?.font = .systemFont(ofSize: r(42))
-        notice.frame = CGRect(x: r(12), y: top + r(110), width: width - r(24), height: r(72))
+        if showingPin {
+            pinLine.frame = CGRect(x: r(32), y: top + r(128), width: r(6), height: r(64))
+            pinTitle.frame = CGRect(x: r(58), y: top + r(120), width: width - r(142), height: r(34)); pinTitle.font = .systemFont(ofSize: r(24))
+            notice.frame = CGRect(x: r(58), y: top + r(154), width: width - r(142), height: r(40)); notice.font = .systemFont(ofSize: r(26)); notice.textAlignment = .left; notice.numberOfLines = 1; notice.backgroundColor = .white
+            dismissPin.frame = CGRect(x: width - r(84), y: top + r(116), width: r(72), height: r(88)); dismissPin.titleLabel?.font = .systemFont(ofSize: r(36))
+        } else {
+            notice.frame = CGRect(x: r(12), y: top + r(110), width: width - r(24), height: r(72)); notice.font = .systemFont(ofSize: r(24)); notice.textAlignment = .center; notice.numberOfLines = 2; notice.backgroundColor = UIColor(hex: 0xf6f7fb)
+        }
         mic.frame = CGRect(x: r(20), y: r(22), width: r(64), height: r(64)); mic.imageEdgeInsets = UIEdgeInsets(top: r(10), left: r(10), bottom: r(10), right: r(10))
         let sendWidth = send.isHidden ? 0 : r(116), inputX = r(96)
         let inputWidth = width - inputX - r(96) - sendWidth
         inputBox.frame = CGRect(x: inputX, y: r(18), width: inputWidth, height: r(72)); inputBox.layer.cornerRadius = r(36)
         input.frame = CGRect(x: r(18), y: 0, width: max(r(24), inputWidth - r(96)), height: r(72)); input.font = .systemFont(ofSize: r(28))
-        emoji.frame = CGRect(x: inputWidth - r(78), y: r(6), width: r(60), height: r(60)); emoji.titleLabel?.font = .systemFont(ofSize: r(36))
+        emoji.frame = CGRect(x: inputWidth - r(78), y: r(6), width: r(60), height: r(60)); emoji.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: r(36), weight: .regular), forImageIn: .normal)
         plus.frame = CGRect(x: inputBox.frame.maxX + r(12), y: r(22), width: r(64), height: r(64)); plus.titleLabel?.font = .systemFont(ofSize: r(40))
         send.frame = CGRect(x: plus.frame.maxX + r(12), y: r(22), width: r(104), height: r(64)); send.layer.cornerRadius = r(10); send.titleLabel?.font = .systemFont(ofSize: r(28))
         [mic, inputBox, plus].forEach { $0.isHidden = hasVoice }; if hasVoice { send.isHidden = true }
         voicePanel.isHidden = !hasVoice; voicePanel.frame = CGRect(x: 0, y: 0, width: width, height: composer.bounds.height - quoteOffset - draftOffset); voiceLabel.frame = CGRect(x: r(32), y: r(16), width: width - r(64), height: r(48)); voiceLabel.font = .systemFont(ofSize: r(30)); voiceCancel.frame = CGRect(x: r(32), y: r(88), width: r(140), height: r(64)); voiceAction.frame = CGRect(x: width - r(172), y: r(88), width: r(140), height: r(64)); voicePlay.frame = CGRect(x: (width - r(180)) / 2, y: r(88), width: r(180), height: r(64)); voicePlay.isHidden = voiceDraft == nil; voiceAction.setTitle(recorder == nil ? "发送" : "结束录音", for: .normal)
-        attachmentPanel.isHidden = !attachmentsVisible || hasVoice; attachmentPanel.frame = CGRect(x: 0, y: r(108), width: width, height: r(348))
+        attachmentPanel.isHidden = !attachmentsVisible || hasVoice; attachmentPanel.frame = CGRect(x: 0, y: r(108), width: width, height: r(attachmentHeight))
         emojiPanel.frame = CGRect(x: 0, y: r(108), width: width, height: r(542)); emojiPanel.isHidden = !emojiVisible || hasVoice
-        let column = (width - r(64)) / 4
-        for (index, button) in attachmentButtons.enumerated() { button.frame = CGRect(x: r(32) + CGFloat(index % 4) * column, y: r(16) + CGFloat(index / 4) * r(158), width: column, height: r(140)); button.titleLabel?.font = .systemFont(ofSize: r(26)); button.imageView?.contentMode = .scaleAspectFit; button.imageEdgeInsets = UIEdgeInsets(top: r(8), left: column / 2 - r(28), bottom: r(56), right: column / 2 - r(28)); button.titleEdgeInsets = UIEdgeInsets(top: r(88), left: -column, bottom: 0, right: 0) }
+        for (index, button) in attachmentButtons.enumerated() { button.frame = CGRect(x: r(32) + CGFloat(index % 4) * r(164), y: r(24) + CGFloat(index / 4) * r(172), width: r(140), height: r(144)) }
         for child in [mic, inputBox, plus, send, voicePanel, attachmentPanel, emojiPanel!] { child.frame.origin.y += quoteOffset + draftOffset }
         pendingMediaButton.isHidden = failedDrafts.isEmpty; pendingMediaButton.frame = CGRect(x: 0, y: quoteOffset, width: width, height: draftOffset); pendingMediaButton.setTitle("附件未发送 · 点此重试（\(failedDrafts.count)）", for: .normal); pendingMediaButton.titleLabel?.font = .systemFont(ofSize: r(24))
         latest.frame = CGRect(x: width - r(164), y: composer.frame.minY - r(108), width: r(140), height: r(72)); latest.titleLabel?.font = .systemFont(ofSize: r(24)); view.bringSubviewToFront(latest)
@@ -198,14 +269,30 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     }
     private func render(scrollToBottom: Bool = false) {
         guard isViewLoaded, dataSource != nil else { return }
-        var completedInitialHistory = false
+        guard !applyingSnapshot else { renderPending = true; bottomPending = bottomPending || scrollToBottom; return }
+        let revision = service.historyReloadRevisions[conversation.id, default: 0]
+        if historyReloadRevision != revision {
+            historyReloadRevision = revision
+            loadOperation = nil; loading = false; historyTask?.cancel()
+            cursor = ""; isEnd = false; awaitingHistoryCursor = ""
+            hasLocalHistoryPreview = false; autoHistoryAllowed = true; lastAutomaticHistoryRequest = nil
+            historyTask = Task { [weak self] in
+                guard let self = self else { return }
+                defer { self.historyTask = nil }
+                await self.loadOlder()
+            }
+        }
         if let requested = awaitingHistoryCursor, requested == cursor,
            let page = service.completedHistoryPage(conversation, cursor: requested) {
-            completedInitialHistory = requested.isEmpty
             applyHistoryPage(page); awaitingHistoryCursor = nil
         }
         if navigationController?.topViewController === self, presentedViewController == nil, let result = service.takeForwardNotice(in: conversation.id) { showForwardResult(result) }
-        notice.text = service.sendRestriction(conversation) ?? service.pinnedMessage(in: conversation).map { "置顶：" + $0.preview } ?? ""; notice.isHidden = notice.text?.isEmpty != false; view.setNeedsLayout()
+        let restriction = service.sendRestriction(conversation)
+        let pin = service.pinnedMessage(in: conversation)
+        showingPin = restriction == nil && pin != nil && pin?.id != dismissedPinID
+        notice.text = restriction ?? (showingPin ? pin?.preview : ""); notice.isHidden = notice.text?.isEmpty != false
+        pinTitle.text = pin?.shared == true ? "置顶消息" : "仅为我置顶"
+        [pinTitle, pinLine, dismissPin].forEach { $0.isHidden = !showingPin }; view.setNeedsLayout()
         if multiSelecting { heading.text = "已选 \(selectedIDs.count) 条"; more.setTitle("转发", for: .normal) } else { heading.text = conversation.title; more.setTitle("⋯", for: .normal) }
         input.isEnabled = !submitting && service.canSend(to: conversation); send.isEnabled = !submitting && service.canSend(to: conversation)
         let stored = service.visibleMessages(conversation.id)
@@ -216,39 +303,96 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         for item in items where item.timestamp > 0 {
             let date = Date(timeIntervalSince1970: Double(item.timestamp) / 1000), day = calendar.startOfDay(for: Date(timeIntervalSince1970: Double(item.timestamp) / 1000))
             defer { previousDay = day }; guard previousDay != day else { continue }
-            let diff = calendar.dateComponents([.day], from: day, to: calendar.startOfDay(for: Date())).day ?? 0; guard diff > 0 else { continue }
-            if diff == 1 { dateSeparators[item.id] = "昨天" }
-            else if diff < 7 { dateSeparators[item.id] = "星期" + ["日", "一", "二", "三", "四", "五", "六"][calendar.component(.weekday, from: date) - 1] }
+            let diff = calendar.dateComponents([.day], from: day, to: calendar.startOfDay(for: Date())).day ?? 0
+            if diff == 0 { dateSeparators[item.id] = "今天" }
+            else if diff == 1 { dateSeparators[item.id] = "昨天" }
+            else if diff > 1 && diff < 7 { dateSeparators[item.id] = "星期" + ["日", "一", "二", "三", "四", "五", "六"][calendar.component(.weekday, from: date) - 1] }
             else { let formatter = DateFormatter(); formatter.dateFormat = calendar.component(.year, from: date) == calendar.component(.year, from: Date()) ? "M月d日" : "yyyy年M月d日"; dateSeparators[item.id] = formatter.string(from: date) }
         }
+        let preparingIDs = Set(attachmentPreviews.values.filter { $0.status != 3 }.map(\.id))
+        let rows = Dictionary(items.map { item in
+            (item.id, RenderedRow(message: item, date: dateSeparators[item.id], status: service.sendingLabel(item), sending: service.mediaIsSending(item), preparing: preparingIDs.contains(item.id), selected: selectedIDs.contains(item.id)))
+        }, uniquingKeysWith: { _, latest in latest })
+        let changedIDs = items.map(\.id).filter { renderedRows[$0] != rows[$0] }
+        let previousSnapshot = dataSource.snapshot()
+        guard previousSnapshot.itemIdentifiers != items.map(\.id) || !changedIDs.isEmpty || scrollToBottom || focusPending else { return }
+        let anchor = captureViewport()
+        let snapshotGestureRevision = scrollGestureRevision
+        renderedRows = rows
+        measuredRows = measuredRows.filter { rows[$0.key] != nil }
         displayed = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
-        let visibleIndex = collection.indexPathsForVisibleItems.sorted().first
-        let anchorID = visibleIndex.flatMap { dataSource.itemIdentifier(for: $0) }
-        let anchorDistance = visibleIndex.flatMap { collection.layoutAttributesForItem(at: $0)?.frame.minY }.map { $0 - collection.contentOffset.y }
         let nearBottom = collection.contentOffset.y + collection.bounds.height >= collection.contentSize.height - 80
-        let followBottom = scrollToBottom || completedInitialHistory || (!loading && nearBottom && dataSource.snapshot().itemIdentifiers.last != items.last?.id)
-        let previous = Set(dataSource.snapshot().itemIdentifiers)
+        let followBottom = HistoryViewportPolicy.shouldFollowBottom(explicit: scrollToBottom, initial: !positionedInitialMessages, userInteracted: userInteracted, appended: !items.isEmpty && previousSnapshot.itemIdentifiers.last != items.last?.id, nearBottom: nearBottom, interacting: collection.isDragging || collection.isDecelerating)
+        let previous = Set(previousSnapshot.itemIdentifiers)
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>(); snapshot.appendSections([0]); snapshot.appendItems(items.map(\.id))
-        snapshot.reconfigureItems(items.map(\.id).filter(previous.contains))
+        snapshot.reconfigureItems(changedIDs.filter(previous.contains))
+        applyingSnapshot = true
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self = self else { return }
-            self.collection.layoutIfNeeded(); self.updateLatestButton()
+            self.collection.collectionViewLayout.invalidateLayout(); self.collection.layoutIfNeeded()
             if self.focusPending, let focus = self.focusID, let index = self.dataSource.indexPath(for: focus) {
                 self.focusPending = false; self.collection.scrollToItem(at: index, at: .centeredVertically, animated: false)
-            } else if followBottom && !items.isEmpty {
+            } else if followBottom && !items.isEmpty && (scrollToBottom || self.scrollGestureRevision == snapshotGestureRevision) {
                 self.collection.scrollToItem(at: IndexPath(item: items.count - 1, section: 0), at: .bottom, animated: false)
-            } else if let anchorID = anchorID, let distance = anchorDistance,
-                      let index = self.dataSource.indexPath(for: anchorID),
-                      let attributes = self.collection.layoutAttributesForItem(at: index) {
-                self.collection.contentOffset.y = max(-self.collection.adjustedContentInset.top, attributes.frame.minY - distance)
+            } else {
+                self.restoreViewport(anchor)
+            }
+            if !items.isEmpty { self.positionedInitialMessages = true }
+            self.applyingSnapshot = false; self.updateLatestButton(); self.applyPendingMediaSizes()
+            if self.renderPending {
+                let bottom = self.bottomPending; self.renderPending = false; self.bottomPending = false
+                self.render(scrollToBottom: bottom)
             }
         }
+    }
+
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        let width = collectionView.bounds.width
+        guard let id = dataSource.itemIdentifier(for: indexPath), let row = renderedRows[id] else { return CGSize(width: width, height: 1) }
+        let size = mediaSizes[id]
+        if let cached = measuredRows[id], cached.width == width, cached.row == row, cached.mediaSize == size { return CGSize(width: width, height: cached.height) }
+        sizingCell.configure(message: row.message, service: service, date: row.date, preparing: row.preparing, group: conversation.type == 3, loadResources: false, resolvedMediaSize: size)
+        let height = sizingCell.measuredHeight(width: width)
+        measuredRows[id] = MeasuredRow(row: row, width: width, mediaSize: size, height: height)
+        return CGSize(width: width, height: height)
+    }
+
+    private struct ViewportAnchor {
+        let id: String; let distance: CGFloat; let gestureRevision: UInt64; let translation: CGFloat
+    }
+    private func captureViewport() -> ViewportAnchor? {
+        guard let index = collection.indexPathsForVisibleItems.sorted().first,
+              let id = dataSource.itemIdentifier(for: index), let frame = collection.layoutAttributesForItem(at: index)?.frame else { return nil }
+        return ViewportAnchor(id: id, distance: frame.minY - collection.contentOffset.y, gestureRevision: scrollGestureRevision, translation: collection.panGestureRecognizer.translation(in: collection).y)
+    }
+    private func restoreViewport(_ anchor: ViewportAnchor?) {
+        guard let anchor = anchor, anchor.gestureRevision == scrollGestureRevision,
+              let index = dataSource.indexPath(for: anchor.id), let frame = collection.layoutAttributesForItem(at: index)?.frame else { return }
+        let delta = collection.isDragging ? anchor.translation - collection.panGestureRecognizer.translation(in: collection).y : 0
+        let minimum = -collection.adjustedContentInset.top
+        let maximum = max(minimum, collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
+        collection.contentOffset.y = CGFloat(HistoryViewportPolicy.restoredOffset(anchorMinY: Double(frame.minY), distanceFromTop: Double(anchor.distance), gestureDelta: Double(delta), minimum: Double(minimum), maximum: Double(maximum)))
+        lastHistoryOffset = collection.contentOffset.y
+    }
+    private func applyPendingMediaSizes() {
+        guard !pendingMediaSizes.isEmpty, !applyingSnapshot, !collection.isDragging, !collection.isDecelerating else { return }
+        let anchor = captureViewport()
+        let updates = pendingMediaSizes; pendingMediaSizes = [:]
+        for (id, size) in updates { mediaSizes[id] = size; measuredRows[id] = nil }
+        for case let cell as NativeMessageCell in collection.visibleCells {
+            guard let index = collection.indexPath(for: cell), let id = dataSource.itemIdentifier(for: index), let size = updates[id] else { continue }
+            cell.updateResolvedMediaSize(size)
+        }
+        UIView.performWithoutAnimation {
+            collection.collectionViewLayout.invalidateLayout(); collection.layoutIfNeeded(); restoreViewport(anchor)
+        }
+        updateLatestButton()
     }
 
     private func loadOlder() async {
         guard !loading, !isEnd, service.isActive else { refresh.endRefreshing(); return }
         let operation = UUID(); loadOperation = operation; loading = true
-        let requested = cursor, initial = cursor.isEmpty && !hasLocalHistoryPreview
+        let requested = cursor
         awaitingHistoryCursor = requested
         defer { if loadOperation == operation { loading = false; refresh.endRefreshing() } }
         do {
@@ -258,7 +402,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
                 hasLocalHistoryPreview = hasLocalHistoryPreview || !page.messages.isEmpty
                 if page.localExhausted { autoHistoryAllowed = false }
             } else if cursor == requested { applyHistoryPage(page); awaitingHistoryCursor = nil }
-            render(scrollToBottom: initial)
+            render()
         } catch {
             guard loadOperation == operation, service.isActive else { return }
             autoHistoryAllowed = false
@@ -275,8 +419,11 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        userInteracted = true; scrollGestureRevision &+= 1
         autoHistoryAllowed = true; lastAutomaticHistoryRequest = nil; lastHistoryOffset = scrollView.contentOffset.y
     }
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) { if !decelerate { applyPendingMediaSizes() } }
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { applyPendingMediaSizes() }
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateLatestButton()
         let towardHistory = scrollView.contentOffset.y < lastHistoryOffset
@@ -557,7 +704,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private func configureAttachments() {
         var items: [(String, String, () -> Void)] = [("相机", "uni_icon_camera", { [weak self] in self?.pickCamera() }), ("照片", "uni_icon_photo", { [weak self] in self?.pickMedia(videos: false) }), ("视频", "uni_attachment_video", { [weak self] in self?.pickMedia(videos: true) })]
         if conversation.type != 3 { items.append(("名片", "uni_icon_card", { [weak self] in self?.pickCard() })) }; items += [("文件", "uni_icon_file", { [weak self] in self?.pickFile() }), ("收藏", "uni_icon_favorite", { [weak self] in self?.pickFavorite() })]
-        for (title, icon, action) in items { let button = UIButton(type: .system); button.setTitle(title, for: .normal); button.setTitleColor(NativeUITheme.body, for: .normal); button.setImage(NativeUITheme.image(icon)?.withRenderingMode(.alwaysOriginal), for: .normal); button.addAction(UIAction { [weak self] _ in self?.attachmentsVisible = false; self?.view.setNeedsLayout(); action() }, for: .touchUpInside); attachmentPanel.addSubview(button); attachmentButtons.append(button) }
+        for (title, icon, action) in items { let button = NativeComposerActionButton(title: title, icon: icon); button.addAction(UIAction { [weak self] _ in self?.attachmentsVisible = false; self?.view.setNeedsLayout(); action() }, for: .touchUpInside); attachmentPanel.addSubview(button); attachmentButtons.append(button) }
     }
     private func chooseMention() {
         guard navigationController?.topViewController === self else { return }
@@ -570,7 +717,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             }, animated: true)
         } catch { showNativeNotice(error.localizedDescription) } }
     }
-    @objc private func openPinned() { guard let pin = service.pinnedMessage(in: conversation) else { return }; Task { do { try await service.focusMessage(pin.id, in: conversation); if let index = dataSource.indexPath(for: pin.id) { collection.scrollToItem(at: index, at: .centeredVertically, animated: true) } } catch { showNativeNotice(error.localizedDescription) } } }
+    @objc private func openPinned() { guard showingPin, let pin = service.pinnedMessage(in: conversation) else { return }; Task { do { try await service.focusMessage(pin.id, in: conversation); if let index = dataSource.indexPath(for: pin.id) { collection.scrollToItem(at: index, at: .centeredVertically, animated: true) } } catch { showNativeNotice(error.localizedDescription) } } }
     private func choosePin(_ message: ChatTextItem) {
         if let old = service.pinnedMessage(in: conversation), old.id == message.id { Task { do { try await service.pinMessage(message, in: conversation, shared: old.shared, remove: true); showNativeNotice("已取消置顶。") } catch { showNativeNotice(error.localizedDescription) } }; return }
         Task { do {

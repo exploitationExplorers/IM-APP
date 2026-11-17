@@ -144,8 +144,8 @@ private final class NativeBusinessCell: UITableViewCell {
     }
     override func layoutSubviews() {
         super.layoutSubviews(); guard let row = represented else { return }
-        let r = bounds.width / 750, height = contentView.bounds.height
-        var left = 32 * r; var right = bounds.width - 32 * r
+        let r = bounds.width / 750, height = contentView.bounds.height, width = contentView.bounds.width
+        var left = 32 * r; var right = width - 32 * r
         if row.avatar != nil { avatar.frame = CGRect(x: left, y: (height - 88 * r) / 2, width: 88 * r, height: 88 * r); avatar.layer.cornerRadius = 44 * r; left += 112 * r }
         else if row.icon != nil { icon.frame = CGRect(x: left, y: (height - 40 * r) / 2, width: 40 * r, height: 40 * r); left += 56 * r }
         if !control.isHidden { control.frame = CGRect(x: right - 72 * r, y: 0, width: 88 * r, height: height); right -= 88 * r }
@@ -160,7 +160,7 @@ private final class NativeBusinessCell: UITableViewCell {
             name.frame = CGRect(x: left, y: 0, width: max(0, available - detailWidth - (detailWidth > 0 ? 16 * r : 0)), height: height)
             valueLabel.textAlignment = .right; valueLabel.frame = CGRect(x: right - detailWidth, y: 0, width: detailWidth, height: height)
         }
-        line.frame = CGRect(x: left, y: height - 0.5, width: max(0, bounds.width - left), height: 0.5)
+        line.frame = CGRect(x: left, y: height - 0.5, width: max(0, width - left), height: 0.5)
     }
 }
 

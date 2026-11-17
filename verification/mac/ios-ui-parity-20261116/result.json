@@ -1,0 +1,2833 @@
+{
+  "checkedAt": "2026-11-16T22:48:58+08:00",
+  "uiRevision": "20261116-ui2",
+  "repo": "/Users/Admin1/Developer/IM-APP-github",
+  "head": "ac5bdbf1f32c725d48ae5385dc7819157633dc9b",
+  "installedSimulatorApps": [
+    {
+      "app": "/Users/Admin1/Library/Developer/CoreSimulator/Devices/90CF78E7-95A7-4F45-86B7-75B654364C29/data/Containers/Bundle/Application/4FCA9D9A-0D3C-49D0-A062-8994AC1B2733/IMNative.app",
+      "version": "0.3.0",
+      "build": "4",
+      "bundleID": "com.im.nativebootstrap.staging",
+      "binarySHA256": "0b70a2c4ebc1ea58ded74b912305fd77e7a5bffd6ad341eab59e8bc400d8b880",
+      "binaryModified": "2026-11-16T21:10:16.795401+08:00",
+      "containsUI2Marker": false
+    }
+  ],
+  "builtApps": [
+    {
+      "app": "/Users/Admin1/Developer/IM-APP-github/.native-cache/DerivedData/Build/Products/Debug-iphonesimulator/IMNative.app",
+      "version": "0.3.0",
+      "build": "4",
+      "bundleID": "com.im.nativebootstrap.staging",
+      "binarySHA256": "541bb26d6111c61a9b25f9575d49d0b010dfe83c87772bd62c2d149751e5faf6",
+      "binaryModified": "2026-11-16T22:42:03.923069+08:00",
+      "containsUI2Marker": true
+    },
+    {
+      "app": "/Users/Admin1/Developer/IM-APP-github/.native-cache/DerivedData/Build/Products/Debug-iphoneos/IMNative.app",
+      "version": "0.3.0",
+      "build": "4",
+      "bundleID": "com.im.nativebootstrap.staging",
+      "binarySHA256": "189c147e72cb263cf5ce7f944efb574c6aa666dcf09212eabca715f6fdc0b85f",
+      "binaryModified": "2026-11-16T22:44:52.668944+08:00",
+      "containsUI2Marker": true
+    }
+  ],
+  "verification": {
+    "coreTests": {
+      "passed": 98,
+      "failed": 0
+    },
+    "projectStaticChecks": {
+      "passed": 8,
+      "failed": 0
+    },
+    "simulatorDebugBuild": "succeeded",
+    "deviceUnsignedDebugBuild": "succeeded",
+    "runtimePagesPassed": 0,
+    "visualPagesPassed": 0,
+    "nativeRouteCount": 72,
+    "baselineInteractionCount": 320,
+    "simulatorInstallation": "not_performed_by_agent",
+    "realAccountChanges": "none"
+  },
+  "logs": {
+    "core": "ios-ui-core-final.log",
+    "static": "ios-ui-static-final.log",
+    "simulatorBuild": "ios-ui-simulator-build-final.log",
+    "deviceBuild": "ios-ui-device-build-final.log"
+  },
+  "sourceSHA256": {
+    "IM-APP-ios/IMNative/AppDelegate.swift": "0807db5c1e1260d4ea8129642ad4a8f9d4ceb7bdeb4a4851896eeaac5095f5f3",
+    "IM-APP-ios/IMNative/LegalViewController.swift": "200360dc03c9afd35cffba83f0ba4477f80ca1fac9ffa1c2da115cdcb7e1c9d0",
+    "IM-APP-ios/IMNative/LoginViewController.swift": "e99e211d7281c7e598432d5c76d6ab2e0e3eb5ef6006c0a7fe622c736e986dce",
+    "IM-APP-ios/IMNative/NativeAccountDeletionController.swift": "8ca6366d41fe4f3af55273d9784be98468fa2c47845b3f25017042c5ca284ed3",
+    "IM-APP-ios/IMNative/NativeAuthFlowController.swift": "2c4598ff57ad913ecadee65fc6e3f2532c1a0db401c9176d99775b3db4d1ded5",
+    "IM-APP-ios/IMNative/NativeBusiness.swift": "eac76608631ba77375fb2196723488d6f9c5185182bb0f2cb68a987264955fa1",
+    "IM-APP-ios/IMNative/NativeBusinessUI.swift": "7a853c36fe8884bcb7d4e10f921ba23a7b211e3fb83d559e2d76f5d8335edf9b",
+    "IM-APP-ios/IMNative/NativeChatExtras.swift": "d3e8253441babe45efb6c355eb51680fa6804cea86187dbd01e99230ab551f83",
+    "IM-APP-ios/IMNative/NativeContactsViewController.swift": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40",
+    "IM-APP-ios/IMNative/NativeConversationViewController.swift": "1607bad9b2da1e1250396bf9ba24df4d93d3c7afdf992961b9f7103220b35dfe",
+    "IM-APP-ios/IMNative/NativeDiagnosticsController.swift": "ed87531f60a75ef137472135a64b1712f7ebe7e7d66eaea9d5f5a64547f84578",
+    "IM-APP-ios/IMNative/NativeForwardTasks.swift": "c16769226c38aa0d483a99d94fe06c8103a45fea09419afcc02597251ea95328",
+    "IM-APP-ios/IMNative/NativeGroupExtras.swift": "c2584bda3c2f52178abf8d8cd0b745b0965db40325da07313d9cbf2673149c7e",
+    "IM-APP-ios/IMNative/NativeGroupsViewController.swift": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79",
+    "IM-APP-ios/IMNative/NativeIMService.swift": "659fde85f10e53b07872e8fe76dcdd953ce2eb0a0c83c2e57d94c9e5a3d66c80",
+    "IM-APP-ios/IMNative/NativeKeychain.swift": "02212cc3696017129869a2c078c7aa05e45b1e948bb713059c7383cf117ded1f",
+    "IM-APP-ios/IMNative/NativeMassAndEmotions.swift": "c319bf8cde8469ad57f3dd4b6bc9992c69b8e8fda356d5f4781d8ab983de5915",
+    "IM-APP-ios/IMNative/NativeMedia.swift": "d1902ede8820b95b9178d55d1c1740e79764773a829aeb372ef07ba67617c955",
+    "IM-APP-ios/IMNative/NativeMineViewController.swift": "e2766c6d3bb2c52f2fac535a3c599902722d0530be836ba54682fc144aeb2fee",
+    "IM-APP-ios/IMNative/NativeQRScannerController.swift": "087e3da8e9b09ebbbbe6a69c135bd5e251ca401383fe4f5ac8ab7645fa903419",
+    "IM-APP-ios/IMNative/NativeReportAndFeedback.swift": "e1442b7fd9487b939e87139e9976884896702eee6d11bb7a8a1da25c4ae34a1d",
+    "IM-APP-ios/IMNative/NativeSearchViewController.swift": "41c9e8d01f6cac9538c64274aad078ff13990c9f517afa2491a8c695ca7b78ab",
+    "IM-APP-ios/IMNative/NativeSettingsViewController.swift": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c",
+    "IM-APP-ios/IMNative/NativeUITheme.swift": "8218c553cff35e8ff371ab580b26673d87103f50047492c5b0229081d71f2719",
+    "IM-APP-ios/IMNative/SampleConversationViewController.swift": "627de3ee0dc4e8f74c3d4deb8033deee5d67aecdbd3c197974bcb195254a12cd",
+    "IM-APP-ios/IMNative/SampleMainViewController.swift": "a2df7d2a541b890368429aa52abc6ef5f9a1dacfc98e0c9686bb9e5e0eea6c16",
+    "IM-APP-ios/IMNative/SceneDelegate.swift": "770c6e1d41bcf6cd15e62b6b454b136a7c7f4c39bcd22a3e7331f2dc9398067d",
+    "IM-APP-ios/IMNative/NativeOpenIMBridge.m": "801b2a672f96ddc243e1996470ad5a1417ca1f758874b84a66ec0d0e9ba0b5bf",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/APIClient.swift": "88b896c379ea4b9af0632c212386016fb0bc8a265a9d01d68bef732723684168",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/APIModels.swift": "5beb82e71bf8da501722b82e750e57a52bb959a42f70d2ed14761e6c05265507",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/BusinessValues.swift": "90871e3e2e728f5e07026c3f9b2aa0a6f9e9bf8bf4caa1b41049e15856e45e44",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/ChatReliability.swift": "f2a93e0d16c392249fbfce3752ed8ad013f9c6e4632119b729ca04e99afff7da",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/GroupVisibility.swift": "43e4125af929e789eaad06799ce85e5f5b0cf95ee52d9d43bc0a6d6eb686bbb8",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/LocalSample.swift": "5391ff2cec0011ad2fcbbb31972b3273f0303ba0445f7cf458f7d5a7ec8e21f1",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/MediaURLPolicy.swift": "85095cd3b937f4fc3e19930b8a073212817f6ee78f6a4f8b403ad56c06af70ff",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/MessageContent.swift": "8a317d28a05bda3952d06b9b7cd058808001c76ee9f6c20b047a3c1395a50b4c",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/SessionCoordinator.swift": "018ad6171386502311a2d1b73efb63b4729aefad5dff98f0059e61ae34b47208"
+  },
+  "pages": [
+    {
+      "route": "pages/chat/index",
+      "iosImplementationFromMap": "SampleMainViewController.realAccount",
+      "iosBehaviorFromMap": "SDK会话全分页、头像、未读过滤、搜索、全量已读、置顶/免打扰/隐藏会话",
+      "androidImplementationFromMap": "UniParityUI.kt / ConversationList + chat/ChatController.kt",
+      "androidBehaviorFromMap": "SDK会话分页/下拉刷新、真实头像/时间/未读、全部/未读筛选；原版左滑置顶/移除并右滑收起，长按免打扰/已读；原⋯全部已读菜单与全量SDK分页标记；原搜索框直接全文检索本机已同步消息、分会话结果/分页及定位。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/SampleMainViewController.swift",
+          "exists": true,
+          "sha256": "a2df7d2a541b890368429aa52abc6ef5f9a1dacfc98e0c9686bb9e5e0eea6c16"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "(open) => onSwipeChange(item, open)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "closeMenus",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go('/pages/contacts/add-friend')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go('/pages/group/create')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goAddGroup",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onMarkAllRead",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onMenuDelete",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onMenuMute",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onMenuPin",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onMenuRead",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onRefresherRefresh",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSearchFooterLoadMore",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSearchScrollToLower",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openConversation",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openSearchRow(row)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setFilter('all')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setFilter('unread')",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/auth/sign-in",
+      "iosImplementationFromMap": "LoginViewController",
+      "iosBehaviorFromMap": "真实密码登录、Keychain恢复、刷新旋转、国家区号、协议、登录后进入单SDK owner",
+      "androidImplementationFromMap": "UniParityUI.kt / UniLogin",
+      "androidBehaviorFromMap": "密码登录、五个国家区号、合法手机号校验、密码显隐、协议、注册/找回入口；BusinessLoginFlow 调 auth/login + me。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/LoginViewController.swift",
+          "exists": true,
+          "sha256": "e99e211d7281c7e598432d5c76d6ab2e0e3eb5ef6006c0a7fe622c736e986dce"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goForgot",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goRegister",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onLogin",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSendCode",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showPassword = !showPassword",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "switchMode('password')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "switchMode('sms')",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/auth/sign-up",
+      "iosImplementationFromMap": "NativeAuthFlowController.register",
+      "iosBehaviorFromMap": "短信注册、同意协议、密码确认、注册后资料完善",
+      "androidImplementationFromMap": "business/NativeAuthUI.kt / NativeAuthPage(register)",
+      "androidBehaviorFromMap": "register 场景 SMS、倒计时、重复密码、协议同意、auth/register；进入 onboarding。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeAuthFlowController.swift",
+          "exists": true,
+          "sha256": "2c4598ff57ad913ecadee65fc6e3f2532c1a0db401c9176d99775b3db4d1ded5"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goBack",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onRegister",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSendCode",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showPassword = !showPassword",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showPasswordConfirm = !showPasswordConfirm",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/auth/onboarding",
+      "iosImplementationFromMap": "NativeOnboardingController",
+      "iosBehaviorFromMap": "真实头像上传、昵称15字、PATCH me、跳过",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / onboarding",
+      "androidBehaviorFromMap": "注册后完善资料，头像真实本地裁剪+上传、昵称限制、PATCH me或稍后完善。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeAuthFlowController.swift",
+          "exists": true,
+          "sha256": "2c4598ff57ad913ecadee65fc6e3f2532c1a0db401c9176d99775b3db4d1ded5"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "chooseAvatar",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onNicknameInput",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "skipLater",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "submitProfile",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/auth/forgot-password",
+      "iosImplementationFromMap": "NativeAuthFlowController.resetPassword",
+      "iosBehaviorFromMap": "SMS、手机号步骤、设置新密码、第二步返回第一步、真实reset API",
+      "androidImplementationFromMap": "business/NativeAuthUI.kt / NativeAuthPage(forgot)",
+      "androidBehaviorFromMap": "reset 场景 SMS、两步找回、auth/password/reset；成功返回登录。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeAuthFlowController.swift",
+          "exists": true,
+          "sha256": "2c4598ff57ad913ecadee65fc6e3f2532c1a0db401c9176d99775b3db4d1ded5"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goBack",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onNext",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSendCode",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showPassword = !showPassword",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/auth/agreement",
+      "iosImplementationFromMap": "LegalViewController.agreement",
+      "iosBehaviorFromMap": "加载原协议离线HTML、禁脚本、禁任意跳转",
+      "androidImplementationFromMap": "UniParityUI.kt / LegalSheet",
+      "androidBehaviorFromMap": "离线 legal/agreement.html 与 privacy.html，WebView 禁用 JavaScript 与文件访问。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/LegalViewController.swift",
+          "exists": true,
+          "sha256": "200360dc03c9afd35cffba83f0ba4477f80ca1fac9ffa1c2da115cdcb7e1c9d0"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": []
+    },
+    {
+      "route": "pages/auth/privacy",
+      "iosImplementationFromMap": "LegalViewController.privacy",
+      "iosBehaviorFromMap": "加载原隐私离线HTML、禁脚本、禁任意跳转",
+      "androidImplementationFromMap": "UniParityUI.kt / LegalSheet",
+      "androidBehaviorFromMap": "离线 legal/agreement.html 与 privacy.html，WebView 禁用 JavaScript 与文件访问。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/LegalViewController.swift",
+          "exists": true,
+          "sha256": "200360dc03c9afd35cffba83f0ba4477f80ca1fac9ffa1c2da115cdcb7e1c9d0"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": []
+    },
+    {
+      "route": "pages/contacts/index",
+      "iosImplementationFromMap": "NativeContactsController",
+      "iosBehaviorFromMap": "原搜索与3入口、群卡、联系人分页、排序、直接进入聊天",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / ContactsHome",
+      "androidBehaviorFromMap": "GET /contacts 搜索分页/排序、最近聊天本地排序；群纵向白卡、联络人粗体标题、新朋友角标、真实头像、Material3 下拉刷新。；已按设备截图修正72r搜索框、原34r菜单字/深色40r箭头及16r分组间隔。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "closeMenus",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go('/pages/contacts/add-friend')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go('/pages/contacts/groups')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go('/pages/contacts/new-friends')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go('/pages/contacts/tags')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go('/pages/group/create')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goAddGroup",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onLoadMore",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onRefresherRefresh",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openContact(c)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openGroupChat(g)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('chat')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('name')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('recent')",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/index",
+      "iosImplementationFromMap": "NativeMineViewController",
+      "iosBehaviorFromMap": "原hero素材、头像昵称、资料入口、收藏设置、退出登录",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / MineHome",
+      "androidBehaviorFromMap": "GET /me；原 CSS luminosity 预合成 hero 素材，144/48/48 rpx 内边距、160 rpx 头像及居中昵称、原菜单/退出确认。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMineViewController.swift",
+          "exists": true,
+          "sha256": "e2766c6d3bb2c52f2fac535a3c599902722d0530be836ba54682fc144aeb2fee"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [
+        "七行菜单的 tag 冲突已修复；需运行确认全部入口可见、可点击。",
+        "已关闭系统滚动边缘效果并使用浅色状态栏；顶部残影是否完全消失需运行截图确认。"
+      ],
+      "interactions": [
+        {
+          "baselineHandler": "go('/pages/mine/profile')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go('/pages/mine/qrcode')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "go(m.url)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onLogout",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/chat/room",
+      "iosImplementationFromMap": "NativeConversationViewController",
+      "iosBehaviorFromMap": "SDK分页气泡、Outbox可靠发送、图片视频语音文件、相机、引用/@/置顶/多选/收藏/转发/撤回/删除/名片/合并查看",
+      "androidImplementationFromMap": "NativeChatUI.kt / NativeChatRoom + chat/ChatController.kt",
+      "androidBehaviorFromMap": "官方SDK历史分页/实时/已读，真实文本/引用/@成员/@全部/图片/视频/语音/文件/名片/收藏；复制/收藏/撤回/删/置顶、多选删除和独立转发；原生输入与durable outbox。；按权限加载消息菜单、群管理禁言/移出/按发送者时间水位清理、举报用户、保存视频/原图、GIF及自定义表情面板真实发送/添加/删除/管理。；已按原34r左对齐标题/原工具栏、点录音→草稿→发送取消、plus四列相机照片视频名片文件收藏与GIF原图缩略优先补齐。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeConversationViewController.swift",
+          "exists": true,
+          "sha256": "1607bad9b2da1e1250396bf9ba24df4d93d3c7afdf992961b9f7103220b35dfe"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [
+        "群角色徽标和按群昵称显示还需继续对照 Android；当前新增的是消息携带的发送者昵称。",
+        "系统事件仍由桥返回通用“系统通知”，未完整迁移 Android 的事件文案。",
+        "名片、合并记录、业务邀请卡片、语音、文件的完整视觉排版尚未逐项对齐。",
+        "置顶提示已修改；隐藏提示仅作用于本次聊天页生命周期。",
+        "消息发送、失败重试、已读、引用定位、撤回、转发、群管理尚未在测试账号实际回归。"
+      ],
+      "interactions": [
+        {
+          "baselineHandler": "(e) => actions.openMenu(m, e)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "actions.selecting.value ? actions.toggleSelect(m) : undefined",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "cancelVoiceDraft",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "checkMuteStatus",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goBack",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToProfile",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "jumpToPinnedMessage",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirmSend",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onEmoji",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onPlus",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onReachOldest",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openAnnouncement",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "pickCamera",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "pickCard",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "pickFavorite",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "pickFile",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "pickImage",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "pickVideo",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "recording ? stopVoiceRecord() : sendVoiceDraft()",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "recording ? stopVoiceRecord() : undefined",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "sendVoiceDraft",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "startVoiceRecord",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "syncAtMentionFromInput",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/chat/forward",
+      "iosImplementationFromMap": "NativeForwardPickerController",
+      "iosBehaviorFromMap": "四类接收对象、媒体preserve、forward-batches、固定幂等键及atomic待确认恢复、任务管理",
+      "androidImplementationFromMap": "NativeChatUI.kt / forwardDialog + ChatController.forward",
+      "androidBehaviorFromMap": "NativeForwardPicker 最近/联系人/群/标签真实分页与选择；全好友 selector/排除、标签和额外目标；小目标文字/图片顺序 SDK 接受，其余业务 forward-batches 队列，明确区分已提交/已入队。；入队后可真实查询任务进度并调用重试/取消。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeConversationViewController.swift",
+          "exists": true,
+          "sha256": "1607bad9b2da1e1250396bf9ba24df4d93d3c7afdf992961b9f7103220b35dfe"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "active = 'contacts'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "active = 'groups'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "active = 'recent'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "active = 'tags'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "loadMore",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSend",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggle(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggleSelectAll",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/chat/image-viewer",
+      "iosImplementationFromMap": "NativeImagePreviewController",
+      "iosBehaviorFromMap": "原生缩放、相邻图左右切换、保原字节相册保存、ownedLocal预览",
+      "androidImplementationFromMap": "media/MediaComponents.kt / ImagePreview",
+      "androidBehaviorFromMap": "原图缩放、当前可见过滤后的图集前后切换及计数；Android10+MediaStore入相册，旧系统SAF；有界解码和缓存。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMedia.swift",
+          "exists": true,
+          "sha256": "d1902ede8820b95b9178d55d1c1740e79764773a829aeb372ef07ba67617c955"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "change",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "move(-1)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "move(1)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "safeBack()",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "save",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/chat/video-viewer",
+      "iosImplementationFromMap": "NativeVideoPreviewController",
+      "iosBehaviorFromMap": "AVPlayer播放、300MB有界下载保存Photos、离页暂停取消",
+      "androidImplementationFromMap": "media/MediaComponents.kt / VideoPreview",
+      "androidBehaviorFromMap": "真实系统视频播放/暂停/进度、缩略图、原文件保存分享；Android10+MediaStore入相册，旧系统SAF。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMedia.swift",
+          "exists": true,
+          "sha256": "d1902ede8820b95b9178d55d1c1740e79764773a829aeb372ef07ba67617c955"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": []
+    },
+    {
+      "route": "pages/chat/card-picker",
+      "iosImplementationFromMap": "NativeContactPickerController.selectionLimit=1",
+      "iosBehaviorFromMap": "完整联系人分页和单选、resolver校验、真实SDKcard",
+      "androidImplementationFromMap": "NativeChatUI.kt / NativeChatPicker(card)",
+      "androidBehaviorFromMap": "真实 /contacts 搜索分页，解析 /im/peers，SDK 名片消息进入 durable outbox，群内禁分享名片。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onPick(contact)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/chat/favorite-picker",
+      "iosImplementationFromMap": "NativeFavoritesController.onSelected",
+      "iosBehaviorFromMap": "收藏分类分页、返回原类型文字/图片/视频/语音/文件消息",
+      "androidImplementationFromMap": "NativeChatUI.kt / NativeChatPicker(favorite)",
+      "androidBehaviorFromMap": "真实 /favorites/list 分页/类型筛选，多选逐条发送 text/emoji/image，管理模式真实删除；保持活动聊天上下文。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goBack",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "load()",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onMainAction",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "switchTab(tab.type)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggle(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggleManage",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/report-user",
+      "iosImplementationFromMap": "NativeReportController + NativeEvidenceFormController",
+      "iosBehaviorFromMap": "动态举报理由、描述、9图上传、真实reports API",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / report-user",
+      "androidBehaviorFromMap": "GET report-reasons，选择 reasonId、说明、证据图片，POST reports targetType/user/evidenceFileIds。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeReportAndFeedback.swift",
+          "exists": true,
+          "sha256": "e1442b7fd9487b939e87139e9976884896702eee6d11bb7a8a1da25c4ae34a1d"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "selectedId = item.id",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/new-friends",
+      "iosImplementationFromMap": "NativeFriendRequestsController",
+      "iosBehaviorFromMap": "真实申请sync、待处理与历史、接受拒绝",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / requests",
+      "androidBehaviorFromMap": "POST /friend-requests/sync；pending/recent 状态，接受/拒绝真实接口；打开来源资料。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onAccept(item.id)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onReject(item.id)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/add-friend",
+      "iosImplementationFromMap": "NativeAddFriendController",
+      "iosBehaviorFromMap": "publicId搜索、扫码入口、资料查看及真实申请",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / add-friend",
+      "androidBehaviorFromMap": "页内扫一扫，GET users/search publicId nullable 结果与真实 friend-requests。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goScan",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSearch",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSendRequest",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "viewProfile",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/add-group",
+      "iosImplementationFromMap": "NativeGroupsController.joinGroup",
+      "iosBehaviorFromMap": "输入群号校验、真实join、需审核转join-requests",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / add-group + group(lookup)",
+      "androidBehaviorFromMap": "页内扫一扫、群号查群、按joinMode真实加入或申请；可查看群资料。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goScan",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onJoin",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/scan",
+      "iosImplementationFromMap": "NativeQRScannerController",
+      "iosBehaviorFromMap": "AVCapture相机扫码、相册识别、只解析业务数据、离页迟到守卫",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / scan + NativeQr.kt",
+      "androidBehaviorFromMap": "Journeyapps 相机扫码、相册 ZXing 识别、我的二维码入口、可粘贴 payload；URL/JSON/裸 token 兼容。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeQRScannerController.swift",
+          "exists": true,
+          "sha256": "087e3da8e9b09ebbbbe6a69c135bd5e251ca401383fe4f5ac8ab7645fa903419"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "chooseFromAlbum",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goBack",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goMyQrcode",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/scan-result",
+      "iosImplementationFromMap": "NativeQRResultController.user",
+      "iosBehaviorFromMap": "真实resolve、friend/pending/blocked/self关系及真实好友申请",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / scan-result",
+      "androidBehaviorFromMap": "POST /users/qrcode/resolve；好友进入会话，非好友真实申请。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeQRScannerController.swift",
+          "exists": true,
+          "sha256": "087e3da8e9b09ebbbbe6a69c135bd5e251ca401383fe4f5ac8ab7645fa903419"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goBack",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onPrimary",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/scan-group-result",
+      "iosImplementationFromMap": "NativeQRResultController.group",
+      "iosBehaviorFromMap": "resolve nextAction enter/join/apply、pending状态、真实qrcode join",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / scan-group-result",
+      "androidBehaviorFromMap": "POST /groups/qrcode/resolve；按 nextAction 进入/加入/申请，调用 qrcode/join。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeQRScannerController.swift",
+          "exists": true,
+          "sha256": "087e3da8e9b09ebbbbe6a69c135bd5e251ca401383fe4f5ac8ab7645fa903419"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goBack",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onPrimary",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/user-profile",
+      "iosImplementationFromMap": "NativeContactController",
+      "iosBehaviorFromMap": "先核对好友关系、用户资料脱敏groupId、加友/发消息/举报",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / user",
+      "androidBehaviorFromMap": "GET /users/:id + /contacts/:id 确认关系；好友发消息；群来源独立 group-friend-requests，服务器权限兜底。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onAddFriend",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onChat",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/friend-detail",
+      "iosImplementationFromMap": "NativeContactController",
+      "iosBehaviorFromMap": "真实好友详情、备注、标签、共同群、拉黑/删好友/聊天",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / friend",
+      "androidBehaviorFromMap": "GET /contacts/:id；头像/备注/签名/标签/共同群/成为好友/最近在线；block/unblock/delete 二次确认。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "closeMore",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goAllGroups",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goRemark",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goTags",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onMessage",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onTogglePin",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onToggleRecv",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openGroup(g)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/friend-common-groups",
+      "iosImplementationFromMap": "NativeCommonGroupsController",
+      "iosBehaviorFromMap": "真实contact.commonGroups、群resolver后进入聊天",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / common-groups",
+      "androidBehaviorFromMap": "真实 contacts/:id commonGroups；打开群资料和聊天。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupExtras.swift",
+          "exists": true,
+          "sha256": "c2584bda3c2f52178abf8d8cd0b745b0965db40325da07313d9cbf2673149c7e"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "openGroup(g)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/friend-remark",
+      "iosImplementationFromMap": "NativeContactController.editRemark",
+      "iosBehaviorFromMap": "push原生字段编辑、PATCH contact remark",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / friend-remark",
+      "androidBehaviorFromMap": "PATCH /contacts/:id remark；成功返回刷新真实资料。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/friend-tags",
+      "iosImplementationFromMap": "NativeTagsController(contactID)",
+      "iosBehaviorFromMap": "真实tag选择、联系人tagIds保存",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / friend-tags",
+      "androidBehaviorFromMap": "真实标签列表与已选seed、页内新建标签自动勾选、PATCH contact tagIds。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "closeCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "confirmCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goEditTags",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggle(tag.id)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/tag-detail",
+      "iosImplementationFromMap": "NativeTagMembersController",
+      "iosBehaviorFromMap": "真实标签成员、备注重命名、批量成员编辑",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / tag-members",
+      "androidBehaviorFromMap": "真实成员列表、改名、添加、移除成员和删标签；移除提交前重新取最新成员差集PUT，保留并发新增。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "closeMore",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "closeRename",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "confirmRename",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goAddMembers",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onDeleteTag",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openContact(c)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openRename",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/tag-add-members",
+      "iosImplementationFromMap": "NativeTagMembersController",
+      "iosBehaviorFromMap": "完整联系人分页、多选、PUT tag members",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / tag-add-members",
+      "androidBehaviorFromMap": "真实联系人搜索分页、已有成员禁选、全选当前页，提交前最新成员union PUT。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "contactStore.loadMoreContacts",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggle(c)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggleAll",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "unselect(c.id)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/tags",
+      "iosImplementationFromMap": "NativeTagsController",
+      "iosBehaviorFromMap": "真实标签列表、新建/改名/删除、成员管理",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / tags",
+      "androidBehaviorFromMap": "真实 contact-tags 列表/创建、标签详情、重命名与删除接口。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeContactsViewController.swift",
+          "exists": true,
+          "sha256": "9b117e3dbea13d781852231fb3484b3b3ff19cc185ddd909afc3367bac273c40"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "closeCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "confirmCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onDelete",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openTag(tag)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggleEdit",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/contacts/groups",
+      "iosImplementationFromMap": "NativeGroupsController",
+      "iosBehaviorFromMap": "真实群分页、创建、加入、群资料",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / groups",
+      "androidBehaviorFromMap": "GET /groups，全部/我创建/我加入筛选、分页、群状态、打开资料/聊天。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openGroup(g)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "tab = 'created'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "tab = 'joined'",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/create",
+      "iosImplementationFromMap": "NativeGroupsController.createGroup",
+      "iosBehaviorFromMap": "完整联系人选择、名称编辑、真实POST groups",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / create-group",
+      "androidBehaviorFromMap": "选择联系人→创建群两步；搜索/最近加入/名字/最近聊天排序、全选当前页、跨页选中保留、自动群名建议；POST groups name/memberIds。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "contactStore.loadMoreContacts",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirmSelect",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('chat')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('name')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('recent')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showSort = false",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggle(c)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/detail",
+      "iosImplementationFromMap": "NativeGroupController",
+      "iosBehaviorFromMap": "真实群详情、权限、头像/名称/群号/备注/昵称、QR、公告、媒体、管理、退出",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / GroupDetail",
+      "androidBehaviorFromMap": "真实 /groups/detail；改群头像/名称/号、成员/公告/二维码/备注/昵称/本地档案/聊天；退出/解散确认。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [
+        "通用列表已避开右侧 accessoryView；群号复制与长文字仍需运行验证。"
+      ],
+      "interactions": [
+        {
+          "baselineHandler": "goToAdmin",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToAnnouncement",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToEditGroupId",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToEditName",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToGroupQrcode",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToJoinRequests",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToMedia",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToMembers",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToMyNickname",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToRemark",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToReport",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goToSearchHistory",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onChooseAvatar",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onClearHistory",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onDismiss",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onLeave",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onRemoveDissolved",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onTogglePin",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onToggleRecv",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "selectJoinMode('approval')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "selectJoinMode('open')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showJoinMode = false",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showJoinMode = true",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/members",
+      "iosImplementationFromMap": "NativeGroupMembersController",
+      "iosBehaviorFromMap": "真实40分页、资料、成员备注、角色/禁言/移除与删除消息",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / members + member",
+      "androidBehaviorFromMap": "全量业务分页聚合后按昵称/群昵称/备注本地搜索；原API无keyword参数；成员备注/权限/禁言/移出和purge真实操作。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goInvite",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onReachListEnd",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openProfile(member)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/invite",
+      "iosImplementationFromMap": "NativeGroupController.invite",
+      "iosBehaviorFromMap": "联系人选择、真实group invitations",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / invite",
+      "androidBehaviorFromMap": "真实联系人搜索分页/排序/当前页全选；全分页读取既有群成员并禁选，POST invitations userIds。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "contactStore.loadMoreContacts",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirm",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('chat')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('name')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "setSort('recent')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showSort = false",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggle(c)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/admin",
+      "iosImplementationFromMap": "NativeGroupAdministrationController",
+      "iosBehaviorFromMap": "真实管理开关、管理员、申请入口",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / group-admin / GroupAdmin",
+      "androidBehaviorFromMap": "独立群管理页；真实管理员/入群申请入口及allMuted/allowMemberAddFriend/joinMode设置。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupExtras.swift",
+          "exists": true,
+          "sha256": "c2584bda3c2f52178abf8d8cd0b745b0965db40325da07313d9cbf2673149c7e"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goToAdmins",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onToggleForbidAdd",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onToggleMute",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/admins",
+      "iosImplementationFromMap": "NativeGroupAdministratorsController",
+      "iosBehaviorFromMap": "完整成员分页筛管理员、群主添加/撤销管理员",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / admins",
+      "androidBehaviorFromMap": "全分页成员聚合筛选owner/admin，可打开成员管理和添加管理员。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupExtras.swift",
+          "exists": true,
+          "sha256": "c2584bda3c2f52178abf8d8cd0b745b0965db40325da07313d9cbf2673149c7e"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goAdd",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onTapMember(member)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/admin-add",
+      "iosImplementationFromMap": "NativeGroupAdministratorsController",
+      "iosBehaviorFromMap": "真实普通成员选择、PUT member role",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / admin-add",
+      "androidBehaviorFromMap": "全分页普通成员与昵称/群昵称/备注搜索；逐目标设置角色，部分失败刷新实际状态并如实汇总。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupExtras.swift",
+          "exists": true,
+          "sha256": "c2584bda3c2f52178abf8d8cd0b745b0965db40325da07313d9cbf2673149c7e"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggle(member.id)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/join-requests",
+      "iosImplementationFromMap": "NativeGroupRequestsController",
+      "iosBehaviorFromMap": "真实申请列表、approve/reject",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / join-requests",
+      "androidBehaviorFromMap": "真实列表；approve / reject 接口，刷新处理结果。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onAccept(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onReject(item)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/edit-name",
+      "iosImplementationFromMap": "NativeGroupController.editName",
+      "iosBehaviorFromMap": "push原生字段编辑、settings/update",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / group-name",
+      "androidBehaviorFromMap": "POST groups/settings/update groupId/name。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/edit-group-id",
+      "iosImplementationFromMap": "NativeGroupController.editPublicID",
+      "iosBehaviorFromMap": "publicIdChangeUsed限制、一次修改确认、真实public-id/update",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / group-id",
+      "androidBehaviorFromMap": "一次修改说明；POST groups/public-id/update groupId/publicId；服务器校验。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "clearId",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirm",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onInput",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/announcement",
+      "iosImplementationFromMap": "NativeAnnouncementsController + NativeAnnouncementEditor",
+      "iosBehaviorFromMap": "真实公告列表/详情、文本+9图上传、保留旧图、缩略图、编辑删除",
+      "androidImplementationFromMap": "business/NativeAnnouncements.kt",
+      "androidBehaviorFromMap": "原页内发布/编辑/取消及底部提交；按permissions.canEditAnnouncement或角色控制，最多10条/500字/9图；编辑仅更新当前ID、新图fileIds与旧图keep分离；网格图片预览/原图保存、删除确认后刷新。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        },
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupExtras.swift",
+          "exists": true,
+          "sha256": "c2584bda3c2f52178abf8d8cd0b745b0965db40325da07313d9cbf2673149c7e"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "addImages",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "beginEdit(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onDelete(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "previewImage(historyImages(item), i)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "previewImage(images, i)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "resetComposer",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/remark",
+      "iosImplementationFromMap": "NativeGroupController.editRemark",
+      "iosBehaviorFromMap": "原生字段编辑、真实PUT group remark",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / group-remark",
+      "androidBehaviorFromMap": "PUT groups/:id/remark。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/qrcode",
+      "iosImplementationFromMap": "NativeQRCodeController",
+      "iosBehaviorFromMap": "真实群QR payload、CoreImage二维码、系统分享",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / QrCard + NativeQr.kt",
+      "androidBehaviorFromMap": "并取真实群详情和payload，显示原群头像/群名/560r QR/扫码进群；生成头像群名合成PNG，Android10+MediaStore入相册，原生分享。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMineViewController.swift",
+          "exists": true,
+          "sha256": "e2766c6d3bb2c52f2fac535a3c599902722d0530be836ba54682fc144aeb2fee"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onSave",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onShare",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/my-nickname",
+      "iosImplementationFromMap": "NativeGroupController.editMyNickname",
+      "iosBehaviorFromMap": "原生字段编辑、真实PUT group/me/nickname",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / group-nickname",
+      "androidBehaviorFromMap": "PUT groups/:id/me/nickname。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/media",
+      "iosImplementationFromMap": "NativeSearchController.initialTypes",
+      "iosBehaviorFromMap": "SDK媒体类型查询、40分页、图片/视频/文件预览",
+      "androidImplementationFromMap": "NativeChatUI.kt / NativeChatArchive(media=true)",
+      "androidBehaviorFromMap": "SDK 全本地库媒体类型分页，真实图/视频/文件/语音预览；可定位原聊天，图集前后切换。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSearchViewController.swift",
+          "exists": true,
+          "sha256": "41c9e8d01f6cac9538c64274aad078ff13990c9f517afa2491a8c695ca7b78ab"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onPreview(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "tab = item.key",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/search-history",
+      "iosImplementationFromMap": "NativeSearchController",
+      "iosBehaviorFromMap": "真实SDK会话查询、40分页、定位消息或媒体预览",
+      "androidImplementationFromMap": "NativeChatUI.kt / NativeChatArchive(media=false)",
+      "androidBehaviorFromMap": "SDK 全本地库关键词分页检索，群水位过滤；点击定位再次核验可见性后进入对应聊天消息。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSearchViewController.swift",
+          "exists": true,
+          "sha256": "41c9e8d01f6cac9538c64274aad078ff13990c9f517afa2491a8c695ca7b78ab"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "loadMore",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openResult(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "results.length && searchCursor ? loadMore() : runSearch(keyword)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/report",
+      "iosImplementationFromMap": "NativeReportController.group",
+      "iosBehaviorFromMap": "群6类理由选择",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / report-group",
+      "androidBehaviorFromMap": "原原因选择第一步，选择原因进入填写说明/证据页面。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeReportAndFeedback.swift",
+          "exists": true,
+          "sha256": "e1442b7fd9487b939e87139e9976884896702eee6d11bb7a8a1da25c4ae34a1d"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "chooseReason(reason)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/report-submit",
+      "iosImplementationFromMap": "NativeEvidenceFormController.groupReport",
+      "iosBehaviorFromMap": "5至200字、9图、真实groups/reports",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / report-group",
+      "androidBehaviorFromMap": "第二步说明和最多9张上传证据，真实POST groups/reports。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeReportAndFeedback.swift",
+          "exists": true,
+          "sha256": "e1442b7fd9487b939e87139e9976884896702eee6d11bb7a8a1da25c4ae34a1d"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "addImages",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "previewImage(i)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/group/leave",
+      "iosImplementationFromMap": "NativeGroupController.leave",
+      "iosBehaviorFromMap": "区分群主解散与成员退出、明确确认、真实API",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / GroupDetail 退出/解散",
+      "androidBehaviorFromMap": "真实 groups/:id/leave 或 dismiss，二次确认后回退。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeGroupsViewController.swift",
+          "exists": true,
+          "sha256": "752d100af5798725c403a07407c15677a730d953a6a70d9f541a79caa40e0e79"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": []
+    },
+    {
+      "route": "pages/mine/profile",
+      "iosImplementationFromMap": "NativeProfileController",
+      "iosBehaviorFromMap": "头像上传、昵称/签名编辑、手机、聊天号复制、QR、注销",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / profile",
+      "androidBehaviorFromMap": "真实GET/PATCH me；头像本地裁剪上传；原版头像左置与昵称/签名、电话/聊天号/二维码、注销分组，聊天号真实复制；统一96r导航、40r标题。；value按原flex分配并右对齐，40r箭头，避免签名过早省略。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMineViewController.swift",
+          "exists": true,
+          "sha256": "e2766c6d3bb2c52f2fac535a3c599902722d0530be836ba54682fc144aeb2fee"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goEditBio",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goEditChatId",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goEditNickname",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goQrcode",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onChooseAvatar",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onDeleteAccount",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/account-deletion",
+      "iosImplementationFromMap": "NativeAccountDeletionController + NativeDeletionVerifyController",
+      "iosBehaviorFromMap": "预览阻塞项、短信delete_account、确认文字、真实不可逆请求、独立本机清理",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / Deletion",
+      "androidBehaviorFromMap": "GET deletion-preview 统计/blockers，delete_account SMS，confirmPhrase 精确匹配与二次确认；服务器确认ok才退出。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeAccountDeletionController.swift",
+          "exists": true,
+          "sha256": "8ca6366d41fe4f3af55273d9784be98468fa2c47845b3f25017042c5ca284ed3"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "load",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onBlockerTap(blocker)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onCodeInput",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSendCode",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "understood = !understood",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/edit-nickname",
+      "iosImplementationFromMap": "NativeProfileController.nickname",
+      "iosBehaviorFromMap": "原生字段编辑、PATCH me",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / edit-nickname",
+      "androidBehaviorFromMap": "15 字限制，PATCH /me nickname/bio/avatarFileId 空串保持旧头像；刷新安全缓存不延长 token expiry。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMineViewController.swift",
+          "exists": true,
+          "sha256": "e2766c6d3bb2c52f2fac535a3c599902722d0530be836ba54682fc144aeb2fee"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "clearNickname",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirm",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onNicknameInput",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/edit-chat-id",
+      "iosImplementationFromMap": "NativeProfileController.publicID",
+      "iosBehaviorFromMap": "一次修改确认、PUT me/public-id",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / edit-chat-id",
+      "androidBehaviorFromMap": "PUT me/public-id，唯一/一次性限制由服务端校验。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMineViewController.swift",
+          "exists": true,
+          "sha256": "e2766c6d3bb2c52f2fac535a3c599902722d0530be836ba54682fc144aeb2fee"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "clearChatId",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onChatIdInput",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirm",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/edit-bio",
+      "iosImplementationFromMap": "NativeTextEditorController",
+      "iosBehaviorFromMap": "原生多行编辑、PATCH me bio",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / edit-bio",
+      "androidBehaviorFromMap": "50 字限制，PATCH /me；保留当前昵称/头像。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeBusinessUI.swift",
+          "exists": true,
+          "sha256": "7a853c36fe8884bcb7d4e10f921ba23a7b211e3fb83d559e2d76f5d8335edf9b"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "clearBio",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onBioInput",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirm",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/qrcode",
+      "iosImplementationFromMap": "NativeQRCodeController",
+      "iosBehaviorFromMap": "真实me/qrcode、CoreImage二维码、系统分享",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / QrCard + NativeQr.kt",
+      "androidBehaviorFromMap": "ZXing真实个人payload，原头像昵称/560r QR/导航扫码分享/底部保存分享；生成头像昵称合成PNG，Android10+MediaStore入相册，原生分享。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMineViewController.swift",
+          "exists": true,
+          "sha256": "e2766c6d3bb2c52f2fac535a3c599902722d0530be836ba54682fc144aeb2fee"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goScan",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSave",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onShare",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/favorites",
+      "iosImplementationFromMap": "NativeFavoritesController",
+      "iosBehaviorFromMap": "真实20分页/分类、会话日期分组、缩略图、预览、转发原消息核对、复制/确认删除",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / Favorites + NativeFavoriteContent",
+      "androidBehaviorFromMap": "真实类型分页、专用媒体预览/播放、复制、管理多选删除；SDK全会话分页找到真实原消息才允许完整目标选择器转发。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "closeMenu",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "handleAction('copy', activeMenuItem)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "handleAction('delete', activeMenuItem)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "handleAction('forward', activeMenuItem)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "loadMore",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "selectTab(item.type)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/notifications",
+      "iosImplementationFromMap": "NativeSettingsController.notifications",
+      "iosBehaviorFromMap": "原白底96r行/40r边距、两section黑字/横线、真实本机开关联动前台通知",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / notifications + NativeSettings",
+      "androidBehaviorFromMap": "原56×36r开关、白底黑粗分组/横线/留白；本地偏好持久化；前台声音/震动、后台连接活跃时系统提醒；系统权限入口footer。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onMessageChange",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onNoDisturbChange",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSoundChange",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onVibrationChange",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onVoiceChange",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/chat-settings",
+      "iosImplementationFromMap": "NativeSettingsController.chat",
+      "iosBehaviorFromMap": "原白底4连续行、回车发送、群发/表情、真实全会话清历史",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / chat-settings",
+      "androidBehaviorFromMap": "原白底紧凑行与56×36r开关；回车发送/表情/群发入口，清历史无额外箭头；全SDK会话分页+业务水位清理，锁定并检查待确认outbox。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goEmotions",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goMassAssistant",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onClear",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onEnterChange",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/mass-assistant",
+      "iosImplementationFromMap": "NativeMassAssistantController",
+      "iosBehaviorFromMap": "真实历史atomic own file、复用目标再建新群发、结果核对",
+      "androidImplementationFromMap": "business/MassAssistant.kt / mass-assistant",
+      "androidBehaviorFromMap": "账号环境隔离本机群发历史；编辑/多选/全选删除与再发一条；删除记录不会撤回消息。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMassAndEmotions.swift",
+          "exists": true,
+          "sha256": "c319bf8cde8469ad57f3dd4b6bc9992c69b8e8fda356d5f4781d8ab983de5915"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goCreate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onDelete",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggleEdit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggleSelect(r.id)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/mass-select-contacts",
+      "iosImplementationFromMap": "NativeMassTargetPicker",
+      "iosBehaviorFromMap": "recent/联系人/群/标签、完整分页、搜索、多选",
+      "androidImplementationFromMap": "business/MassAssistant.kt / mass-select",
+      "androidBehaviorFromMap": "联系人/群/最近聊天/标签真实目标，多页取全、搜索、全选与跨类保留；最近群转换业务群ID再去重。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMassAndEmotions.swift",
+          "exists": true,
+          "sha256": "c319bf8cde8469ad57f3dd4b6bc9992c69b8e8fda356d5f4781d8ab983de5915"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "active = 'contacts'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "active = 'groups'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "active = 'recent'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "active = 'tags'",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "loadMore",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirm",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggle(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggleSelectAll",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/mass-compose",
+      "iosImplementationFromMap": "NativeMassComposeController",
+      "iosBehaviorFromMap": "文字/多图/语音/文件、编辑目标、先持久record再发送、取消退出停止",
+      "androidImplementationFromMap": "business/MassAssistant.kt / mass-compose",
+      "androidBehaviorFromMap": "原支持文字/多图片/语音/文件，已补录音和音频文件；一次上传复用、逐目标多图顺序durable发送、标签展开去重、空标签/失败单独计数、不盲重发。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMassAndEmotions.swift",
+          "exists": true,
+          "sha256": "c319bf8cde8469ad57f3dd4b6bc9992c69b8e8fda356d5f4781d8ab983de5915"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goEditTargets",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSend",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/mass-targets",
+      "iosImplementationFromMap": "NativeMassTargetPicker",
+      "iosBehaviorFromMap": "编辑接收对象、真实数据与去重",
+      "androidImplementationFromMap": "business/MassAssistant.kt / mass-targets",
+      "androidBehaviorFromMap": "当前收件人列表与移除、返回编辑；共享群发选择状态。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMassAndEmotions.swift",
+          "exists": true,
+          "sha256": "c319bf8cde8469ad57f3dd4b6bc9992c69b8e8fda356d5f4781d8ab983de5915"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": []
+    },
+    {
+      "route": "pages/mine/privacy",
+      "iosImplementationFromMap": "NativeSettingsController.privacy",
+      "iosBehaviorFromMap": "真实GET/POST privacy、确认后开关状态、黑名单入口",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / privacy",
+      "androidBehaviorFromMap": "GET/POST me/privacy-settings 两项真实持久化；黑名单入口。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "goBlacklist",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onFriendVerify",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onGroupInviteVerify",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/blacklist",
+      "iosImplementationFromMap": "NativeSettingsController.blocked",
+      "iosBehaviorFromMap": "真实blocked列表、解除拉黑",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / blacklist",
+      "androidBehaviorFromMap": "GET contacts/blocked 搜索；DELETE contacts/:id/block 解除与确认。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onPullDownRefresh",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onUnblock(item)",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/security",
+      "iosImplementationFromMap": "NativeSecurityController",
+      "iosBehaviorFromMap": "原手机展示、旧密码眼睛、下一步、verify后新密码两字段和确认、仅闭包内持旧密码",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / Security + BusinessController.verifyOldPassword",
+      "androidBehaviorFromMap": "原手机号+修改密码+旧密码输入与底部下一步；先POST me/password/verify，旧密码仅内存临时持有；无密码直接设置，忘记密码SMS找回。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onNext",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onOldPasswordInput",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showOldPassword = !showOldPassword",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/reset-password",
+      "iosImplementationFromMap": "NativeSecurityController.step1",
+      "iosBehaviorFromMap": "新密码/确认密码、6字匹配、真实PUT me/password、返回清秘密",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / reset-password + BusinessController.changePassword",
+      "androidBehaviorFromMap": "新密码+确认，PUT me/password；change模式必须有已验证旧密码，返回/退出即清临时值。；两项密码均提供独立显示/隐藏按钮。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onConfirm",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onConfirmPasswordInput",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onPasswordInput",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showConfirmPassword = !showConfirmPassword",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "showPassword = !showPassword",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/general",
+      "iosImplementationFromMap": "NativeSettingsController.general",
+      "iosBehaviorFromMap": "7连续白底原行、反馈/关于/图片缓存清理/重连/诊断，语言显示模式维持原提示",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / general",
+      "androidBehaviorFromMap": "原白底/菜单顺序、28r上下内边距/44r行高；真实缓存清理/重连/反馈/关于/调试探针入口；语言显示保持原静态提示。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "closeClearModal",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "closeLineModal",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "confirmClearCache",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "confirmReselectLine",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goAbout",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "goFeedback",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onDebug",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onDisplayMode",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onLanguage",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openClearModal",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openLineModal",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/feedback",
+      "iosImplementationFromMap": "NativeEvidenceFormController.feedback",
+      "iosBehaviorFromMap": "联系方式64、内容200、1图、上传后真实feedbacks",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / feedback + ImageAttachments",
+      "androidBehaviorFromMap": "真实内容/联系方式/最多9张图片上传，POST feedbacks，错误保留可重试。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeReportAndFeedback.swift",
+          "exists": true,
+          "sha256": "e1442b7fd9487b939e87139e9976884896702eee6d11bb7a8a1da25c4ae34a1d"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "chooseImage",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onContentInput",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onSubmit",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "removeImage",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/about",
+      "iosImplementationFromMap": "NativeAboutController",
+      "iosBehaviorFromMap": "原logo/名字/版本/检查更新/协议、GET public/app-release canary只读",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / about",
+      "androidBehaviorFromMap": "恢复160r logo/32r标题间距/版本/检查更新/协议布局；只读GET public/app-release canary；拒绝WGT，APK须核验包名/签名/原生releaseFamily/递增版本再交系统安装。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeSettingsViewController.swift",
+          "exists": true,
+          "sha256": "636d28ba0dc6ac2d1c554721a43618f763f8d361faddd58e1a00aa553153d88c"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onCheckUpdate",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openLegalDocument('agreement')",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "openLegalDocument('privacy')",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/emotions",
+      "iosImplementationFromMap": "NativeEmotionsController",
+      "iosBehaviorFromMap": "真实列表/原GIFWebP字节上传/多选删除/图片预览或SDK发图",
+      "androidImplementationFromMap": "business/NativeBusinessUI.kt / emotions",
+      "androidBehaviorFromMap": "真实表情分页/上传/GIF动画预览、管理多选全选删除及二次确认；聊天自定义表情面板发送/添加/删除/管理已接真实接口。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeMassAndEmotions.swift",
+          "exists": true,
+          "sha256": "c319bf8cde8469ad57f3dd4b6bc9992c69b8e8fda356d5f4781d8ab983de5915"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onDelete",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onEmotionClick(item)",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "onUpload",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "toggleEdit",
+          "runtime": "not_run"
+        }
+      ]
+    },
+    {
+      "route": "pages/mine/debug",
+      "iosImplementationFromMap": "NativeDiagnosticsController",
+      "iosBehaviorFromMap": "SDK版本/状态/会话/Outbox专用诊断，安全摘要、手动核对、真实forward tasks",
+      "androidImplementationFromMap": "business/NativeDebugPage.kt + NativeDiagnostics.kt",
+      "androidBehaviorFromMap": "复用当前已获得IM地址；App/API/File/OpenIM/WS与外站真实只读探测，最近10次API采样柱图、设备/网络/储存/媒体解码/权限/能力和本地库同步状态；STARTED生命周期每10秒采样、离页停止；脱敏PNG真导出/相册与摘要复制。",
+      "files": [
+        {
+          "path": "IM-APP-ios/IMNative/NativeDiagnosticsController.swift",
+          "exists": true,
+          "sha256": "ed87531f60a75ef137472135a64b1712f7ebe7e7d66eaea9d5f5a64547f84578"
+        }
+      ],
+      "sourceReferenceCheck": "files_exist_only",
+      "runtime": "not_run",
+      "visual": "not_run",
+      "knownGaps": [],
+      "interactions": [
+        {
+          "baselineHandler": "onSaveImage",
+          "runtime": "not_run"
+        },
+        {
+          "baselineHandler": "runProbes",
+          "runtime": "not_run"
+        }
+      ]
+    }
+  ]
+}

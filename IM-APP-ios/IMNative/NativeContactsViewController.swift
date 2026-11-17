@@ -18,6 +18,7 @@ final class NativeContactsViewController: NativeBusinessListController {
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() {
         super.viewDidLoad(); tableView.backgroundColor = .white; tableView.separatorStyle = .none; tableView.sectionHeaderTopPadding = 0
+        NativeUITheme.useCustomScrollEdges(tableView)
         search.placeholder = "搜索"; search.backgroundColor = UIColor(hex: 0xf3f4f7); search.layer.cornerRadius = 4; search.clearButtonMode = .whileEditing
         search.addTarget(self, action: #selector(searchChanged), for: .editingChanged)
         let searchIcon = UIImageView(image: UIImage(systemName: "magnifyingglass")); searchIcon.tintColor = UIColor(hex: 0x8a8f9c); searchIcon.contentMode = .center; searchIcon.frame = CGRect(x: 0, y: 0, width: 40, height: 34); search.leftView = searchIcon; search.leftViewMode = .always

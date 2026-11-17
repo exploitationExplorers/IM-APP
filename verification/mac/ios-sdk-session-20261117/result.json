@@ -1,0 +1,78 @@
+{
+  "date": "2026-11-17",
+  "ui_revision": "20261117-ui6",
+  "backend_changed_this_turn": false,
+  "backend_deployed": false,
+  "official_sources": [
+    "https://docs.openim.io/sdk/ios/getting-started/authenticate-and-manage-session",
+    "https://openim-docs-legacy.vercel.app/sdks/api/initialization/login",
+    "https://openim-docs-legacy.vercel.app/sdks/api/initialization/logout",
+    "https://github.com/openimsdk/openim-sdk-core/blob/v3.8.3-patch.15/open_im_sdk/apicb.go",
+    "https://github.com/openimsdk/openim-sdk-core/blob/v3.8.3-patch.15/open_im_sdk/userRelated.go",
+    "https://github.com/openimsdk/tools/blob/v0.0.50-alpha.80/errs/predefine.go"
+  ],
+  "same_account_probe": {
+    "login_http": 200,
+    "login_business_code": 0,
+    "ios": {
+      "platform": 1,
+      "token_http": 200,
+      "token_business_code": 0,
+      "identity_matches": true,
+      "jwt_remaining_seconds_at_probe": 4611611,
+      "parse_http": 200,
+      "parse_code": 1507,
+      "conversations_http": 200,
+      "conversations_code": 1507
+    },
+    "android": {
+      "platform": 2,
+      "token_http": 200,
+      "token_business_code": 0,
+      "identity_matches": true,
+      "parse_http": 200,
+      "parse_code": 0,
+      "parse_platform_matches": true,
+      "parse_identity_matches": true,
+      "conversations_http": 200,
+      "conversations_code": 0,
+      "conversation_count": 764
+    },
+    "same_normalized_api_and_ws": true,
+    "messages_sent": 0,
+    "groups_changed": 0,
+    "limitations": "HTTP 只读对照不等于 SDK 在线登录或 UIKit 验收；先前有临时 500/网络失败，最终对照请求成功。"
+  },
+  "checks": {
+    "simulator_debug_build": "passed",
+    "device_debug_build": "passed",
+    "core_tests": 131,
+    "core_failures": 0,
+    "project_static_checks": 8,
+    "diff_check": "passed"
+  },
+  "built_binaries": {
+    "Debug-iphonesimulator": {
+      "revision": "20261117-ui6",
+      "sha256": "50c152dda7f47fb5dc3ab59314c9795d0e656be9ce84c1f308c779db7ac318e1"
+    },
+    "Debug-iphoneos": {
+      "revision": "20261117-ui6",
+      "sha256": "b57dbf43afe471f0d39ea0af14b7975fb1c9552db8f8f4559b45283986f40d2a"
+    }
+  },
+  "installed_simulator_binaries": [
+    {
+      "revision": "20261117-ui6",
+      "sha256": "2a906b0035ffe6bf8435abbc6f423b9035a2dfacfb40aff5a75da4a7c25ed480"
+    }
+  ],
+  "runtime": {
+    "sdk_login": "not_verified",
+    "ui_parity": "not_verified",
+    "photos_save": "not_verified",
+    "group_scroll": "not_verified",
+    "reason": "CoreSimulatorService 连接被当前环境拒绝，原生桌面控制不可用。安装包 ui6 已核对，无法据此确认正在运行的进程。"
+  },
+  "remaining_blocker": "平台 1 票据被 OpenIM 以 1507 拒绝，需要恢复被服务接受的 iOS 票据；不能据此认定必须修改或部署后端代码。"
+}

@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-17",
+  "ui_revision": "20261117-ui5",
+  "installed_simulator_revision": "20261117-ui4",
+  "online_probe": {
+    "business_login_http": 200,
+    "business_login_code": 0,
+    "im_token_http": 200,
+    "im_token_code": 0,
+    "platform": 1,
+    "identity_matches": true,
+    "jwt_remaining_seconds_at_probe": 4614297,
+    "openim_parse_http": 200,
+    "openim_parse_code": 1507
+  },
+  "checks": {
+    "core_tests": 125,
+    "core_failures": 0,
+    "project_checks": 8,
+    "simulator_debug_build": "passed",
+    "iphone_debug_build": "passed",
+    "server_im_and_service_race_tests": "passed",
+    "server_build_all": "passed",
+    "server_vet_all": "passed",
+    "diff_check": "passed"
+  },
+  "runtime": {
+    "installed_ui5": false,
+    "sdk_login": "not_run",
+    "conversation_ui": "not_run",
+    "contacts_ui": "not_run",
+    "photo_save": "not_run",
+    "group_scroll": "not_run",
+    "reason": "当前执行环境无法连接 CoreSimulatorService，且没有原生桌面控制工具。"
+  },
+  "deployment": {
+    "state": "not_deployed",
+    "database_migrations": false,
+    "global_cache_clear": false,
+    "patch_sha256": "665ada400501390aef68d7f8fbf9f5c4c552816bf62de754ffb5da32740a8842"
+  },
+  "known_limit": "返回的 iOS 票据已被上游判定不存在；还需部署业务服务修复并核对 OpenIM API/WS 指向同一环境，随后验证实际 SDK 登录。"
+}

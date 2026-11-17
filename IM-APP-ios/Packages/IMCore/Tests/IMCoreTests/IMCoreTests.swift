@@ -172,6 +172,24 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    func testAuthenticatedBusinessCodeOneKeepsHTTPAuthStatusForRefresh() async throws {
+        for status in [401, 403] {
+            let api = try client(FakeTransport([.success(HTTPResponse(status: status, body: try fixture("api-error")))]))
+            do {
+                let _: EmptyReply = try await api.businessRequest("contacts", accessToken: "synthetic-access")
+                XCTFail("认证失败不能作为成功返回")
+            } catch let error as APIError { XCTAssertEqual(error, .httpStatus(status)) }
+        }
+    }
+
+    func testRefreshCodeOneKeepsHTTPUnauthorized() async throws {
+        let api = try client(FakeTransport([.success(HTTPResponse(status: 401, body: try fixture("api-error")))]))
+        do {
+            _ = try await api.refreshToken(RefreshTokenRequest(refreshToken: "synthetic-refresh", deviceId: "test"))
+            XCTFail("已撤销 refresh 不能恢复登录")
+        } catch let error as APIError { XCTAssertEqual(error, .httpStatus(401)) }
+    }
+
     func testBusinessMessagesAreBoundedAndDoNotExposeCredentialOrMarkup() async throws {
         let fallback = "请求失败，请稍后重试。"
         let longText = String(repeating: "请稍后重试", count: 40)

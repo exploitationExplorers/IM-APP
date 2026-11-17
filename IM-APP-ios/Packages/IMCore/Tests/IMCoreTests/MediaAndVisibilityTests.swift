@@ -3,7 +3,50 @@ import Foundation
 @testable import IMCore
 
 final class MediaAndVisibilityTests: XCTestCase {
+    func testQuoteKeepsReplySeparateFromQuotedPreviewForBothFieldStyles() throws {
+        let lower = #"{"contentType":114,"quoteElem":{"text":"新的回复","quoteMessage":{"clientMsgID":"quoted","senderNickname":"测试用户","contentType":101,"textElem":{"content":"被引用内容"}}}}"#
+        let upper = #"{"ContentType":114,"QuoteElem":{"Text":"新的回复","QuoteMessage":{"ClientMsgID":"quoted","SenderNickname":"测试用户","ContentType":101,"TextElem":{"Content":"被引用内容"}}}}"#
+        let quote = try XCTUnwrap(MessageQuoteReference(serialized: lower))
+        XCTAssertEqual(quote, MessageQuoteReference(serialized: upper))
+        XCTAssertEqual(quote.replyText, "新的回复"); XCTAssertEqual(quote.summary, "被引用内容")
+        XCTAssertEqual(quote.id, "quoted"); XCTAssertEqual(quote.sender, "测试用户")
+    }
+    func testImageBubbleUsesBothSDKFieldStylesAndAndroidGeometry() {
+        let camel = #"{"pictureElem":{"sourcePicture":{"width":1200,"height":800}}}"#
+        let pascal = #"{"Content":"{\"PictureElem\":{\"SnapshotPicture\":{\"Width\":1200,\"Height\":800}}}"}"#
+        let first = ImageMessageMetadata(serialized: camel)
+        XCTAssertEqual(first, ImageMessageMetadata(serialized: pascal))
+        let landscape = first.fitted(viewportWidth: 390)
+        XCTAssertEqual(landscape.width, 210, accuracy: 0.001)
+        XCTAssertEqual(landscape.height, 140, accuracy: 0.001)
+        let portrait = ImageMessageMetadata(serialized: #"{"pictureElem":{"bigPicture":{"width":400,"height":1200}}}"#).fitted(viewportWidth: 390)
+        XCTAssertEqual(portrait.width, 90, accuracy: 0.001)
+        XCTAssertEqual(portrait.height, 260, accuracy: 0.001)
+        let missing = ImageMessageMetadata(serialized: "{}")
+        XCTAssertFalse(missing.hasDimensions)
+        let loaded = missing.fitted(viewportWidth: 390, loadedWidth: 1200, loadedHeight: 800)
+        XCTAssertEqual(loaded.width, landscape.width); XCTAssertEqual(loaded.height, landscape.height)
+        XCTAssertEqual(missing.fitted(viewportWidth: 390).width, 170)
+        XCTAssertEqual(missing.fitted(viewportWidth: .nan).width, 0)
+        XCTAssertEqual(missing.fitted(viewportWidth: 390, loadedWidth: .infinity, loadedHeight: 1).height, 160)
+    }
     private var policy: MediaURLPolicy { MediaURLPolicy(businessBaseURL: URL(string: "https://business.invalid/api/v1/")!) }
+    func testAvatarCandidatesRetainOriginalWhenThumbnailFails() {
+        let raw = "https://oss-business.whs188.xin/im-app-production/business/avatars/a.png"
+        let candidates = policy.imageCandidates(raw, variant: .avatar, fallbacks: [raw])
+        XCTAssertEqual(candidates, [policy.image(raw, variant: .avatar), raw])
+        XCTAssertNotEqual(policy.cacheIdentity(candidates[0]), policy.cacheIdentity(candidates[1]))
+        XCTAssertEqual(policy.imageCandidates("/object/avatar.png", variant: .avatar), ["https://business.invalid/object/avatar.png"])
+    }
+    func testImageCandidatesPreserveUnknownSignedURLsAndRejectInsecureFallbacks() {
+        let signed = "https://unknown.invalid/a%2Fb.png?X-Amz-Signature=a%2Bb&opaque=1+2"
+        XCTAssertEqual(policy.imageCandidates(signed, variant: .avatar, fallbacks: [signed, "http://unknown.invalid/a.png", "", "file:///tmp/a.png"]), [signed])
+        let capability = "https://business.invalid/api/v1/public/oss-media?key=avatar.png&token=private-capability"
+        let candidates = policy.imageCandidates(capability, variant: .avatar)
+        XCTAssertEqual(candidates.count, 2)
+        XCTAssertEqual(candidates.last, capability)
+        XCTAssertTrue(candidates.allSatisfy { $0.contains("token=private-capability") })
+    }
     func testVideoPlaybackRecoversOnlyKnownLegacySignedChatObject() {
         let raw = "https://oss-chat-test.xn--jprz53bj9s.com/oss-test/chat/a%20b/movie.mp4?OSSAccessKeyId=k&Signature=expired%2Bsignature&Expires=1"
         XCTAssertEqual(policy.playback(raw), "https://business.invalid/object/a%20b/movie.mp4")

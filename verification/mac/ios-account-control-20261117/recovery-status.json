@@ -1,0 +1,24 @@
+{
+  "permission": "approved_by_user",
+  "target": "failing_test_account",
+  "platform": 1,
+  "allowed": [
+    "refresh_iOS_ticket",
+    "update_corresponding_business_ticket_cache"
+  ],
+  "not_authorized": [
+    "deployment",
+    "service_restart",
+    "other_account_mutation"
+  ],
+  "state": "scoped_ticket_and_cache_repaired_public_apis_verified",
+  "production_modified": true,
+  "scoped_cache_entries_updated": 1,
+  "public_verified_at_utc": "2026-11-17T06:39:32Z",
+  "native_sdk_connection_verified": false,
+  "native_ui_verified": false,
+  "deployment_performed": false,
+  "service_restart_performed": false,
+  "management_session_signed_out": true,
+  "report": "../ios-ticket-recovery-20261117/README.md"
+}

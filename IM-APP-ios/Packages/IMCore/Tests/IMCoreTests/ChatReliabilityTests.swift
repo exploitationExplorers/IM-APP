@@ -103,12 +103,64 @@ final class ChatReliabilityTests: XCTestCase {
         XCTAssertEqual(ConversationOrderPolicy.orderedIDs(unpinned, previous: ["pinned", "new-message", "old-A"]), ["new-message", "old-A", "pinned"])
     }
 
+    func testIncrementalMessageMergeMatchesFullSnapshotForOutOfOrderEvents() {
+        func fullMerge(_ old: [ChatTextItem], _ incoming: [ChatTextItem]) -> [ChatTextItem] {
+            var values = Dictionary(old.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+            for item in incoming where !item.id.isEmpty {
+                if let prior = values[item.id] {
+                    if prior.status == 4 && item.status != 4 { continue }
+                    if prior.status == 2 && item.status != 2 && item.status != 4 { continue }
+                }
+                values[item.id] = item
+            }
+            return values.values.sorted { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp }
+        }
+        var seed: UInt64 = 42
+        func next(_ bound: Int) -> Int {
+            seed = seed &* 6364136223846793005 &+ 1
+            return Int((seed >> 32) % UInt64(bound))
+        }
+        func events(_ count: Int) -> [ChatTextItem] {
+            (0..<count).map { _ in
+                ChatTextItem(id: "m-\(next(300))", senderID: "owner", text: "version-\(next(10))", timestamp: Int64(next(100)), status: next(4) + 1)
+            }
+        }
+        var actual = events(500), expected = actual
+        for _ in 0..<80 {
+            let incoming = events(next(40))
+            actual = ChatTextItem.merge(actual, incoming)
+            expected = fullMerge(expected, incoming)
+            XCTAssertEqual(actual, expected)
+        }
+        XCTAssertEqual(ChatTextItem.merge([], []), [])
+        XCTAssertEqual(ChatTextItem.merge(actual, []), actual)
+    }
     func testHistoryPrefetchRequiresUpwardInteractionAndAllowsDecelerationBeforeTop() {
         XCTAssertTrue(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 300, viewportHeight: 600, movingTowardHistory: true, interacting: true, canLoad: true))
         XCTAssertFalse(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 300, viewportHeight: 600, movingTowardHistory: true, interacting: false, canLoad: true))
         XCTAssertFalse(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 300, viewportHeight: 600, movingTowardHistory: false, interacting: true, canLoad: true))
         XCTAssertFalse(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 300, viewportHeight: 600, movingTowardHistory: true, interacting: true, canLoad: false))
         XCTAssertFalse(HistoryViewportPolicy.shouldPrefetch(distanceFromTop: 500, viewportHeight: 600, movingTowardHistory: true, interacting: true, canLoad: true))
+    }
+
+    func testLateInitialHistoryAndIncomingMessagesDoNotInterruptReading() {
+        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: true, userInteracted: false, appended: false, nearBottom: false, interacting: false))
+        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: true, userInteracted: true, appended: false, nearBottom: false, interacting: true))
+        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, nearBottom: true, interacting: true))
+        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, nearBottom: false, interacting: false))
+        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, nearBottom: true, interacting: false))
+        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: true, initial: false, userInteracted: true, appended: false, nearBottom: false, interacting: false))
+    }
+
+    func testHistoryPrependAndMediaResizeKeepAnchorIncludingContinuedDrag() {
+        // 原锚点位于 y=500，视口 offset=520（锚点露出前20点）；插入更早消息增高900点。
+        XCTAssertEqual(HistoryViewportPolicy.restoredOffset(anchorMinY: 1400, distanceFromTop: -20, gestureDelta: 0, minimum: 0, maximum: 3000), 1420)
+        XCTAssertEqual(HistoryViewportPolicy.restoredOffset(anchorMinY: 1400, distanceFromTop: -20, gestureDelta: -80, minimum: 0, maximum: 3000), 1340)
+        // 图片缩短80点时同样保持锚点，而不是恢复更新前的绝对 offset。
+        XCTAssertEqual(HistoryViewportPolicy.restoredOffset(anchorMinY: 420, distanceFromTop: -20, gestureDelta: 0, minimum: 0, maximum: 3000), 440)
+        XCTAssertEqual(HistoryViewportPolicy.restoredOffset(anchorMinY: 0, distanceFromTop: 60, gestureDelta: 0, minimum: 0, maximum: 500), 0)
+        XCTAssertEqual(HistoryViewportPolicy.restoredOffset(anchorMinY: 900, distanceFromTop: -20, gestureDelta: 0, minimum: 0, maximum: 500), 500)
+        XCTAssertEqual(HistoryViewportPolicy.restoredOffset(anchorMinY: 0, distanceFromTop: 0, gestureDelta: 0, minimum: -10, maximum: -100), -10)
     }
 
     func testUnreadBadgeCapsCountsAndHidesZero() {

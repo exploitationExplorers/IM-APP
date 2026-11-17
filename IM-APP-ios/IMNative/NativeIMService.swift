@@ -84,7 +84,8 @@ final class NativeIMService {
     let account: BusinessAccountSession
     private let configuration: APIConfiguration
     private let api: APIClient
-    lazy var business = NativeBusinessContext(account: account, configuration: configuration, ownerIsActive: { [weak self] in self?.isActive == true && self?.needsAuthentication == false })
+    // SDK 认证失败不代表业务 owner 已退出；通讯录、资料及业务刷新仍可使用。
+    lazy var business = NativeBusinessContext(account: account, configuration: configuration, ownerIsActive: { [weak self] in self?.isActive == true })
     private let bridge = NativeOpenIMBridge()
     private let coordinator = SessionCoordinator()
     private var ticket: SessionTicket?
@@ -100,7 +101,22 @@ final class NativeIMService {
     private var emptyConversationTaskID: UUID?
     private var pending: [UUID: NativeReply] = [:]
     private var observers: [UUID: () -> Void] = [:]
+    private var publishTask: Task<Void, Never>?
     private var initialized = false
+    private var bootstrapToken: IMToken?
+    private var retryingConnection = false
+    private var credentialRecoveryBudget = IMCredentialRecoveryBudget()
+    private var credentialRecoveryTask: Task<Void, Never>?
+    private var recoveryLoginInProgress = false
+    private var recoveryLoginRejected = false
+    private var automaticLogoutExpected = false
+    private var credentialRecoveryStage = "idle"
+    private var rejectedCredentialReused = false
+    private var sdkStopWarning: String?
+    private var conversationReadRetryBudget = ConversationReadRetryBudget()
+    private var conversationReadRetryTask: Task<Void, Never>?
+    private(set) var lastSDKReadFailure: OpenIMReadFailure?
+    private var conversationSnapshotFallbacks = 0
     private(set) var loggedIn = false
     private(set) var needsAuthentication = false
     private var stopped = false
@@ -133,7 +149,7 @@ final class NativeIMService {
     private var conversationSnapshotMilliseconds = 0
     private var bufferedStartupEventCount = 0
     var conversationStartupDiagnosticLines: [String] {
-        ["conversationSnapshotReady=\(conversationStartup.ready)", "conversationStartupBufferedRows=\(bufferedStartupEventCount)", "conversationFullSnapshotRows=\(conversationSnapshotCount)", "conversationSnapshotMs=\(conversationSnapshotMilliseconds)", "conversationAutoReloadAttempts=\(emptyConversationBudget.attempts)"]
+        ["conversationSnapshotReady=\(conversationStartup.ready)", "conversationStartupBufferedRows=\(bufferedStartupEventCount)", "conversationFullSnapshotRows=\(conversationSnapshotCount)", "conversationSnapshotMs=\(conversationSnapshotMilliseconds)", "conversationAutoReloadAttempts=\(emptyConversationBudget.attempts)", "sdkLoginStatus=\(initialized ? bridge.loginStatus() : 0)", "sdkLoginPending=\(bridge.loginPending())", "sdkConnected=\(sdkConnected)", "imPlatform=1", "imCredentialRecoveryAttempts=\(credentialRecoveryBudget.attempts)", "imCredentialRecoveryRunning=\(credentialRecoveryTask != nil)", "imCredentialRecoveryStage=\(credentialRecoveryStage)", "imRejectedCredentialReused=\(rejectedCredentialReused)", "imSessionKicked=\(credentialRecoveryBudget.kicked)", "conversationReadRetryAttempts=\(conversationReadRetryBudget.attempts)", "conversationSnapshotFallbacks=\(conversationSnapshotFallbacks)", "lastSDKReadOperation=\(lastSDKReadFailure?.operation ?? "none")", "lastSDKReadCode=\(lastSDKReadFailure.map { String($0.code) } ?? "none")", "lastSDKReadReason=\(lastSDKReadFailure?.reason.rawValue ?? "none")"]
     }
     private var outbox: PersistentOutbox?
     private(set) var outboxEntries: [OutboxEntry] = []
@@ -158,6 +174,8 @@ final class NativeIMService {
     private var completedHistoryPages: [String: [String: NativeHistoryPage]] = [:]
     private var historyRequests: [String: (conversation: NativeConversation, cursor: String)] = [:]
     private var historyVersions: [String: UUID] = [:]
+    private(set) var historyReloadRevisions: [String: UInt64] = [:]
+    private let historyPageSize = 20
     private var retentionRefreshTask: Task<Void, Never>?
     private var pinSyncTime: [String: Int64] = [:]
 
@@ -166,7 +184,7 @@ final class NativeIMService {
     }
 
     var isActive: Bool { !stopped && Self.current === self }
-    var canSend: Bool { isActive && loggedIn && localReadable && !needsAuthentication && UIApplication.shared.isProtectedDataAvailable }
+    var canSend: Bool { isActive && loggedIn && sdkConnected && localReadable && !needsAuthentication && UIApplication.shared.isProtectedDataAvailable }
     func canSend(to conversation: NativeConversation) -> Bool { canSend && (conversation.type != 3 || groupTargets[conversation.id]?.canChat == true) }
     func sendRestriction(_ conversation: NativeConversation) -> String? { conversation.type == 3 && groupTargets[conversation.id]?.canChat == false ? groupTargets[conversation.id]?.denyReason ?? "当前禁止在此群发言。" : nil }
     func loadAllConversations() async throws -> [NativeConversation] {
@@ -182,7 +200,15 @@ final class NativeIMService {
         let id = UUID(); observers[id] = update; return id
     }
     func removeObserver(_ id: UUID) { observers[id] = nil }
-    private func publish() { for update in Array(observers.values) { update() } }
+    private func publish() {
+        guard publishTask == nil else { return }
+        publishTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 16_000_000) } catch { return }
+            guard let self = self else { return }
+            self.publishTask = nil
+            for update in Array(self.observers.values) { update() }
+        }
+    }
     private func require(_ expected: UUID) throws {
         try Task.checkCancellation()
         guard isActive && generation == expected else { throw NativeChatError.inactive }
@@ -192,7 +218,10 @@ final class NativeIMService {
         guard !Self.switching else { lastError = "另一次聊天登录仍在结束，请返回后重试。"; publish(); return }
         Self.switching = true
         defer { Self.switching = false }
-        if let previous = Self.current, previous !== self { await previous.stop() }
+        if let previous = Self.current, previous !== self {
+            await previous.stop()
+            guard !previous.initialized else { lastError = previous.sdkStopWarning ?? "上一聊天会话尚未退出，请完全关闭 App 后重开；聊天记录已保留。"; publish(); return }
+        }
         guard !Task.isCancelled, !stopped else { return }
         Self.current = self
         let current = generation
@@ -200,18 +229,27 @@ final class NativeIMService {
             let created = try await coordinator.beginAuthentication(ownerKey: configuration.baseURL.absoluteString + "|" + account.profile.id)
             try require(current)
             ticket = created
-            // 每个本次业务会话只签发一次；资源未就绪、断线和前后台切换都不循环申请。
+            // 普通重试复用票据；过期或 SDK 明确拒绝时才有界恢复一次。
             let saved = try await NativeSessionVault.shared.load()
-            let cached = saved?.authentication.refreshToken == account.authentication.refreshToken
-                ? saved?.imCredential.flatMap { try? $0.validated(businessUserID: account.profile.id, configuration: configuration) } : nil
+            let credential = saved?.authentication.refreshToken == business.refreshToken ? saved?.imCredential : nil
+            let cached = credential.flatMap { try? $0.validForLogin(businessUserID: account.profile.id, configuration: configuration) }
             let token: IMToken
             if let cached = cached { token = cached }
             else {
-                token = try await api.imToken(accessToken: account.authentication.accessToken)
-                try require(current)
-                try await NativeSessionVault.shared.saveIMCredential(IMBootstrapCredential(businessUserID: account.profile.id, apiBaseURL: configuration.baseURL.absoluteString, token: token), expectedRefreshToken: account.authentication.refreshToken)
+                do {
+                    let issued = try await business.imToken()
+                    try require(current)
+                    try await saveIMCredential(issued)
+                    token = issued
+                } catch {
+                    guard let failure = error as? APIError, failure == .transport || failure == .timedOut,
+                          let credential = credential else { throw error }
+                    // 与 Android 一样，临时断网仍可尝试同身份本机开库，不能据此恢复发送权限。
+                    token = try credential.validated(businessUserID: account.profile.id, configuration: configuration)
+                }
             }
             try require(current)
+            bootstrapToken = token
             imUserID = token.userId
             _ = await coordinator.authenticationSucceeded(created, businessUserID: account.profile.id, imUserID: token.userId)
             _ = await coordinator.updateLocalStore(.opening, for: created)
@@ -253,7 +291,22 @@ final class NativeIMService {
             installLifecycle()
             _ = try await call { bridge.login(userID: token.userId, token: token.token, completion: $0) }
             try require(current)
-            loggedIn = true
+            await resumeAfterSDKLogin()
+        } catch {
+            guard isActive, generation == current else { return }
+            lastSDKReadFailure = OpenIMReadFailure(error: error)
+            lastError = lastSDKReadFailure?.message ?? error.localizedDescription
+            if lastSDKReadFailure?.reason == .kicked { handleCredentialFailure(.kicked) }
+            else if lastSDKReadFailure?.reason == .authentication { handleCredentialFailure(.invalid) }
+            if let ticket = ticket { _ = await coordinator.authenticationFailed(ticket, reason: "SDK 登录未就绪") }
+            publish()
+        }
+    }
+
+    private func resumeAfterSDKLogin() async {
+        guard !needsAuthentication else { return }
+        loggedIn = true
+        if retentionTask == nil {
             retentionTask = Task { [weak self] in
                 while !Task.isCancelled {
                     do { try await Task.sleep(nanoseconds: 30_000_000_000) } catch { return }
@@ -262,15 +315,169 @@ final class NativeIMService {
                     catch { if self.isActive { self.lastError = "群消息可见性暂未更新，保留已确认水位。"; self.publish() } }
                 }
             }
-            storeLabel = "正在验证本地可读"
-            publish()
-            await loadConversations(reset: true)
-        } catch {
-            guard isActive, generation == current else { return }
-            lastError = error.localizedDescription
-            if let ticket = ticket { _ = await coordinator.authenticationFailed(ticket, reason: "SDK 登录未就绪") }
-            publish()
         }
+        storeLabel = "正在验证本地可读"; lastError = nil; publish()
+        await loadConversations(reset: true)
+    }
+
+    /// 普通读取重试复用票据，认证失效只走独立的有界恢复。
+    func retryConversations() async {
+        guard isActive, !retryingConnection, !Self.switching else { return }
+        guard !needsAuthentication else {
+            lastError = credentialRecoveryTask != nil ? "正在恢复聊天认证，请稍候。" : (credentialRecoveryBudget.kicked ? "账号已在其他设备登录，请重新登录。" : credentialFailureMessage())
+            publish(); return
+        }
+        guard initialized, let token = bootstrapToken else { lastError = "聊天 SDK 初始化未完成，请返回登录页重试。"; publish(); return }
+        retryingConnection = true
+        defer { retryingConnection = false; publish() }
+        conversationReadRetryTask?.cancel(); conversationReadRetryTask = nil; conversationReadRetryBudget.reset()
+        let current = generation
+        switch bridge.loginStatus() {
+        case 3:
+            if loggedIn { await loadConversations(reset: true) }
+            else { await resumeAfterSDKLogin() }
+        case 2:
+            lastError = "聊天 SDK 正在登录，请稍后再试。"
+        default:
+            guard !bridge.loginPending() else { lastError = "聊天 SDK 正在完成上一次登录，请稍后再试。"; return }
+            loggedIn = false
+            do {
+                _ = try await call { bridge.login(userID: token.userId, token: token.token, completion: $0) }
+                try require(current)
+                await resumeAfterSDKLogin()
+            } catch {
+                guard isActive, generation == current else { return }
+                lastSDKReadFailure = OpenIMReadFailure(error: error)
+                lastError = lastSDKReadFailure?.message ?? error.localizedDescription
+                if lastSDKReadFailure?.reason == .kicked { handleCredentialFailure(.kicked) }
+                else if lastSDKReadFailure?.reason == .authentication { handleCredentialFailure(.invalid) }
+            }
+        }
+    }
+
+    private func saveIMCredential(_ token: IMToken) async throws {
+        let credential = IMBootstrapCredential(businessUserID: account.profile.id, apiBaseURL: configuration.baseURL.absoluteString, token: token)
+        let expectedRefresh = business.refreshToken
+        do { try await NativeSessionVault.shared.saveIMCredential(credential, expectedRefreshToken: expectedRefresh) }
+        catch is CancellationError {
+            // 只重试同 owner 的并发业务轮换，不重复申请 IM Token。
+            guard isActive, business.refreshToken != expectedRefresh else { throw CancellationError() }
+            try await NativeSessionVault.shared.saveIMCredential(credential, expectedRefreshToken: business.refreshToken)
+        }
+    }
+
+    private func handleCredentialFailure(_ failure: IMCredentialRecoveryBudget.Failure) {
+        needsAuthentication = true
+        loggedIn = false; sdkConnected = false
+        automaticLogoutExpected = true
+        retentionTask?.cancel(); retentionTask = nil
+        conversationReadRetryTask?.cancel(); conversationReadRetryTask = nil
+        syncTimeout?.cancel(); syncTimeout = nil
+        cancelEmptyConversationReload()
+        let canRecover = credentialRecoveryBudget.reserve(failure)
+        if recoveryLoginInProgress { recoveryLoginRejected = true }
+        // 互踢或恢复中再次拒绝也要撤销当前票据，不能等下次启动继续复用。
+        if let token = bootstrapToken?.token {
+            let refresh = business.refreshToken
+            Task {
+                try? await NativeSessionVault.shared.clearIMCredential(expectedUserID: account.profile.id,
+                    apiBaseURL: configuration.baseURL.absoluteString, expectedRefreshToken: refresh, token: token)
+            }
+        }
+        if failure == .kicked {
+            credentialRecoveryTask?.cancel()
+            connection = "账号已在其他设备登录"
+            lastError = connection + "，请重新登录。"
+        } else if credentialRecoveryTask != nil {
+            publish(); return
+        } else {
+            connection = "聊天凭据失效"
+            lastError = canRecover ? "正在恢复聊天认证…" : credentialFailureMessage()
+        }
+        guard credentialRecoveryTask == nil else { publish(); return }
+        let current = generation, invalidToken = bootstrapToken?.token, refresh = business.refreshToken
+        credentialRecoveryTask = Task { [weak self] in
+            guard let self = self else { return }
+            defer { self.recoveryLoginInProgress = false; self.credentialRecoveryTask = nil; self.publish() }
+            do {
+                if let invalidToken = invalidToken {
+                    try await NativeSessionVault.shared.clearIMCredential(expectedUserID: self.account.profile.id,
+                        apiBaseURL: self.configuration.baseURL.absoluteString, expectedRefreshToken: refresh, token: invalidToken)
+                }
+                guard canRecover else { return }
+                // 启动登录及手动重试先释放 SDK 单例；等待本身不触发新请求。
+                self.credentialRecoveryStage = "waitingForLoginCallback"
+                let waitingSince = ProcessInfo.processInfo.systemUptime
+                while Self.switching || self.retryingConnection {
+                    guard ProcessInfo.processInfo.systemUptime - waitingSince < 30 else { throw IMCredentialRecoveryError.sdkBusy }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                    try self.require(current)
+                }
+                try self.require(current)
+                guard !self.credentialRecoveryBudget.kicked else { return }
+                self.credentialRecoveryStage = "waitingForAutomaticLogout"
+                try await OpenIMSessionBarrier.waitForLogout(status: {
+                    try self.require(current)
+                    return self.bridge.loginPending() ? 2 : self.bridge.loginStatus()
+                })
+                self.automaticLogoutExpected = false
+                self.credentialRecoveryStage = "requestingCredential"
+                let token = try await self.business.imToken()
+                try self.require(current)
+                guard !self.credentialRecoveryBudget.kicked else { return }
+                if let previous = self.bootstrapToken {
+                    guard token.userId == previous.userId, token.apiAddr == previous.apiAddr, token.wsAddr == previous.wsAddr else { throw APIError.invalidCredentials }
+                }
+                self.rejectedCredentialReused = token.token == invalidToken
+                try IMCredentialRecoveryError.requireReplacement(token.token, rejected: invalidToken)
+                try await self.saveIMCredential(token)
+                try self.require(current)
+                guard !self.credentialRecoveryBudget.kicked else { return }
+                let ticket = try await self.coordinator.beginAuthentication(ownerKey: self.configuration.baseURL.absoluteString + "|" + self.account.profile.id)
+                self.ticket = ticket
+                self.bootstrapToken = token; self.loggedIn = false
+                self.recoveryLoginRejected = false; self.recoveryLoginInProgress = true
+                self.credentialRecoveryStage = "loggingIn"
+                _ = try await self.call { self.bridge.login(userID: token.userId, token: token.token, completion: $0) }
+                try self.require(current)
+                guard !self.credentialRecoveryBudget.kicked, !self.recoveryLoginRejected else { throw APIError.invalidCredentials }
+                // login 成功只表示本机开库完成；在线恢复必须等连接成功事件。
+                self.credentialRecoveryStage = "waitingForConnection"
+                let connectionSince = ProcessInfo.processInfo.systemUptime
+                while !self.sdkConnected {
+                    guard !self.credentialRecoveryBudget.kicked, !self.recoveryLoginRejected else { throw APIError.invalidCredentials }
+                    guard ProcessInfo.processInfo.systemUptime - connectionSince < 25 else { throw IMCredentialRecoveryError.connectionNotReady }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                    try self.require(current)
+                }
+                _ = await self.coordinator.authenticationSucceeded(ticket, businessUserID: self.account.profile.id, imUserID: token.userId)
+                try self.require(current)
+                guard !self.credentialRecoveryBudget.kicked, !self.recoveryLoginRejected else { throw APIError.invalidCredentials }
+                self.recoveryLoginInProgress = false
+                self.credentialRecoveryStage = "ready"
+                self.needsAuthentication = false; self.connection = "聊天认证已恢复"
+                self.lastSDKReadFailure = nil
+                await self.resumeAfterSDKLogin()
+            } catch {
+                guard self.isActive, self.generation == current, !Task.isCancelled else { return }
+                self.lastSDKReadFailure = OpenIMReadFailure(error: error) ?? self.lastSDKReadFailure
+                if error as? IMCredentialRecoveryError == .connectionNotReady { self.credentialRecoveryStage = "waitingForConnection" }
+                else { self.credentialRecoveryStage = self.rejectedCredentialReused ? "credentialUnchanged" : "failed" }
+                if self.credentialRecoveryBudget.kicked { self.lastError = "账号已在其他设备登录，请重新登录。" }
+                else if let recoveryError = error as? IMCredentialRecoveryError { self.lastError = recoveryError.localizedDescription + self.credentialCodeSuffix }
+                else { self.lastError = self.credentialFailureMessage() }
+            }
+        }
+        publish()
+    }
+
+    private var credentialCodeSuffix: String {
+        guard let failure = lastSDKReadFailure, failure.code != 0 else { return "" }
+        return "（SDK \(failure.code)）"
+    }
+    private func credentialFailureMessage() -> String {
+        if rejectedCredentialReused { return IMCredentialRecoveryError.unchangedCredential.localizedDescription + credentialCodeSuffix }
+        return "聊天认证尚未恢复，请查看调试资讯；聊天记录已保留。" + credentialCodeSuffix
     }
 
     /// 所有异步 SDK 请求有界等待；超时只停止等待，不假定网络操作没有执行。
@@ -308,6 +515,8 @@ final class NativeIMService {
     private func performStop() async {
         guard !stopped else { return }
         stopped = true; generation = UUID(); loggedIn = false
+        credentialRecoveryTask?.cancel(); credentialRecoveryTask = nil
+        bootstrapToken = nil; conversationReadRetryTask?.cancel(); conversationReadRetryTask = nil
         syncTimeout?.cancel(); syncTimeout = nil; cancelEmptyConversationReload(); sdkConnected = false; monitor.cancel()
         retentionTask?.cancel(); retentionTask = nil
         for token in notifications { NotificationCenter.default.removeObserver(token) }
@@ -315,6 +524,7 @@ final class NativeIMService {
         for reply in pending.values { reply.finish(.failure(NativeChatError.inactive)) }
         pending.removeAll()
         queuedEvents.removeAll()
+        publishTask?.cancel(); publishTask = nil
         reconciliationTasks.values.forEach { $0.cancel() }; reconciliationTasks.removeAll()
         forwardTasks.values.forEach { $0.cancel() }; forwardTasks.removeAll()
         visibilityRefreshTasks.values.forEach { $0.cancel() }; visibilityRefreshTasks.removeAll()
@@ -322,26 +532,57 @@ final class NativeIMService {
         completedHistoryPages.removeAll(); historyRequests.removeAll(); historyVersions.removeAll()
         retentionRefreshTask?.cancel(); retentionRefreshTask = nil
         forwardNotices.removeAll()
-        // unInitSDK 同步释放旧核心，再允许新owner初始化；不等待迟到的旧logout回调去unInit新核心。
+        // 固定版 unInitSDK 不关闭已登录会话；必须先等实际 login/logout 回调释放旧核心。
         if initialized, Self.current === self {
-            bridge.shutdown()
-            initialized = false
+            await finishSDKSession()
         }
         // 等待此前已入队的旧outbox写操作结束，新owner才能读取同一账号文件。
         if let outbox = outbox { _ = await outbox.snapshot() }
-        if Self.current === self { Self.current = nil }
+        if Self.current === self, !initialized { Self.current = nil }
         await coordinator.logout()
         await NativeImageCache.shared.invalidateSession()
         messages.removeAll(); conversations.removeAll(); conversationRefreshSeen = nil; pendingConversationReset = false; conversationStartup = ConversationStartupGate(); outboxEntries.removeAll(); outbox = nil
-        lastError = "已退出聊天会话"
+        lastError = sdkStopWarning ?? "已退出聊天会话"
         publish(); observers.removeAll()
+    }
+
+    private func finishSDKSession() async {
+        do {
+            let started = ProcessInfo.processInfo.systemUptime
+            while bridge.loginPending() {
+                guard ProcessInfo.processInfo.systemUptime - started < 25 else { throw IMCredentialRecoveryError.sdkBusy }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+            if automaticLogoutExpected {
+                try await OpenIMSessionBarrier.waitForLogout(status: { self.bridge.loginStatus() })
+            } else if bridge.loginStatus() == 3 {
+                // 已停止 App owner，不能走 require(isActive) 的普通请求包装。
+                _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[String: Any], Error>) in
+                    let reply = NativeReply(continuation)
+                    reply.timeout = Task { @MainActor in
+                        do { try await Task.sleep(nanoseconds: 25_000_000_000) } catch { return }
+                        reply.finish(.failure(IMCredentialRecoveryError.sdkBusy))
+                    }
+                    bridge.logout { result, error in
+                        Task { @MainActor in
+                            if let error = error { reply.finish(.failure(error)) }
+                            else { reply.finish(.success(result ?? [:])) }
+                        }
+                    }
+                }
+            }
+            guard bridge.shutdown() else { throw IMCredentialRecoveryError.sdkBusy }
+            initialized = false
+        } catch {
+            sdkStopWarning = "上一聊天会话退出未完成，请完全关闭 App 后重开；聊天记录已保留。"
+            business.logoutWarning = sdkStopWarning
+        }
     }
 
     func logout() async {
         if let stopTask = stopTask { await stopTask.value; return }
         // stop与logout共用一个task；新owner.start必须等完整旧logout/unInit结束。
         let task = Task { @MainActor in
-            let shouldLogout = self.isActive && self.initialized && self.loggedIn
             self.needsAuthentication = true; self.loggedIn = false
             let refresh = self.business.refreshToken
             var warnings: [String] = []
@@ -350,7 +591,6 @@ final class NativeIMService {
             do { let _: EmptyReply = try await self.api.businessRequest("auth/logout", method: "POST", body: ["refreshToken": .string(refresh)], accessToken: self.business.accessToken) }
             catch { warnings.append("服务端会话撤销未确认：" + error.localizedDescription) }
             self.business.logoutWarning = warnings.isEmpty ? nil : warnings.joined(separator: "；")
-            if shouldLogout { _ = try? await self.call { self.bridge.logout(completion: $0) } }
             await self.performStop()
         }
         stopTask = task
@@ -388,10 +628,21 @@ final class NativeIMService {
         do {
             let offset = fullSnapshot ? 0 : conversationOffset
             let result: [String: Any]
-            if fullSnapshot { result = try await call { bridge.allConversations(completion: $0) } }
+            if fullSnapshot {
+                let rows = try await ConversationSnapshotRead.read(pageSize: 40, all: {
+                    let snapshot = try await self.call { self.bridge.allConversations(completion: $0) }
+                    return snapshot["items"] as? [[String: Any]] ?? []
+                }, page: { offset, count in
+                    let page = try await self.call { self.bridge.conversations(offset: offset, count: count, completion: $0) }
+                    return page["items"] as? [[String: Any]] ?? []
+                }, identity: { $0["id"] as? String ?? "" }, onFallback: { failure in
+                    self.lastSDKReadFailure = failure; self.conversationSnapshotFallbacks += 1
+                })
+                result = ["items": rows]
+            }
             else { result = try await call { bridge.conversations(offset: offset, count: 40, completion: $0) } }
             try require(current)
-            guard conversationRequest == requestID else { return }
+            guard conversationRequest == requestID, !needsAuthentication else { return }
             let rows = (result["items"] as? [[String: Any]] ?? []).compactMap(NativeConversation.init)
             let localChanges = ConversationRefreshPolicy.changesSince(start: queryStart, current: conversations, identity: { $0.id })
             let resolved: [NativeConversation]
@@ -414,15 +665,39 @@ final class NativeIMService {
                 conversationSnapshotMilliseconds = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
             }
             localReadable = true; storeLabel = "本地可读"; lastError = nil
+            conversationReadRetryTask?.cancel(); conversationReadRetryTask = nil; conversationReadRetryBudget.reset()
             if let ticket = ticket { _ = await coordinator.updateLocalStore(.readable, for: ticket) }
             await advanceSyncIfReadable()
             scheduleRetentionRefresh()
         } catch {
             guard isActive, generation == current else { return }
-            lastError = error.localizedDescription
-            cancelEmptyConversationReload()
-            // resource not ready 不是同步完成，也不触发取token/删库/循环登录。
+            guard !needsAuthentication else { return }
+            let failure = OpenIMReadFailure(error: error)
+            lastSDKReadFailure = failure
+            lastError = failure?.message ?? error.localizedDescription
+            if failure?.reason == .notLoggedIn { loggedIn = false }
+            if failure?.reason == .kicked { handleCredentialFailure(.kicked) }
+            else if failure?.reason == .authentication { handleCredentialFailure(.invalid) }
+            cancelEmptyConversationReload(clearBudget: false)
+            if let failure = failure, failure.canRetryRead, !scheduleConversationReadRetry(failure) {
+                lastError = "聊天数据暂不可读，自动重试已停止，请点击状态重试（SDK \(failure.code)）。"
+            }
         }
+    }
+
+    @discardableResult
+    private func scheduleConversationReadRetry(_ failure: OpenIMReadFailure) -> Bool {
+        guard isActive, loggedIn, !needsAuthentication else { return false }
+        if conversationReadRetryTask != nil { return true }
+        guard let delay = conversationReadRetryBudget.reserve(failure: failure, now: ProcessInfo.processInfo.systemUptime) else { return false }
+        let current = generation
+        conversationReadRetryTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
+            guard let self = self, self.isActive, self.generation == current, !self.needsAuthentication else { return }
+            self.conversationReadRetryTask = nil
+            await self.loadConversations(reset: true)
+        }
+        return true
     }
 
     private func cancelEmptyConversationReload(clearBudget: Bool = true) {
@@ -490,7 +765,7 @@ final class NativeIMService {
         let position = cursorTime.map { Int($0 / 1000) + 1 } ?? (Int(Date().timeIntervalSince1970) + 1)
         let anchor = localHistoryCursors[conversation.id]?[cursor] ?? (position: position, page: 1, exhausted: false)
         if anchor.exhausted { return NativeHistoryPage(messages: [], isEnd: false, lastMinSeq: 0, isLocalPreview: true, localExhausted: true) }
-        let result = try await call { bridge.localHistory(conversation: conversation.id, position: anchor.position, page: anchor.page, count: 40, completion: $0) }
+        let result = try await call { bridge.localHistory(conversation: conversation.id, position: anchor.position, page: anchor.page, count: historyPageSize, completion: $0) }
         let items = (result["items"] as? [[String: Any]] ?? []).compactMap(Self.item)
         let exhausted = result["localExhausted"] as? Bool ?? false
         try require(current)
@@ -519,7 +794,7 @@ final class NativeIMService {
             guard let self = self else { return }
             defer { if self.generation == current, self.historyVersions[conversation.id] == version { self.historyRefreshTasks[key] = nil } }
             do {
-                let result = try await self.call { self.bridge.history(conversation: conversation.id, cursor: cursor, count: 40, completion: $0) }
+                let result = try await self.call { self.bridge.history(conversation: conversation.id, cursor: cursor, count: self.historyPageSize, completion: $0) }
                 try self.require(current)
                 guard self.historyVersions[conversation.id] == version else { return }
                 let items = (result["items"] as? [[String: Any]] ?? []).compactMap(Self.item)
@@ -830,8 +1105,16 @@ final class NativeIMService {
         let current = generation
         _ = try await call { bridge.markRead(conversation.id, completion: $0) }
         try require(current)
-        await loadConversations(reset: true)
+        let before = conversations.first { $0.id == conversation.id }
+        let result = try await call { bridge.conversation(target: conversation.target, type: conversation.type, completion: $0) }
         try require(current)
+        // 只刷新已读房间；查询期间新到的会话事件优先，不能被旧查询覆盖。
+        if conversations.first(where: { $0.id == conversation.id }) == before,
+           let updated = NativeConversation(result), updated.id == conversation.id {
+            if loadingConversations { conversationChangesDuringRequest.append(updated) }
+            if conversationStartup.receive([updated]) { mergeConversations([updated]) }
+            publish()
+        }
         if conversation.type == 3 { try await business.change("im/group-read-cursors/report", body: ["conversationId": .string(conversation.id)]) }
     }
     func recall(_ item: ChatTextItem, in conversation: NativeConversation, reason: String? = nil) async throws {
@@ -1174,16 +1457,27 @@ final class NativeIMService {
         case "connecting": sdkConnected = false; connection = "连接中"; cancelEmptyConversationReload(clearBudget: false)
         case "connected":
             sdkConnected = true; connection = "已连接"
+            if needsAuthentication, credentialRecoveryStage == "waitingForConnection", credentialRecoveryTask == nil,
+               !credentialRecoveryBudget.kicked, !recoveryLoginRejected, bridge.loginStatus() == 3, let ticket = ticket {
+                _ = await coordinator.authenticationSucceeded(ticket, businessUserID: account.profile.id, imUserID: imUserID)
+                guard isActive, generation == eventGeneration, !credentialRecoveryBudget.kicked,
+                      !recoveryLoginRejected, credentialRecoveryStage == "waitingForConnection" else { return }
+                needsAuthentication = false; credentialRecoveryStage = "ready"; lastSDKReadFailure = nil
+            }
+            if !loggedIn, !needsAuthentication, !Self.switching, initialized, bridge.loginStatus() == 3 {
+                await resumeAfterSDKLogin()
+                guard isActive, generation == eventGeneration else { return }
+            }
             scheduleEmptyConversationReload()
             for request in Array(historyRequests.values) { scheduleHistoryRefresh(request.conversation, cursor: request.cursor) }
             for id in Set(outboxEntries.filter { $0.state == .uncertain }.map(\.conversationID)) { await reconcile(conversationID: id); guard isActive, generation == eventGeneration else { return } }
         case "connectFailed": sdkConnected = false; connection = "连接中断，等待 SDK 重连"; cancelEmptyConversationReload()
         case "kicked", "tokenExpired", "tokenInvalid":
-            needsAuthentication = true
-            cancelEmptyConversationReload()
-            connection = name == "kicked" ? "账号已在其他设备登录" : "聊天凭据失效"
-            lastError = connection + "，请退出后重新登录。"
-            // 由用户重新登录触发新 token；当前绝不重登循环。
+            let code = (payload["code"] as? NSNumber)?.intValue ?? 0
+            let reason = name == "kicked" ? "kicked" : "authentication"
+            lastSDKReadFailure = OpenIMReadFailure(error: NSError(domain: "NativeOpenIM", code: code,
+                userInfo: ["NativeIMReason": reason, "NativeIMOperation": "connection"]))
+            handleCredentialFailure(name == "kicked" ? .kicked : (name == "tokenExpired" ? .expired : .invalid))
         case "syncStart":
             cancelEmptyConversationReload()
             emptyConversationBudget.begin(now: ProcessInfo.processInfo.systemUptime)
@@ -1200,6 +1494,7 @@ final class NativeIMService {
                 await self.finishSync(.timedOut)
             }
         case "syncFinish":
+            resetEmptyHistoryAfterSync()
             await finishSync(.completed)
             for request in Array(historyRequests.values) { scheduleHistoryRefresh(request.conversation, cursor: request.cursor) }
             if loggedIn { await loadConversations(reset: true) }
@@ -1252,6 +1547,21 @@ final class NativeIMService {
         default: break
         }
         publish()
+    }
+
+    private func resetEmptyHistoryAfterSync() {
+        let emptyIDs = Set(historyRequests.values.filter {
+            $0.cursor.isEmpty && (messages[$0.conversation.id] ?? []).isEmpty
+        }.map { $0.conversation.id })
+        for id in emptyIDs {
+            // 首登空库的结束页在同步后失效；已显示历史与可见边界均保留。
+            historyVersions[id] = UUID()
+            localHistoryCursors[id] = nil; completedHistoryPages[id] = nil
+            for key in Array(historyRequests.keys) where historyRequests[key]?.conversation.id == id {
+                historyRefreshTasks[key]?.cancel(); historyRefreshTasks[key] = nil
+            }
+            historyReloadRevisions[id, default: 0] &+= 1
+        }
     }
 
     private func advanceSyncIfReadable() async {

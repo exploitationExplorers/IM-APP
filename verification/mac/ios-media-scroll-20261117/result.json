@@ -1,0 +1,71 @@
+{
+  "recorded_at": "2026-11-17T10:01:41+08:00",
+  "ui_revision": "20261117-ui3",
+  "branch": "codex/native-bootstrap",
+  "base_commit": "ac5bdbf1f32c725d48ae5385dc7819157633dc9b",
+  "source_sha256": {
+    "IM-APP-ios/IMNative/NativeMedia.swift": "985176fb0e1f625ab0601d2f968269ca3fe1d1e115d578279faa1e350dd5dd46",
+    "IM-APP-ios/IMNative/NativeConversationViewController.swift": "7a33187238073c80f8bc0473e233e28bf90ac14f5df71cfa5a60f6ea2be79d75",
+    "IM-APP-ios/IMNative/SampleConversationViewController.swift": "c8f7366f264b3c4c65b3ece61f4513e4d09f4e102ebc8b66b5169623ee4ccdbc",
+    "IM-APP-ios/IMNative/NativeUITheme.swift": "0b215d4a1bd254b670c70dfd3f5ac8470de252b63fe92853d7e9402a4db2c060",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/PhotoLibraryResource.swift": "62eda7aa2755448c75fca2891a1ed36313b2ccd45e8a65c35054800c9d4c5b89",
+    "IM-APP-ios/Packages/IMCore/Sources/IMCore/ChatReliability.swift": "478c790fb3d48623ffe233ad4991a36bd66a1fedd25d408bf4fc50d09e50d8d0",
+    "IM-APP-ios/Packages/IMCore/Tests/IMCoreTests/PhotoLibraryResourceTests.swift": "aa22e79f7504978f9e26bbff4a604d0783748bd8b7e840d2c31409c7a4e06ba1",
+    "IM-APP-ios/Packages/IMCore/Tests/IMCoreTests/ChatReliabilityTests.swift": "c125a210f9d1596cafcf73e97bb33ab5fd0d9d8019e6d9b7c03e9e24861e8d9b",
+    "IM-APP-ios/Packages/IMCore/Tests/IMCoreTests/Fixtures/photo-static.webp": "bf71be747bb6923c48926bf86feafbb2769299029e81eaa4b2e75dff63680d8c",
+    "IM-APP-ios/Packages/IMCore/Tests/IMCoreTests/Fixtures/photo-animated.webp": "a01adfc9c923db7833719a7c60c9df31aae1da7ff9ef0c6be65fb08ac187610b"
+  },
+  "checks": {
+    "core_tests": 107,
+    "core_failures": 0,
+    "static_checks": 8,
+    "simulator_build": "passed_unsigned_debug",
+    "device_build": "passed_unsigned_debug",
+    "simulator_install": "not_run",
+    "photos_save_runtime": "not_run",
+    "group_history_scroll_runtime": "not_run"
+  },
+  "built_apps": {
+    "iphonesimulator": {
+      "app_path": "/Users/Admin1/Developer/IM-APP-github/.native-cache/DerivedData/Build/Products/Debug-iphonesimulator/IMNative.app",
+      "bundle_id": "com.im.nativebootstrap.staging",
+      "version": "0.3.0",
+      "build": "4",
+      "binary_sha256": "1771327de0594aeed7e30591c8357673e65fbb59ae9bab94e7b50723808f02cf",
+      "binary_modified_at": "2026-11-17T09:58:28+08:00",
+      "ui_markers": [
+        "20261117-ui3"
+      ]
+    },
+    "iphoneos": {
+      "app_path": "/Users/Admin1/Developer/IM-APP-github/.native-cache/DerivedData/Build/Products/Debug-iphoneos/IMNative.app",
+      "bundle_id": "com.im.nativebootstrap.staging",
+      "version": "0.3.0",
+      "build": "4",
+      "binary_sha256": "e98b8a1ec77df6f41f47718c16f1eddabb532a1fdba93b966dbe96b52d9e61a1",
+      "binary_modified_at": "2026-11-17T09:59:23+08:00",
+      "ui_markers": [
+        "20261117-ui3"
+      ]
+    }
+  },
+  "installed_apps": [
+    {
+      "app_path": "/Users/Admin1/Library/Developer/CoreSimulator/Devices/90CF78E7-95A7-4F45-86B7-75B654364C29/data/Containers/Bundle/Application/223C321F-6277-4366-899E-8569C5B6F188/IMNative.app",
+      "bundle_id": "com.im.nativebootstrap.staging",
+      "version": "0.3.0",
+      "build": "4",
+      "binary_sha256": "cf2bb454fee3aa827ad0978f12e8a8c3c0d785df60e2a65a8061e79c6635ee59",
+      "binary_modified_at": "2026-11-16T23:02:24+08:00",
+      "ui_markers": [
+        "20261116-ui2"
+      ]
+    }
+  ],
+  "fixtures": "Synthetic 12x8 WebP images generated with Pillow; no private chat data.",
+  "limitations": [
+    "No native application control in current session; no runtime verification of Photos or scrolling.",
+    "The precise original image format and file have not been captured; 3302 cause is not proven by the screenshot alone.",
+    "No real messages sent or group operations performed."
+  ]
+}
