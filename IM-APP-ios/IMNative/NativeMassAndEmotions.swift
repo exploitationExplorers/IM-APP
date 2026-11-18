@@ -138,6 +138,8 @@ final class NativeMassComposeController: UIViewController, PHPickerViewControlle
     private let composer = UIView(); private let inputBox = UIView(); private let mic = NativeUITheme.imageButton("uni_icon_mic", accessibility: "语音"); private let emoji = UIButton(type: .system); private let plus = UIButton(type: .system); private let sendButton = UIButton(type: .system); private let hold = UIButton(type: .system)
     private let tools = UIView(); private var toolButtons: [UIButton] = []; private var emojiPanel: NativeEmojiPanel!; private var panel = 0; private var voiceMode = false; private var holdActive = false; private var holdID = UUID()
     private var recorder: AVAudioRecorder?; private var recordingURL: URL?; private var recordingDuration = 0; private var sending = false; private var sendTask: Task<Void, Never>?; private var mediaTask: Task<Void, Never>?; private var mediaOperation = UUID(); private var composerHeight: NSLayoutConstraint!
+    private let audioSession = NativeAudioSessionLease()
+    private var audioTask: Task<Void, Never>?
     init(service: NativeIMService, targets: [NativeMassRecord.Target], text: String, attachments: [NativeMassAttachment], onSend: @escaping ([NativeMassRecord.Target], String, [NativeMassAttachment]) async throws -> String) { self.service = service; self.targets = targets; self.attachments = attachments; self.onSend = onSend; super.init(nibName: nil, bundle: nil); title = "群发"; self.text.text = text }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() {
@@ -194,15 +196,30 @@ final class NativeMassComposeController: UIViewController, PHPickerViewControlle
     @objc private func file() { guard !sending else { return }; let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true); picker.delegate = self; present(picker, animated: true) }
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { guard !sending, let url = urls.first else { return }; let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }; do { attachments = [.init(kind: 105, path: try service.importMediaFile(url).path, filename: url.lastPathComponent, duration: 0)]; text.text = ""; render(); confirmSend("确认发送文件“\(url.lastPathComponent)”吗？") } catch { showNativeNotice(error.localizedDescription) } }
     @objc private func beginHold() {
-        guard !sending, recorder == nil else { return }; holdActive = true; let id = UUID(); holdID = id
+        guard !sending, recorder == nil, audioTask == nil else { return }; holdActive = true; recordingDuration = 0; let id = UUID(); holdID = id
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] allowed in Task { @MainActor in
             guard let self = self, self.holdActive, self.holdID == id, self.navigationController?.topViewController === self else { return }; guard allowed else { self.showNativeNotice("请允许麦克风权限。"); return }
-            do { let audio = AVAudioSession.sharedInstance(); try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker]); try audio.setActive(true); let file = try self.service.createMediaFile(data: Data(), extension: "m4a"); let recorder = try AVAudioRecorder(url: file, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1]); recorder.delegate = self; guard recorder.record(forDuration: 60) else { throw APIError.invalidResponse }; self.recorder = recorder; self.recordingURL = file; self.hold.setTitle("松开发送（最长 60 秒）", for: .normal) } catch { self.showNativeNotice(error.localizedDescription) }
+            guard self.audioTask == nil else { return }
+            self.audioTask = Task { [weak self] in
+                guard let self = self else { return }; defer { self.audioTask = nil }
+                do {
+                    try await self.audioSession.activate(.recording)
+                    try Task.checkCancellation()
+                    guard self.holdActive, self.holdID == id, self.navigationController?.topViewController === self else { throw CancellationError() }
+                    let file = try self.service.createMediaFile(data: Data(), extension: "m4a")
+                    let recorder = try AVAudioRecorder(url: file, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1]); recorder.delegate = self
+                    guard recorder.record(forDuration: 60) else { throw APIError.invalidResponse }
+                    self.recorder = recorder; self.recordingURL = file; self.hold.setTitle("松开发送（最长 60 秒）", for: .normal)
+                } catch {
+                    self.audioSession.deactivate()
+                    if !(error is CancellationError), !Task.isCancelled, self.navigationController?.topViewController === self { self.holdActive = false; self.showNativeNotice(error.localizedDescription) }
+                }
+            }
         } }
     }
-    @objc private func endHold() { holdActive = false; guard let recorder = recorder else { return }; recordingDuration = max(1, Int(ceil(recorder.currentTime))); recorder.stop(); finishVoice(success: true) }
+    @objc private func endHold() { holdActive = false; holdID = UUID(); audioTask?.cancel(); guard let recorder = recorder else { audioSession.deactivate(); return }; recordingDuration = max(1, Int(ceil(recorder.currentTime))); recorder.stop(); finishVoice(success: true) }
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) { if self.recorder === recorder { if recordingDuration == 0 { recordingDuration = 60 }; finishVoice(success: flag) } }
-    private func finishVoice(success: Bool) { guard let file = recordingURL else { return }; self.recorder = nil; recordingURL = nil; holdActive = false; hold.setTitle("按住说话", for: .normal); try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation); guard success, navigationController?.topViewController === self else { return }; attachments = [.init(kind: 103, path: file.path, filename: "语音.m4a", duration: max(1, recordingDuration))]; recordingDuration = 0; text.text = ""; render(); confirmSend("确认发送语音吗？") }
+    private func finishVoice(success: Bool) { guard let file = recordingURL else { return }; self.recorder = nil; recordingURL = nil; holdActive = false; hold.setTitle("按住说话", for: .normal); audioSession.deactivate(); guard success, navigationController?.topViewController === self else { return }; attachments = [.init(kind: 103, path: file.path, filename: "语音.m4a", duration: max(1, recordingDuration))]; recordingDuration = 0; text.text = ""; render(); confirmSend("确认发送语音吗？") }
     private func confirmSend(_ message: String) {
         guard navigationController?.topViewController === self, !sending else { return }
         if let picker = presentedViewController as? PHPickerViewController { picker.dismiss(animated: true) { [weak self] in self?.confirmSend(message) }; return }
@@ -217,7 +234,7 @@ final class NativeMassComposeController: UIViewController, PHPickerViewControlle
         let payload = value.isEmpty ? attachments : []; sending = true; render(); text.resignFirstResponder(); let targets = self.targets
         sendTask = Task { [weak self] in guard let self = self else { return }; defer { self.sendTask = nil }; do { let message = try await self.onSend(targets, value, payload); try Task.checkCancellation(); guard self.navigationController?.topViewController === self else { return }; let previous = self.navigationController?.viewControllers.dropLast().last; self.navigationController?.popViewController(animated: true); previous?.showNativeNotice(message) } catch { guard !Task.isCancelled, self.navigationController?.topViewController === self else { return }; self.showNativeNotice(error.localizedDescription + " 请返回群发记录核对结果；重新发送需要新建群发。"); self.attachmentLabel.text = "请返回群发记录核对结果" } }
     }
-    override func viewWillDisappear(_ animated: Bool) { super.viewWillDisappear(animated); holdActive = false; holdID = UUID(); recordingURL = nil; recorder?.delegate = nil; recorder?.stop(); recorder = nil; emojiPanel?.setVisible(false); try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation); if isMovingFromParent || navigationController?.isBeingDismissed == true || isBeingDismissed { sendTask?.cancel(); mediaTask?.cancel() } }
+    override func viewWillDisappear(_ animated: Bool) { super.viewWillDisappear(animated); holdActive = false; holdID = UUID(); audioTask?.cancel(); recordingURL = nil; recorder?.delegate = nil; recorder?.stop(); recorder = nil; emojiPanel?.setVisible(false); audioSession.deactivate(); if isMovingFromParent || navigationController?.isBeingDismissed == true || isBeingDismissed { sendTask?.cancel(); mediaTask?.cancel() } }
 }
 
 struct NativeSticker: Decodable { let id: String; let fileId: String?; let url: String; let createdAt: String }

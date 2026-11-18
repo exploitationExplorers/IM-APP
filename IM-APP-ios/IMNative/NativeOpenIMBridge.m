@@ -57,7 +57,7 @@ static NSString *MessageText(OIMMessageInfo *message) {
         case OIMMessageContentTypeFile: text = @"[文件]"; break;
         case OIMMessageContentTypeCard: text = [NSString stringWithFormat:@"[名片] %@", message.cardElem.nickname ?: @""]; break;
         case OIMMessageContentTypeMerge: text = message.mergeElem.title ?: @"聊天记录"; break;
-        case OIMMessageContentTypeQuote: text = [NSString stringWithFormat:@"%@\n引用：%@", message.quoteElem.text ?: @"", message.quoteElem.quoteMessage.textElem.content ?: @"[消息]"]; break;
+        case OIMMessageContentTypeQuote: text = message.quoteElem.text.length ? message.quoteElem.text : @"[引用消息]"; break;
         case OIMMessageContentTypeAt: text = [message.atTextElem.mj_keyValues[@"text"] isKindOfClass:NSString.class] ? message.atTextElem.mj_keyValues[@"text"] : @"[@消息]"; break;
         case OIMMessageContentTypeAdvancedText: text = message.advancedTextElem.text ?: @""; break;
         case OIMMessageContentTypeRevoke: text = @"[消息已撤回]"; break;

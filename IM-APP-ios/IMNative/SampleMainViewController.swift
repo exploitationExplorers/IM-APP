@@ -1,32 +1,13 @@
 import UIKit
 import IMCore
 
-private final class NativeUnreadBadge: UILabel {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = UIColor(hex: 0xef4444); textColor = .white; textAlignment = .center
-        clipsToBounds = true; adjustsFontSizeToFitWidth = true; minimumScaleFactor = 0.7; isHidden = true
-        isAccessibilityElement = true
-    }
-    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
-    func setCount(_ count: Int, muted: Bool = false) {
-        text = muted ? nil : ConversationUnreadBadge.text(count); isHidden = count <= 0
-        accessibilityLabel = count > 0 ? "\(count) 条未读消息" : nil
-        setNeedsLayout()
-    }
-    override func layoutSubviews() {
-        super.layoutSubviews(); layer.cornerRadius = bounds.height / 2
-        font = .systemFont(ofSize: bounds.height == 16 ? 10 : bounds.height * 0.62)
-    }
-}
-
 private final class ConversationRowCell: UITableViewCell {
     let avatar = NativeRemoteImageView()
     let name = UILabel()
     let preview = UILabel()
     let time = UILabel()
     let line = UIView()
-    private let unread = NativeUnreadBadge()
+    private let unread = NativeCountBadge()
     var unreadCount = 0 { didSet { unread.setCount(unreadCount, muted: muted); setNeedsLayout() } }
     var muted = false { didSet { unread.setCount(unreadCount, muted: muted); setNeedsLayout() } }
 
@@ -96,11 +77,12 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     private var tabs: [UIButton] = []
     private var tabImages: [UIImageView] = []
     private var tabLabels: [UILabel] = []
-    private let chatUnread = NativeUnreadBadge()
+    private let chatUnread = NativeCountBadge()
     private var currentTab = 1
     private var unreadOnly = false
     private var latestPreview = "这是本机样例会话，不会发送到服务器。"
     private let conversation: LocalSampleConversation?
+    private lazy var pendingJoins = chat.map { NativePendingJoinRequests(context: $0.business) }
     private var chatObserver: UUID?
     private let conversationRefresh = UIRefreshControl()
     private let loadMore = UIButton(type: .system)
@@ -142,6 +124,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: animated)
         if let chat = chat, chatObserver == nil { chatObserver = chat.observe { [weak self] in self?.refreshTab() } }
+        pendingJoins?.start { [weak self] in self?.refreshTab() }
         guard let conversation = conversation else { refreshTab(); return }
         Task { [weak self] in
             let messages = await conversation.snapshot()
@@ -155,6 +138,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         super.viewWillDisappear(animated)
         if let chatObserver = chatObserver { chat?.removeObserver(chatObserver) }
         chatObserver = nil
+        pendingJoins?.stop()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -268,7 +252,8 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             tabLabels[index].frame = CGRect(x: 0, y: r(66), width: width / 3, height: r(32))
             tabLabels[index].font = .systemFont(ofSize: r(24))
         }
-        chatUnread.frame = CGRect(x: width / 6 + r(10), y: r(3), width: r(50), height: r(32))
+        chatUnread.frame = CGRect(x: width / 6 + r(10), y: r(3),
+                                  width: r(chatUnread.displaysDot ? 12 : 50), height: r(chatUnread.displaysDot ? 12 : 32))
         table.frame = CGRect(x: 0, y: filter.frame.maxY + r(8), width: width, height: max(0, tabbar.frame.minY - filter.frame.maxY - r(8)))
         table.rowHeight = r(144) + r(1)
         empty.frame = CGRect(x: r(40), y: searchBox.frame.maxY + r(100), width: width - r(80), height: r(140))
@@ -313,7 +298,6 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     }
 
     private func refreshTab() {
-        setNeedsStatusBarAppearanceUpdate()
         let names = ["contacts", "chat", "mine"]
         let titles = ["通讯录", "聊天", "我的"]
         titleLabel.text = titles[currentTab]
@@ -321,8 +305,17 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             tabImages[index].image = NativeUITheme.image("uni_tab_" + names[index] + (currentTab == index ? "_active" : ""))
             tabLabels[index].textColor = currentTab == index ? NativeUITheme.primary : NativeUITheme.body
         }
-        let unreadTotal = chat?.conversations.reduce(0) { total, item in min(100, total + min(100, max(0, self.chat?.conversationUnread(item) ?? 0))) } ?? 0
-        chatUnread.setCount(unreadTotal)
+        let conversations = chat?.conversations ?? []
+        func total(muted: Bool) -> Int {
+            conversations.filter { $0.muted == muted }.reduce(0) {
+                min(100, $0 + min(100, max(0, self.chat?.conversationUnread($1) ?? 0)))
+            }
+        }
+        let badge = HomeChatBadge(unmutedUnread: total(muted: false), mutedUnread: total(muted: true),
+                                  pendingJoinRequests: pendingJoins?.monitor.count ?? 0)
+        chatUnread.setCount(badge.count, muted: badge.mutedOnly)
+        chatUnread.accessibilityLabel = "聊天未读及待审核入群申请"
+        chatUnread.accessibilityValue = badge.mutedOnly ? "免打扰消息" : ConversationUnreadBadge.text(badge.count)
         let chat = currentTab == 1
         searchBox.isHidden = !chat
         filter.isHidden = !chat
@@ -356,6 +349,11 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         guard next != renderedConversations else { return }
         let previous = renderedConversations
         renderedConversations = next
+        // 隐藏或尚未入窗时只更新数据，避免为不可见列表强制计算可见行布局。
+        guard table.window != nil, !table.isHidden else {
+            table.reloadData()
+            return
+        }
         if previous.map({ $0.conversation.id }) == next.map({ $0.conversation.id }) {
             let changed = next.indices.filter { next[$0] != previous[$0] }.map { IndexPath(row: $0, section: 0) }
             UIView.performWithoutAnimation { table.reloadRows(at: changed, with: .none) }
@@ -377,7 +375,16 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         }
     }
 
-    @objc private func selectTab(_ sender: UIButton) { currentTab = sender.tag; refreshTab(); if currentTab == 0 { contactsPage?.reloadContent() } }
+    @objc private func selectTab(_ sender: UIButton) {
+        let previousStatusBarStyle = preferredStatusBarStyle
+        currentTab = sender.tag
+        // SDK 通知、搜索和未读刷新不改变状态栏；只在切页确实改变样式时请求更新。
+        if preferredStatusBarStyle != previousStatusBarStyle {
+            setNeedsStatusBarAppearanceUpdate()
+        }
+        refreshTab()
+        if currentTab == 0 { contactsPage?.reloadContent() }
+    }
     @objc private func searchChanged() { refreshTab() }
     func textFieldShouldReturn(_ textField: UITextField) -> Bool { textField.resignFirstResponder(); if let chat = chat, !(textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { navigationController?.pushViewController(NativeSearchController(service: chat, initialQuery: textField.text ?? ""), animated: true) }; return true }
 

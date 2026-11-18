@@ -6,7 +6,7 @@ enum NativeUITheme {
     static let body = UIColor(hex: 0x212121)
     static let secondary = UIColor(hex: 0x636e86)
     static let sampleNotice = "本地样例 · 不联网 · 不送达"
-    static let uiRevision = "20261117-ui6"
+    static let uiRevision = "20261117-ui8"
 
     /// Vue 的 rpx 按实际窗口逻辑宽度换算，px 保持逻辑尺寸。
     static func rpx(_ value: CGFloat, width: CGFloat) -> CGFloat { value * width / 750 }

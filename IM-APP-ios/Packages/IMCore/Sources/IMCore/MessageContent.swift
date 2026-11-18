@@ -85,7 +85,12 @@ public struct ForwardMessageSnapshot: Codable, Equatable, Sendable {
         let keys = [101: "textElem", 102: "pictureElem", 103: "soundElem", 104: "videoElem", 105: "fileElem", 106: "atTextElem", 107: "mergeElem", 108: "cardElem", 109: "locationElem", 110: "customElem", 114: "quoteElem", 115: "faceElem", 117: "advancedTextElem"]
         guard let key = keys[type] else { throw APIError.business(code: -1, message: "该消息不支持转发。") }
         var element = root[key] as? [String: Any]
-        if element?.isEmpty != false, let text = root["content"] as? String, let data = text.data(using: .utf8) { element = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]).map(normalize) }
+        if element?.isEmpty != false, let stored = MessagePayload.object(root["content"]).map(normalize) {
+            element = stored[key] as? [String: Any] ?? stored
+        }
+        if element == nil, type == 101, let text = root["content"] as? String {
+            element = ["content": text]
+        }
         guard var content = element else { throw APIError.invalidResponse }
         // 服务端任务永远不读取本机路径；媒体必须已经有服务端地址。
         for key in ["sourcePath", "soundPath", "videoPath", "snapshotPath", "filePath"] where content[key] != nil { content[key] = "" }
@@ -133,6 +138,23 @@ public struct ForwardMessageSnapshot: Codable, Equatable, Sendable {
         let data = try JSONSerialization.data(withJSONObject: content)
         return Self(contentType: type, content: try JSONDecoder().decode(JSONValue.self, from: data))
     }
+    /// 服务端只返回受保护的内容快照；保留原消息 envelope 与稳定 clientMsgID。
+    public func applying(to serialized: String) throws -> String {
+        guard let raw = MessagePayload.object(serialized) else { throw APIError.invalidResponse }
+        var root = Self.normalize(raw)
+        guard (root["contentType"] as? NSNumber)?.intValue == contentType else { throw APIError.invalidResponse }
+        let keys = [106: "atTextElem", 114: "quoteElem"]
+        guard let key = keys[contentType], case .object = content else { throw APIError.invalidResponse }
+        let encoded = try JSONEncoder().encode(content)
+        root[key] = try JSONSerialization.jsonObject(with: encoded)
+        root["content"] = String(decoding: encoded, as: UTF8.self)
+        let updated = String(decoding: try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys]), as: UTF8.self)
+        guard let before = MessageQuoteReference(serialized: serialized),
+              let after = MessageQuoteReference(serialized: updated),
+              before.id == after.id, before.replyText == after.replyText else { throw APIError.invalidResponse }
+        return updated
+    }
+
     private static func normalize(_ raw: [String: Any]) -> [String: Any] {
         let aliases = ["SourceURL": "sourceUrl", "sourceURL": "sourceUrl", "VideoURL": "videoUrl", "videoURL": "videoUrl", "SnapshotURL": "snapshotUrl", "snapshotURL": "snapshotUrl", "URL": "url", "Url": "url", "UUID": "uuid"]
         var result: [String: Any] = [:]
@@ -232,31 +254,7 @@ public struct BusinessMessageCard: Equatable, Sendable {
     public var actionTitle: String { kind == .invitation ? "申请加入" : "查看申请" }
 }
 
-public struct MessageQuoteReference: Equatable, Sendable {
-    public let id: String; public let sender: String; public let summary: String; public let image: String
-    public let replyText: String
-    public init?(serialized: String) {
-        guard let root = MessagePayload.object(serialized) else { return nil }
-        let type = MessagePayload.number(root, "contentType"); guard [106, 114].contains(type) else { return nil }
-        let element = MessagePayload.object(MessagePayload.value(root, type == 106 ? "atTextElem" : "quoteElem")) ?? MessagePayload.object(MessagePayload.value(root, "content")) ?? [:]
-        replyText = MessagePayload.text(element, "text")
-        guard let quoted = MessagePayload.object(MessagePayload.value(element, "quoteMessage")) else { return nil }
-        let id = MessagePayload.text(quoted, "clientMsgID"); guard !id.isEmpty else { return nil }; self.id = id
-        sender = MessagePayload.text(quoted, "senderNickname")
-        let quotedType = MessagePayload.number(quoted, "contentType")
-        let content = MessagePayload.object(MessagePayload.value(quoted, "content")) ?? [:]
-        let text = MessagePayload.object(MessagePayload.value(quoted, "textElem")) ?? content
-        let rawText = MessagePayload.text(text, "content")
-        let previews = [102: "[图片]", 103: "[语音]", 104: "[视频]", 105: "[文件]", 107: "[聊天记录]", 108: "[名片]"]
-        summary = previews[quotedType] ?? (!rawText.isEmpty ? rawText : (quotedType == 101 ? MessagePayload.text(quoted, "content") : "[消息]"))
-        let picture = MessagePayload.object(MessagePayload.value(quoted, "pictureElem")) ?? (quotedType == 102 ? content : [:])
-        let source = MessagePayload.object(MessagePayload.value(picture, "sourcePicture")) ?? [:]
-        let video = MessagePayload.object(MessagePayload.value(quoted, "videoElem")) ?? (quotedType == 104 ? content : [:])
-        image = quotedType == 102 ? MessagePayload.text(source, "url") : MessagePayload.text(video, "snapshotUrl")
-    }
-}
-
-private enum MessagePayload {
+enum MessagePayload {
     static func object(_ raw: Any?) -> [String: Any]? { if let value = raw as? [String: Any] { return value }; guard let text = raw as? String, let data = text.data(using: .utf8) else { return nil }; return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] }
     static func value(_ data: [String: Any], _ key: String) -> Any? { let aliases = ["clientMsgID": ["ClientMsgID", "clientMsgId"], "groupId": ["GroupID", "groupID"], "requestId": ["RequestID"], "url": ["URL", "Url"], "snapshotUrl": ["SnapshotURL", "snapshotURL"]]; for candidate in [key, key.prefix(1).uppercased() + key.dropFirst()] + (aliases[key] ?? []) { if let value = data[candidate] { return value } }; return nil }
     static func text(_ data: [String: Any], _ key: String) -> String { (value(data, key) as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }

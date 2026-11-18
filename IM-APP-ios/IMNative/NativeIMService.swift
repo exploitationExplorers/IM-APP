@@ -124,8 +124,7 @@ final class NativeIMService {
     private var inFlightIDs = Set<String>()
     private var sendAttempts: [String: UUID] = [:]
     private var reconciliationTasks: [String: Task<Void, Never>] = [:]
-    private var forwardTasks: [String: Task<Void, Never>] = [:]
-    private var forwardNotices: [String: String] = [:]
+    private var forwardDelivery: NativeForwardDeliveryCoordinator?
     private var imagePaths: [String: String] = [:]
     private var generation = UUID()
     private var localReadable = false
@@ -277,7 +276,7 @@ final class NativeIMService {
             if let storageDirectory = storageDirectory {
                 visibilityLedger = try GroupVisibilityLedger(file: storageDirectory.appendingPathComponent("outbox/visibility.json"), owner: namespace)
                 visibility = await visibilityLedger!.snapshot()
-                groupVisibilityReady = Set(visibility.floors.keys.filter { visibility.hasConfirmedBoundary($0) })
+                groupVisibilityReady = visibility.confirmedBoundaryIDs
             }
             outboxEntries = await storage.1.snapshot()
             try require(current)
@@ -526,12 +525,12 @@ final class NativeIMService {
         queuedEvents.removeAll()
         publishTask?.cancel(); publishTask = nil
         reconciliationTasks.values.forEach { $0.cancel() }; reconciliationTasks.removeAll()
-        forwardTasks.values.forEach { $0.cancel() }; forwardTasks.removeAll()
+        await forwardDelivery?.stop()
+        forwardDelivery = nil
         visibilityRefreshTasks.values.forEach { $0.cancel() }; visibilityRefreshTasks.removeAll()
         historyRefreshTasks.values.forEach { $0.cancel() }; historyRefreshTasks.removeAll(); localHistoryCursors.removeAll()
         completedHistoryPages.removeAll(); historyRequests.removeAll(); historyVersions.removeAll()
         retentionRefreshTask?.cancel(); retentionRefreshTask = nil
-        forwardNotices.removeAll()
         // 固定版 unInitSDK 不关闭已登录会话；必须先等实际 login/logout 回调释放旧核心。
         if initialized, Self.current === self {
             await finishSDKSession()
@@ -854,13 +853,13 @@ final class NativeIMService {
         try await dispatch(entry, outbox: outbox)
     }
 
-    func createMediaFile(data: Data, extension fileExtension: String) throws -> URL {
+    private func accountMediaStore() throws -> AccountMediaStore {
         guard isActive, let root = storageDirectory else { throw NativeChatError.unavailable }
-        let folder = root.appendingPathComponent("media", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-        let ext = fileExtension.lowercased().filter { $0.isASCII && $0.isLetter || $0.isNumber }
-        let url = folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext.isEmpty ? "bin" : String(ext.prefix(12)))
-        try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]); return url
+        return AccountMediaStore(accountDirectory: root)
+    }
+
+    func createMediaFile(data: Data, extension fileExtension: String) throws -> URL {
+        try accountMediaStore().create(data: data, fileExtension: fileExtension)
     }
     func massRecordsData() throws -> Data? {
         guard isActive, let root = storageDirectory else { throw NativeChatError.unavailable }
@@ -871,107 +870,37 @@ final class NativeIMService {
         guard isActive, let root = storageDirectory else { throw NativeChatError.unavailable }
         try data.write(to: root.appendingPathComponent("outbox/mass-records.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
-    func forwardSubmissionsData() throws -> Data? {
+    private func forwardCoordinator() throws -> NativeForwardDeliveryCoordinator {
         guard isActive, let root = storageDirectory else { throw NativeChatError.unavailable }
-        let file = root.appendingPathComponent("outbox/forward-submissions.json"); guard FileManager.default.fileExists(atPath: file.path) else { return nil }; return try Data(contentsOf: file)
-    }
-    func saveForwardSubmissionsData(_ data: Data) throws {
-        guard isActive, let root = storageDirectory else { throw NativeChatError.unavailable }
-        try data.write(to: root.appendingPathComponent("outbox/forward-submissions.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-    }
-    func saveForwardSubmission(_ submission: NativeForwardSubmission) throws {
-        var rows = try forwardSubmissionsData().map { try JSONDecoder().decode([NativeForwardSubmission].self, from: $0) } ?? []
-        if let index = rows.firstIndex(where: { $0.key == submission.key }) {
-            guard rows[index].body == submission.body else { throw NativeChatError.invalidMessage }
-            return
-        }
-        guard rows.filter({ $0.accepted == nil }).count < 200 else { throw APIError.business(code: -1, message: "未确认的转发较多，请稍后重试。") }
-        rows = rows.filter { $0.accepted == nil } + rows.filter { $0.accepted != nil }.suffix(100)
-        rows.append(submission); try saveForwardSubmissionsData(JSONEncoder().encode(rows))
-    }
-    /// 页面退出后由账号 owner 持有任务；结果不确定时保留同一幂等批次供显式核对。
-    func dispatchForwardInBackground(_ submission: NativeForwardSubmission) {
-        guard isActive, forwardTasks[submission.key] == nil else { return }
+        if let existing = forwardDelivery { return existing }
         let expected = generation
-        forwardTasks[submission.key] = Task { [weak self] in
-            guard let self = self else { return }; defer { self.forwardTasks[submission.key] = nil }
-            do {
-                let cacheEpoch = await NativeImageCache.shared.mutationEpoch()
-                try self.require(expected)
-                let result: NativeForwardAccepted = try await self.business.request("forward-batches", method: "POST", body: submission.body)
-                try self.require(expected)
-                guard ForwardBatchReceiptPolicy.isAccepted(status: result.status, batchID: result.batchId, taskIDs: result.taskIds), result.taskIds.count == Set(submission.messageIDs).count else { throw APIError.invalidResponse }
-                // 重新读当前文件，不能用页面旧快照覆盖同时提交的其他批次。
-                var rows = try self.forwardSubmissionsData().map { try JSONDecoder().decode([NativeForwardSubmission].self, from: $0) } ?? []
-                guard let index = rows.firstIndex(where: { $0.key == submission.key }) else { throw NativeChatError.persistence }
-                rows[index].accepted = result
-                try self.saveForwardSubmissionsData(JSONEncoder().encode(rows))
-                self.publish()
-                // 缓存重绑失败不推翻已经持久保存的服务端受理结果。
-                let initialProgress = (try? await self.rebindForwardImages(submission, accepted: result, expected: expected, cacheEpoch: cacheEpoch)) ?? [:]
-                try self.require(expected)
-                let outcome = try await self.confirmForwardDelivery(submission, accepted: result, initialProgress: initialProgress, expected: expected)
-                try self.require(expected)
-                self.forwardNotices[submission.sourceConversationID] = outcome == .success ? "转发成功" : outcome == .failure ? "有消息转发失败，请重试。" : "转发结果尚未确认，请稍后查看聊天记录。"
-                self.publish()
-            } catch {
-                guard self.isActive, self.generation == expected else { return }
-                self.forwardNotices[submission.sourceConversationID] = "暂未确认转发结果，请稍后查看聊天记录。"; self.publish()
-            }
+        let coordinator = NativeForwardDeliveryCoordinator(context: business, accountDirectory: root,
+            ownerIsActive: { [weak self] in self?.isActive == true && self?.generation == expected },
+            onChange: { [weak self] in self?.publish() })
+        forwardDelivery = coordinator
+        return coordinator
+    }
+
+    func forwardSubmissions() async throws -> [NativeForwardSubmission] {
+        try await forwardCoordinator().submissions()
+    }
+
+    func saveForwardSubmission(_ submission: NativeForwardSubmission) async throws {
+        try await forwardCoordinator().save(submission)
+    }
+
+    func dispatchForwardInBackground(_ submission: NativeForwardSubmission) {
+        do { try forwardCoordinator().dispatch(submission) }
+        catch {
+            lastError = "转发任务尚未准备好，请稍后重试。"
+            publish()
         }
     }
-    func forwardIsRunning(_ key: String) -> Bool { forwardTasks[key] != nil }
-    func takeForwardNotice(in conversationID: String) -> String? { forwardNotices.removeValue(forKey: conversationID) }
-    private func confirmForwardDelivery(_ submission: NativeForwardSubmission, accepted: NativeForwardAccepted, initialProgress: [String: NativeForwardProgress], expected: UUID) async throws -> ForwardBatchReceiptPolicy.DeliveryState {
-        var remaining = Set(accepted.taskIds)
-        var deliveredSources = Set<String>()
-        let deadline = Date().addingTimeInterval(30)
-        for attempt in 0..<30 {
-            for id in remaining.sorted() {
-                try require(expected)
-                guard Date() < deadline else { return .unconfirmed }
-                let progress: NativeForwardProgress
-                if attempt == 0, let cached = initialProgress[id] { progress = cached }
-                else { progress = try await business.request("forward-task-progress", query: [URLQueryItem(name: "taskId", value: id)]) }
-                try require(expected)
-                guard progress.id == id, submission.messageIDs.contains(progress.sourceClientMsgId) else { throw APIError.invalidResponse }
-                switch progress.deliveryState {
-                case .success: remaining.remove(id); deliveredSources.insert(progress.sourceClientMsgId)
-                case .failure: return .failure
-                case .unconfirmed: return .unconfirmed
-                case .pending: break
-                }
-            }
-            if remaining.isEmpty { return deliveredSources == Set(submission.messageIDs) ? .success : .unconfirmed }
-            if attempt < 29 { try await Task.sleep(nanoseconds: 1_000_000_000) }
-        }
-        return .unconfirmed
-    }
-    private func rebindForwardImages(_ submission: NativeForwardSubmission, accepted: NativeForwardAccepted, expected: UUID, cacheEpoch: UUID) async throws -> [String: NativeForwardProgress] {
-        guard case .array(let sources)? = submission.body["messages"] else { return [:] }
-        var originals: [String: ForwardMessageSnapshot] = [:]
-        var initialProgress: [String: NativeForwardProgress] = [:]
-        for value in sources {
-            guard case .object(let row) = value, case .string(let id)? = row["sourceClientMsgId"], let snapshot = row["sourceSnapshot"], submission.messageIDs.contains(id) else { continue }
-            originals[id] = try JSONDecoder().decode(ForwardMessageSnapshot.self, from: JSONEncoder().encode(snapshot))
-        }
-        let policy = business.media
-        for id in accepted.taskIds {
-            let progress: NativeForwardProgress = try await business.request("forward-task-progress", query: [URLQueryItem(name: "taskId", value: id)])
-            try require(expected)
-            guard progress.id == id, submission.messageIDs.contains(progress.sourceClientMsgId) else { throw APIError.invalidResponse }
-            initialProgress[id] = progress
-            guard let original = originals[progress.sourceClientMsgId] else { continue }
-            for (source, archived) in original.imageCopies(to: progress.sourceSnapshot) {
-                guard policy.absolute(source)?.scheme == "https", policy.absolute(archived)?.scheme == "https" else { continue }
-                for variant in [MediaURLPolicy.Variant.list, .preview] {
-                    try require(expected)
-                    await NativeImageCache.shared.aliasCached(from: policy.cacheIdentity(policy.image(source, variant: variant)), to: policy.cacheIdentity(policy.image(archived, variant: variant)), expectedEpoch: cacheEpoch)
-                    try require(expected)
-                }
-            }
-        }
-        return initialProgress
+
+    func forwardIsRunning(_ key: String) -> Bool { forwardDelivery?.isRunning(key) == true }
+
+    func takeForwardNotice(in conversationID: String) -> String? {
+        forwardDelivery?.takeNotice(in: conversationID)
     }
     func unpackMessage(_ serialized: String) -> ChatTextItem? { bridge.unpack(serialized).flatMap(Self.item) }
     func sendAt(_ text: String, users: [NativeGroupMember], all: Bool, quoted: ChatTextItem?, to conversation: NativeConversation, onPersisted: (() -> Void)? = nil) async throws {
@@ -1003,33 +932,26 @@ final class NativeIMService {
         if shared { body["businessKey"] = "message_pin"; body["action"] = remove ? "unpin" : "pin"; guard let message = bridge.createCustom(String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)) else { throw NativeChatError.invalidMessage }; try await sendPrepared(message, to: conversation) }
     }
     func importMediaFile(_ source: URL) throws -> URL {
-        guard isActive, let root = storageDirectory else { throw NativeChatError.unavailable }
-        let folder = root.appendingPathComponent("media", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-        let destination = folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(source.pathExtension)
-        try FileManager.default.copyItem(at: source, to: destination); try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
-        return destination
+        try accountMediaStore().importFile(source)
     }
+
     func ownedMediaURL(_ path: String) -> URL? {
-        let url = path.hasPrefix("file:") ? URL(string: path) : URL(fileURLWithPath: path)
-        guard let url = url?.standardizedFileURL.resolvingSymlinksInPath(), let root = storageDirectory?.appendingPathComponent("media").standardizedFileURL.resolvingSymlinksInPath(),
-              url.isFileURL, url.path.hasPrefix(root.path + "/"), FileManager.default.fileExists(atPath: url.path) else { return nil }; return url
+        guard let root = storageDirectory else { return nil }
+        return AccountMediaStore(accountDirectory: root).ownedURL(path)
     }
-    /// 大媒体复制不占用 UI 线程；异步返回时仍必须属于同一登录 owner。
+
     func importMediaFileInBackground(_ source: URL) async throws -> URL {
-        guard isActive, let root = storageDirectory else { throw NativeChatError.unavailable }
-        let expected = generation, folder = root.appendingPathComponent("media", isDirectory: true)
-        let destination = folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(source.pathExtension)
+        let store = try accountMediaStore()
+        let expected = generation
+        let destination = try await store.importInBackground(source)
         do {
-            try await Task.detached(priority: .userInitiated) {
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-                try FileManager.default.copyItem(at: source, to: destination)
-                try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
-            }.value
-            try Task.checkCancellation(); try require(expected)
-            guard ownedMediaURL(destination.path) != nil else { throw NativeChatError.invalidMessage }
+            try Task.checkCancellation()
+            try require(expected)
             return destination
-        } catch { try? FileManager.default.removeItem(at: destination); throw error }
+        } catch {
+            try store.removeOwnedFile(destination)
+            throw error
+        }
     }
     func ownedImageURL(for message: ChatTextItem) -> URL? {
         guard message.contentType == 102 else { return nil }
@@ -1043,8 +965,10 @@ final class NativeIMService {
         return ownedMediaURL(root.appendingPathComponent("media").appendingPathComponent(name).path)
     }
     func sendMedia(kind: Int, file: URL, filename: String, duration: Int = 0, snapshot: URL? = nil, to conversation: NativeConversation, onPersisted: (() -> Void)? = nil) async throws {
-        guard let owned = ownedMediaURL(file.path), snapshot == nil || ownedMediaURL(snapshot!.path) != nil,
-              let message = bridge.createMedia(kind: kind, path: owned.path, filename: filename, duration: duration, snapshot: snapshot?.path ?? "") else { throw NativeChatError.invalidMessage }
+        guard let owned = ownedMediaURL(file.path) else { throw NativeChatError.invalidMessage }
+        if let snapshot = snapshot, ownedMediaURL(snapshot.path) == nil { throw NativeChatError.invalidMessage }
+        guard let message = bridge.createMedia(kind: kind, path: owned.path, filename: filename, duration: duration,
+                                               snapshot: snapshot?.path ?? "") else { throw NativeChatError.invalidMessage }
         try await sendPrepared(message, to: conversation, onPersisted: onPersisted)
     }
     func sendQuote(_ text: String, original: ChatTextItem, to conversation: NativeConversation, onPersisted: (() -> Void)? = nil) async throws {
@@ -1089,8 +1013,7 @@ final class NativeIMService {
         struct RetentionResult: Decodable { let items: [GroupRetentionState] }
         let states: RetentionResult = try await business.request("im/group-retention/states", query: [URLQueryItem(name: "conversationIds", value: conversation.id)])
         try require(current)
-        guard states.items.contains(where: { $0.conversationId == conversation.id && $0.minVisibleSeq >= 0 && $0.revision >= 0 }) else { throw NativeChatError.unavailable }
-        visibility = try await ledger.apply(states.items.filter { $0.conversationId == conversation.id }); try require(current)
+        visibility = try await ledger.applyRetentionSnapshot(states.items, requested: [conversation.id]); try require(current)
         let target: NativeGroupPeer = try await business.request("im/groups/by-im/\(conversation.target)"); try require(current)
         groupTargets[conversation.id] = target
         struct Purges: Decodable { let items: [GroupMessagePurge] }
@@ -1189,7 +1112,8 @@ final class NativeIMService {
         guard let message = visibleMessages(conversation.id).first(where: { $0.id == favorite.messageId }) else { throw NativeChatError.invalidMessage }; return (conversation, message)
     }
 
-    private func dispatch(_ entry: OutboxEntry, outbox: PersistentOutbox) async throws {
+    private func dispatch(_ entryToSend: OutboxEntry, outbox: PersistentOutbox) async throws {
+        var entry = entryToSend
         guard !inFlightIDs.contains(entry.clientMsgID) else { throw NativeChatError.unavailable }
         inFlightIDs.insert(entry.clientMsgID)
         sendAttempts[entry.clientMsgID] = UUID()
@@ -1213,6 +1137,14 @@ final class NativeIMService {
                 try await outbox.transition(entry.clientMsgID, to: .failed)
                 await refreshOutbox(); throw error
             }
+        }
+        do {
+            entry = try await prepareQuotedEntry(entryToSend, outbox: outbox, expected: current)
+        } catch {
+            try require(current)
+            try await outbox.transition(entryToSend.clientMsgID, to: .failed)
+            await refreshOutbox()
+            throw error
         }
         try await outbox.transition(entry.clientMsgID, to: .sending)
         try require(current)
@@ -1255,6 +1187,23 @@ final class NativeIMService {
             throw error
         }
         await refreshOutbox()
+    }
+
+    private func prepareQuotedEntry(_ entry: OutboxEntry, outbox: PersistentOutbox, expected: UUID) async throws -> OutboxEntry {
+        let context = business
+        let prepared = try await QuoteMessagePreparation.prepare(serialized: entry.serializedMessage, mediaPolicy: context.media) { snapshot in
+            try self.require(expected)
+            let protected: ForwardMessageSnapshot = try await context.request("forward-media/preserve", method: "POST", body: ["sourceSnapshot": snapshot.body])
+            try self.require(expected)
+            return protected
+        }
+        try require(expected)
+        guard prepared != entry.serializedMessage else { return entry }
+        let updated = try await outbox.replaceUnsubmittedPayload(entry.clientMsgID, serialized: prepared)
+        try require(expected)
+        await refreshOutbox()
+        try require(expected)
+        return updated
     }
 
     func retry(_ entry: OutboxEntry) async throws {
@@ -1382,7 +1331,7 @@ final class NativeIMService {
         for start in stride(from: 0, to: ids.count, by: 50) {
             let batch = Array(ids[start..<min(start + 50, ids.count)])
             let result: Result = try await business.request("im/group-retention/states", query: [URLQueryItem(name: "conversationIds", value: batch.joined(separator: ","))]); try require(current)
-            visibility = try await ledger.apply(result.items.filter { batch.contains($0.conversationId) }); try require(current)
+            visibility = try await ledger.applyRetentionSnapshot(result.items, requested: Set(batch)); try require(current)
             groupVisibilityReady.formUnion(batch.filter { visibility.hasConfirmedBoundary($0) })
         }
         for id in messages.keys { messages[id] = (messages[id] ?? []).filter { visibility.permits($0, conversationID: id) } }; publish()

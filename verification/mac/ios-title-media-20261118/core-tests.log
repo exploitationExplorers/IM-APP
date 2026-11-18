@@ -1,0 +1,372 @@
+Building for debugging...
+Build complete! (0.38秒)
+Test Suite 'All tests' started at 2026-11-18 09:26:45.050.
+Test Suite 'IMCoreTests.xctest' started at 2026-11-18 09:26:45.051.
+Test Suite 'APIClientTests' started at 2026-11-18 09:26:45.051.
+Test Case '-[IMCoreTests.APIClientTests testAndroidTokenCannotAuthenticateIOSSDK]' started.
+Test Case '-[IMCoreTests.APIClientTests testAndroidTokenCannotAuthenticateIOSSDK]' passed (0.006 seconds).
+Test Case '-[IMCoreTests.APIClientTests testAuthenticatedBusinessCodeOneKeepsHTTPAuthStatusForRefresh]' started.
+Test Case '-[IMCoreTests.APIClientTests testAuthenticatedBusinessCodeOneKeepsHTTPAuthStatusForRefresh]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.APIClientTests testBusinessLoginFetchesActualProfileAndNeverIssuesUnusedIMToken]' started.
+Test Case '-[IMCoreTests.APIClientTests testBusinessLoginFetchesActualProfileAndNeverIssuesUnusedIMToken]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.APIClientTests testBusinessMessagesAreBoundedAndDoNotExposeCredentialOrMarkup]' started.
+Test Case '-[IMCoreTests.APIClientTests testBusinessMessagesAreBoundedAndDoNotExposeCredentialOrMarkup]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.APIClientTests testConfigurationRequiresExplicitHTTPSAndRejectsCredentialsAndQuery]' started.
+Test Case '-[IMCoreTests.APIClientTests testConfigurationRequiresExplicitHTTPSAndRejectsCredentialsAndQuery]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testHTTPAndBusinessFailureNeverReturnAuthentication]' started.
+Test Case '-[IMCoreTests.APIClientTests testHTTPAndBusinessFailureNeverReturnAuthentication]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testHTTPFailureWithNoValidBusinessEnvelopeDoesNotExposeRawBody]' started.
+Test Case '-[IMCoreTests.APIClientTests testHTTPFailureWithNoValidBusinessEnvelopeDoesNotExposeRawBody]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.APIClientTests testIMEndpointsRejectMissingHostsAndEmbeddedCredentials]' started.
+Test Case '-[IMCoreTests.APIClientTests testIMEndpointsRejectMissingHostsAndEmbeddedCredentials]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testNullOrMalformedPayloadDoesNotBecomeSuccess]' started.
+Test Case '-[IMCoreTests.APIClientTests testNullOrMalformedPayloadDoesNotBecomeSuccess]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testOtherFourRoutesAndIOSPlatformHeader]' started.
+Test Case '-[IMCoreTests.APIClientTests testOtherFourRoutesAndIOSPlatformHeader]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.APIClientTests testPasswordRequestMatchesSharedPayloadAndStaticRoute]' started.
+Test Case '-[IMCoreTests.APIClientTests testPasswordRequestMatchesSharedPayloadAndStaticRoute]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testProfileCancellationCannotBecomeFallbackLoginSuccess]' started.
+Test Case '-[IMCoreTests.APIClientTests testProfileCancellationCannotBecomeFallbackLoginSuccess]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testProfileFailureUsesOnlyRealProfileFromSameAuthentication]' started.
+Test Case '-[IMCoreTests.APIClientTests testProfileFailureUsesOnlyRealProfileFromSameAuthentication]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testProfileIdentityMismatchCannotBindDifferentAccount]' started.
+Test Case '-[IMCoreTests.APIClientTests testProfileIdentityMismatchCannotBindDifferentAccount]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testProfileRequiresBothCredentialAndExpectedBusinessIdentity]' started.
+Test Case '-[IMCoreTests.APIClientTests testProfileRequiresBothCredentialAndExpectedBusinessIdentity]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testRefreshCodeOneKeepsHTTPUnauthorized]' started.
+Test Case '-[IMCoreTests.APIClientTests testRefreshCodeOneKeepsHTTPUnauthorized]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testSharedFixturesKeepBusinessAndIMIdentitySeparate]' started.
+Test Case '-[IMCoreTests.APIClientTests testSharedFixturesKeepBusinessAndIMIdentitySeparate]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.APIClientTests testTimeoutAndCancellationAreDistinct]' started.
+Test Case '-[IMCoreTests.APIClientTests testTimeoutAndCancellationAreDistinct]' passed (0.000 seconds).
+Test Suite 'APIClientTests' passed at 2026-11-18 09:26:45.067.
+	 Executed 18 tests, with 0 failures (0 unexpected) in 0.014 (0.016) seconds
+Test Suite 'AudioSessionCoordinatorTests' started at 2026-11-18 09:26:45.067.
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testActivationFailureDoesNotAcquireOwnership]' started.
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testActivationFailureDoesNotAcquireOwnership]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testAlreadyCancelledStartNeverTouchesAudio]' started.
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testAlreadyCancelledStartNeverTouchesAudio]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testAudioWorkRunsOutsideMainThreadAndReleaseIsIdempotent]' started.
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testAudioWorkRunsOutsideMainThreadAndReleaseIsIdempotent]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testLateOldPageReleaseCannotStopNewPageAudio]' started.
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testLateOldPageReleaseCannotStopNewPageAudio]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testLeavingDuringActivationReleasesAudioBeforeReturning]' started.
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testLeavingDuringActivationReleasesAudioBeforeReturning]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testUnusedPageDoesNotDeactivateGlobalAudio]' started.
+Test Case '-[IMCoreTests.AudioSessionCoordinatorTests testUnusedPageDoesNotDeactivateGlobalAudio]' passed (0.102 seconds).
+Test Suite 'AudioSessionCoordinatorTests' passed at 2026-11-18 09:26:45.170.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.103 (0.103) seconds
+Test Suite 'ChatReliabilityTests' started at 2026-11-18 09:26:45.170.
+Test Case '-[IMCoreTests.ChatReliabilityTests testBootstrapCredentialReopensOnlyMatchingAccountEnvironmentAndPlatform]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testBootstrapCredentialReopensOnlyMatchingAccountEnvironmentAndPlatform]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testContactTotalSurvivesZeroInLaterPagesAndCountsUniqueLoadedRows]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testContactTotalSurvivesZeroInLaterPagesAndCountsUniqueLoadedRows]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testConversationEqualTimesKeepExistingThenSDKOrder]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testConversationEqualTimesKeepExistingThenSDKOrder]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testConversationPageCannotTemporarilyReorderLatestUnpinnedEvent]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testConversationPageCannotTemporarilyReorderLatestUnpinnedEvent]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testConversationPagePreservesLocalChangesWithoutSDKEvent]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testConversationPagePreservesLocalChangesWithoutSDKEvent]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testConversationRealMessageAndPinStillMoveToTop]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testConversationRealMessageAndPinStillMoveToTop]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testEmptyConversationFailureTimeoutAndLogoutStopProgressRetries]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testEmptyConversationFailureTimeoutAndLogoutStopProgressRetries]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testEmptyConversationProgressDoesNotResetBudgetOrPollForever]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testEmptyConversationProgressDoesNotResetBudgetOrPollForever]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testEmptyConversationSnapshotBeforeSyncCanReloadWithoutManualRefresh]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testEmptyConversationSnapshotBeforeSyncCanReloadWithoutManualRefresh]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testForwardBatchReceiptRequiresExplicitQueueAndCompleteIdentifiers]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testForwardBatchReceiptRequiresExplicitQueueAndCompleteIdentifiers]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testForwardCacheBindingsPreservePictureVariantsAndDuplicateSources]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testForwardCacheBindingsPreservePictureVariantsAndDuplicateSources]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testHistoryAndIncomingDeduplicateStableIDsWithoutDowngradingSDKSuccess]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testHistoryAndIncomingDeduplicateStableIDsWithoutDowngradingSDKSuccess]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testHistoryPrefetchRequiresUpwardInteractionAndAllowsDecelerationBeforeTop]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testHistoryPrefetchRequiresUpwardInteractionAndAllowsDecelerationBeforeTop]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testHistoryPrependAndMediaResizeKeepAnchorIncludingContinuedDrag]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testHistoryPrependAndMediaResizeKeepAnchorIncludingContinuedDrag]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testIncrementalMessageMergeMatchesFullSnapshotForOutOfOrderEvents]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testIncrementalMessageMergeMatchesFullSnapshotForOutOfOrderEvents]' passed (0.070 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testLateFailureCannotReplaceAnActiveRetryOrConfirmedAcceptance]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testLateFailureCannotReplaceAnActiveRetryOrConfirmedAcceptance]' passed (0.004 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testLateInitialHistoryAndIncomingMessagesDoNotInterruptReading]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testLateInitialHistoryAndIncomingMessagesDoNotInterruptReading]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testLateSendingEvidenceRestoresUncertaintyAndBlocksBlindRetry]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testLateSendingEvidenceRestoresUncertaintyAndBlocksBlindRetry]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testNativeUpdateAcceptsOnlySpecificAppleDistributionPages]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testNativeUpdateAcceptsOnlySpecificAppleDistributionPages]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testOnlyExactExistingLegacyEndpointsUpgradeOnDefaultOrigin]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testOnlyExactExistingLegacyEndpointsUpgradeOnDefaultOrigin]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testOnlyExplicitFailureCanRetrySameStableID]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testOnlyExplicitFailureCanRetrySameStableID]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testOutboxRecoversInFlightAsUncertainAndRefusesBlindResend]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testOutboxRecoversInFlightAsUncertainAndRefusesBlindResend]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testOutboxRejectsCrossAccountReadAndDuplicateID]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testOutboxRejectsCrossAccountReadAndDuplicateID]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testOutboxWriteFailureLeavesNoRecordAndCannotProceedToSend]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testOutboxWriteFailureLeavesNoRecordAndCannotProceedToSend]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testPendingLocalImageSurvivesRestartWithoutBeingMarkedSent]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testPendingLocalImageSurvivesRestartWithoutBeingMarkedSent]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testPruningOnlyRemovesConfirmedAcceptedAndPreservesUncertainAndFailed]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testPruningOnlyRemovesConfirmedAcceptedAndPreservesUncertainAndFailed]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testRevokedStatusCannotBeReplacedByLateHistoryOriginal]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testRevokedStatusCannotBeReplacedByLateHistoryOriginal]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testSendPreflightRejectionDoesNotMisclassifyTransportOrRepeatedMessage]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testSendPreflightRejectionDoesNotMisclassifyTransportOrRepeatedMessage]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testStartupEventsCannotPublishPartialConversationSubset]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testStartupEventsCannotPublishPartialConversationSubset]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testStartupSnapshotRetainsLatestBufferedFieldsAndNewMessage]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testStartupSnapshotRetainsLatestBufferedFieldsAndNewMessage]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ChatReliabilityTests testUnreadBadgeCapsCountsAndHidesZero]' started.
+Test Case '-[IMCoreTests.ChatReliabilityTests testUnreadBadgeCapsCountsAndHidesZero]' passed (0.000 seconds).
+Test Suite 'ChatReliabilityTests' passed at 2026-11-18 09:26:45.261.
+	 Executed 31 tests, with 0 failures (0 unexpected) in 0.090 (0.092) seconds
+Test Suite 'ConversationReadRecoveryTests' started at 2026-11-18 09:26:45.261.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testAuthenticationFailureIsPropagatedWithoutAlternateRead]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testAuthenticationFailureIsPropagatedWithoutAlternateRead]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testDiagnosticsRejectUntrustedOperationAndReasonAndDoNotEchoRawData]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testDiagnosticsRejectUntrustedOperationAndReasonAndDoNotEchoRawData]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testEmptySuccessfulFallbackIsAnActualEmptySnapshot]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testEmptySuccessfulFallbackIsAnActualEmptySnapshot]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testLoginStorageAndAuthenticationFailuresCannotTriggerPagedFallback]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testLoginStorageAndAuthenticationFailuresCannotTriggerPagedFallback]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testPartialPageFailureDoesNotPublishOrReturnAnIncompleteSnapshot]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testPartialPageFailureDoesNotPublishOrReturnAnIncompleteSnapshot]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testRepeatedPageStopsWithoutAnEndlessReadLoop]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testRepeatedPageStopsWithoutAnEndlessReadLoop]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testResourceAndBusyRecoveryIsBoundedAndDoesNotDependOnSyncEvents]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testResourceAndBusyRecoveryIsBoundedAndDoesNotDependOnSyncEvents]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testSuccessfulFullSnapshotDoesNotPerformFallback]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testSuccessfulFullSnapshotDoesNotPerformFallback]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testUnknownCodeIsNotMistakenForResourceNotReady]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testUnknownCodeIsNotMistakenForResourceNotReady]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testUnknownFullReadFallsBackToCompletePagedSnapshot]' started.
+Test Case '-[IMCoreTests.ConversationReadRecoveryTests testUnknownFullReadFallsBackToCompletePagedSnapshot]' passed (0.000 seconds).
+Test Suite 'ConversationReadRecoveryTests' passed at 2026-11-18 09:26:45.264.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'ForwardSubmissionLedgerTests' started at 2026-11-18 09:26:45.264.
+Test Case '-[IMCoreTests.ForwardSubmissionLedgerTests testAcceptedReceiptDoesNotOverwriteOtherPendingBatchAndSurvivesRestart]' started.
+Test Case '-[IMCoreTests.ForwardSubmissionLedgerTests testAcceptedReceiptDoesNotOverwriteOtherPendingBatchAndSurvivesRestart]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.ForwardSubmissionLedgerTests testConflictingIdempotencyKeyAndStoppedOwnerCannotWrite]' started.
+Test Case '-[IMCoreTests.ForwardSubmissionLedgerTests testConflictingIdempotencyKeyAndStoppedOwnerCannotWrite]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.ForwardSubmissionLedgerTests testCorruptArchiveIsPreservedInsteadOfSilentlyReset]' started.
+Test Case '-[IMCoreTests.ForwardSubmissionLedgerTests testCorruptArchiveIsPreservedInsteadOfSilentlyReset]' passed (0.001 seconds).
+Test Suite 'ForwardSubmissionLedgerTests' passed at 2026-11-18 09:26:45.267.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'GroupRetentionSnapshotTests' started at 2026-11-18 09:26:45.267.
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testEmptySnapshotNeverResetsExistingFloorPurgesOrHiddenMessages]' started.
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testEmptySnapshotNeverResetsExistingFloorPurgesOrHiddenMessages]' passed (0.004 seconds).
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testEmptySnapshotRequiresIndependentPurgeConfirmationAndSurvivesRestart]' started.
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testEmptySnapshotRequiresIndependentPurgeConfirmationAndSurvivesRestart]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testFailedPersistenceDoesNotConfirmAnEmptySnapshot]' started.
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testFailedPersistenceDoesNotConfirmAnEmptySnapshot]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testInvalidResponseIsRejectedAtomically]' started.
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testInvalidResponseIsRejectedAtomically]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testLegacyArchiveStillLoadsWithoutAssumingUnseenGroupsAreChecked]' started.
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testLegacyArchiveStillLoadsWithoutAssumingUnseenGroupsAreChecked]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testPartialBatchConfirmsOnlyRequestedGroupsWithoutWeakeningFloors]' started.
+Test Case '-[IMCoreTests.GroupRetentionSnapshotTests testPartialBatchConfirmsOnlyRequestedGroupsWithoutWeakeningFloors]' passed (0.002 seconds).
+Test Suite 'GroupRetentionSnapshotTests' passed at 2026-11-18 09:26:45.279.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.011 (0.011) seconds
+Test Suite 'IMCredentialTests' started at 2026-11-18 09:26:45.279.
+Test Case '-[IMCoreTests.IMCredentialTests testCancellationStopsWaitingForAutomaticLogout]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testCancellationStopsWaitingForAutomaticLogout]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testClockRollbackAndOwnerMismatchCannotMakeOnlineCredentialValid]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testClockRollbackAndOwnerMismatchCannotMakeOnlineCredentialValid]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testConnectionRejectionRetainsSafeSDKCodeAndOperation]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testConnectionRejectionRetainsSafeSDKCodeAndOperation]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testDuplicateExpiryAndInvalidEventsCannotLoopRecovery]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testDuplicateExpiryAndInvalidEventsCannotLoopRecovery]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testJWTExpiryCannotBeExtendedByFreshCacheTimestamp]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testJWTExpiryCannotBeExtendedByFreshCacheTimestamp]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testKickBlocksRecoveryBeforeAndDuringCredentialRefresh]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testKickBlocksRecoveryBeforeAndDuringCredentialRefresh]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testLoginRefreshesAtSixtySecondBoundary]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testLoginRefreshesAtSixtySecondBoundary]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testRecoveryWaitsForSDKAutomaticLogoutToFinish]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testRecoveryWaitsForSDKAutomaticLogoutToFinish]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testRejectedTicketCannotBeSavedOrRetriedAsItsOwnReplacement]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testRejectedTicketCannotBeSavedOrRetriedAsItsOwnReplacement]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testRestartsDoNotExtendCredentialExpiryAndKeepOfflineIdentity]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testRestartsDoNotExtendCredentialExpiryAndKeepOfflineIdentity]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testStuckSDKLogoutFailsWithoutAttemptingAnotherLogin]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testStuckSDKLogoutFailsWithoutAttemptingAnotherLogin]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.IMCredentialTests testUninitializedSDKIsNotTreatedAsCompletedLogout]' started.
+Test Case '-[IMCoreTests.IMCredentialTests testUninitializedSDKIsNotTreatedAsCompletedLogout]' passed (0.000 seconds).
+Test Suite 'IMCredentialTests' passed at 2026-11-18 09:26:45.282.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'MediaAndVisibilityTests' started at 2026-11-18 09:26:45.282.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testAvatarCandidatesRetainOriginalWhenThumbnailFails]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testAvatarCandidatesRetainOriginalWhenThumbnailFails]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testCDNTransformationRequiresMatchingHostAndBucket]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testCDNTransformationRequiresMatchingHostAndBucket]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testForwardSuccessRequiresCompletedAndEveryTargetAcknowledged]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testForwardSuccessRequiresCompletedAndEveryTargetAcknowledged]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testGIFPublicAndObjectURLsDoNotReceiveStaticWebPProcessing]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testGIFPublicAndObjectURLsDoNotReceiveStaticWebPProcessing]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testGIFStableKeyRetainsAnimationAndOpaqueToken]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testGIFStableKeyRetainsAnimationAndOpaqueToken]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testImageBubbleUsesBothSDKFieldStylesAndAndroidGeometry]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testImageBubbleUsesBothSDKFieldStylesAndAndroidGeometry]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testImageCandidatesPreserveUnknownSignedURLsAndRejectInsecureFallbacks]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testImageCandidatesPreserveUnknownSignedURLsAndRejectInsecureFallbacks]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testMemberPurgeDoesNotHideMessagesAfterRejoiningAndHiddenIDsSurviveRestart]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testMemberPurgeDoesNotHideMessagesAfterRejoiningAndHiddenIDsSurviveRestart]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testOnlyKnownUnsignedHTTPMediaUpgradesWithoutATSGlobalBypass]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testOnlyKnownUnsignedHTTPMediaUpgradesWithoutATSGlobalBypass]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testOtherSignedURLsRemainByteIdenticalAndVideoIsNotAnImage]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testOtherSignedURLsRemainByteIdenticalAndVideoIsNotAnImage]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testQuoteKeepsReplySeparateFromQuotedPreviewForBothFieldStyles]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testQuoteKeepsReplySeparateFromQuotedPreviewForBothFieldStyles]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testRetentionFloorsPersistMonotonicallyAndDoNotEstimateSevenDays]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testRetentionFloorsPersistMonotonicallyAndDoNotEstimateSevenDays]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testSignedChatImageRecoversLogicalKeyForPreviewAndOriginal]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testSignedChatImageRecoversLogicalKeyForPreviewAndOriginal]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testSignedUnknownHostAndCrossBucketURLsRemainByteIdentical]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testSignedUnknownHostAndCrossBucketURLsRemainByteIdentical]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testStableVariantsKeepTokenAndOriginalRemovesOnlyProcessing]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testStableVariantsKeepTokenAndOriginalRemovesOnlyProcessing]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testVideoPlaybackRecoversOnlyKnownLegacySignedChatObject]' started.
+Test Case '-[IMCoreTests.MediaAndVisibilityTests testVideoPlaybackRecoversOnlyKnownLegacySignedChatObject]' passed (0.000 seconds).
+Test Suite 'MediaAndVisibilityTests' passed at 2026-11-18 09:26:45.290.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.008 (0.009) seconds
+Test Suite 'MediaCacheIdentityTests' started at 2026-11-18 09:26:45.290.
+Test Case '-[IMCoreTests.MediaCacheIdentityTests testTrustedSignatureRotationKeepsIdentityAndVariantsRemainDistinct]' started.
+Test Case '-[IMCoreTests.MediaCacheIdentityTests testTrustedSignatureRotationKeepsIdentityAndVariantsRemainDistinct]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MediaCacheIdentityTests testUnknownSignaturesCapabilityTokensAndObjectVersionsRemainDistinct]' started.
+Test Case '-[IMCoreTests.MediaCacheIdentityTests testUnknownSignaturesCapabilityTokensAndObjectVersionsRemainDistinct]' passed (0.000 seconds).
+Test Suite 'MediaCacheIdentityTests' passed at 2026-11-18 09:26:45.291.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'MessageContentTests' started at 2026-11-18 09:26:45.291.
+Test Case '-[IMCoreTests.MessageContentTests testDeepQuoteCannotRecurseWithoutBound]' started.
+Test Case '-[IMCoreTests.MessageContentTests testDeepQuoteCannotRecurseWithoutBound]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testForwardLegacySinglePictureFillsMissingSpecsAndDefaultMIME]' started.
+Test Case '-[IMCoreTests.MessageContentTests testForwardLegacySinglePictureFillsMissingSpecsAndDefaultMIME]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testForwardNestedQuoteAlsoCompletesPictureTypes]' started.
+Test Case '-[IMCoreTests.MessageContentTests testForwardNestedQuoteAlsoCompletesPictureTypes]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testForwardPictureCompletesEveryRequiredTypeWithoutLosingPreview]' started.
+Test Case '-[IMCoreTests.MessageContentTests testForwardPictureCompletesEveryRequiredTypeWithoutLosingPreview]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testForwardQuoteUsesOldClientReadableEmbeddedJSONString]' started.
+Test Case '-[IMCoreTests.MessageContentTests testForwardQuoteUsesOldClientReadableEmbeddedJSONString]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testForwardReadsEncodedContentWhenSDKElementIsEmptyAndUpgradesOnlyKnownLegacyOrigin]' started.
+Test Case '-[IMCoreTests.MessageContentTests testForwardReadsEncodedContentWhenSDKElementIsEmptyAndUpgradesOnlyKnownLegacyOrigin]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testJoinRequestCustomCardRequiresRealRequestAndSafeGroupID]' started.
+Test Case '-[IMCoreTests.MessageContentTests testJoinRequestCustomCardRequiresRealRequestAndSafeGroupID]' passed (0.007 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testLegacyFavoriteSnapshotsAndRawImageURL]' started.
+Test Case '-[IMCoreTests.MessageContentTests testLegacyFavoriteSnapshotsAndRawImageURL]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testLegacyImageWithOnlyBigPictureCanForwardWithoutLocalPath]' started.
+Test Case '-[IMCoreTests.MessageContentTests testLegacyImageWithOnlyBigPictureCanForwardWithoutLocalPath]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testMenuDoesNotOfferUnimplementedForwardOrActionsForRecalledSystemMessages]' started.
+Test Case '-[IMCoreTests.MessageContentTests testMenuDoesNotOfferUnimplementedForwardOrActionsForRecalledSystemMessages]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testMessageMenuUsesMediaTypeAndNeverForwardsUnconfirmedOrRevokedMessage]' started.
+Test Case '-[IMCoreTests.MessageContentTests testMessageMenuUsesMediaTypeAndNeverForwardsUnconfirmedOrRevokedMessage]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testNewFavoriteSnapshotRemainsReadableByOldClient]' started.
+Test Case '-[IMCoreTests.MessageContentTests testNewFavoriteSnapshotRemainsReadableByOldClient]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testOwnMessagesCanBeRecalledInMultiSelectionWithoutManagerRole]' started.
+Test Case '-[IMCoreTests.MessageContentTests testOwnMessagesCanBeRecalledInMultiSelectionWithoutManagerRole]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testPascalCaseForwardMediaStripsOnlyLocalPaths]' started.
+Test Case '-[IMCoreTests.MessageContentTests testPascalCaseForwardMediaStripsOnlyLocalPaths]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testPascalCustomInvitationPreservesOpaqueTokenAndGroupIdentity]' started.
+Test Case '-[IMCoreTests.MessageContentTests testPascalCustomInvitationPreservesOpaqueTokenAndGroupIdentity]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testQRJSONPublicIDAndUnknownURLDoNotBecomeNavigation]' started.
+Test Case '-[IMCoreTests.MessageContentTests testQRJSONPublicIDAndUnknownURLDoNotBecomeNavigation]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testQRURLExtractsDataWithoutChangingTokenEncoding]' started.
+Test Case '-[IMCoreTests.MessageContentTests testQRURLExtractsDataWithoutChangingTokenEncoding]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testQuoteReferenceSupportsPascalEmbeddedMessageAndOriginalImageURL]' started.
+Test Case '-[IMCoreTests.MessageContentTests testQuoteReferenceSupportsPascalEmbeddedMessageAndOriginalImageURL]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testQuoteReferenceUsesTextAndRejectsMissingIdentity]' started.
+Test Case '-[IMCoreTests.MessageContentTests testQuoteReferenceUsesTextAndRejectsMissingIdentity]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testUnuploadedAndSystemMessagesCannotCreateForwardTasks]' started.
+Test Case '-[IMCoreTests.MessageContentTests testUnuploadedAndSystemMessagesCannotCreateForwardTasks]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testVideoEmptyElementFallsBackToEncodedLegacyContentAndVideoDimensions]' started.
+Test Case '-[IMCoreTests.MessageContentTests testVideoEmptyElementFallsBackToEncodedLegacyContentAndVideoDimensions]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testVideoPortraitCoverFitsWithoutCroppingOrStretching]' started.
+Test Case '-[IMCoreTests.MessageContentTests testVideoPortraitCoverFitsWithoutCroppingOrStretching]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testVideoPreparationRejectsInvalidDurationBeforeSDKIntegerConversion]' started.
+Test Case '-[IMCoreTests.MessageContentTests testVideoPreparationRejectsInvalidDurationBeforeSDKIntegerConversion]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.MessageContentTests testVideoUnknownOrPartialDimensionsUseStableFallback]' started.
+Test Case '-[IMCoreTests.MessageContentTests testVideoUnknownOrPartialDimensionsUseStableFallback]' passed (0.000 seconds).
+Test Suite 'MessageContentTests' passed at 2026-11-18 09:26:45.305.
+	 Executed 24 tests, with 0 failures (0 unexpected) in 0.012 (0.014) seconds
+Test Suite 'NativeParityRefactorTests' started at 2026-11-18 09:26:45.305.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testLateSendCompletionCannotUnlockNewDraftSubmission]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testLateSendCompletionCannotUnlockNewDraftSubmission]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testMediaStoreRejectsOtherAccountsAndEscapingSymlinks]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testMediaStoreRejectsOtherAccountsAndEscapingSymlinks]' passed (0.003 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testMemberPermissionsAndHomeBadgeMatchBusinessSemantics]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testMemberPermissionsAndHomeBadgeMatchBusinessSemantics]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testOutboxPayloadRepairIsDurableAndCannotResetSubmittedState]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testOutboxPayloadRepairIsDurableAndCannotResetSubmittedState]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testPendingRequestCountsRejectInvalidResponseAndDeduplicateGroups]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testPendingRequestCountsRejectInvalidResponseAndDeduplicateGroups]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testProtectedQuoteDisplaysArchivedCoverAndRetainsReplyID]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testProtectedQuoteDisplaysArchivedCoverAndRetainsReplyID]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testProtectedQuoteKeepsEnvelopeAndRejectsChangedReplyOrSourceIdentity]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testProtectedQuoteKeepsEnvelopeAndRejectsChangedReplyOrSourceIdentity]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testQuotePrefersRemoteThumbnailAndPreservesSignedQuery]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testQuotePrefersRemoteThumbnailAndPreservesSignedQuery]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testQuotePreparationPropagatesProtectionFailureAndSkipsPlainText]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testQuotePreparationPropagatesProtectionFailureAndSkipsPlainText]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testQuoteReadsLegacyEncodedContentAndSkipsSenderLocalPaths]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testQuoteReadsLegacyEncodedContentAndSkipsSenderLocalPaths]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.NativeParityRefactorTests testQuoteVideoSupportsPascalCaseStoredElementWithoutUsingLocalCover]' started.
+Test Case '-[IMCoreTests.NativeParityRefactorTests testQuoteVideoSupportsPascalCaseStoredElementWithoutUsingLocalCover]' passed (0.000 seconds).
+Test Suite 'NativeParityRefactorTests' passed at 2026-11-18 09:26:45.316.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
+Test Suite 'PendingJoinRequestMonitorTests' started at 2026-11-18 09:26:45.316.
+Test Case '-[IMCoreTests.PendingJoinRequestMonitorTests testRestartRejectsLateResultFromPreviousGeneration]' started.
+Test Case '-[IMCoreTests.PendingJoinRequestMonitorTests testRestartRejectsLateResultFromPreviousGeneration]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.PendingJoinRequestMonitorTests testSingleLoopKeepsLastCountOnFailureAndDoesNotPublishAfterStop]' started.
+Test Case '-[IMCoreTests.PendingJoinRequestMonitorTests testSingleLoopKeepsLastCountOnFailureAndDoesNotPublishAfterStop]' passed (0.002 seconds).
+Test Suite 'PendingJoinRequestMonitorTests' passed at 2026-11-18 09:26:45.319.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'PhotoLibraryResourceTests' started at 2026-11-18 09:26:45.319.
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testActualTypeOverridesMisleadingJPEGExtension]' started.
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testActualTypeOverridesMisleadingJPEGExtension]' passed (0.044 seconds).
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testAnimatedGIFPreservesEveryFrameAndOriginalBytes]' started.
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testAnimatedGIFPreservesEveryFrameAndOriginalBytes]' passed (0.002 seconds).
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testAnimatedWebPConversionKeepsFramesTimingAndLoop]' started.
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testAnimatedWebPConversionKeepsFramesTimingAndLoop]' passed (0.004 seconds).
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testExtensionlessPNGIsNamedAndPreservedWithoutChangingOwnedOriginal]' started.
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testExtensionlessPNGIsNamedAndPreservedWithoutChangingOwnedOriginal]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testInvalidOrTruncatedDownloadIsRejectedBeforePhotosTransaction]' started.
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testInvalidOrTruncatedDownloadIsRejectedBeforePhotosTransaction]' passed (0.001 seconds).
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testJPEGPreservesFullResolution]' started.
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testJPEGPreservesFullResolution]' passed (0.003 seconds).
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testStaticWebPConvertsToPNGWithTransparency]' started.
+Test Case '-[IMCoreTests.PhotoLibraryResourceTests testStaticWebPConvertsToPNGWithTransparency]' passed (0.002 seconds).
+Test Suite 'PhotoLibraryResourceTests' passed at 2026-11-18 09:26:45.376.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.057 (0.058) seconds
+Test Suite 'SessionCoordinatorTests' started at 2026-11-18 09:26:45.376.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testAuthenticationDoesNotImplyOpenStoreOrCompletedSync]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testAuthenticationDoesNotImplyOpenStoreOrCompletedSync]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testCancelledAuthenticationStartPreservesCurrentSession]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testCancelledAuthenticationStartPreservesCurrentSession]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testDelayedCancellationDoesNotLogoutNewAccount]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testDelayedCancellationDoesNotLogoutNewAccount]' passed (0.104 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testFailureAndTimeoutPreserveReadableStoreWithoutCompletingSync]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testFailureAndTimeoutPreserveReadableStoreWithoutCompletingSync]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testLocalSampleHasStableKeysAndNoNetworkDeliveryState]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testLocalSampleHasStableKeysAndNoNetworkDeliveryState]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testLogoutRejectsDelayedResults]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testLogoutRejectsDelayedResults]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testLosingReadableStoreInvalidatesActiveSyncAttempt]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testLosingReadableStoreInvalidatesActiveSyncAttempt]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testNewAccountRejectsOldAuthenticationAndSDKCallbacks]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testNewAccountRejectsOldAuthenticationAndSDKCallbacks]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testOldSyncAttemptCannotCompleteANewerAttemptInSameSession]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testOldSyncAttemptCannotCompleteANewerAttemptInSameSession]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testOutOfOrderCompletionIsRejected]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testOutOfOrderCompletionIsRejected]' passed (0.000 seconds).
+Test Case '-[IMCoreTests.SessionCoordinatorTests testSameAccountNewAttemptInvalidatesPriorTicket]' started.
+Test Case '-[IMCoreTests.SessionCoordinatorTests testSameAccountNewAttemptInvalidatesPriorTicket]' passed (0.000 seconds).
+Test Suite 'SessionCoordinatorTests' passed at 2026-11-18 09:26:45.483.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.106 (0.107) seconds
+Test Suite 'IMCoreTests.xctest' passed at 2026-11-18 09:26:45.483.
+	 Executed 159 tests, with 0 failures (0 unexpected) in 0.422 (0.432) seconds
+Test Suite 'All tests' passed at 2026-11-18 09:26:45.483.
+	 Executed 159 tests, with 0 failures (0 unexpected) in 0.422 (0.433) seconds
+◇ Test run started.
+↳ Testing Library Version: 2403
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

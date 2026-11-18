@@ -283,6 +283,29 @@ public actor PersistentOutbox {
         try commit(entries + [entry])
     }
 
+    /// 只允许发送前改写已保护的引用内容，不能把 sending/uncertain 回退成可发送状态。
+    public func replaceUnsubmittedPayload(_ id: String, serialized: String) throws -> OutboxEntry {
+        guard let index = entries.firstIndex(where: { $0.clientMsgID == id }) else { throw OutboxError.missingEntry }
+        let old = entries[index]
+        guard [.prepared, .failed].contains(old.state),
+              let before = MessagePayload.object(old.serializedMessage),
+              let after = MessagePayload.object(serialized),
+              MessagePayload.text(before, "clientMsgID") == id,
+              MessagePayload.text(after, "clientMsgID") == id,
+              MessagePayload.number(before, "contentType") == MessagePayload.number(after, "contentType"),
+              let quote = MessageQuoteReference(serialized: old.serializedMessage),
+              let updated = MessageQuoteReference(serialized: serialized),
+              quote.id == updated.id, quote.replyText == updated.replyText else { throw OutboxError.invalidEntry }
+        var replacement = OutboxEntry(clientMsgID: old.clientMsgID, conversationID: old.conversationID,
+            targetID: old.targetID, sessionType: old.sessionType, text: old.text,
+            serializedMessage: serialized, createdAt: old.createdAt)
+        replacement.state = old.state
+        var next = entries
+        next[index] = replacement
+        try commit(next)
+        return replacement
+    }
+
     public func transition(_ id: String, to state: OutboxState) throws {
         guard let index = entries.firstIndex(where: { $0.clientMsgID == id }) else { throw OutboxError.missingEntry }
         let old = entries[index].state

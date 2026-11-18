@@ -72,7 +72,11 @@ struct NativeGroup: Decodable {
     let joinMode: String?; let allMuted: Bool?; let allowMemberAddFriend: Bool?; let myNickname: String?; let remark: String?
     let canChat: Bool?; let denyReason: String?; let permissions: NativeGroupPermissions?; let status: String?
     var isOwner: Bool { ["owner", "100"].contains(myRole ?? "") || ["owner", "100"].contains(role ?? "") }
-    var canManage: Bool { permissions?.canManageMembers ?? (isOwner || ["admin", "60"].contains(myRole ?? "")) }
+    var managementRole: GroupMemberRole {
+        if isOwner { return .owner }
+        return GroupMemberRole(serverValue: myRole ?? role)
+    }
+    var canManage: Bool { permissions?.canManageMembers ?? managementRole.canManage }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: NativeBusinessKey.self)
         guard let id: String = try c.value("id"), !id.isEmpty else { throw APIError.invalidResponse }; self.id = id

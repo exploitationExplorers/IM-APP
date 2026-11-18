@@ -4,6 +4,7 @@ import IMCore
 struct NativeBusinessRow {
     var title: String
     var detail = ""
+    var badgeCount: Int? = nil
     var icon: String? = nil
     var avatar: String? = nil
     var destructive = false
@@ -114,13 +115,14 @@ private final class NativeParityToggle: UIControl {
 }
 
 private final class NativeBusinessCell: UITableViewCell {
+    private let badge = NativeCountBadge()
     private let name = UILabel(); private let valueLabel = UILabel(); private let icon = UIImageView()
     private let avatar = NativeRemoteImageView(); private let arrow = UIImageView(image: NativeUITheme.image("uni_mine_icon_chevron"))
     private let check = UILabel(); private let control = NativeParityToggle(); private let line = UIView()
     private var represented: NativeBusinessRow?
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: .default, reuseIdentifier: reuseIdentifier)
-        [name, valueLabel, icon, avatar, arrow, check, control, line].forEach { contentView.addSubview($0) }
+        [name, valueLabel, icon, avatar, arrow, check, control, line, badge].forEach { contentView.addSubview($0) }
         icon.contentMode = .scaleAspectFit; avatar.contentMode = .scaleAspectFill; avatar.clipsToBounds = true
         arrow.contentMode = .scaleAspectFit; check.text = "✓"; check.textAlignment = .center; check.textColor = NativeUITheme.primary
         name.lineBreakMode = .byTruncatingTail; valueLabel.lineBreakMode = .byTruncatingTail; valueLabel.textColor = NativeUITheme.secondary
@@ -130,6 +132,9 @@ private final class NativeBusinessCell: UITableViewCell {
     override func prepareForReuse() { super.prepareForReuse(); avatar.cancel(); control.change = nil; represented = nil }
     func configure(_ row: NativeBusinessRow, policy: MediaURLPolicy) {
         represented = row; name.text = row.title; valueLabel.text = row.detail
+        badge.setCount(row.badgeCount ?? 0)
+        badge.accessibilityLabel = "待审核入群申请"
+        badge.accessibilityValue = row.badgeCount.map(String.init)
         name.textColor = row.destructive ? UIColor(hex: 0xdc2828) : UIColor(hex: 0x212121)
         icon.image = row.icon.flatMap(NativeUITheme.image); icon.isHidden = row.icon == nil
         avatar.isHidden = row.avatar == nil
@@ -151,6 +156,11 @@ private final class NativeBusinessCell: UITableViewCell {
         if !control.isHidden { control.frame = CGRect(x: right - 72 * r, y: 0, width: 88 * r, height: height); right -= 88 * r }
         else if !check.isHidden { check.frame = CGRect(x: right - 40 * r, y: 0, width: 40 * r, height: height); right -= 52 * r }
         else if !arrow.isHidden { arrow.frame = CGRect(x: right - 40 * r, y: (height - 40 * r) / 2, width: 40 * r, height: 40 * r); right -= 56 * r }
+        if !badge.isHidden {
+            let badgeWidth: CGFloat = (row.badgeCount ?? 0) > 99 ? 56 * r : 36 * r
+            badge.frame = CGRect(x: right - badgeWidth, y: (height - 36 * r) / 2, width: badgeWidth, height: 36 * r)
+            right -= badgeWidth + 12 * r
+        }
         name.font = .systemFont(ofSize: 32 * r); valueLabel.font = .systemFont(ofSize: 28 * r); check.font = .systemFont(ofSize: 32 * r)
         if row.avatar != nil && !row.detail.isEmpty {
             name.frame = CGRect(x: left, y: height / 2 - 39 * r, width: max(0, right - left), height: 44 * r)

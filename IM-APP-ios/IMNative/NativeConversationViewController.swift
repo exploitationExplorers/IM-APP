@@ -32,7 +32,7 @@ private final class NativeComposerActionButton: UIButton {
 }
 
 @MainActor
-final class NativeConversationViewController: UIViewController, UICollectionViewDelegateFlowLayout, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UITextFieldDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+final class NativeConversationViewController: UIViewController, UICollectionViewDelegateFlowLayout, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UITextFieldDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate, AVAudioPlayerDelegate {
     private let service: NativeIMService
     private let conversation: NativeConversation
     private let header = UIView()
@@ -85,14 +85,18 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var loading = false
     private var awaitingHistoryCursor: String?
     private var hasLocalHistoryPreview = false
-    private var submitting = false
+    private var composerSubmission = ComposerSubmissionGate()
+    private var submitting: Bool { composerSubmission.isSubmitting }
     private var loadOperation: UUID?
     private var headerHeight: NSLayoutConstraint!
     private var composerHeight: NSLayoutConstraint!
     private var quoteDraft: ChatTextItem? { didSet { if isViewLoaded { updateQuoteBar() } } }
-    private let quoteBar = UIView(); private let quoteThumb = NativeRemoteImageView(); private let quoteName = UILabel(); private let quoteText = UILabel(); private let quoteClose = UIButton(type: .system)
+    private let quoteBar = NativeComposerQuoteView()
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
+    private let audioSession = NativeAudioSessionLease()
+    private var audioTask: Task<Void, Never>?
+    private var recordPermissionID = UUID()
     private var voiceDraft: (url: URL, duration: Int)?; private var voiceTimer: Task<Void, Never>?; private var voicePlayer: AVAudioPlayer?
     private let voicePanel = UIView(); private let voiceLabel = UILabel(); private let voiceCancel = UIButton(type: .system); private let voiceAction = UIButton(type: .system); private let voicePlay = UIButton(type: .system)
     private let attachmentPanel = UIView(); private var attachmentButtons: [NativeComposerActionButton] = []; private var attachmentsVisible = false
@@ -103,6 +107,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var multiSelecting = false; private var selectedIDs = Set<String>()
     private var dateSeparators: [String: String] = [:]; private let latest = UIButton(type: .system)
     private var historyTask: Task<Void, Never>?; private var actionTask: Task<Void, Never>?; private var roleTask: Task<Void, Never>?
+    private var detailsTask: Task<Void, Never>?
     private var canManageGroup = false; private var autoHistoryAllowed = true; private var processingCards = Set<String>()
     private var lastHistoryOffset = CGFloat.zero
     private var lastAutomaticHistoryRequest: String?
@@ -138,7 +143,9 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         if let observer = observer { service.removeObserver(observer) }
         observer = nil; loadOperation = nil; loading = false; refresh.endRefreshing()
         emojiPanel?.setVisible(false); historyTask?.cancel(); historyTask = nil; roleTask?.cancel(); actionTask?.cancel()
-        recorder?.stop(); recorder = nil; recordingURL = nil; voiceTimer?.cancel(); voiceTimer = nil; voicePlayer?.stop(); voicePlayer = nil; try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation); readTask?.cancel(); readTask = nil
+        stopVoiceAudio(); readTask?.cancel(); readTask = nil
+        detailsTask?.cancel()
+        detailsTask = nil
     }
 
     override func viewDidLoad() {
@@ -170,6 +177,10 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         back.accessibilityLabel = "返回"; back.addTarget(self, action: #selector(goBack), for: .touchUpInside)
         heading.text = conversation.title.isEmpty ? "聊天" : conversation.title
         heading.textColor = NativeUITheme.body
+        heading.isUserInteractionEnabled = true
+        heading.accessibilityTraits.insert(.button)
+        heading.accessibilityHint = "查看聊天详情"
+        heading.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openDetails)))
         more.setTitle("⋯", for: .normal); more.setTitleColor(NativeUITheme.body, for: .normal)
         more.addTarget(self, action: #selector(showMenu), for: .touchUpInside)
         notice.textAlignment = .center; notice.font = .systemFont(ofSize: 10); notice.numberOfLines = 2
@@ -177,7 +188,12 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         composer.backgroundColor = UIColor(hex: 0xf7f7f7)
         composer.addSubview(pendingMediaButton); pendingMediaButton.backgroundColor = .white; pendingMediaButton.setTitleColor(NativeUITheme.primary, for: .normal); pendingMediaButton.addTarget(self, action: #selector(showPendingAttachments), for: .touchUpInside)
         [mic, inputBox, plus, send].forEach { composer.addSubview($0) }
-        composer.addSubview(quoteBar); [quoteThumb, quoteName, quoteText, quoteClose].forEach { quoteBar.addSubview($0) }; quoteBar.backgroundColor = .white; quoteThumb.contentMode = .scaleAspectFill; quoteThumb.clipsToBounds = true; quoteName.font = .boldSystemFont(ofSize: 12); quoteText.font = .systemFont(ofSize: 12); quoteText.textColor = NativeUITheme.secondary; quoteClose.setTitle("×", for: .normal); quoteClose.setTitleColor(.gray, for: .normal); quoteClose.addAction(UIAction { [weak self] _ in self?.quoteDraft = nil; self?.input.placeholder = "输入消息" }, for: .touchUpInside); updateQuoteBar()
+        composer.addSubview(quoteBar)
+        quoteBar.onClose = { [weak self] in
+            self?.quoteDraft = nil
+            self?.input.placeholder = "输入消息"
+        }
+        updateQuoteBar()
         composer.addSubview(voicePanel); [voiceLabel, voiceCancel, voiceAction, voicePlay].forEach { voicePanel.addSubview($0) }; voicePanel.isHidden = true
         voiceLabel.textAlignment = .center; voiceCancel.setTitle("取消", for: .normal); voiceCancel.addTarget(self, action: #selector(cancelVoice), for: .touchUpInside); voiceAction.addTarget(self, action: #selector(voiceActionTapped), for: .touchUpInside); voicePlay.setTitle("▶ 试听", for: .normal); voicePlay.addTarget(self, action: #selector(previewVoice), for: .touchUpInside)
         composer.addSubview(attachmentPanel); attachmentPanel.backgroundColor = UIColor(hex: 0xf0f0f0); attachmentPanel.isHidden = true; configureAttachments()
@@ -260,9 +276,12 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         for child in [mic, inputBox, plus, send, voicePanel, attachmentPanel, emojiPanel!] { child.frame.origin.y += quoteOffset + draftOffset }
         pendingMediaButton.isHidden = failedDrafts.isEmpty; pendingMediaButton.frame = CGRect(x: 0, y: quoteOffset, width: width, height: draftOffset); pendingMediaButton.setTitle("附件未发送 · 点此重试（\(failedDrafts.count)）", for: .normal); pendingMediaButton.titleLabel?.font = .systemFont(ofSize: r(24))
         latest.frame = CGRect(x: width - r(164), y: composer.frame.minY - r(108), width: r(140), height: r(72)); latest.titleLabel?.font = .systemFont(ofSize: r(24)); view.bringSubviewToFront(latest)
-        quoteBar.frame = CGRect(x: 0, y: 0, width: width, height: quoteOffset); quoteThumb.frame = CGRect(x: r(24), y: r(16), width: r(64), height: r(64)); quoteName.frame = CGRect(x: r(104), y: r(16), width: width - r(188), height: r(34)); quoteText.frame = CGRect(x: r(104), y: r(50), width: width - r(188), height: r(34)); quoteName.font = .boldSystemFont(ofSize: r(24)); quoteText.font = .systemFont(ofSize: r(24)); quoteClose.frame = CGRect(x: width - r(68), y: r(22), width: r(44), height: r(44)); quoteClose.titleLabel?.font = .systemFont(ofSize: r(36))
+        quoteBar.frame = CGRect(x: 0, y: 0, width: width, height: quoteOffset)
     }
-    private func updateQuoteBar() { quoteBar.isHidden = quoteDraft == nil; if let item = quoteDraft { quoteName.text = item.senderName.isEmpty ? "我" : item.senderName; quoteText.text = item.text; let thumbnail = item.media?.kind == 102 ? item.media?.url : item.media?.thumbnail.isEmpty == false ? item.media?.thumbnail : item.avatar; quoteThumb.load(thumbnail ?? item.avatar, policy: service.business.media, variant: .list) } else { quoteThumb.cancel() }; view.setNeedsLayout() }
+    private func updateQuoteBar() {
+        quoteBar.configure(message: quoteDraft, policy: service.business.media)
+        view.setNeedsLayout()
+    }
 
     private func showForwardResult(_ message: String) {
         showNativeNotice(message)
@@ -491,23 +510,45 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         view.setNeedsLayout()
     }
     @objc private func sendText() {
-        let text = (input.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !submitting, service.canSend else { return }
-        submitting = true; render()
+        let draft = input.text ?? ""
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !submitting, service.canSend(to: conversation) else { return }
+        let mentions = mentionDraft
+        let all = mentionAll
+        let quote = quoteDraft
+        guard let submission = composerSubmission.begin() else { return }
+        render()
+        let persisted: () -> Void = { [weak self] in
+            guard let self = self, self.composerSubmission.finish(submission) else { return }
+            if self.input.text == draft {
+                self.input.text = ""
+                self.mentionDraft = []
+                self.mentionAll = false
+                if self.quoteDraft?.id == quote?.id { self.quoteDraft = nil }
+                self.input.placeholder = "输入消息"
+                self.inputChanged()
+            }
+            self.render(scrollToBottom: true)
+        }
         Task { [weak self] in
             guard let self = self else { return }
-            defer { self.submitting = false; self.render() }
+            defer {
+                self.composerSubmission.finish(submission)
+                self.render()
+            }
             do {
-                if self.mentionAll || !self.mentionDraft.isEmpty {
-                    try await self.service.sendAt(text, users: self.mentionDraft, all: self.mentionAll, quoted: self.quoteDraft, to: self.conversation) { [weak self] in self?.mentionDraft = []; self?.mentionAll = false; self?.quoteDraft = nil; self?.input.text = ""; self?.inputChanged() }
-                } else if let original = self.quoteDraft {
-                    try await self.service.sendQuote(text, original: original, to: self.conversation) { [weak self] in self?.quoteDraft = nil; self?.input.placeholder = "输入消息"; self?.input.text = ""; self?.inputChanged() }
-                } else { try await self.service.send(text, to: self.conversation) { [weak self] in
-                    guard let self = self else { return }
-                    self.input.text = ""; self.inputChanged(); self.render(scrollToBottom: true)
-                } }
+                if all || !mentions.isEmpty {
+                    try await self.service.sendAt(text, users: mentions, all: all, quoted: quote,
+                                                  to: self.conversation, onPersisted: persisted)
+                } else if let quote = quote {
+                    try await self.service.sendQuote(text, original: quote, to: self.conversation, onPersisted: persisted)
+                } else {
+                    try await self.service.send(text, to: self.conversation, onPersisted: persisted)
+                }
                 self.render(scrollToBottom: true)
-            } catch { if self.service.isActive && self.view.window != nil { self.showNativeNotice(error.localizedDescription) } }
+            } catch {
+                if self.service.isActive, self.view.window != nil { self.showNativeNotice(error.localizedDescription) }
+            }
         }
     }
     @objc private func pullHistory() { Task { await loadOlder() } }
@@ -843,27 +884,74 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         }
     }
     @objc private func toggleRecording() {
+        guard audioTask == nil else { return }
         if let recorder = recorder, let url = recordingURL {
             let duration = max(1, Int(ceil(recorder.currentTime))); recorder.stop(); self.recorder = nil; recordingURL = nil; mic.tintColor = nil
-            do { try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) } catch { showNativeNotice(error.localizedDescription) }
+            audioSession.deactivate()
             voiceTimer?.cancel(); voiceTimer = nil; voiceDraft = (url, duration); voiceLabel.text = "语音草稿 \(duration) 秒"; view.setNeedsLayout(); return
         }
-        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in Task { @MainActor in guard let self = self else { return }; guard granted else { self.showNativeNotice("请在系统设置中允许使用麦克风。"); return }; self.beginRecording() } }
+        let request = UUID(); recordPermissionID = request
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in Task { @MainActor in
+            guard let self = self, self.recordPermissionID == request, self.navigationController?.topViewController === self else { return }
+            guard granted else { self.showNativeNotice("请在系统设置中允许使用麦克风。"); return }
+            self.beginRecording()
+        } }
     }
     private func beginRecording() {
-        do {
-            guard service.canSend, view.window != nil else { return }; let audio = AVAudioSession.sharedInstance(); try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker]); try audio.setActive(true)
-            let url = try service.createMediaFile(data: Data(), extension: "m4a"); let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue])
-            guard recorder.record(forDuration: 60) else { throw APIError.invalidResponse }; self.recorder = recorder; recordingURL = url; voiceDraft = nil; attachmentsVisible = false; voiceLabel.text = "录音中 0 秒"; view.setNeedsLayout()
-            voiceTimer?.cancel(); voiceTimer = Task { [weak self] in for seconds in 1...60 { do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }; guard let self = self, self.recorder != nil else { return }; self.voiceLabel.text = "录音中 \(seconds) 秒"; if seconds == 60 { self.toggleRecording() } } }
-        } catch { showNativeNotice(error.localizedDescription) }
+        guard audioTask == nil, service.canSend, view.window != nil else { return }
+        voicePlayer?.stop(); voicePlayer = nil
+        audioTask = Task { [weak self] in
+            guard let self = self else { return }; defer { self.audioTask = nil }
+            do {
+                try await self.audioSession.activate(.recording)
+                try Task.checkCancellation()
+                guard self.service.canSend, self.navigationController?.topViewController === self else { throw CancellationError() }
+                let url = try self.service.createMediaFile(data: Data(), extension: "m4a")
+                let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue])
+                guard recorder.record(forDuration: 60) else { throw APIError.invalidResponse }
+                self.recorder = recorder; self.recordingURL = url; self.voiceDraft = nil; self.attachmentsVisible = false; self.voiceLabel.text = "录音中 0 秒"; self.view.setNeedsLayout()
+                self.voiceTimer?.cancel(); self.voiceTimer = Task { [weak self] in for seconds in 1...60 { do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }; guard let self = self, self.recorder != nil else { return }; self.voiceLabel.text = "录音中 \(seconds) 秒"; if seconds == 60 { self.toggleRecording() } } }
+            } catch {
+                self.audioSession.deactivate()
+                if !(error is CancellationError), !Task.isCancelled, self.navigationController?.topViewController === self { self.showNativeNotice(error.localizedDescription) }
+            }
+        }
     }
-    @objc private func cancelVoice() { recorder?.stop(); recorder = nil; recordingURL = nil; voiceTimer?.cancel(); voiceTimer = nil; voicePlayer?.stop(); voicePlayer = nil; voiceDraft = nil; try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation); inputChanged(); view.setNeedsLayout() }
-    @objc private func previewVoice() { guard let draft = voiceDraft else { return }; do { try AVAudioSession.sharedInstance().setCategory(.playback); try AVAudioSession.sharedInstance().setActive(true); voicePlayer?.stop(); let player = try AVAudioPlayer(contentsOf: draft.url); voicePlayer = player; guard player.play() else { throw APIError.invalidResponse } } catch { showNativeNotice(error.localizedDescription) } }
+    private func stopVoiceAudio() {
+        recordPermissionID = UUID(); audioTask?.cancel()
+        recorder?.stop(); recorder = nil; recordingURL = nil; voiceTimer?.cancel(); voiceTimer = nil
+        voicePlayer?.delegate = nil; voicePlayer?.stop(); voicePlayer = nil; audioSession.deactivate()
+    }
+    @objc private func cancelVoice() { stopVoiceAudio(); voiceDraft = nil; inputChanged(); view.setNeedsLayout() }
+    @objc private func previewVoice() {
+        guard let draft = voiceDraft, audioTask == nil else { return }
+        voicePlayer?.stop(); voicePlayer = nil
+        audioTask = Task { [weak self] in
+            guard let self = self else { return }; defer { self.audioTask = nil }
+            do {
+                try await self.audioSession.activate(.playback)
+                try Task.checkCancellation()
+                guard self.voiceDraft?.url == draft.url, self.navigationController?.topViewController === self else { throw CancellationError() }
+                let player = try AVAudioPlayer(contentsOf: draft.url); player.delegate = self
+                guard player.play() else { throw APIError.invalidResponse }; self.voicePlayer = player
+            } catch {
+                self.audioSession.deactivate()
+                if !(error is CancellationError), !Task.isCancelled, self.navigationController?.topViewController === self { self.showNativeNotice(error.localizedDescription) }
+            }
+        }
+    }
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        guard voicePlayer === player else { return }; voicePlayer = nil; audioSession.deactivate()
+    }
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        guard voicePlayer === player else { return }; voicePlayer = nil; audioSession.deactivate()
+        if navigationController?.topViewController === self { showNativeNotice("语音暂时无法播放，请重新打开后再试。") }
+    }
     @objc private func voiceActionTapped() {
         if recorder != nil { toggleRecording(); return }
-        guard let draft = voiceDraft, !submitting else { return }; submitting = true; voiceAction.isEnabled = false; voiceCancel.isEnabled = false; voicePlay.isEnabled = false
-        Task { defer { submitting = false; voiceAction.isEnabled = true; voiceCancel.isEnabled = true; voicePlay.isEnabled = true }; do { voicePlayer?.stop(); try await service.sendMedia(kind: 103, file: draft.url, filename: "语音.m4a", duration: draft.duration, to: conversation) { [weak self] in self?.voiceDraft = nil; self?.inputChanged(); self?.view.setNeedsLayout() } } catch { showNativeNotice(error.localizedDescription) } }
+        guard let draft = voiceDraft, let submission = composerSubmission.begin() else { return }; voiceAction.isEnabled = false; voiceCancel.isEnabled = false; voicePlay.isEnabled = false
+        stopVoiceAudio()
+        Task { defer { composerSubmission.finish(submission); voiceAction.isEnabled = true; voiceCancel.isEnabled = true; voicePlay.isEnabled = true }; do { try await service.sendMedia(kind: 103, file: draft.url, filename: "语音.m4a", duration: draft.duration, to: conversation) { [weak self] in self?.voiceDraft = nil; self?.inputChanged(); self?.view.setNeedsLayout() } } catch { showNativeNotice(error.localizedDescription) } }
     }
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = displayed[id], item.status != 4 else { return }
@@ -903,163 +991,23 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         })
         present(alert, animated: true)
     }
-    private func openDetails() { Task { do { let id = try await service.businessPeerID(conversation); let page: UIViewController = conversation.type == 3 ? NativeGroupController(service: service, groupID: id) : NativeContactController(service: service, userID: id, isFriend: true); navigationController?.pushViewController(page, animated: true) } catch { showNativeNotice(error.localizedDescription) } } }
+    @objc private func openDetails() {
+        guard !multiSelecting, detailsTask == nil else { return }
+        detailsTask = Task { [weak self] in
+            guard let self = self else { return }
+            defer { self.detailsTask = nil }
+            do {
+                let id = try await self.service.businessPeerID(self.conversation)
+                try Task.checkCancellation()
+                guard self.service.isActive, self.navigationController?.topViewController === self else { return }
+                let page: UIViewController = self.conversation.type == 3
+                    ? NativeGroupController(service: self.service, groupID: id)
+                    : NativeContactController(service: self.service, userID: id, isFriend: true)
+                self.navigationController?.pushViewController(page, animated: true)
+            } catch {
+                if !Task.isCancelled { self.showNativeNotice(error.localizedDescription) }
+            }
+        }
+    }
     private func confirmClear() { let alert = UIAlertController(title: "清除聊天记录", message: "聊天记录将从你的所有设备中删除，不影响其他人。", preferredStyle: .alert); alert.addAction(UIAlertAction(title: "取消", style: .cancel)); alert.addAction(UIAlertAction(title: "清除", style: .destructive) { [weak self] _ in guard let self = self else { return }; Task { do { try await self.service.clearHistory(self.conversation); self.cursor = ""; self.isEnd = true; self.render() } catch { self.showNativeNotice(error.localizedDescription) } } }); present(alert, animated: true) }
-}
-
-@MainActor
-final class NativeForwardPickerController: NativeBusinessListController {
-    private let service: NativeIMService; private let messages: [ChatTextItem]; private let source: NativeConversation
-    private var selected: [NativeMassRecord.Target] = []; private let idempotencyKey = UUID().uuidString
-    private var accepted: NativeForwardAccepted?; private var submissions: [NativeForwardSubmission] = []; private var draft: NativeForwardSubmission?; private var storageReadable = false
-    init(service: NativeIMService, message: ChatTextItem, sourceConversation: NativeConversation) { self.service = service; messages = [message]; source = sourceConversation; super.init(title: "转发给", context: service.business) }
-    init(service: NativeIMService, messages: [ChatTextItem], sourceConversation: NativeConversation) { self.service = service; self.messages = messages; source = sourceConversation; super.init(title: "转发给", context: service.business) }
-    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
-    override func viewDidLoad() {
-        super.viewDidLoad(); navigationItem.rightBarButtonItem = UIBarButtonItem(title: "传送", style: .done, target: self, action: #selector(send))
-        do { if let data = try service.forwardSubmissionsData() { submissions = try JSONDecoder().decode([NativeForwardSubmission].self, from: data) }; draft = submissions.last(where: { $0.sourceConversationID == source.id && $0.messageIDs == messages.map(\.id) && $0.accepted == nil }); storageReadable = true }
-        catch { showNativeNotice("前次转发状态读取失败，本次未提交：" + error.localizedDescription) }
-    }
-    override func reloadContent() {
-        var sections = [[NativeBusinessRow(title: "选择接收对象", detail: "已选 \(selected.count)", action: { [weak self] in self?.pick() })], selected.map { NativeBusinessRow(title: $0.name) }]
-        if draft != nil { sections.insert([NativeBusinessRow(title: "上次转发尚未确认", detail: "点击重试", action: { [weak self] in self?.send() })], at: 0) }
-        setRows(sections); navigationItem.rightBarButtonItem?.isEnabled = storageReadable && accepted == nil && (!selected.isEmpty || draft != nil)
-    }
-    private func pick() { guard accepted == nil, draft == nil else { return }; push(NativeMassTargetPicker(service: service, initial: selected) { [weak self] values in self?.selected = values; self?.reloadContent() }) }
-    @objc private func send() {
-        guard storageReadable, (!selected.isEmpty || draft != nil), accepted == nil else { return }
-        if draft != nil { confirm("确认重试上次转发？", destructiveTitle: "重试") { [weak self] in self?.submit() }; return }
-        confirm("将 \(messages.count) 条消息转发给所选 \(selected.count) 个对象？", destructiveTitle: "传送") { [weak self] in self?.submit() }
-    }
-    private func submit() {
-        perform { [self] in
-            if let pending = draft { returnToChatAndDispatch(pending); return }
-            var userIDs = Set<String>(), groupIDs = Set<String>()
-            for target in selected {
-                if target.kind == "recent" {
-                    guard let conversation = service.conversations.first(where: { $0.id == target.id }) else { throw APIError.invalidResponse }
-                    let id = try await service.businessPeerID(conversation)
-                    if conversation.type == 3 { groupIDs.insert(id) } else { userIDs.insert(id) }
-                } else if target.kind == "group" { groupIDs.insert(target.id) } else { userIDs.insert(target.id) }
-            }
-            var sources: [JSONValue] = []
-            for message in messages {
-                guard message.status == 2 else { throw APIError.business(code: -1, message: "请先核对消息发送状态。") }
-                let snapshot = try ForwardMessageSnapshot.make(serialized: message.serialized, mediaPolicy: context.media)
-                // 批量接口与原 uni-app 相同，由服务端保存独立媒体副本；不再额外重复 preserve。
-                sources.append(.object(["sourceConversationId": .string(source.id), "sourceClientMsgId": .string(message.id), "sourceSnapshot": snapshot.body]))
-            }
-            // 单次用户操作固定幂等键。请求超时后再次确认仍提交同一批次，不创建重复任务。
-            let body: [String: JSONValue] = ["messages": .array(sources), "targetUserIds": .array(userIDs.sorted().map(JSONValue.string)), "targetGroupIds": .array(groupIDs.sorted().map(JSONValue.string)), "idempotencyKey": .string(idempotencyKey)]
-            let pending = NativeForwardSubmission(key: idempotencyKey, sourceConversationID: source.id, messageIDs: messages.map(\.id), body: body, createdAt: Date(), accepted: nil)
-            guard submissions.filter({ $0.accepted == nil }).count < 200 else { throw APIError.business(code: -1, message: "未确认的转发较多，请稍后重试。") }
-            try service.saveForwardSubmission(pending)
-            submissions.append(pending)
-            draft = pending
-            returnToChatAndDispatch(pending)
-        }
-    }
-    private func returnToChatAndDispatch(_ pending: NativeForwardSubmission) {
-        service.dispatchForwardInBackground(pending)
-        navigationController?.popViewController(animated: true)
-    }
-
-}
-
-@MainActor
-private final class NativeTextSelectionController: UIViewController {
-    private let textView = UITextView()
-    init(text: String) { super.init(nibName: nil, bundle: nil); title = "选择文字"; textView.text = text }
-    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
-    override func viewDidLoad() { super.viewDidLoad(); view.backgroundColor = .white; textView.isEditable = false; textView.isSelectable = true; textView.font = .systemFont(ofSize: 18); textView.textContainerInset = UIEdgeInsets(top: 24, left: 20, bottom: 24, right: 20); view.addSubview(textView); textView.becomeFirstResponder() }
-    override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); navigationController?.setNavigationBarHidden(false, animated: animated) }
-    override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); textView.frame = view.bounds.inset(by: view.safeAreaInsets) }
-}
-
-
-/// 对齐旧端消息菜单：两列、奇数留空、管理员操作在底部通栏，外点关闭。
-@MainActor
-private final class NativeMessageActionOverlay: UIViewController {
-    private let grid: [NativeMenuItem]
-    private let wide: [NativeMenuItem]
-    private let anchorInWindow: CGPoint
-    private let panel = UIView()
-    private let scroll = UIScrollView()
-    private let content = UIView()
-    private var cells: [UIView] = []
-    private var choosing = false
-
-    init(grid: [NativeMenuItem], wide: [NativeMenuItem], anchorInWindow: CGPoint) {
-        self.grid = grid; self.wide = wide; self.anchorInWindow = anchorInWindow
-        super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .overFullScreen; modalTransitionStyle = .crossDissolve
-    }
-    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        view.accessibilityViewIsModal = true
-        let outside = UIButton(type: .custom); outside.frame = view.bounds; outside.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        outside.accessibilityLabel = "关闭消息菜单"
-        outside.addAction(UIAction { [weak self] _ in self?.dismiss(animated: true) }, for: .touchUpInside)
-        view.addSubview(outside); view.addSubview(panel)
-        panel.backgroundColor = .white; panel.layer.cornerRadius = 12
-        panel.layer.shadowColor = UIColor(hex: 0x0f172a).cgColor; panel.layer.shadowOpacity = 0.14; panel.layer.shadowRadius = 16; panel.layer.shadowOffset = CGSize(width: 0, height: 8)
-        panel.addSubview(scroll); scroll.backgroundColor = .white; scroll.layer.cornerRadius = 12; scroll.clipsToBounds = true
-        scroll.addSubview(content); scroll.alwaysBounceVertical = false
-        let paddedCount = grid.count + grid.count % 2
-        for index in 0..<paddedCount {
-            if index < grid.count { cells.append(makeButton(grid[index], wide: false)) }
-            else { let spacer = UIView(); spacer.isAccessibilityElement = false; content.addSubview(spacer); cells.append(spacer) }
-        }
-        for item in wide { cells.append(makeButton(item, wide: true)) }
-    }
-    private func makeButton(_ item: NativeMenuItem, wide: Bool) -> UIButton {
-        let button = NativeMessageActionButton(type: .custom)
-        button.setTitle(item.title, for: .normal); button.setTitleColor(UIColor(hex: 0x1a1a1a), for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 14, weight: wide ? .semibold : .regular)
-        button.titleLabel?.numberOfLines = 2; button.titleLabel?.textAlignment = .center
-        button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 6, bottom: 8, right: 6)
-        button.addAction(UIAction { [weak self] _ in
-            guard let self = self, !self.choosing else { return }; self.choosing = true
-            // 新页面或权限确认框只能在浮层关闭后打开，不依赖 UIAlertAction 私有接口。
-            self.dismiss(animated: true, completion: item.action)
-        }, for: .touchUpInside)
-        content.addSubview(button); return button
-    }
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let safe = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 8, dy: 8)
-        let keyboardTop = view.keyboardLayoutGuide.layoutFrame.minY
-        let available = CGRect(x: safe.minX, y: safe.minY, width: safe.width, height: max(44, min(safe.maxY, keyboardTop - 8) - safe.minY))
-        let width = min(available.width, min(320, max(view.bounds.width * 0.5, view.bounds.width * 240 / 750)))
-        let paddedCount = grid.count + grid.count % 2, rows = paddedCount / 2
-        let total = CGFloat(rows) * 44 + CGFloat(wide.count) * 48
-        let height = min(total, available.height)
-        let anchor = view.convert(anchorInWindow, from: view.window)
-        let x = min(max(anchor.x - width / 2, available.minX), available.maxX - width)
-        var y = anchor.y + 12
-        if y + height > available.maxY { y = anchor.y - height - 12 }
-        y = min(max(y, available.minY), available.maxY - height)
-        panel.frame = CGRect(x: x, y: y, width: width, height: height)
-        scroll.frame = panel.bounds; scroll.contentSize = CGSize(width: width, height: total)
-        content.frame = CGRect(x: 0, y: 0, width: width, height: total)
-        // 细分隔线包含空位；底部通栏项不进入两列网格。
-        content.layer.sublayers?.filter { $0.name == "menuSeparator" }.forEach { $0.removeFromSuperlayer() }
-        for (index, cell) in cells.enumerated() {
-            if index < paddedCount { cell.frame = CGRect(x: CGFloat(index % 2) * width / 2, y: CGFloat(index / 2) * 44, width: width / 2, height: 44) }
-            else { cell.frame = CGRect(x: 0, y: CGFloat(rows) * 44 + CGFloat(index - paddedCount) * 48, width: width, height: 48) }
-        }
-        let pixel = 1 / (view.window?.screen.scale ?? UIScreen.main.scale)
-        func line(_ rect: CGRect) { let layer = CALayer(); layer.name = "menuSeparator"; layer.backgroundColor = UIColor(hex: 0xececec).cgColor; layer.frame = rect; content.layer.addSublayer(layer) }
-        if rows > 0 { line(CGRect(x: width / 2, y: 0, width: pixel, height: CGFloat(rows) * 44)) }
-        if rows > 1 { for row in 1..<rows { line(CGRect(x: 0, y: CGFloat(row) * 44, width: width, height: pixel)) } }
-        for index in wide.indices { line(CGRect(x: 0, y: CGFloat(rows) * 44 + CGFloat(index) * 48, width: width, height: pixel)) }
-    }
-    override func accessibilityPerformEscape() -> Bool { dismiss(animated: true); return true }
-}
-
-@MainActor
-private final class NativeMessageActionButton: UIButton {
-    override var isHighlighted: Bool { didSet { backgroundColor = isHighlighted ? UIColor(hex: 0xf0f1f4) : .white } }
 }

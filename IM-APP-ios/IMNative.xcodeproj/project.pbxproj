@@ -39,6 +39,12 @@
 		C10000000000000000000010 /* NativeChatExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000010 /* NativeChatExtras.swift */; };
 		C10000000000000000000011 /* NativeDiagnosticsController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000011 /* NativeDiagnosticsController.swift */; };
 		E85944F97BE3FFA0F7B447E0 /* Pods_IMNative.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23C1130E14499BBD77D99C7F /* Pods_IMNative.framework */; };
+		D10000000000000000000001 /* NativePendingJoinRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* NativePendingJoinRequests.swift */; };
+		D10000000000000000000002 /* NativeComposerQuoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* NativeComposerQuoteView.swift */; };
+		D10000000000000000000003 /* NativeForwardDeliveryCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* NativeForwardDeliveryCoordinator.swift */; };
+		D10000000000000000000004 /* NativeCountBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000004 /* NativeCountBadge.swift */; };
+		D10000000000000000000005 /* NativeForwardPickerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005 /* NativeForwardPickerController.swift */; };
+		D10000000000000000000006 /* NativeMessageTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000006 /* NativeMessageTools.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -118,6 +124,12 @@
 		C20000000000000000000011 /* NativeDiagnosticsController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDiagnosticsController.swift; sourceTree = "<group>"; };
 		C658FD59C6C7B02120EF1F01 /* Pods.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = Pods.xcodeproj; path = Pods/Pods.xcodeproj; sourceTree = "<group>"; };
 		D5329F4C944BDC886E40B99B /* Pods-IMNative.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-IMNative.debug.xcconfig"; path = "Target Support Files/Pods-IMNative/Pods-IMNative.debug.xcconfig"; sourceTree = "<group>"; };
+		D20000000000000000000001 /* NativePendingJoinRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePendingJoinRequests.swift; sourceTree = "<group>"; };
+		D20000000000000000000002 /* NativeComposerQuoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeComposerQuoteView.swift; sourceTree = "<group>"; };
+		D20000000000000000000003 /* NativeForwardDeliveryCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeForwardDeliveryCoordinator.swift; sourceTree = "<group>"; };
+		D20000000000000000000004 /* NativeCountBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCountBadge.swift; sourceTree = "<group>"; };
+		D20000000000000000000005 /* NativeForwardPickerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeForwardPickerController.swift; sourceTree = "<group>"; };
+		D20000000000000000000006 /* NativeMessageTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMessageTools.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -192,6 +204,12 @@
 				A20000000000000000000010 /* Assets.xcassets */,
 				A20000000000000000000011 /* Legal */,
 				A20000000000000000000012 /* NativeIMService.swift */,
+				D20000000000000000000006 /* NativeMessageTools.swift */,
+				D20000000000000000000005 /* NativeForwardPickerController.swift */,
+				D20000000000000000000004 /* NativeCountBadge.swift */,
+				D20000000000000000000003 /* NativeForwardDeliveryCoordinator.swift */,
+				D20000000000000000000002 /* NativeComposerQuoteView.swift */,
+				D20000000000000000000001 /* NativePendingJoinRequests.swift */,
 				A20000000000000000000013 /* NativeConversationViewController.swift */,
 				A20000000000000000000014 /* NativeOpenIMBridge.m */,
 				A20000000000000000000015 /* NativeOpenIMBridge.h */,
@@ -414,6 +432,12 @@
 				A10000000000000000000007 /* LegalViewController.swift in Sources */,
 				A10000000000000000000008 /* SampleMainViewController.swift in Sources */,
 				A10000000000000000000011 /* NativeIMService.swift in Sources */,
+				D10000000000000000000006 /* NativeMessageTools.swift in Sources */,
+				D10000000000000000000005 /* NativeForwardPickerController.swift in Sources */,
+				D10000000000000000000004 /* NativeCountBadge.swift in Sources */,
+				D10000000000000000000003 /* NativeForwardDeliveryCoordinator.swift in Sources */,
+				D10000000000000000000002 /* NativeComposerQuoteView.swift in Sources */,
+				D10000000000000000000001 /* NativePendingJoinRequests.swift in Sources */,
 				A10000000000000000000012 /* NativeConversationViewController.swift in Sources */,
 				A10000000000000000000013 /* NativeOpenIMBridge.m in Sources */,
 				B10000000000000000000090 /* NativeKeychain.swift in Sources */,

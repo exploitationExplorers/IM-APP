@@ -1,0 +1,9 @@
+transport reused=false protocol=http/1.1 durationMS=19
+transport reused=true protocol=http/1.1 durationMS=1
+transport reused=true protocol=http/1.1 durationMS=0
+transport reused=true protocol=http/1.1 durationMS=0
+PASS oversized response rejected
+PASS cancellation propagated
+transport reused=true protocol=http/1.1 durationMS=2
+transport reused=true protocol=http/1.1 durationMS=2
+PASS another request survives cancellation

@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-17",
+  "ui_revision": "20261117-ui7",
+  "core_tests": 137,
+  "core_failures": 0,
+  "audio_regression_tests": 6,
+  "project_static_checks": 8,
+  "diff_check": "passed",
+  "simulator_debug_build": "passed",
+  "device_debug_build": "passed",
+  "native_console_rechecked": false,
+  "native_recording_or_playback_verified": false,
+  "backend_changed": false,
+  "sdk_version_changed": false,
+  "committed": false,
+  "pushed": false,
+  "remaining_unattributed_message": "cannot add handler to 0 from 0 - dropping",
+  "log_suppression_added": false,
+  "built_binaries": {
+    "Debug-iphonesimulator": {
+      "revision": "20261117-ui7",
+      "sha256": "46765a1a58f5f606ce46e6e8915c4fdfe5cfad48adbf297ad0c1a7358ee31824"
+    },
+    "Debug-iphoneos": {
+      "revision": "20261117-ui7",
+      "sha256": "ff1be093dc7b16b3e731bbf9fcc2d384a71734eac5d38ddffb85000951b8fbde"
+    }
+  },
+  "installed_simulator_revisions": [
+    "20261117-ui6"
+  ]
+}

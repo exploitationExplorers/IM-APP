@@ -1,0 +1,13 @@
+test_all_app_sources_are_in_build_phase (__main__.IOSProjectStaticTests.test_all_app_sources_are_in_build_phase) ... ok
+test_app_links_local_core_package_and_scheme (__main__.IOSProjectStaticTests.test_app_links_local_core_package_and_scheme) ... ok
+test_info_plist_and_staging_identity (__main__.IOSProjectStaticTests.test_info_plist_and_staging_identity) ... ok
+test_legal_documents_exist_and_webview_restricts_navigation (__main__.IOSProjectStaticTests.test_legal_documents_exist_and_webview_restricts_navigation) ... ok
+test_project_object_references_are_defined (__main__.IOSProjectStaticTests.test_project_object_references_are_defined) ... ok
+test_release_guard_rejects_release_and_archive (__main__.IOSProjectStaticTests.test_release_guard_rejects_release_and_archive) ... ok
+test_shared_fixture_bytes_have_not_drifted (__main__.IOSProjectStaticTests.test_shared_fixture_bytes_have_not_drifted) ... ok
+test_ui_assets_are_bundled_and_referenced_files_exist (__main__.IOSProjectStaticTests.test_ui_assets_are_bundled_and_referenced_files_exist) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.056s
+
+OK

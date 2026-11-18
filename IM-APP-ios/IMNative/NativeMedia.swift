@@ -6,6 +6,43 @@ import AVKit
 import IMCore
 import CryptoKit
 
+@MainActor
+final class NativeAudioSessionLease {
+    private static let session = AudioSessionCoordinator(activate: { mode in
+        let audio = AVAudioSession.sharedInstance()
+        if mode == .recording { try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker]) }
+        else { try audio.setCategory(.playback) }
+        // actor 的同步操作在后台执行，并保持切换顺序；兼容 iOS 15 起的版本。
+        try audio.setActive(true)
+    }, deactivate: {
+        try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    })
+    private var owner: UUID?
+
+    func activate(_ mode: AudioSessionCoordinator.Mode) async throws {
+        let previous = owner; let request = UUID(); owner = request
+        do {
+            if let previous = previous { try await Self.session.deactivate(owner: previous) }
+            try Task.checkCancellation()
+            guard owner == request else { throw CancellationError() }
+            try await Self.session.activate(owner: request, mode: mode)
+            try Task.checkCancellation()
+            guard owner == request else { throw CancellationError() }
+        } catch {
+            try? await Self.session.deactivate(owner: request)
+            if owner == request { owner = nil }
+            throw error
+        }
+    }
+
+    func deactivate() {
+        // 页面从未使用音频时不访问 AVAudioSession，也不触发系统音频初始化。
+        guard let request = owner else { return }
+        owner = nil
+        Task { try? await Self.session.deactivate(owner: request) }
+    }
+}
+
 /// 下载到临时文件并在传输中检查上限；不携带业务Token，只允许HTTPS跳转。
 final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let limit: Int64
@@ -13,9 +50,16 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
     private var continuation: CheckedContinuation<URL, Error>?
     private var cancelled = false
     private var task: URLSessionDownloadTask?
-    private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral; config.timeoutIntervalForRequest = 30; config.timeoutIntervalForResource = 180
-        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    // Task delegates own individual downloads; the session keeps same-host connections reusable.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 180
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
+        config.urlCredentialStorage = nil
+        config.urlCache = nil
+        return URLSession(configuration: config)
     }()
     init(limit: Int64) { self.limit = limit }
     func download(_ url: URL) async throws -> URL {
@@ -24,7 +68,12 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
             try await withCheckedThrowingContinuation { continuation in
                 lock.lock()
                 if cancelled { lock.unlock(); continuation.resume(throwing: APIError.cancelled); return }
-                self.continuation = continuation; let task = session.downloadTask(with: url); self.task = task; lock.unlock(); task.resume()
+                self.continuation = continuation
+                let task = Self.session.downloadTask(with: url)
+                task.delegate = self
+                self.task = task
+                lock.unlock()
+                task.resume()
             }
         }, onCancel: { self.cancel() })
     }
@@ -33,7 +82,6 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
         lock.lock(); let callback = continuation; continuation = nil; lock.unlock()
         if let callback = callback { callback.resume(with: result) }
         else if case .success(let file) = result { try? FileManager.default.removeItem(at: file) }
-        session.finishTasksAndInvalidate()
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(request.url?.scheme == "https" ? request : nil)
