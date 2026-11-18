@@ -105,6 +105,11 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
 @Composable private fun Action(text:String,enabled:Boolean=true,red:Boolean=false,onClick:()->Unit) {
     Box(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=10.dp).height(46.dp).clip(RoundedCornerShape(8.dp)).background(if(enabled)if(red)Red else Blue else Color(0xFFC8CCD6)).clickable(enabled=enabled,onClick=onClick),contentAlignment=Alignment.Center) { Text(text,color=Color.White,fontSize=16.sp) }
 }
+/** H5 primary-btn：96rpx 高、8rpx 圆角、#0A2FC2 底、28rpx 半粗白字；horizontal 为两侧边距（rpx） */
+@Composable private fun PrimaryButton(text:String,enabled:Boolean=true,horizontal:Int=40,onClick:()->Unit) {
+    val s=scale()
+    Box(Modifier.fillMaxWidth().padding(start=(horizontal*s).dp,end=(horizontal*s).dp,top=(16*s).dp,bottom=(16*s).dp).height((96*s).dp).clip(RoundedCornerShape((8*s).dp)).background(Blue.copy(alpha=if(enabled)1f else .7f)).clickable(enabled=enabled,onClick=onClick),contentAlignment=Alignment.Center){Text(text,color=Color.White,fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold)}
+}
 @Composable private fun Input(label:String,value:String,change:(String)->Unit,secret:Boolean=false,multiline:Boolean=false) {
     var reveal by remember(label){mutableStateOf(false)}
     Column(Modifier.fillMaxWidth().background(Color.White).padding(horizontal=20.dp,vertical=12.dp)) {
@@ -132,7 +137,7 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
         Row(Modifier.fillMaxWidth().padding(horizontal=(40*s).dp,vertical=(16*s).dp).height((72*s).dp).clip(RoundedCornerShape((8*s).dp)).background(Color(0xFFF3F4F7)).padding(start=(32*s).dp,end=(24*s).dp),verticalAlignment=Alignment.CenterVertically) {
             Canvas(Modifier.size(16.dp).padding(end=(2*s).dp)) {val stroke=2.dp.toPx();val radius=size.minDimension*.31f;drawCircle(Color(0xFF8A8F9C),radius,androidx.compose.ui.geometry.Offset(radius+stroke/2,radius+stroke/2),style=androidx.compose.ui.graphics.drawscope.Stroke(stroke));drawLine(Color(0xFF8A8F9C),androidx.compose.ui.geometry.Offset(radius*1.8f,radius*1.8f),androidx.compose.ui.geometry.Offset(size.width-stroke/2,size.height-stroke/2),stroke,androidx.compose.ui.graphics.StrokeCap.Round)}
             Spacer(Modifier.width((16*s).dp))
-            BasicTextField(value,{value=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*s).sp,color=Body),decorationBox={inner->Box{if(value.isEmpty())Text(placeholder,fontSize=(28*s).sp,color=Color(0xFF626E8D));inner()}})
+            BasicTextField(value,{value=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*s).sp,lineHeight=(28*s).sp,color=Body),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(value.isEmpty())Text(placeholder,fontSize=(28*s).sp,lineHeight=(28*s).sp,color=Color(0xFF626E8D));inner()}})
             if(value.isNotBlank())Text("×",Modifier.padding(start=(8*s).dp).size((40*s).dp).clip(CircleShape).background(Color(0xFFC4C7CF)).clickable{value=""}.wrapContentSize(),fontSize=(28*s).sp,color=Color.White)
         }
         return
@@ -258,6 +263,20 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
     var confirm by remember(r){mutableStateOf<Pair<String,()->Unit>?>(null)}
     var muteTarget by remember(r){mutableStateOf<Pair<String,JsonObject>?>(null)}
     var removeTarget by remember(r){mutableStateOf<Pair<String,JsonObject>?>(null)}
+    // 添加朋友/添加群聊/创建群聊页状态（布局与交互对标 H5 对应页面）
+    var addFriendKeyword by remember(r){mutableStateOf("")}
+    var addFriendSearched by remember(r){mutableStateOf(false)}
+    var addGroupId by remember(r){mutableStateOf("")}
+    var createGroupStep by remember(r){mutableStateOf(false)}
+    var createGroupName by remember(r){mutableStateOf("")}
+    var createGroupSelected by remember(r){mutableStateOf(emptySet<String>())}
+    val createGroupChosen=remember(r){mutableStateMapOf<String,JsonObject>()}
+    var createGroupSortMenu by remember(r){mutableStateOf(false)}
+    fun submitAddGroupJoin(){
+        val id=addGroupId.trim()
+        if(!Regex("^(qun_[A-Za-z0-9]{6,20}|\\d+)$").matches(id)){controller.reportError("请输入正确的群号");return}
+        controller.joinGroup(id)
+    }
     var modal by remember(r){mutableStateOf<Pair<String,(String)->Unit>?>(null)}
     var modalText by remember(r){mutableStateOf("")}
     var attachments by remember(r){mutableStateOf(emptyList<ImageAttachment>())}
@@ -284,13 +303,20 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
     cropUri?.let{uri->AvatarCropper(uri,{cropUri=null}){cropped->cropUri=null;acceptImage(cropped)}}
     Column(Modifier.fillMaxSize().background(if(r.page in listOf("general","security","reset-password","about","notifications","chat-settings","privacy","debug"))Color.White else Page).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().height((96*pageScale).dp).background(Color.White).padding(horizontal=(32*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
-            Box(Modifier.width((72*pageScale).dp).fillMaxHeight().clickable{controller.back()},contentAlignment=Alignment.CenterStart){Image(painterResource(R.drawable.uni_icon_back),"返回",Modifier.size((44*pageScale).dp))}
-            Text(routeTitles[r.page].orEmpty(),Modifier.weight(1f),fontSize=(40*pageScale).sp,fontWeight=FontWeight.Bold,textAlign=androidx.compose.ui.text.style.TextAlign.Center,color=Body)
+            Box(Modifier.width((72*pageScale).dp).fillMaxHeight().clickable{if(r.page=="create-group"&&createGroupStep)createGroupStep=false else controller.back()},contentAlignment=Alignment.CenterStart){Image(painterResource(R.drawable.uni_icon_back),"返回",Modifier.size((44*pageScale).dp))}
+            Text(if(r.page=="create-group"&&!createGroupStep)"选择联络人" else routeTitles[r.page].orEmpty(),Modifier.weight(1f),fontSize=(40*pageScale).sp,fontWeight=FontWeight.Bold,textAlign=androidx.compose.ui.text.style.TextAlign.Center,color=Body)
             val myIds=setOfNotNull(model.state.value.profile?.businessUserId,model.state.value.profile?.publicId)
             val canInviteMembers=r.page=="members"&&state.items.firstOrNull{it.identifier() in myIds}?.text("role") in listOf("owner","admin")
-            Box(Modifier.width((72*pageScale).dp),contentAlignment=Alignment.CenterEnd){
+            Box(Modifier.widthIn(min=(72*pageScale).dp),contentAlignment=Alignment.CenterEnd){
                 if(r.page=="tags")Text("新增",Modifier.clickable{modal="新建标签" to { name->controller.mutate("POST","/contact-tags",obj("name" to name)) };modalText=""},color=Blue,fontSize=(28*pageScale).sp)
                 else if(canInviteMembers)Text("新增",Modifier.clickable{controller.open("invite",r.id)},color=Blue,fontSize=(28*pageScale).sp)
+                else if(r.page=="add-friend"||r.page=="add-group")Image(painterResource(R.drawable.uni_icon_scan),"扫一扫",Modifier.size((48*pageScale).dp).clickable{qrScanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setCaptureActivity(NativeScanActivity::class.java).setBeepEnabled(false))})
+                else if(r.page=="create-group"&&!createGroupStep)Box(Modifier.widthIn(min=(104*pageScale).dp).height((64*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(if(createGroupSelected.isNotEmpty())Blue else Color(0xFFE1E3EA)).clickable(enabled=createGroupSelected.isNotEmpty()){
+                    val me=model.state.value.profile?.nickname?.ifBlank{"我"}?:"我"
+                    val draft=(listOf(me)+createGroupChosen.values.filter{it.identifier() in createGroupSelected}.map{it.displayName()}).joinToString("、")
+                    createGroupName=if(draft.length>50)draft.take(47)+"..." else draft
+                    createGroupStep=true
+                },contentAlignment=Alignment.Center){Text(if(createGroupSelected.isEmpty())"确认" else "确认(${createGroupSelected.size})",fontSize=(28*pageScale).sp,color=if(createGroupSelected.isNotEmpty())Color.White else Color(0xFF848EA9),fontWeight=FontWeight.SemiBold)}
             }
         }
         BusinessStatus(state,controller)
@@ -304,7 +330,7 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                 "mass-assistant","mass-select","mass-targets","mass-compose" -> MassPage(r.page,model,controller)
                 "scan" -> {
                     Section("扫描朋友或群聊的二维码")
-                    Action("扫一扫"){qrScanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("将二维码放入框内").setBeepEnabled(false).setOrientationLocked(false))}
+                    Action("扫一扫"){qrScanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setCaptureActivity(NativeScanActivity::class.java).setBeepEnabled(false))}
                     RowItem("从相册选择"){qrAlbum.launch("image/*")}
                     RowItem("我的二维码"){controller.open("qrcode")}
                     var raw by remember{mutableStateOf("")};Input("也可粘贴二维码内容或链接",raw,{raw=it},multiline=true)
@@ -321,19 +347,41 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                     else {var remark by remember(r){mutableStateOf("")};Input("申请说明",remark,{remark=it});Action(if(d.text("nextAction")=="apply")"申请入群" else "加入群聊",!state.loading){controller.mutate("POST","/groups/qrcode/join",obj("token" to r.context,"payload" to r.context,"remark" to remark))}}
                 }
                 "add-friend" -> {
-                    RowItem("扫一扫"){controller.open("scan")}
-                    SearchBox(placeholder="请输入对方聊天号"){controller.searchUser(it)}
-                    if(d.identifier().isNotBlank()) {
-                        PersonRow(d,d.text("publicId")){controller.open("user",d.identifier())}
-                        var message by remember(r){mutableStateOf("")}
-                        Input("验证信息",message,{message=it})
-                        Action("添加到通讯录",!state.loading){controller.mutate("POST","/friend-requests",obj("toUserId" to d.identifier(),"message" to message))}
+                    // 布局对标 H5 add-friend：灰底圆角搜索框 + 结果卡片 + 验证信息 + 发送按钮，底部固定「搜索」
+                    Row(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp,bottom=(24*pageScale).dp).height((72*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Color(0xFFF3F4F7)).padding(start=(32*pageScale).dp,end=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
+                        Text("⌕",color=Color(0xFF626E8D),fontSize=(30*pageScale).sp)
+                        Spacer(Modifier.width((16*pageScale).dp))
+                        BasicTextField(addFriendKeyword,{addFriendKeyword=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),keyboardOptions=KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Search),keyboardActions=androidx.compose.foundation.text.KeyboardActions(onSearch={if(addFriendKeyword.isNotBlank()){addFriendSearched=true;controller.searchUser(addFriendKeyword)}}),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(addFriendKeyword.isEmpty())Text("搜索聊天号",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Color(0xFF626E8D));inner()}})
                     }
+                    if(d.identifier().isNotBlank()) {
+                        Row(Modifier.fillMaxWidth().clickable{controller.open("user",d.identifier())}.padding(horizontal=(40*pageScale).dp,vertical=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
+                            SharedAvatar(d.text("avatar"),Modifier.size((96*pageScale).dp).clip(CircleShape))
+                            Column(Modifier.weight(1f).padding(start=(32*pageScale).dp)) {
+                                Text(d.displayName(),fontSize=(34*pageScale).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                Text("聊天号: ${d.text("publicId")}",Modifier.padding(top=(4*pageScale).dp),fontSize=(24*pageScale).sp,color=Color(0xFF626E8D))
+                            }
+                            Text("›",fontSize=(40*pageScale).sp,color=Color(0xFF999999))
+                        }
+                        var message by remember(r){mutableStateOf("你好，我想加你为好友")}
+                        Box(Modifier.fillMaxWidth().padding(top=(24*pageScale).dp).height(1.dp).background(Color(0xFFF3F4F7)))
+                        Text("验证信息",Modifier.padding(start=(40*pageScale).dp,top=(24*pageScale).dp),fontSize=(28*pageScale).sp,color=Color(0xFF626E8D))
+                        BasicTextField(message,{message=it},Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp).height((80*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Color(0xFFF3F4F7)).padding(horizontal=(32*pageScale).dp),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),decorationBox={inner->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.CenterStart){if(message.isEmpty())Text("填写验证说明",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Color(0xFF626E8D));inner()}})
+                        Spacer(Modifier.height((16*pageScale).dp))
+                        PrimaryButton("发送好友申请",!state.loading){controller.mutate("POST","/friend-requests",obj("toUserId" to d.identifier(),"message" to message)){res->
+                            val status=(res as? JsonObject)?.text("status").orEmpty()
+                            NativeNotices.show(if(status=="accepted")"已添加好友" else "已发送好友申请")
+                            controller.back()
+                        }}
+                    }
+                    if(addFriendSearched&&d.identifier().isBlank()&&!state.loading)Text("未找到该用户，请确认聊天号是否正确",Modifier.fillMaxWidth().padding(top=(80*pageScale).dp),fontSize=(26*pageScale).sp,color=Color(0xFF626E8D),textAlign=androidx.compose.ui.text.style.TextAlign.Center)
                 }
                 "add-group" -> {
-                    RowItem("扫一扫"){controller.open("scan")}
-                    SearchBox(placeholder="输入群号，如 qun_xxxx"){controller.lookupGroup(it)}
-                    Text("输入对方群资料里的群号（qun_ 开头）。也可扫群二维码。",Modifier.padding(horizontal=16.dp,vertical=8.dp),fontSize=12.sp,color=Muted)
+                    // 布局对标 H5 add-group：灰底圆角输入框 + 提示文案，「加入群聊」按钮紧跟其后（非固定底部）
+                    Row(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp).height((72*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Color(0xFFF3F4F7)).padding(horizontal=(32*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
+                        BasicTextField(addGroupId,{addGroupId=it.take(28)},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),keyboardOptions=KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Done),keyboardActions=androidx.compose.foundation.text.KeyboardActions(onDone={submitAddGroupJoin()}),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(addGroupId.isEmpty())Text("输入群号，如 qun_xxxx",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Color(0xFF626E8D));inner()}})
+                    }
+                    Text("输入对方群资料里的群号（qun_ 开头）。右上角仍可扫群二维码。",Modifier.padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp),fontSize=(24*pageScale).sp,color=Color(0xFF626E8D),lineHeight=(36*pageScale).sp)
+                    PrimaryButton(if(state.loading)"加入中..." else "加入群聊",!state.loading){submitAddGroupJoin()}
                 }
                 "requests" -> {
                     state.items.forEach{request->
@@ -397,29 +445,52 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                     }}
                     ListFooter(state,controller,"无群组")
                 }
-                "create-group","invite","tag-add-members" -> {
-                    var selected by remember(r){mutableStateOf(emptySet<String>())};var name by remember(r){mutableStateOf("")};var createStep by remember(r){mutableStateOf(false)}
-                    val chosen=remember(r){mutableStateMapOf<String,JsonObject>()}
-                    val existing=d.get("existingMembers")?.takeIf{it.isJsonArray}?.asJsonArray?.map{it.asString}?.toSet().orEmpty()
-                    if(r.page=="create-group"&&createStep) {
-                        androidx.activity.compose.BackHandler{createStep=false}
-                        TextButton(onClick={createStep=false}){Text("返回选择联系人")}
-                        Input("群聊名称",name,{name=it.take(50)})
-                        Text("群成员（${selected.size}）",Modifier.padding(18.dp),fontSize=14.sp,color=Muted)
-                        chosen.values.filter{it.identifier() in selected}.forEach{person->PersonRow(person){}}
-                        Action("创建",name.isNotBlank()&&!state.loading){controller.createGroup(name,selected)}
+                "create-group" -> {
+                    if(createGroupStep) {
+                        // 第二步（对标 H5 create.vue）：群头像 + 群名称(50字计数) + 成员宫格，底部固定「创建」
+                        androidx.activity.compose.BackHandler{createGroupStep=false}
+                        Column(Modifier.fillMaxWidth().padding(top=(48*pageScale).dp,bottom=(32*pageScale).dp),horizontalAlignment=Alignment.CenterHorizontally){SharedAvatar("",Modifier.size((160*pageScale).dp).clip(CircleShape))}
+                        Column(Modifier.fillMaxWidth().padding(horizontal=(40*pageScale).dp)) {
+                            BasicTextField(createGroupName,{createGroupName=it.take(50)},Modifier.fillMaxWidth().height((96*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Color(0xFFF3F4F7)).padding(horizontal=(32*pageScale).dp),singleLine=true,textStyle=TextStyle(fontSize=(32*pageScale).sp,lineHeight=(32*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),decorationBox={inner->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.CenterStart){if(createGroupName.isEmpty())Text("请输入群名称",fontSize=(32*pageScale).sp,lineHeight=(32*pageScale).sp,color=Color(0xFF626E8D));inner()}})
+                            Row(Modifier.fillMaxWidth().padding(top=(12*pageScale).dp),horizontalArrangement=Arrangement.SpaceBetween){Text("群组名称最多 50 个字",fontSize=(24*pageScale).sp,color=Color(0xFF626E8D));Text("${createGroupName.length}/50",fontSize=(24*pageScale).sp,color=Color(0xFF626E8D))}
+                            Text("群成员 (${createGroupSelected.size+1})",Modifier.padding(top=(40*pageScale).dp,bottom=(24*pageScale).dp),fontSize=(28*pageScale).sp,fontWeight=FontWeight.Bold,color=Body)
+                            val me=model.state.value.profile
+                            val memberRows=(listOf(me?.avatar.orEmpty() to (me?.nickname?.ifBlank{"我"}?:"我"))+createGroupChosen.values.filter{it.identifier() in createGroupSelected}.map{it.text("avatar") to it.displayName()}).chunked(4)
+                            memberRows.forEach{row->Row(Modifier.fillMaxWidth().padding(bottom=(24*pageScale).dp),horizontalArrangement=Arrangement.spacedBy((32*pageScale).dp)){row.forEach{(avatar,name)->Column(Modifier.width((120*pageScale).dp),horizontalAlignment=Alignment.CenterHorizontally){SharedAvatar(avatar,Modifier.size((96*pageScale).dp).clip(CircleShape));Text(name,Modifier.padding(top=(8*pageScale).dp),fontSize=(22*pageScale).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)}}}}
+                        }
                     } else {
+                        // 第一步（对标 H5 选择联络人）：已选 chips + 搜索 + 计数/排序下拉 + 圆圈勾选列表
+                        if(createGroupSelected.isNotEmpty())Column(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(8*pageScale).dp,bottom=(16*pageScale).dp)){createGroupChosen.values.filter{it.identifier() in createGroupSelected}.chunked(4).forEach{row->Row(Modifier.fillMaxWidth().padding(bottom=(16*pageScale).dp),horizontalArrangement=Arrangement.spacedBy((16*pageScale).dp)){row.forEach{person->Row(Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0xFFF3F4F7)).clickable{createGroupSelected=createGroupSelected-person.identifier()}.padding(start=(4*pageScale).dp,end=(12*pageScale).dp,top=(4*pageScale).dp,bottom=(4*pageScale).dp),verticalAlignment=Alignment.CenterVertically){SharedAvatar(person.text("avatar"),Modifier.size((48*pageScale).dp).clip(CircleShape));Text(person.displayName(),Modifier.padding(start=(8*pageScale).dp).widthIn(max=(160*pageScale).dp),fontSize=(24*pageScale).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)}}}}}
+                        SearchBox(auto=true,original=true,placeholder="搜索"){controller.query(it)}
+                        Row(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(8*pageScale).dp,bottom=(16*pageScale).dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+                            Text("联络人 (${state.items.size})",fontSize=(28*pageScale).sp,fontWeight=FontWeight.Bold,color=Body)
+                            Box {
+                                Row(Modifier.clickable{createGroupSortMenu=true},verticalAlignment=Alignment.CenterVertically){Text(when(state.sort){"name"->"名字";"chat"->"最近聊天";else->"最近加入(默认)"},fontSize=(24*pageScale).sp,color=Color(0xFF626E8D));Text(" ▼",fontSize=(18*pageScale).sp,color=Color(0xFF626E8D))}
+                                DropdownMenu(createGroupSortMenu,{createGroupSortMenu=false}){listOf("recent" to "最近加入(默认)","name" to "名字","chat" to "最近聊天").forEach{(sort,label)->DropdownMenuItem(text={Text(label,color=if((if(state.sort.isBlank())"recent" else state.sort)==sort)Blue else Body)},onClick={createGroupSortMenu=false;controller.query(state.keyword,sort)})}}
+                            }
+                        }
+                        state.items.forEach{p->createGroupChosen[p.identifier()]=p
+                            Row(Modifier.fillMaxWidth().height((128*pageScale).dp).clickable{val id=p.identifier();createGroupSelected=if(id in createGroupSelected)createGroupSelected-id else createGroupSelected+id}.padding(horizontal=(40*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
+                                SharedAvatar(p.text("avatar"),Modifier.size((96*pageScale).dp).clip(CircleShape))
+                                Text(p.displayName(),Modifier.weight(1f).padding(start=(32*pageScale).dp),fontSize=(34*pageScale).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                CircleCheck(p.identifier() in createGroupSelected)
+                            }
+                        }
+                        ListFooter(state,controller,"暂无可选联系人")
+                    }
+                }
+                "invite","tag-add-members" -> {
+                    var selected by remember(r){mutableStateOf(emptySet<String>())}
+                    val existing=d.get("existingMembers")?.takeIf{it.isJsonArray}?.asJsonArray?.map{it.asString}?.toSet().orEmpty()
                     SearchBox(state.keyword,auto=true){controller.query(it)}
                     Row {listOf("recent" to "最近加入","name" to "名字","chat" to "最近聊天").forEach{(sort,label)->TextButton(onClick={controller.query(state.keyword,sort)}){Text(label)}}}
-                    state.items.filter{it.identifier() in selected}.forEach{chosen[it.identifier()]=it}
                     TextButton(onClick={val available=state.items.map{it.identifier()}.filterNot{it in existing}.toSet();selected=if(available.isNotEmpty()&&available.all{it in selected})selected-available else selected+available}){Text("全选 / 取消当前页")}
                     val chatOrder=model.state.value.chat.conversations.filter{it.target.sessionType==1}.map{com.im.nativebootstrap.chat.businessUserId(it.target.userId)}
                     val people=if(state.sort=="chat")state.items.sortedBy{chatOrder.indexOf(it.identifier()).takeIf{index->index>=0}?:Int.MAX_VALUE} else state.items
                     people.forEach{p->PersonRow(p,trailing={Checkbox(p.identifier() in selected||p.identifier() in existing,{checked->if(p.identifier() !in existing)selected=if(checked)selected+p.identifier() else selected-p.identifier()},enabled=p.identifier() !in existing,colors=CheckboxDefaults.colors(checkedColor=Blue))}){if(p.identifier() !in existing)selected=if(p.identifier() in selected)selected-p.identifier() else selected+p.identifier()}}
                     ListFooter(state,controller,"暂无可选联系人")
                     Action("确认（${selected.size}）",selected.isNotEmpty()&&!state.loading) {
-                        when(r.page){"create-group"->{name=chosen.values.filter{it.identifier() in selected}.joinToString("、"){it.displayName()}.take(50);createStep=true};"invite"->controller.mutate("POST","/groups/${encoded(r.id)}/invitations",obj("userIds" to selected),true);else->controller.addTagMembers(r.id,selected)}
-                    }
+                        if(r.page=="invite")controller.mutate("POST","/groups/${encoded(r.id)}/invitations",obj("userIds" to selected),true) else controller.addTagMembers(r.id,selected)
                     }
                 }
                 "group-admin" -> GroupAdmin(state,controller)
@@ -547,6 +618,9 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                 }
             }
         }}
+        // 底部固定主按钮，对标 H5 footer primary-btn（add-group 的按钮在内容区内，不在此处）
+        if(r.page=="add-friend")PrimaryButton(if(state.loading)"搜索中..." else "搜索",!state.loading){if(addFriendKeyword.isBlank())controller.reportError("请输入聊天号")else{addFriendSearched=true;controller.searchUser(addFriendKeyword)}}
+        if(r.page=="create-group"&&createGroupStep)PrimaryButton(if(state.loading)"创建中..." else "创建",createGroupName.isNotBlank()&&!state.loading,horizontal=32){controller.createGroup(createGroupName,createGroupSelected)}
     }
     confirm?.let{(text,action)->AlertDialog(onDismissRequest={confirm=null},title={Text("提示")},text={Text(text)},confirmButton={TextButton(onClick={confirm=null;action()}){Text("确认")}},dismissButton={TextButton(onClick={confirm=null}){Text("取消")}})}
     // 禁言时长档位与 H5 constants/mute.ts 保持一致（上限 30 天）
@@ -627,6 +701,17 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
     }
 }
 
+@Composable private fun CircleCheck(on:Boolean) {
+    // 对标 H5 选人列表的圆形勾选框：选中蓝底白勾，未选中灰底灰边
+    val s=scale()
+    Box(Modifier.size((48*s).dp).clip(CircleShape).border((2*s).dp,if(on)Blue else Color(0xFFE1E3EA),CircleShape).background(if(on)Blue else Color(0xFFF3F4F7))) {
+        if(on)Canvas(Modifier.fillMaxSize()){
+            val w=size.width
+            drawLine(Color.White,androidx.compose.ui.geometry.Offset(w*.30f,w*.52f),androidx.compose.ui.geometry.Offset(w*.45f,w*.68f),strokeWidth=w*.08f,cap=androidx.compose.ui.graphics.StrokeCap.Round)
+            drawLine(Color.White,androidx.compose.ui.geometry.Offset(w*.45f,w*.68f),androidx.compose.ui.geometry.Offset(w*.72f,w*.32f),strokeWidth=w*.08f,cap=androidx.compose.ui.graphics.StrokeCap.Round)
+        }
+    }
+}
 @Composable private fun GroupAdmin(state:BusinessState,c:BusinessController) {
     val r=state.route;val d=state.detail
     RowItem("入群申请"){c.open("join-requests",r.id)}
