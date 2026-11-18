@@ -3,6 +3,9 @@ package com.im.nativebootstrap.media
 import android.graphics.Bitmap
 import android.graphics.drawable.Animatable
 import android.media.MediaPlayer
+import androidx.compose.animation.core.Animatable as ComposeAnimatable
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,6 +47,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 
 @Composable
 fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:ContentScale=ContentScale.Fit,description:String="图片",fallbackRes:Int?=null,fallbackUrls:List<String> = emptyList(),localDraft:java.io.File?=null,onDimensions:(Int,Int)->Unit={_,_->},retryOnTap:Boolean=true,cacheUrls:List<String> = emptyList(),boxBackground:Color=Color(0xFFE9EDF4)) {
@@ -128,8 +132,9 @@ private class PreviewTransform {
 }
 
 /**
- * 大图查看（对齐 uniapp 图 1 的布局与操作）：
- * 顶部返回 + 发送者/时间 + 页码；左右滑动切换；双指缩放 1–4x、放大后可单指拖动；
+ * 大图查看（对齐 uniapp image-viewer / viewer）：
+ * 顶部返回 + 发送者/时间 + 页码；左右滑动切换；两侧箭头；双指缩放 1–4x、放大后可单指拖动；
+ * 右下角 −/+ 缩放按钮；底部提示「双指缩放 · 左右滑动切换」；打开淡入；
  * 底部 删除 / 保存 / 转发（有消息上下文时展示，与视频查看页一致）。
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -139,12 +144,17 @@ fun ImagePreview(urls:List<String>,initial:Int=0,onDismiss:()->Unit,onSave:(Stri
     if(list.isEmpty()) { LaunchedEffect(Unit) { onDismiss() };return }
     val state=rememberPagerState(initialPage=initial.coerceIn(0,list.lastIndex)) { list.size }
     val current=state.currentPage
+    val transforms=remember(list) { List(list.size) { PreviewTransform() } }
+    val scope=rememberCoroutineScope()
     var zoomed by remember { mutableStateOf(false) }
+    // 打开淡入：alpha 0→1，200ms
+    val enter=remember { ComposeAnimatable(0f) }
+    LaunchedEffect(Unit) { enter.animateTo(1f,tween(200)) }
     Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(Modifier.fillMaxSize().background(Color.Black).graphicsLayer(alpha=enter.value)) {
             HorizontalPager(state=state,modifier=Modifier.fillMaxSize(),userScrollEnabled=!zoomed) { page ->
                 val url=list[page]
-                val transform=remember(page) { PreviewTransform() }
+                val transform=transforms[page]
                 // 只在双指或已放大时接管手势：单指横滑留给 pager 翻页。
                 val gesture=Modifier.pointerInput(url) {
                     awaitEachGesture {
@@ -175,7 +185,33 @@ fun ImagePreview(urls:List<String>,initial:Int=0,onDismiss:()->Unit,onSave:(Stri
                 }
                 if(list.size>1)Text("${current+1} / ${list.size}",Modifier.padding(end=16.dp),color=Color(0xFFDDDDDD),fontSize=12.sp)
             }
-            if(onDelete!=null||onForward!=null)Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().height(56.dp),horizontalArrangement=Arrangement.SpaceAround,verticalAlignment=Alignment.CenterVertically) {
+            // 两侧翻页箭头（与 uniapp image-viewer 的 viewer-arrow 一致），放大时禁用避免与拖拽冲突。
+            if(list.size>1) {
+                val prevEnabled=current>0&&!zoomed
+                val nextEnabled=current<list.lastIndex&&!zoomed
+                Box(Modifier.align(Alignment.CenterStart).padding(start=2.dp).size(34.dp).clickable(enabled=prevEnabled) { scope.launch { state.animateScrollToPage(current-1) } },contentAlignment=Alignment.Center) {
+                    Text("‹",color=if(prevEnabled)Color.White else Color(0x66FFFFFF),fontSize=30.sp)
+                }
+                Box(Modifier.align(Alignment.CenterEnd).padding(end=2.dp).size(34.dp).clickable(enabled=nextEnabled) { scope.launch { state.animateScrollToPage(current+1) } },contentAlignment=Alignment.Center) {
+                    Text("›",color=if(nextEnabled)Color.White else Color(0x66FFFFFF),fontSize=30.sp)
+                }
+            }
+            val hasBar=onDelete!=null||onForward!=null
+            val barInset=if(hasBar)62.dp else 20.dp
+            // 右下角 −/+ 缩放按钮（对齐 uniapp PreviewImageSlide 的 preview-zoom）
+            Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end=12.dp,bottom=barInset),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                listOf("−" to -1f,"+" to 1f).forEach { (label,delta) ->
+                    Box(Modifier.size(32.dp).clip(CircleShape).background(Color(0xCC333333)).clickable {
+                        val transform=transforms[current]
+                        scope.launch {
+                            animate(transform.zoom,(transform.zoom+delta).coerceIn(1f,4f),animationSpec=tween(160)) { value,_ -> transform.zoom=value }
+                            if(transform.zoom<=1.001f) { transform.zoom=1f;transform.panX=0f;transform.panY=0f }
+                        }
+                    },contentAlignment=Alignment.Center) { Text(label,color=Color.White,fontSize=18.sp) }
+                }
+            }
+            Text("双指缩放 · 左右滑动切换",Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom=barInset),color=Color(0xFFAAAAAA),fontSize=12.sp)
+            if(hasBar)Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().height(56.dp),horizontalArrangement=Arrangement.SpaceAround,verticalAlignment=Alignment.CenterVertically) {
                 val actions=listOf(onDelete to (R.drawable.uni_video_trash to "删除"),({ onSave(list[current]) }) to (R.drawable.uni_video_download to "保存"),onForward to (R.drawable.uni_video_forward to "转发")).filter { it.first!=null }
                 actions.forEach { (action,icon) -> Box(Modifier.width(72.dp).fillMaxHeight().clickable(onClick={ action?.invoke() }),contentAlignment=Alignment.Center) { Image(painterResource(icon.first),icon.second,Modifier.size(24.dp),contentScale=ContentScale.Fit) } }
             }
