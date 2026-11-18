@@ -584,6 +584,8 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                 }
                 "chat-settings" -> {
                     ToggleRow("回车键送出消息",preferences.enterToSend,compact=true){model.settings.set("enterToSend",it)}
+                    ToggleRow("自动缓存最近聊天媒体",preferences.autoCacheMedia,compact=true){model.settings.set("autoCacheMedia",it)}
+                    ToggleRow("仅 Wi-Fi 自动缓存",preferences.wifiOnly,compact=true){model.settings.set("wifiOnly",it)}
                     ChatSettingCell("群发助手"){controller.open("mass-assistant")}
                     ChatSettingCell("我的表情"){controller.open("emotions")}
                     var clearNote by remember{mutableStateOf("")};var clearing by remember{mutableStateOf(false)}

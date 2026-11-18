@@ -176,18 +176,47 @@ object MediaLoader {
     val access = state.asStateFlow()
     private val pending = ConcurrentHashMap<Job, Long>()
     @Volatile private var pipeline: MediaImagePipeline? = null
+    @Volatile private var cacheOwner: String? = null
+    @Volatile private var cacheVersion = 0L
+    private var storeOwner: String? = null
+    private var store: MediaCacheStore? = null
     private fun images(context: Context): MediaImagePipeline = pipeline ?: synchronized(this) {
         pipeline ?: MediaImagePipeline(context).also { pipeline = it }
     }
-    @Synchronized fun setScope(base: String, account: String) {
+    @Synchronized fun setScope(base: String, account: String, owner: String? = null) {
         MediaURLs.businessBase = base
         val scope = MediaCacheIdentity.scope(base, account)
-        if (scope == state.value.scope) return
+        if (scope == state.value.scope && owner == cacheOwner) return
+        cacheOwner = owner
+        cacheVersion += 1
+        storeOwner = null
+        store = null
+        if (scope == state.value.scope) {
+            state.value = state.value.copy(generation = state.value.generation + 1)
+            pending.keys.forEach { it.cancel() }
+            MediaHttp.cancelDownloads()
+            return
+        }
         state.value = MediaAccess(scope, base, state.value.generation + 1)
         pending.keys.forEach { it.cancel() }
         MediaHttp.cancelDownloads()
         pipeline?.loader?.memoryCache?.clear()
         MediaMetrics.reset()
+    }
+    fun cacheOwner(): String? = cacheOwner
+    fun cacheVersion(): Long = cacheVersion
+    fun cacheCurrent(owner: String, version: Long) = cacheOwner == owner && cacheVersion == version
+    fun isCachedFile(context: Context, file: File) = persistentStore(context, state.value)?.owns(file.canonicalFile) == true
+    private fun persistentStore(context: Context, captured: MediaAccess): MediaCacheStore? {
+        val owner = cacheOwner ?: return null
+        if (captured != state.value || captured.clearing) return null
+        synchronized(this) {
+            if (storeOwner == owner) return store
+            return MediaCacheStore.of(context, owner).also {
+                storeOwner = owner
+                store = it
+            }
+        }
     }
     internal fun id(url: String, captured: MediaAccess = state.value) = MediaCacheIdentity.key(url, captured.scope, captured.base)
     internal fun encodedCache(context: Context) = images(context).loader.diskCache
@@ -255,9 +284,10 @@ object MediaLoader {
             require(url.isNotEmpty()) { "媒体地址不受支持" }
             val key=id(url,captured)
             val own=withContext(Dispatchers.IO) { localCopies(context).get(captured.scope,key) }
-            val local=own ?: withContext(Dispatchers.IO) { MediaHttp.cachedFile(context,key,32L*1024*1024) }
+            val persistent=withContext(Dispatchers.IO) { persistentStore(context,captured)?.find(key)?.takeIf { it.length() in 1..32L*1024*1024 } }
+            val local=own ?: persistent ?: withContext(Dispatchers.IO) { MediaHttp.cachedFile(context,key,32L*1024*1024) }
             val value = images(context).load(context, url, key, edge,local) {
-                if(own!=null)localCopies(context).discard(captured.scope,key) else local?.delete()
+                if(own!=null)localCopies(context).discard(captured.scope,key) else if(persistent==null)local?.delete()
             }
             ensureActive()
             if (captured != state.value) throw CancellationException("媒体会话已变化")
@@ -276,9 +306,10 @@ object MediaLoader {
             if(url.isBlank())return@coroutineScope null
             val key=id(url,captured)
             val own=withContext(Dispatchers.IO) { localCopies(context).get(captured.scope,key) }
-            val local=own ?: withContext(Dispatchers.IO) { MediaHttp.cachedFile(context,key,32L*1024*1024) }
+            val persistent=withContext(Dispatchers.IO) { persistentStore(context,captured)?.find(key)?.takeIf { it.length() in 1..32L*1024*1024 } }
+            val local=own ?: persistent ?: withContext(Dispatchers.IO) { MediaHttp.cachedFile(context,key,32L*1024*1024) }
             val value=images(context).cached(context,key,edge,local) {
-                if(own!=null)localCopies(context).discard(captured.scope,key) else local?.delete()
+                if(own!=null)localCopies(context).discard(captured.scope,key) else if(persistent==null)local?.delete()
             }
             ensureActive()
             if(captured!=state.value)throw CancellationException("媒体会话已变化")
@@ -290,21 +321,43 @@ object MediaLoader {
     fun bitmap(context: Context, url: String, edge: Int): Bitmap = visual(context, url, edge).let {
         it.bitmap ?: it.animation?.toBitmap() ?: error("图片解码失败")
     }
-    fun fetch(context: Context, raw: String, maxBytes: Long = 256L * 1024 * 1024): File {
+    fun fetch(context: Context, raw: String, maxBytes: Long = 256L * 1024 * 1024, meta: MediaCacheMeta? = null): File {
         val captured = state.value
         check(!captured.clearing) { "媒体缓存正在清理，请稍后重试" }
         val url = MediaURLs.remote(raw, captured.base)
         require(url.isNotEmpty()) { "媒体地址不受支持" }
-        localCopies(context).get(captured.scope,id(url,captured))?.let { if(captured==state.value&&it.length()<=maxBytes)return it }
-        return MediaHttp.download(context, url, id(url, captured), maxBytes, { captured == state.value }, images(context).loader.diskCache)
+        val key=id(url,captured)
+        localCopies(context).get(captured.scope,key)?.let { if(captured==state.value&&it.length()<=maxBytes)return it }
+        val store=persistentStore(context,captured)
+        store?.find(key)?.let { file ->
+            if(captured==state.value&&file.length()<=maxBytes) {
+                if(meta!=null)store.tag(key,meta)
+                return file
+            }
+        }
+        val target=store?.target(key)
+        val file=MediaHttp.download(context, url, key, maxBytes, { captured == state.value }, images(context).loader.diskCache, target)
+        if(captured==state.value&&store!=null)store.register(key,url,file,meta ?: MediaCacheMeta(url=url))
+        return file
+    }
+    fun cachedFile(context: Context, raw: String, maxBytes: Long = 256L * 1024 * 1024): File? {
+        val captured = state.value
+        if (captured.clearing) return null
+        val url = MediaURLs.remote(raw, captured.base)
+        if (url.isEmpty()) return null
+        val key = id(url, captured)
+        localCopies(context).get(captured.scope, key)?.let { if (it.length() in 1..maxBytes) return it }
+        persistentStore(context, captured)?.find(key)?.let { if (it.length() in 1..maxBytes) return it }
+        return MediaHttp.cachedFile(context, key, maxBytes)
     }
     suspend fun clearDownloads(context: Context): Long {
+        val persistent=persistentStore(context,state.value)
         synchronized(this) {
             state.value = state.value.copy(generation = state.value.generation + 1, clearing = true)
             pending.keys.forEach { it.cancel() }
             MediaHttp.cancelDownloads()
         }
-        return try { withContext(Dispatchers.IO) { images(context).clear() + MediaHttp.clear(context)+localCopies(context).clear() } }
+        return try { withContext(Dispatchers.IO) { (persistent?.clear() ?: 0L) + images(context).clear() + MediaHttp.clear(context)+localCopies(context).clear() } }
         finally { synchronized(this) { state.value = state.value.copy(generation = state.value.generation + 1, clearing = false) } }
     }
 }

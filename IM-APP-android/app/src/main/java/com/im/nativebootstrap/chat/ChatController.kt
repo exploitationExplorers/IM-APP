@@ -296,6 +296,7 @@ class ChatController(
                     items.forEach { (_,msg) -> if(msg.mine && (msg.seq>0 || msg.status==2)) acceptEvidence(msg) }
                     val active=snapshot.active?.target
                     emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(items.filter { it.first.conversationId==active?.conversationId }.map { it.second }))))
+                    active?.let { target -> MediaPrefetch.enqueue(target,items.filter { it.first==target }.map { it.second }) }
                     items.map { it.first }.distinct().filter { it.sessionType==3 }.forEach { refreshGroupPurges(it) }
                     if(items.any { it.first.conversationId==active?.conversationId&&!it.second.mine }) markRoomRead()
                 } }
@@ -337,6 +338,7 @@ class ChatController(
                     else {syncFinishedBeforeStore=true;if(snapshot.loggedIn)loadConversations(true)}
                     reconcilePending()
                     reconcileJoinRequestHighlights()
+                    snapshot.active?.let { active -> MediaPrefetch.enqueue(active.target,snapshot.messages) }
                     emit()
                 } }
                 override fun syncFailed() { dispatch {
@@ -509,6 +511,7 @@ class ChatController(
                     if(local.messages.isNotEmpty()||!local.end)localHistoryPage=page+1
                     local.messages.filter { it.mine&&(it.status==2||it.seq>0) }.forEach(::acceptEvidence)
                     emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(local.messages)),historyLoading=false,historyEnd=historyExhausted(),historyRevision=snapshot.historyRevision+1,error=null))
+                    MediaPrefetch.enqueue(active.target,local.messages)
                     // 未连上服务器也尝试一次完整 SDK 历史；无补洞时可立即补出本地系统/表情。
                     // 该查询独立限时，既不占本地 loading，也不阻止下一页本地预览。
                     if(snapshot.ready)loadRemoteHistory(t,active,version)
@@ -533,6 +536,7 @@ class ChatController(
                 page.messages.filter { it.mine && (it.status==2 || it.seq>0) }.forEach(::acceptEvidence)
                 // 仅 SDK 的 isEnd 决定结束；空页或重复游标不能冒充无更多历史。
                 emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(page.messages)),historyLoading=false,historyEnd=page.end,historyRevision=snapshot.historyRevision+if(page.end||oldest!=null&&oldest!=before)1 else 0,error=if(!page.end&&(oldest==null||oldest==before)) "历史暂未推进，请稍后重试。" else null))
+                MediaPrefetch.enqueue(active.target,page.messages)
                 markRoomRead()
             },onFailure={ emit(snapshot.copy(historyLoading=false,error=it.message ?: "历史读取失败，可重试。")) })
         } }
@@ -571,6 +575,7 @@ class ChatController(
                 remoteHistoryEnd=page.end
                 page.messages.filter { it.mine&&(it.status==2||it.seq>0) }.forEach(::acceptEvidence)
                 emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(page.messages)),historySyncing=false,historyEnd=historyExhausted(),historyRevision=snapshot.historyRevision+if(page.end||cursor!=before)1 else 0))
+                MediaPrefetch.enqueue(active.target,page.messages)
                 markRoomRead()
             },onFailure={ emit(snapshot.copy(historySyncing=false,error=if(snapshot.messages.isEmpty())"在线历史暂未同步，可继续读取本机记录。" else snapshot.error)) })
         } }

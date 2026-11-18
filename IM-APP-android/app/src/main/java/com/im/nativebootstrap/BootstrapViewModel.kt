@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import java.util.UUID
 import com.im.nativebootstrap.business.*
 import com.google.gson.JsonElement
@@ -96,7 +97,14 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         { id, group, title, avatar -> openBusinessChat(id,group,title,avatar) }, { logout() })
     val mass=MassAssistant(application,viewModelScope,{businessBaseURL+"|"+businessSession.currentProfile()?.businessUserId.orEmpty()},
         {method,path,data,query->businessRequest(method,path,data,query)},::sendMassTarget)
-    init { restoreSession() }
+    init {
+        viewModelScope.launch {
+            settings.state.collect { value ->
+                com.im.nativebootstrap.media.MediaPrefetch.configure(getApplication(),value.autoCacheMedia,value.wifiOnly)
+            }
+        }
+        restoreSession()
+    }
 
     private fun persistSession() {
         val tag=operation
@@ -123,7 +131,10 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                     runCatching { imSecureStore.load()?.let { StoredIMSession.decode(it,base,stored.profile.businessUserId) } }.getOrNull()
                 }
                 // 本机已有的 SDK 凭据先开库；资料校验不再挡住离线历史首屏。
-                if(localIM!=null)startChatSession(base,stored.profile,tag,localIM)
+                if(localIM!=null) {
+                    com.im.nativebootstrap.media.MediaLoader.setScope(base,stored.profile.businessUserId,AccountStorage.key(base,stored.profile.businessUserId,localIM.imUserId))
+                    startChatSession(base,stored.profile,tag,localIM)
+                }
                 val api=NativeAPI(base)
                 var credentials=stored.tokens
                 var refreshed=false
@@ -186,6 +197,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
             val credentials=cached ?: withContext(Dispatchers.IO) { businessSession.withAccessToken(profile.businessUserId){NativeAPI(baseURL).imToken(it)} }
             if(tag!=operation||credentials==null)return
             PerfLog.mark("im-token:ready", "cached=${cached!=null}")
+            com.im.nativebootstrap.media.MediaLoader.setScope(baseURL,profile.businessUserId,AccountStorage.key(baseURL,profile.businessUserId,credentials.imUserId))
             if(cached==null) {
                 val value=StoredIMSession.encode(baseURL,profile.businessUserId,credentials)
                 credentialIO.execute { if(tag==operation)runCatching { imSecureStore.save(value) } }
@@ -682,6 +694,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         business.reset()
         mass.reset()
         chatAction { chatController.attachIncoming(null);chatController.logout();chatController.attachBusiness(null) }
+        com.im.nativebootstrap.media.MediaPrefetch.clearQueue()
         mutableState.value = BootstrapState()
         credentialIO.execute {
             try{secureStore.clear();imSecureStore.clear()}catch(_:Exception){}
