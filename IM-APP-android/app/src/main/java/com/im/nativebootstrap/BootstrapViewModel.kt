@@ -22,12 +22,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import java.util.UUID
 import com.im.nativebootstrap.business.*
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import kotlinx.coroutines.delay
 import com.im.nativebootstrap.core.SecureSessionStore
 import com.im.nativebootstrap.core.SessionPersistenceCodec
 import com.im.nativebootstrap.core.StoredIMSession
@@ -46,8 +46,6 @@ data class BootstrapState(
     val chatOpen: Boolean = false,
     val messages: List<SampleMessage> = emptyList(),
     val chat: ChatState = ChatState(),
-    /** 我管理的群里待审核入群申请总数，用于底部「聊天」tab 红点角标（与 H5 pending-join-requests 对账一致）。 */
-    val pendingJoinRequests: Int = 0,
 )
 
 class BootstrapViewModel(application: Application) : AndroidViewModel(application) {
@@ -85,22 +83,6 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private var loginJob: Job? = null
-    // 待审核入群申请轮询：登录/恢复会话后启动，换号或退出后由 operation 代次自动终止。
-    private val joinRequestPollTag=AtomicReference(-1L)
-    private fun startJoinRequestPolling(tag:Long) {
-        if(joinRequestPollTag.get()==tag)return
-        joinRequestPollTag.set(tag)
-        viewModelScope.launch {
-            while(tag==operation&&mutableState.value.authenticated) {
-                val total=try {
-                    val result=withContext(Dispatchers.IO){businessRequest("GET","/groups/pending-join-requests")}
-                    if(result.isJsonArray)result.asJsonArray.sumOf{(it as? JsonObject)?.get("count")?.takeIf{c->c.isJsonPrimitive}?.asInt?:0} else 0
-                } catch(_:Exception) { mutableState.value.pendingJoinRequests }
-                if(tag==operation&&mutableState.value.authenticated&&total!=mutableState.value.pendingJoinRequests)mutableState.value=mutableState.value.copy(pendingJoinRequests=total)
-                delay(10_000)
-            }
-        }
-    }
     private val deviceId by lazy { DeviceIdentity.get(application) }
     val settings=NativeSettings(application)
     private var businessBaseURL = com.im.nativebootstrap.data.RuntimeEndpoints.DEFAULT_API_BASE_URL
@@ -115,7 +97,14 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         { id, group, title, avatar -> openBusinessChat(id,group,title,avatar) }, { logout() })
     val mass=MassAssistant(application,viewModelScope,{businessBaseURL+"|"+businessSession.currentProfile()?.businessUserId.orEmpty()},
         {method,path,data,query->businessRequest(method,path,data,query)},::sendMassTarget)
-    init { restoreSession() }
+    init {
+        viewModelScope.launch {
+            settings.state.collect { value ->
+                com.im.nativebootstrap.media.MediaPrefetch.configure(getApplication(),value.autoCacheMedia,value.wifiOnly)
+            }
+        }
+        restoreSession()
+    }
 
     private fun persistSession() {
         val tag=operation
@@ -138,12 +127,14 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                 businessSession.restore(stored.tokens,stored.profile)
                 com.im.nativebootstrap.media.MediaLoader.setScope(base,stored.profile.businessUserId)
                 mutableState.value=BootstrapState(authenticated=true,profile=stored.profile,chat=ChatState(sessionTag=tag,connection=ConnectionState.CONNECTING))
-                startJoinRequestPolling(tag)
                 val localIM=withContext(Dispatchers.IO) {
                     runCatching { imSecureStore.load()?.let { StoredIMSession.decode(it,base,stored.profile.businessUserId) } }.getOrNull()
                 }
                 // 本机已有的 SDK 凭据先开库；资料校验不再挡住离线历史首屏。
-                if(localIM!=null)startChatSession(base,stored.profile,tag,localIM)
+                if(localIM!=null) {
+                    com.im.nativebootstrap.media.MediaLoader.setScope(base,stored.profile.businessUserId,AccountStorage.key(base,stored.profile.businessUserId,localIM.imUserId))
+                    startChatSession(base,stored.profile,tag,localIM)
+                }
                 val api=NativeAPI(base)
                 var credentials=stored.tokens
                 var refreshed=false
@@ -206,6 +197,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
             val credentials=cached ?: withContext(Dispatchers.IO) { businessSession.withAccessToken(profile.businessUserId){NativeAPI(baseURL).imToken(it)} }
             if(tag!=operation||credentials==null)return
             PerfLog.mark("im-token:ready", "cached=${cached!=null}")
+            com.im.nativebootstrap.media.MediaLoader.setScope(baseURL,profile.businessUserId,AccountStorage.key(baseURL,profile.businessUserId,credentials.imUserId))
             if(cached==null) {
                 val value=StoredIMSession.encode(baseURL,profile.businessUserId,credentials)
                 credentialIO.execute { if(tag==operation)runCatching { imSecureStore.save(value) } }
@@ -310,7 +302,6 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                 PerfLog.mark("login:auth-returned")
                 com.im.nativebootstrap.media.MediaLoader.setScope(baseURL,profile.businessUserId)
                 mutableState.value = BootstrapState(authenticated = true, profile = profile,chat=ChatState(sessionTag=activeOperation,connection=ConnectionState.CONNECTING))
-                startJoinRequestPolling(activeOperation)
                 PerfLog.mark("login:home-published")
                 persistSession()
                 if(registerCode!=null)business.open("onboarding")
@@ -703,6 +694,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         business.reset()
         mass.reset()
         chatAction { chatController.attachIncoming(null);chatController.logout();chatController.attachBusiness(null) }
+        com.im.nativebootstrap.media.MediaPrefetch.clearQueue()
         mutableState.value = BootstrapState()
         credentialIO.execute {
             try{secureStore.clear();imSecureStore.clear()}catch(_:Exception){}

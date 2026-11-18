@@ -56,13 +56,23 @@ internal object MediaHttp {
         return File(context.cacheDir,"media-files-v2/$id").takeIf { it.isFile&&it.length() in 1..max }
             ?.also { it.setLastModified(System.currentTimeMillis()) }
     }
-    fun download(context: Context, url: String, id: String, max: Long, active: () -> Boolean, images: DiskCache?): File {
+    fun download(
+        context: Context,
+        url: String,
+        id: String,
+        max: Long,
+        active: () -> Boolean,
+        images: DiskCache?,
+        persistent: File? = null,
+    ): File {
         val lock = synchronized(guard) { val old = locks[id]; (old?.first ?: Any()).also { locks[id] = it to ((old?.second ?: 0) + 1) } }
         try { synchronized(lock) {
             check(active()) { "媒体会话已变化" }
-            val directory = File(context.cacheDir, "media-files-v2").apply { check(mkdirs() || isDirectory) }
-            val destination = File(directory, id)
+            val directory = persistent?.parentFile ?: File(context.cacheDir, "media-files-v2").apply { check(mkdirs() || isDirectory) }
+            check(directory.mkdirs() || directory.isDirectory) { "媒体缓存目录不可用" }
+            val destination = persistent ?: File(directory, id)
             if (destination.isFile && destination.length() in 1..max) { destination.setLastModified(System.currentTimeMillis()); return destination }
+            if (destination.isFile) destination.delete()
             val part = File(directory, "$id.${UUID.randomUUID()}.part")
             try {
                 val snapshot = images?.openSnapshot(id)
@@ -85,7 +95,7 @@ internal object MediaHttp {
                     } } finally { calls.remove(call); fileSlots.release() }
                 }
                 synchronized(guard) { check(active()) { "媒体会话已变化" }; check(part.length() > 0 && part.renameTo(destination)) }
-                trim(directory, destination)
+                if (persistent == null) trim(directory, destination)
                 return destination
             } finally { part.delete() }
         } } finally { synchronized(guard) { val entry = locks[id]!!; if (entry.second == 1) locks.remove(id) else locks[id] = entry.first to (entry.second - 1) } }

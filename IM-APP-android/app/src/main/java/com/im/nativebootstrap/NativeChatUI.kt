@@ -119,6 +119,26 @@ private val ChatBlue=Color(0xFF2B5CFF)
 private val ChatHint=Color(0xFF9AA3B5)
 private fun onUI(action:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper())action() else Handler(Looper.getMainLooper()).post(action) }
 
+private suspend fun voiceSource(
+    context:android.content.Context,
+    messageId:String,
+    content:MessageContent,
+    conversationId:String,
+    group:Boolean,
+):String {
+    if(content.url.isBlank()) return ""
+    return withContext(Dispatchers.IO) {
+        runCatching {
+            MediaLoader.fetch(
+                context,
+                content.url,
+                32L*1024*1024,
+                MediaCacheMeta("voice","original",conversationId,messageId,group,content.url),
+            ).absolutePath
+        }.getOrElse { content.url }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:String="",enterToSend:Boolean=false) {
@@ -369,7 +389,9 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         preparing=true
         scope.launch {
             val result=withContext(Dispatchers.IO) { runCatching {
-                val file=ownedFile?.let { OwnedVideoFiles.verified(it,state.mediaOwnerDirectory.takeIf(String::isNotBlank)?.let(::File),File(context.filesDir,"native-chat")) } ?: MediaLoader.fetch(context,MediaURLs.playback(url))
+                val file=ownedFile?.let { OwnedVideoFiles.verified(it,state.mediaOwnerDirectory.takeIf(String::isNotBlank)?.let(::File),File(context.filesDir,"native-chat")) }
+                    ?: listOf(url,MediaURLs.playback(url)).firstNotNullOfOrNull { MediaLoader.cachedFile(context,it) }
+                    ?: MediaLoader.fetch(context,MediaURLs.playback(url))
                 val saved=MediaIO.saveToGallery(context,file,"视频-${System.currentTimeMillis()}.mp4","video/mp4",true)
                 file to saved
             } }
@@ -557,7 +579,15 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                 
                                 when(content.type) {
                                     102 -> if(content.url.isNotEmpty())image=content.url else notice="图片原图地址不可用"
-                                    103 -> if(playing==message.id) { player.stop();playing=null } else { playing=message.id;player.play(content.url,{ onUI { playing=null } },{ onUI { playing=null;notice="语音播放失败，可稍后重试" } }) }
+                                    103 -> if(playing==message.id) { player.stop();playing=null } else {
+                                        playing=message.id
+                                        scope.launch {
+                                            val source=voiceSource(context,message.id,content,state.active?.target?.conversationId.orEmpty(),state.active?.target?.sessionType==3)
+                                            if(playing!=message.id)return@launch
+                                            if(source.isEmpty()) { playing=null;notice="语音暂无法播放";return@launch }
+                                            player.play(source,{ onUI { playing=null } },{ onUI { playing=null;notice="语音播放失败，可稍后重试" } })
+                                        }
+                                    }
                                     104 -> if(content.url.isNotEmpty()||localVideo?.file?.isFile==true) { videoMessage=message;videoLocal=localVideo;video=content.url } else notice="视频仍在准备，请稍后点按"
                                     105 -> openFile(content)
                                     108 -> if(content.cardUserId.isNotEmpty())callbacks.onOpenPeer(content.cardUserId)
@@ -843,7 +873,10 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                 when(content.type) {
                     102 -> RemoteMediaImage(MediaURLs.image(content.thumbnail.ifEmpty { content.url }),Modifier.size(180.dp,140.dp).clickable { image=content.url },scale=ContentScale.Fit,cacheUrls=listOf(content.url,content.thumbnail)+content.imageAlternatives)
                     104 -> Box(Modifier.size(180.dp,140.dp).background(ChatGray).clickable { video=content.url },contentAlignment=Alignment.Center) { if(content.thumbnail.isNotBlank())RemoteMediaImage(MediaURLs.image(content.thumbnail),Modifier.fillMaxSize(),scale=ContentScale.Fit);Text("▶ ${duration(content.duration)}",color=ChatBlue) }
-                    103 -> Text("◖))) ${content.duration}″",Modifier.clickable { player.play(content.url,{}, { onUI { notice="语音暂无法播放" } }) }.padding(8.dp),color=ChatBlue)
+                    103 -> Text("◖))) ${content.duration}″",Modifier.clickable { scope.launch {
+                        val source=voiceSource(context,message.id,content,state.active?.target?.conversationId.orEmpty(),state.active?.target?.sessionType==3)
+                        if(source.isEmpty())notice="语音暂无法播放" else player.play(source,{}, { onUI { notice="语音暂无法播放" } })
+                    } }.padding(8.dp),color=ChatBlue)
                     105 -> Text("▤ ${content.fileName}",Modifier.clickable { openFile(content) }.padding(8.dp),color=ChatBlue)
                     108 -> Text("名片：${content.cardName}",Modifier.clickable { callbacks.onOpenPeer(content.cardUserId) }.padding(8.dp),color=ChatBlue)
                     else -> SelectionContainer { Text(content.text.ifBlank { "[消息]" }) }
@@ -927,7 +960,15 @@ fun NativeChatArchive(title:String,media:Boolean,onBack:()->Unit,search:(String,
         when(content.type) {
             102 -> if(content.url.isNotEmpty())image=content.url else NativeNotices.show("原图地址暂不可用")
             104 -> if(content.url.isNotEmpty())video=content.url else NativeNotices.show("视频地址暂不可用")
-            103 -> if(playing==message.id) { player.stop();playing=null } else { playing=message.id;player.play(content.url,{ onUI { playing=null } },{ onUI { playing=null;NativeNotices.show("语音暂无法播放") } }) }
+            103 -> if(playing==message.id) { player.stop();playing=null } else {
+                playing=message.id
+                scope.launch {
+                    val source=voiceSource(context,message.id,content,"",false)
+                    if(playing!=message.id)return@launch
+                    if(source.isEmpty()) { playing=null;NativeNotices.show("语音暂无法播放");return@launch }
+                    player.play(source,{ onUI { playing=null } },{ onUI { playing=null;NativeNotices.show("语音暂无法播放") } })
+                }
+            }
             105 -> {
                 download=true
                 scope.launch {
@@ -1034,7 +1075,15 @@ fun NativeFavoriteContent(type:String,content:String) {
                 Text("▶ ${duration(parsed.duration)}",Modifier.background(Color(0x77000000),RoundedCornerShape(5.dp)).padding(10.dp),color=Color.White)
             }
             103 -> Text(if(playing)"■ 正在播放  ${duration(parsed.duration)}" else "◖)))  语音 ${duration(parsed.duration)}",Modifier.clickable {
-                if(playing) { player.stop();playing=false } else { playing=true;player.play(parsed.url,{ onUI { playing=false } },{ onUI { playing=false;NativeNotices.show("语音暂无法播放") } }) }
+                if(playing) { player.stop();playing=false } else {
+                    playing=true
+                    scope.launch {
+                        val source=voiceSource(context,"",parsed,"",false)
+                        if(!playing)return@launch
+                        if(source.isEmpty()) { playing=false;NativeNotices.show("语音暂无法播放");return@launch }
+                        player.play(source,{ onUI { playing=false } },{ onUI { playing=false;NativeNotices.show("语音暂无法播放") } })
+                    }
+                }
             }.padding(vertical=12.dp),color=ChatBlue)
             105 -> Column(Modifier.clickable(enabled=!busy) {
                 busy=true

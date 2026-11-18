@@ -17,16 +17,16 @@ import com.im.nativebootstrap.chat.ChatMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-data class NativeSettingsState(val noDisturb:Boolean=false,val message:Boolean=true,val voice:Boolean=true,val sound:Boolean=true,val vibration:Boolean=false,val enterToSend:Boolean=true)
+data class NativeSettingsState(val noDisturb:Boolean=false,val message:Boolean=true,val voice:Boolean=true,val sound:Boolean=true,val vibration:Boolean=false,val enterToSend:Boolean=true,val autoCacheMedia:Boolean=true,val wifiOnly:Boolean=true)
 
 /** 本机非敏感偏好持久化；实时提醒与输入键盘直接读取，不伪造系统推送注册。 */
 class NativeSettings(private val context:Context) {
     private val prefs=context.getSharedPreferences("native_chat_settings_v1",Context.MODE_PRIVATE)
     private val mutable=MutableStateFlow(read())
     val state=mutable.asStateFlow()
-    private fun read()=NativeSettingsState(prefs.getBoolean("noDisturb",false),prefs.getBoolean("message",true),prefs.getBoolean("voice",true),prefs.getBoolean("sound",true),prefs.getBoolean("vibration",false),prefs.getBoolean("enterToSend",true))
+    private fun read()=NativeSettingsState(prefs.getBoolean("noDisturb",false),prefs.getBoolean("message",true),prefs.getBoolean("voice",true),prefs.getBoolean("sound",true),prefs.getBoolean("vibration",false),prefs.getBoolean("enterToSend",true),prefs.getBoolean("autoCacheMedia",true),prefs.getBoolean("wifiOnly",true))
     fun set(key:String,value:Boolean) {
-        require(key in setOf("noDisturb","message","voice","sound","vibration","enterToSend"))
+        require(key in setOf("noDisturb","message","voice","sound","vibration","enterToSend","autoCacheMedia","wifiOnly"))
         prefs.edit().putBoolean(key,value).apply();mutable.value=read()
         if(key=="message"&&!value || key=="noDisturb"&&value)(context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancelAll()
     }

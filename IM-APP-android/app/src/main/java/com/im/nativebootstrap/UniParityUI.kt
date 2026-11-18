@@ -367,12 +367,7 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
             tabs.forEach { (id, name, image) -> Column(Modifier.widthIn(min = s.dp(120)).fillMaxHeight().clickable { changeTab(id) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Box(Modifier.size(s.dp(48))) {
                     Image(painterResource(image), null, Modifier.fillMaxSize())
-                    if(id=="chat"){
-                        val joinPending=if(state.sample)0 else state.pendingJoinRequests
-                        val badgeCount=unreadSummary.count+joinPending
-                        val badgeMuted=joinPending==0&&unreadSummary.mutedOnly
-                        NativeUnreadBadge(if(badgeMuted)1 else badgeCount,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true,muted=badgeMuted)
-                    }
+                    if(id=="chat")NativeUnreadBadge(if(unreadSummary.mutedOnly)1 else unreadSummary.count,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true,muted=unreadSummary.mutedOnly)
                 }
                 Text(name, Modifier.padding(top = s.dp(4)), color = if (tab == id) Primary else Ink, fontSize = s.text(24), lineHeight = s.text(32))
             } }
