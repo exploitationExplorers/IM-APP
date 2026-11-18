@@ -222,6 +222,43 @@ class ChatRuntimeTest {
         assertEquals(2,h.state.messages.size);assertFalse(h.state.historyLoading)
         assertEquals(SyncStatus.RUNNING,h.state.sync)
     }
+    @Test fun syncFinishReloadsFirstPageWhenRoomOnlyHasSeedMessage() {
+        val h=Harness();h.gateway.supportsLocalHistory=true;h.ready()
+        val seed=message("seed",2,99,99)
+        h.controller.open(conversation().copy(latestMessage=seed))
+        assertEquals(listOf("seed"),h.state.messages.map { it.id })
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(emptyList(),true)))
+        h.gateway.events.syncStarted()
+        h.gateway.events.syncFinished()
+        assertEquals(1,h.gateway.localHistories.last().second)
+        val page=(1..20).map { message("m$it",2,it.toLong(),it.toLong()) }
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(page,true)))
+        assertEquals(21,h.state.messages.size)
+        assertTrue(h.state.messages.any { it.id=="seed" })
+        assertTrue(h.state.messages.any { it.id=="m20" })
+    }
+    @Test fun reconnectReloadsShortRoomEvenAfterLocalHistoryReportedEnd() {
+        val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
+        val one=message("one",2,10,10)
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(one),true)))
+        h.gateway.histories.last().third(Result.success(HistoryPage(listOf(one),true)))
+        assertTrue(h.state.historyEnd)
+        h.gateway.events.connection(ConnectionState.CONNECTED)
+        assertEquals(2,h.gateway.histories.size)
+        assertFalse(h.state.historyEnd)
+    }
+    @Test fun initialSnapshotRetriesShortRoomOpenedBeforeStoreReady() {
+        val h=Harness();h.gateway.supportsLocalHistory=true
+        val seed=message("seed",2,99,99)
+        h.controller.open(conversation().copy(latestMessage=seed))
+        assertEquals(listOf("seed"),h.state.messages.map { it.id })
+        assertTrue(h.gateway.localHistories.isEmpty())
+        h.gateway.login(Result.success(Unit))
+        h.gateway.pages.last().third(Result.success(emptyList()))
+        assertEquals(1,h.gateway.localHistories.size)
+        h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(seed),true)))
+        assertEquals(1,h.gateway.histories.size)
+    }
     @Test fun remoteEndDoesNotHideRemainingLocalPagesFromAutomaticPagination() {
         val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
         h.gateway.localHistories.last().third(Result.success(HistoryPage(listOf(message("recent",2,40,40)),false)))

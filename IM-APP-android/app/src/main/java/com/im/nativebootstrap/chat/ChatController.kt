@@ -12,6 +12,8 @@ import java.util.concurrent.Executors
 
 private const val READ_ID_WINDOW=2_000
 private const val PAGE_SIZE=20
+private const val PREFETCH_CONVERSATIONS=50
+private const val PREFETCH_MESSAGE_COUNT=30
 private const val TOMBSTONE_WINDOW=4_096
 
 // 控制器所有入口及 SDK 回调经同一串行调度器执行，UI 仅接收不可变快照。
@@ -124,6 +126,15 @@ class ChatController(
     private val convLatest=HashMap<String,ChatMessage>()
     private val recalledConversation=HashMap<String,String>()
     private val inviteHandled=HashMap<String,String>()
+    private val recentMessages=HashMap<String,List<ChatMessage>>()
+    private var roomFirstPageRetry=false
+    private val recentPrefetchAttempts=HashMap<String,Int>()
+    private val serverRecentInFlight=linkedSetOf<String>()
+    private val serverRecentDone=linkedSetOf<String>()
+    private var serverRecentFailures=0
+    private var serverRecentUnavailable=false
+    private val recentPrefetching=HashSet<String>()
+    private val recentPrefetchDone=HashSet<String>()
     private var business:ChatBusiness?=null
     private var incomingListener:((ChatMessage)->Unit)?=null
     private var appForeground=false
@@ -156,6 +167,8 @@ class ChatController(
         }
     }
     private val businessIO=Executors.newFixedThreadPool(2) { runnable -> Thread(runnable,"chat-media-business").apply { isDaemon=true } }
+    private val priorityIO=Executors.newSingleThreadExecutor { runnable -> Thread(runnable,"chat-priority").apply { isDaemon=true } }
+    private val priorityRetention=linkedSetOf<String>()
     private var permissionOperation=0L
     private var presentation:ChatRoomPresentation?=null
     private var membersOperation=0L
@@ -166,6 +179,8 @@ class ChatController(
         try { action() } catch (_:Exception) { emit(snapshot.copy(error="聊天存储或资源暂不可用，数据已保留，请稍后重试。",historyLoading=false,conversationsLoading=false)) }
     } }
     private fun boundaryReady(target:ChatTarget)=business==null||target.sessionType!=3||!GroupRetention.supported(target.conversationId)||retention?.watermark(target.conversationId)!=null||target.conversationId in retentionChecked
+    private fun localHistoryReadable()=snapshot.store==StoreStatus.READABLE||remoteHistoryReadable()
+    private fun remoteHistoryReadable()=!authRevoked&&(snapshot.loggedIn||snapshot.connection==ConnectionState.CONNECTED)
     private fun historyExhausted()=remoteHistoryEnd&&(localHistorySupported!=true||localHistoryEnd)
     private fun permits(target:ChatTarget,message:ChatMessage)=retention?.permits(target,message)!=false&&purges?.permits(target,message)!=false
     // 撤回提示文案：本人撤回 / 私聊对方撤回 / 群聊按撤回人昵称展示（管理员代撤时标注）。
@@ -263,7 +278,9 @@ class ChatController(
                         emit(snapshot.copy(connection=state,ready=snapshot.ready&&!authRevoked,loggedIn=snapshot.loggedIn&&!authRevoked,error=if(authRevoked) "聊天登录已失效，请退出后重新登录。" else snapshot.error))
                         if(state==ConnectionState.CONNECTED)scheduleConversationRecovery() else cancelConversationRecovery()
                         if(state==ConnectionState.CONNECTED&&!authRevoked)reconcilePending()
+                        if(state==ConnectionState.CONNECTED&&!authRevoked)snapshot.active?.let { active -> prefetchRecentMessages(listOf(active)) }
                         if(state==ConnectionState.CONNECTED&&!authRevoked&&localHistorySupported==true)snapshot.active?.let { active ->
+                            if(snapshot.messages.size<PAGE_SIZE&&!remoteHistoryLoading)remoteHistoryEnd=false
                             emit(snapshot.copy(historyEnd=historyExhausted()))
                             loadRemoteHistory(t,active,roomGeneration)
                         }
@@ -294,6 +311,7 @@ class ChatController(
                     items.forEach { row -> row.latestMessage?.let { convLatest[row.target.conversationId]=it } }
                     val merged=mergeConversations(snapshot.conversations,items.map { row -> if(row.preview.isBlank()&&row.latestMessage==null) recalledConversation[row.target.conversationId]?.let { row.copy(preview=it) } ?: row else row })
                     if(merged!==snapshot.conversations)emit(snapshot.copy(conversations=merged,conversationsLoading=false,error=null),"sync-snapshot")
+                    prefetchRecentMessages(items)
                     refreshRetention(items)
                 } } }
                 override fun read(ids:List<String>) { dispatch { if(current(t)) {
@@ -372,13 +390,14 @@ class ChatController(
                     conversationDiagnostics.phase("sync-finish")
                     val attempt=syncAttempt ?: return@dispatch
                     cancelConversationRecovery()
-                    resetRoomHistoryForSyncRetry()
+                    val retryRoom=resetRoomHistoryForSyncRetry()
                     if(coordinator.snapshot().store==StoreStatus.READABLE) { coordinator.completeSync(attempt);syncAttempt=null;loadConversations(true) }
                     else {syncFinishedBeforeStore=true;if(snapshot.loggedIn)loadConversations(true)}
                     reconcilePending()
                     reconcileJoinRequestHighlights()
                     snapshot.active?.let { active -> MediaPrefetch.enqueue(active.target,snapshot.messages) }
                     emit()
+                    if(retryRoom)retryRoomFirstPage()
                 } }
                 override fun syncFailed() { dispatch {
                     if(!current(t)) return@dispatch
@@ -444,17 +463,125 @@ class ChatController(
                 emit(snapshot.copy(ready=!authRevoked&&snapshot.loggedIn,conversations=merged,conversationsLoading=false,conversationsEnd=response.end),if(refresh)"local-snapshot" else "local-page")
                 if(merged.isNotEmpty())cancelConversationRecovery()
                 refreshRetention(page)
-                if(snapshot.active!=null&&!snapshot.historyLoading&&snapshot.messages.isEmpty())loadHistory()
+                prefetchRecentMessages(merged)
+                if(snapshot.active!=null&&!snapshot.historyLoading&&(snapshot.messages.isEmpty()||snapshot.messages.size<PAGE_SIZE||roomFirstPageRetry))retryRoomFirstPage()
                 finishConversationRead()
             },onFailure={ emit(snapshot.copy(conversationsLoading=false,error=it.message ?: "会话读取失败，可重试。"));finishConversationRead() })
         } }
         if(refresh)gateway.initialConversations(30,resultHandler)
         else gateway.conversations(requestedOffset,30) { result -> resultHandler(result.map { ConversationSnapshotPage(it,it.size<30) }) }
     }
+    /**
+     * 首屏只预热可见的前 20 个会话；不按 700+ 会话全量并发拉取。
+     * 点开时先用这页消息，历史加载继续在后台补齐。
+     */
+    private fun prefetchRecentMessages(items:List<ChatConversation>) {
+        if(!gateway.supportsRecentPrefetch||authRevoked||(!snapshot.loggedIn&&snapshot.connection!=ConnectionState.CONNECTED))return
+        val t=ticket ?: return
+        val activeId=snapshot.active?.target?.conversationId
+        val candidates=items.filter { it.target.supported() }.take(PREFETCH_CONVERSATIONS)
+        fetchServerRecent(candidates)
+        candidates.sortedByDescending { it.target.conversationId==activeId }.forEach { conversation ->
+            val id=conversation.target.conversationId
+            if(id in recentPrefetching||id in recentPrefetchDone)return@forEach
+            val attempt=(recentPrefetchAttempts[id]?:0)+1
+            val maxAttempts=if(snapshot.active?.target?.conversationId==id)10 else 4
+            if(attempt>maxAttempts)return@forEach
+            recentPrefetchAttempts[id]=attempt
+            recentPrefetching.add(id)
+            gateway.history(conversation.target,null,PREFETCH_MESSAGE_COUNT) { result -> dispatch {
+                if(!current(t))return@dispatch
+                recentPrefetching.remove(id)
+                result.fold(onSuccess={ page ->
+                    recentMessages[id]=page.messages
+                    if(page.messages.isNotEmpty()) { recentPrefetchDone.add(id);recentPrefetchAttempts.remove(id) } else recentPrefetchDone.remove(id)
+                    PerfLog.mark("recent-prefetch:ok","count=${page.messages.size}")
+                    if(page.messages.isNotEmpty()&&snapshot.active?.target?.conversationId==id&&snapshot.messages.size<PAGE_SIZE) {
+                        emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(page.messages)),historyRevision=snapshot.historyRevision+1,error=null))
+                        MediaPrefetch.enqueue(snapshot.active!!.target,page.messages)
+                    }
+                    val active=snapshot.active
+                    if(page.messages.isNotEmpty()&&active!=null&&active.target.conversationId!=id&&snapshot.messages.size<PAGE_SIZE) {
+                        prefetchRecentMessages(listOf(active))
+                    }
+                    if(page.messages.isEmpty()&&attempt<maxAttempts&&(snapshot.connection==ConnectionState.CONNECTED||snapshot.sync==SyncStatus.RUNNING)) {
+                        after(1_500) { dispatch { if(current(t)&&snapshot.active?.target?.conversationId==id)prefetchRecentMessages(listOf(conversation)) } }
+                    }
+                },onFailure={
+                    recentPrefetchDone.remove(id)
+                    PerfLog.mark("recent-prefetch:failed")
+                    if(attempt<maxAttempts&&(snapshot.connection==ConnectionState.CONNECTED||snapshot.sync==SyncStatus.RUNNING)) {
+                        after(1_500) { dispatch { if(current(t)&&snapshot.active?.target?.conversationId==id)prefetchRecentMessages(listOf(conversation)) } }
+                    }
+                })
+            } }
+        }
+    }
+    /**
+     * 首屏/进入房间时先走业务后端批量拉最近消息。该接口不依赖 SDK 首次同步，
+     * 返回后直接进入内存缓存并回填当前房间；SDK 预取仍作为持久化和兜底。
+     */
+    private fun fetchServerRecent(items:List<ChatConversation>) {
+        val api=business ?: return
+        val t=ticket ?: return
+        if(serverRecentUnavailable||ownIMId.isBlank())return
+        val candidates=items.filter { it.target.supported() && it.latestSeq>0 && it.target.conversationId !in serverRecentInFlight && it.target.conversationId !in serverRecentDone }.take(PREFETCH_CONVERSATIONS)
+        if(candidates.isEmpty())return
+        candidates.forEach { serverRecentInFlight.add(it.target.conversationId) }
+        businessIO.execute {
+            val result=runCatching {
+                val loaded=LinkedHashMap<String,List<ChatMessage>>()
+                var failure:Exception?=null
+                candidates.chunked(10).forEach { chunk ->
+                    val request=JsonObject().apply {
+                        val list=JsonArray()
+                        chunk.forEach { conversation ->
+                            list.add(JsonObject().apply {
+                                addProperty("conversationId",conversation.target.conversationId)
+                                addProperty("endSeq",conversation.latestSeq)
+                                addProperty("count",PREFETCH_MESSAGE_COUNT)
+                            })
+                        }
+                        add("items",list)
+                    }
+                    try {
+                        loaded.putAll(parseServerRecentMessages(api.request("POST","/im/conversations/recent-messages",request),ownIMId))
+                    } catch(error:Exception) {
+                        if(failure==null)failure=error
+                    }
+                }
+                if(loaded.isEmpty())failure?.let { throw it }
+                loaded
+            }
+            dispatch {
+                candidates.forEach { serverRecentInFlight.remove(it.target.conversationId) }
+                if(!current(t))return@dispatch
+                result.fold(onSuccess={ parsed ->
+                    serverRecentFailures=0
+                    candidates.forEach { serverRecentDone.add(it.target.conversationId) }
+                    parsed.forEach { (conversationId,messages) ->
+                        if(messages.isNotEmpty())recentMessages[conversationId]=messages
+                    }
+                    val active=snapshot.active
+                    val activeMessages=active?.target?.conversationId?.let { parsed[it] }.orEmpty()
+                    if(active!=null&&activeMessages.isNotEmpty()&&snapshot.messages.size<PAGE_SIZE) {
+                        emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(activeMessages)),historyRevision=snapshot.historyRevision+1,error=null))
+                        MediaPrefetch.enqueue(active.target,activeMessages)
+                    }
+                    PerfLog.mark("server-recent:ok","conversations=${parsed.size}")
+                },onFailure={ error ->
+                    serverRecentFailures+=1
+                    if(serverRecentFailures>=3)serverRecentUnavailable=true
+                    PerfLog.mark("server-recent:failed","${error.message}")
+                })
+            }
+        }
+    }
     fun open(conversation: ChatConversation) {
         if(conversation.target.conversationId in clearing) { emit(snapshot.copy(error="聊天记录正在清理，请稍后打开"));return }
         if(!conversation.target.supported()) { emit(snapshot.copy(error="该会话类型尚未接入，暂不能打开。"));return }
         roomGeneration+=1
+        roomFirstPageRetry=false
         localHistoryPage=1;localHistorySupported=null;localHistoryEnd=false;localHistoryAnchor=(System.currentTimeMillis()+999)/1000;remoteHistoryOperation++;remoteHistoryLoading=false;remoteHistoryEnd=false
         membersOperation++;membersLoading=false;wantedMembers=emptyList();checkedMembers.clear()
         cursor=null
@@ -464,7 +591,12 @@ class ChatController(
             snapshot.conversations.map { if(it.target.conversationId==conversation.target.conversationId)it.copy(joinRequestPending=false) else it }
         } else snapshot.conversations
         emit(snapshot.copy(active=opened,conversations=conversations,messages=emptyList(),historyEnd=false,historyLoading=false,historyRevision=0,historySyncing=false,historyDiagnostic=null,error=null,maxOtherReadSeq=0,mentions=emptyList(),focusMessageId=null,sendBlockedReason=null,permissionLoading=false,groupRole="",groupBusinessId="",groupMemberCount=0,groupAnnouncement="",groupMembers=emptyMap(),groupOwnerName="",peerOnline=null,peerLastSeenAt=""))
-        emit(snapshot.copy(messages=visible(local)))
+        val latest=conversation.latestMessage ?: convLatest[conversation.target.conversationId]
+        val seed=latest?.takeIf { it.serialized.isNotBlank() }?.let { visible(listOf(it)) }.orEmpty()
+        val cached=visible(recentMessages[conversation.target.conversationId].orEmpty())
+        emit(snapshot.copy(messages=mergeMessages(mergeMessages(seed,visible(local)),cached)))
+        fetchServerRecent(listOf(opened))
+        prefetchRecentMessages(listOf(opened))
         // 先启动历史首屏；retention 只在群消息区做门禁，不再串行阻塞其他房间初始化。
         loadHistory()
         refreshGroupPurges(conversation.target,true)
@@ -512,7 +644,7 @@ class ChatController(
             emit(snapshot.copy(inviteHandled=inviteHandled.toMap()))
         }
     }
-    fun closeRoom() { roomGeneration+=1;remoteHistoryOperation++;remoteHistoryLoading=false;cursor=null;gateway.watchPeer(null) {};emit(snapshot.copy(active=null,messages=emptyList(),historyLoading=false,historyEnd=false,error=null,mentions=emptyList(),focusMessageId=null)) }
+    fun closeRoom() { roomGeneration+=1;roomFirstPageRetry=false;remoteHistoryOperation++;remoteHistoryLoading=false;cursor=null;gateway.watchPeer(null) {};emit(snapshot.copy(active=null,messages=emptyList(),historyLoading=false,historyEnd=false,error=null,mentions=emptyList(),focusMessageId=null)) }
     private fun refreshPeerPresence() {
         val t=ticket ?: return
         val target=snapshot.active?.target ?: return
@@ -536,20 +668,22 @@ class ChatController(
         val active=snapshot.active ?: return
         if(active.target.conversationId in clearing)return
         if(!boundaryReady(active.target)) {
+            PerfLog.mark("room:boundary-wait","id=${active.target.conversationId}")
             if(!snapshot.historySyncing)emit(snapshot.copy(historySyncing=true))
             refreshRetention(listOf(active))
+            refreshRetentionPriority(active.target)
             return
         }
-        if(snapshot.store!=StoreStatus.READABLE||snapshot.historyLoading||snapshot.historyEnd&&(localHistorySupported!=true||localHistoryEnd))return
+        if(!localHistoryReadable()||snapshot.historyLoading||snapshot.historyEnd&&(localHistorySupported!=true||localHistoryEnd))return
         if(localHistorySupported!=false) {
             if(localHistoryEnd) { if(snapshot.ready)loadRemoteHistory(t,active,roomGeneration);return }
             val version=roomGeneration;val query=++historyOperation;val page=localHistoryPage
             emit(snapshot.copy(historyLoading=true,historySyncing=false,error=null))
             after(5_000) { dispatch { if(current(t)&&version==roomGeneration&&query==historyOperation&&snapshot.historyLoading) {
-                historyOperation++;emit(snapshot.copy(historyLoading=false,error="本地历史暂未读出，可重试。"))
+                historyOperation++;historyFailure("本地历史暂未读出，可重试。")
             } } }
             gateway.localHistory(active.target,page,PAGE_SIZE,localHistoryAnchor) { result -> dispatch {
-                if(!current(t)||version!=roomGeneration||query!=historyOperation||snapshot.store!=StoreStatus.READABLE)return@dispatch
+                if(!current(t)||version!=roomGeneration||query!=historyOperation||!localHistoryReadable())return@dispatch
                 result.fold(onSuccess={ local ->
                     localHistorySupported=true
                     localHistoryEnd=local.end
@@ -560,22 +694,22 @@ class ChatController(
                     MediaPrefetch.enqueue(active.target,local.messages)
                     // 未连上服务器也尝试一次完整 SDK 历史；无补洞时可立即补出本地系统/表情。
                     // 该查询独立限时，既不占本地 loading，也不阻止下一页本地预览。
-                    if(snapshot.ready)loadRemoteHistory(t,active,version)
+                    if(remoteHistoryReadable())loadRemoteHistory(t,active,version)
                 },onFailure={ error ->
                     if(error is UnsupportedOperationException) { localHistorySupported=false;emit(snapshot.copy(historyLoading=false));loadHistory() }
-                    else { emit(snapshot.copy(historyLoading=false,error="本地历史暂未读出，可重试。"));if(snapshot.ready)loadRemoteHistory(t,active,version) }
+                    else { historyFailure("本地历史暂未读出，可重试。");if(remoteHistoryReadable())loadRemoteHistory(t,active,version) }
                 })
             } }
             return
         }
-        if(!snapshot.ready)return
+        if(!remoteHistoryReadable())return
         val version=roomGeneration
         val query=++historyOperation
         val before=cursor
         emit(snapshot.copy(historyLoading=true,historySyncing=false,error=null))
         after(20_000) { dispatch { if(current(t)&&roomGeneration==version&&historyOperation==query&&snapshot.historyLoading) { historyOperation+=1;emit(snapshot.copy(historyLoading=false,error="历史读取超时，可点击重试。")) } } }
         gateway.history(active.target,before,PAGE_SIZE) { result -> dispatch {
-            if(!current(t)||version!=roomGeneration||query!=historyOperation||!snapshot.ready) return@dispatch
+            if(!current(t)||version!=roomGeneration||query!=historyOperation||!remoteHistoryReadable()) return@dispatch
             result.fold(onSuccess={ page ->
                 val oldest=page.messages.minWithOrNull(compareBy<ChatMessage> { it.time }.thenBy { it.id })?.id
                 if(oldest!=null && oldest!=before) cursor=oldest
@@ -592,8 +726,11 @@ class ChatController(
      * 首次登录时本地库可能先返回空页，不能把“暂时没数据”当成永久 historyEnd。
      * SDK 同步完成后，当前房间允许从第一页重新读一次。
      */
-    private fun resetRoomHistoryForSyncRetry() {
-        if(snapshot.active==null||snapshot.messages.isNotEmpty())return
+    private fun resetRoomHistoryForSyncRetry():Boolean {
+        if(snapshot.active==null||snapshot.messages.size>=PAGE_SIZE) {
+            PerfLog.mark("room:sync-retry-skip","active=${snapshot.active!=null} messages=${snapshot.messages.size}")
+            return false
+        }
         historyOperation++
         remoteHistoryOperation++
         remoteHistoryLoading=false
@@ -602,29 +739,53 @@ class ChatController(
         localHistorySupported=null
         localHistoryEnd=false
         localHistoryAnchor=(System.currentTimeMillis()+999)/1000
+        roomFirstPageRetry=true
+        PerfLog.mark("room:sync-retry","messages=${snapshot.messages.size}")
         emit(snapshot.copy(historyLoading=false,historySyncing=false,historyEnd=false))
+        return true
+    }
+    private fun retryRoomFirstPage() {
+        if(snapshot.active==null||snapshot.historyLoading||!localHistoryReadable()) {
+            PerfLog.mark("room:retry-skip","active=${snapshot.active!=null} loading=${snapshot.historyLoading} store=${snapshot.store}")
+            return
+        }
+        PerfLog.mark("room:retry","messages=${snapshot.messages.size}")
+        roomFirstPageRetry=false
+        loadHistory()
     }
     private fun loadRemoteHistory(t:SessionTicket,active:ChatConversation,version:Long) {
-        if(remoteHistoryLoading||remoteHistoryEnd||!snapshot.ready)return
+        if(remoteHistoryLoading||remoteHistoryEnd||!remoteHistoryReadable()) {
+            PerfLog.mark("room:remote-skip","loading=$remoteHistoryLoading end=$remoteHistoryEnd ready=${snapshot.ready}")
+            return
+        }
         val query=++remoteHistoryOperation;val before=cursor
         remoteHistoryLoading=true
         emit(snapshot.copy(historySyncing=true))
         after(20_000) { dispatch { if(current(t)&&version==roomGeneration&&query==remoteHistoryOperation&&remoteHistoryLoading) {
             remoteHistoryOperation++;remoteHistoryLoading=false
-            emit(snapshot.copy(historySyncing=false,error=if(snapshot.messages.isEmpty())"在线历史暂未同步，可继续读取本机记录或稍后重试。" else snapshot.error))
+            if(snapshot.messages.isEmpty())historyFailure("在线历史暂未同步，可继续读取本机记录或稍后重试。")
+            else emit(snapshot.copy(historySyncing=false,error=snapshot.error))
         } } }
         gateway.history(active.target,before,PAGE_SIZE) { result -> dispatch {
             if(!current(t)||version!=roomGeneration||query!=remoteHistoryOperation)return@dispatch
             remoteHistoryLoading=false
             result.fold(onSuccess={ page ->
+                PerfLog.mark("room:remote-ok","count=${page.messages.size} end=${page.end}")
                 page.messages.minWithOrNull(compareBy<ChatMessage> { it.time }.thenBy { it.id })?.id?.takeIf { it!=before }?.let { cursor=it }
-                remoteHistoryEnd=page.end
+                remoteHistoryEnd=page.end&&(page.messages.isNotEmpty()||snapshot.sync!=SyncStatus.RUNNING)
                 page.messages.filter { it.mine&&(it.status==2||it.seq>0) }.forEach(::acceptEvidence)
                 emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(page.messages)),historySyncing=false,historyEnd=historyExhausted(),historyRevision=snapshot.historyRevision+if(page.end||cursor!=before)1 else 0))
                 MediaPrefetch.enqueue(active.target,page.messages)
                 markRoomRead()
-            },onFailure={ emit(snapshot.copy(historySyncing=false,error=if(snapshot.messages.isEmpty())"在线历史暂未同步，可继续读取本机记录。" else snapshot.error)) })
+            },onFailure={ error ->
+                PerfLog.mark("room:remote-failed","${error.message}")
+                if(snapshot.messages.isEmpty())historyFailure("在线历史暂未同步，可继续读取本机记录。") else emit(snapshot.copy(historySyncing=false,error=snapshot.error))
+            })
         } }
+    }
+    private fun historyFailure(message:String) {
+        val syncing=snapshot.sync==SyncStatus.RUNNING
+        emit(snapshot.copy(historyLoading=false,historySyncing=syncing,error=if(syncing)null else message))
     }
     fun send(text: String,quote:ChatMessage?=null):Boolean {
         val active=snapshot.active ?: return false
@@ -1756,6 +1917,37 @@ class ChatController(
             }
         }
     }
+    private fun refreshRetentionPriority(target:ChatTarget) {
+        val t=ticket ?: return
+        val api=business ?: return
+        val id=target.conversationId
+        if(target.sessionType!=3||!GroupRetention.supported(id)||boundaryReady(target)||id in priorityRetention)return
+        priorityRetention.add(id)
+        priorityIO.execute {
+            val result=runCatching {
+                val response=api.request("GET","/im/group-retention/states",query=mapOf("conversationIds" to id)).asJsonObject
+                GroupRetention.parse(response.getAsJsonArray("items") ?: error("群历史边界响应缺失"),setOf(id))
+            }
+            dispatch {
+                priorityRetention.remove(id)
+                if(!current(t))return@dispatch
+                result.fold(onSuccess={ states ->
+                    retention?.merge(states)
+                    conversationVisibilityDirty=true
+                    retentionRefreshNeedsRead=true
+                    historyChecks?.mark(listOf(id))
+                    retentionFresh[id]=System.currentTimeMillis()
+                    retentionChecked.add(id)
+                    PerfLog.mark("room:boundary-ok","id=$id")
+                    emit(snapshot.copy(messages=visible(snapshot.messages),historySyncing=false))
+                    if(snapshot.active?.target?.conversationId==id)loadHistory()
+                },onFailure={
+                    retentionFresh[id]=System.currentTimeMillis()
+                    if(snapshot.active?.target?.conversationId==id)emit(snapshot.copy(historyDiagnostic="群历史边界刷新失败",historySyncing=false,error="暂时无法读取此群历史，请稍后重试。"))
+                })
+            }
+        }
+    }
     private fun refreshGroupPurges(target:ChatTarget,force:Boolean=false) {
         val t=ticket ?: return
         val api=business ?: return
@@ -2125,7 +2317,7 @@ class ChatController(
         coordinator.logout();ticket=null;syncAttempt=null;outbox=null;mediaUploads=null;sentVideos=null;pendingForwards=null;runningForwards.clear();announcedForwards.clear();uploadAttempts.clear();retention=null;historyChecks=null;purges=null;purgeFresh.clear();purgeInFlight.clear();retentionFresh.clear();retentionInFlight.clear();retentionChecked.clear();readReporting.clear();readReported.clear();readMarkedAt.clear();clearing.clear();uploadingTargets.clear();notified.clear();ownIMId="";pageGeneration+=1;roomGeneration+=1;remoteHistoryOperation++;remoteHistoryLoading=false;cursor=null;offset=0
         gateway.shutdown()
         authRevoked=false;syncFinishedBeforeStore=false;tombstones.clear();sendAttempts.clear();sendCompletions.clear()
-        recallBy.clear();recallById.clear();convLatest.clear();recalledConversation.clear();inviteHandled.clear()
+        recallBy.clear();recallById.clear();convLatest.clear();recalledConversation.clear();inviteHandled.clear();recentMessages.clear();recentPrefetching.clear();recentPrefetchDone.clear();recentPrefetchAttempts.clear();serverRecentInFlight.clear();serverRecentDone.clear();serverRecentFailures=0;serverRecentUnavailable=false;priorityRetention.clear();roomFirstPageRetry=false
         snapshot=ChatState();changed(snapshot)
     }
 }

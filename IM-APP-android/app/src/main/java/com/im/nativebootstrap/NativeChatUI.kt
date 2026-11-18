@@ -59,6 +59,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.im.nativebootstrap.chat.*
+import com.im.nativebootstrap.core.StoreStatus
+import com.im.nativebootstrap.core.SyncStatus
 import com.im.nativebootstrap.media.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -571,6 +573,9 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             TextButton(enabled=!state.uploading&&media.file.absolutePath !in retryingMedia,onClick={ sendFile(media) }) { Text("重试上传") }
             TextButton(enabled=media.file.absolutePath !in retryingMedia,onClick={ failedMedia=failedMedia.filterNot { it.file==media.file };media.file.delete();media.snapshot?.delete() }) { Text("移除草稿") }
         } }
+        if(reversedMessages.isEmpty()) {
+            ChatRoomLoadingState(state,callbacks.onLoadHistory,Modifier.weight(1f).fillMaxWidth())
+        } else {
         // 消息不足一屏时顶格显示（reverseLayout 下 Top=视觉顶部），与微信一致；消息多时无影响。
         LazyColumn(Modifier.weight(1f).fillMaxWidth(),state=list,reverseLayout=true,verticalArrangement=Arrangement.Top,contentPadding=PaddingValues(vertical=rpx(20))) {
             itemsIndexed(reversedMessages,key={ _,message -> message.id },contentType={ _,message -> message.contentType }) { index,message ->
@@ -694,6 +699,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                     if(state.historyLoading||state.historySyncing)CircularProgressIndicator(Modifier.size(16.dp).semantics { contentDescription="正在读取更早消息" },color=ChatHint,strokeWidth=1.5.dp)
                 }
             }
+        }
         }
         if(list.firstVisibleItemIndex>2)Box(Modifier.fillMaxWidth().background(ChatGray).padding(end=16.dp,bottom=6.dp),contentAlignment=Alignment.CenterEnd) { Text("↓",Modifier.size(36.dp).clip(CircleShape).background(Color.White).clickable { scope.launch { list.animateScrollToItem(0) } }.wrapContentSize(),color=ChatBlue,fontSize=22.sp) }
         if(multi)Row(Modifier.fillMaxWidth().background(Color(0xFFF7F7F7)).padding(start=rpx(24),end=rpx(24),top=rpx(16),bottom=rpx(24)),horizontalArrangement=Arrangement.spacedBy(rpx(16))) {
@@ -928,6 +934,51 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         }
     } },confirmButton={ TextButton(onClick={ merge=null }) { Text("关闭") } }) }
 }
+
+@Composable
+private fun ChatRoomLoadingState(state:ChatState,onRetry:()->Unit,modifier:Modifier=Modifier) {
+    val factor=LocalConfiguration.current.screenWidthDp/750f
+    fun rpx(value:Int)=(value*factor).dp
+    val waiting=chatRoomWaiting(state)
+    val detail=state.error?.takeIf(String::isNotBlank)
+    Column(
+        modifier.fillMaxWidth().background(ChatGray).semantics { contentDescription=if(waiting)"聊天记录加载中" else "聊天记录为空" }.padding(horizontal=rpx(24),vertical=rpx(20)),
+        horizontalAlignment=Alignment.CenterHorizontally,
+        verticalArrangement=Arrangement.Center,
+    ) {
+        if(waiting) {
+            Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(rpx(14))) {
+                repeat(4) { index ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=if(index%2==0)Arrangement.Start else Arrangement.End,
+                        verticalAlignment=Alignment.Top,
+                    ) {
+                        if(index%2==0)Box(Modifier.size(rpx(64)).clip(CircleShape).background(Color(0xFFE4E8F0)))
+                        Column(Modifier.padding(horizontal=rpx(12)).widthIn(max=(LocalConfiguration.current.screenWidthDp*.58f).dp)) {
+                            Box(Modifier.fillMaxWidth(if(index%2==0) .82f else .64f).height(rpx(62)).clip(RoundedCornerShape(rpx(16))).background(if(index%2==0) Color(0xFFE6EAF2) else Color(0xFFEDF0F5)))
+                            Spacer(Modifier.height(rpx(10)))
+                            Box(Modifier.width(rpx(72)).height(rpx(18)).clip(RoundedCornerShape(rpx(4))).background(Color(0xFFE8ECF3)))
+                        }
+                        if(index%2!=0)Box(Modifier.size(rpx(64)).clip(CircleShape).background(Color(0xFFE4E8F0)))
+                    }
+                }
+            }
+            Spacer(Modifier.height(rpx(28)))
+            CircularProgressIndicator(Modifier.size(rpx(32)),color=ChatBlue,strokeWidth=2.dp)
+            Spacer(Modifier.height(rpx(14)))
+            Text("正在加载最近消息…",color=ChatHint,fontSize=(24*factor).sp)
+            Text("当前群最近消息会优先显示，更早记录随后补齐",color=ChatHint.copy(alpha=.8f),fontSize=(21*factor).sp,modifier=Modifier.padding(top=rpx(8)))
+        } else {
+            Text(if(detail!=null)"聊天记录暂未同步完成" else "暂无聊天记录",color=ChatHint,fontSize=(25*factor).sp)
+            if(detail!=null)Text(detail,color=ChatHint,fontSize=(21*factor).sp,maxLines=3,modifier=Modifier.padding(top=rpx(10)))
+            TextButton(onClick=onRetry){Text("重新加载",color=ChatBlue)}
+        }
+    }
+}
+
+internal fun chatRoomWaiting(state:ChatState):Boolean =
+    state.error==null&&(state.historyLoading||state.historySyncing||state.sync==SyncStatus.RUNNING||!state.ready||state.store==StoreStatus.OPENING)
 
 @Composable
 private fun ComposerAction(icon:Int,label:String,onClick:()->Unit) {

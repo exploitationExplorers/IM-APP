@@ -501,6 +501,12 @@ class ChatFeaturesTest {
         assertEquals(refreshed,mergeConversations(listOf(old),listOf(refreshed)).single())
         assertEquals(old.copy(time=99),mergeConversations(listOf(old.copy(time=99)),listOf(refreshed)).single())
     }
+    @Test fun refreshWithoutLatestMessageKeepsKnownMessageForInstantRoomSeed() {
+        val latest=ChatMessage("latest","最新消息",false,10,2,1,"""{"clientMsgID":"latest","contentType":101}""")
+        val old=conversation.copy(latestMessage=latest)
+        val refreshed=conversation.copy(latestMessage=null,unread=0)
+        assertEquals(latest,mergeConversations(listOf(old),listOf(refreshed)).single().latestMessage)
+    }
     @Test fun markAllReadTraversesEverySdkPageInsteadOfOnlyLoadedConversations() {
         val h=Harness()
         h.gateway.listed=(0..204).map { conversation.copy(target=ChatTarget("si_$it",1,"peer"),unread=1) }
