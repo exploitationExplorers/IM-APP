@@ -27,7 +27,7 @@ fun BusinessImagePreview(url:String,onDismiss:()->Unit) {
             toast(result.fold({"图片已保存"},{"保存未完成，请重试"}))
         }
     }
-    ImagePreview(url,onDismiss,{
+    ImagePreview(listOf(url),0,onDismiss,{
         if(!saving){saving=true;scope.launch {
             val result=runCatching{withContext(Dispatchers.IO){
                 val file=MediaLoader.fetch(context,MediaURLs.image(url,ImageVariant.ORIGINAL),32L*1024*1024)

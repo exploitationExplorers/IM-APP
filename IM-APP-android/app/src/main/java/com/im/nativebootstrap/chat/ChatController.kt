@@ -323,6 +323,8 @@ class ChatController(
                 override fun messages(items: List<Pair<ChatTarget,ChatMessage>>) { dispatch {
                     if(!current(t)) return@dispatch
                     items.forEach { (_,msg) -> if(msg.mine && (msg.seq>0 || msg.status==2)) acceptEvidence(msg) }
+                    // 会话最新消息实时缓存：发送确认/新消息都刷新，保证撤回时能命中会话预览（SDK 会话事件可能滞后）。
+                    items.forEach { (target,msg) -> if(msg.time>0) { val old=convLatest[target.conversationId]; if(old==null||msg.time>=old.time) { convLatest[target.conversationId]=msg;recalledConversation.remove(target.conversationId) } } }
                     val active=snapshot.active?.target
                     emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(items.filter { it.first.conversationId==active?.conversationId }.map { it.second }))))
                     active?.let { target -> MediaPrefetch.enqueue(target,items.filter { it.first==target }.map { it.second }) }
@@ -1164,7 +1166,11 @@ class ChatController(
                     return@dispatch
                 }
                 if(result.isSuccess&&action==ChatAction.RECALL) { tombstones[message.id]=false;outbox?.confirmed(message.id)
-                    val rows=snapshot.conversations.map { row -> if(row.latestMessage?.id==message.id) { val label=recallLabel(message,row.target);recalledConversation[row.target.conversationId]=label;row.copy(preview=label) } else row }
+                    // 优先用 convLatest 实时缓存匹配会话预览（row.latestMessage 可能仍停留在旧消息）。
+                    val rows=snapshot.conversations.map { row ->
+                        val lm=convLatest[row.target.conversationId] ?: row.latestMessage
+                        if(lm?.id==message.id) { val label=recallLabel(message,row.target);recalledConversation[row.target.conversationId]=label;row.copy(preview=label) } else row
+                    }
                     if(snapshot.active?.target==active.target) emit(snapshot.copy(messages=visible(snapshot.messages),conversations=rows)) else if(rows!==snapshot.conversations) emit(snapshot.copy(conversations=rows))
                 }
                 if(result.isFailure&&action==ChatAction.RECALL) { tombstones.remove(message.id);emit(snapshot.copy(messages=visible(snapshot.messages.map { if(it.id==message.id) message else it }))) }

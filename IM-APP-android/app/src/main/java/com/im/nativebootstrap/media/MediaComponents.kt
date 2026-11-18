@@ -3,11 +3,19 @@ package com.im.nativebootstrap.media
 import android.graphics.Bitmap
 import android.graphics.drawable.Animatable
 import android.media.MediaPlayer
+import androidx.compose.animation.core.Animatable as ComposeAnimatable
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,9 +47,10 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 
 @Composable
-fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:ContentScale=ContentScale.Fit,description:String="图片",fallbackRes:Int?=null,fallbackUrls:List<String> = emptyList(),localDraft:java.io.File?=null,onDimensions:(Int,Int)->Unit={_,_->},retryOnTap:Boolean=true,cacheUrls:List<String> = emptyList()) {
+fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:ContentScale=ContentScale.Fit,description:String="图片",fallbackRes:Int?=null,fallbackUrls:List<String> = emptyList(),localDraft:java.io.File?=null,onDimensions:(Int,Int)->Unit={_,_->},retryOnTap:Boolean=true,cacheUrls:List<String> = emptyList(),boxBackground:Color=Color(0xFFE9EDF4)) {
     val context=LocalContext.current
     val access by MediaLoader.access.collectAsState()
     val candidates=remember(url,fallbackUrls) { (listOf(url)+fallbackUrls).filter(String::isNotBlank).distinct() }
@@ -84,7 +93,7 @@ fun RemoteMediaImage(url:String,modifier:Modifier=Modifier,edge:Int=360,scale:Co
         }
     }
     DisposableEffect(visual?.animation) { val drawable=visual?.animation;onDispose { (drawable as? Animatable)?.stop() } }
-    Box(modifier.background(Color(0xFFE9EDF4)),contentAlignment=Alignment.Center) {
+    Box(modifier.background(boxBackground),contentAlignment=Alignment.Center) {
         val animation=visual?.animation
         if(animation!=null) {
             val lifecycle=LocalLifecycleOwner.current.lifecycle
@@ -115,32 +124,112 @@ fun SharedAvatar(url:String,modifier:Modifier=Modifier,group:Boolean=false) {
     else RemoteMediaImage(candidates.first(),modifier.clip(CircleShape),128,ContentScale.Crop,"头像",if(group)R.drawable.uni_group_default else R.drawable.uni_avatar_default,fallbackUrls=candidates.drop(1),cacheUrls=listOf(url))
 }
 
+/** 单页的缩放/平移状态：Compose 状态字段，手势写入即可触发重组。 */
+private class PreviewTransform {
+    var zoom by mutableFloatStateOf(1f)
+    var panX by mutableFloatStateOf(0f)
+    var panY by mutableFloatStateOf(0f)
+}
+
+/**
+ * 大图查看（对齐 uniapp image-viewer / viewer）：
+ * 顶部返回 + 发送者/时间 + 页码；左右滑动切换；两侧箭头；双指缩放 1–4x、放大后可单指拖动；
+ * 右下角 −/+ 缩放按钮；底部提示「双指缩放 · 左右滑动切换」；打开淡入；
+ * 底部 删除 / 保存 / 转发（有消息上下文时展示，与视频查看页一致）。
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun ImagePreview(url:String,onDismiss:()->Unit,onSave:()->Unit,previous:(()->Unit)?=null,next:(()->Unit)?=null,position:String="") {
-    var zoom by remember(url) { mutableFloatStateOf(1f) }
-    var offsetX by remember(url) { mutableFloatStateOf(0f) }
-    var offsetY by remember(url) { mutableFloatStateOf(0f) }
+fun ImagePreview(urls:List<String>,initial:Int=0,onDismiss:()->Unit,onSave:(String)->Unit,sender:String="",time:String="",onDelete:(()->Unit)?=null,onForward:(()->Unit)?=null,saving:Boolean=false) {
+    val list=remember(urls) { urls.filter(String::isNotBlank).distinct() }
+    if(list.isEmpty()) { LaunchedEffect(Unit) { onDismiss() };return }
+    val state=rememberPagerState(initialPage=initial.coerceIn(0,list.lastIndex)) { list.size }
+    val current=state.currentPage
+    val transforms=remember(list) { List(list.size) { PreviewTransform() } }
+    val scope=rememberCoroutineScope()
+    var zoomed by remember { mutableStateOf(false) }
+    // 打开淡入：alpha 0→1，200ms
+    val enter=remember { ComposeAnimatable(0f) }
+    LaunchedEffect(Unit) { enter.animateTo(1f,tween(200)) }
     Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            RemoteMediaImage(MediaURLs.image(url,ImageVariant.PREVIEW),Modifier.fillMaxSize().pointerInput(url) { detectTransformGestures { _,pan,change,_ ->
-                zoom=(zoom*change).coerceIn(1f,4f)
-                offsetX=if(zoom==1f)0f else offsetX+pan.x;offsetY=if(zoom==1f)0f else offsetY+pan.y
-            } }.graphicsLayer(scaleX=zoom,scaleY=zoom,translationX=offsetX,translationY=offsetY),960,cacheUrls=listOf(url))
-            Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp),horizontalArrangement=Arrangement.SpaceBetween) {
-                TextButton(onClick=onDismiss) { Text("关闭",color=Color.White) }
-                TextButton(onClick=onSave) { Text("保存原图",color=Color.White) }
+        Box(Modifier.fillMaxSize().background(Color.Black).graphicsLayer(alpha=enter.value)) {
+            HorizontalPager(state=state,modifier=Modifier.fillMaxSize(),userScrollEnabled=!zoomed) { page ->
+                val url=list[page]
+                val transform=transforms[page]
+                // 只在双指或已放大时接管手势：单指横滑留给 pager 翻页。
+                val gesture=Modifier.pointerInput(url) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed=false)
+                        var started=false
+                        do {
+                            val event=awaitPointerEvent()
+                            val multi=event.changes.size>=2
+                            if(multi||transform.zoom>1.001f) {
+                                val change=event.calculateZoom();val pan=event.calculatePan()
+                                transform.zoom=(transform.zoom*change).coerceIn(1f,4f)
+                                if(transform.zoom<=1.001f) { transform.panX=0f;transform.panY=0f } else { transform.panX+=pan.x;transform.panY+=pan.y }
+                                event.changes.forEach { it.consume() }
+                                started=true
+                            }
+                        } while(event.changes.any { it.pressed })
+                        if(!started&&transform.zoom>1.001f) { transform.zoom=1f;transform.panX=0f;transform.panY=0f }
+                    }
+                }
+                LaunchedEffect(page,transform.zoom>1.001f) { if(state.currentPage==page) zoomed=transform.zoom>1.001f }
+                RemoteMediaImage(MediaURLs.image(url,ImageVariant.PREVIEW),Modifier.fillMaxSize().then(gesture).graphicsLayer(scaleX=transform.zoom,scaleY=transform.zoom,translationX=transform.panX,translationY=transform.panY),960,cacheUrls=listOf(url),boxBackground=Color.Black)
             }
-            if(previous!=null||next!=null)Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
-                TextButton(onClick={ previous?.invoke() },enabled=previous!=null) { Text("上一张",color=if(previous!=null)Color.White else Color.Gray) }
-                Text(position,color=Color.White)
-                TextButton(onClick={ next?.invoke() },enabled=next!=null) { Text("下一张",color=if(next!=null)Color.White else Color.Gray) }
+            Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().height(58.dp).padding(horizontal=4.dp),verticalAlignment=Alignment.CenterVertically) {
+                TextButton(onClick=onDismiss) { Text("‹",color=Color.White,fontSize=28.sp) }
+                Column(Modifier.weight(1f)) {
+                    if(sender.isNotBlank())Text(sender,color=Color.White,fontSize=15.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if(time.isNotBlank())Text(time,color=Color(0xFFBBBBBB),fontSize=12.sp)
+                }
+                if(list.size>1)Text("${current+1} / ${list.size}",Modifier.padding(end=16.dp),color=Color(0xFFDDDDDD),fontSize=12.sp)
             }
+            // 两侧翻页箭头（与 uniapp image-viewer 的 viewer-arrow 一致），放大时禁用避免与拖拽冲突。
+            if(list.size>1) {
+                val prevEnabled=current>0&&!zoomed
+                val nextEnabled=current<list.lastIndex&&!zoomed
+                Box(Modifier.align(Alignment.CenterStart).padding(start=2.dp).size(34.dp).clickable(enabled=prevEnabled) { scope.launch { state.animateScrollToPage(current-1) } },contentAlignment=Alignment.Center) {
+                    Text("‹",color=if(prevEnabled)Color.White else Color(0x66FFFFFF),fontSize=30.sp)
+                }
+                Box(Modifier.align(Alignment.CenterEnd).padding(end=2.dp).size(34.dp).clickable(enabled=nextEnabled) { scope.launch { state.animateScrollToPage(current+1) } },contentAlignment=Alignment.Center) {
+                    Text("›",color=if(nextEnabled)Color.White else Color(0x66FFFFFF),fontSize=30.sp)
+                }
+            }
+            val hasBar=onDelete!=null||onForward!=null
+            val barInset=if(hasBar)62.dp else 20.dp
+            // 右下角 −/+ 缩放按钮（对齐 uniapp PreviewImageSlide 的 preview-zoom）
+            Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end=12.dp,bottom=barInset),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                listOf("−" to -1f,"+" to 1f).forEach { (label,delta) ->
+                    Box(Modifier.size(32.dp).clip(CircleShape).background(Color(0xCC333333)).clickable {
+                        val transform=transforms[current]
+                        scope.launch {
+                            animate(transform.zoom,(transform.zoom+delta).coerceIn(1f,4f),animationSpec=tween(160)) { value,_ -> transform.zoom=value }
+                            if(transform.zoom<=1.001f) { transform.zoom=1f;transform.panX=0f;transform.panY=0f }
+                        }
+                    },contentAlignment=Alignment.Center) { Text(label,color=Color.White,fontSize=18.sp) }
+                }
+            }
+            Text("双指缩放 · 左右滑动切换",Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom=barInset),color=Color(0xFFAAAAAA),fontSize=12.sp)
+            if(hasBar)Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().height(56.dp),horizontalArrangement=Arrangement.SpaceAround,verticalAlignment=Alignment.CenterVertically) {
+                val actions=listOf(
+                    Triple<(() -> Unit)?,Pair<Int,String>,Boolean>(onDelete,R.drawable.uni_video_trash to "删除",false),
+                    Triple<(() -> Unit)?,Pair<Int,String>,Boolean>({ onSave(list[current]) },R.drawable.uni_video_download to "保存",true),
+                    Triple<(() -> Unit)?,Pair<Int,String>,Boolean>(onForward,R.drawable.uni_video_forward to "转发",false)
+                ).filter { it.first!=null }
+                actions.forEach { (action,icon,isSave) -> Box(Modifier.width(72.dp).fillMaxHeight().clickable(enabled=!(isSave&&saving),onClick={ action?.invoke() }),contentAlignment=Alignment.Center) {
+                    // 保存进行中在原位显示进度，避免「点了没反应」。
+                    if(isSave&&saving)CircularProgressIndicator(Modifier.size(20.dp),color=Color.White,strokeWidth=2.dp)
+                    else Image(painterResource(icon.first),icon.second,Modifier.size(24.dp),contentScale=ContentScale.Fit)
+                } }
+            }
+            else TextButton(onClick={ onSave(list[current]) },enabled=!saving,modifier=Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom=8.dp)) { if(saving)CircularProgressIndicator(Modifier.size(18.dp),color=Color.White,strokeWidth=2.dp) else Text("保存原图",color=Color.White) }
         }
     }
 }
 
 @Composable
-fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:String="",sender:String="视频",time:String="",onSave:(()->Unit)?=null,onForward:(()->Unit)?=null,onDelete:(()->Unit)?=null,localFile:java.io.File?=null,localPoster:java.io.File?=null,allowedLocalDirectory:java.io.File?=null) {
+fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:String="",sender:String="视频",time:String="",onSave:(()->Unit)?=null,onForward:(()->Unit)?=null,onDelete:(()->Unit)?=null,localFile:java.io.File?=null,localPoster:java.io.File?=null,allowedLocalDirectory:java.io.File?=null,saving:Boolean=false) {
     val context=LocalContext.current
     val access by MediaLoader.access.collectAsState()
     val address=remember(url,access) { MediaURLs.playback(url,access.base) }
@@ -179,14 +268,19 @@ fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:Str
                         player.bind(address,cached,{}, { rendered=true }, { error="视频暂无法播放，点击重试";onError(error!!) },allowedLocalDirectory)
                     } },modifier=Modifier.fillMaxSize(),onRelease={ it.release() }) }
                     if(!rendered&&error==null)Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {
-                        if(poster.isNotBlank()||localPoster!=null)RemoteMediaImage(MediaURLs.image(poster),Modifier.fillMaxSize(),960,retryOnTap=false,localDraft=localPoster)
+                        if(poster.isNotBlank()||localPoster!=null)RemoteMediaImage(MediaURLs.image(poster),Modifier.fillMaxSize(),960,retryOnTap=false,localDraft=localPoster,boxBackground=Color.Black)
                         CircularProgressIndicator(Modifier.size(32.dp),color=Color.White,strokeWidth=2.dp)
                     }
                 }
                 error?.let { Text(it,Modifier.align(Alignment.Center).background(Color(0xAA000000)).clickable { view?.release();error=null;rendered=false;attempt++ }.padding(16.dp),color=Color.White) }
             }
             if(onSave!=null||onForward!=null||onDelete!=null)Row(Modifier.fillMaxWidth().height(56.dp),horizontalArrangement=Arrangement.SpaceAround,verticalAlignment=Alignment.CenterVertically) {
-                listOf(Triple(onDelete,R.drawable.uni_video_trash,"删除"),Triple(onSave,R.drawable.uni_video_download,"保存"),Triple(onForward,R.drawable.uni_video_forward,"转发")).forEach { (action,icon,label) -> if(action!=null)Box(Modifier.width(72.dp).fillMaxHeight().clickable(onClick=action),contentAlignment=Alignment.Center) { Image(painterResource(icon),label,Modifier.size(24.dp),contentScale=ContentScale.Fit) } }
+                listOf(Triple(onDelete,R.drawable.uni_video_trash,"删除"),Triple(onSave,R.drawable.uni_video_download,"保存"),Triple(onForward,R.drawable.uni_video_forward,"转发")).forEach { (action,icon,label) ->
+                    if(action!=null)Box(Modifier.width(72.dp).fillMaxHeight().clickable(enabled=!(saving&&label=="保存"),onClick=action),contentAlignment=Alignment.Center) {
+                        if(saving&&label=="保存")CircularProgressIndicator(Modifier.size(20.dp),color=Color.White,strokeWidth=2.dp)
+                        else Image(painterResource(icon),label,Modifier.size(24.dp),contentScale=ContentScale.Fit)
+                    }
+                }
             }
         }
     }
