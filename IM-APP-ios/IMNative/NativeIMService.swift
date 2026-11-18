@@ -196,6 +196,20 @@ final class NativeIMService {
     }
     var statusText: String { lastError ?? "\(connection) · \(storeLabel) · \(syncLabel)" }
 
+    func mediaPreference(_ preference: NativeMediaPreference) -> Bool {
+        UserDefaults.standard.object(forKey: preference.key(for: business.media)) as? Bool ?? true
+    }
+
+    func setMediaPreference(_ preference: NativeMediaPreference, enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: preference.key(for: business.media))
+    }
+
+    func canPrefetchMedia(wifiOnly: Bool) -> Bool {
+        let path = monitor.currentPath
+        return isActive && loggedIn && !needsAuthentication && UIApplication.shared.applicationState == .active &&
+            path.status == .satisfied && (!wifiOnly || path.usesInterfaceType(.wifi))
+    }
+
     func observe(_ update: @escaping () -> Void) -> UUID {
         let id = UUID(); observers[id] = update; return id
     }
@@ -515,6 +529,7 @@ final class NativeIMService {
     private func performStop() async {
         guard !stopped else { return }
         stopped = true; generation = UUID(); loggedIn = false
+        await NativeRecentMediaCache.shared.invalidate()
         credentialRecoveryTask?.cancel(); credentialRecoveryTask = nil
         bootstrapToken = nil; conversationReadRetryTask?.cancel(); conversationReadRetryTask = nil
         syncTimeout?.cancel(); syncTimeout = nil; cancelEmptyConversationReload(); sdkConnected = false; monitor.cancel()
@@ -822,7 +837,7 @@ final class NativeIMService {
         let sequence = (data["seq"] as? NSNumber)?.intValue ?? 0, rawStatus = (data["status"] as? NSNumber)?.intValue ?? 0
         // 正服务序号证明已受理；迟到的本地失败不能覆盖它，撤回仍按撤回显示。
         let status = sequence > 0 && rawStatus != 4 ? 2 : rawStatus
-        let media = [102, 103, 104, 105].contains(type) ? ChatMedia(kind: type, url: data["mediaURL"] as? String ?? "", thumbnail: data["thumbnail"] as? String ?? "", localPath: data["localPath"] as? String ?? "", filename: data["filename"] as? String ?? "", duration: (data["duration"] as? NSNumber)?.intValue ?? 0) : nil
+        let media = [102, 103, 104, 105].contains(type) ? ChatMedia(kind: type, url: data["mediaURL"] as? String ?? "", thumbnail: data["thumbnail"] as? String ?? "", localPath: data["localPath"] as? String ?? "", filename: data["filename"] as? String ?? "", duration: (data["duration"] as? NSNumber)?.intValue ?? 0, byteCount: (data["mediaBytes"] as? NSNumber)?.int64Value) : nil
         return ChatTextItem(id: id, senderID: data["senderID"] as? String ?? "", text: data["text"] as? String ?? "[消息]",
             timestamp: (data["timestamp"] as? NSNumber)?.int64Value ?? 0, status: status,
             seq: sequence, avatar: data["avatar"] as? String ?? "", senderName: data["senderName"] as? String ?? "", contentType: type,
@@ -1596,6 +1611,7 @@ final class NativeIMService {
         monitor.pathUpdateHandler = { [weak self] _ in
             Task { @MainActor in
                 guard let self = self, self.isActive, self.loggedIn, !self.needsAuthentication else { return }
+                self.publish()
                 do { _ = try await self.call { self.bridge.networkChanged(completion: $0) } }
                 catch { self.lastError = "网络切换尚未恢复，等待 SDK 重连。"; self.publish() }
             }

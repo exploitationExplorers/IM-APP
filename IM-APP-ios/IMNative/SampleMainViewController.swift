@@ -327,10 +327,9 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
                 min(100, $0 + min(100, max(0, self.chat?.conversationUnread($1) ?? 0)))
             }
         }
-        let badge = HomeChatBadge(unmutedUnread: total(muted: false), mutedUnread: total(muted: true),
-                                  pendingJoinRequests: pendingJoins?.monitor.count ?? 0)
+        let badge = HomeChatBadge(unmutedUnread: total(muted: false), mutedUnread: total(muted: true))
         chatUnread.setCount(badge.count, muted: badge.mutedOnly)
-        chatUnread.accessibilityLabel = "聊天未读及待审核入群申请"
+        chatUnread.accessibilityLabel = "聊天未读"
         chatUnread.accessibilityValue = badge.mutedOnly ? "免打扰消息" : ConversationUnreadBadge.text(badge.count)
         let chat = currentTab == 1
         searchBox.isHidden = !chat

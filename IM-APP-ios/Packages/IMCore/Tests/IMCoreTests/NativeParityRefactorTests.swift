@@ -107,12 +107,14 @@ final class NativeParityRefactorTests: XCTestCase {
         XCTAssertFalse(GroupMemberRole.owner.canModerate(target: .member, isSelf: true))
         XCTAssertFalse(GroupMemberRole.owner.canModerate(target: .unknown, isSelf: false))
         XCTAssertEqual(GroupMemberRole(serverValue: "60"), .admin)
-        let muted = HomeChatBadge(unmutedUnread: 0, mutedUnread: 4, pendingJoinRequests: 0)
+        let muted = HomeChatBadge(unmutedUnread: 0, mutedUnread: 4)
         XCTAssertTrue(muted.mutedOnly)
-        let requests = HomeChatBadge(unmutedUnread: 0, mutedUnread: 4, pendingJoinRequests: 3)
-        XCTAssertFalse(requests.mutedOnly)
-        XCTAssertEqual(requests.count, 3)
-        XCTAssertEqual(HomeChatBadge(unmutedUnread: Int.max, mutedUnread: 0, pendingJoinRequests: Int.max).count, 100)
+        XCTAssertEqual(muted.count, 1)
+        let mixed = HomeChatBadge(unmutedUnread: 3, mutedUnread: 4)
+        XCTAssertFalse(mixed.mutedOnly)
+        XCTAssertEqual(mixed.count, 3)
+        XCTAssertEqual(HomeChatBadge(unmutedUnread: Int.max, mutedUnread: 0).count, 100)
+        XCTAssertEqual(HomeChatBadge(unmutedUnread: 0, mutedUnread: 0).count, 0)
     }
 
     func testPendingRequestCountsRejectInvalidResponseAndDeduplicateGroups() throws {

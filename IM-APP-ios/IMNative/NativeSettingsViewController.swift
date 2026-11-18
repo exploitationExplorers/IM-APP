@@ -49,6 +49,24 @@ final class NativeSettingsController: NativeBusinessListController {
             self?.reloadContent()
         })
     }
+    private func mediaSwitch(_ title: String, preference: NativeMediaPreference) -> NativeBusinessRow {
+        NativeBusinessRow(title: title, checked: service.mediaPreference(preference), toggle: { [weak self] value in
+            self?.service.setMediaPreference(preference, enabled: value)
+            self?.reloadContent()
+        })
+    }
+
+    private func clearMediaCache() {
+        confirm("清除图片和聊天媒体缓存？聊天记录和待发消息会保留。", destructiveTitle: "清除") { [weak self] in
+            self?.perform { [weak self] in
+                async let images: Void = NativeImageCache.shared.clear()
+                async let media: Void = NativeRecentMediaCache.shared.clear()
+                _ = try await (images, media)
+                self?.showNativeNotice("已清除缓存。")
+            }
+        }
+    }
+
     override func reloadContent() {
         switch kind {
         case .privacy:
@@ -66,7 +84,9 @@ final class NativeSettingsController: NativeBusinessListController {
             if !defaults.bool(forKey: prefix + "noDisturb") { groups += [[localSwitch("新消息通知", key: "message", defaultValue: true), localSwitch("语音邀请", key: "voice", defaultValue: true)], [localSwitch("声音", key: "sound", defaultValue: true)]] }
             setRows(groups, titles: defaults.bool(forKey: prefix + "noDisturb") ? [] : ["", "应用未打开时", "应用打开时"])
         case .chat:
-            setRows([[localSwitch("回车键送出消息", key: "enterToSend", defaultValue: true), NativeBusinessRow(title: "群发助手", action: { [weak self] in guard let self = self else { return }; self.push(NativeMassAssistantController(service: self.service)) }), NativeBusinessRow(title: "我的表情", action: { [weak self] in guard let self = self else { return }; self.push(NativeEmotionsController(context: self.context)) }), NativeBusinessRow(title: "清除聊天记录", action: { [weak self] in self?.clearAllHistory() })]])
+            let media = [mediaSwitch("自动缓存最近聊天媒体", preference: .automatic),
+                         mediaSwitch("仅 Wi-Fi 自动缓存", preference: .wifiOnly)]
+            setRows([[localSwitch("回车键送出消息", key: "enterToSend", defaultValue: true), NativeBusinessRow(title: "群发助手", action: { [weak self] in guard let self = self else { return }; self.push(NativeMassAssistantController(service: self.service)) }), NativeBusinessRow(title: "我的表情", action: { [weak self] in guard let self = self else { return }; self.push(NativeEmotionsController(context: self.context)) }), NativeBusinessRow(title: "清除聊天记录", action: { [weak self] in self?.clearAllHistory() })], media])
         case .security:
             setRows([[NativeBusinessRow(title: "手机号码", detail: context.profile.phoneMasked)], [NativeBusinessRow(title: context.profile.hasPassword ? "修改密码" : "设置密码", action: { [weak self] in self?.changePassword() })], [NativeBusinessRow(title: "注销账号", destructive: true, action: { [weak self] in guard let self = self else { return }; self.push(NativeAccountDeletionController(service: self.service)) })]])
         case .general:
@@ -76,7 +96,7 @@ final class NativeSettingsController: NativeBusinessListController {
             ,
                 NativeBusinessRow(title: "意见反馈", action: { [weak self] in self?.openFeedback() }),
                 NativeBusinessRow(title: "关于我们", action: { [weak self] in guard let self = self else { return }; self.push(NativeAboutController(context: self.context)) }),
-                NativeBusinessRow(title: "清除缓存数据", action: { [weak self] in self?.confirm("清除图片缓存，聊天记录和待发消息会保留。", destructiveTitle: "清除") { Task { do { try await NativeImageCache.shared.clear(); self?.showNativeNotice("已清除图片缓存。") } catch { self?.showNativeNotice("图片缓存未完全清除：" + error.localizedDescription) } } } })
+                NativeBusinessRow(title: "清除缓存数据", action: { [weak self] in self?.clearMediaCache() })
             ,
                 NativeBusinessRow(title: "重新选线", action: { [weak self] in self?.confirm("重新连接聊天服务？", destructiveTitle: "确认") { guard let self = self else { return }; self.perform { try await self.service.reconnect(); self.showNativeNotice("已请求重新连接。") } } }),
                 NativeBusinessRow(title: "调试资讯", action: { [weak self] in guard let self = self else { return }; self.push(NativeDiagnosticsController(service: self.service)) })
@@ -128,23 +148,12 @@ final class NativeSettingsController: NativeBusinessListController {
 
 @MainActor
 private final class NativeNotificationSettingCell: UITableViewCell {
-    private let label = UILabel(); private let control = NativeNotificationToggle(); private let arrow = UIImageView(image: NativeUITheme.image("uni_mine_icon_chevron")); private var inset: CGFloat = 40
+    private let label = UILabel(); private let control = NativeParityToggle(); private let arrow = UIImageView(image: NativeUITheme.image("uni_mine_icon_chevron")); private var inset: CGFloat = 40
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) { super.init(style: .default, reuseIdentifier: reuseIdentifier); contentView.addSubview(label); contentView.addSubview(control); contentView.addSubview(arrow); arrow.contentMode = .scaleAspectFit; backgroundColor = .white; selectionStyle = .none; label.textColor = UIColor(hex: 0x111111) }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     func configure(_ row: NativeBusinessRow, inset: CGFloat, showsArrow: Bool) { self.inset = inset; label.text = row.title; control.value = row.checked ?? false; control.isHidden = row.toggle == nil; arrow.isHidden = row.toggle != nil || row.action == nil || !showsArrow; control.accessibilityLabel = row.title; control.change = { [weak self] value in self?.control.value = row.checked ?? false; row.toggle?(value) }; selectionStyle = row.action == nil ? .none : .default; setNeedsLayout() }
     override func layoutSubviews() { super.layoutSubviews(); let r = bounds.width / 750; label.font = .systemFont(ofSize: 30 * r); label.frame = CGRect(x: inset * r, y: 0, width: bounds.width - (inset + 128) * r, height: contentView.bounds.height); control.frame = CGRect(x: bounds.width - (inset + 72) * r, y: 0, width: 88 * r, height: contentView.bounds.height); arrow.frame = CGRect(x: bounds.width - (inset + 40) * r, y: (bounds.height - 40 * r) / 2, width: 40 * r, height: 40 * r) }
     override func prepareForReuse() { super.prepareForReuse(); control.change = nil }
-}
-
-@MainActor
-private final class NativeNotificationToggle: UIControl {
-    var value = false { didSet { accessibilityValue = value ? "开启" : "关闭"; setNeedsLayout() } }
-    var change: ((Bool) -> Void)?
-    private let track = UIView(); private let dot = UIView()
-    override init(frame: CGRect) { super.init(frame: frame); addSubview(track); track.addSubview(dot); dot.backgroundColor = .white; isAccessibilityElement = true; accessibilityTraits = .button; addTarget(self, action: #selector(toggle), for: .touchUpInside) }
-    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
-    override func layoutSubviews() { super.layoutSubviews(); let r = bounds.width / 88; track.frame = CGRect(x: 16 * r, y: (bounds.height - 36 * r) / 2, width: 56 * r, height: 36 * r); track.layer.cornerRadius = 18 * r; track.backgroundColor = UIColor(hex: value ? 0x153dcc : 0xe1e5ed); dot.frame = CGRect(x: (value ? 24 : 4) * r, y: 4 * r, width: 28 * r, height: 28 * r); dot.layer.cornerRadius = 14 * r }
-    @objc private func toggle() { change?(!value) }
 }
 
 @MainActor

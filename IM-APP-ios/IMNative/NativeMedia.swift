@@ -46,12 +46,17 @@ final class NativeAudioSessionLease {
 /// 下载到临时文件并在传输中检查上限；不携带业务Token，只允许HTTPS跳转。
 final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let limit: Int64
+    private let cacheOnly: Bool
+    private let wifiOnly: Bool
     private let lock = NSLock()
     private var continuation: CheckedContinuation<URL, Error>?
     private var cancelled = false
     private var task: URLSessionDownloadTask?
     // Task delegates own individual downloads; the session keeps same-host connections reusable.
-    private static let session: URLSession = {
+    private static let session = makeSession(wifiOnly: false)
+    private static let wifiSession = makeSession(wifiOnly: true)
+
+    private static func makeSession(wifiOnly: Bool) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 180
@@ -59,9 +64,15 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
         config.httpShouldSetCookies = false
         config.urlCredentialStorage = nil
         config.urlCache = nil
+        config.allowsCellularAccess = !wifiOnly
         return URLSession(configuration: config)
-    }()
-    init(limit: Int64) { self.limit = limit }
+    }
+
+    init(limit: Int64, cacheOnly: Bool = false, wifiOnly: Bool = false) {
+        self.limit = limit
+        self.cacheOnly = cacheOnly
+        self.wifiOnly = wifiOnly
+    }
     func download(_ url: URL) async throws -> URL {
         guard url.scheme == "https" else { throw APIError.invalidConfiguration }
         return try await withTaskCancellationHandler(operation: {
@@ -69,7 +80,8 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
                 lock.lock()
                 if cancelled { lock.unlock(); continuation.resume(throwing: APIError.cancelled); return }
                 self.continuation = continuation
-                let task = Self.session.downloadTask(with: url)
+                let session = wifiOnly ? Self.wifiSession : Self.session
+                let task = session.downloadTask(with: url)
                 task.delegate = self
                 self.task = task
                 lock.unlock()
@@ -92,6 +104,11 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         do {
             guard let response = downloadTask.response as? HTTPURLResponse, (200..<300).contains(response.statusCode), response.url?.scheme == "https" else { throw APIError.invalidResponse }
+            if cacheOnly {
+                let directives = response.value(forHTTPHeaderField: "Cache-Control")?.lowercased().split(separator: ",") ?? []
+                guard response.statusCode == 200,
+                      !directives.contains(where: { $0.trimmingCharacters(in: .whitespaces) == "no-store" }) else { throw APIError.invalidResponse }
+            }
             let size = (try FileManager.default.attributesOfItem(atPath: location.path)[.size] as? NSNumber)?.int64Value ?? Int64.max
             guard size <= limit else { throw APIError.business(code: -1, message: "文件超过本机预览大小限制。") }
             lock.lock(); let active = continuation != nil && !cancelled; lock.unlock(); guard active else { return }
@@ -179,6 +196,10 @@ actor NativeImageCache {
             memory.values.setObject(image, forKey: memoryKey, cost: cost); record(key, "DISK_CACHE", started); return image
         } catch { try? FileManager.default.removeItem(at: file); return nil }
     }
+    func decodeRecentImage(_ url: URL, edge: Int) throws -> UIImage {
+        try decode(url, edge: edge)
+    }
+
     func mutationEpoch() -> UUID { epoch }
     /// 只由账号 owner 传入其验证过的私有源文件；捕获的代次失效后禁止补写缓存。
     func seedOwned(_ local: URL, identities: [String], expectedEpoch: UUID) {
@@ -394,6 +415,30 @@ final class NativeRemoteImageView: UIImageView {
                     self?.image = cached; self?.loaded = true; self?.refreshAnimationRegistration(); self?.onImageLoaded?(); return
                 }
             }
+            if variant != .avatar {
+                var seen = Set<String>()
+                let paths = candidates + ([raw] + fallbacks).filter { !$0.isEmpty }.map(policy.original)
+                for path in paths {
+                    guard !Task.isCancelled, self?.represented == identity else { return }
+                    let key = policy.cacheIdentity(path)
+                    guard seen.insert(key).inserted,
+                          let copy = await NativeRecentMediaCache.shared.copy(identity: key, scope: nil) else { continue }
+                    defer { try? FileManager.default.removeItem(at: copy) }
+                    let image: UIImage
+                    do { image = try await NativeImageCache.shared.decodeRecentImage(copy, edge: edge) }
+                    catch {
+                        guard !Task.isCancelled else { return }
+                        await NativeRecentMediaCache.shared.remove(identity: key, scope: nil)
+                        continue
+                    }
+                    guard !Task.isCancelled, self?.represented == identity else { return }
+                    self?.image = image
+                    self?.loaded = true
+                    self?.refreshAnimationRegistration()
+                    self?.onImageLoaded?()
+                    return
+                }
+            }
             for candidate in candidates {
                 guard !Task.isCancelled, self?.represented == identity else { return }
                 guard let url = policy.absolute(candidate), url.scheme == "https" else { continue }
@@ -523,27 +568,66 @@ final class NativeImagePreviewController: UIViewController, UIScrollViewDelegate
 }
 
 @MainActor
+enum NativeAttachmentPreview {
+    static func make(media: ChatMedia, policy: MediaURLPolicy, ownedLocal: URL? = nil,
+                     scope: RecentChatMediaScope? = nil) -> UIViewController? {
+        let resource = RecentChatMediaResource.attachment(media, policy: policy)
+        guard let url = ownedLocal ?? resource?.url else { return nil }
+        let identity = ownedLocal == nil ? resource?.identity : nil
+        switch media.kind {
+        case 103, 104:
+            return NativeVideoPreviewController(url: url, allowSave: media.kind == 104, cacheIdentity: identity, scope: scope)
+        case 105:
+            return NativeFilePreviewController(url: url, filename: media.filename, cacheIdentity: identity, scope: scope)
+        default:
+            return nil
+        }
+    }
+}
+
+@MainActor
 final class NativeFilePreviewController: QLPreviewController, QLPreviewControllerDataSource {
     private var file: URL?
     private let remote: URL
     private let filename: String
+    private let cacheIdentity: String?
+    private let scope: RecentChatMediaScope?
     private var downloadTask: Task<Void, Never>?
     private var temporaryDirectory: URL?
-    init(url: URL, filename: String) { remote = url; self.filename = filename; super.init(nibName: nil, bundle: nil); dataSource = self }
+    init(url: URL, filename: String, cacheIdentity: String? = nil, scope: RecentChatMediaScope? = nil) {
+        remote = url
+        self.filename = filename
+        self.cacheIdentity = cacheIdentity
+        self.scope = scope
+        super.init(nibName: nil, bundle: nil)
+        dataSource = self
+    }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() {
         super.viewDidLoad(); title = filename
         downloadTask = Task {
             do {
-                guard remote.scheme == "https" else { throw APIError.invalidResponse }
-                let temp = try await NativeBoundedDownload(limit: 100 * 1024 * 1024).download(remote)
-                defer { try? FileManager.default.removeItem(at: temp) }; try Task.checkCancellation()
+                let source: URL
+                if remote.isFileURL {
+                    source = remote
+                } else if let identity = cacheIdentity, let cached = await NativeRecentMediaCache.shared.copy(identity: identity, scope: scope) {
+                    source = cached
+                } else {
+                    try Task.checkCancellation()
+                    source = try await NativeBoundedDownload(limit: 100 * 1024 * 1024).download(remote)
+                }
+                defer { if !remote.isFileURL { try? FileManager.default.removeItem(at: source) } }
+                try Task.checkCancellation()
                 let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 temporaryDirectory = folder
-                let safe = (filename as NSString).lastPathComponent
-                let destination = folder.appendingPathComponent(safe.isEmpty ? "文件" : safe)
-                try FileManager.default.moveItem(at: temp, to: destination); file = destination; reloadData()
+                let name = (filename as NSString).lastPathComponent
+                let safe = ["", "/", ".", ".."].contains(name) ? "文件" : name
+                let destination = folder.appendingPathComponent(safe)
+                if remote.isFileURL { try FileManager.default.copyItem(at: source, to: destination) }
+                else { try FileManager.default.moveItem(at: source, to: destination) }
+                file = destination
+                reloadData()
             } catch { if !Task.isCancelled, view.window != nil { showNativeNotice(error.localizedDescription) } }
         }
     }
@@ -556,24 +640,67 @@ final class NativeFilePreviewController: QLPreviewController, QLPreviewControlle
 final class NativeVideoPreviewController: AVPlayerViewController {
     private let source: URL
     private let allowSave: Bool
+    private let cacheIdentity: String?
+    private let scope: RecentChatMediaScope?
+    private var cachedCopy: URL?
+    private var prepareTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var playbackObservation: NSKeyValueObservation?
     private var backgroundObserver: NSObjectProtocol?
     private var playbackFailed = false
     private var failureReported = false
-    init(url: URL, allowSave: Bool = true) { source = url; self.allowSave = allowSave; super.init(nibName: nil, bundle: nil); player = AVPlayer(url: url) }
+    init(url: URL, allowSave: Bool = true, cacheIdentity: String? = nil, scope: RecentChatMediaScope? = nil) {
+        source = url
+        self.allowSave = allowSave
+        self.cacheIdentity = cacheIdentity
+        self.scope = scope
+        super.init(nibName: nil, bundle: nil)
+    }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() {
         super.viewDidLoad()
         if allowSave { navigationItem.rightBarButtonItem = UIBarButtonItem(title: "保存", style: .plain, target: self, action: #selector(save)) }
+        backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.player?.pause() } }
+        prepareTask = Task { [weak self, cacheIdentity, scope, source, allowSave] in
+            let copy: URL?
+            if let cacheIdentity {
+                let ext = source.pathExtension.isEmpty ? (allowSave ? "mp4" : "") : source.pathExtension
+                copy = await NativeRecentMediaCache.shared.copy(identity: cacheIdentity, scope: scope, fileExtension: ext)
+            } else { copy = nil }
+            guard let self = self, !Task.isCancelled else {
+                if let copy { try? FileManager.default.removeItem(at: copy) }
+                return
+            }
+            self.cachedCopy = copy
+            self.prepareTask = nil
+            self.configurePlayer(copy ?? source)
+        }
+    }
+    private func configurePlayer(_ url: URL) {
+        player = AVPlayer(url: url)
         playbackObservation = player?.currentItem?.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             let failed = item.status == .failed
-            Task { @MainActor in guard let self = self, failed else { return }; self.playbackFailed = true; self.reportPlaybackFailure() }
+            Task { @MainActor [weak self] in
+                guard let self, failed, self.player?.currentItem === item else { return }
+                self.handlePlaybackFailure()
+            }
         }
-        backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.player?.pause() } }
+        if view.window != nil, UIApplication.shared.applicationState == .active { player?.play() }
     }
     override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); navigationController?.setNavigationBarHidden(false, animated: animated); player?.play() }
-    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); reportPlaybackFailure() }
+    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); if UIApplication.shared.applicationState == .active { player?.play() }; reportPlaybackFailure() }
+    private func handlePlaybackFailure() {
+        if let copy = cachedCopy, let cacheIdentity {
+            cachedCopy = nil
+            playbackObservation?.invalidate()
+            configurePlayer(source)
+            try? FileManager.default.removeItem(at: copy)
+            Task { [scope] in await NativeRecentMediaCache.shared.remove(identity: cacheIdentity, scope: scope) }
+            return
+        }
+        playbackFailed = true
+        reportPlaybackFailure()
+    }
     private func reportPlaybackFailure() {
         guard playbackFailed, !failureReported, view.window != nil, presentedViewController == nil else { return }
         failureReported = true; showNativeNotice("视频暂时无法播放，请检查网络后重新打开。")
@@ -586,8 +713,9 @@ final class NativeVideoPreviewController: AVPlayerViewController {
                 let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
                 guard status == .authorized || status == .limited else { throw APIError.business(code: -1, message: "请在系统设置中允许添加照片。") }
                 let temp: URL
-                if source.isFileURL { temp = source } else { temp = try await NativeBoundedDownload(limit: 300 * 1024 * 1024).download(source) }
-                defer { if !source.isFileURL { try? FileManager.default.removeItem(at: temp) } }
+                let local = cachedCopy ?? (source.isFileURL ? source : nil)
+                if let local { temp = local } else { temp = try await NativeBoundedDownload(limit: 300 * 1024 * 1024).download(source) }
+                defer { if local == nil { try? FileManager.default.removeItem(at: temp) } }
                 try Task.checkCancellation()
                 let asset = AVURLAsset(url: temp); guard try await asset.load(.isPlayable) else { throw APIError.invalidResponse }
                 let ext = source.pathExtension.isEmpty ? "mp4" : source.pathExtension
@@ -599,7 +727,19 @@ final class NativeVideoPreviewController: AVPlayerViewController {
             } catch { if !Task.isCancelled, view.window != nil { showNativeNotice(error.localizedDescription) } }
         }
     }
-    override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); player?.pause(); if navigationController?.viewControllers.contains(where: { $0 === self }) != true { saveTask?.cancel(); playbackObservation?.invalidate(); playbackObservation = nil; player?.replaceCurrentItem(with: nil); player = nil } }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        player?.pause()
+        guard navigationController?.viewControllers.contains(where: { $0 === self }) != true else { return }
+        prepareTask?.cancel()
+        saveTask?.cancel()
+        playbackObservation?.invalidate()
+        playbackObservation = nil
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+        if let cachedCopy { try? FileManager.default.removeItem(at: cachedCopy) }
+        cachedCopy = nil
+    }
     deinit { if let token = backgroundObserver { NotificationCenter.default.removeObserver(token) } }
 }
 

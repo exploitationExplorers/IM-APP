@@ -31,10 +31,7 @@ final class NativeSearchController: NativeBusinessListController, UISearchResult
     private func open(_ hit: NativeSearchHit) {
         if let media = hit.message.media {
             if media.kind == 102 { push(NativeImagePreviewController(url: media.url, policy: context.media, allImages: hits.compactMap { $0.message.media?.kind == 102 ? $0.message.media?.url : nil })); return }
-            if let url = context.media.absolute(media.kind == 104 ? context.media.playback(media.url) : media.url), url.scheme == "https" {
-                if media.kind == 105 { push(NativeFilePreviewController(url: url, filename: media.filename)) }
-                else { push(NativeVideoPreviewController(url: url, allowSave: media.kind == 104)) }; return
-            }
+            if let page = NativeAttachmentPreview.make(media: media, policy: context.media) { push(page); return }
         }
         perform { [self] in let conversation = try await service.conversationForSearch(hit); push(NativeConversationViewController(service: service, conversation: conversation, focusID: hit.message.id)) }
     }
@@ -66,7 +63,21 @@ final class NativeGroupMediaController: UIViewController, UICollectionViewDataSo
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { items.count }
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize { if selected == 3 { return CGSize(width: collection.bounds.width - 8, height: NativeUITheme.rpx(96, width: view.bounds.width)) }; let edge = floor((collection.bounds.width - 12) / 3); return CGSize(width: edge, height: edge) }
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell { let cell = collection.dequeueReusableCell(withReuseIdentifier: "group-media", for: indexPath) as! NativeGroupMediaCell; cell.configure(items[indexPath.item].message, policy: service.business.media); return cell }
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) { guard let media = items[indexPath.item].message.media else { return }; let page: UIViewController; if media.kind == 102 { page = NativeImagePreviewController(url: media.url, policy: service.business.media, allImages: items.compactMap { $0.message.media?.kind == 102 ? $0.message.media?.url : nil }) } else { guard let url = service.business.media.absolute(media.kind == 104 ? service.business.media.playback(media.url) : media.url), url.scheme == "https" else { showNativeNotice("媒体地址尚未就绪。"); return }; page = media.kind == 105 ? NativeFilePreviewController(url: url, filename: media.filename) : NativeVideoPreviewController(url: url, allowSave: true) }; navigationController?.pushViewController(page, animated: true) }
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard let media = items[indexPath.item].message.media else { return }
+        let policy = service.business.media
+        let page: UIViewController
+        if media.kind == 102 {
+            let images = items.compactMap { $0.message.media?.kind == 102 ? $0.message.media?.url : nil }
+            page = NativeImagePreviewController(url: media.url, policy: policy, allImages: images)
+        } else if let preview = NativeAttachmentPreview.make(media: media, policy: policy, scope: .group) {
+            page = preview
+        } else {
+            showNativeNotice("媒体地址尚未就绪。")
+            return
+        }
+        navigationController?.pushViewController(page, animated: true)
+    }
     override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); if isMovingFromParent || navigationController?.viewControllers.contains(where: { $0 === self }) != true { task?.cancel(); operation = UUID() } }
 }
 

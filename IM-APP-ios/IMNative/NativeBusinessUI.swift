@@ -95,7 +95,7 @@ class NativeBusinessListController: UITableViewController {
 }
 
 /// 保留原 ImSwitch 的 56×36rpx 轨道和 28rpx 圆点，触摸区域扩大但不改变视觉尺寸。
-private final class NativeParityToggle: UIControl {
+final class NativeParityToggle: UIControl {
     private let track = UIView(); private let dot = UIView()
     var value = false { didSet { setNeedsLayout(); accessibilityValue = value ? "开启" : "关闭" } }
     var change: ((Bool) -> Void)?
@@ -113,6 +113,7 @@ private final class NativeParityToggle: UIControl {
         track.layer.cornerRadius = 18 * r; track.backgroundColor = UIColor(hex: value ? 0x153dcc : 0xe1e5ed)
         dot.frame = CGRect(x: (value ? 24 : 4) * r, y: 4 * r, width: 28 * r, height: 28 * r); dot.layer.cornerRadius = 14 * r
     }
+    override func accessibilityActivate() -> Bool { toggle(); return true }
     @objc private func toggle() { value.toggle(); change?(value) }
 }
 

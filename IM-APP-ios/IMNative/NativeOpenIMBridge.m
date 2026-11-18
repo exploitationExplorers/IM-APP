@@ -70,18 +70,18 @@ static NSString *MessageText(OIMMessageInfo *message) {
 static NSDictionary *MessageData(OIMMessageInfo *message) {
     NSString *text = MessageText(message);
     NSString *url = @"", *thumbnail = @"", *local = @"", *filename = @"";
-    NSInteger duration = 0;
+    NSInteger duration = 0, mediaBytes = 0;
     if (message.contentType == OIMMessageContentTypeImage) {
         url = message.pictureElem.sourcePicture.url.length ? message.pictureElem.sourcePicture.url : (message.pictureElem.bigPicture.url ?: @"");
         if (!url.length) url = message.pictureElem.snapshotPicture.url ?: @"";
         thumbnail = message.pictureElem.snapshotPicture.url.length ? message.pictureElem.snapshotPicture.url : url; local = message.pictureElem.sourcePath ?: @"";
     } else if (message.contentType == OIMMessageContentTypeVideo) {
         url = message.videoElem.videoUrl ?: @""; thumbnail = message.videoElem.snapshotUrl ?: @"";
-        local = message.videoElem.videoPath ?: @""; duration = message.videoElem.duration;
+        local = message.videoElem.videoPath ?: @""; duration = message.videoElem.duration; mediaBytes = message.videoElem.videoSize;
     } else if (message.contentType == OIMMessageContentTypeAudio) {
         url = message.soundElem.sourceUrl ?: @""; local = message.soundElem.soundPath ?: @""; duration = message.soundElem.duration;
     } else if (message.contentType == OIMMessageContentTypeFile) {
-        url = message.fileElem.sourceUrl ?: @""; local = message.fileElem.filePath ?: @""; filename = message.fileElem.fileName ?: @"";
+        url = message.fileElem.sourceUrl ?: @""; local = message.fileElem.filePath ?: @""; filename = message.fileElem.fileName ?: @""; mediaBytes = message.fileElem.fileSize;
     }
     return @{@"id": message.clientMsgID ?: @"", @"senderID": message.sendID ?: @"",
              @"recvID": message.recvID ?: @"", @"groupID": message.groupID ?: @"",
@@ -89,7 +89,7 @@ static NSDictionary *MessageData(OIMMessageInfo *message) {
              @"timestamp": @((int64_t)(message.sendTime > 0 ? message.sendTime : message.createTime)),
              @"status": @(message.status), @"contentType": @(message.contentType),
              @"seq": @(message.seq), @"isRead": @(message.isRead), @"avatar": message.senderFaceUrl ?: @"", @"senderName": message.senderNickname ?: @"",
-             @"mediaURL": url, @"thumbnail": thumbnail, @"localPath": local, @"filename": filename, @"duration": @(duration),
+             @"mediaURL": url, @"thumbnail": thumbnail, @"localPath": local, @"filename": filename, @"duration": @(duration), @"mediaBytes": @(mediaBytes),
              @"serialized": message.mj_JSONString ?: @""};
 }
 

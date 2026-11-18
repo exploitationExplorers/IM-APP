@@ -17,7 +17,7 @@ public struct MediaURLPolicy: Sendable {
     public func cacheIdentity(_ raw: String) -> String {
         let namespace = "media-v2\n\(businessBaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))\n\(accountScope)\n"
         guard let url = absolute(raw), let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return namespace + raw }
-        let sameOrigin = url.scheme?.lowercased() == businessBaseURL.scheme?.lowercased() && url.host?.lowercased() == businessBaseURL.host?.lowercased() && url.port == businessBaseURL.port
+        let sameOrigin = isBusinessOrigin(url)
         let host = url.host?.lowercased() ?? "", path = parts.percentEncodedPath
         let capability = sameOrigin && path == "/api/v1/public/oss-media"
         let objectRoute = sameOrigin && path.hasPrefix("/object/")
@@ -55,12 +55,12 @@ public struct MediaURLPolicy: Sendable {
         }
         // 其余签名 URL 必须字节级原样，不能通过 URLComponents 重编码后返回。
         if signed { return raw }
-        if url.path == "/api/v1/public/oss-media", images.contains(query(parts, "key").map { ($0 as NSString).pathExtension.lowercased() } ?? ""),
+        if isBusinessOrigin(url), url.path == "/api/v1/public/oss-media", images.contains(query(parts, "key").map { ($0 as NSString).pathExtension.lowercased() } ?? ""),
            !(query(parts, "token") ?? "").isEmpty {
             set(&parts, key: "variant", value: variant.rawValue)
             return parts.url?.absoluteString ?? raw
         }
-        if variant != .avatar, url.path.hasPrefix("/object/"), !nonImages.contains(ext) {
+        if variant != .avatar, isBusinessOrigin(url), url.path.hasPrefix("/object/"), !nonImages.contains(ext) {
             for item in thumbnail(edge) { set(&parts, key: item.name, value: item.value ?? "") }
             return parts.url?.absoluteString ?? raw
         }
@@ -102,10 +102,26 @@ public struct MediaURLPolicy: Sendable {
             }
             return raw
         }
-        var removed: Set<String> = ["x-oss-process", "variant"]
-        if url.path.hasPrefix("/object/") { removed.formUnion(["type", "width", "height", "format"]) }
-        parts.queryItems = parts.queryItems?.filter { !removed.contains($0.name) }
-        if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
+        let host = url.host?.lowercased() ?? ""
+        let path = parts.percentEncodedPath
+        let removed: Set<String>
+        if isBusinessOrigin(url), path.hasPrefix("/object/") {
+            removed = ["x-oss-process", "variant", "type", "width", "height", "format"]
+        } else if isBusinessOrigin(url), path == "/api/v1/public/oss-media" {
+            removed = ["variant"]
+        } else if (chatHosts.contains(host) && chatPrefixes.contains { path.hasPrefix("/" + $0) }) ||
+                  (businessHosts.contains(host) && businessPrefixes.contains { path.hasPrefix("/" + $0) }) {
+            removed = ["x-oss-process"]
+        } else {
+            return raw
+        }
+        if let query = parts.percentEncodedQuery {
+            let retained = query.split(separator: "&", omittingEmptySubsequences: false).filter { pair in
+                guard let name = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).first?.removingPercentEncoding else { return true }
+                return !removed.contains(name)
+            }.joined(separator: "&")
+            parts.percentEncodedQuery = retained.isEmpty ? nil : retained
+        }
         return parts.url?.absoluteString ?? raw
     }
     /// 已知旧测试聊天桶的视频签名可过期；仅在 host、桶前缀与视频扩展名同时匹配时恢复稳定入口。
@@ -119,6 +135,11 @@ public struct MediaURLPolicy: Sendable {
     public func isGIF(_ raw: String) -> Bool {
         guard let url = absolute(raw), let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         return url.path.lowercased().hasSuffix(".gif") || (query(parts, "key")?.lowercased().hasSuffix(".gif") ?? false)
+    }
+
+    private func isBusinessOrigin(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == businessBaseURL.scheme?.lowercased() &&
+            url.host?.lowercased() == businessBaseURL.host?.lowercased() && url.port == businessBaseURL.port
     }
 
     private func logicalChatKey(_ url: URL, parts: URLComponents) -> String? {

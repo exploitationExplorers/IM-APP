@@ -57,28 +57,227 @@ final class NativeGroupsController: NativeBusinessListController {
 
 @MainActor
 final class NativeContactPickerController: NativeBusinessListController, UISearchResultsUpdating {
-    private let service: NativeIMService; private let done: ([NativeContact]) -> Void; private let selectionLimit: Int
-    private var contacts: [NativeContact] = []; private var selected = Set<String>(); private let search = UISearchController(searchResultsController: nil)
-    init(service: NativeIMService, title: String, selectionLimit: Int = Int.max, done: @escaping ([NativeContact]) -> Void) { self.service = service; self.done = done; self.selectionLimit = selectionLimit; super.init(title: title, context: service.business) }
-    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
-    override func viewDidLoad() {
-        super.viewDidLoad(); search.searchResultsUpdater = self; search.obscuresBackgroundDuringPresentation = false; navigationItem.searchController = search
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(finish))
+    private enum Destination {
+        case selection(([NativeContact]) -> Void)
+        case group(String)
     }
-    override func reloadContent() {
-        perform { [self] in
-            var all: [NativeContact] = []; var cursor: String?; var seen = Set<String>()
-            repeat { let page = try await context.contacts(sort: "name", cursor: cursor); all += page.items; guard page.hasMore, let next = page.nextCursor, seen.insert(next).inserted else { break }; cursor = next } while true
-            contacts = all; render()
+
+    private struct InvitationResult: Decodable {
+        let invitedCount: Int
+        let pendingCount: Int
+
+        var notice: String {
+            switch (invitedCount, pendingCount) {
+            case (0, 0): return "所选好友无需重复邀请，请刷新后重新选择。"
+            case (0, let pending): return "已邀请 \(pending) 位好友，等待对方确认。"
+            case (let invited, 0): return "已添加 \(invited) 位群成员。"
+            case (let invited, let pending): return "已添加 \(invited) 位群成员，另有 \(pending) 位好友待确认。"
+            }
         }
     }
-    func updateSearchResults(for searchController: UISearchController) { render() }
-    private func render() {
-        let key = search.searchBar.text ?? ""
-        setRows([contacts.filter { key.isEmpty || $0.displayName.localizedCaseInsensitiveContains(key) }.map { c in NativeBusinessRow(title: c.displayName, avatar: c.avatar, checked: selected.contains(c.id), action: { [weak self] in guard let self = self else { return }; if self.selected.contains(c.id) { self.selected.remove(c.id) } else { if self.selectionLimit == 1 { self.selected = [] }; guard self.selected.count < self.selectionLimit else { self.showNativeNotice("已达到选择人数上限。"); return }; self.selected.insert(c.id) }; self.render() }) }])
-        navigationItem.rightBarButtonItem?.title = selected.isEmpty ? "完成" : "完成（\(selected.count)）"
+
+    private let destination: Destination
+    private let selectionLimit: Int
+    private let search = UISearchController(searchResultsController: nil)
+    private var inviteButton: UIButton?
+    private var contacts: [NativeContact] = []
+    private var selected: [String: NativeContact] = [:]
+    private var groupMemberIDs: Set<String> = []
+    private var nextCursor: String?
+    private var seenCursors: Set<String> = []
+    private var loadedKeyword: String?
+    private var requestedKeyword = ""
+    private var searchTask: Task<Void, Never>?
+
+    init(service: NativeIMService, title: String, selectionLimit: Int = Int.max, done: @escaping ([NativeContact]) -> Void) {
+        destination = .selection(done)
+        self.selectionLimit = selectionLimit
+        super.init(title: title, context: service.business)
     }
-    @objc private func finish() { guard !selected.isEmpty else { showNativeNotice("请选择联系人。"); return }; let result = contacts.filter { selected.contains($0.id) }; navigationController?.popViewController(animated: false); done(result) }
+
+    init(context: NativeBusinessContext, groupID: String) {
+        destination = .group(groupID)
+        selectionLimit = Int.max
+        super.init(title: "邀请好友", context: context)
+    }
+
+    required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        definesPresentationContext = true
+        search.searchResultsUpdater = self
+        search.obscuresBackgroundDuringPresentation = false
+        search.searchBar.placeholder = "搜索昵称、备注或聊天号"
+        navigationItem.searchController = search
+        switch destination {
+        case .selection:
+            navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(finish))
+        case .group:
+            configureInviteButton()
+        }
+        updateDoneButton(canSubmit: false)
+    }
+
+    private func configureInviteButton() {
+        let button = UIButton(configuration: .filled(), primaryAction: UIAction { [weak self] _ in self?.finish() })
+        button.tintColor = NativeUITheme.primary
+        button.accessibilityIdentifier = "groupInviteConfirm"
+        button.translatesAutoresizingMaskIntoConstraints = false
+        let footer = UIView(frame: CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 76))
+        footer.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 20),
+            button.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -20),
+            button.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+            button.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        tableView.tableFooterView = footer
+        inviteButton = button
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        searchTask?.cancel()
+    }
+
+    override func reloadContent() { load(reset: true) }
+
+    func updateSearchResults(for searchController: UISearchController) {
+        let keyword = (searchController.searchBar.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard keyword != requestedKeyword else { return }
+        requestedKeyword = keyword
+        searchTask?.cancel()
+        searchTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
+            guard let self = self, self.loadedKeyword != keyword else { return }
+            self.reloadContent()
+        }
+    }
+
+    private func load(reset: Bool) {
+        guard !working else { return }
+        let keyword = requestedKeyword
+        let cursor = reset ? nil : nextCursor
+        guard reset || (loadedKeyword == keyword && cursor != nil) else { return }
+        updateDoneButton(canSubmit: false)
+        perform { [self] in
+            defer {
+                if !Task.isCancelled, requestedKeyword != keyword { scheduleReload() }
+                updateDoneButton(canSubmit: true)
+            }
+            do {
+                let page = try await context.contacts(keyword: keyword, cursor: cursor)
+                guard requestedKeyword == keyword else { return }
+                if case .group(let groupID) = destination, reset, groupMemberIDs.isEmpty || refreshControl?.isRefreshing == true {
+                    groupMemberIDs = try await fetchGroupMemberIDs(groupID)
+                    selected = selected.filter { !groupMemberIDs.contains($0.key) }
+                }
+                guard requestedKeyword == keyword else { return }
+                if reset { seenCursors = [] }
+                if page.hasMore {
+                    guard let next = page.nextCursor, !next.isEmpty, seenCursors.insert(next).inserted else { throw APIError.invalidResponse }
+                    nextCursor = next
+                } else {
+                    nextCursor = nil
+                }
+                if reset { contacts = [] }
+                var seen = Set(contacts.map(\.id))
+                contacts += page.items.filter { seen.insert($0.id).inserted }
+                loadedKeyword = keyword
+                render()
+            } catch {
+                guard !Task.isCancelled, requestedKeyword == keyword else { return }
+                if loadedKeyword != keyword {
+                    setRows([[NativeBusinessRow(title: "好友加载失败，点击重试", action: { [weak self] in self?.reloadContent() })]])
+                }
+                throw error
+            }
+        }
+    }
+
+    private func fetchGroupMemberIDs(_ groupID: String) async throws -> Set<String> {
+        var ids: Set<String> = [context.userID]
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        repeat {
+            var query = [URLQueryItem(name: "groupId", value: groupID), URLQueryItem(name: "limit", value: "100")]
+            if let cursor = cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+            let page: NativePage<NativeGroupMember> = try await context.request("group-members", query: query)
+            ids.formUnion(page.items.map(\.id))
+            guard page.hasMore else { return ids }
+            guard let next = page.nextCursor, !next.isEmpty, seenCursors.insert(next).inserted else { throw APIError.invalidResponse }
+            cursor = next
+        } while true
+    }
+
+    private func render() {
+        var rows = contacts.map { contact in
+            let alreadyJoined = groupMemberIDs.contains(contact.id)
+            let action: (() -> Void)? = alreadyJoined ? nil : { [weak self] in self?.toggleSelection(contact) }
+            return NativeBusinessRow(title: contact.displayName, detail: alreadyJoined ? "已在群里" : "", avatar: contact.avatar,
+                                     checked: alreadyJoined || selected[contact.id] != nil, action: action)
+        }
+        if nextCursor != nil {
+            rows.append(NativeBusinessRow(title: "加载更多", action: { [weak self] in self?.load(reset: false) }))
+        } else if rows.isEmpty {
+            rows.append(NativeBusinessRow(title: requestedKeyword.isEmpty ? "暂无可选联系人" : "没有找到匹配的好友"))
+        }
+        setRows([rows])
+    }
+
+    private func toggleSelection(_ contact: NativeContact) {
+        guard !working, loadedKeyword == requestedKeyword, !groupMemberIDs.contains(contact.id) else { return }
+        if selected.removeValue(forKey: contact.id) == nil {
+            if selectionLimit == 1 { selected = [:] }
+            guard selected.count < selectionLimit else { showNativeNotice("已达到选择人数上限。"); return }
+            selected[contact.id] = contact
+        }
+        render()
+        updateDoneButton(canSubmit: true)
+    }
+
+    private func updateDoneButton(canSubmit: Bool) {
+        navigationItem.rightBarButtonItem?.title = selected.isEmpty ? "完成" : "完成（\(selected.count)）"
+        inviteButton?.configuration?.title = selected.isEmpty ? "确认邀请" : "确认邀请（\(selected.count)）"
+        inviteButton?.isEnabled = canSubmit && !selected.isEmpty
+    }
+
+    @objc private func finish() {
+        guard !working, let navigation = navigationController, navigation.topViewController === self else { return }
+        guard !selected.isEmpty else { showNativeNotice("请选择联系人。"); return }
+        switch destination {
+        case .selection(let done):
+            let result = selected.values.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+            navigation.popViewController(animated: false)
+            done(result)
+        case .group(let id):
+            search.isActive = false
+            submitInvitation(groupID: id)
+        }
+    }
+
+    private func submitInvitation(groupID: String) {
+        let userIDs = selected.keys.sorted()
+        let keyword = requestedKeyword
+        updateDoneButton(canSubmit: false)
+        perform { [self] in
+            defer {
+                updateDoneButton(canSubmit: true)
+                if !Task.isCancelled, requestedKeyword != keyword { scheduleReload() }
+            }
+            let result: InvitationResult = try await context.request("groups/\(groupID)/invitations", method: "POST",
+                                                                    body: ["userIds": .array(userIDs.map(JSONValue.string))])
+            guard let navigation = navigationController, navigation.topViewController === self else { return }
+            if result.invitedCount > 0 || result.pendingCount > 0 {
+                let parent = navigation.viewControllers.dropLast().last
+                navigation.popViewController(animated: true)
+                parent?.showNativeNotice(result.notice)
+            } else {
+                showNativeNotice(result.notice)
+            }
+        }
+    }
 }
 
 @MainActor
@@ -86,17 +285,10 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
     private let service: NativeIMService; private let groupID: String; private var group: NativeGroup?
     private var conversation: NativeConversation?; private var previewMembers: [NativeGroupMember] = []; private var memberError: String?
     private lazy var pendingJoins = NativePendingJoinRequests(service: service, groupID: groupID)
-    private var returningFromInvitationPicker = false
     private struct Dissolved: Decodable { let id: String; let name: String; let avatar: String; let status: String }
     init(service: NativeIMService, groupID: String) { self.service = service; self.groupID = groupID; super.init(title: "群组详情", context: service.business) }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func reloadContent() {
-        // picker 先 pop 再回调。跳过本次自动重载，避免占用 perform 导致邀请被静默忽略。
-        if returningFromInvitationPicker {
-            returningFromInvitationPicker = false
-            refreshControl?.endRefreshing()
-            return
-        }
         perform { [self] in
             let g: NativeGroup
             do { g = try await context.request("groups/detail", query: [URLQueryItem(name: "groupId", value: groupID)]) }
@@ -158,14 +350,7 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
 
     private func inviteMembers() {
         guard group?.canManage == true else { return }
-        returningFromInvitationPicker = true
-        push(NativeContactPickerController(service: service, title: "邀请好友") { [weak self] contacts in
-            guard let self = self else { return }
-            self.perform {
-                try await self.context.change("groups/\(self.groupID)/invitations", body: ["userIds": .array(contacts.map { .string($0.id) })])
-                self.scheduleReload()
-            }
-        })
+        push(NativeContactPickerController(context: context, groupID: groupID))
     }
 
     private func isOwner(_ group: NativeGroup) -> Bool { group.isOwner || group.ownerId == context.userID }
@@ -224,7 +409,6 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
     private func updateSetting(_ key: String, _ value: JSONValue) { perform { [self] in do { try await saveSetting(key, value); scheduleReload() } catch { scheduleReload(); throw error } } }
     private func editMyNickname() { edit(title: "我在本群的昵称", value: group?.myNickname ?? "") { [weak self] name in guard let self = self else { return }; try await self.context.change("groups/\(self.groupID)/me/nickname", method: "PUT", body: ["nickname": .string(name)]) } }
     private func editRemark() { edit(title: "群备注", value: group?.remark ?? "") { [weak self] remark in guard let self = self else { return }; try await self.context.change("groups/\(self.groupID)/remark", method: "PUT", body: ["remark": .string(remark)]) } }
-    private func invite() { push(NativeContactPickerController(service: service, title: "邀请好友") { [weak self] contacts in guard let self = self else { return }; self.perform { try await self.context.change("groups/\(self.groupID)/invitations", body: ["userIds": .array(contacts.map { .string($0.id) })]); self.scheduleReload() } }) }
     private func openChat() { perform { [self] in let target: NativeGroupPeer = try await context.request("im/groups/\(groupID)"); let conversation = try await service.openConversation(target: target.imGroupId, type: 3); push(NativeConversationViewController(service: service, conversation: conversation)) } }
     private func leave() {
         guard let group = group else { return }; let action = isOwner(group) ? "dismiss" : "leave"
@@ -243,20 +427,14 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
 @MainActor
 final class NativeGroupMembersController: NativeBusinessListController {
     private let service: NativeIMService; private let group: NativeGroup; private var members: [NativeGroupMember] = []; private var cursor: String?
-    private var returningFromInvitationPicker = false
     init(service: NativeIMService, group: NativeGroup) { self.service = service; self.group = group; super.init(title: "群成员", context: service.business) }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() { super.viewDidLoad(); if group.canManage { navigationItem.rightBarButtonItem = UIBarButtonItem(title: "新增", style: .plain, target: self, action: #selector(inviteMembers)) } }
-    @objc private func inviteMembers() { returningFromInvitationPicker = true; push(NativeContactPickerController(service: service, title: "邀请好友") { [weak self] contacts in guard let self = self else { return }; self.perform { try await self.context.change("groups/\(self.group.id)/invitations", body: ["userIds": .array(contacts.map { .string($0.id) })]); self.scheduleReload() } }) }
-    override func reloadContent() {
-        // 避免 picker 返回时的自动重载抢占邀请提交。
-        if returningFromInvitationPicker {
-            returningFromInvitationPicker = false
-            refreshControl?.endRefreshing()
-            return
-        }
-        load(reset: true)
+    @objc private func inviteMembers() {
+        guard group.canManage else { return }
+        push(NativeContactPickerController(context: context, groupID: group.id))
     }
+    override func reloadContent() { load(reset: true) }
     private func load(reset: Bool) {
         perform { [self] in
             var query = [URLQueryItem(name: "groupId", value: group.id), URLQueryItem(name: "limit", value: "40")]; if !reset, let cursor = cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }

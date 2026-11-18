@@ -358,8 +358,10 @@ public struct ChatMedia: Codable, Equatable, Sendable {
     public let localPath: String
     public let filename: String
     public let duration: Int
-    public init(kind: Int, url: String = "", thumbnail: String = "", localPath: String = "", filename: String = "", duration: Int = 0) {
+    public let byteCount: Int64?
+    public init(kind: Int, url: String = "", thumbnail: String = "", localPath: String = "", filename: String = "", duration: Int = 0, byteCount: Int64? = nil) {
         self.kind = kind; self.url = url; self.thumbnail = thumbnail; self.localPath = localPath; self.filename = filename; self.duration = duration
+        self.byteCount = byteCount
     }
 }
 

@@ -20,16 +20,15 @@ public enum GroupMemberRole: String, Sendable {
     }
 }
 
-/// 首页角标合并真实未读与待审核申请；只有免打扰消息时显示圆点。
+/// 底部聊天角标只统计消息未读；待审核申请使用群会话的独立提醒。
 public struct HomeChatBadge: Equatable, Sendable {
     public let count: Int
     public let mutedOnly: Bool
 
-    public init(unmutedUnread: Int, mutedUnread: Int, pendingJoinRequests: Int) {
-        let pending = min(100, max(0, pendingJoinRequests))
+    public init(unmutedUnread: Int, mutedUnread: Int) {
         let unread = min(100, max(0, unmutedUnread))
-        mutedOnly = pending == 0 && unread == 0 && mutedUnread > 0
-        count = mutedOnly ? 1 : min(100, unread + pending)
+        mutedOnly = unread == 0 && mutedUnread > 0
+        count = mutedOnly ? 1 : unread
     }
 }
 

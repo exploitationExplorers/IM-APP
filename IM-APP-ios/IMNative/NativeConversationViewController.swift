@@ -80,6 +80,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var scrollGestureRevision: UInt64 = 0
     private var historyReloadRevision: UInt64 = 0
     private var observer: UUID?
+    private let mediaPrefetch = NativeRecentMediaPrefetch()
     private var cursor = ""
     private var isEnd = false
     private var loading = false
@@ -136,6 +137,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: animated)
+        Task(priority: .utility) { await NativeRecentMediaCache.shared.maintain() }
         if observer == nil { observer = service.observe { [weak self] in self?.render() } }
         emojiPanel?.setVisible(emojiVisible)
         render()
@@ -150,7 +152,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         if let observer = observer { service.removeObserver(observer) }
-        observer = nil; loadOperation = nil; loading = false; refresh.endRefreshing()
+        observer = nil; mediaPrefetch.stop(); loadOperation = nil; loading = false; refresh.endRefreshing()
         emojiPanel?.setVisible(false); historyTask?.cancel(); historyTask = nil; roleTask?.cancel(); actionTask?.cancel()
         stopVoiceAudio(); readTask?.cancel(); readTask = nil
         actionProgress.hide(); detailsProgress.hide()
@@ -158,7 +160,16 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         detailsTask = nil
     }
 
+    @objc private func pauseMediaPrefetch() { mediaPrefetch.stop() }
+
+    @objc private func resumeMediaPrefetch() {
+        guard observer != nil else { return }
+        mediaPrefetch.update(items: service.visibleMessages(conversation.id), service: service, scope: conversation.type == 3 ? .group : .direct)
+    }
+
     override func viewDidLoad() {
+        NotificationCenter.default.addObserver(self, selector: #selector(pauseMediaPrefetch), name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(resumeMediaPrefetch), name: UIApplication.didBecomeActiveNotification, object: nil)
         super.viewDidLoad()
         view.backgroundColor = UIColor(hex: 0xe6e8ee)
         let layout = UICollectionViewFlowLayout()
@@ -325,6 +336,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         if multiSelecting { heading.text = "已选 \(selectedIDs.count) 条"; more.setTitle("转发", for: .normal) } else { heading.text = conversation.title; more.setTitle("⋯", for: .normal) }
         input.isEnabled = !submitting && service.canSend(to: conversation); send.isEnabled = !submitting && service.canSend(to: conversation)
         let stored = service.visibleMessages(conversation.id)
+        if observer != nil { mediaPrefetch.update(items: stored, service: service, scope: conversation.type == 3 ? .group : .direct) }
         let storedMedia = Set(stored.filter { $0.senderID == service.imUserID }.compactMap { $0.media?.localPath }.filter { !$0.isEmpty })
         let previews = attachmentPreviews.values.filter { $0.media?.localPath.isEmpty != false || !storedMedia.contains($0.media?.localPath ?? "") }
         let items = ChatTextItem.merge(stored, Array(previews))
@@ -975,12 +987,13 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             if let local = service.ownedImageURL(for: item) { navigationController?.pushViewController(NativeImagePreviewController(ownedLocal: local, policy: service.business.media, remote: media.url), animated: true) }
             else { navigationController?.pushViewController(NativeImagePreviewController(url: media.url, policy: service.business.media, allImages: service.visibleMessages(conversation.id).compactMap { $0.media?.kind == 102 && $0.status != 4 ? $0.media?.url : nil }.filter { !$0.isEmpty }), animated: true) }; return
         }
-        let local = service.ownedMediaURL(for: item)
-        let remote = service.business.media.absolute(media.kind == 104 ? service.business.media.playback(media.url) : service.business.media.original(media.url))
-        let url = local ?? (remote?.scheme?.lowercased() == "https" ? remote : nil)
-        guard let url = url else { showNativeNotice("媒体地址尚未就绪，请核对发送状态后重试。"); return }
-        if [103, 104].contains(media.kind) { navigationController?.pushViewController(NativeVideoPreviewController(url: url, allowSave: media.kind == 104), animated: true) }
-        else { navigationController?.pushViewController(NativeFilePreviewController(url: url, filename: media.filename), animated: true) }
+        guard let page = NativeAttachmentPreview.make(media: media, policy: service.business.media,
+                                                      ownedLocal: service.ownedMediaURL(for: item),
+                                                      scope: conversation.type == 3 ? .group : .direct) else {
+            showNativeNotice("媒体地址尚未就绪，请核对发送状态后重试。")
+            return
+        }
+        navigationController?.pushViewController(page, animated: true)
     }
     private func favorite(_ item: ChatTextItem) {
         let alert = UIAlertController(title: "加入收藏", message: "确定加入收藏吗？", preferredStyle: .alert)

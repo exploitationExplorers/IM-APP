@@ -69,7 +69,7 @@ final class NativeMergedMessagesController: NativeBusinessListController {
         if item.contentType == 108, let data = item.serialized.data(using: .utf8), let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let card = root["cardElem"] as? [String: Any] ?? root["CardElem"] as? [String: Any], let id = (card["userID"] ?? card["UserID"]) as? String { push(NativeContactController(service: service, userID: GroupVisibility.businessUserID(id), isFriend: false)); return }
         guard let media = item.media else { UIPasteboard.general.string = item.text; return }
         if media.kind == 102 { push(NativeImagePreviewController(url: media.url, policy: context.media, allImages: loaded.compactMap { $0.media?.kind == 102 ? $0.media?.url : nil })) }
-        else if let url = context.media.absolute(media.kind == 104 ? context.media.playback(media.url) : media.url), url.scheme == "https" { if media.kind == 105 { push(NativeFilePreviewController(url: url, filename: media.filename)) } else { push(NativeVideoPreviewController(url: url, allowSave: media.kind == 104)) } }
+        else if let page = NativeAttachmentPreview.make(media: media, policy: context.media) { push(page) }
     }
 }
 
