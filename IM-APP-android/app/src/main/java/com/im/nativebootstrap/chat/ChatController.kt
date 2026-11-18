@@ -1065,6 +1065,11 @@ class ChatController(
                 } }
             } };return
         }
+        if(action==ChatAction.RECALL&&message.seq>0) {
+            // 乐观撤回：确认后立即本地呈现「[消息已撤回]」，服务端结果回来后确认或回滚（见 dispatch）。
+            tombstones[message.id]=false
+            if(snapshot.active?.target==active.target) emit(snapshot.copy(messages=visible(snapshot.messages)))
+        }
         businessIO.execute {
             var refreshedPurges:List<GroupMessagePurge>?=null
             val result=runCatching {
@@ -1118,6 +1123,7 @@ class ChatController(
                     return@dispatch
                 }
                 if(result.isSuccess&&action==ChatAction.RECALL) { tombstones[message.id]=false;outbox?.confirmed(message.id);if(snapshot.active?.target==active.target) emit(snapshot.copy(messages=visible(snapshot.messages))) }
+                if(result.isFailure&&action==ChatAction.RECALL) { tombstones.remove(message.id);emit(snapshot.copy(messages=visible(snapshot.messages.map { if(it.id==message.id) message else it }))) }
                 done(result.map { Unit })
             }
         }

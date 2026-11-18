@@ -200,6 +200,7 @@ internal class TombstoneWindow(private val limit: Int) {
         while (values.size > limit) values.remove(values.keys.first())
     }
     fun containsKey(id: String): Boolean = values.containsKey(id)
+    fun remove(id: String) { values.remove(id) }
     fun clear() = values.clear()
     val size: Int get() = values.size
 }

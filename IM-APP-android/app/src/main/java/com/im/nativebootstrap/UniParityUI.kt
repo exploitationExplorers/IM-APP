@@ -328,7 +328,10 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
             Text(when (tab) { "contacts" -> "通讯录"; "mine" -> "我的"; else -> "聊天" }, fontSize = s.text(48), lineHeight = s.text(64), color = Ink, fontWeight = FontWeight.Bold)
             if (tab != "mine") Row(verticalAlignment = Alignment.CenterVertically) {
                 if (tab == "chat")Box {
-                    Text("⋯",Modifier.size(s.dp(64)).clickable{moreMenu=!moreMenu;addMenu=false}.wrapContentSize(),fontSize=s.text(44),fontWeight=FontWeight.Bold)
+                    // 「更多」用三圆点自绘而非字体字形：字形基线随字体度量浮动，真机上与右侧「＋」图标盒不齐；圆点几何居中保证两图标视觉对齐。
+                    Box(Modifier.size(s.dp(64)).clickable{moreMenu=!moreMenu;addMenu=false}.wrapContentSize(),contentAlignment=Alignment.Center) {
+                        Row(horizontalArrangement=Arrangement.spacedBy(s.dp(7))) { repeat(3) { Box(Modifier.size(s.dp(7)).background(Ink,CircleShape)) } }
+                    }
                     androidx.compose.material3.DropdownMenu(moreMenu,{moreMenu=false},modifier=Modifier.shadow(10.dp,RoundedCornerShape(s.dp(16))).clip(RoundedCornerShape(s.dp(16))).background(Color.White)){androidx.compose.material3.DropdownMenuItem(text={Text("全部已读")},onClick={moreMenu=false;if(state.sample)toast("本地样例没有未读消息")else if(unreadSummary.count==0)toast("没有未读消息") else model.markLoadedConversationsRead(toast)})}
                 }
                 Box {

@@ -490,6 +490,9 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         }
     }
     LaunchedEffect(latestId) { if(state.focusMessageId==null&&list.firstVisibleItemIndex<3) list.scrollToItem(0) }
+    // 自己发送的消息：无论当前浏览位置在哪，都跳回最新消息（与竞品一致）；他人消息仅贴底时跟随。
+    val latestMineId=state.messages.lastOrNull { it.mine }?.id
+    LaunchedEffect(latestMineId) { if(state.focusMessageId==null&&latestMineId!=null) list.scrollToItem(0) }
     LaunchedEffect(state.focusMessageId) { state.focusMessageId?.let { id -> val index=reversedMessages.indexOfFirst { it.id==id };if(index>=0)list.animateScrollToItem(index) } }
     LaunchedEffect(state.forwardSuccessId,state.forwardFailureId) {
         if(state.forwardSuccessId.isNotBlank())NativeNotices.show("转发成功")

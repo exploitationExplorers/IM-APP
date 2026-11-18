@@ -22,6 +22,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.Executors
 import com.im.nativebootstrap.media.MediaKind
 import com.im.nativebootstrap.media.UploadedMedia
 import com.im.nativebootstrap.media.MessageContents
@@ -65,6 +66,9 @@ class OpenIMGateway(private val application:Application):ChatGateway {
     private val conversationMapping=ConversationMappingQueue()
     private var watchedPeer:String?=null
     private val liveHandler=Handler(Looper.getMainLooper())
+    // 置顶 ex 读-改-写统一走单线程：用户置顶/取消与远端 pinSync 并发调用 Go 核心（getOneConversation→setConversation）
+    // 曾触发 gomobile 空指针 native 崩溃，这里串行化消除竞争。
+    private val exIO=Executors.newSingleThreadExecutor()
     private val liveLock=Any()
     private val liveBatch=mutableListOf<Pair<ChatTarget,ChatMessage>>()
     private var liveScheduled=false
@@ -546,17 +550,19 @@ class OpenIMGateway(private val application:Application):ChatGateway {
         client.conversationManager.hideConversation(base<String> { done(it.map { Unit }) },target.conversationId)
     }
     override fun pinMessage(target:ChatTarget,pinned:PinnedChatMessage?,done:(Result<Unit>)->Unit) {
-        client.conversationManager.getOneConversation(base<ConversationInfo> { result ->
-            result.fold(onSuccess={ info ->
-                val extra=runCatching { JsonParser.parseString(info.ex.orEmpty()).asJsonObject }.getOrElse { com.google.gson.JsonObject() }
-                if(pinned==null)extra.remove("pinnedMessage") else extra.add("pinnedMessage",gson.toJsonTree(pinned))
-                val req=ConversationReq().apply { ex=extra.toString() }
-                client.conversationManager.setConversation(base<String> { done(it.map { Unit }) },target.conversationId,req)
-            },onFailure={ done(Result.failure(it)) })
-        },if(target.sessionType==3)target.groupId else target.userId,target.sessionType)
+        exIO.execute {
+            client.conversationManager.getOneConversation(base<ConversationInfo> { result ->
+                result.fold(onSuccess={ info ->
+                    val extra=runCatching { JsonParser.parseString(info.ex.orEmpty()).asJsonObject }.getOrElse { com.google.gson.JsonObject() }
+                    if(pinned==null)extra.remove("pinnedMessage") else extra.add("pinnedMessage",gson.toJsonTree(pinned))
+                    val req=ConversationReq().apply { ex=extra.toString() }
+                    exIO.execute { client.conversationManager.setConversation(base<String> { done(it.map { Unit }) },target.conversationId,req) }
+                },onFailure={ done(Result.failure(it)) })
+            },if(target.sessionType==3)target.groupId else target.userId,target.sessionType)
+        }
     }
     private fun applyRemotePin(target:ChatTarget,pinned:PinnedChatMessage?,seq:Long,time:Long,events:ChatEvents) {
-        client.conversationManager.getOneConversation(base<ConversationInfo> { result -> result.onSuccess { info ->
+        exIO.execute { client.conversationManager.getOneConversation(base<ConversationInfo> { result -> result.onSuccess { info ->
             val extra=runCatching { JsonParser.parseString(info.ex.orEmpty()).asJsonObject }.getOrElse { com.google.gson.JsonObject() }
             val oldSeq=extra.number("messagePinSeq")
             val oldTime=maxOf(extra.number("messagePinTime"),extra.obj("pinnedMessage").number("pinnedAt"))
@@ -564,8 +570,8 @@ class OpenIMGateway(private val application:Application):ChatGateway {
             if(pinned==null)extra.remove("pinnedMessage") else extra.add("pinnedMessage",gson.toJsonTree(pinned))
             extra.addProperty("messagePinSeq",maxOf(seq,oldSeq));extra.addProperty("messagePinTime",maxOf(time,oldTime))
             val req=ConversationReq().apply { ex=extra.toString() }
-            client.conversationManager.setConversation(base<String> { saved -> if(saved.isSuccess)events.pin(target,pinned) },target.conversationId,req)
-        } },if(target.sessionType==3)target.groupId else target.userId,target.sessionType)
+            exIO.execute { client.conversationManager.setConversation(base<String> { saved -> if(saved.isSuccess)events.pin(target,pinned) },target.conversationId,req) }
+        } },if(target.sessionType==3)target.groupId else target.userId,target.sessionType) }
     }
     override fun createPinSync(target:ChatTarget,pinned:PinnedChatMessage?,old:PinnedChatMessage?):ChatMessage {
         val pin=pinned ?: old ?: error("置顶信息缺失")
