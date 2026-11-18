@@ -155,7 +155,7 @@ fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:Str
         sourceReady=false
         cached=withContext(Dispatchers.IO) {
             localFile?.let { OwnedVideoFiles.verified(it,allowedLocalDirectory,java.io.File(context.filesDir,"native-chat")) }
-                ?: listOf(address,MediaURLs.remote(url,access.base)).filter(String::isNotBlank).map { java.io.File(context.cacheDir,"media-files-v2/"+MediaLoader.id(it,access)) }.firstOrNull { it.isFile&&it.length() in 1..256L*1024*1024 }
+                ?: listOf(address,url,MediaURLs.remote(url,access.base)).filter(String::isNotBlank).firstNotNullOfOrNull { MediaLoader.cachedFile(context,it) }
         }
         sourceReady=true
     }
@@ -196,9 +196,14 @@ fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:Str
 class VoicePlayer {
     private var player:MediaPlayer?=null
     fun stop() { player?.release();player=null }
-    fun play(url:String,onEnd:()->Unit,onError:()->Unit) {
+    fun play(source:String,onEnd:()->Unit,onError:()->Unit) {
         stop()
-        val address=MediaURLs.remote(url)
+        val raw=source.trim()
+        val address=when {
+            raw.startsWith("file://") -> raw.removePrefix("file://")
+            raw.startsWith("/") -> raw
+            else -> MediaURLs.remote(raw)
+        }
         if(address.isEmpty()) { onError();return }
         val value=MediaPlayer();player=value
         try {

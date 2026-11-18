@@ -40,7 +40,7 @@ class NativeVideoPlayerView(context:Context):FrameLayout(context) {
         try {
             if(source!=null) {
                 val canonical=source.canonicalFile
-                val cached=canonical.toPath().startsWith(context.cacheDir.canonicalFile.toPath())&&canonical.isFile&&canonical.length() in 1..256L*1024*1024
+                val cached=(canonical.toPath().startsWith(context.cacheDir.canonicalFile.toPath())||MediaLoader.isCachedFile(context,canonical))&&canonical.isFile&&canonical.length() in 1..256L*1024*1024
                 check(cached||OwnedVideoFiles.verified(canonical,allowedLocalDirectory,File(context.filesDir,"native-chat"))!=null)
                 video.setVideoURI(Uri.fromFile(canonical))
             } else {
