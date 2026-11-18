@@ -386,7 +386,11 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                 Triple(file,extension,saved)
             } }
             preparing=false
-            result.fold(onSuccess={ (file,extension,saved) -> if(saved)notice="原图已保存到相册" else { notice="请在系统文件选择器中选择原图保存位置";saveFile=file;save.launch("图片-${System.currentTimeMillis()}.$extension") } },onFailure={ notice=it.message ?: "原图保存失败" })
+            // 保存反馈走全局 toast：大图/视频预览层覆盖聊天页时也能立即看到结果与真实失败原因。
+            result.fold(onSuccess={ (file,extension,saved) ->
+                if(saved)NativeNotices.show("原图已保存到相册")
+                else { NativeNotices.show("请在系统文件选择器中选择原图保存位置");saveFile=file;save.launch("图片-${System.currentTimeMillis()}.$extension") }
+            },onFailure={ NativeNotices.show(it.message ?: "原图保存失败") })
         }
     }
     fun saveVideo(url:String,ownedFile:File?=null) {
@@ -400,7 +404,10 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                 file to saved
             } }
             preparing=false
-            result.fold(onSuccess={ (file,saved) -> if(saved)notice="视频已保存到相册" else { notice="请在系统文件选择器中选择视频保存位置";saveFile=file;save.launch("视频-${System.currentTimeMillis()}.mp4") } },onFailure={ notice=it.message ?: "视频保存失败" })
+            result.fold(onSuccess={ (file,saved) ->
+                if(saved)NativeNotices.show("视频已保存到相册")
+                else { NativeNotices.show("请在系统文件选择器中选择视频保存位置");saveFile=file;save.launch("视频-${System.currentTimeMillis()}.mp4") }
+            },onFailure={ NativeNotices.show(it.message ?: "视频保存失败") })
         }
     }
     fun addSticker(url:String) {
@@ -1407,6 +1414,8 @@ fun NativeForwardPicker(
         }
         error?.let { Text(it,Modifier.fillMaxWidth().background(Color(0xFFFFF5DF)).padding(12.dp),color=Color(0xFF89652B),fontSize=13.sp) }
         LazyColumn(Modifier.weight(1f)) {
+            // 首屏加载期间给明确反馈，避免列表空白 1 秒后内容突然出现。
+            if(items.isEmpty()&&loading&&!busy)item { Box(Modifier.fillParentMaxSize(),contentAlignment=Alignment.Center) { Column(horizontalAlignment=Alignment.CenterHorizontally) { CircularProgressIndicator(Modifier.size(30.dp),color=ChatBlue,strokeWidth=3.dp);Text("正在读取转发目标…",Modifier.padding(top=12.dp),fontSize=14.sp,color=ChatHint) } } }
             items(items,key={ it.id }) { item -> Row(Modifier.fillMaxWidth().clickable(enabled=!busy) { toggle(item) }.padding(horizontal=18.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text(if(checked(item))"●" else "○",Modifier.padding(end=14.dp),fontSize=23.sp,color=if(checked(item))ChatBlue else ChatHint)
                 if(item.kind=="tag")Box(Modifier.size(42.dp).background(Color(0xFFEAF0FF),CircleShape),contentAlignment=Alignment.Center) { Text("#",color=ChatBlue,fontSize=22.sp) } else SharedAvatar(item.avatar,Modifier.size(42.dp),item.kind=="group")

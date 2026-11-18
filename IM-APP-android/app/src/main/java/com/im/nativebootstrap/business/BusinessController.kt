@@ -244,7 +244,11 @@ class BusinessController(
             val response=call(method,path,data)
             mutable.value=mutable.value.copy(loading=false,notice="已保存")
             done(response)
-            if(backAfter)back() else refresh()
+            if(backAfter) {
+                // back() 会重建 BusinessState 并清掉 notice；全局 toast 直接弹，保证「保存成功」立即出现、不延迟不丢失。
+                com.im.nativebootstrap.NativeNotices.show("已保存")
+                back()
+            } else refresh()
         }
     }
     fun searchUser(publicId:String) {

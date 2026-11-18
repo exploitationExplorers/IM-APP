@@ -34,6 +34,8 @@ object MediaIO {
     /** Android 10 及以上写入系统相册，无需申请整个存储目录权限。 */
     fun saveToGallery(context:Context,file:File,name:String,mime:String,video:Boolean):Boolean {
         if(Build.VERSION.SDK_INT<29)return false
+        // 源文件必须真实存在且非空：缓存被清理或下载未完成的占位文件不允许静默写入。
+        require(file.isFile&&file.length()>0) { if(video)"视频源文件不可用，请重新打开后保存" else "图片源文件不可用，请重新打开后保存" }
         val collection=if(video)MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val values=ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME,name)
