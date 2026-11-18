@@ -179,6 +179,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     var pinTarget by remember { mutableStateOf<ChatMessage?>(null) }
     var selectText by remember { mutableStateOf<String?>(null) }
     var image by remember { mutableStateOf<String?>(null) }
+    var imageMessage by remember { mutableStateOf<ChatMessage?>(null) }
     var video by remember { mutableStateOf<String?>(null) }
     var videoMessage by remember { mutableStateOf<ChatMessage?>(null) }
     var videoLocal by remember { mutableStateOf<LocalMedia?>(null) }
@@ -603,7 +604,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                 if(multi) { if(!deleting&&!recalling)toggleSelection(message);return@combinedClickable }
                                 
                                 when(content.type) {
-                                    102 -> if(content.url.isNotEmpty())image=content.url else notice="图片原图地址不可用"
+                                    102 -> if(content.url.isNotEmpty()){ image=content.url;imageMessage=message } else notice="图片原图地址不可用"
                                     103 -> if(playing==message.id) { player.stop();playing=null } else {
                                         playing=message.id
                                         scope.launch {
@@ -856,7 +857,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         ActionButton("从相册选择") { showVideoSource=false;videoAlbum.launch(arrayOf("video/*")) }
         ActionButton("拍摄视频") { showVideoSource=false;if(ContextCompat.checkSelfPermission(context,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)captureVideo() else videoCameraPermission.launch(Manifest.permission.CAMERA) }
     } },confirmButton={ TextButton(onClick={ showVideoSource=false }) { Text("取消") } })
-    confirmDelete?.let { message -> AlertDialog(onDismissRequest={ confirmDelete=null },title={ Text("删除本地消息？") },text={ Text("这条消息将从本机聊天记录移除。") },confirmButton={ TextButton(onClick={ confirmDelete=null;callbacks.onAction(message,ChatAction.DELETE_LOCAL) { result -> onUI { if(result.isFailure)notice=result.exceptionOrNull()?.message ?: "删除失败" } } }) { Text("删除") } },dismissButton={ TextButton(onClick={ confirmDelete=null }) { Text("取消") } }) }
+    confirmDelete?.let { message -> AlertDialog(onDismissRequest={ confirmDelete=null },title={ Text("删除本地消息？") },text={ Text("这条消息将从本机聊天记录移除。") },confirmButton={ TextButton(onClick={ confirmDelete=null;callbacks.onAction(message,ChatAction.DELETE_LOCAL) { result -> onUI { if(result.isFailure)notice=result.exceptionOrNull()?.message ?: "删除失败" else NativeNotices.show("已删除") } } }) { Text("删除") } },dismissButton={ TextButton(onClick={ confirmDelete=null }) { Text("取消") } }) }
     val forwardItems=multiForward ?: forward?.let { listOf(it) }
     forwardItems?.let { messages -> androidx.compose.ui.window.Dialog(onDismissRequest={ forward=null;multiForward=null },properties=androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth=false)) {
         NativeForwardPicker(messages.size,{ forward=null;multiForward=null },callbacks.onLoadForward,{ plan,done -> callbacks.onSubmitForward(messages,plan,done) },{ result ->
@@ -867,8 +868,14 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     if(confirmMultiDelete)AlertDialog(onDismissRequest={ confirmMultiDelete=false },title={ Text("删除 ${selection.size} 条本地消息？") },text={ Text("仅从本机移除所选消息；待核对的发送记录会保留。") },confirmButton={ TextButton(onClick={ confirmMultiDelete=false;deleteSelected() }) { Text("删除") } },dismissButton={ TextButton(onClick={ confirmMultiDelete=false }) { Text("取消") } })
     image?.let { url ->
         val pictures=state.messages.map { MessageContents.parse(it.serialized,it.text) }.filter { it.type==102&&it.url.isNotEmpty() }.map { it.url }.distinct()
-        val index=pictures.indexOf(url)
-        ImagePreview(url,{ image=null },{ saveOriginal(url) },previous=if(index>0)({ image=pictures[index-1] }) else null,next=if(index>=0&&index<pictures.lastIndex)({ image=pictures[index+1] }) else null,position=if(index>=0)"${index+1} / ${pictures.size}" else "")
+        val gallery=if(url in pictures)pictures else listOf(url)
+        val start=gallery.indexOf(url).coerceAtLeast(0)
+        val message=imageMessage
+        ImagePreview(gallery,start,{ image=null;imageMessage=null },{ saveOriginal(it) },
+            sender=message?.sender?.ifBlank { if(message.mine)"我" else "图片" } ?: "",
+            time=message?.let { chatDayLabel(it.time)+" "+chatTime(it.time) }.orEmpty(),
+            onDelete=message?.takeUnless { it.id.startsWith("upload-") }?.let { target -> { image=null;imageMessage=null;confirmDelete=target } },
+            onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { target -> { image=null;imageMessage=null;forward=target } })
     }
     if(showMentions)ChatMentionPicker(callbacks.onLoadMentions,{ showMentions=false },{ choice ->
         callbacks.onSelectMention(choice) { result -> onUI {
@@ -897,7 +904,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             Column(Modifier.fillMaxWidth().padding(vertical=8.dp)) {
                 Text(runCatching { item.asJsonObject.string("senderNickname","SenderNickname") }.getOrDefault(""),color=ChatHint,fontSize=12.sp)
                 when(content.type) {
-                    102 -> RemoteMediaImage(MediaURLs.image(content.thumbnail.ifEmpty { content.url }),Modifier.size(180.dp,140.dp).clickable { image=content.url },scale=ContentScale.Fit,cacheUrls=listOf(content.url,content.thumbnail)+content.imageAlternatives)
+                    102 -> RemoteMediaImage(MediaURLs.image(content.thumbnail.ifEmpty { content.url }),Modifier.size(180.dp,140.dp).clickable { image=content.url;imageMessage=null },scale=ContentScale.Fit,cacheUrls=listOf(content.url,content.thumbnail)+content.imageAlternatives)
                     104 -> Box(Modifier.size(180.dp,140.dp).background(ChatGray).clickable { video=content.url },contentAlignment=Alignment.Center) { if(content.thumbnail.isNotBlank())RemoteMediaImage(MediaURLs.image(content.thumbnail),Modifier.fillMaxSize(),scale=ContentScale.Fit);Text("▶ ${duration(content.duration)}",color=ChatBlue) }
                     103 -> Text("◖))) ${content.duration}″",Modifier.clickable { scope.launch {
                         val source=voiceSource(context,message.id,content,state.active?.target?.conversationId.orEmpty(),state.active?.target?.sessionType==3)
@@ -1058,12 +1065,13 @@ fun NativeChatArchive(title:String,media:Boolean,onBack:()->Unit,search:(String,
     }
     image?.let { url ->
         val pictures=items.map { MessageContents.parse(it.serialized,it.text) }.filter { it.type==102&&it.url.isNotEmpty() }.map { it.url }.distinct()
-        val index=pictures.indexOf(url)
-        ImagePreview(url,{ image=null },{
+        val gallery=if(url in pictures)pictures else listOf(url)
+        val start=gallery.indexOf(url).coerceAtLeast(0)
+        ImagePreview(gallery,start,{ image=null },{ saveUrl ->
         download=true
         scope.launch {
             val result=withContext(Dispatchers.IO) { runCatching {
-                val file=MediaLoader.fetch(context,MediaURLs.image(url,ImageVariant.ORIGINAL))
+                val file=MediaLoader.fetch(context,MediaURLs.image(saveUrl,ImageVariant.ORIGINAL))
                 val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true };BitmapFactory.decodeFile(file.path,bounds)
                 val ext=when(bounds.outMimeType) { "image/png" -> "png";"image/gif" -> "gif";"image/webp" -> "webp";else -> "jpg" }
                 val saved=MediaIO.saveToGallery(context,file,"图片-${System.currentTimeMillis()}.$ext",bounds.outMimeType ?: "image/jpeg",false)
@@ -1072,7 +1080,7 @@ fun NativeChatArchive(title:String,media:Boolean,onBack:()->Unit,search:(String,
             download=false
             result.fold(onSuccess={ (file,ext,saved) -> if(saved)NativeNotices.show("原图已保存到相册") else { NativeNotices.show("请在系统文件选择器中选择原图保存位置");saveFile=file;save.launch("图片-${System.currentTimeMillis()}.$ext") } },onFailure={ NativeNotices.show("原图保存失败，请稍后重试") })
         }
-    },previous=if(index>0)({ image=pictures[index-1] }) else null,next=if(index>=0&&index<pictures.lastIndex)({ image=pictures[index+1] }) else null,position=if(index>=0)"${index+1} / ${pictures.size}" else "") }
+    }) }
     video?.let { url -> VideoPreview(url,{ video=null },NativeNotices::show) }
 }
 
@@ -1124,7 +1132,7 @@ fun NativeFavoriteContent(type:String,content:String) {
             else -> Text("收藏内容暂不可读取",color=ChatHint)
         }
     }
-    if(image)ImagePreview(parsed.url,{ image=false },{
+    if(image)ImagePreview(listOf(parsed.url),0,{ image=false },{
         busy=true
         scope.launch {
             val result=withContext(Dispatchers.IO) { runCatching {
