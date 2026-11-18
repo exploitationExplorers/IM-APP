@@ -15,7 +15,7 @@ data class ChatMentionPage(val items:List<ChatMentionChoice>,val nextCursor:Stri
 data class ChatGroupMember(val userId:String,val role:String,val muted:Boolean,val name:String="")
 
 data class ChatMessageMenu(val canManage:Boolean=false,val senderInGroup:Boolean=false,val muted:Boolean=false,val canRecall:Boolean=false,val publicName:String="")
-data class ChatConversation(val target: ChatTarget, val title: String, val preview: String, val time: Long, val unread: Int = 0, val pinned: Boolean = false, val avatar: String = "", val latestSeq: Long = 0, val muted: Boolean = false, val pinnedMessage:PinnedChatMessage?=null,val latestMessage:ChatMessage?=null)
+data class ChatConversation(val target: ChatTarget, val title: String, val preview: String, val time: Long, val unread: Int = 0, val pinned: Boolean = false, val avatar: String = "", val latestSeq: Long = 0, val muted: Boolean = false, val pinnedMessage:PinnedChatMessage?=null,val latestMessage:ChatMessage?=null,val joinRequestPending:Boolean=false)
 data class ChatMessage(
     val id: String,
     val text: String,
@@ -56,6 +56,8 @@ interface ChatEvents {
     fun read(ids: List<String>) {}
     fun pin(target:ChatTarget,pinned:PinnedChatMessage?) {}
     fun groupChanged(groupId:String) {}
+    /** 群主/管理员待审入群申请：会话 ID（sg_）集合，对齐 uni-app pending-join-requests。 */
+    fun joinRequestHighlights(conversationIds:Set<String>) {}
 }
 interface ChatGateway {
     fun watchPeer(userId:String?,done:(Result<Boolean?>)->Unit) { done(Result.success(null)) }
@@ -124,9 +126,12 @@ fun mergeConversations(old: List<ChatConversation>, incoming: List<ChatConversat
     incoming.forEach { next ->
         val previous = rows[next.target.conversationId]
         if ((authoritative || previous == null || next.time >= previous.time)&&previous!=next) {
-            changed=true
-            if(previous==null||previous.time!=next.time||previous.pinned!=next.pinned)needsSort=true
-            rows[next.target.conversationId] = next
+            val merged=if(previous?.joinRequestPending==true&&!next.joinRequestPending)next.copy(joinRequestPending=true) else next
+            if(merged!=previous) {
+                changed=true
+                if(previous==null||previous.time!=merged.time||previous.pinned!=merged.pinned)needsSort=true
+                rows[next.target.conversationId] = merged
+            }
         }
     }
     if(!changed&&!needsSort)return old

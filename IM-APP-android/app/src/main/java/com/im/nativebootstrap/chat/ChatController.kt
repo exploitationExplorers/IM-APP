@@ -279,6 +279,18 @@ class ChatController(
                         if(snapshot.active?.target?.groupId==groupId) { checkedMembers.clear();membersOperation++;membersLoading=false;emit(snapshot.copy(groupMembers=emptyMap()));loadVisibleGroupMembers(wantedMembers);refreshSendPermission() }
                     }
                 } }
+                override fun joinRequestHighlights(conversationIds:Set<String>) { dispatch {
+                    if(!current(t)||conversationIds.isEmpty())return@dispatch
+                    val activeId=snapshot.active?.target?.conversationId
+                    val pending=conversationIds.filter { it!=activeId }.toSet()
+                    if(pending.isEmpty())return@dispatch
+                    val merged=snapshot.conversations.map { row ->
+                        if(row.target.sessionType==3&&row.target.conversationId in pending&&!row.joinRequestPending)row.copy(joinRequestPending=true) else row
+                    }
+                    if(merged!=snapshot.conversations)emit(snapshot.copy(conversations=merged))
+                    // 实时通知到了也再拉一次列表，避免只亮一个会话、漏掉并发申请。
+                    reconcileJoinRequestHighlights()
+                } }
                 override fun messages(items: List<Pair<ChatTarget,ChatMessage>>) { dispatch {
                     if(!current(t)) return@dispatch
                     items.forEach { (_,msg) -> if(msg.mine && (msg.seq>0 || msg.status==2)) acceptEvidence(msg) }
@@ -324,6 +336,7 @@ class ChatController(
                     if(coordinator.snapshot().store==StoreStatus.READABLE) { coordinator.completeSync(attempt);syncAttempt=null;loadConversations(true) }
                     else {syncFinishedBeforeStore=true;if(snapshot.loggedIn)loadConversations(true)}
                     reconcilePending()
+                    reconcileJoinRequestHighlights()
                     emit()
                 } }
                 override fun syncFailed() { dispatch {
@@ -405,7 +418,11 @@ class ChatController(
         membersOperation++;membersLoading=false;wantedMembers=emptyList();checkedMembers.clear()
         cursor=null
         val local=outbox?.all().orEmpty().filter { it.target.conversationId==conversation.target.conversationId }.map { it.message }
-        emit(snapshot.copy(active=conversation,messages=emptyList(),historyEnd=false,historyLoading=false,historyRevision=0,historySyncing=false,historyDiagnostic=null,error=null,maxOtherReadSeq=0,mentions=emptyList(),focusMessageId=null,sendBlockedReason=null,permissionLoading=false,groupRole="",groupBusinessId="",groupMemberCount=0,groupAnnouncement="",groupMembers=emptyMap(),groupOwnerName="",peerOnline=null,peerLastSeenAt=""))
+        val opened=if(conversation.joinRequestPending)conversation.copy(joinRequestPending=false) else conversation
+        val conversations=if(opened.joinRequestPending!=conversation.joinRequestPending) {
+            snapshot.conversations.map { if(it.target.conversationId==conversation.target.conversationId)it.copy(joinRequestPending=false) else it }
+        } else snapshot.conversations
+        emit(snapshot.copy(active=opened,conversations=conversations,messages=emptyList(),historyEnd=false,historyLoading=false,historyRevision=0,historySyncing=false,historyDiagnostic=null,error=null,maxOtherReadSeq=0,mentions=emptyList(),focusMessageId=null,sendBlockedReason=null,permissionLoading=false,groupRole="",groupBusinessId="",groupMemberCount=0,groupAnnouncement="",groupMembers=emptyMap(),groupOwnerName="",peerOnline=null,peerLastSeenAt=""))
         emit(snapshot.copy(messages=visible(local)))
         // 先启动历史首屏；retention 只在群消息区做门禁，不再串行阻塞其他房间初始化。
         loadHistory()
@@ -1885,6 +1902,32 @@ class ChatController(
         } }
     }
     private fun reconcilePending() { outbox?.all().orEmpty().filter { it.state==OutboxState.UNCERTAIN }.forEach { reconcile(it.id,notify=false) } }
+    /** 对齐 uni-app：用 pending-join-requests 校准群主/管理员会话上的入群申请标记。 */
+    private fun reconcileJoinRequestHighlights() {
+        val t=ticket ?: return
+        val api=business ?: return
+        businessIO.execute {
+            val pending=runCatching {
+                val rows=api.request("GET","/groups/pending-join-requests")
+                val values=if(rows.isJsonArray)rows.asJsonArray else return@runCatching emptySet<String>()
+                values.mapNotNull { item ->
+                    if(!item.isJsonObject)return@mapNotNull null
+                    val id=item.asJsonObject.get("groupConversationId")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+                    id.takeIf { it.startsWith("sg_") }
+                }.toSet()
+            }.getOrDefault(emptySet())
+            dispatch {
+                if(!current(t))return@dispatch
+                val activeId=snapshot.active?.target?.conversationId
+                val visible=pending.filter { it!=activeId }.toSet()
+                val merged=snapshot.conversations.map { row ->
+                    val want=row.target.sessionType==3&&row.target.conversationId in visible
+                    if(row.joinRequestPending==want)row else row.copy(joinRequestPending=want)
+                }
+                if(merged!=snapshot.conversations)emit(snapshot.copy(conversations=merged))
+            }
+        }
+    }
     private fun reconcileRoom() { outbox?.all().orEmpty().filter { it.target.conversationId==snapshot.active?.target?.conversationId&&it.state!=OutboxState.SENDING }.forEach { if(it.state==OutboxState.ACCEPTED) ticket?.let { t -> confirmAccepted(t,it) } else reconcile(it.id,notify=false) } }
     fun reconcile(id:String,notify:Boolean=true) {
         val t=ticket ?: return
@@ -1931,7 +1974,7 @@ class ChatController(
             },onFailure={ emit(snapshot.copy(error="暂时无法核对，未重复发送。")) })
         } }
     }
-    fun foreground(active:Boolean) { appForeground=active;if(ticket!=null) { gateway.foreground(active);if(active) { reconcilePending();snapshot.active?.target?.let { refreshGroupPurges(it,true) };refreshSendPermission();refreshPeerPresence() } } }
+    fun foreground(active:Boolean) { appForeground=active;if(ticket!=null) { gateway.foreground(active);if(active) { reconcilePending();reconcileJoinRequestHighlights();snapshot.active?.target?.let { refreshGroupPurges(it,true) };refreshSendPermission();refreshPeerPresence() } } }
     fun logout() {
         conversationDiagnostics.reset()
         initialConversationSnapshotLoaded=false
