@@ -43,7 +43,7 @@ final class NativeGroupsController: NativeBusinessListController {
         })
     }
     func joinGroup() {
-        edit(title: "添加群聊", placeholder: "输入群号，如 qun_xxxxxx") { [weak self] id in
+        edit(title: "添加群聊", placeholder: "请输入群号") { [weak self] id in
             guard let self = self else { return }
             guard id.range(of: "^(qun_[A-Za-z0-9]{6,20}|[0-9]+)$", options: .regularExpression) != nil else { throw APIError.business(code: -1, message: "请输入正确的群号。") }
             do { let group: NativeGroup = try await self.context.request("groups/\(id)/join", method: "POST", body: [:]); self.push(NativeGroupController(service: self.service, groupID: group.id)) }
@@ -105,11 +105,10 @@ final class NativeContactPickerController: NativeBusinessListController, UISearc
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        definesPresentationContext = true
         search.searchResultsUpdater = self
         search.obscuresBackgroundDuringPresentation = false
         search.searchBar.placeholder = "搜索昵称、备注或聊天号"
-        navigationItem.searchController = search
+        placeSearchBelowTitle(search)
         switch destination {
         case .selection:
             navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(finish))
@@ -429,8 +428,16 @@ final class NativeGroupMembersController: NativeBusinessListController {
     private let service: NativeIMService; private let group: NativeGroup; private var members: [NativeGroupMember] = []; private var cursor: String?
     init(service: NativeIMService, group: NativeGroup) { self.service = service; self.group = group; super.init(title: "群成员", context: service.business) }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
-    override func viewDidLoad() { super.viewDidLoad(); if group.canManage { navigationItem.rightBarButtonItem = UIBarButtonItem(title: "新增", style: .plain, target: self, action: #selector(inviteMembers)) } }
-    @objc private func inviteMembers() {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        if group.canManage {
+            navigationItem.rightBarButtonItem = UIBarButtonItem(title: "新增", primaryAction: UIAction { [weak self] _ in
+                self?.inviteMembers()
+            })
+        }
+    }
+
+    private func inviteMembers() {
         guard group.canManage else { return }
         push(NativeContactPickerController(context: context, groupID: group.id))
     }

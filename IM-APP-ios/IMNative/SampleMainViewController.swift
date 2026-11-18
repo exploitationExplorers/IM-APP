@@ -106,6 +106,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     private struct RenderedConversation: Equatable {
         let conversation: NativeConversation
         let preview: String
+        let timestamp: Int64
         let unread: Int
         let joinRequestPending: Bool
     }
@@ -131,8 +132,10 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     }
     private var visibleConversations: [NativeConversation] {
         let keyword = (search.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return (chat?.conversations ?? []).filter {
-            (!unreadOnly || (chat?.conversationUnread($0) ?? 0) > 0) && (keyword.isEmpty || $0.title.localizedCaseInsensitiveContains(keyword) || (chat?.conversationPreview($0) ?? "").localizedCaseInsensitiveContains(keyword))
+        guard let chat else { return [] }
+        return chat.conversationsWithForwardPreviews.filter {
+            (!unreadOnly || chat.conversationUnread($0) > 0) &&
+            (keyword.isEmpty || $0.title.localizedCaseInsensitiveContains(keyword) || chat.conversationPreview($0).localizedCaseInsensitiveContains(keyword))
         }
     }
 
@@ -172,8 +175,9 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         [header, sampleNotice, searchBox, filter, table, empty, profilePanel, tabbar].forEach { view.addSubview($0) }
         [titleLabel, more, add].forEach { header.addSubview($0) }
         titleLabel.textColor = NativeUITheme.body
-        more.setTitle("⋯", for: .normal)
-        more.setTitleColor(NativeUITheme.body, for: .normal)
+        more.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        more.tintColor = NativeUITheme.body
+        more.accessibilityLabel = "更多"
         more.addTarget(self, action: #selector(showMore), for: .touchUpInside)
         add.addTarget(self, action: #selector(showAdd), for: .touchUpInside)
         sampleNotice.text = chat?.statusText ?? NativeUITheme.sampleNotice
@@ -249,7 +253,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         titleLabel.frame = CGRect(x: r(40), y: 0, width: width / 2, height: r(96))
         titleLabel.font = .systemFont(ofSize: r(48), weight: .bold)
         more.frame = CGRect(x: width - r(176), y: r(16), width: r(64), height: r(64))
-        more.titleLabel?.font = .systemFont(ofSize: r(44), weight: .bold)
+        more.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: r(40), weight: .semibold), forImageIn: .normal)
         add.frame = CGRect(x: width - r(104), y: r(16), width: r(64), height: r(64))
         add.imageEdgeInsets = UIEdgeInsets(top: r(8), left: r(8), bottom: r(8), right: r(8))
         sampleNotice.frame = CGRect(x: 0, y: header.frame.maxY, width: width, height: 24)
@@ -363,6 +367,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         let pendingIDs = pendingJoins?.monitor.snapshot.conversationIDs ?? []
         let next = visibleConversations.map {
             RenderedConversation(conversation: $0, preview: service.conversationPreview($0),
+                                 timestamp: service.conversationTimestamp($0),
                                  unread: service.conversationUnread($0),
                                  joinRequestPending: $0.type == 3 && pendingIDs.contains($0.id))
         }
@@ -483,7 +488,8 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             let preview = chat?.conversationPreview(item) ?? ""
             cell.preview.text = cell.joinRequestPending && preview.isEmpty ? "[入群申请]" : preview
             if let chat = chat { cell.avatar.load(item.avatar, policy: chat.business.media, placeholder: item.type == 3 ? "uni_group_default" : "uni_avatar_default") }
-            cell.time.text = item.timestamp > 0 ? Date(timeIntervalSince1970: Double(item.timestamp) / 1000).formatted(date: .omitted, time: .shortened) : ""
+            let timestamp = chat?.conversationTimestamp(item) ?? item.timestamp
+            cell.time.text = timestamp > 0 ? Date(timeIntervalSince1970: Double(timestamp) / 1000).formatted(date: .omitted, time: .shortened) : ""
         } else { cell.joinRequestPending = false; cell.muted = false; cell.unreadCount = 0; cell.preview.text = latestPreview }
         return cell
     }

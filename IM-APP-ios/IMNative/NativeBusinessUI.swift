@@ -38,6 +38,18 @@ class NativeBusinessListController: UITableViewController {
         progress.hide()
         if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true { workTask?.cancel() }
     }
+    func placeSearchBelowTitle(_ search: UISearchController) {
+        definesPresentationContext = true
+        navigationItem.searchController = search
+        navigationItem.hidesSearchBarWhenScrolling = false
+        if #available(iOS 16.0, *) {
+            navigationItem.preferredSearchBarPlacement = .stacked
+        }
+        if #available(iOS 26.0, *) {
+            navigationItem.searchBarPlacementAllowsToolbarIntegration = false
+        }
+    }
+
     func reloadContent() {}
     func scheduleReload() { DispatchQueue.main.async { [weak self] in self?.reloadContent() } }
     @objc private func reloadFromPull() { reloadContent() }

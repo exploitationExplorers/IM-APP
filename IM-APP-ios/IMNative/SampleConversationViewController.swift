@@ -13,6 +13,7 @@ final class NativeMessageCell: UICollectionViewCell {
     private var representedMessageID: String?
     private var onMediaSizeResolved: ((CGSize) -> Void)?
     private var hasMedia = false
+    private let selectionCircle = UIImageView()
     private let bubble = UIView()
     private let label = UILabel()
     private let bubbleMask = CAShapeLayer()
@@ -37,7 +38,9 @@ final class NativeMessageCell: UICollectionViewCell {
         avatar.contentMode = .scaleAspectFill
         avatar.clipsToBounds = true
         label.numberOfLines = 0
-        [avatar, bubble, receipt, sender].forEach { contentView.addSubview($0) }
+        [avatar, bubble, receipt, sender, selectionCircle].forEach { contentView.addSubview($0) }
+        selectionCircle.contentMode = .scaleAspectFit
+        selectionCircle.isHidden = true
         receipt.textColor = NativeUITheme.secondary; sender.textColor = NativeUITheme.secondary
         sender.lineBreakMode = .byTruncatingTail
         bubble.addSubview(label)
@@ -104,7 +107,21 @@ final class NativeMessageCell: UICollectionViewCell {
         dateText = date; dateLabel.text = date
         let ownAvatar = service.business.profile.avatar
         if loadResources { avatar.load(mine && !ownAvatar.isEmpty ? ownAvatar : message.avatar, policy: service.business.media, placeholder: mine ? "uni_avatar_me" : "uni_avatar_default") }
-        if message.status != 4, let card = BusinessMessageCard(serialized: message.serialized) { self.card = card; messageText = card.title + "\n" + card.summary; bubble.backgroundColor = .white; cardImage.isHidden = false; cardAction.isHidden = false; cardAction.text = card.actionTitle; if loadResources { cardImage.load(card.avatar, policy: service.business.media, placeholder: "uni_group_default") }; mediaView.cancel(); quoteImage.cancel(); setNeedsLayout(); return }
+        if message.status != 4, let card = BusinessMessageCard(serialized: message.serialized) {
+            self.card = card
+            let ownInvitation = mine && card.kind == .invitation
+            messageText = (ownInvitation ? "你邀请对方加入群聊" : card.title) + "\n" + card.summary
+            bubble.backgroundColor = .white
+            cardImage.isHidden = false
+            let inviteStatus = card.kind == .invitation ? service.inviteStatus(card.token) : nil
+            cardAction.isHidden = ownInvitation
+            cardAction.text = inviteStatus ?? card.actionTitle
+            if loadResources {
+                cardImage.load(card.avatar, policy: service.business.media, placeholder: "uni_group_default")
+            }
+            mediaView.cancel(); quoteImage.cancel(); setNeedsLayout()
+            return
+        }
         cardImage.cancel()
         if message.status != 4, let quote = MessageQuoteReference(serialized: message.serialized) { quoted = quote; messageText = quote.replyText; quoteView.isHidden = false; quoteLabel.text = (quote.sender.isEmpty ? "" : quote.sender + "：") + quote.summary; quoteImage.isHidden = quote.image.isEmpty; if loadResources, !quote.image.isEmpty { quoteImage.load(quote.image, policy: service.business.media, variant: .list) } }
 
@@ -144,7 +161,8 @@ final class NativeMessageCell: UICollectionViewCell {
         paragraph.maximumLineHeight = r(45)
         paragraph.lineBreakMode = .byCharWrapping
         let text = NSAttributedString(string: messageText, attributes: [.font: font, .paragraphStyle: paragraph, .foregroundColor: isMine ? UIColor.white : UIColor(hex: 0x222222)])
-        let maximum = max(r(80), (width - r(48)) * 0.70 - r(44))
+        let selectionInset = selectionCircle.isHidden ? 0 : r(50)
+        let maximum = max(r(80), (width - r(48)) * 0.70 - r(44) - selectionInset)
         let rect = text.boundingRect(with: CGSize(width: maximum, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
         let bubbleWidth = max(ceil(rect.width) + r(44), quoted == nil ? 0 : r(360))
         let bubbleHeight = max(r(45), ceil(rect.height)) + r(36) + (quoted == nil ? 0 : r(96))
@@ -172,6 +190,16 @@ final class NativeMessageCell: UICollectionViewCell {
         return attributes
     }
 
+    func showSelectionCircle(_ selected: Bool?) {
+        if selectionCircle.isHidden != (selected == nil) { cachedDimensions = nil }
+        selectionCircle.isHidden = selected == nil
+        if let selected {
+            selectionCircle.image = UIImage(systemName: selected ? "checkmark.circle.fill" : "circle")
+            selectionCircle.tintColor = selected ? NativeUITheme.primary : NativeUITheme.secondary
+        }
+        setNeedsLayout()
+    }
+
     func measuredHeight(width: CGFloat) -> CGFloat { ceil(dimensions(width: width).2) }
     func updateResolvedMediaSize(_ size: CGSize) { resolvedMediaSize = size; cachedDimensions = nil; setNeedsLayout() }
 
@@ -182,12 +210,14 @@ final class NativeMessageCell: UICollectionViewCell {
         let (bubbleWidth, bubbleHeight, _, text) = dimensions(width: width)
         let senderHeight: CGFloat = sender.text?.isEmpty == false ? r(34) : 0
         let mine = isMine
-        let avatarX = mine ? width - r(24) - r(72) : r(24)
+        let leadingInset: CGFloat = selectionCircle.isHidden ? 0 : r(50)
+        let avatarX = mine ? width - r(24) - r(72) : r(24) + leadingInset
         let dateHeight: CGFloat = dateText == nil ? 0 : r(68); dateLabel.isHidden = dateText == nil; dateLabel.font = .systemFont(ofSize: r(22))
         let dateWidth = min(width - r(64), dateLabel.intrinsicContentSize.width + r(36))
         dateLabel.frame = CGRect(x: (width - dateWidth) / 2, y: r(12), width: dateWidth, height: r(43)); dateLabel.backgroundColor = UIColor(hex: 0xd8dbe2); dateLabel.layer.cornerRadius = r(12); dateLabel.clipsToBounds = true
         avatar.frame = CGRect(x: avatarX, y: r(16) + dateHeight, width: r(72), height: r(72))
         avatar.layer.cornerRadius = r(36)
+        selectionCircle.frame = CGRect(x: r(24), y: avatar.frame.midY - r(18), width: r(36), height: r(36))
         let x = mine ? avatarX - r(16) - bubbleWidth : avatar.frame.maxX + r(16)
         bubble.frame = CGRect(x: x, y: r(16) + dateHeight + senderHeight, width: bubbleWidth, height: bubbleHeight)
         sender.frame = CGRect(x: x, y: r(16) + dateHeight, width: max(bubbleWidth, r(180)), height: senderHeight); sender.font = .systemFont(ofSize: r(22))
@@ -233,6 +263,7 @@ final class NativeMessageCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        showSelectionCircle(nil)
         messageText = ""; statusText = ""; isMine = false
         videoMetadata = nil; videoPlay.isHidden = true; videoDuration.isHidden = true; mediaSpinner.stopAnimating()
         imageMetadata = nil; timestamp = 0; receipt.text = nil; sender.text = nil; systemMessage = false

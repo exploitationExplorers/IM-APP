@@ -1,6 +1,6 @@
 # iOS 原生打包、老板签名与朋友安装操作文档
 
-更新日期：2026-11-16。适用于本仓库 `IM-APP-ios`（Swift / UIKit），目标流程是：你在 Mac 构建 → 老板签名 → 上传服务器 → 朋友在 iPhone 安装。
+更新日期：2026-11-18。适用于本仓库 `IM-APP-ios`（Swift / UIKit），目标流程是：你在 Mac 构建 → 老板签名 → 上传服务器 → 朋友在 iPhone 安装。
 
 你不需要拥有 iPhone，也不需要把朋友手机接到你的 Mac 才能构建。真机安装与功能验收由朋友完成。原生工程使用 Xcode；原来的 uni-app 云打包入口不能直接构建这个 Swift 工程。
 
@@ -35,6 +35,7 @@ Production identity, signing, SDK compatibility and migration gates are not conf
 > 4. 是否需要朋友提供 UDID？证书和描述文件由谁管理？
 > 5. 旧服务器安装页和 manifest 是否可以复用？签名完成后是否由你生成安装清单？
 > 6. 如果以后覆盖旧版，旧版的 Bundle ID、签名团队与 entitlement 配置能否提供给开发负责人核对？
+> 7. 如果这次用的是试用企业签，请确认实际签名团队、允许分发的对象、证书与描述文件的到期时间，以及到期后的续签安排。
 
 不要仅凭“以前能下载”判断是企业签名；也不要把所有重签服务视为同一种分发方式。
 
@@ -42,7 +43,7 @@ Production identity, signing, SDK compatibility and migration gates are not conf
 | --- | --- | --- |
 | Ad Hoc | 手机 UDID 必须包含在本次描述文件里 | 老板登记设备并生成包含该设备的 profile，再导出或重签 |
 | 企业内部分发 | 仅适用于符合 Apple 企业计划条件的组织内部使用 | 由老板确认资格、适用对象和设备侧安装要求 |
-| TestFlight | 通过 TestFlight 邀请安装 | 改走 App Store Connect 上传，无须自建 IPA 下载站 |
+| TestFlight | 外部客户通过邀请安装，首个外测构建需提交 Beta App Review，每个构建最多测试 90 天 | 通过 App Store Connect 上传，宝塔下载页可以放 TestFlight 邀请链接 |
 | 尚不清楚 | 暂不能确定安装条件 | 先确认签名资料和工具，再选第 6 节交付路线 |
 
 Ad Hoc 需要匹配应用身份、分发证书与已登记设备，Apple 官方说明见文末参考。企业分发不是面向任意朋友或公众的通用下载方式。
@@ -310,11 +311,37 @@ shasum -a 256 /实际路径/老板签名后的应用.ipa
 
 OTA 清单只负责告诉系统从哪里安装，不能让无效证书、未授权设备或不匹配的 profile 变得可用。
 
+### 9.1 找到旧下载页与站点目录
+
+仓库的旧入口包括 `app/ios.html` 和 `testapp/ios.html`。前者的脚本指向根路径 `/manifest.plist`，后者使用 `/testapp/manifest.plist`，旧测试清单指向 `/testapp/app.ipa`。这些是源码中的路径，登录宝塔后再核对实际站点、域名和文件位置。第一次原生内测建议使用独立 Bundle ID 和 `/ios-native/` 目录，先与旧版并存。
+
+1. 在宝塔的「网站」中找到旧下载域名，查看「网站目录」和「SSL」。如果用了反向代理或 CDN，也核对 `/ios-native/` 实际由哪个站点提供。若旧站只有 HTTP 或 IP，先为原生入口准备手机可访问的 HTTPS 域名和受信任证书。
+2. 在站点根目录下创建 `ios-native/`。每个签名包使用独立目录，例如 `ios-native/0.3.0-15/`。`0.3.0-15` 是目录示例，发布时用最终包的版本号和 Build。
+3. 先上传老板已经签好的 IPA，再上传同目录的 `manifest.plist`。清单里的 URL 指向这一版 IPA 的 HTTPS 地址，应用标识和版本取自**最终签名包**。按分发范围控制安装页和资源访问，实际安装请求也须能访问清单和 IPA。
+4. 用 iPhone 验证这一版独立入口可以安装，再更新 `ios-native/index.html` 里稳定的下载按钮。对常用入口设置 `Cache-Control: no-store`，有 CDN 时刷新该入口。每版独立目录保留用于排查，避免替换正在下载的文件。
+
+上传前后分别比较签名包的 SHA-256，确认 HTTPS 返回的文件字节与老板交付的包一致。有鉴权的站点使用实际发布方式验证，不要把下载凭据写进脚本或文档。
+
+```bash
+plutil -lint manifest.plist
+shasum -a 256 IMNative.ipa
+curl --fail --silent --show-error --dump-header - \
+  https://download.example.com/ios-native/0.3.0-15/manifest.plist \
+  --output /tmp/im-native-manifest.plist
+plutil -lint /tmp/im-native-manifest.plist
+curl --fail --silent --show-error --dump-header - \
+  https://download.example.com/ios-native/0.3.0-15/IMNative.ipa \
+  --output /tmp/im-native-download.ipa
+shasum -a 256 /tmp/im-native-download.ipa
+```
+
+给服务器负责人准备站点域名、宝塔中的站点名、目标目录和上传权限即可。后续按约定使用专用权限，签名私钥留在签名负责人处。
+
 ## 10. 朋友下载安装与反馈
 
 1. 使用 Safari 打开你发的安装页；聊天软件内置浏览器打不开时，选择在 Safari 打开。
 2. 点击安装并确认，回到桌面等待完成。
-3. 如果系统提示企业应用信任/验证，按系统当前指引在“设置 → 通用 → VPN 与设备管理”等位置操作；具体位置和额外步骤随系统版本及分发方式变化。Ad Hoc 不应一律套用企业信任步骤。
+3. 组织内部通过网站手动安装的企业 App，若显示「不受信任的企业级开发者」，打开「设置 → 通用 → VPN 与设备管理」，选择对应组织并按提示信任。在 iOS 18 及更新系统上，这一步可能显示「允许并重新启动」。设备需要联网完成验证。Ad Hoc 和 TestFlight 按各自安装流程进行。
 4. 需要 Developer Mode 的开发签名测试包按系统提示处理；不要把它当作所有分发包通用的安装前提。
 5. 打开 App，先确认显示的版本和 Build 是本次包。
 6. 用专用测试账号验证登录、会话加载、文字/图片/视频/语音/文件收发、前后台切换和断网重连。
@@ -351,7 +378,21 @@ OTA 清单只负责告诉系统从哪里安装，不能让无效证书、未授�
 
 以上角色可由同一个人兼任。你没有 iPhone 不阻碍构建，最终签名方式与当前 Release 门禁是打通流程前需要解决的两件事。
 
-## 13. 参考资料
+## 13. 原生版本怎么更新
+
+旧 uni-app 通过版本接口下载 `.wgt`，在 App 内使用 `plus.runtime.install` 安装资源包，再重启生效。相关发布流程在 [WGT 热更新发布](../IM-APP-fronend/docs/wgt热更新发布.md)。原生版的 Swift、UIKit 页面和 OpenIM 桥接已编译进 App，修复这些内容需要新的签名 IPA。兼容已发布客户端的服务端修复和 App 已支持的远程配置，可走原有服务端发布流程。
+
+| 本次改了什么 | 发布方式 | 客户收到更新的方式 |
+| --- | --- | --- |
+| Swift 页面、客户端交互或原生 SDK | 提高 `CFBundleVersion`，重新归档、签名、分发。继续使用该版本线的应用身份和签名配置 | TestFlight 更新，或重新打开同一个下载页，点安装申请覆盖 |
+| 后端缺陷、后端兼容配置 | 发布服务端变更并验证旧客户端仍能工作 | 客户继续使用现有 App |
+| 旧 uni-app 的 WGT | 继续使用旧壳对应的版本接口和发布流程 | 仍用旧壳的设备按其更新策略安装 WGT |
+
+每次原生发布沿用第 8～10 节。客户先保留旧原生 App，直接安装更高 Build。先在一台已装旧包的 iPhone 上确认覆盖成功，并核对登录态、历史消息和本地资源。需要回退代码时，用上一可用提交构建更高 Build，再签名分发。保留上一个包和清单便于核验。
+
+当前原生版的「检查更新」使用 `NativeTestFlightURL`、`NativeAppStoreURL`，或读取 `NativeUpdateManifestURL` 对应 `update.json` 中受支持的 Apple 链接。这个 JSON 用于 App 内提示，和 Safari 安装使用的 `manifest.plist` 是两个文件。自建 OTA 安装页目前通过 Safari 链接交付，App 内没有 OTA 自动安装入口。构建参数和 JSON 字段见[原生分发与更新操作](原生分发与更新操作.md)。
+
+## 14. 参考资料
 
 - 项目现状：`IM-APP-ios/README.md`。
 - 环境与模拟器验证：`docs/iOS-Mac验证步骤.md`。
@@ -360,5 +401,11 @@ OTA 清单只负责告诉系统从哪里安装，不能让无效证书、未授�
 - Apple：Create an ad hoc provisioning profile — https://developer.apple.com/help/account/provisioning-profiles/create-an-ad-hoc-provisioning-profile/
 - Apple：Distributing your app to registered devices — https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices
 - Apple：Distribute proprietary in-house apps（企业内部分发、网站与清单要求）— https://support.apple.com/guide/deployment/distribute-proprietary-in-house-apps-depce7cefc4d/web
+
+- [Apple Developer Enterprise Program](https://developer.apple.com/programs/enterprise/)
+- [Apple 企业 App 安装与信任说明](https://support.apple.com/118254)
+- [Apple TestFlight](https://developer.apple.com/testflight/)
+- [DCloud uni-upgrade-center](https://uniapp.dcloud.net.cn/uniCloud/upgrade-center.html)
+- [HTML5+ Runtime 的 install 方法](https://www.html5plus.org/doc/zh_cn/runtime.html)
 
 菜单名称、账号要求与设备侧行为以实际 Xcode/iOS 版本及 Apple 当前说明为准。

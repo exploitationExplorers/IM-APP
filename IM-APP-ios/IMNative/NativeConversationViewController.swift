@@ -43,7 +43,9 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private let pinTitle = UILabel()
     private let pinLine = UIView()
     private let dismissPin = UIButton(type: .system)
-    private var dismissedPinID: String?
+    private var pendingPinRemoval: NativeMessagePin?
+    private var pinRemovalTask: Task<Void, Never>?
+    private let pinRemovalProgress = NativeActionProgress()
     private var showingPin = false
     private let composer = UIView()
     private let mic = NativeUITheme.imageButton("uni_icon_mic", accessibility: "语音")
@@ -62,7 +64,8 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         let status: String
         let sending: Bool
         let preparing: Bool
-        let selected: Bool
+        let selection: Bool?
+        let inviteStatus: String?
     }
     private var renderedRows: [String: RenderedRow] = [:]
     private struct MeasuredRow {
@@ -118,7 +121,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private let actionProgress = NativeActionProgress()
     private let detailsProgress = NativeActionProgress()
     private var detailsTask: Task<Void, Never>?
-    private var canManageGroup = false; private var autoHistoryAllowed = true; private var processingCards = Set<String>()
+    private var canManageGroup = false; private var autoHistoryAllowed = true
     private var lastHistoryOffset = CGFloat.zero
     private var lastAutomaticHistoryRequest: String?
     private struct PendingAttachment {
@@ -140,6 +143,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         Task(priority: .utility) { await NativeRecentMediaCache.shared.maintain() }
         if observer == nil { observer = service.observe { [weak self] in self?.render() } }
         emojiPanel?.setVisible(emojiVisible)
+        if pinRemovalTask != nil { pinRemovalProgress.show(in: self, text: "取消置顶中…") }
         render()
         if conversation.type == 3 { roleTask?.cancel(); roleTask = Task { [weak self] in guard let self = self else { return }; do { let id = try await self.service.businessPeerID(self.conversation); let group: NativeGroup = try await self.service.business.request("groups/detail", query: [URLQueryItem(name: "groupId", value: id)]); try Task.checkCancellation(); self.canManageGroup = group.canManage || group.ownerId == self.service.business.userID } catch { if !Task.isCancelled { self.canManageGroup = false } } } }
         if let focusID = focusID, !focusedInitially {
@@ -155,7 +159,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         observer = nil; mediaPrefetch.stop(); loadOperation = nil; loading = false; refresh.endRefreshing()
         emojiPanel?.setVisible(false); historyTask?.cancel(); historyTask = nil; roleTask?.cancel(); actionTask?.cancel()
         stopVoiceAudio(); readTask?.cancel(); readTask = nil
-        actionProgress.hide(); detailsProgress.hide()
+        actionProgress.hide(); detailsProgress.hide(); pinRemovalProgress.hide()
         detailsTask?.cancel()
         detailsTask = nil
     }
@@ -192,8 +196,10 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         header.backgroundColor = .white
         [back, heading, more, notice, pinTitle, pinLine, dismissPin].forEach { header.addSubview($0) }
         pinTitle.textColor = NativeUITheme.primary; pinLine.backgroundColor = NativeUITheme.primary
-        dismissPin.setTitle("×", for: .normal); dismissPin.setTitleColor(NativeUITheme.secondary, for: .normal); dismissPin.accessibilityLabel = "隐藏置顶提示"
-        dismissPin.addAction(UIAction { [weak self] _ in guard let self = self else { return }; self.dismissedPinID = self.service.pinnedMessage(in: self.conversation)?.id; self.render() }, for: .touchUpInside)
+        dismissPin.setTitle("×", for: .normal)
+        dismissPin.setTitleColor(NativeUITheme.secondary, for: .normal)
+        dismissPin.accessibilityLabel = "取消消息置顶"
+        dismissPin.addTarget(self, action: #selector(cancelPinnedFromBanner), for: .touchUpInside)
         back.setImage(NativeUITheme.image("uni_icon_back"), for: .normal); back.setTitleColor(NativeUITheme.body, for: .normal)
         back.accessibilityLabel = "返回"; back.addTarget(self, action: #selector(goBack), for: .touchUpInside)
         heading.text = conversation.title.isEmpty ? "聊天" : conversation.title
@@ -251,7 +257,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             })
             cell.onAvatarTap = { [weak self] in self?.openSender(message) }
             cell.onQuoteTap = { [weak self] in guard let self = self, let reference = MessageQuoteReference(serialized: message.serialized) else { return }; self.locate(reference.id) }
-            cell.contentView.backgroundColor = self.selectedIDs.contains(id) ? NativeUITheme.primary.withAlphaComponent(0.12) : .clear
+            cell.showSelectionCircle(self.renderedRows[id]?.selection)
             return cell
         }
     }
@@ -329,7 +335,8 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         if navigationController?.topViewController === self, presentedViewController == nil, let result = service.takeForwardNotice(in: conversation.id) { showForwardResult(result) }
         let restriction = service.sendRestriction(conversation)
         let pin = service.pinnedMessage(in: conversation)
-        showingPin = restriction == nil && pin != nil && pin?.id != dismissedPinID
+        let isRemovingPin = pendingPinRemoval.map { pin?.isSamePin(as: $0) == true } ?? false
+        showingPin = restriction == nil && pin != nil && !isRemovingPin
         notice.text = restriction ?? (showingPin ? pin?.preview : ""); notice.isHidden = notice.text?.isEmpty != false
         pinTitle.text = pin?.shared == true ? "置顶消息" : "仅为我置顶"
         [pinTitle, pinLine, dismissPin].forEach { $0.isHidden = !showingPin }; view.setNeedsLayout()
@@ -351,8 +358,13 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             else { let formatter = DateFormatter(); formatter.dateFormat = calendar.component(.year, from: date) == calendar.component(.year, from: Date()) ? "M月d日" : "yyyy年M月d日"; dateSeparators[item.id] = formatter.string(from: date) }
         }
         let preparingIDs = Set(attachmentPreviews.values.filter { $0.status != 3 }.map(\.id))
+        let previewIDs = Set(attachmentPreviews.values.map(\.id))
         let rows = Dictionary(items.map { item in
-            (item.id, RenderedRow(message: item, date: dateSeparators[item.id], status: service.sendingLabel(item), sending: service.mediaIsSending(item), preparing: preparingIDs.contains(item.id), selected: selectedIDs.contains(item.id)))
+            let selection = multiSelecting && Self.canMultiSelect(item, isAttachmentPreview: previewIDs.contains(item.id)) ? selectedIDs.contains(item.id) : nil
+            let inviteStatus = item.contentType == 110 ? service.inviteStatus(for: item) : nil
+            return (item.id, RenderedRow(message: item, date: dateSeparators[item.id], status: service.sendingLabel(item),
+                sending: service.mediaIsSending(item), preparing: preparingIDs.contains(item.id), selection: selection,
+                inviteStatus: inviteStatus))
         }, uniquingKeysWith: { _, latest in latest })
         let changedIDs = items.map(\.id).filter { renderedRows[$0] != rows[$0] }
         let previousSnapshot = dataSource.snapshot()
@@ -393,6 +405,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         let size = mediaSizes[id]
         if let cached = measuredRows[id], cached.width == width, cached.row == row, cached.mediaSize == size { return CGSize(width: width, height: cached.height) }
         sizingCell.configure(message: row.message, service: service, date: row.date, preparing: row.preparing, group: conversation.type == 3, loadResources: false, resolvedMediaSize: size)
+        sizingCell.showSelectionCircle(row.selection)
         let height = sizingCell.measuredHeight(width: width)
         measuredRows[id] = MeasuredRow(row: row, width: width, mediaSize: size, height: height)
         return CGSize(width: width, height: height)
@@ -513,17 +526,48 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private func deleteSelected(_ messages: [ChatTextItem]) {
         guard actionTask == nil else { return }; let alert = UIAlertController(title: "删除消息", message: "确定删除选中的 \(messages.count) 条消息？", preferredStyle: .alert); alert.addAction(UIAlertAction(title: "取消", style: .cancel)); alert.addAction(UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in guard let self = self else { return }; self.actionTask = Task { defer { self.actionTask = nil }; var failures: [String] = []; for item in messages { guard !Task.isCancelled, self.service.isActive else { break }; do { try await self.service.delete(item, in: self.conversation) } catch { if Task.isCancelled { return }; failures.append(error.localizedDescription) } }; guard !Task.isCancelled, self.navigationController?.topViewController === self else { return }; self.multiSelecting = false; self.selectedIDs = []; self.render(); if !failures.isEmpty { self.showNativeNotice("有 \(failures.count) 条消息删除失败：\n" + failures.joined(separator: "\n")) } } }); present(alert, animated: true)
     }
-    private func openBusinessCard(_ card: BusinessMessageCard, messageID: String) {
-        if card.kind == .joinRequest { navigationController?.pushViewController(NativeGroupRequestsController(service: service, groupID: card.groupID), animated: true); return }
-        guard !processingCards.contains(messageID), actionTask == nil else { return }
-        let alert = UIAlertController(title: "加入群聊", message: "确认加入“\(card.groupName)”？", preferredStyle: .alert); alert.addAction(UIAlertAction(title: "取消", style: .cancel)); alert.addAction(UIAlertAction(title: "申请加入", style: .default) { [weak self] _ in guard let self = self else { return }; self.processingCards.insert(messageID); self.actionTask = Task { defer { self.processingCards.remove(messageID); self.actionTask = nil }; do {
-            struct Result: Decodable { let nextAction: String; let group: NativeGroup? }
-            guard let token = card.token.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) else { throw APIError.invalidResponse }
-            let result: Result = try await self.service.business.request("group-invitations/\(token)/accept", method: "POST", body: [:]); try Task.checkCancellation(); guard self.navigationController?.topViewController === self else { return }
-            if result.nextAction == "pending_approval" { self.showNativeNotice("已提交入群申请，等待管理员审核。"); return }
-            guard ["joined", "already_member"].contains(result.nextAction) else { throw APIError.invalidResponse }
-            let peer: NativeGroupPeer = try await self.service.business.request("im/groups/\(result.group?.id ?? card.groupID)"); let chat = try await self.service.openConversation(target: peer.imGroupId, type: 3); try Task.checkCancellation(); self.navigationController?.pushViewController(NativeConversationViewController(service: self.service, conversation: chat), animated: true)
-        } catch { if !Task.isCancelled, self.navigationController?.topViewController === self { self.showNativeNotice(error.localizedDescription) } } } }); present(alert, animated: true)
+    private func openBusinessCard(_ card: BusinessMessageCard) {
+        if card.kind == .joinRequest {
+            navigationController?.pushViewController(NativeGroupRequestsController(service: service, groupID: card.groupID), animated: true)
+            return
+        }
+        guard actionTask == nil, presentedViewController == nil, service.beginOpeningInvite(card.token) else { return }
+        let alert = UIAlertController(title: "加入群聊", message: "确认加入“\(card.groupName)”？", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "申请加入", style: .default) { [weak self] _ in
+            self?.acceptInvitation(card)
+        })
+        present(alert, animated: true)
+    }
+
+    private func acceptInvitation(_ card: BusinessMessageCard) {
+        guard actionTask == nil else { return }
+        actionTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.actionTask = nil }
+            do {
+                struct Result: Decodable { let nextAction: String; let group: NativeGroup? }
+                let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+                guard let token = card.token.addingPercentEncoding(withAllowedCharacters: allowed) else { throw APIError.invalidResponse }
+                let result: Result = try await service.business.request("group-invitations/\(token)/accept", method: "POST", body: [:])
+                if result.nextAction == "pending_approval" {
+                    service.updateInviteStatus("已申请加入", token: card.token)
+                    if !Task.isCancelled, navigationController?.topViewController === self { showNativeNotice("已提交入群申请，等待管理员审核。") }
+                    return
+                }
+                guard ["joined", "already_member"].contains(result.nextAction) else { throw APIError.invalidResponse }
+                service.updateInviteStatus("已加入群聊", token: card.token)
+                try Task.checkCancellation()
+                guard navigationController?.topViewController === self else { return }
+                let peer: NativeGroupPeer = try await service.business.request("im/groups/\(result.group?.id ?? card.groupID)")
+                let chat = try await service.openConversation(target: peer.imGroupId, type: 3)
+                try Task.checkCancellation()
+                guard navigationController?.topViewController === self else { return }
+                navigationController?.pushViewController(NativeConversationViewController(service: service, conversation: chat), animated: true)
+            } catch {
+                if !Task.isCancelled, navigationController?.topViewController === self { showNativeNotice(error.localizedDescription) }
+            }
+        }
     }
 
     @objc private func inputChanged() {
@@ -690,7 +734,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         // 未确认消息保留核对入口；不会因 UI 对齐而绕过发送结果安全门。
         if let entry = entry, entry.state != .failed { grid.append(NativeMenuItem(title: "核对发送结果", action: { [weak self] in guard let self = self else { return }; Task { await self.service.reconcile(conversationID: self.conversation.id) } })) }
         grid.append(NativeMenuItem(title: "删除", action: { [weak self] in self?.deleteSelected([message]) }))
-        if capabilities.multiSelect { grid.append(NativeMenuItem(title: "多选", action: { [weak self] in self?.multiSelecting = true; self?.selectedIDs = [message.id]; self?.render() })) }
+        if Self.canMultiSelect(message, isAttachmentPreview: attachmentPreviews.values.contains(where: { $0.id == message.id })) { grid.append(NativeMenuItem(title: "多选", action: { [weak self] in self?.multiSelecting = true; self?.selectedIDs = [message.id]; self?.render() })) }
         present(NativeMessageActionOverlay(grid: grid, wide: wide, anchorInWindow: anchor), animated: true)
     }
 
@@ -776,8 +820,45 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         } catch { showNativeNotice(error.localizedDescription) } }
     }
     @objc private func openPinned() { guard showingPin, let pin = service.pinnedMessage(in: conversation) else { return }; Task { do { try await service.focusMessage(pin.id, in: conversation); if let index = dataSource.indexPath(for: pin.id) { collection.scrollToItem(at: index, at: .centeredVertically, animated: true) } } catch { showNativeNotice(error.localizedDescription) } } }
+
+    @objc private func cancelPinnedFromBanner() {
+        guard showingPin, let pin = service.pinnedMessage(in: conversation) else { return }
+        cancelPin(pin, hideBanner: true)
+    }
+
+    private func cancelPin(_ pin: NativeMessagePin, hideBanner: Bool) {
+        guard actionTask == nil, pinRemovalTask == nil else { return }
+        pinRemovalProgress.show(in: self, text: "取消置顶中…")
+        if hideBanner {
+            pendingPinRemoval = pin
+            render()
+        }
+        // 离开页面只隐藏提示。SDK 会话写入后，共享取消消息仍需进入当前账号的 Outbox。
+        pinRemovalTask = Task { [weak self, service, conversation] in
+            let notice: String
+            do {
+                try await service.unpinMessage(pin, in: conversation)
+                notice = "已取消置顶。"
+            } catch {
+                notice = "取消置顶失败：" + error.localizedDescription
+            }
+            guard let self else { return }
+            self.pinRemovalTask = nil
+            self.pinRemovalProgress.hide()
+            self.pendingPinRemoval = nil
+            guard service.isActive, self.viewIfLoaded?.window != nil,
+                  self.navigationController?.topViewController === self else { return }
+            self.render()
+            self.showNativeNotice(notice)
+        }
+    }
+
     private func choosePin(_ message: ChatTextItem) {
-        if let old = service.pinnedMessage(in: conversation), old.id == message.id { Task { do { try await service.pinMessage(message, in: conversation, shared: old.shared, remove: true); showNativeNotice("已取消置顶。") } catch { showNativeNotice(error.localizedDescription) } }; return }
+        guard pinRemovalTask == nil else { return }
+        if let pin = service.pinnedMessage(in: conversation), pin.id == message.id {
+            cancelPin(pin, hideBanner: false)
+            return
+        }
         Task { do {
             var canShare = true
             if conversation.type == 3 { let id = try await service.businessPeerID(conversation); let group: NativeGroup = try await service.business.request("groups/detail", query: [URLQueryItem(name: "groupId", value: id)]); canShare = group.canManage }
@@ -970,14 +1051,21 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         stopVoiceAudio()
         Task { defer { composerSubmission.finish(submission); voiceAction.isEnabled = true; voiceCancel.isEnabled = true; voicePlay.isEnabled = true }; do { try await service.sendMedia(kind: 103, file: draft.url, filename: "语音.m4a", duration: draft.duration, to: conversation) { [weak self] in self?.voiceDraft = nil; self?.inputChanged(); self?.view.setNeedsLayout() } } catch { showNativeNotice(error.localizedDescription) } }
     }
+    private static func canMultiSelect(_ item: ChatTextItem, isAttachmentPreview: Bool) -> Bool {
+        !isAttachmentPreview && MessageMenuCapabilities(contentType: item.contentType, status: item.status).multiSelect
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = displayed[id], item.status != 4 else { return }
         if multiSelecting {
-            guard !attachmentPreviews.values.contains(where: { $0.id == id }) else { showNativeNotice("媒体准备完成后才可选择。"); return }
+            guard Self.canMultiSelect(item, isAttachmentPreview: attachmentPreviews.values.contains(where: { $0.id == id })) else { return }
             if selectedIDs.contains(id) { selectedIDs.remove(id) } else { selectedIDs.insert(id) }; render(); return
         }
         if attachmentPreviews.values.contains(where: { $0.id == id }), service.ownedMediaURL(for: item) == nil { showNativeNotice("媒体正在准备，请稍候。"); return }
-        if let card = BusinessMessageCard(serialized: item.serialized) { openBusinessCard(card, messageID: item.id); return }
+        if let card = BusinessMessageCard(serialized: item.serialized) {
+            if card.kind != .invitation || item.senderID != service.imUserID { openBusinessCard(card) }
+            return
+        }
         if item.contentType == 107 { navigationController?.pushViewController(NativeMergedMessagesController(service: service, source: item), animated: true); return }
         if item.contentType == 108, let data = item.serialized.data(using: .utf8), let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let card = root["cardElem"] as? [String: Any] ?? root["CardElem"] as? [String: Any], let user = (card["userID"] ?? card["UserID"]) as? String {
             navigationController?.pushViewController(NativeContactController(service: service, userID: GroupVisibility.businessUserID(user), isFriend: false), animated: true); return

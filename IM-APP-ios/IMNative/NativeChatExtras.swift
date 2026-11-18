@@ -10,6 +10,10 @@ struct NativeMessagePin {
         preview = raw["preview"] as? String ?? raw["Preview"] as? String ?? ""; sender = raw["senderNickname"] as? String ?? ""; type = raw["messageType"] as? String ?? "text"
         shared = (raw["scope"] as? String ?? "shared") == "shared"; timestamp = (raw["pinnedAt"] as? NSNumber)?.int64Value ?? 0
     }
+    func isSamePin(as other: NativeMessagePin) -> Bool {
+        id == other.id && timestamp == other.timestamp && shared == other.shared
+    }
+
     static func control(_ item: ChatTextItem) -> NativeMessagePin? {
         guard item.contentType == 110, let data = item.serialized.data(using: .utf8), let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let custom = root["customElem"] as? [String: Any] ?? root["CustomElem"] as? [String: Any], let text = custom["data"] as? String ?? custom["Data"] as? String, let bytes = text.data(using: .utf8), let body = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any], (body["businessKey"] as? String ?? body["BusinessKey"] as? String) == "message_pin" else { return nil }
         return NativeMessagePin(body)

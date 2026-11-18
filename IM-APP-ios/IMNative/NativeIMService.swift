@@ -20,6 +20,7 @@ struct NativeConversation: Equatable {
     let pinned: Bool
     let avatar: String
     let muted: Bool
+    let latestMessageID: String
     let latestSeq: Int
     let latestSender: String
     let extra: String
@@ -30,9 +31,15 @@ struct NativeConversation: Equatable {
         preview = data["preview"] as? String ?? "暂无消息"; unread = (data["unread"] as? NSNumber)?.intValue ?? 0
         timestamp = (data["timestamp"] as? NSNumber)?.int64Value ?? 0; pinned = data["pinned"] as? Bool ?? false
         avatar = data["avatar"] as? String ?? ""; muted = data["muted"] as? Bool ?? false
+        latestMessageID = data["latestMessageID"] as? String ?? ""
         latestSeq = (data["latestSeq"] as? NSNumber)?.intValue ?? 0; latestSender = data["latestSender"] as? String ?? ""
     }
     var canOpen: Bool { [1, 3].contains(type) && !target.isEmpty }
+}
+
+struct NativeForwardDestination: Hashable, Sendable {
+    let imID: String
+    let type: Int
 }
 
 struct NativeHistoryPage {
@@ -125,6 +132,9 @@ final class NativeIMService {
     private var sendAttempts: [String: UUID] = [:]
     private var reconciliationTasks: [String: Task<Void, Never>] = [:]
     private var forwardDelivery: NativeForwardDeliveryCoordinator?
+    private var directForwardTasks: [UUID: Task<Void, Never>] = [:]
+    private var directForwardNotices: [String: String] = [:]
+    private var latestLocalForwards: [String: OutboxEntry] = [:]
     private var imagePaths: [String: String] = [:]
     private var generation = UUID()
     private var localReadable = false
@@ -159,6 +169,10 @@ final class NativeIMService {
     private var queuedEvents: [(String, [String: Any])] = []
     private var drainingEvents = false
     private var revokedIDs = Set<String>()
+    private var pendingRecalls = Set<String>()
+    private var lastKnownPreview: [String: NativeConversation] = [:]
+    private var revokers: [String: (id: String, name: String)] = [:]
+    private var inviteStatuses: [String: String] = [:]
     private var deletedIDs = Set<String>()
     private var storageDirectory: URL?
     private var visibilityLedger: GroupVisibilityLedger?
@@ -178,6 +192,7 @@ final class NativeIMService {
     private let historyPageSize = 20
     private var retentionRefreshTask: Task<Void, Never>?
     private var pinSyncTime: [String: Int64] = [:]
+    private var pinPatchTail: (id: UUID, task: Task<Void, Error>)?
 
     init(account: BusinessAccountSession, configuration: APIConfiguration) {
         self.account = account; self.configuration = configuration; self.api = APIClient(configuration: configuration)
@@ -529,6 +544,7 @@ final class NativeIMService {
     private func performStop() async {
         guard !stopped else { return }
         stopped = true; generation = UUID(); loggedIn = false
+        pinPatchTail?.task.cancel(); pinPatchTail = nil
         await NativeRecentMediaCache.shared.invalidate()
         credentialRecoveryTask?.cancel(); credentialRecoveryTask = nil
         bootstrapToken = nil; conversationReadRetryTask?.cancel(); conversationReadRetryTask = nil
@@ -541,6 +557,8 @@ final class NativeIMService {
         queuedEvents.removeAll()
         publishTask?.cancel(); publishTask = nil
         reconciliationTasks.values.forEach { $0.cancel() }; reconciliationTasks.removeAll()
+        directForwardTasks.values.forEach { $0.cancel() }
+        directForwardTasks.removeAll(); directForwardNotices.removeAll(); latestLocalForwards.removeAll()
         await forwardDelivery?.stop()
         forwardDelivery = nil
         visibilityRefreshTasks.values.forEach { $0.cancel() }; visibilityRefreshTasks.removeAll()
@@ -745,7 +763,14 @@ final class NativeIMService {
         let previous = conversations.map(\.id)
         let previousIDs = Set(previous)
         var byID: [String: NativeConversation] = replacing ? [:] : Dictionary(conversations.map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
-        for row in rows { byID[row.id] = row }
+        for row in rows {
+            if !row.latestMessageID.isEmpty { lastKnownPreview[row.id] = row }
+            if let local = latestLocalForwards[row.id],
+               row.latestMessageID == local.clientMsgID || row.timestamp > local.createdAt {
+                latestLocalForwards.removeValue(forKey: row.id)
+            }
+            byID[row.id] = row
+        }
         let candidates = replacing ? rows : conversations + rows.filter { !previousIDs.contains($0.id) }
         let order = ConversationOrderPolicy.orderedIDs(candidates.map { source in
             let row = byID[source.id] ?? source
@@ -753,6 +778,7 @@ final class NativeIMService {
         }, previous: previous)
         var seen = Set<String>()
         conversations = order.filter { seen.insert($0).inserted }.compactMap { byID[$0] }
+        if replacing { lastKnownPreview = lastKnownPreview.filter { byID[$0.key] != nil } }
     }
 
     func openConversation(target: String, type: Int) async throws -> NativeConversation {
@@ -916,8 +942,115 @@ final class NativeIMService {
     func forwardIsRunning(_ key: String) -> Bool { forwardDelivery?.isRunning(key) == true }
 
     func takeForwardNotice(in conversationID: String) -> String? {
-        forwardDelivery?.takeNotice(in: conversationID)
+        directForwardNotices.removeValue(forKey: conversationID) ?? forwardDelivery?.takeNotice(in: conversationID)
     }
+    func enqueueDirectForward(messages: [ChatTextItem], snapshots: [ForwardMessageSnapshot],
+                              to destinations: [NativeForwardDestination], from sourceID: String,
+                              skipped: Int) async throws {
+        guard canSend, let outbox, (1...100).contains(messages.count), messages.count == snapshots.count,
+              (1...12).contains(destinations.count) else { throw NativeChatError.unavailable }
+        let expected = generation
+        let known = Dictionary(conversations.filter(\.canOpen).map {
+            (NativeForwardDestination(imID: $0.target, type: $0.type), $0)
+        }, uniquingKeysWith: { first, _ in first })
+        let targets = try await withThrowingTaskGroup(of: NativeConversation.self) { group in
+            for destination in destinations {
+                group.addTask { @MainActor in
+                    try self.require(expected)
+                    if let cached = known[destination] { return cached }
+                    return try await self.openConversation(target: destination.imID, type: destination.type)
+                }
+            }
+            var result: [NativeConversation] = []
+            for try await target in group { result.append(target) }
+            return result
+        }
+        try Task.checkCancellation()
+        try require(expected)
+        let prepared = try zip(messages, snapshots).map { message, snapshot in
+            try snapshot.applyingDirectForward(to: message.serialized)
+        }
+        let entries = try targets.map { target in
+            try zip(prepared, snapshots).map { serialized, snapshot in
+                guard let data = bridge.createForward(serialized), let item = Self.item(data),
+                      item.contentType == snapshot.contentType, !item.serialized.isEmpty else { throw NativeChatError.invalidMessage }
+                return OutboxEntry(clientMsgID: item.id, conversationID: target.id, targetID: target.target,
+                                   sessionType: target.type, text: item.text, serializedMessage: item.serialized,
+                                   createdAt: item.timestamp, forwardMedia: snapshot.contentType == 101 ? nil : snapshot)
+            }
+        }
+        let queued = entries.flatMap { $0 }
+        try require(expected)
+        do { try await outbox.prepareBatch(queued) }
+        catch { throw NativeChatError.persistence }
+        // Once durable, cancellation of the picker must not cancel the account-owned delivery.
+        guard isActive, generation == expected else { throw NativeChatError.inactive }
+        for entry in queued where entry.createdAt >= (latestLocalForwards[entry.conversationID]?.createdAt ?? 0) {
+            latestLocalForwards[entry.conversationID] = entry
+        }
+        await refreshOutbox()
+        guard isActive, generation == expected else { throw NativeChatError.inactive }
+        let job = UUID()
+        directForwardTasks[job] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.directForwardTasks.removeValue(forKey: job) }
+            await self.deliverDirectForward(entries, snapshots: snapshots, outbox: outbox,
+                                            sourceID: sourceID, skipped: skipped, expected: expected)
+        }
+    }
+
+    private func deliverDirectForward(_ batches: [[OutboxEntry]], snapshots: [ForwardMessageSnapshot],
+                                      outbox: PersistentOutbox, sourceID: String, skipped: Int, expected: UUID) async {
+        // 同一条源媒体只归档一次。各会话独立发送，同一会话保留选中消息的顺序。
+        let media = Dictionary(uniqueKeysWithValues: snapshots.enumerated().compactMap { index, snapshot in
+            snapshot.contentType == 101 ? nil : (index, Task {
+                try await self.archiveForwardMedia(snapshot, expected: expected)
+            })
+        })
+        defer { media.values.forEach { $0.cancel() } }
+        let failed = await withTaskGroup(of: Int.self) { group in
+            for batch in batches {
+                group.addTask { @MainActor in
+                    var failures = 0
+                    for (index, entry) in batch.enumerated() {
+                        guard !Task.isCancelled, self.isActive, self.generation == expected else { break }
+                        do { try await self.dispatch(entry, outbox: outbox, forwardArchive: media[index]) }
+                        catch { failures += 1 }
+                    }
+                    return failures
+                }
+            }
+            var failures = 0
+            for await count in group { failures += count }
+            return failures
+        }
+        guard !Task.isCancelled, isActive, generation == expected else { return }
+        var notice = failed == 0 ? "转发成功" : "有 \(failed) 条转发未完成，请在目标会话查看状态。"
+        if skipped > 0 { notice += " 已跳过 \(skipped) 个不可用的接收对象。" }
+        directForwardNotices[sourceID] = notice
+        publish()
+    }
+
+    private func archiveForwardMedia(_ snapshot: ForwardMessageSnapshot, expected: UUID) async throws -> ForwardMessageSnapshot {
+        try Task.checkCancellation()
+        try require(expected)
+        let policy = business.media
+        let cacheEpoch = await NativeImageCache.shared.mutationEpoch()
+        try require(expected)
+        let archived: ForwardMessageSnapshot = try await business.request("forward-media/preserve", method: "POST", body: ["sourceSnapshot": snapshot.body])
+        try require(expected)
+        for (source, destination) in snapshot.imageCopies(to: archived) {
+            guard policy.absolute(source)?.scheme == "https", policy.absolute(destination)?.scheme == "https" else { continue }
+            for variant in [MediaURLPolicy.Variant.list, .preview] {
+                try require(expected)
+                await NativeImageCache.shared.aliasCached(from: policy.cacheIdentity(policy.image(source, variant: variant)),
+                    to: policy.cacheIdentity(policy.image(destination, variant: variant)), expectedEpoch: cacheEpoch)
+            }
+        }
+        try require(expected)
+        return archived
+    }
+
     func unpackMessage(_ serialized: String) -> ChatTextItem? { bridge.unpack(serialized).flatMap(Self.item) }
     func sendAt(_ text: String, users: [NativeGroupMember], all: Bool, quoted: ChatTextItem?, to conversation: NativeConversation, onPersisted: (() -> Void)? = nil) async throws {
         guard conversation.type == 3 else { throw NativeChatError.invalidMessage }; let current = generation
@@ -926,26 +1059,77 @@ final class NativeIMService {
         guard let message = bridge.createAt(text, users: mentions, all: all, quoted: quoted?.serialized ?? "") else { throw NativeChatError.invalidMessage }
         try await sendPrepared(message, to: conversation, onPersisted: onPersisted)
     }
+    func inviteStatus(_ token: String) -> String? { inviteStatuses[token] }
+
+    func inviteStatus(for item: ChatTextItem) -> String? {
+        guard !inviteStatuses.isEmpty, let card = BusinessMessageCard(serialized: item.serialized), card.kind == .invitation else { return nil }
+        return inviteStatus(card.token)
+    }
+
+    func beginOpeningInvite(_ token: String) -> Bool {
+        guard isActive, inviteStatuses[token] == nil else { return false }
+        updateInviteStatus("已查看邀请", token: token)
+        return true
+    }
+
+    func updateInviteStatus(_ status: String, token: String) {
+        guard isActive else { return }
+        inviteStatuses[token] = status
+        publish()
+    }
+
     func pinnedMessage(in conversation: NativeConversation) -> NativeMessagePin? {
         let extra = conversations.first(where: { $0.id == conversation.id })?.extra ?? conversation.extra
         guard let data = extra.data(using: .utf8), let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let raw = root["pinnedMessage"] as? [String: Any], let pin = NativeMessagePin(raw) else { return nil }
         if let message = messages[conversation.id]?.first(where: { $0.id == pin.id }), !visibility.permits(message, conversationID: conversation.id) || revokedIDs.contains(pin.id) || deletedIDs.contains(pin.id) { return nil }
         return pin
     }
-    func pinMessage(_ item: ChatTextItem, in conversation: NativeConversation, shared: Bool, remove: Bool = false) async throws {
-        let current = generation
+    func pinMessage(_ item: ChatTextItem, in conversation: NativeConversation, shared: Bool) async throws {
         guard item.status == 2, item.contentType < 1000 else { throw NativeChatError.invalidMessage }
-        if shared, conversation.type == 3 {
-            let id = try await businessPeerID(conversation); let group: NativeGroup = try await business.request("groups/detail", query: [URLQueryItem(name: "groupId", value: id)]); try require(current)
-            guard group.canManage else { throw APIError.business(code: -1, message: "仅群主或管理员可为全员置顶。") }
-        }
         let type = [102: "image", 103: "voice", 104: "video", 105: "file", 108: "card"][item.contentType] ?? "text"
-        var body: [String: Any] = ["clientMsgID": item.id, "preview": item.text, "senderNickname": item.senderName, "messageType": type, "scope": shared ? "shared" : "self", "pinnedAt": Int64(Date().timeIntervalSince1970 * 1000)]
-        body["action"] = remove ? "unpin" : "pin"
-        let payload = String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)
-        _ = try await call { bridge.patchPin(conversation.id, payload: payload, completion: $0) }; try require(current)
-        await loadConversations(reset: true); try require(current)
-        if shared { body["businessKey"] = "message_pin"; body["action"] = remove ? "unpin" : "pin"; guard let message = bridge.createCustom(String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)) else { throw NativeChatError.invalidMessage }; try await sendPrepared(message, to: conversation) }
+        try await updateMessagePin(id: item.id, preview: item.text, sender: item.senderName, type: type,
+                                   in: conversation, shared: shared)
+    }
+
+    func unpinMessage(_ pin: NativeMessagePin, in conversation: NativeConversation) async throws {
+        try await updateMessagePin(id: pin.id, preview: pin.preview, sender: pin.sender, type: pin.type,
+                                   in: conversation, shared: pin.shared, removing: pin)
+    }
+
+    private func updateMessagePin(id: String, preview: String, sender: String, type: String,
+                                  in conversation: NativeConversation, shared: Bool, removing: NativeMessagePin? = nil) async throws {
+        let current = generation
+        try require(current)
+        if shared, conversation.type == 3 {
+            let groupID = try await businessPeerID(conversation)
+            let group: NativeGroup = try await business.request("groups/detail", query: [URLQueryItem(name: "groupId", value: groupID)])
+            try require(current)
+            guard group.canManage else { throw APIError.business(code: -1, message: "仅群主或管理员可更改全员置顶。") }
+        }
+        try Task.checkCancellation()
+        if let removing {
+            guard pinnedMessage(in: conversation)?.isSamePin(as: removing) == true else {
+                throw APIError.business(code: -1, message: "置顶消息已变化，请刷新后重试。")
+            }
+        }
+        var body: [String: Any] = [
+            "action": removing == nil ? "pin" : "unpin", "clientMsgID": id, "preview": preview,
+            "senderNickname": sender, "messageType": type, "scope": shared ? "shared" : "self",
+            "pinnedAt": Int64(Date().timeIntervalSince1970 * 1000)
+        ]
+        var localPatch = body
+        if let removing { localPatch["expectedPinnedAt"] = removing.timestamp }
+        let payload = String(decoding: try JSONSerialization.data(withJSONObject: localPatch), as: UTF8.self)
+        try await patchPin(payload, in: conversation, generation: current)
+        try require(current)
+        await loadConversations(reset: true)
+        try require(current)
+        if shared {
+            body["businessKey"] = "message_pin"
+            let control = String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)
+            guard let message = bridge.createCustom(control) else { throw NativeChatError.invalidMessage }
+            try await sendPrepared(message, to: conversation)
+        }
     }
     func importMediaFile(_ source: URL) throws -> URL {
         try accountMediaStore().importFile(source)
@@ -1058,11 +1242,26 @@ final class NativeIMService {
     }
     func recall(_ item: ChatTextItem, in conversation: NativeConversation, reason: String? = nil) async throws {
         let current = generation
-        let peer = try await businessPeerID(conversation); try require(current)
+        try require(current)
+        guard !revokedIDs.contains(item.id), pendingRecalls.insert(item.id).inserted else { return }
+        publish()
+        defer {
+            pendingRecalls.remove(item.id)
+            if isActive, generation == current { publish() }
+        }
+        let peer = try await businessPeerID(conversation)
+        try require(current)
         var body: [String: JSONValue] = ["peerType": .string(conversation.type == 3 ? "group" : "c2c"), "peerId": .string(peer), "clientMsgId": .string(item.id), "seq": .number(Double(item.seq))]
         if let reason = reason, !reason.isEmpty { body["reason"] = .string(reason) }
-        try await business.change("im/messages/recall", body: body)
-        try require(current); revokedIDs.insert(item.id); mergeMessages([], conversationID: conversation.id); publish()
+        struct RecallResult: Decodable { let alreadyRecalled: Bool? }
+        let result: RecallResult = try await business.request("im/messages/recall", method: "POST", body: body)
+        // Once the server has accepted the change, record it even if the page just closed.
+        guard isActive, generation == current else { throw NativeChatError.inactive }
+        revokedIDs.insert(item.id)
+        if result.alreadyRecalled != true, revokers[item.id] == nil {
+            revokers[item.id] = (imUserID, business.profile.nickname)
+        }
+        mergeMessages([], conversationID: conversation.id)
     }
     func delete(_ item: ChatTextItem, in conversation: NativeConversation) async throws {
         let current = generation
@@ -1073,6 +1272,7 @@ final class NativeIMService {
     func clearHistory(_ conversation: NativeConversation) async throws {
         let current = generation; let peer = try await businessPeerID(conversation); try require(current)
         try await business.change("im/conversation-messages/clear", body: ["peerType": .string(conversation.type == 3 ? "group" : "c2c"), "peerId": .string(peer)]); try require(current)
+        lastKnownPreview[conversation.id] = nil
         historyVersions[conversation.id] = UUID(); completedHistoryPages[conversation.id] = nil; localHistoryCursors[conversation.id] = nil
         for key in Array(historyRequests.keys) where historyRequests[key]?.conversation.id == conversation.id {
             historyRefreshTasks[key]?.cancel(); historyRefreshTasks[key] = nil; historyRequests[key] = nil
@@ -1147,7 +1347,8 @@ final class NativeIMService {
         guard let message = visibleMessages(conversation.id).first(where: { $0.id == favorite.messageId }) else { throw NativeChatError.invalidMessage }; return (conversation, message)
     }
 
-    private func dispatch(_ entryToSend: OutboxEntry, outbox: PersistentOutbox) async throws {
+    private func dispatch(_ entryToSend: OutboxEntry, outbox: PersistentOutbox,
+                          forwardArchive: Task<ForwardMessageSnapshot, Error>? = nil) async throws {
         var entry = entryToSend
         guard !inFlightIDs.contains(entry.clientMsgID) else { throw NativeChatError.unavailable }
         inFlightIDs.insert(entry.clientMsgID)
@@ -1174,7 +1375,15 @@ final class NativeIMService {
             }
         }
         do {
-            entry = try await prepareQuotedEntry(entryToSend, outbox: outbox, expected: current)
+            if let snapshot = entry.forwardMedia {
+                let archived: ForwardMessageSnapshot
+                if let forwardArchive { archived = try await forwardArchive.value }
+                else { archived = try await archiveForwardMedia(snapshot, expected: current) }
+                try require(current)
+                entry = try await outbox.protectForwardMedia(entry.clientMsgID, with: archived)
+            } else {
+                entry = try await prepareQuotedEntry(entry, outbox: outbox, expected: current)
+            }
         } catch {
             try require(current)
             try await outbox.transition(entryToSend.clientMsgID, to: .failed)
@@ -1184,6 +1393,7 @@ final class NativeIMService {
         try await outbox.transition(entry.clientMsgID, to: .sending)
         try require(current)
         await refreshOutbox()
+        try require(current)
         do {
             let kind = (bridge.unpack(entry.serializedMessage)?["contentType"] as? NSNumber)?.intValue ?? 101
             let result = try await call(timeout: [102, 103, 104, 105].contains(kind) ? 120_000_000_000 : 25_000_000_000) { bridge.send(serialized: entry.serializedMessage, target: entry.targetID, type: entry.sessionType, completion: $0) }
@@ -1327,19 +1537,41 @@ final class NativeIMService {
     }
 
     func visibleMessages(_ id: String) -> [ChatTextItem] {
-        if conversations.first(where: { $0.id == id })?.type == 3, !groupVisibilityReady.contains(id) { return [] }
+        let isGroup = conversations.first(where: { $0.id == id })?.type == 3
+        if isGroup, !groupVisibilityReady.contains(id) { return [] }
         let pending = outboxEntries.filter { $0.conversationID == id && $0.state != .accepted }.map { entry -> ChatTextItem in
             if let data = bridge.unpack(entry.serializedMessage), let item = Self.item(data) {
                 return ChatTextItem(id: item.id, senderID: item.senderID.isEmpty ? imUserID : item.senderID, text: item.text, timestamp: item.timestamp, status: item.status, seq: item.seq, avatar: item.avatar, senderName: item.senderName, contentType: item.contentType, isRead: item.isRead, serialized: item.serialized, media: item.media)
             }
             return ChatTextItem(id: entry.clientMsgID, senderID: imUserID, text: entry.text, timestamp: entry.createdAt, status: 1)
         }
-        return sanitize(ChatTextItem.merge(pending, messages[id] ?? [])).filter { visibility.permits($0, conversationID: id) && NativeMessagePin.control($0) == nil }
+        return sanitize(ChatTextItem.merge(pending, messages[id] ?? []))
+            .filter { visibility.permits($0, conversationID: id) && NativeMessagePin.control($0) == nil }
+            .map { item in
+                guard item.status == 4 || pendingRecalls.contains(item.id) else { return item }
+                return recalledItem(item, text: recallLabel(for: item, group: isGroup))
+            }
+    }
+
+    private func recallLabel(for item: ChatTextItem, group: Bool) -> String {
+        let revoker = revokers[item.id]
+        let name = revoker?.name.isEmpty == false ? revoker?.name : nil
+        if pendingRecalls.contains(item.id), !revokedIDs.contains(item.id) { return "正在撤回…" }
+        if revoker?.id == imUserID || (revoker == nil && item.senderID == imUserID) { return "你撤回了一条消息" }
+        if item.senderID == imUserID, let revoker, !revoker.id.isEmpty { return "\(name ?? "管理员")撤回了你的消息" }
+        if group { return "\(name ?? (item.senderName.isEmpty ? "群成员" : item.senderName))撤回了一条消息" }
+        return "对方撤回了一条消息"
+    }
+
+    private func recalledItem(_ item: ChatTextItem, text: String) -> ChatTextItem {
+        ChatTextItem(id: item.id, senderID: item.senderID, text: text, timestamp: item.timestamp, status: 4,
+                     seq: item.seq, senderName: item.senderName)
     }
 
     private func sanitize(_ items: [ChatTextItem]) -> [ChatTextItem] {
-        items.filter { !deletedIDs.contains($0.id) }.map {
-            revokedIDs.contains($0.id) ? ChatTextItem(id: $0.id, senderID: $0.senderID, text: "[消息已撤回]", timestamp: $0.timestamp, status: 4, seq: $0.seq) : (readIDs.contains($0.id) ? $0.read() : $0)
+        items.filter { !deletedIDs.contains($0.id) }.map { item in
+            if revokedIDs.contains(item.id) { return recalledItem(item, text: "[消息已撤回]") }
+            return readIDs.contains(item.id) ? item.read() : item
         }
     }
 
@@ -1350,14 +1582,29 @@ final class NativeIMService {
 
     private func applyPinControl(_ item: ChatTextItem, conversation: NativeConversation) async throws {
         guard let pin = NativeMessagePin.control(item), visibility.permits(item, conversationID: conversation.id), item.status != 4 else { return }
-        let extra = conversations.first(where: { $0.id == conversation.id })?.extra ?? conversation.extra
-        let root = extra.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any] ?? [:]
-        let stored = (root["nativeMessagePinRevision"] as? NSNumber)?.int64Value ?? 0
-        guard item.timestamp > max(pinSyncTime[conversation.id] ?? 0, stored) else { return }
-        let body: [String: Any] = ["action": pin.action, "clientMsgID": pin.id, "preview": pin.preview, "senderNickname": pin.sender, "messageType": pin.type, "scope": "shared", "pinnedAt": item.timestamp]
-        let current = generation, payload = String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)
-        _ = try await call { bridge.patchPin(conversation.id, payload: payload, completion: $0) }
-        try require(current); pinSyncTime[conversation.id] = item.timestamp
+        guard item.timestamp > (pinSyncTime[conversation.id] ?? 0) else { return }
+        let body: [String: Any] = ["action": pin.action, "clientMsgID": pin.id, "preview": pin.preview,
+            "senderNickname": pin.sender, "messageType": pin.type, "scope": "shared", "pinnedAt": item.timestamp,
+            "requiresNewerRevision": true]
+        let current = generation
+        let payload = String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)
+        try await patchPin(payload, in: conversation, generation: current)
+        try require(current)
+        pinSyncTime[conversation.id] = max(item.timestamp, pinSyncTime[conversation.id] ?? 0)
+    }
+
+    private func patchPin(_ payload: String, in conversation: NativeConversation, generation expected: UUID) async throws {
+        try require(expected)
+        let previous = pinPatchTail?.task
+        let id = UUID()
+        let task = Task { [self] in
+            _ = await previous?.result
+            try require(expected)
+            _ = try await call { bridge.patchPin(conversation.id, payload: payload, completion: $0) }
+        }
+        pinPatchTail = (id, task)
+        defer { if pinPatchTail?.id == id { pinPatchTail = nil } }
+        return try await task.value
     }
     private func refreshRetentionBatch() async throws {
         let current = generation; guard let ledger = visibilityLedger else { throw NativeChatError.unavailable }
@@ -1391,12 +1638,40 @@ final class NativeIMService {
             catch { /* 离线继续使用已持久确认的 floor 与成员清理快照。 */ }
         }
     }
+    private func localForwardPreview(_ conversation: NativeConversation) -> OutboxEntry? {
+        guard let entry = latestLocalForwards[conversation.id], entry.createdAt >= conversation.timestamp,
+              !deletedIDs.contains(entry.clientMsgID), !revokedIDs.contains(entry.clientMsgID),
+              visibility.permits(ChatTextItem(id: entry.clientMsgID, senderID: imUserID, text: entry.text,
+                                               timestamp: entry.createdAt, status: 1), conversationID: conversation.id) else { return nil }
+        return entry
+    }
+
+    var conversationsWithForwardPreviews: [NativeConversation] {
+        guard !latestLocalForwards.isEmpty else { return conversations }
+        return conversations.enumerated().map { ($0.offset, $0.element, conversationTimestamp($0.element)) }
+            .sorted { lhs, rhs in
+                if lhs.1.pinned != rhs.1.pinned { return lhs.1.pinned }
+                return lhs.2 == rhs.2 ? lhs.0 < rhs.0 : lhs.2 > rhs.2
+            }.map { $0.1 }
+    }
+
+    func conversationTimestamp(_ conversation: NativeConversation) -> Int64 {
+        localForwardPreview(conversation)?.createdAt ?? conversation.timestamp
+    }
+
     func conversationPreview(_ conversation: NativeConversation) -> String {
+        if let queued = localForwardPreview(conversation) { return queued.text }
         if conversation.type == 3, !groupVisibilityReady.contains(conversation.id) { return "" }
-        let latest = ChatTextItem(id: "preview", senderID: conversation.latestSender, text: "", timestamp: conversation.timestamp, status: 2, seq: conversation.latestSeq)
-        return visibility.permits(latest, conversationID: conversation.id) ? conversation.preview : ""
+        let previous = conversation.latestMessageID.isEmpty ? lastKnownPreview[conversation.id] : nil
+        let candidate = previous.flatMap { revokedIDs.contains($0.latestMessageID) ? $0 : nil } ?? conversation
+        let latest = ChatTextItem(id: candidate.latestMessageID.isEmpty ? "preview" : candidate.latestMessageID,
+            senderID: candidate.latestSender, text: "", timestamp: candidate.timestamp, status: 2, seq: candidate.latestSeq)
+        guard visibility.permits(latest, conversationID: conversation.id) else { return "" }
+        if revokedIDs.contains(candidate.latestMessageID) { return "[撤回]" }
+        return conversation.preview
     }
     func conversationUnread(_ conversation: NativeConversation) -> Int {
+        if conversation.type == 3, !groupVisibilityReady.contains(conversation.id) { return 0 }
         if conversationPreview(conversation).isEmpty { return 0 }
         if let floor = visibility.floors[conversation.id], conversation.latestSeq > 0 { return max(0, min(conversation.unread, conversation.latestSeq - floor.minVisibleSeq + 1)) }
         return conversation.unread
@@ -1526,8 +1801,14 @@ final class NativeIMService {
         case "read":
             readIDs.formUnion(payload["ids"] as? [String] ?? [])
         case "revoked", "deleted":
-            if let id = payload["id"] as? String {
-                if name == "deleted" { deletedIDs.insert(id) } else { revokedIDs.insert(id) }
+            if let id = payload["id"] as? String, !id.isEmpty {
+                if name == "deleted" { deletedIDs.insert(id) }
+                else {
+                    revokedIDs.insert(id)
+                    let revokerID = payload["revokerID"] as? String ?? ""
+                    let nickname = payload["revokerNickname"] as? String ?? ""
+                    if !revokerID.isEmpty || !nickname.isEmpty { revokers[id] = (revokerID, nickname) }
+                }
                 for key in Array(messages.keys) {
                     messages[key] = sanitize(messages[key] ?? [])
                 }

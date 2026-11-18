@@ -229,9 +229,10 @@ public struct OutboxEntry: Codable, Equatable, Sendable {
     public let serializedMessage: String
     public let createdAt: Int64
     public var state: OutboxState
+    public var forwardMedia: ForwardMessageSnapshot?
 
     public init(clientMsgID: String, conversationID: String, targetID: String, sessionType: Int,
-                text: String, serializedMessage: String, createdAt: Int64) {
+                text: String, serializedMessage: String, createdAt: Int64, forwardMedia: ForwardMessageSnapshot? = nil) {
         self.clientMsgID = clientMsgID
         self.conversationID = conversationID
         self.targetID = targetID
@@ -240,6 +241,7 @@ public struct OutboxEntry: Codable, Equatable, Sendable {
         self.serializedMessage = serializedMessage
         self.createdAt = createdAt
         self.state = .prepared
+        self.forwardMedia = forwardMedia
     }
 }
 
@@ -275,12 +277,34 @@ public actor PersistentOutbox {
         entries.filter { conversationID == nil || $0.conversationID == conversationID }
     }
 
-    public func prepare(_ entry: OutboxEntry) throws {
-        guard !entry.clientMsgID.isEmpty, !entry.conversationID.isEmpty, !entry.targetID.isEmpty,
-              [1, 3].contains(entry.sessionType), !entry.text.isEmpty, !entry.serializedMessage.isEmpty,
-              entry.state == .prepared else { throw OutboxError.invalidEntry }
-        guard !entries.contains(where: { $0.clientMsgID == entry.clientMsgID }) else { throw OutboxError.duplicateID }
-        try commit(entries + [entry])
+    public func prepare(_ entry: OutboxEntry) throws { try prepareBatch([entry]) }
+
+    public func prepareBatch(_ batch: [OutboxEntry]) throws {
+        guard !batch.isEmpty else { throw OutboxError.invalidEntry }
+        var ids = Set(entries.map(\.clientMsgID))
+        for entry in batch {
+            guard !entry.clientMsgID.isEmpty, !entry.conversationID.isEmpty, !entry.targetID.isEmpty,
+                  [1, 3].contains(entry.sessionType), !entry.text.isEmpty, !entry.serializedMessage.isEmpty,
+                  entry.state == .prepared else { throw OutboxError.invalidEntry }
+            guard ids.insert(entry.clientMsgID).inserted else { throw OutboxError.duplicateID }
+        }
+        try commit(entries + batch)
+    }
+
+    public func protectForwardMedia(_ id: String, with archived: ForwardMessageSnapshot) throws -> OutboxEntry {
+        guard let index = entries.firstIndex(where: { $0.clientMsgID == id }) else { throw OutboxError.missingEntry }
+        let old = entries[index]
+        guard [.prepared, .failed].contains(old.state), let original = old.forwardMedia,
+              [102, 104].contains(original.contentType), original.contentType == archived.contentType else { throw OutboxError.invalidEntry }
+        let serialized = try archived.applyingDirectForward(to: old.serializedMessage)
+        var replacement = OutboxEntry(clientMsgID: id, conversationID: old.conversationID,
+            targetID: old.targetID, sessionType: old.sessionType, text: old.text,
+            serializedMessage: serialized, createdAt: old.createdAt)
+        replacement.state = old.state
+        var next = entries
+        next[index] = replacement
+        try commit(next)
+        return replacement
     }
 
     /// 只允许发送前改写已保护的引用内容，不能把 sending/uncertain 回退成可发送状态。

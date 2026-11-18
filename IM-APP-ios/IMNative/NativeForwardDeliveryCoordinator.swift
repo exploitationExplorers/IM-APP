@@ -75,6 +75,11 @@ final class NativeForwardDeliveryCoordinator {
                 try self.requireActive()
                 self.notices[submission.sourceConversationID] = Self.notice(for: outcome)
                 self.onChange()
+            } catch APIError.business(code: 1, message: "invalid forward request: no eligible targets") {
+                guard !self.stopped, self.ownerIsActive(), !Task.isCancelled else { return }
+                // 多消息批次可在拒绝前已提交一部分，继续保留原批次用于核对。
+                self.notices[submission.sourceConversationID] = "接收对象当前不可用。部分消息可能已发送，请先查看聊天记录。"
+                self.onChange()
             } catch {
                 guard !self.stopped, self.ownerIsActive(), !Task.isCancelled else { return }
                 self.notices[submission.sourceConversationID] = "暂未确认转发结果，请稍后查看聊天记录。"

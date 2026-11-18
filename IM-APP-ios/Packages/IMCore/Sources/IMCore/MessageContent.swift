@@ -155,6 +155,20 @@ public struct ForwardMessageSnapshot: Codable, Equatable, Sendable {
         return updated
     }
 
+    /// 只替换直接转发支持的内容，保留 SDK 创建的消息标识及信封。
+    public func applyingDirectForward(to serialized: String) throws -> String {
+        let elements = [101: "textElem", 102: "pictureElem", 104: "videoElem"]
+        guard let element = elements[contentType], case .object = content,
+              var root = MessagePayload.object(serialized),
+              MessagePayload.number(root, "contentType") == contentType else { throw APIError.invalidResponse }
+        let encoded = try JSONEncoder().encode(content)
+        root[element] = try JSONSerialization.jsonObject(with: encoded)
+        root["content"] = String(decoding: encoded, as: UTF8.self)
+        let updated = String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+        _ = try Self.make(serialized: updated)
+        return updated
+    }
+
     private static func normalize(_ raw: [String: Any]) -> [String: Any] {
         let aliases = ["SourceURL": "sourceUrl", "sourceURL": "sourceUrl", "VideoURL": "videoUrl", "videoURL": "videoUrl", "SnapshotURL": "snapshotUrl", "snapshotURL": "snapshotUrl", "URL": "url", "Url": "url", "UUID": "uuid"]
         var result: [String: Any] = [:]

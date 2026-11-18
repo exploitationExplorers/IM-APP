@@ -8,6 +8,10 @@
 @property(nonatomic, copy, nullable) NativeIMEvent events;
 @property(nonatomic, assign) BOOL alive;
 @property(nonatomic, assign) BOOL loginInFlight;
+@property(nonatomic, assign) NSUInteger pinSession;
+@property(nonatomic, strong) NSUUID *pinOperation;
+@property(nonatomic, assign) NSTimeInterval pinReadDeadline;
+@property(nonatomic, assign) BOOL pinWritePending;
 @end
 
 @implementation NativeOpenIMBridge
@@ -105,9 +109,10 @@ static NSDictionary *ConversationData(OIMConversationInfo *conversation) {
              @"title": conversation.showName ?: @"", @"unread": @(conversation.unreadCount),
              @"ex": conversation.ex ?: @"",
              @"avatar": conversation.faceURL ?: @"", @"muted": @(conversation.recvMsgOpt != 0),
-             @"latestSeq": @(conversation.latestMsg.seq), @"latestSender": conversation.latestMsg.sendID ?: @"",
+             @"latestMessageID": conversation.latestMsg.clientMsgID ?: @"", @"latestSeq": @(conversation.latestMsg.seq), @"latestSender": conversation.latestMsg.sendID ?: @"",
              @"timestamp": @(conversation.latestMsgSendTime), @"pinned": @(conversation.isPinned),
-             @"preview": conversation.latestMsg ? MessageText(conversation.latestMsg) : @"暂无消息"};
+             @"preview": conversation.latestMsg.status == OIMMessageStatusRevoke || conversation.latestMsg.contentType == OIMMessageContentTypeRevoke
+                 ? @"[撤回]" : (conversation.latestMsg ? MessageText(conversation.latestMsg) : @"暂无消息")};
 }
 
 static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
@@ -165,6 +170,9 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
 - (BOOL)loginPending { return self.loginInFlight; }
 
 - (void)logout:(NativeIMResult)completion {
+    self.pinSession += 1;
+    self.pinOperation = nil;
+    self.pinWritePending = NO;
     [OIMManager.manager logoutWithOnSuccess:^(NSString *data) { completion(@{}, nil); }
                                   onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
 }
@@ -273,15 +281,69 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
 }
 
 - (void)patchPin:(NSString *)conversation payload:(NSString *)payload completion:(NativeIMResult)completion {
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (self.pinOperation && (self.pinWritePending || now < self.pinReadDeadline)) {
+        completion(nil, [NSError errorWithDomain:@"NativeMessagePin" code:2 userInfo:@{NSLocalizedDescriptionKey:@"上一笔置顶操作仍在确认，请刷新后重试。"}]);
+        return;
+    }
+    NSUUID *operation = NSUUID.UUID;
+    self.pinOperation = operation;
+    self.pinReadDeadline = now + 24;
+    NSUInteger session = self.pinSession;
+    NativeIMResult finish = ^(NSDictionary *result, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([self.pinOperation isEqual:operation]) {
+                self.pinOperation = nil;
+                self.pinWritePending = NO;
+            }
+            completion(result, error);
+        });
+    };
     [OIMManager.manager getMultipleConversation:@[conversation] onSuccess:^(NSArray<OIMConversationInfo *> *items) {
-        OIMConversationInfo *current = items.firstObject;
-        if (!current || ![current.conversationID isEqualToString:conversation]) { completion(nil, NativeError(-1)); return; }
-        NSDictionary *original = [current.ex mj_JSONObject];
-        NSMutableDictionary *extra = [original isKindOfClass:NSDictionary.class] ? [original mutableCopy] : [NSMutableDictionary new];
-        if (payload.length) { NSDictionary *pinned = [payload mj_JSONObject]; if (![pinned isKindOfClass:NSDictionary.class]) { completion(nil, NativeError(-1)); return; } if ([pinned[@"action"] isEqual:@"unpin"]) [extra removeObjectForKey:@"pinnedMessage"]; else extra[@"pinnedMessage"] = pinned; if (pinned[@"pinnedAt"]) extra[@"nativeMessagePinRevision"] = pinned[@"pinnedAt"]; }
-        else [extra removeObjectForKey:@"pinnedMessage"];
-        [OIMManager.manager setConversation:conversation req:@{@"ex": extra.count ? [extra mj_JSONString] : @""} onSuccess:^(NSString *data) { completion(@{}, nil); } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
-    } onFailure:^(NSInteger code, NSString *msg) { completion(nil, NativeError(code)); }];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!self.alive || session != self.pinSession || ![self.pinOperation isEqual:operation] ||
+                NSProcessInfo.processInfo.systemUptime >= self.pinReadDeadline) {
+                finish(nil, NativeError(-1));
+                return;
+            }
+            OIMConversationInfo *current = items.firstObject;
+            if (!current || ![current.conversationID isEqualToString:conversation]) { finish(nil, NativeError(-1)); return; }
+            NSDictionary *original = [current.ex mj_JSONObject];
+            NSMutableDictionary *extra = [original isKindOfClass:NSDictionary.class] ? [original mutableCopy] : [NSMutableDictionary new];
+            NSDictionary *decoded = [payload mj_JSONObject];
+            if (![decoded isKindOfClass:NSDictionary.class]) { finish(nil, NativeError(-1)); return; }
+            NSMutableDictionary *pinned = [decoded mutableCopy];
+            id revision = extra[@"nativeMessagePinRevision"];
+            int64_t stored = [revision isKindOfClass:NSNumber.class] ? [revision longLongValue] : 0;
+            if ([pinned[@"requiresNewerRevision"] boolValue] && [pinned[@"pinnedAt"] longLongValue] <= stored) {
+                finish(@{}, nil);
+                return;
+            }
+            [pinned removeObjectForKey:@"requiresNewerRevision"];
+            if ([pinned[@"action"] isEqual:@"unpin"]) {
+                NSNumber *expected = pinned[@"expectedPinnedAt"];
+                if (expected) {
+                    id active = extra[@"pinnedMessage"];
+                    if (![active isKindOfClass:NSDictionary.class]) { finish(nil, NativeError(-1)); return; }
+                    id activeID = active[@"clientMsgID"] ?: active[@"ClientMsgID"];
+                    id activeScope = active[@"scope"] ?: @"shared";
+                    id activeTime = active[@"pinnedAt"] ?: @0;
+                    if (![activeID isEqual:pinned[@"clientMsgID"]] || ![activeScope isEqual:pinned[@"scope"]] || ![activeTime isEqual:expected]) {
+                        finish(nil, [NSError errorWithDomain:@"NativeMessagePin" code:1 userInfo:@{NSLocalizedDescriptionKey:@"置顶消息已变化，请刷新后重试。"}]);
+                        return;
+                    }
+                }
+                [extra removeObjectForKey:@"pinnedMessage"];
+            } else {
+                extra[@"pinnedMessage"] = pinned;
+            }
+            if (pinned[@"pinnedAt"]) extra[@"nativeMessagePinRevision"] = pinned[@"pinnedAt"];
+            self.pinWritePending = YES;
+            [OIMManager.manager setConversation:conversation req:@{@"ex": [extra mj_JSONString] ?: @""}
+                onSuccess:^(NSString *data) { finish(@{}, nil); }
+                onFailure:^(NSInteger code, NSString *msg) { finish(nil, NativeError(code)); }];
+        });
+    } onFailure:^(NSInteger code, NSString *msg) { finish(nil, NativeError(code)); }];
 }
 
 - (NSDictionary *)unpack:(NSString *)serialized {
@@ -404,6 +466,9 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
 - (void)onRecvC2CReadReceipt:(NSArray<OIMReceiptInfo *> *)items {
     for (OIMReceiptInfo *item in items) [self emit:@"read" payload:@{@"ids": item.msgIDList ?: @[]}];
 }
-- (void)onRecvMessageRevoked:(OIMMessageRevokedInfo *)info { [self emit:@"revoked" payload:@{@"id": info.clientMsgID ?: @""}]; }
+- (void)onRecvMessageRevoked:(OIMMessageRevokedInfo *)info {
+    [self emit:@"revoked" payload:@{@"id": info.clientMsgID ?: @"", @"revokerID": info.revokerID ?: @"",
+                                  @"revokerNickname": info.revokerNickname ?: @""}];
+}
 - (void)onMsgDeleted:(OIMMessageInfo *)message { [self emit:@"deleted" payload:@{@"id": message.clientMsgID ?: @""}]; }
 @end

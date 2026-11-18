@@ -86,23 +86,82 @@ final class NativeMassTargetPicker: NativeBusinessListController, UISearchResult
     init(service: NativeIMService, initial: [NativeMassRecord.Target], done: @escaping ([NativeMassRecord.Target]) -> Void) { self.service = service; self.done = done; selected = Dictionary(initial.map { ($0.key, $0) }, uniquingKeysWith: { _, b in b }); super.init(title: "选择群发对象", context: service.business) }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() {
-        super.viewDidLoad(); search.searchResultsUpdater = self; search.obscuresBackgroundDuringPresentation = false; navigationItem.searchController = search
+        super.viewDidLoad()
+        search.searchResultsUpdater = self
+        search.obscuresBackgroundDuringPresentation = false
+        search.hidesNavigationBarDuringPresentation = false
+        placeSearchBelowTitle(search)
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "确认", style: .done, target: self, action: #selector(finish))
-        let tabs = UISegmentedControl(items: ["最近", "联系人", "群组", "标签"]); tabs.selectedSegmentIndex = 0; tabs.addTarget(self, action: #selector(change(_:)), for: .valueChanged); tabs.frame = CGRect(x: 16, y: 8, width: view.bounds.width - 32, height: 36)
-        let header = UIView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 52)); header.addSubview(tabs); tableView.tableHeaderView = header
+        let tabs = UISegmentedControl(items: ["最近", "联系人", "群组", "标签"])
+        tabs.selectedSegmentIndex = 0
+        tabs.addTarget(self, action: #selector(change(_:)), for: .valueChanged)
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        let header = UIView(frame: CGRect(x: 0, y: 0, width: max(tableView.bounds.width, 32), height: 52))
+        header.addSubview(tabs)
+        NSLayoutConstraint.activate([
+            tabs.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 16),
+            tabs.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -16),
+            tabs.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            tabs.heightAnchor.constraint(equalToConstant: 36)
+        ])
+        tableView.tableHeaderView = header
+        render()
     }
     override func reloadContent() {
         perform { [self] in
-            _ = try await service.loadAllConversations()
-            var all: [NativeContact] = []; var cursor: String?; var seen = Set<String>()
-            repeat { let page = try await context.contacts(sort: "name", cursor: cursor); all += page.items; guard page.hasMore else { break }; guard let next = page.nextCursor, seen.insert(next).inserted else { throw APIError.invalidResponse }; cursor = next } while true
-            contacts = all; var allGroups: [NativeGroup] = []; cursor = nil; seen = []
-            repeat {
-                var query = [URLQueryItem(name: "limit", value: "100")]; if let cursor = cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
-                let page: NativePage<NativeGroup> = try await context.request("groups", query: query); allGroups += page.items; guard page.hasMore else { break }; guard let next = page.nextCursor, seen.insert(next).inserted else { throw APIError.invalidResponse }; cursor = next
-            } while true
-            groups = allGroups; tags = try await context.request("contact-tags"); render()
+            await withTaskGroup(of: Void.self) { tasks in
+                tasks.addTask { await self.loadTargets(category: 0) }
+                tasks.addTask { await self.loadTargets(category: 1) }
+                tasks.addTask { await self.loadTargets(category: 2) }
+                tasks.addTask { await self.loadTargets(category: 3) }
+            }
         }
+    }
+
+    private var loadErrors: [Int: String] = [:]
+
+    private func loadTargets(category: Int) async {
+        loadErrors[category] = nil
+        do {
+            switch category {
+            case 0:
+                _ = try await service.loadAllConversations()
+            case 1:
+                var result: [NativeContact] = []
+                var cursor: String?, seen = Set<String>()
+                repeat {
+                    let page = try await context.contacts(cursor: cursor)
+                    result += page.items
+                    guard page.hasMore else { break }
+                    guard let next = page.nextCursor, seen.insert(next).inserted else { throw APIError.invalidResponse }
+                    cursor = next
+                } while true
+                try Task.checkCancellation()
+                contacts = result
+            case 2:
+                var result: [NativeGroup] = []
+                var cursor: String?, seen = Set<String>()
+                repeat {
+                    var query = [URLQueryItem(name: "limit", value: "100")]
+                    if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+                    let page: NativePage<NativeGroup> = try await context.request("groups", query: query)
+                    result += page.items
+                    guard page.hasMore else { break }
+                    guard let next = page.nextCursor, seen.insert(next).inserted else { throw APIError.invalidResponse }
+                    cursor = next
+                } while true
+                try Task.checkCancellation()
+                groups = result
+            default:
+                let result: [NativeTag] = try await context.request("contact-tags")
+                try Task.checkCancellation()
+                tags = result
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            loadErrors[category] = error.localizedDescription
+        }
+        if !Task.isCancelled, self.category == category { render() }
     }
     @objc private func change(_ sender: UISegmentedControl) { category = sender.selectedSegmentIndex; render() }
     func updateSearchResults(for searchController: UISearchController) { render() }
@@ -113,20 +172,45 @@ final class NativeMassTargetPicker: NativeBusinessListController, UISearchResult
         else if category == 2 { targets = groups.map { .init(id: $0.id, name: $0.name, kind: "group") } }
         else { targets = tags.map { .init(id: $0.id, name: $0.name, kind: "tag") } }
         let text = search.searchBar.text ?? ""
-        setRows([targets.filter { text.isEmpty || $0.name.localizedCaseInsensitiveContains(text) }.map { target in NativeBusinessRow(title: target.name, checked: selected[target.key] != nil, action: { [weak self] in guard let self = self else { return }; if self.selected[target.key] == nil { self.selected[target.key] = target } else { self.selected.removeValue(forKey: target.key) }; self.render() }) }])
+        let matches = targets.filter { text.isEmpty || $0.name.localizedCaseInsensitiveContains(text) }
+        var rows = matches.map { target in
+            NativeBusinessRow(title: target.name, checked: selected[target.key] != nil, action: { [weak self] in
+                guard let self else { return }
+                if self.selected[target.key] == nil { self.selected[target.key] = target }
+                else { self.selected.removeValue(forKey: target.key) }
+                self.render()
+            })
+        }
+        if let error = loadErrors[category], targets.isEmpty {
+            rows.append(NativeBusinessRow(title: "加载失败", detail: error, action: { [weak self] in self?.reloadContent() }))
+        }
+        setRows([rows])
         navigationItem.rightBarButtonItem?.title = "确认（\(selected.count)）"
     }
     @objc private func finish() {
-        guard !selected.isEmpty else { showNativeNotice("请选择群发对象。"); return }
+        let targets = selected.values.sorted { $0.key < $1.key }
+        guard !targets.isEmpty else { showNativeNotice("请先选择接收对象。"); return }
+        if !targets.contains(where: { $0.kind == "tag" }) {
+            returnSelection(targets)
+            return
+        }
         perform { [self] in
             var output: [String: NativeMassRecord.Target] = [:]
-            for item in selected.values.sorted(by: { $0.key < $1.key }) {
+            for item in targets {
                 if item.kind == "tag" { let members: [NativeContact] = try await context.request("contact-tags/\(item.id)/members"); for member in members { let target = NativeMassRecord.Target(id: member.id, name: member.displayName); output[target.key] = target } }
                 else { output[item.key] = item }
             }
             guard !output.isEmpty else { throw APIError.business(code: -1, message: "选中的标签暂无联系人。") }
-            navigationController?.popViewController(animated: false); done(output.values.sorted { $0.key < $1.key })
+            try Task.checkCancellation()
+            returnSelection(output.values.sorted { $0.key < $1.key })
         }
+    }
+
+    private func returnSelection(_ targets: [NativeMassRecord.Target]) {
+        guard let navigationController, navigationController.topViewController === self else { return }
+        search.isActive = false
+        navigationController.popViewController(animated: false)
+        done(targets)
     }
 }
 
