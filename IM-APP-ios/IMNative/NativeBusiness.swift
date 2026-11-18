@@ -111,6 +111,7 @@ struct NativeUpload: Decodable {
 final class NativeBusinessContext {
     let api: APIClient
     let configuration: APIConfiguration
+    private let uploadTransport = URLSessionTransport()
     private var authentication: AuthResult
     var accessToken: String { authentication.accessToken }
     var refreshToken: String { authentication.refreshToken }
@@ -198,26 +199,19 @@ final class NativeBusinessContext {
         if let cursor = cursor, !cursor.isEmpty { query.append(URLQueryItem(name: "cursor", value: cursor)) }
         return try await request("contacts", query: query)
     }
-    func upload(data: Data, filename: String, contentType: String, purpose: String) async throws -> NativeFileObject {
+    func upload(data: Data, filename: String, contentType: String, purpose: String, completing: () -> Void = {}) async throws -> NativeFileObject {
         let upload: NativeUpload = try await request("files/uploads", method: "POST", body: ["purpose": .string(purpose), "fileName": .string(filename), "contentType": .string(contentType), "size": .number(Double(data.count))])
-        let rawURL = upload.formUrl ?? upload.uploadUrl
-        guard let url = URL(string: rawURL), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil else { throw APIError.invalidResponse }
-        var request = URLRequest(url: url); request.timeoutInterval = 60
-        // 对象存储请求单独构造，绝不附加业务 Authorization。
-        if let fields = upload.formData, !fields.isEmpty {
-            let boundary = "im-" + UUID().uuidString
-            request.httpMethod = "POST"; request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-            var payload = Data()
-            for key in fields.keys.sorted() {
-                guard !key.contains("\r"), !key.contains("\n"), !key.contains("\"") else { throw APIError.invalidResponse }
-                payload.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"\r\n\r\n\(fields[key]!)\r\n".utf8))
-            }
-            payload.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\nContent-Type: \(contentType)\r\n\r\n".utf8))
-            payload.append(data); payload.append(Data("\r\n--\(boundary)--\r\n".utf8)); request.httpBody = payload
-        } else { request.httpMethod = "PUT"; request.httpBody = data; request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
-        for (key, value) in upload.headers ?? [:] where key.lowercased() != "authorization" { request.setValue(value, forHTTPHeaderField: key) }
-        let response = try await URLSessionTransport().send(request)
+        guard let url = URL(string: upload.formUrl ?? upload.uploadUrl) else { throw APIError.invalidResponse }
+        let preparation = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try ObjectStorageUpload.encode(url: url, data: data, contentType: contentType, fields: upload.formData, headers: upload.headers ?? [:])
+        }
+        let encoded = try await withTaskCancellationHandler(operation: { try await preparation.value }, onCancel: { preparation.cancel() })
+        try Task.checkCancellation(); guard ownerIsActive() else { throw APIError.cancelled }
+        let response = try await uploadTransport.upload(encoded.request, body: encoded.body)
         guard (200..<300).contains(response.status) else { throw APIError.httpStatus(response.status) }
-        return try await self.request("files/uploads/complete", method: "POST", body: ["fileId": .string(upload.file.id)])
+        try Task.checkCancellation(); guard ownerIsActive() else { throw APIError.cancelled }
+        completing()
+        return try await request("files/uploads/complete", method: "POST", body: ["fileId": .string(upload.file.id)])
     }
 }

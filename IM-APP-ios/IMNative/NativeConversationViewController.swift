@@ -106,7 +106,16 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var mentionDraft: [NativeGroupMember] = []; private var mentionAll = false
     private var multiSelecting = false; private var selectedIDs = Set<String>()
     private var dateSeparators: [String: String] = [:]; private let latest = UIButton(type: .system)
-    private var historyTask: Task<Void, Never>?; private var actionTask: Task<Void, Never>?; private var roleTask: Task<Void, Never>?
+    private var historyTask: Task<Void, Never>?
+    private var actionTask: Task<Void, Never>? {
+        didSet {
+            if actionTask == nil { actionProgress.hide() }
+            else { actionProgress.show(in: self) }
+        }
+    }
+    private var roleTask: Task<Void, Never>?
+    private let actionProgress = NativeActionProgress()
+    private let detailsProgress = NativeActionProgress()
     private var detailsTask: Task<Void, Never>?
     private var canManageGroup = false; private var autoHistoryAllowed = true; private var processingCards = Set<String>()
     private var lastHistoryOffset = CGFloat.zero
@@ -144,6 +153,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         observer = nil; loadOperation = nil; loading = false; refresh.endRefreshing()
         emojiPanel?.setVisible(false); historyTask?.cancel(); historyTask = nil; roleTask?.cancel(); actionTask?.cancel()
         stopVoiceAudio(); readTask?.cancel(); readTask = nil
+        actionProgress.hide(); detailsProgress.hide()
         detailsTask?.cancel()
         detailsTask = nil
     }
@@ -560,6 +570,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             if messages.contains(where: { MessageMenuCapabilities(contentType: $0.contentType, status: $0.status).canRecall(isMine: $0.senderID == service.imUserID, canManageSender: canManageGroup) }) { actions.append(NativeMenuItem(title: "撤回", destructive: true, action: { [weak self] in self?.recallMessages(messages) })) }
             showAnchoredNativeMenu(anchor: more, items: actions); return
         }
+        let current = service.conversations.first { $0.id == conversation.id } ?? conversation
         showAnchoredNativeMenu(anchor: more, items: [
             NativeMenuItem(title: "核对待发消息", action: { [weak self] in
                 guard let self = self else { return }
@@ -568,8 +579,8 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             NativeMenuItem(title: "加载更早消息", action: { [weak self] in Task { await self?.loadOlder() } })
             ,NativeMenuItem(title: "聊天资料", action: { [weak self] in self?.openDetails() })
             ,NativeMenuItem(title: "查找聊天记录", action: { [weak self] in guard let self = self else { return }; self.navigationController?.pushViewController(NativeSearchController(service: self.service, conversation: self.conversation), animated: true) })
-            ,NativeMenuItem(title: conversation.pinned ? "取消置顶" : "置顶聊天", action: { [weak self] in guard let self = self else { return }; Task { do { try await self.service.pin(self.conversation) } catch { self.showNativeNotice(error.localizedDescription) } } })
-            ,NativeMenuItem(title: conversation.muted ? "开启消息提醒" : "消息免打扰", action: { [weak self] in guard let self = self else { return }; Task { do { try await self.service.mute(self.conversation) } catch { self.showNativeNotice(error.localizedDescription) } } })
+            ,NativeMenuItem(title: current.pinned ? "取消置顶" : "置顶聊天", action: { [weak self] in guard let self = self else { return }; self.runAction { try await self.service.setPinned(!current.pinned, conversation: current) } })
+            ,NativeMenuItem(title: current.muted ? "取消免打扰" : "消息免打扰", action: { [weak self] in guard let self = self else { return }; self.runAction { try await self.service.setMuted(!current.muted, conversation: current) } })
             ,NativeMenuItem(title: "清空聊天记录", destructive: true, action: { [weak self] in self?.confirmClear() })
         ])
     }
@@ -681,28 +692,22 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         }
     }
     private func addMessageSticker(_ message: ChatTextItem) {
-        guard actionTask == nil, let media = message.media, media.kind == 102 else { return }
-        actionTask = Task { [weak self] in
-            guard let self = self else { return }; defer { self.actionTask = nil }
-            do {
-                let local = self.service.ownedImageURL(for: message)
-                let file: URL
-                if let local = local { file = local }
-                else { guard let url = self.service.business.media.absolute(self.service.business.media.original(media.url)), url.scheme == "https" else { throw APIError.invalidResponse }; file = try await NativeBoundedDownload(limit: 20 * 1024 * 1024).download(url) }
-                defer { if local == nil { try? FileManager.default.removeItem(at: file) } }
-                let payload = try await Task.detached(priority: .userInitiated) { () -> (Data, String, String) in
-                    let size = (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? Int.max
-                    guard size > 0, size <= 20 * 1024 * 1024, let source = CGImageSourceCreateWithURL(file as CFURL, nil), let raw = CGImageSourceGetType(source) as String?, let type = UTType(raw), type.conforms(to: .image) else { throw APIError.invalidResponse }
-                    return (try Data(contentsOf: file, options: .mappedIfSafe), type.preferredMIMEType ?? "image/png", type.preferredFilenameExtension ?? "png")
-                }.value
-                try Task.checkCancellation(); guard self.service.isActive else { throw APIError.cancelled }
-                let uploaded = try await self.service.business.upload(data: payload.0, filename: "sticker." + payload.2, contentType: payload.1, purpose: "sticker")
-                try Task.checkCancellation(); guard self.service.isActive else { throw APIError.cancelled }
-                try await self.service.business.change("stickers", body: ["fileId": .string(uploaded.id)])
-                self.emojiPanel.reloadStickers(); self.showNativeNotice("已加入表情包。")
-            } catch { if !Task.isCancelled, self.service.isActive { self.showNativeNotice(error.localizedDescription) } }
+        runAction { [self] in
+            try await NativeStickerAddition.add(message, service: service) { actionProgress.update($0) }
+            emojiPanel.reloadStickers(); showNativeNotice("已加入表情包。")
         }
     }
+
+    private func runAction(_ work: @escaping () async throws -> Void) {
+        guard actionTask == nil else { return }
+        actionTask = Task { [weak self] in
+            guard let self = self else { return }
+            defer { self.actionTask = nil }
+            do { try Task.checkCancellation(); try await work() }
+            catch { if !Task.isCancelled, self.service.isActive, self.view.window != nil { self.showNativeNotice(error.localizedDescription) } }
+        }
+    }
+
     private func chooseSenderMute(groupID: String, user: String, muted: Bool) {
         func apply(_ seconds: Int?) {
             guard actionTask == nil else { return }
@@ -982,20 +987,21 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         alert.addAction(UIAlertAction(title: "收藏", style: .default) { [weak self] _ in
             guard let self = self else { return }
-            Task { do {
+            self.runAction {
                 let type = [102: "image", 103: "voice", 104: "video", 105: "file"][item.contentType] ?? "text"
                 let content = try FavoriteContent.snapshot(type: type, media: item.media, text: item.text)
                 try await self.service.business.change("favorites", body: ["messageId": .string(item.id), "type": .string(type), "content": .string(content), "senderId": .string(GroupVisibility.businessUserID(item.senderID)), "conversationId": .string(self.conversation.id)])
                 self.showNativeNotice("已收藏。")
-            } catch { self.showNativeNotice(error.localizedDescription) } }
+            }
         })
         present(alert, animated: true)
     }
     @objc private func openDetails() {
-        guard !multiSelecting, detailsTask == nil else { return }
+        guard !multiSelecting, detailsTask == nil, actionTask == nil else { return }
+        detailsProgress.show(in: self, text: "正在读取聊天详情…")
         detailsTask = Task { [weak self] in
             guard let self = self else { return }
-            defer { self.detailsTask = nil }
+            defer { self.detailsTask = nil; self.detailsProgress.hide() }
             do {
                 let id = try await self.service.businessPeerID(self.conversation)
                 try Task.checkCancellation()

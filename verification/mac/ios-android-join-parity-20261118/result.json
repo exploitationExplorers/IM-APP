@@ -1,0 +1,31 @@
+{
+  "date": "2026-11-18",
+  "base": "08fbf23",
+  "androidCommits": [
+    "24ee6d3",
+    "0c5d0fc"
+  ],
+  "coreTests": {
+    "executed": 165,
+    "failures": 0
+  },
+  "projectChecks": {
+    "executed": 8,
+    "failures": 0
+  },
+  "simulatorBuild": "passed with local ad-hoc signing",
+  "simulator": "IM-iOS-Refactor-20261117 / iOS 27.2",
+  "runtime": {
+    "sdk": "connected, locally readable, sync completed",
+    "home": "pending dots visible on two groups; total badge 4",
+    "groupDetail": "pending badge 2; two pending rows",
+    "returnHome": "pending markers preserved"
+  },
+  "independentReadOnlyReview": "PASS",
+  "notVerified": [
+    "real incoming new application from second account",
+    "approval/rejection and membership writes",
+    "iPhone device, APNs, background delivery",
+    "Release/Archive"
+  ]
+}

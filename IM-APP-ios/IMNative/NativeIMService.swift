@@ -135,6 +135,7 @@ final class NativeIMService {
     private(set) var lastSendErrorCode: Int?
     private(set) var imUserID = ""
     private(set) var conversations: [NativeConversation] = []
+    private(set) var groupJoinRequestsRevision = UUID()
     private(set) var conversationsEnd = false
     private(set) var loadingConversations = false
     private var conversationOffset = 0
@@ -1068,8 +1069,27 @@ final class NativeIMService {
     }
     func pin(_ conversation: NativeConversation) async throws { try await setPinned(!conversation.pinned, conversation: conversation) }
     func mute(_ conversation: NativeConversation) async throws { try await setMuted(!conversation.muted, conversation: conversation) }
-    func setPinned(_ value: Bool, conversation: NativeConversation) async throws { let current = generation; _ = try await call { bridge.pin(conversation.id, pinned: value, completion: $0) }; try require(current); await loadConversations(reset: true) }
-    func setMuted(_ value: Bool, conversation: NativeConversation) async throws { let current = generation; _ = try await call { bridge.mute(conversation.id, muted: value, completion: $0) }; try require(current); await loadConversations(reset: true) }
+    func setPinned(_ value: Bool, conversation: NativeConversation) async throws {
+        let current = generation
+        _ = try await call { bridge.pin(conversation.id, pinned: value, completion: $0) }
+        try require(current); try await refreshConversation(conversation, generation: current)
+    }
+    func setMuted(_ value: Bool, conversation: NativeConversation) async throws {
+        let current = generation
+        _ = try await call { bridge.mute(conversation.id, muted: value, completion: $0) }
+        try require(current); try await refreshConversation(conversation, generation: current)
+    }
+    private func refreshConversation(_ conversation: NativeConversation, generation current: UUID) async throws {
+        let before = conversations.first { $0.id == conversation.id }
+        let result = try await call { bridge.conversation(target: conversation.target, type: conversation.type, completion: $0) }
+        try require(current)
+        // 设置只查询当前房间；等待期间有新事件时，优先保留事件里的完整会话。
+        guard conversations.first(where: { $0.id == conversation.id }) == before,
+              let updated = NativeConversation(result), updated.id == conversation.id else { return }
+        if loadingConversations { conversationChangesDuringRequest.append(updated) }
+        if conversationStartup.receive([updated]) { mergeConversations([updated]) }
+        publish()
+    }
     func hide(_ conversation: NativeConversation) async throws { let current = generation; _ = try await call { bridge.hide(conversation.id, completion: $0) }; try require(current); if loadingConversations { conversationHiddenDuringRequest.insert(conversation.id) }; conversations.removeAll { $0.id == conversation.id }; publish() }
     func search(_ keyword: String, conversation: NativeConversation?, types: [Int] = [], page: Int = 1) async throws -> [NativeSearchHit] {
         try await searchPage(keyword, conversation: conversation, types: types, page: page).items
@@ -1442,7 +1462,11 @@ final class NativeIMService {
                 guard let self = self, self.isActive, self.generation == current, self.syncEventSequence == sequence else { return }
                 await self.finishSync(.timedOut)
             }
+        case "businessNotification":
+            guard GroupJoinRequestNotice(payload: payload) != nil else { return }
+            groupJoinRequestsRevision = UUID()
         case "syncFinish":
+            groupJoinRequestsRevision = UUID()
             resetEmptyHistoryAfterSync()
             await finishSync(.completed)
             for request in Array(historyRequests.values) { scheduleHistoryRefresh(request.conversation, cursor: request.cursor) }

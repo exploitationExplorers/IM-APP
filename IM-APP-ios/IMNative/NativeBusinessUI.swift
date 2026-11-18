@@ -18,7 +18,7 @@ class NativeBusinessListController: UITableViewController {
     let context: NativeBusinessContext
     var sections: [[NativeBusinessRow]] = []
     var sectionTitles: [String] = []
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let progress = NativeActionProgress()
     private var workTask: Task<Void, Never>?
     private(set) var working = false
     init(title: String, context: NativeBusinessContext, style: UITableView.Style = .grouped) { self.context = context; super.init(style: style); self.title = title }
@@ -31,11 +31,11 @@ class NativeBusinessListController: UITableViewController {
         tableView.register(NativeBusinessCell.self, forCellReuseIdentifier: "original-business-row")
         tableView.keyboardDismissMode = .onDrag
         refreshControl = UIRefreshControl(); refreshControl?.addTarget(self, action: #selector(reloadFromPull), for: .valueChanged)
-        tableView.backgroundView = spinner
     }
-    override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if !(parent is SampleMainViewController) { navigationController?.setNavigationBarHidden(false, animated: animated) }; reloadContent() }
+    override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if !(parent is SampleMainViewController) { navigationController?.setNavigationBarHidden(false, animated: animated) }; if working { progress.show(in: self) }; reloadContent() }
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        progress.hide()
         if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true { workTask?.cancel() }
     }
     func reloadContent() {}
@@ -45,10 +45,10 @@ class NativeBusinessListController: UITableViewController {
         self.sections = sections; sectionTitles = titles; tableView.reloadData()
     }
     func perform(_ work: @escaping () async throws -> Void) {
-        guard !working else { return }; working = true; spinner.startAnimating()
+        guard !working else { return }; working = true; progress.show(in: self)
         workTask = Task { [weak self] in
             guard let self = self else { return }
-            defer { self.workTask = nil; self.working = false; self.spinner.stopAnimating(); self.refreshControl?.endRefreshing() }
+            defer { self.workTask = nil; self.working = false; self.progress.hide(); self.refreshControl?.endRefreshing() }
             do { try Task.checkCancellation(); try await work() } catch { if !Task.isCancelled, self.view.window != nil { self.showNativeNotice(error.localizedDescription) } }
         }
     }
@@ -102,6 +102,8 @@ private final class NativeParityToggle: UIControl {
     override init(frame: CGRect) {
         super.init(frame: frame); isAccessibilityElement = true; accessibilityTraits = .button
         addSubview(track); track.addSubview(dot); dot.backgroundColor = .white
+        // 装饰视图不能截走 UIControl 的触摸，否则只有轨道外的留白能切换。
+        track.isUserInteractionEnabled = false
         addTarget(self, action: #selector(toggle), for: .touchUpInside)
     }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }

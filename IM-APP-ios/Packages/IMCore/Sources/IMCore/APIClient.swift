@@ -93,6 +93,12 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         return HTTPResponse(status: response.statusCode, body: data)
     }
+
+    public func upload(_ request: URLRequest, body: Data) async throws -> HTTPResponse {
+        let (data, response) = try await session.upload(for: request, from: body)
+        guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        return HTTPResponse(status: response.statusCode, body: data)
+    }
 }
 
 public struct APIClient: Sendable {

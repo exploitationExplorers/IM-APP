@@ -4,7 +4,7 @@
 #import <OpenIMSDK/CallbackProxy.h>
 @import OpenIMCore;
 
-@interface NativeOpenIMBridge () <OIMConversationListener, OIMAdvancedMsgListener>
+@interface NativeOpenIMBridge () <OIMConversationListener, OIMAdvancedMsgListener, OIMCustomBusinessListener>
 @property(nonatomic, copy, nullable) NativeIMEvent events;
 @property(nonatomic, assign) BOOL alive;
 @property(nonatomic, assign) BOOL loginInFlight;
@@ -147,6 +147,7 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
     if (initialized) {
         [OIMManager.callbacker addConversationListener:self];
         [OIMManager.callbacker addAdvancedMsgListener:self];
+        [OIMManager.callbacker addCustomBusinessListener:self];
     } else { self.alive = NO; }
     return initialized;
 }
@@ -177,6 +178,7 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
     self.events = nil;
     [OIMManager.callbacker removeConversationListener:self];
     [OIMManager.callbacker removeAdvancedMsgListener:self];
+    [OIMManager.callbacker removeCustomBusinessListener:self];
     [OIMManager.manager unInitSDK];
     OIMManager.manager.token = nil;
     return YES;
@@ -389,6 +391,10 @@ static NSArray *ConversationList(NSArray<OIMConversationInfo *> *list) {
 }
 
 - (void)onSyncServerStart:(BOOL)reInstall { [self emit:@"syncStart" payload:@{}]; }
+- (void)onRecvCustomBusinessMessage:(NSDictionary<NSString *, id> *)businessMessage {
+    if ([businessMessage isKindOfClass:NSDictionary.class]) [self emit:@"businessNotification" payload:businessMessage];
+}
+
 - (void)onSyncServerFinish:(BOOL)reInstall { [self emit:@"syncFinish" payload:@{}]; }
 - (void)onSyncServerFailed:(BOOL)reInstall { [self emit:@"syncFailed" payload:@{}]; }
 - (void)onSyncServerProgress:(NSInteger)progress { [self emit:@"syncProgress" payload:@{@"progress": @(progress)}]; }

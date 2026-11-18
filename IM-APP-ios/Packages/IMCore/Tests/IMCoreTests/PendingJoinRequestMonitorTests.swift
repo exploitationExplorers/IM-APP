@@ -90,4 +90,102 @@ final class PendingJoinRequestMonitorTests: XCTestCase {
         monitor.stop()
         driver.pauses.removeFirst().resume()
     }
+
+    private final class SnapshotDriver {
+        var requests: [CheckedContinuation<PendingJoinRequestSnapshot, Error>] = []
+        var pauses: [CheckedContinuation<Void, Never>] = []
+        var onRequest: (() -> Void)?
+        var onPause: (() -> Void)?
+
+        func load() async throws -> PendingJoinRequestSnapshot {
+            try await withCheckedThrowingContinuation { continuation in
+                requests.append(continuation)
+                onRequest?()
+            }
+        }
+
+        func pause() async {
+            await withCheckedContinuation { continuation in
+                pauses.append(continuation)
+                onPause?()
+            }
+        }
+    }
+
+    private func snapshot(_ character: Character) throws -> PendingJoinRequestSnapshot {
+        let id = "sg_" + String(repeating: String(character), count: 32)
+        let data = try JSONSerialization.data(withJSONObject: [["groupId": "public", "groupConversationId": id, "count": 2]])
+        return PendingJoinRequestSnapshot(rows: try JSONDecoder().decode([PendingGroupJoinCount].self, from: data))
+    }
+
+    func testRefreshInterruptsPausePublishesMovedGroupAndKeepsSnapshotOnFailure() async throws {
+        let driver = SnapshotDriver()
+        let monitor = PendingJoinRequestMonitor(loadSnapshot: { try await driver.load() }, pause: { await driver.pause() })
+        let first = expectation(description: "initial request")
+        driver.onRequest = { first.fulfill() }
+        monitor.start()
+        await fulfillment(of: [first], timeout: 2)
+        let initialPause = expectation(description: "initial pause")
+        driver.onPause = { initialPause.fulfill() }
+        driver.requests.removeFirst().resume(returning: try snapshot("a"))
+        await fulfillment(of: [initialPause], timeout: 2)
+
+        let refreshed = expectation(description: "refresh without waiting interval")
+        driver.onRequest = { refreshed.fulfill() }
+        monitor.refresh()
+        await fulfillment(of: [refreshed], timeout: 2)
+        // The cancelled interval may finish late; it cannot create another request.
+        driver.pauses.removeFirst().resume()
+        let moved = expectation(description: "same count different group publishes")
+        monitor.onChange = { moved.fulfill() }
+        let movedPause = expectation(description: "pause after moved group")
+        driver.onPause = { movedPause.fulfill() }
+        let expected = try snapshot("b")
+        driver.requests.removeFirst().resume(returning: expected)
+        await fulfillment(of: [moved, movedPause], timeout: 2)
+        XCTAssertEqual(monitor.snapshot, expected)
+
+        let failedRequest = expectation(description: "request that fails")
+        driver.onRequest = { failedRequest.fulfill() }
+        monitor.refresh()
+        await fulfillment(of: [failedRequest], timeout: 2)
+        driver.pauses.removeFirst().resume()
+        let failed = expectation(description: "failure published")
+        monitor.onChange = { failed.fulfill() }
+        let failurePause = expectation(description: "failure keeps polling")
+        driver.onPause = { failurePause.fulfill() }
+        driver.requests.removeFirst().resume(throwing: Failure.offline)
+        await fulfillment(of: [failed, failurePause], timeout: 2)
+        XCTAssertEqual(monitor.snapshot, expected)
+        XCTAssertNotNil(monitor.errorDescription)
+        monitor.stop()
+        driver.pauses.removeFirst().resume()
+    }
+
+    func testNotificationBurstCoalescesWhileLoadingAndStopRejectsLateResult() async throws {
+        let driver = SnapshotDriver()
+        let monitor = PendingJoinRequestMonitor(loadSnapshot: { try await driver.load() }, pause: { await driver.pause() })
+        let first = expectation(description: "first request")
+        driver.onRequest = { first.fulfill() }
+        monitor.start()
+        await fulfillment(of: [first], timeout: 2)
+        for _ in 0..<20 { monitor.refresh() }
+        let followup = expectation(description: "one coalesced followup")
+        followup.assertForOverFulfill = true
+        driver.onRequest = { followup.fulfill() }
+        driver.requests.removeFirst().resume(returning: try snapshot("a"))
+        await fulfillment(of: [followup], timeout: 2)
+        XCTAssertEqual(driver.requests.count, 1)
+        XCTAssertTrue(driver.pauses.isEmpty)
+        let beforeStop = monitor.snapshot
+        monitor.stop()
+        monitor.onChange = { XCTFail("late response after stop") }
+        driver.onRequest = { XCTFail("refresh cannot restart a stopped monitor") }
+        monitor.refresh()
+        driver.requests.removeFirst().resume(returning: try snapshot("b"))
+        // Drain queued main actor work deterministically, without a timed sleep.
+        await Task.yield()
+        XCTAssertEqual(monitor.snapshot, beforeStop)
+    }
+
 }

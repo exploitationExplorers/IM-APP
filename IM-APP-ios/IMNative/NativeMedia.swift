@@ -128,6 +128,15 @@ actor NativeImageCache {
     nonisolated func peek(identity: String, edge: Int) -> UIImage? { memory.values.object(forKey: "\(edge):\(resourceKey(identity))" as NSString) }
     private func record(_ key: String, _ tier: String, _ start: Date) { metrics.append("\(key.prefix(10)) \(tier) \(Int(Date().timeIntervalSince(start) * 1000))ms"); if metrics.count > 60 { metrics.removeFirst(metrics.count - 60) } }
     func diagnosticLines() -> [String] { ["媒体缓存采样（当前进程，非现网性能验收）"] + metrics }
+    /// 仅复用原图对应的编码文件，不拿列表缩略图代替原图。返回独立临时副本，避免被 LRU 清理。
+    func copyOriginal(identity: String) throws -> URL? {
+        try Task.checkCancellation()
+        let source = directory.appendingPathComponent(resourceKey(identity))
+        guard valid(source) else { return nil }
+        let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.copyItem(at: source, to: copy)
+        return copy
+    }
     func image(_ url: URL, edge: Int, identity: String) async throws -> UIImage {
         guard url.scheme == "https" else { throw APIError.invalidResponse }; try Task.checkCancellation()
         let started = Date(), expectedEpoch = epoch

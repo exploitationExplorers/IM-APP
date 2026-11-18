@@ -1,0 +1,58 @@
+Simulator Debug; local ad-hoc signing enabled; OpenIMSDK 3.8.3-hotfix.15
+** BUILD SUCCEEDED **
+
+Compiler warnings (existing paths; no warning was emitted on new code):
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeQRScannerController.swift:18:58: warning: conformance of 'NativeQRScannerController' to protocol 'AVCaptureMetadataOutputObjectsDelegate' crosses into main actor-isolated code and can cause data races; this is an error in the Swift 6 language mode [#ConformanceIsolation]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeMassAndEmotions.swift:134:139: warning: conformance of 'NativeMassComposeController' to protocol 'AVAudioRecorderDelegate' crosses into main actor-isolated code and can cause data races; this is an error in the Swift 6 language mode [#ConformanceIsolation]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/SampleMainViewController.swift:246:13: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:292:101: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:345:105: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:441:115: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:633:99: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:636:122: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:643:106: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:746:99: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:768:172: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:797:160: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:931:93: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1030:75: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1033:125: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1054:103: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1068:72: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1072:186: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1073:185: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1074:154: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1084:166: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1104:114: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1155:234: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1215:133: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1245:122: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1325:93: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1580:87: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1587:183: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeIMService.swift:1591:76: warning: passing non-Sendable parameter '$0' to function expecting a '@Sendable' closure
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeContactsViewController.swift:332:475: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeBusinessUI.swift:247:179: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeBusiness.swift:136:44: warning: conformance of 'T' to protocol 'Decodable' may be isolated and cannot be passed to @concurrent context [#IsolatedConformances]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeBusiness.swift:141:48: warning: conformance of 'T' to protocol 'Decodable' may be isolated and cannot be passed to @concurrent context [#IsolatedConformances]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeAuthFlowController.swift:101:210: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeAuthFlowController.swift:128:121: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeAuthFlowController.swift:164:120: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/LoginViewController.swift:159:13: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/SampleConversationViewController.swift:361:13: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeSearchViewController.swift:27:237: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeSearchViewController.swift:28:102: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeMineViewController.swift:51:33: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeMineViewController.swift:203:228: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeQRScannerController.swift:48:83: warning: capture of 'session' with non-Sendable type 'AVCaptureSession' in a '@Sendable' closure [#SendableClosureCaptures]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeQRScannerController.swift:2:1: warning: add '@preconcurrency' to suppress 'Sendable'-related warnings from module 'AVFoundation' [#AddPreconcurrencyImport]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeQRScannerController.swift:55:17: warning: capture of 'session' with non-Sendable type 'AVCaptureSession' in a '@Sendable' closure [#SendableClosureCaptures]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeQRScannerController.swift:66:177: warning: capture of 'session' with non-Sendable type 'AVCaptureSession' in a '@Sendable' closure [#SendableClosureCaptures]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeQRScannerController.swift:89:49: warning: capture of 'session' with non-Sendable type 'AVCaptureSession' in a '@Sendable' closure [#SendableClosureCaptures]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeMassAndEmotions.swift:167:82: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeMassAndEmotions.swift:170:326: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeMassAndEmotions.swift:170:418: warning: 'titleEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeConversationViewController.swift:263:82: warning: 'imageEdgeInsets' was deprecated in iOS 15.0: This property is ignored when using UIButtonConfiguration [#DeprecatedDeclaration]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeConversationViewController.swift:755:123: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeConversationViewController.swift:769:258: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+/Users/Admin1/Developer/IM-APP-github/IM-APP-ios/IMNative/NativeConversationViewController.swift:954:290: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]

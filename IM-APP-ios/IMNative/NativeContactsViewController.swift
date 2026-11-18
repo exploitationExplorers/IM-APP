@@ -245,7 +245,23 @@ final class NativeContactController: NativeBusinessListController {
     }
     private static func date(_ raw: String) -> String { let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; guard let date = formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else { return raw }; let display = DateFormatter(); display.dateFormat = "yyyy-MM-dd HH:mm"; return display.string(from: date) }
     @objc private func showMore() { showAnchoredNativeMenu(anchor: more, items: [NativeMenuItem(title: contact?.isBlocked == true ? "解除黑名单" : "加入黑名单", action: { [weak self] in self?.setBlocked(self?.contact?.isBlocked != true) }), NativeMenuItem(title: "删除好友", destructive: true, action: { [weak self] in self?.deleteFriend() })], width: 320) }
-    private func setConversation(_ value: Bool, pinned: Bool) { guard let chat = conversation else { return }; perform { [self] in do { if pinned { try await service.setPinned(value, conversation: chat) } else { try await service.setMuted(value, conversation: chat) }; scheduleReload() } catch { scheduleReload(); throw error } } }
+    private func setConversation(_ value: Bool, pinned: Bool) {
+        guard let chat = conversation else { return }
+        perform { [self] in
+            if pinned { try await service.setPinned(value, conversation: chat) }
+            else { try await service.setMuted(value, conversation: chat) }
+            try Task.checkCancellation()
+            guard let updated = service.conversations.first(where: { $0.id == chat.id }) else { return }
+            conversation = updated
+            for section in sections.indices {
+                for row in sections[section].indices {
+                    if sections[section][row].title == "消息免打扰" { sections[section][row].checked = updated.muted }
+                    if sections[section][row].title == "置顶聊天" { sections[section][row].checked = updated.pinned }
+                }
+            }
+            tableView.reloadData()
+        }
+    }
     private func editRemark() { edit(title: "设置备注", value: contact?.remark ?? "") { [weak self] value in guard let self = self else { return }; try await self.context.change("contacts/\(self.userID)", method: "PATCH", body: ["remark": .string(value)]) } }
     private func setBlocked(_ value: Bool) { confirm(value ? "加入黑名单后将隐藏与他的对话，确认继续？" : "确认解除黑名单？", destructiveTitle: value ? "加入" : "解除") { [weak self] in guard let self = self else { return }; self.perform { let chat = self.conversation; try await self.context.change("contacts/\(self.userID)/block", method: value ? "POST" : "DELETE", body: value ? [:] : nil); if value, let chat = chat { do { try await self.service.hide(chat) } catch { self.showNativeNotice("黑名单已更新，本机对话隐藏失败：" + error.localizedDescription) } } else { await self.service.loadConversations(reset: true) }; self.scheduleReload() } } }
     private func deleteFriend() { confirm("删除后将不再显示该联系人，并删除与他的对话。", destructiveTitle: "删除好友") { [weak self] in guard let self = self else { return }; self.perform { let chat = self.conversation; try await self.context.change("contacts/\(self.userID)", method: "DELETE", body: nil); if let chat = chat { do { try await self.service.hide(chat) } catch { self.showNativeNotice("好友已删除，本机对话隐藏失败：" + error.localizedDescription); self.isFriend = false; self.scheduleReload(); return } }; try Task.checkCancellation(); self.navigationController?.popToRootViewController(animated: true) } } }

@@ -45,6 +45,8 @@
 		D10000000000000000000004 /* NativeCountBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000004 /* NativeCountBadge.swift */; };
 		D10000000000000000000005 /* NativeForwardPickerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005 /* NativeForwardPickerController.swift */; };
 		D10000000000000000000006 /* NativeMessageTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000006 /* NativeMessageTools.swift */; };
+		D10000000000000000000007 /* NativeActionProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000007 /* NativeActionProgress.swift */; };
+		D10000000000000000000008 /* NativeStickerAddition.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000008 /* NativeStickerAddition.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -130,6 +132,8 @@
 		D20000000000000000000004 /* NativeCountBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCountBadge.swift; sourceTree = "<group>"; };
 		D20000000000000000000005 /* NativeForwardPickerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeForwardPickerController.swift; sourceTree = "<group>"; };
 		D20000000000000000000006 /* NativeMessageTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMessageTools.swift; sourceTree = "<group>"; };
+		D20000000000000000000007 /* NativeActionProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeActionProgress.swift; sourceTree = "<group>"; };
+		D20000000000000000000008 /* NativeStickerAddition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStickerAddition.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -204,6 +208,8 @@
 				A20000000000000000000010 /* Assets.xcassets */,
 				A20000000000000000000011 /* Legal */,
 				A20000000000000000000012 /* NativeIMService.swift */,
+				D20000000000000000000007 /* NativeActionProgress.swift */,
+				D20000000000000000000008 /* NativeStickerAddition.swift */,
 				D20000000000000000000006 /* NativeMessageTools.swift */,
 				D20000000000000000000005 /* NativeForwardPickerController.swift */,
 				D20000000000000000000004 /* NativeCountBadge.swift */,
@@ -432,6 +438,8 @@
 				A10000000000000000000007 /* LegalViewController.swift in Sources */,
 				A10000000000000000000008 /* SampleMainViewController.swift in Sources */,
 				A10000000000000000000011 /* NativeIMService.swift in Sources */,
+				D10000000000000000000007 /* NativeActionProgress.swift in Sources */,
+				D10000000000000000000008 /* NativeStickerAddition.swift in Sources */,
 				D10000000000000000000006 /* NativeMessageTools.swift in Sources */,
 				D10000000000000000000005 /* NativeForwardPickerController.swift in Sources */,
 				D10000000000000000000004 /* NativeCountBadge.swift in Sources */,

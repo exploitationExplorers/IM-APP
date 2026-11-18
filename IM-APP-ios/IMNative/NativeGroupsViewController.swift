@@ -85,7 +85,7 @@ final class NativeContactPickerController: NativeBusinessListController, UISearc
 final class NativeGroupController: NativeBusinessListController, PHPickerViewControllerDelegate {
     private let service: NativeIMService; private let groupID: String; private var group: NativeGroup?
     private var conversation: NativeConversation?; private var previewMembers: [NativeGroupMember] = []; private var memberError: String?
-    private lazy var pendingJoins = NativePendingJoinRequests(context: context, groupID: groupID)
+    private lazy var pendingJoins = NativePendingJoinRequests(service: service, groupID: groupID)
     private var returningFromInvitationPicker = false
     private struct Dissolved: Decodable { let id: String; let name: String; let avatar: String; let status: String }
     init(service: NativeIMService, groupID: String) { self.service = service; self.groupID = groupID; super.init(title: "群组详情", context: service.business) }
@@ -186,7 +186,23 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
     }
     override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); if let g = group, abs((tableView.tableHeaderView?.bounds.width ?? 0) - view.bounds.width) > 0.5 { buildMembers(g) } }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell { let cell = super.tableView(tableView, cellForRowAt: indexPath); if sections[indexPath.section][indexPath.row].title == "群号" { let copy = UIButton(type: .system); copy.setImage(UIImage(systemName: "doc.on.doc"), for: .normal); copy.frame = CGRect(x: 0, y: 0, width: 38, height: 38); copy.accessibilityLabel = "复制群号"; copy.addAction(UIAction { [weak self] _ in guard let self = self else { return }; UIPasteboard.general.string = self.group?.publicId ?? self.groupID }, for: .touchUpInside); cell.accessoryView = copy } else { cell.accessoryView = nil }; return cell }
-    private func changeConversation(_ value: Bool, pinned: Bool) { guard let chat = conversation else { return }; perform { [self] in defer { scheduleReload() }; if pinned { try await service.setPinned(value, conversation: chat) } else { try await service.setMuted(value, conversation: chat) } } }
+    private func changeConversation(_ value: Bool, pinned: Bool) {
+        guard let chat = conversation else { return }
+        perform { [self] in
+            if pinned { try await service.setPinned(value, conversation: chat) }
+            else { try await service.setMuted(value, conversation: chat) }
+            try Task.checkCancellation()
+            guard let updated = service.conversations.first(where: { $0.id == chat.id }) else { return }
+            conversation = updated
+            for section in sections.indices {
+                for row in sections[section].indices {
+                    if sections[section][row].title == "消息免打扰" { sections[section][row].checked = updated.muted }
+                    if sections[section][row].title == "置顶聊天" { sections[section][row].checked = updated.pinned }
+                }
+            }
+            tableView.reloadData()
+        }
+    }
     private func searchHistory() { guard let chat = conversation else { showNativeNotice("请先重试读取会话设置。"); return }; push(NativeSearchController(service: service, conversation: chat)) }
     private func clearHistory() { guard let chat = conversation else { showNativeNotice("请先重试读取会话设置。"); return }; confirm("清除后聊天记录无法恢复，是否继续？", destructiveTitle: "清除") { [weak self] in guard let self = self else { return }; self.perform { try await self.service.clearHistory(chat); self.scheduleReload() } } }
     private func changeJoinMode() { let dialog = UIAlertController(title: "入群方式", message: nil, preferredStyle: .actionSheet); for (label, mode) in [("公开群", "open"), ("私密群（需要审核）", "approval")] { dialog.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in self?.updateSetting("joinMode", .string(mode)) }) }; dialog.addAction(UIAlertAction(title: "取消", style: .cancel)); dialog.popoverPresentationController?.sourceView = tableView; present(dialog, animated: true) }

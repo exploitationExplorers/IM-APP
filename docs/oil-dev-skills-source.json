@@ -1,0 +1,40 @@
+{
+  "repository": "https://github.com/oil-oil/oil-dev-skills",
+  "commit": "a31f9876a4b02d816ec3a8727ac42108314fa989",
+  "installed": "2026-11-17",
+  "scope": "project .agents/skills",
+  "local_modifications": "none; upstream root LICENSE included per skill; adaptation in AGENTS.md",
+  "skills": [
+    {
+      "name": "oil-bug-fix",
+      "files": {
+        "LICENSE": "d44a3ca218007a85d3be41a0b76553d746e42336c7a63c6c6687d2619199c3c4",
+        "SKILL.md": "bb3dda98b498c049aea4e7413f1db026fcde43a37d16a2d063523a4614e59c17",
+        "evals/evals.json": "535d499aa5eabbc23c4d18233b564c9f9abfcd9a7262b7ab0668e2ec4de0ea1a",
+        "references/root-cause-methods.md": "c9b088cad86fa00fd4d539fb1ebbfa9fb61c124a7bb40ac0c87cf35d1705bae9"
+      }
+    },
+    {
+      "name": "oil-code-review",
+      "files": {
+        "LICENSE": "d44a3ca218007a85d3be41a0b76553d746e42336c7a63c6c6687d2619199c3c4",
+        "SKILL.md": "1de6d6e8302929de0927f6cd7ff69f3b28779b5fe1e822efd93b64125e87fcb9",
+        "references/review-playbook.md": "cedcb9bf80b07d7e25d065442ac9627179bab4a8ae8e394688ee47df5228644a",
+        "scripts/review_helper.py": "b4bf2ddc988d786597bacbe9e6fc8c6d7dd4e469b36712f80f9bf85e4151a7e4",
+        "tests/test_review_helper.py": "d22b920a96c53666290067f2c3575aa54d249795e3cbbb425617db8d829b2cd2"
+      }
+    },
+    {
+      "name": "oil-explore",
+      "files": {
+        "LICENSE": "d44a3ca218007a85d3be41a0b76553d746e42336c7a63c6c6687d2619199c3c4",
+        "SKILL.md": "108809023840e79b20fb6e71d8bee9eae570fe39f0c99ba2408f69da866f6a01",
+        "references/parallel-exploration.md": "e49c006a62354b40ecea99d9ce834df98a60b2e53e1ddaa7609da5c3f5371ff7",
+        "scripts/preferences.py": "8d700533aa2795cee4f931370a1c371827bf6dd87d3545f28521694984dc4d12",
+        "scripts/repo_map.py": "79e95f0f001443792a8d1a3c925a2b5f2e3cea83a603458a15707c4ab14b62ae",
+        "tests/test_preferences.py": "a0cdb242e26bff67e974df0bb412c488fb5c6296c3c7bf8e90924909b29fae2b",
+        "tests/test_repo_map.py": "eb2b57cc2e09ae96ea2802d3d1f5260d8e6772c8b8725611543233f968e2e58f"
+      }
+    }
+  ]
+}

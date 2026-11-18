@@ -6,10 +6,19 @@ private final class ConversationRowCell: UITableViewCell {
     let name = UILabel()
     let preview = UILabel()
     let time = UILabel()
+    private let muteLabel = UILabel()
     let line = UIView()
     private let unread = NativeCountBadge()
-    var unreadCount = 0 { didSet { unread.setCount(unreadCount, muted: muted); setNeedsLayout() } }
-    var muted = false { didSet { unread.setCount(unreadCount, muted: muted); setNeedsLayout() } }
+    var unreadCount = 0 { didSet { updateUnreadBadge() } }
+    var muted = false { didSet { updateUnreadBadge() } }
+    var joinRequestPending = false { didSet { updateUnreadBadge() } }
+
+    private func updateUnreadBadge() {
+        muteLabel.isHidden = !muted
+        unread.setCount(joinRequestPending ? 1 : unreadCount, muted: joinRequestPending || muted)
+        if joinRequestPending { unread.accessibilityLabel = "待审核入群申请" }
+        setNeedsLayout()
+    }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -17,13 +26,15 @@ private final class ConversationRowCell: UITableViewCell {
         avatar.image = NativeUITheme.image("uni_avatar_1")
         avatar.contentMode = .scaleAspectFill
         avatar.clipsToBounds = true
-        [avatar, name, preview, time, unread, line].forEach { contentView.addSubview($0) }
+        [avatar, name, preview, time, muteLabel, unread, line].forEach { contentView.addSubview($0) }
         name.text = "样例会话"
         preview.text = "这是本机样例会话，不会发送到服务器。"
         name.textColor = UIColor(hex: 0x111111)
         preview.textColor = UIColor(hex: 0x999999)
         time.textColor = UIColor(hex: 0x999999)
         time.text = "本地"
+        muteLabel.text = "免打扰"; muteLabel.textColor = NativeUITheme.secondary
+        muteLabel.isHidden = true
         line.backgroundColor = UIColor(hex: 0xf0f1f4)
     }
 
@@ -41,9 +52,13 @@ private final class ConversationRowCell: UITableViewCell {
         time.frame = CGRect(x: bounds.width - r(104), y: r(29), width: r(64), height: r(34))
         time.textAlignment = .right
         time.font = .systemFont(ofSize: r(24))
-        let badgeDiameter: CGFloat = muted ? 6 : 16
+        let badgeDiameter: CGFloat = (joinRequestPending || muted) ? 6 : 16
         unread.frame = CGRect(x: bounds.width - r(40) - badgeDiameter, y: r(97) - badgeDiameter / 2, width: badgeDiameter, height: badgeDiameter)
-        preview.frame = CGRect(x: bodyX, y: r(79), width: max(0, bodyWidth - (unread.isHidden ? 0 : badgeDiameter + 8)), height: r(36))
+        let trailing = unread.isHidden ? 0 : badgeDiameter + 8
+        let muteWidth = muted ? r(70) : 0
+        muteLabel.font = .systemFont(ofSize: r(20)); muteLabel.textAlignment = .right
+        muteLabel.frame = CGRect(x: bounds.width - r(40) - trailing - muteWidth, y: r(79), width: muteWidth, height: r(36))
+        preview.frame = CGRect(x: bodyX, y: r(79), width: max(0, bodyWidth - trailing - muteWidth - (muted ? r(12) : 0)), height: r(36))
         preview.font = .systemFont(ofSize: r(26))
         line.frame = CGRect(x: 0, y: bounds.height - r(1), width: bounds.width, height: r(1))
     }
@@ -82,7 +97,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     private var unreadOnly = false
     private var latestPreview = "这是本机样例会话，不会发送到服务器。"
     private let conversation: LocalSampleConversation?
-    private lazy var pendingJoins = chat.map { NativePendingJoinRequests(context: $0.business) }
+    private lazy var pendingJoins = chat.map { NativePendingJoinRequests(service: $0) }
     private var chatObserver: UUID?
     private let conversationRefresh = UIRefreshControl()
     private let loadMore = UIButton(type: .system)
@@ -92,6 +107,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         let conversation: NativeConversation
         let preview: String
         let unread: Int
+        let joinRequestPending: Bool
     }
     private var renderedConversations: [RenderedConversation] = []
 
@@ -345,7 +361,12 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
 
     private func updateConversationRows() {
         guard let service = chat else { return }
-        let next = visibleConversations.map { RenderedConversation(conversation: $0, preview: service.conversationPreview($0), unread: service.conversationUnread($0)) }
+        let pendingIDs = pendingJoins?.monitor.snapshot.conversationIDs ?? []
+        let next = visibleConversations.map {
+            RenderedConversation(conversation: $0, preview: service.conversationPreview($0),
+                                 unread: service.conversationUnread($0),
+                                 joinRequestPending: $0.type == 3 && pendingIDs.contains($0.id))
+        }
         guard next != renderedConversations else { return }
         let previous = renderedConversations
         renderedConversations = next
@@ -459,10 +480,12 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             cell.name.text = item.title.isEmpty ? "聊天" : item.title
             let unread = chat?.conversationUnread(item) ?? 0
             cell.muted = item.muted; cell.unreadCount = unread
-            cell.preview.text = chat?.conversationPreview(item) ?? ""
+            cell.joinRequestPending = item.type == 3 && pendingJoins?.monitor.snapshot.conversationIDs.contains(item.id) == true
+            let preview = chat?.conversationPreview(item) ?? ""
+            cell.preview.text = cell.joinRequestPending && preview.isEmpty ? "[入群申请]" : preview
             if let chat = chat { cell.avatar.load(item.avatar, policy: chat.business.media, placeholder: item.type == 3 ? "uni_group_default" : "uni_avatar_default") }
             cell.time.text = item.timestamp > 0 ? Date(timeIntervalSince1970: Double(item.timestamp) / 1000).formatted(date: .omitted, time: .shortened) : ""
-        } else { cell.muted = false; cell.unreadCount = 0; cell.preview.text = latestPreview }
+        } else { cell.joinRequestPending = false; cell.muted = false; cell.unreadCount = 0; cell.preview.text = latestPreview }
         return cell
     }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

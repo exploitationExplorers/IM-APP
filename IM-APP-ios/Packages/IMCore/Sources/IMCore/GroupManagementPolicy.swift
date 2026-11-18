@@ -35,13 +35,16 @@ public struct HomeChatBadge: Equatable, Sendable {
 
 public struct PendingGroupJoinCount: Decodable, Equatable, Sendable {
     public let groupID: String
+    public let conversationID: String?
     public let count: Int
 
-    private enum CodingKeys: String, CodingKey { case groupId, count }
+    private enum CodingKeys: String, CodingKey { case groupId, groupConversationId, count }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         groupID = try container.decode(String.self, forKey: .groupId)
+        let conversation = try container.decodeIfPresent(String.self, forKey: .groupConversationId)
+        conversationID = conversation.flatMap { GroupJoinRequestNotice.isGroupConversationID($0) ? $0 : nil }
         let count = try container.decode(Int.self, forKey: .count)
         guard count >= 0 else {
             throw DecodingError.dataCorruptedError(forKey: .count, in: container, debugDescription: "Negative pending request count")
@@ -54,5 +57,41 @@ public struct PendingGroupJoinCount: Decodable, Equatable, Sendable {
         var counts: [String: Int] = [:]
         for row in rows { counts[row.groupID] = row.count }
         return counts.values.reduce(0) { min(100, $0 + min(100, $1)) }
+    }
+}
+
+/// Business notifications are refresh hints, never chat messages or approval commands.
+public struct GroupJoinRequestNotice: Equatable, Sendable {
+    public let conversationID: String
+
+    public init?(payload: [String: Any]) {
+        guard MessagePayload.text(payload, "key") == "group_join_request",
+              let data = MessagePayload.object(MessagePayload.value(payload, "data")) else { return nil }
+        let id = MessagePayload.text(data, "groupConversationId")
+        let alternative = MessagePayload.text(data, "groupConversationID")
+        let conversation = id.isEmpty ? alternative : id
+        guard Self.isGroupConversationID(conversation) else { return nil }
+        conversationID = conversation
+    }
+
+    static func isGroupConversationID(_ value: String) -> Bool {
+        value.range(of: "^sg_[0-9a-f]{32}$", options: .regularExpression) != nil
+    }
+}
+
+public struct PendingJoinRequestSnapshot: Equatable, Sendable {
+    public let count: Int
+    public let conversationIDs: Set<String>
+
+    public init(count: Int) {
+        self.count = max(0, count)
+        conversationIDs = []
+    }
+
+    public init(rows: [PendingGroupJoinCount]) {
+        // Match badgeTotal's last-row-wins group deduplication before deriving highlights.
+        let groups = Dictionary(rows.map { ($0.groupID, $0) }, uniquingKeysWith: { _, latest in latest })
+        count = PendingGroupJoinCount.badgeTotal(Array(groups.values))
+        conversationIDs = Set(groups.values.filter { $0.count > 0 }.compactMap(\.conversationID))
     }
 }

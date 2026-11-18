@@ -17,6 +17,8 @@ final class NativeMessageCell: UICollectionViewCell {
     private let label = UILabel()
     private let bubbleMask = CAShapeLayer()
     private var messageText = ""
+    private var cachedDimensions: (width: CGFloat, result: (CGFloat, CGFloat, CGFloat, NSAttributedString))?
+    private var receiptTime = ""
     private var isMine = false
     private var statusText = ""
     private let receipt = UILabel()
@@ -70,6 +72,7 @@ final class NativeMessageCell: UICollectionViewCell {
     }
 
     func configure(text: String, isMine: Bool, status: String = "", resetResources: Bool = true) {
+        cachedDimensions = nil; receiptTime = ""
         mediaSpinner.stopAnimating()
         videoMetadata = nil; videoPlay.isHidden = true; videoDuration.isHidden = true; videoDuration.text = nil
         imageMetadata = nil; timestamp = 0; receipt.text = nil; sender.text = nil; systemMessage = false
@@ -89,6 +92,7 @@ final class NativeMessageCell: UICollectionViewCell {
         // 同消息重配仅更新文本/状态，不取消仍在取图的任务或覆盖已经命中的头像。
         configure(text: text, isMine: mine, status: service.sendingLabel(message), resetResources: false)
         representedMessageID = message.id; self.resolvedMediaSize = resolvedMediaSize; self.onMediaSizeResolved = onMediaSizeResolved
+        receiptTime = message.timestamp > 0 ? Date(timeIntervalSince1970: Double(message.timestamp) / 1000).formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) : ""
         timestamp = message.timestamp
         systemMessage = message.status == 4 || message.contentType >= 1000 || message.contentType == 0
         sender.text = group && !mine && !systemMessage ? message.senderName : nil
@@ -122,6 +126,13 @@ final class NativeMessageCell: UICollectionViewCell {
     }
 
     private func dimensions(width: CGFloat) -> (CGFloat, CGFloat, CGFloat, NSAttributedString) {
+        if let cached = cachedDimensions, cached.width == width { return cached.result }
+        let result = measureDimensions(width: width)
+        cachedDimensions = (width, result)
+        return result
+    }
+
+    private func measureDimensions(width: CGFloat) -> (CGFloat, CGFloat, CGFloat, NSAttributedString) {
         let r: (CGFloat) -> CGFloat = { NativeUITheme.rpx($0, width: width) }
         let font = UIFont.systemFont(ofSize: r(30))
         let dateHeight: CGFloat = dateText == nil ? 0 : r(68)
@@ -162,7 +173,7 @@ final class NativeMessageCell: UICollectionViewCell {
     }
 
     func measuredHeight(width: CGFloat) -> CGFloat { ceil(dimensions(width: width).2) }
-    func updateResolvedMediaSize(_ size: CGSize) { resolvedMediaSize = size; setNeedsLayout() }
+    func updateResolvedMediaSize(_ size: CGSize) { resolvedMediaSize = size; cachedDimensions = nil; setNeedsLayout() }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -181,8 +192,7 @@ final class NativeMessageCell: UICollectionViewCell {
         bubble.frame = CGRect(x: x, y: r(16) + dateHeight + senderHeight, width: bubbleWidth, height: bubbleHeight)
         sender.frame = CGRect(x: x, y: r(16) + dateHeight, width: max(bubbleWidth, r(180)), height: senderHeight); sender.font = .systemFont(ofSize: r(22))
         receipt.isHidden = timestamp <= 0 || systemMessage; sender.isHidden = senderHeight == 0
-        let time = timestamp > 0 ? Date(timeIntervalSince1970: Double(timestamp) / 1000).formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) : ""
-        receipt.text = time + (statusText.isEmpty ? "" : "  " + statusText)
+        receipt.text = receiptTime + (statusText.isEmpty ? "" : "  " + statusText)
         receipt.font = .systemFont(ofSize: r(20)); receipt.textAlignment = mine ? .right : .left
         let receiptWidth = max(bubbleWidth, receipt.sizeThatFits(CGSize(width: width * 0.70, height: r(31))).width)
         receipt.frame = CGRect(x: mine ? bubble.frame.maxX - receiptWidth : x, y: bubble.frame.maxY + r(5), width: receiptWidth, height: r(26))
