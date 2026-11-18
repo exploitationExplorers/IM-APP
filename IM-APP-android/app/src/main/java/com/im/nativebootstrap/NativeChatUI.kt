@@ -102,6 +102,8 @@ data class NativeChatCallbacks(
     val onRefreshPermission:()->Unit = {},
     val onRecall:(ChatMessage,String,(Result<Unit>)->Unit)->Unit = { _,_,done -> done(Result.failure(IllegalStateException("撤回服务尚未就绪"))) },
     val onAcceptGroupInvite:(String,(Result<ChatInviteResult>)->Unit)->Unit = { _,done -> done(Result.failure(IllegalStateException("入群服务尚未就绪"))) },
+    /** 群邀请卡片点击/处理完成时登记（token, 文案）；点击即消耗，避免重复点击与过期后再点。 */
+    val onInviteHandled:(String,String)->Unit = { _,_-> },
     val onOpenBusinessGroup:(String)->Unit = {},
     val onOpenJoinRequests:(String)->Unit = {},
     val onOpenAnnouncements:(String)->Unit = {},
@@ -158,7 +160,6 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     var uploadMenu by remember { mutableStateOf<PendingMediaUpload?>(null) }
     var selectedAnchor by remember { mutableStateOf<Offset?>(null) }
     var invite by remember { mutableStateOf<GroupMessageCard?>(null) }
-    var handledInviteLabels by remember(state.active?.target) { mutableStateOf<Map<String,String>>(emptyMap()) }
     var forward by remember { mutableStateOf<ChatMessage?>(null) }
     var multi by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -631,7 +632,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                     107 -> Column { Text("聊天记录",color=foreground,fontWeight=FontWeight.Medium);Text(content.text,color=foreground,fontSize=12.sp) }
                                     110 -> content.groupCard?.let { card -> Column(Modifier.widthIn(min=rpx(300),max=rpx(460)),horizontalAlignment=Alignment.CenterHorizontally) {
                                         if(card.kind=="group_invite") {
-                                            GroupInviteCard(card,message.mine,foreground,handledInviteLabels[card.token]) { invite=card }
+                                            GroupInviteCard(card,message.mine,foreground,state.inviteHandled[card.token]) { callbacks.onInviteHandled(card.token,"邀请已过期");invite=card }
                                         } else {
                                             Row(verticalAlignment=Alignment.CenterVertically) { SharedAvatar(card.avatar,Modifier.size(rpx(76)));Column(Modifier.padding(start=rpx(16))) { Text(card.applicantName,color=foreground,fontWeight=FontWeight.SemiBold);Text("申请加入 ${card.groupName}",color=foreground.copy(alpha=.7f),fontSize=(24*factor).sp) } }
                                             Text("去审核",Modifier.padding(top=rpx(20)).clickable { callbacks.onOpenJoinRequests(card.groupId) },color=ChatBlue,fontSize=(26*factor).sp)
@@ -740,7 +741,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         }
     }
     invite?.let { card -> GroupInviteDialog(card,callbacks,{ invite=null },{ value ->
-        handledInviteLabels=handledInviteLabels+(card.token to value)
+        callbacks.onInviteHandled(card.token,value)
     },{ notice=it }) }
     uploadMenu?.let { upload ->
         val mediaName=if(upload.kind==MediaKind.VIDEO)"视频" else "图片"

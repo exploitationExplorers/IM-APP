@@ -402,6 +402,10 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         val tag=operation
         chatAction{chatController.acceptGroupInvite(token){result->main.post{if(tag==operation)done(result)}}}
     }
+    fun markInviteHandled(token:String,label:String) {
+        val tag=operation
+        chatAction{chatController.markInviteHandled(token,label)}
+    }
     fun openBusinessGroupFromChat(groupId:String) {
         if(groupId.isBlank())return
         closeChat();openBusinessChat(groupId,true,"","")

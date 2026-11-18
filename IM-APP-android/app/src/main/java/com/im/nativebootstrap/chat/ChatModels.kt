@@ -49,6 +49,8 @@ interface ChatEvents {
     fun messages(items: List<Pair<ChatTarget, ChatMessage>>)
     fun liveMessages(items: List<Pair<ChatTarget, ChatMessage>>) { messages(items) }
     fun tombstone(id: String, deleted: Boolean)
+    /** 撤回回调可携带撤回人（revoker），用于区分「你/对方/群成员」撤回文案；deleted=true 表示本机删除。 */
+    fun tombstone(id: String, deleted: Boolean, revokerId: String, revokerNickname: String) { tombstone(id, deleted) }
     fun syncStarted()
     fun syncProgress(progress:Long) {}
     fun syncFinished()

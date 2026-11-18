@@ -59,6 +59,8 @@ data class ChatState(
     val pendingForwards:List<PendingForward> = emptyList(),
     val forwardSuccessId:String="",
     val forwardFailureId:String="",
+    /** 群邀请卡片已处理标记：token → 展示文案（只能点击一次，点击即视为消耗/过期）。 */
+    val inviteHandled:Map<String,String> = emptyMap(),
     val revision:Long=0,
 ) {
     // 只用于 StateFlow 快速发布；大列表不在主线程做深度 equals。
@@ -116,6 +118,12 @@ class ChatController(
     private var cursor: String? = null
     private var authRevoked=false
     private val tombstones=TombstoneWindow(TOMBSTONE_WINDOW)
+    // 撤回人信息与会话最新消息缓存：用于区分撤回文案（你/对方/群成员）与会话列表「撤回」预览。
+    private val recallBy=HashMap<String,String>()
+    private val recallById=HashMap<String,String>()
+    private val convLatest=HashMap<String,ChatMessage>()
+    private val recalledConversation=HashMap<String,String>()
+    private val inviteHandled=HashMap<String,String>()
     private var business:ChatBusiness?=null
     private var incomingListener:((ChatMessage)->Unit)?=null
     private var appForeground=false
@@ -160,7 +168,18 @@ class ChatController(
     private fun boundaryReady(target:ChatTarget)=business==null||target.sessionType!=3||!GroupRetention.supported(target.conversationId)||retention?.watermark(target.conversationId)!=null||target.conversationId in retentionChecked
     private fun historyExhausted()=remoteHistoryEnd&&(localHistorySupported!=true||localHistoryEnd)
     private fun permits(target:ChatTarget,message:ChatMessage)=retention?.permits(target,message)!=false&&purges?.permits(target,message)!=false
-    private fun visible(messages:List<ChatMessage>)=messages.filterNot { tombstones[it.id]==true||it.pinSync||(it.contentType<=0&&MessageContents.isPinSync(it.serialized)) }.filter { message -> snapshot.active?.target?.let { target -> (message.seq<=0||boundaryReady(target))&&permits(target,message) } != false }.map { if(tombstones.containsKey(it.id)) it.copy(text="[消息已撤回]",serialized="",status=2) else it }
+    // 撤回提示文案：本人撤回 / 私聊对方撤回 / 群聊按撤回人昵称展示（管理员代撤时标注）。
+    private fun recallLabel(message:ChatMessage,target:ChatTarget?):String {
+        val revoker=recallBy[message.id]?.takeIf { it.isNotBlank() }
+        val byOther=recallById[message.id]?.takeIf { it.isNotBlank() }?.let { it!=message.senderId } ?: false
+        return when {
+            message.mine&&byOther -> "${revoker ?: "管理员"}撤回了你的消息"
+            message.mine -> "你撤回了一条消息"
+            target?.sessionType==1 -> "对方撤回了一条消息"
+            else -> (revoker ?: message.sender.ifBlank { null } ?: "对方")+"撤回了一条消息"
+        }
+    }
+    private fun visible(messages:List<ChatMessage>)=messages.filterNot { tombstones[it.id]==true||it.pinSync||(it.contentType<=0&&MessageContents.isPinSync(it.serialized)) }.filter { message -> snapshot.active?.target?.let { target -> (message.seq<=0||boundaryReady(target))&&permits(target,message) } != false }.map { if(tombstones.containsKey(it.id)) it.copy(text=recallLabel(it,snapshot.active?.target),serialized="",status=2) else it }
     fun attachBusiness(value:ChatBusiness?) { business=value;conversationVisibilityDirty=true;value?.let { MediaURLs.businessBase=it.baseUrl };refreshRetention(snapshot.conversations);snapshot.active?.target?.let { refreshGroupPurges(it) } }
     fun attachIncoming(listener:((ChatMessage)->Unit)?) { incomingListener=listener }
 
@@ -253,20 +272,27 @@ class ChatController(
                 override fun conversations(items: List<ChatConversation>) { dispatch { if(current(t)) {
                     PerfLog.mark("controller:conversation-event", "count=${items.size}")
                     conversationDiagnostics.input(if(initialConversationSnapshotLoaded)"sdk-event" else "sdk-event/provisional",items)
+                    // 会话最新消息缓存 + 撤回预览保持：SDK 撤回后会把 latestMsg 置空，此处回填撤回文案。
+                    val decorated=items.map { row ->
+                        val cid=row.target.conversationId
+                        row.latestMessage?.let { convLatest[cid]=it }
+                        if(row.preview.isBlank()&&row.latestMessage==null) recalledConversation[cid]?.let { row.copy(preview=it) } ?: row else row
+                    }
                     // 固定 SDK 的发送状态更新通过会话 latestMsg 通知，未必触发新消息监听。
-                    val confirmed=items.mapNotNull { item -> item.latestMessage?.takeIf { msg -> msg.mine&&(msg.status==2||msg.seq>0)&&outbox?.all()?.any { it.id==msg.id&&it.target==item.target }==true } }
+                    val confirmed=decorated.mapNotNull { item -> item.latestMessage?.takeIf { msg -> msg.mine&&(msg.status==2||msg.seq>0)&&outbox?.all()?.any { it.id==msg.id&&it.target==item.target }==true } }
                     confirmed.forEach(::acceptEvidence)
-                    if(snapshot.conversationsLoading)items.forEach { conversationChangesDuringRequest[it.target.conversationId]=it }
+                    if(snapshot.conversationsLoading)decorated.forEach { conversationChangesDuringRequest[it.target.conversationId]=it }
                     // 首登同步期间先显示 SDK 已落地的会话；正式本地快照返回后再校准。
-                    val merged=mergeConversations(snapshot.conversations,items,authoritative=initialConversationSnapshotLoaded)
+                    val merged=mergeConversations(snapshot.conversations,decorated,authoritative=initialConversationSnapshotLoaded)
                     val confirmedMessages=confirmed.filter { it.serialized.isNotBlank() }
-                    if(merged!==snapshot.conversations||confirmed.isNotEmpty())emit(snapshot.copy(conversations=merged,messages=if(confirmedMessages.isEmpty())snapshot.messages else mergeMessages(snapshot.messages,visible(confirmedMessages.filter { msg -> items.any { it.target==snapshot.active?.target&&it.latestMessage?.id==msg.id } })),error=if(confirmed.isNotEmpty())null else snapshot.error),"sdk-event")
-                    refreshRetention(items)
+                    if(merged!==snapshot.conversations||confirmed.isNotEmpty())emit(snapshot.copy(conversations=merged,messages=if(confirmedMessages.isEmpty())snapshot.messages else mergeMessages(snapshot.messages,visible(confirmedMessages.filter { msg -> decorated.any { it.target==snapshot.active?.target&&it.latestMessage?.id==msg.id } })),error=if(confirmed.isNotEmpty())null else snapshot.error),"sdk-event")
+                    refreshRetention(decorated)
                 } } }
                 override fun conversationSnapshot(items:List<ChatConversation>) { dispatch { if(current(t)&&items.isNotEmpty()) {
                     PerfLog.mark("controller:conversation-snapshot", "count=${items.size}")
                     conversationDiagnostics.input("sync-snapshot",items)
-                    val merged=mergeConversations(snapshot.conversations,items)
+                    items.forEach { row -> row.latestMessage?.let { convLatest[row.target.conversationId]=it } }
+                    val merged=mergeConversations(snapshot.conversations,items.map { row -> if(row.preview.isBlank()&&row.latestMessage==null) recalledConversation[row.target.conversationId]?.let { row.copy(preview=it) } ?: row else row })
                     if(merged!==snapshot.conversations)emit(snapshot.copy(conversations=merged,conversationsLoading=false,error=null),"sync-snapshot")
                     refreshRetention(items)
                 } } }
@@ -310,11 +336,19 @@ class ChatController(
                         while(notified.size>500)notified.remove(notified.first())
                     } }
                 }
-                override fun tombstone(id:String,deleted:Boolean) { dispatch {
+                override fun tombstone(id:String,deleted:Boolean) { tombstone(id,deleted,"","") }
+                override fun tombstone(id:String,deleted:Boolean,revokerId:String,revokerNickname:String) { dispatch {
                     if(!current(t)) return@dispatch
+                    if(!deleted&&revokerNickname.isNotBlank())recallBy[id]=revokerNickname
+                    if(!deleted&&revokerId.isNotBlank())recallById[id]=revokerId
                     tombstones[id]=deleted
                     outbox?.confirmed(id)
-                    emit(snapshot.copy(messages=visible(snapshot.messages)))
+                    // 被撤回的是会话最新消息时，会话列表预览同步为撤回文案（SDK 会把 latestMsg 清空）。
+                    val rows=if(!deleted)snapshot.conversations.map { row ->
+                        val lm=convLatest[row.target.conversationId]
+                        if(lm?.id==id) { val label=recallLabel(lm,row.target);recalledConversation[row.target.conversationId]=label;row.copy(preview=label) } else row
+                    } else snapshot.conversations
+                    emit(snapshot.copy(messages=visible(snapshot.messages),conversations=rows))
                 } }
                 override fun syncStarted() { dispatch {
                     if(!current(t)) return@dispatch
@@ -467,6 +501,13 @@ class ChatController(
                 ChatInviteResult(action,response.obj("group").string("id"))
             }
             dispatch { if(current(t))done(result) }
+        }
+    }
+    fun markInviteHandled(token:String,label:String) {
+        val t=ticket ?: return
+        dispatch { if(!current(t))return@dispatch
+            inviteHandled[token]=label
+            emit(snapshot.copy(inviteHandled=inviteHandled.toMap()))
         }
     }
     fun closeRoom() { roomGeneration+=1;remoteHistoryOperation++;remoteHistoryLoading=false;cursor=null;gateway.watchPeer(null) {};emit(snapshot.copy(active=null,messages=emptyList(),historyLoading=false,historyEnd=false,error=null,mentions=emptyList(),focusMessageId=null)) }
@@ -1122,7 +1163,10 @@ class ChatController(
                     done(Result.failure(IllegalStateException("服务端已处理，本机清理边界暂未保存，请检查空间后刷新，勿重复操作")))
                     return@dispatch
                 }
-                if(result.isSuccess&&action==ChatAction.RECALL) { tombstones[message.id]=false;outbox?.confirmed(message.id);if(snapshot.active?.target==active.target) emit(snapshot.copy(messages=visible(snapshot.messages))) }
+                if(result.isSuccess&&action==ChatAction.RECALL) { tombstones[message.id]=false;outbox?.confirmed(message.id)
+                    val rows=snapshot.conversations.map { row -> if(row.latestMessage?.id==message.id) { val label=recallLabel(message,row.target);recalledConversation[row.target.conversationId]=label;row.copy(preview=label) } else row }
+                    if(snapshot.active?.target==active.target) emit(snapshot.copy(messages=visible(snapshot.messages),conversations=rows)) else if(rows!==snapshot.conversations) emit(snapshot.copy(conversations=rows))
+                }
                 if(result.isFailure&&action==ChatAction.RECALL) { tombstones.remove(message.id);emit(snapshot.copy(messages=visible(snapshot.messages.map { if(it.id==message.id) message else it }))) }
                 done(result.map { Unit })
             }
@@ -1826,7 +1870,7 @@ class ChatController(
                 if(!boundaryReady(conversation.target)) { refreshRetention(listOf(conversation));done(Result.failure(IllegalStateException("群历史边界正在校验，请稍后重试")));return@fold }
                 gateway.search(conversation.target,keyword,types,page,count) { result -> dispatch {
                     if(!current(t))return@dispatch
-                    done(result.map { value -> value.copy(messages=value.messages.filter { tombstones[it.id]!=true&&!MessageContents.isPinSync(it.serialized)&&permits(conversation.target,it) }.map { if(tombstones.containsKey(it.id))it.copy(text="[消息已撤回]",serialized="") else it }) })
+                    done(result.map { value -> value.copy(messages=value.messages.filter { tombstones[it.id]!=true&&!MessageContents.isPinSync(it.serialized)&&permits(conversation.target,it) }.map { if(tombstones.containsKey(it.id))it.copy(text=recallLabel(it,conversation.target),serialized="") else it }) })
                 } }
             },onFailure={ done(Result.failure(it)) })
         } }
@@ -1838,7 +1882,7 @@ class ChatController(
         gateway.searchAll(keyword,page,count) { result -> dispatch {
             if(!current(t))return@dispatch
             result.fold(onSuccess={ found ->
-                fun deliver() { done(Result.success(found.copy(hits=found.hits.filter { hit -> boundaryReady(hit.conversation.target)&&permits(hit.conversation.target,hit.message)&&tombstones[hit.message.id]!=true&&!MessageContents.isPinSync(hit.message.serialized) }.map { hit -> if(tombstones.containsKey(hit.message.id))hit.copy(message=hit.message.copy(text="[消息已撤回]",serialized="")) else hit }))) }
+                fun deliver() { done(Result.success(found.copy(hits=found.hits.filter { hit -> boundaryReady(hit.conversation.target)&&permits(hit.conversation.target,hit.message)&&tombstones[hit.message.id]!=true&&!MessageContents.isPinSync(hit.message.serialized) }.map { hit -> if(tombstones.containsKey(hit.message.id))hit.copy(message=hit.message.copy(text=recallLabel(hit.message,hit.conversation.target),serialized="")) else hit }))) }
                 val ids=found.hits.map { it.conversation.target }.filter { it.sessionType==3&&GroupRetention.supported(it.conversationId)&&!boundaryReady(it) }.map { it.conversationId }.distinct()
                 val api=business
                 if(ids.isEmpty()||api==null) { deliver();return@fold }
@@ -2075,6 +2119,7 @@ class ChatController(
         coordinator.logout();ticket=null;syncAttempt=null;outbox=null;mediaUploads=null;sentVideos=null;pendingForwards=null;runningForwards.clear();announcedForwards.clear();uploadAttempts.clear();retention=null;historyChecks=null;purges=null;purgeFresh.clear();purgeInFlight.clear();retentionFresh.clear();retentionInFlight.clear();retentionChecked.clear();readReporting.clear();readReported.clear();readMarkedAt.clear();clearing.clear();uploadingTargets.clear();notified.clear();ownIMId="";pageGeneration+=1;roomGeneration+=1;remoteHistoryOperation++;remoteHistoryLoading=false;cursor=null;offset=0
         gateway.shutdown()
         authRevoked=false;syncFinishedBeforeStore=false;tombstones.clear();sendAttempts.clear();sendCompletions.clear()
+        recallBy.clear();recallById.clear();convLatest.clear();recalledConversation.clear();inviteHandled.clear()
         snapshot=ChatState();changed(snapshot)
     }
 }

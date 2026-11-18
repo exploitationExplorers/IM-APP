@@ -144,7 +144,7 @@ fun UniParityApp(model: BootstrapViewModel = viewModel()) {
             onReportUser=model::reportChatUser,onLoadMessageMenu=model::loadMessageMenu,onAddSticker=model::addChatSticker,
             onLoadStickers=model::loadChatStickers,onSendSticker=model::sendChatSticker,onDeleteSticker=model::deleteChatSticker,onManageStickers=model::manageChatStickers,
             onRefreshPermission=model::refreshChatPermission,onRecall=model::recallChatMessage,
-            onAcceptGroupInvite=model::acceptChatGroupInvite,onOpenBusinessGroup=model::openBusinessGroupFromChat,onOpenJoinRequests=model::openJoinRequestsFromChat,
+            onAcceptGroupInvite=model::acceptChatGroupInvite,onInviteHandled=model::markInviteHandled,onOpenBusinessGroup=model::openBusinessGroupFromChat,onOpenJoinRequests=model::openJoinRequestsFromChat,
             onOpenAnnouncements=model::openAnnouncementsFromChat,onDismissAnnouncement=model::dismissChatAnnouncement,onDismissPin=model::dismissChatPin,onLoadGroupMembers=model::loadVisibleChatMembers
         ),state.profile?.avatar.orEmpty(),preferences.enterToSend) }
         state.chatOpen -> key("offline-sample") { UniChat(state, model, scale, toast) }

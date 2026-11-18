@@ -256,7 +256,7 @@ class ChatFeaturesTest {
         assertEquals(25L,sent!!.get("seq").asLong)
         assertEquals(pending.id,sent!!.get("clientMsgId").asString)
         assertEquals("12345678-1234-1234-1234-123456789abc",sent!!.get("peerId").asString)
-        assertEquals("[消息已撤回]",h.state.messages.first { it.id==pending.id }.text)
+        assertEquals("你撤回了一条消息",h.state.messages.first { it.id==pending.id }.text)
     }
     @Test fun recallFallsBackToSameIdRecentHistoryButNeverSubmitsMissingSeqOrTreatsRejectionAsSuccess() {
         listOf(0L,28L).forEach { syncedSeq ->

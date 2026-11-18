@@ -457,7 +457,7 @@ class ChatRuntimeTest {
         h.gateway.events.tombstone("revoked",false);h.gateway.events.tombstone("deleted",true)
         h.gateway.histories.last().third(Result.success(HistoryPage(listOf(message("revoked",2,1),message("deleted",2,2)),true)))
         assertEquals(listOf("revoked"),h.state.messages.map { it.id })
-        assertEquals("[消息已撤回]",h.state.messages.single().text)
+        assertEquals("你撤回了一条消息",h.state.messages.single().text)
     }
     @Test fun privateOutboxRecoversUncertainAndValidatesStateOwnerAndIds() {
         val file=File(temporary.newFolder(),"outbox.json")

@@ -139,8 +139,8 @@ class OpenIMGateway(private val application:Application):ChatGateway {
             client.messageManager.setAdvancedMsgListener(object:OnAdvanceMsgListener {
                 override fun onRecvC2CReadReceipt(receipts:MutableList<C2CReadReceiptInfo>?) { events.read(receipts.orEmpty().flatMap { it.msgIDList.orEmpty() }) }
                 override fun onRecvGroupMessageReadReceipt(receipt:GroupMessageReceipt?) { events.read(receipt?.groupMessageReadInfo.orEmpty().filter { it.hasReadCount>0 }.mapNotNull { it.clientMsgID?.takeIf(String::isNotEmpty) }) }
-                override fun onRecvMessageRevokedV2(info:RevokedInfo?) { info?.clientMsgID?.takeIf { it.isNotBlank() }?.let { events.tombstone(it,false) } }
-                override fun onMsgDeleted(message:Message?) { message?.clientMsgID?.takeIf { it.isNotBlank() }?.let { events.tombstone(it,true) } }
+                override fun onRecvMessageRevokedV2(info:RevokedInfo?) { info?.clientMsgID?.takeIf { it.isNotBlank() }?.let { events.tombstone(it,false,info.revokerID.orEmpty(),info.revokerNickname.orEmpty()) } }
+                override fun onMsgDeleted(message:Message?) { message?.clientMsgID?.takeIf { it.isNotBlank() }?.let { events.tombstone(it,true,"","") } }
                 override fun onRecvNewMessage(message:Message?) { message?.let { enqueueRealtime(it,events) } }
                 override fun onRecvOfflineNewMessage(messages:MutableList<Message>?) {
                     val items=messages.orEmpty().mapNotNull { prepareIncoming(it,events) }
