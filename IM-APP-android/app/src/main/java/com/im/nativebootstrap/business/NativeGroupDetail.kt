@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -116,7 +118,9 @@ private val GroupBlue=Color(0xFF1E88FF)
         // 待审数量用红色圆角标（同聊天 tab 样式），有几条显示几；为 0 不显示
         val pendingJoin=d.text("_pendingJoinCount").toIntOrNull()?:0
         GroupInfoRow("入群申请",if(d.flag("_pendingError"))"数量未加载" else "",trailing={
-            if(pendingJoin>0)Box(Modifier.padding(end=(12*s).dp).size((36*s).dp).clip(CircleShape).background(Color(0xFFEF4444)),contentAlignment=Alignment.Center){Text(pendingJoin.toString(),color=Color.White,fontSize=(22*s).sp,fontWeight=FontWeight.Bold)}
+            if(pendingJoin>0)Box(Modifier.padding(end=(12*s).dp).size((36*s).dp).clip(CircleShape).background(Color(0xFFEF4444)),contentAlignment=Alignment.Center){
+                Text(pendingJoin.toString(),color=Color.White,fontSize=(22*s).sp,lineHeight=(28*s).sp,fontWeight=FontWeight.Bold,maxLines=1,softWrap=false,textAlign=TextAlign.Center,style=TextStyle(platformStyle=PlatformTextStyle(includeFontPadding=false)))
+            }
         }){c.open("join-requests",r.id)}
         GroupInfoRow("入群方式",if(d.text("joinMode")=="approval")"私密群（申请入群）" else "公开群（扫码入群）",last=true){joinSheet=true}
     }
