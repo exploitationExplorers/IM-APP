@@ -27,7 +27,6 @@ import com.im.nativebootstrap.business.*
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import kotlinx.coroutines.delay
 import com.im.nativebootstrap.core.SecureSessionStore
 import com.im.nativebootstrap.core.SessionPersistenceCodec
 import com.im.nativebootstrap.core.StoredIMSession
@@ -46,8 +45,6 @@ data class BootstrapState(
     val chatOpen: Boolean = false,
     val messages: List<SampleMessage> = emptyList(),
     val chat: ChatState = ChatState(),
-    /** 我管理的群里待审核入群申请总数，用于底部「聊天」tab 红点角标（与 H5 pending-join-requests 对账一致）。 */
-    val pendingJoinRequests: Int = 0,
 )
 
 class BootstrapViewModel(application: Application) : AndroidViewModel(application) {
@@ -85,22 +82,6 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private var loginJob: Job? = null
-    // 待审核入群申请轮询：登录/恢复会话后启动，换号或退出后由 operation 代次自动终止。
-    private val joinRequestPollTag=AtomicReference(-1L)
-    private fun startJoinRequestPolling(tag:Long) {
-        if(joinRequestPollTag.get()==tag)return
-        joinRequestPollTag.set(tag)
-        viewModelScope.launch {
-            while(tag==operation&&mutableState.value.authenticated) {
-                val total=try {
-                    val result=withContext(Dispatchers.IO){businessRequest("GET","/groups/pending-join-requests")}
-                    if(result.isJsonArray)result.asJsonArray.sumOf{(it as? JsonObject)?.get("count")?.takeIf{c->c.isJsonPrimitive}?.asInt?:0} else 0
-                } catch(_:Exception) { mutableState.value.pendingJoinRequests }
-                if(tag==operation&&mutableState.value.authenticated&&total!=mutableState.value.pendingJoinRequests)mutableState.value=mutableState.value.copy(pendingJoinRequests=total)
-                delay(10_000)
-            }
-        }
-    }
     private val deviceId by lazy { DeviceIdentity.get(application) }
     val settings=NativeSettings(application)
     private var businessBaseURL = com.im.nativebootstrap.data.RuntimeEndpoints.DEFAULT_API_BASE_URL
@@ -138,7 +119,6 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                 businessSession.restore(stored.tokens,stored.profile)
                 com.im.nativebootstrap.media.MediaLoader.setScope(base,stored.profile.businessUserId)
                 mutableState.value=BootstrapState(authenticated=true,profile=stored.profile,chat=ChatState(sessionTag=tag,connection=ConnectionState.CONNECTING))
-                startJoinRequestPolling(tag)
                 val localIM=withContext(Dispatchers.IO) {
                     runCatching { imSecureStore.load()?.let { StoredIMSession.decode(it,base,stored.profile.businessUserId) } }.getOrNull()
                 }
@@ -310,7 +290,6 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                 PerfLog.mark("login:auth-returned")
                 com.im.nativebootstrap.media.MediaLoader.setScope(baseURL,profile.businessUserId)
                 mutableState.value = BootstrapState(authenticated = true, profile = profile,chat=ChatState(sessionTag=activeOperation,connection=ConnectionState.CONNECTING))
-                startJoinRequestPolling(activeOperation)
                 PerfLog.mark("login:home-published")
                 persistSession()
                 if(registerCode!=null)business.open("onboarding")
