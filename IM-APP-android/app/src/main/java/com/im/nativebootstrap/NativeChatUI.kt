@@ -376,7 +376,11 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         }
     }
     fun saveOriginal(url:String) {
+        if(preparing)return
         preparing=true
+        var done=false
+        // 原图可能有几 MB，先给「正在保存」即时反馈，避免点完没反应、结果突然弹出。
+        scope.launch { delay(400);if(!done)NativeNotices.show("正在保存原图…") }
         scope.launch {
             val result=withContext(Dispatchers.IO) { runCatching {
                 val original=MediaURLs.image(url,ImageVariant.ORIGINAL)
@@ -386,28 +390,33 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                 val saved=MediaIO.saveToGallery(context,file,"图片-${System.currentTimeMillis()}.$extension",bounds.outMimeType ?: "image/jpeg",false)
                 Triple(file,extension,saved)
             } }
-            preparing=false
+            done=true;preparing=false
             // 保存反馈走全局 toast：大图/视频预览层覆盖聊天页时也能立即看到结果与真实失败原因。
             result.fold(onSuccess={ (file,extension,saved) ->
-                if(saved)NativeNotices.show("原图已保存到相册")
+                if(saved)NativeNotices.show("原图已保存到相册（易可聊）")
                 else { NativeNotices.show("请在系统文件选择器中选择原图保存位置");saveFile=file;save.launch("图片-${System.currentTimeMillis()}.$extension") }
             },onFailure={ NativeNotices.show(it.message ?: "原图保存失败") })
         }
     }
     fun saveVideo(url:String,ownedFile:File?=null) {
+        if(preparing)return
         preparing=true
+        var done=false
+        scope.launch { delay(400);if(!done)NativeNotices.show("正在保存视频…") }
         scope.launch {
             val result=withContext(Dispatchers.IO) { runCatching {
                 val file=ownedFile?.let { OwnedVideoFiles.verified(it,state.mediaOwnerDirectory.takeIf(String::isNotBlank)?.let(::File),File(context.filesDir,"native-chat")) }
                     ?: listOf(url,MediaURLs.playback(url)).firstNotNullOfOrNull { MediaLoader.cachedFile(context,it) }
-                    ?: MediaLoader.fetch(context,MediaURLs.playback(url))
-                val saved=MediaIO.saveToGallery(context,file,"视频-${System.currentTimeMillis()}.mp4","video/mp4",true)
-                file to saved
+                    ?: runCatching { MediaLoader.fetch(context,MediaURLs.playback(url)) }.getOrElse { MediaLoader.fetch(context,url) }
+                // 按真实容器决定扩展名/MIME：mov、webm 存成 .mp4 时部分相册和播放器打不开。
+                val (extension,mime)=MediaIO.videoFormat(file)
+                val saved=MediaIO.saveToGallery(context,file,"视频-${System.currentTimeMillis()}.$extension",mime,true)
+                Triple(file,extension,saved)
             } }
-            preparing=false
-            result.fold(onSuccess={ (file,saved) ->
-                if(saved)NativeNotices.show("视频已保存到相册")
-                else { NativeNotices.show("请在系统文件选择器中选择视频保存位置");saveFile=file;save.launch("视频-${System.currentTimeMillis()}.mp4") }
+            done=true;preparing=false
+            result.fold(onSuccess={ (file,extension,saved) ->
+                if(saved)NativeNotices.show("视频已保存到相册（易可聊）")
+                else { NativeNotices.show("请在系统文件选择器中选择视频保存位置");saveFile=file;save.launch("视频-${System.currentTimeMillis()}.$extension") }
             },onFailure={ NativeNotices.show(it.message ?: "视频保存失败") })
         }
     }
@@ -875,7 +884,8 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             sender=message?.sender?.ifBlank { if(message.mine)"我" else "图片" } ?: "",
             time=message?.let { chatDayLabel(it.time)+" "+chatTime(it.time) }.orEmpty(),
             onDelete=message?.takeUnless { it.id.startsWith("upload-") }?.let { target -> { image=null;imageMessage=null;confirmDelete=target } },
-            onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { target -> { image=null;imageMessage=null;forward=target } })
+            onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { target -> { image=null;imageMessage=null;forward=target } },
+            saving=preparing)
     }
     if(showMentions)ChatMentionPicker(callbacks.onLoadMentions,{ showMentions=false },{ choice ->
         callbacks.onSelectMention(choice) { result -> onUI {
@@ -892,7 +902,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         val message=videoMessage?.takeIf { MessageContents.parse(it.serialized,it.text).url==url }
         val content=message?.let { MessageContents.parse(it.serialized,it.text) }
         val ownMedia=message?.let { current->uploadsById[current.id]?.media() ?: state.localSentMedia[current.id] } ?: videoLocal
-        VideoPreview(url,{ video=null;videoMessage=null;videoLocal=null },{ notice=it },poster=content?.thumbnail.orEmpty(),sender=message?.sender?.ifBlank { if(message.mine)"我" else "视频" } ?: "视频",time=message?.let { chatDayLabel(it.time)+" "+chatTime(it.time) }.orEmpty(),onSave={ saveVideo(url,ownMedia?.file) },onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { { video=null;videoMessage=null;videoLocal=null;forward=it } },onDelete=message?.takeUnless { it.id.startsWith("upload-") }?.let { { video=null;videoMessage=null;videoLocal=null;confirmDelete=it } },localFile=ownMedia?.file,localPoster=ownMedia?.snapshot,allowedLocalDirectory=state.mediaOwnerDirectory.takeIf(String::isNotBlank)?.let(::File))
+        VideoPreview(url,{ video=null;videoMessage=null;videoLocal=null },{ notice=it },poster=content?.thumbnail.orEmpty(),sender=message?.sender?.ifBlank { if(message.mine)"我" else "视频" } ?: "视频",time=message?.let { chatDayLabel(it.time)+" "+chatTime(it.time) }.orEmpty(),onSave={ saveVideo(url,ownMedia?.file) },onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { { video=null;videoMessage=null;videoLocal=null;forward=it } },onDelete=message?.takeUnless { it.id.startsWith("upload-") }?.let { { video=null;videoMessage=null;videoLocal=null;confirmDelete=it } },localFile=ownMedia?.file,localPoster=ownMedia?.snapshot,allowedLocalDirectory=state.mediaOwnerDirectory.takeIf(String::isNotBlank)?.let(::File),saving=preparing)
     }
     merge?.let { message -> AlertDialog(onDismissRequest={ merge=null },title={ Text("聊天记录") },text={ Column(Modifier.verticalScroll(rememberScrollState())) {
         val raw=runCatching { com.google.gson.JsonParser.parseString(message.serialized).asJsonObject }.getOrNull()
@@ -1068,7 +1078,10 @@ fun NativeChatArchive(title:String,media:Boolean,onBack:()->Unit,search:(String,
         val gallery=if(url in pictures)pictures else listOf(url)
         val start=gallery.indexOf(url).coerceAtLeast(0)
         ImagePreview(gallery,start,{ image=null },{ saveUrl ->
+        if(!download) {
         download=true
+        var done=false
+        scope.launch { delay(400);if(!done)NativeNotices.show("正在保存原图…") }
         scope.launch {
             val result=withContext(Dispatchers.IO) { runCatching {
                 val file=MediaLoader.fetch(context,MediaURLs.image(saveUrl,ImageVariant.ORIGINAL))
@@ -1077,10 +1090,11 @@ fun NativeChatArchive(title:String,media:Boolean,onBack:()->Unit,search:(String,
                 val saved=MediaIO.saveToGallery(context,file,"图片-${System.currentTimeMillis()}.$ext",bounds.outMimeType ?: "image/jpeg",false)
                 Triple(file,ext,saved)
             } }
-            download=false
-            result.fold(onSuccess={ (file,ext,saved) -> if(saved)NativeNotices.show("原图已保存到相册") else { NativeNotices.show("请在系统文件选择器中选择原图保存位置");saveFile=file;save.launch("图片-${System.currentTimeMillis()}.$ext") } },onFailure={ NativeNotices.show("原图保存失败，请稍后重试") })
+            done=true;download=false
+            result.fold(onSuccess={ (file,ext,saved) -> if(saved)NativeNotices.show("原图已保存到相册（易可聊）") else { NativeNotices.show("请在系统文件选择器中选择原图保存位置");saveFile=file;save.launch("图片-${System.currentTimeMillis()}.$ext") } },onFailure={ NativeNotices.show(it.message ?: "原图保存失败") })
         }
-    }) }
+        }
+    },saving=download) }
     video?.let { url -> VideoPreview(url,{ video=null },NativeNotices::show) }
 }
 

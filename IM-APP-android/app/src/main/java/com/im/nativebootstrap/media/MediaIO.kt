@@ -31,27 +31,90 @@ object MediaIO {
         source.copyTo(file)
         return LocalMedia(file,"表情.$extension",mime,MediaKind.IMAGE,width=bounds.outWidth,height=bounds.outHeight)
     }
-    /** Android 10 及以上写入系统相册，无需申请整个存储目录权限。 */
+    /**
+     * Android 10 及以上写入系统相册，无需申请整个存储目录权限。
+     * 返回 true 表示条目已落库并解除 pending（相册可见）；返回 false 表示系统不支持，调用方应回退到文件选择器。
+     * 写入链路做三重校验，避免「提示已保存、相册里没有」：字节数一致、IS_PENDING 确已解除、落库 SIZE 与源一致。
+     */
     fun saveToGallery(context:Context,file:File,name:String,mime:String,video:Boolean):Boolean {
         if(Build.VERSION.SDK_INT<29)return false
         // 源文件必须真实存在且非空：缓存被清理或下载未完成的占位文件不允许静默写入。
         require(file.isFile&&file.length()>0) { if(video)"视频源文件不可用，请重新打开后保存" else "图片源文件不可用，请重新打开后保存" }
-        val collection=if(video)MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val size=file.length()
+        val now=System.currentTimeMillis()
         val values=ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME,name)
             put(MediaStore.MediaColumns.MIME_TYPE,mime)
             put(MediaStore.MediaColumns.RELATIVE_PATH,if(video)"Movies/易可聊" else "Pictures/易可聊")
             put(MediaStore.MediaColumns.IS_PENDING,1)
+            put(MediaStore.MediaColumns.DATE_ADDED,now/1000)
+            put(MediaStore.MediaColumns.DATE_TAKEN,now)
+            if(video) {
+                // 相册按 DURATION/分辨率建索引：缺字段时部分系统相册不展示该视频或显示 0 秒。
+                val retriever=MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(file.path)
+                    val millis=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0
+                    val width=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                    val height=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                    require(millis>0&&width>0&&height>0) { "视频文件不完整，请重新打开后保存" }
+                    put(MediaStore.Video.VideoColumns.DURATION,millis)
+                    put(MediaStore.MediaColumns.WIDTH,width)
+                    put(MediaStore.MediaColumns.HEIGHT,height)
+                } finally { retriever.release() }
+            } else {
+                val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+                BitmapFactory.decodeFile(file.path,bounds)
+                if(bounds.outWidth>0&&bounds.outHeight>0) {
+                    put(MediaStore.MediaColumns.WIDTH,bounds.outWidth)
+                    put(MediaStore.MediaColumns.HEIGHT,bounds.outHeight)
+                }
+            }
         }
-        val uri=context.contentResolver.insert(collection,values) ?: error("系统相册暂不可写入")
+        val collection=if(video)MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        // 插入失败（系统策略/权限）交给调用方回退文件选择器，而不是让用户以为已保存。
+        val uri=context.contentResolver.insert(collection,values) ?: return false
         try {
-            context.contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } } ?: error("系统相册暂不可写入")
-            context.contentResolver.update(uri,ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING,0) },null,null)
+            file.inputStream().use { input ->
+                (context.contentResolver.openOutputStream(uri,"w") ?: error("系统相册暂不可写入")).use { output ->
+                    val buffer=ByteArray(64*1024);var total=0L
+                    while(true) {
+                        val count=input.read(buffer);if(count<0)break
+                        total+=count;output.write(buffer,0,count)
+                    }
+                    output.flush()
+                    check(total==size) { if(video)"视频写入未完成，请重试" else "图片写入未完成，请重试" }
+                }
+            }
+            val finished=context.contentResolver.update(uri,ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING,0) },null,null)
+            check(finished>0) { if(video)"视频未写入系统相册，请重试" else "图片未写入系统相册，请重试" }
+            // 落库体积核对：半截文件不能算成功。
+            val stored=runCatching {
+                context.contentResolver.query(uri,arrayOf(MediaStore.MediaColumns.SIZE),null,null,null)?.use { cursor -> if(cursor.moveToFirst())cursor.getLong(0) else -1L } ?: -1L
+            }.getOrDefault(-1L)
+            check(stored<=0L||stored==size) { if(video)"视频保存不完整，请重试" else "图片保存不完整，请重试" }
             return true
         } catch(error:Exception) {
-            context.contentResolver.delete(uri,null,null)
+            runCatching { context.contentResolver.delete(uri,null,null) }
             throw error
         }
+    }
+
+    /** 识别视频真实容器，避免 mov/webm 内容被存成 .mp4 后相册或播放器无法识别。 */
+    fun videoFormat(file:File):Pair<String,String> {
+        val retriever=MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.path)
+            val mime=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)?.lowercase().orEmpty()
+            when {
+                "quicktime" in mime||"mov" in mime -> "mov" to "video/quicktime"
+                "webm" in mime -> "webm" to "video/webm"
+                "3gpp" in mime -> "3gp" to "video/3gpp"
+                "matroska" in mime -> "mkv" to "video/x-matroska"
+                "avi" in mime -> "avi" to "video/x-msvideo"
+                else -> "mp4" to "video/mp4"
+            }
+        } catch(_:Exception) { "mp4" to "video/mp4" } finally { retriever.release() }
     }
     /** 自拍源文件已由本 App 写入；移动到私有持久目录后即可入队，不先等待解帧。 */
     fun stageCapturedVideo(context:Context,source:File):LocalMedia {

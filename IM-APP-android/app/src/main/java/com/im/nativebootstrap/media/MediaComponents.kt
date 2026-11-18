@@ -139,7 +139,7 @@ private class PreviewTransform {
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun ImagePreview(urls:List<String>,initial:Int=0,onDismiss:()->Unit,onSave:(String)->Unit,sender:String="",time:String="",onDelete:(()->Unit)?=null,onForward:(()->Unit)?=null) {
+fun ImagePreview(urls:List<String>,initial:Int=0,onDismiss:()->Unit,onSave:(String)->Unit,sender:String="",time:String="",onDelete:(()->Unit)?=null,onForward:(()->Unit)?=null,saving:Boolean=false) {
     val list=remember(urls) { urls.filter(String::isNotBlank).distinct() }
     if(list.isEmpty()) { LaunchedEffect(Unit) { onDismiss() };return }
     val state=rememberPagerState(initialPage=initial.coerceIn(0,list.lastIndex)) { list.size }
@@ -212,16 +212,24 @@ fun ImagePreview(urls:List<String>,initial:Int=0,onDismiss:()->Unit,onSave:(Stri
             }
             Text("双指缩放 · 左右滑动切换",Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom=barInset),color=Color(0xFFAAAAAA),fontSize=12.sp)
             if(hasBar)Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().height(56.dp),horizontalArrangement=Arrangement.SpaceAround,verticalAlignment=Alignment.CenterVertically) {
-                val actions=listOf(onDelete to (R.drawable.uni_video_trash to "删除"),({ onSave(list[current]) }) to (R.drawable.uni_video_download to "保存"),onForward to (R.drawable.uni_video_forward to "转发")).filter { it.first!=null }
-                actions.forEach { (action,icon) -> Box(Modifier.width(72.dp).fillMaxHeight().clickable(onClick={ action?.invoke() }),contentAlignment=Alignment.Center) { Image(painterResource(icon.first),icon.second,Modifier.size(24.dp),contentScale=ContentScale.Fit) } }
+                val actions=listOf(
+                    Triple<(() -> Unit)?,Pair<Int,String>,Boolean>(onDelete,R.drawable.uni_video_trash to "删除",false),
+                    Triple<(() -> Unit)?,Pair<Int,String>,Boolean>({ onSave(list[current]) },R.drawable.uni_video_download to "保存",true),
+                    Triple<(() -> Unit)?,Pair<Int,String>,Boolean>(onForward,R.drawable.uni_video_forward to "转发",false)
+                ).filter { it.first!=null }
+                actions.forEach { (action,icon,isSave) -> Box(Modifier.width(72.dp).fillMaxHeight().clickable(enabled=!(isSave&&saving),onClick={ action?.invoke() }),contentAlignment=Alignment.Center) {
+                    // 保存进行中在原位显示进度，避免「点了没反应」。
+                    if(isSave&&saving)CircularProgressIndicator(Modifier.size(20.dp),color=Color.White,strokeWidth=2.dp)
+                    else Image(painterResource(icon.first),icon.second,Modifier.size(24.dp),contentScale=ContentScale.Fit)
+                } }
             }
-            else TextButton(onClick={ onSave(list[current]) },Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom=8.dp)) { Text("保存原图",color=Color.White) }
+            else TextButton(onClick={ onSave(list[current]) },enabled=!saving,modifier=Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom=8.dp)) { if(saving)CircularProgressIndicator(Modifier.size(18.dp),color=Color.White,strokeWidth=2.dp) else Text("保存原图",color=Color.White) }
         }
     }
 }
 
 @Composable
-fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:String="",sender:String="视频",time:String="",onSave:(()->Unit)?=null,onForward:(()->Unit)?=null,onDelete:(()->Unit)?=null,localFile:java.io.File?=null,localPoster:java.io.File?=null,allowedLocalDirectory:java.io.File?=null) {
+fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:String="",sender:String="视频",time:String="",onSave:(()->Unit)?=null,onForward:(()->Unit)?=null,onDelete:(()->Unit)?=null,localFile:java.io.File?=null,localPoster:java.io.File?=null,allowedLocalDirectory:java.io.File?=null,saving:Boolean=false) {
     val context=LocalContext.current
     val access by MediaLoader.access.collectAsState()
     val address=remember(url,access) { MediaURLs.playback(url,access.base) }
@@ -267,7 +275,12 @@ fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:Str
                 error?.let { Text(it,Modifier.align(Alignment.Center).background(Color(0xAA000000)).clickable { view?.release();error=null;rendered=false;attempt++ }.padding(16.dp),color=Color.White) }
             }
             if(onSave!=null||onForward!=null||onDelete!=null)Row(Modifier.fillMaxWidth().height(56.dp),horizontalArrangement=Arrangement.SpaceAround,verticalAlignment=Alignment.CenterVertically) {
-                listOf(Triple(onDelete,R.drawable.uni_video_trash,"删除"),Triple(onSave,R.drawable.uni_video_download,"保存"),Triple(onForward,R.drawable.uni_video_forward,"转发")).forEach { (action,icon,label) -> if(action!=null)Box(Modifier.width(72.dp).fillMaxHeight().clickable(onClick=action),contentAlignment=Alignment.Center) { Image(painterResource(icon),label,Modifier.size(24.dp),contentScale=ContentScale.Fit) } }
+                listOf(Triple(onDelete,R.drawable.uni_video_trash,"删除"),Triple(onSave,R.drawable.uni_video_download,"保存"),Triple(onForward,R.drawable.uni_video_forward,"转发")).forEach { (action,icon,label) ->
+                    if(action!=null)Box(Modifier.width(72.dp).fillMaxHeight().clickable(enabled=!(saving&&label=="保存"),onClick=action),contentAlignment=Alignment.Center) {
+                        if(saving&&label=="保存")CircularProgressIndicator(Modifier.size(20.dp),color=Color.White,strokeWidth=2.dp)
+                        else Image(painterResource(icon),label,Modifier.size(24.dp),contentScale=ContentScale.Fit)
+                    }
+                }
             }
         }
     }
