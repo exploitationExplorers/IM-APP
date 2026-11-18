@@ -376,6 +376,25 @@ class BusinessController(
             if(response.isJsonObject) { val group=response.asJsonObject;open("group",group.identifier()) }
         }
     }
+    // 对标 H5 add-group：公开群直接加入并进入会话；需要审核的群自动转入群申请。
+    fun joinGroup(publicId:String,remark:String="") {
+        launch {
+            try {
+                val result=call("POST","/groups/${encoded(publicId)}/join")
+                val group=(result as? JsonObject)?.let{it.get("group")?.takeIf{g->g.isJsonObject}?.asJsonObject?:it} ?: JsonObject()
+                mutable.value=mutable.value.copy(notice="已加入群聊")
+                if(group.identifier().isNotBlank())openChat(group,true) else back()
+            } catch(e:Exception) {
+                if(e is kotlinx.coroutines.CancellationException)throw e
+                val message=e.message.orEmpty()
+                if(message.contains("审核")) {
+                    call("POST","/groups/${encoded(publicId)}/join-requests",obj("remark" to remark))
+                    mutable.value=mutable.value.copy(notice="已提交入群申请")
+                    back()
+                } else throw APIException(if(message.isBlank()||message=="加入失败")"群不存在或无法加入" else message)
+            }
+        }
+    }
     fun deleteAccount(phone:String,country:String,code:String,acknowledge:String) {
         val d=mutable.value.detail
         if(!d.flag("canDelete") || acknowledge!=d.text("confirmPhrase"))return

@@ -8,7 +8,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 
-data class PreparedForward(val target:ChatTarget,val message:ChatMessage,val attempted:Boolean=false,val accepted:Boolean=false)
+/** archived=true 表示归档已处理（成功换副本 URL，或失败确认降级用原始 URL），resume 时不再重复 preserve。sourceId 指回源消息。 */
+data class PreparedForward(val target:ChatTarget,val message:ChatMessage,val attempted:Boolean=false,val accepted:Boolean=false,val archived:Boolean=false,val sourceId:String?=null)
 data class PendingForward(val id:String,val sourceConversationId:String,val sources:List<ChatMessage>,val selection:ChatForwardSelection,
     val status:String="queued",val plan:List<PreparedForward> = emptyList(),val remoteTaskIds:List<String> = emptyList(),val createdAt:Long=System.currentTimeMillis(),
     val failureStage:String="",val failureCode:Int?=null) {

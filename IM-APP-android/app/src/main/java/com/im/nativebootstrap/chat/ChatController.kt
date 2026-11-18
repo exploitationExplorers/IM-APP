@@ -2,6 +2,7 @@ package com.im.nativebootstrap.chat
 
 import com.im.nativebootstrap.core.*
 import com.im.nativebootstrap.PerfLog
+import android.util.Log
 import java.io.File
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
@@ -78,6 +79,7 @@ class ChatController(
     private var mediaUploads:PendingMediaUploads?=null
     private var sentVideos:SentLocalVideos?=null
     private var pendingForwards:PendingForwards?=null
+    private var compressCache:File=File(System.getProperty("java.io.tmpdir") ?: "/tmp","upload-compress")
     private val runningForwards=mutableSetOf<String>()
     private val announcedForwards=mutableSetOf<String>()
     private fun notifyForward(job:PendingForward) {
@@ -223,6 +225,7 @@ class ChatController(
             sentVideos=SentLocalVideos(File(directory,"sent-videos.json"),owner)
             mediaUploads=PendingMediaUploads(File(directory,"media-uploads.json"),owner,sentVideos!!.retainedPaths())
             pendingForwards=PendingForwards(File(directory,"pending-forwards.json"),owner)
+            compressCache=File(directory,"upload-compress").apply { mkdirs() }
             mediaUploads?.all()?.filter { job -> job.prepared?.id?.let { id -> outbox?.all()?.any { it.id==id } }==true }?.forEach { job ->
                 if(job.kind==MediaKind.VIDEO&&job.media().file.isFile)sentVideos?.put(job.prepared!!.id,job.media())
                 mediaUploads?.remove(job.id,keepFiles=job.kind==MediaKind.VIDEO)
@@ -671,9 +674,13 @@ class ChatController(
                     pending=store.update(entry.id) { it.copy(width=local.width,height=local.height,duration=local.duration,snapshotPath=local.snapshot!!.absolutePath) } ?: error("本地附件不可用")
                     dispatch { if(current(t)&&mediaUploads===store)emit() }
                 }
-                var value=if(pending.remoteUrl.isNotBlank())UploadedMedia(local,pending.remoteUrl,pending.remoteThumbnail,pending.remoteId) else api.uploadMedia(local).also { base ->
-                    check(current(t)&&mediaUploads===store)
-                    store.update(entry.id) { it.copy(remoteUrl=base.url,remoteThumbnail=base.thumbnail,remoteId=base.id) }
+                var value=if(pending.remoteUrl.isNotBlank())UploadedMedia(local,pending.remoteUrl,pending.remoteThumbnail,pending.remoteId) else {
+                    // 服务端直传表单限 20MB，超限图片先本地压缩（降采样+JPEG），原文件不动。
+                    val uploadable=com.im.nativebootstrap.media.ImageUploadCompress.compressIfNeeded(local,compressCache)
+                    api.uploadMedia(uploadable).also { base ->
+                        check(current(t)&&mediaUploads===store)
+                        store.update(entry.id) { it.copy(remoteUrl=base.url,remoteThumbnail=base.thumbnail,remoteId=base.id) }
+                    }
                 }
                 if(local.kind==MediaKind.VIDEO&&value.thumbnail.isBlank()) {
                     val cover=local.snapshot ?: error("视频封面暂不可读取")
@@ -1228,7 +1235,10 @@ class ChatController(
         if(!runningForwards.add(job.id))return
         fun done(result:Result<ChatForwardResult>) {
             runningForwards.remove(job.id)
-            result.fold(onSuccess={ value -> store.update(job.id) { it.copy(status=if(value.queued)"processing" else "completed",remoteTaskIds=value.taskIds) } },onFailure={ error -> store.update(job.id) { it.copy(status="failed",failureStage=it.failureStage.ifBlank { "prepare" },failureCode=failureCode(error)) } })
+            result.fold(onSuccess={ value -> store.update(job.id) { it.copy(status=if(value.queued)"processing" else "completed",remoteTaskIds=value.taskIds) } },onFailure={ error ->
+                Log.w("ChatForward","forward ${job.id} failed stage=${store.all().firstOrNull { it.id==job.id }?.failureStage.orEmpty()}",error)
+                store.update(job.id) { it.copy(status="failed",failureStage=it.failureStage.ifBlank { "prepare" },failureCode=failureCode(error)) }
+            })
             emit()
             store.all().firstOrNull { it.id==job.id }?.let(::notifyForward)
         }
@@ -1246,31 +1256,49 @@ class ChatController(
         val direct=frozen.all { it.second.get("contentType").asInt in setOf(101,102,104) }&&!selection.allFriends&&selection.targets.none { it.kind=="tag" }&&directTargets.size in 1..12
         businessIO.execute {
             val resolved=runCatching {
+                // 无标识的目标（如系统会话 imAdmin 映射不到业务 ID）自动跳过，不因单个目标阻塞整个转发。
+                val usable=selection.targets.filter { when(it.kind) {
+                    "contact" -> it.businessUserId.isNotEmpty()
+                    "group" -> it.businessGroupId.isNotEmpty()||it.imGroupId.isNotEmpty()
+                    "tag" -> it.tagId.isNotEmpty()
+                    else -> false
+                } }
+                check(usable.isNotEmpty()) { "所选目标暂不可转发，请刷新后重试" }
+                var skipped=0
                 val users=linkedSetOf<String>();val groups=linkedSetOf<String>();val tags=linkedSetOf<String>()
                 val targets=mutableListOf<Pair<String,Boolean>>()
-                selection.targets.forEach { item -> when(item.kind) {
+                usable.forEach { item -> when(item.kind) {
                     "tag" -> { require(item.tagId.isNotEmpty());tags.add(item.tagId) }
                     "contact" -> {
                         require(item.businessUserId.isNotEmpty()) { "无法识别转发用户" }
-                        users.add(item.businessUserId)
                         if(direct) {
                             val peer=api.request("GET","/im/peers/${item.businessUserId}").asJsonObject
-                            check(peer.field("canChat")?.asBoolean==true) { "所选用户当前不可发送" }
-                            targets.add(peer.string("imUserId").also { check(it.isNotEmpty()) } to false)
-                        }
+                            // 单个目标不可发送（解散/禁言/非好友）只跳过并记日志，不让整批转发失败。
+                            if(peer.field("canChat")?.asBoolean==true) targets.add(peer.string("imUserId").also { check(it.isNotEmpty()) } to false)
+                            else { skipped++;Log.w("ChatForward","skip peer ${item.businessUserId}: canChat=false") }
+                        } else users.add(item.businessUserId)
                     }
                     "group" -> {
-                        val group=if(item.businessGroupId.isNotEmpty())api.request("GET","/im/groups/${item.businessGroupId}").asJsonObject else api.request("GET","/im/groups/by-im/${item.imGroupId}").asJsonObject
-                        val id=group.string("businessGroupId").also { check(it.isNotEmpty()) { "群已解散或不可用" } }
+                        val group=runCatching {
+                            if(item.businessGroupId.isNotEmpty())api.request("GET","/im/groups/${item.businessGroupId}").asJsonObject else api.request("GET","/im/groups/by-im/${item.imGroupId}").asJsonObject
+                        }.getOrElse {
+                            skipped++;Log.w("ChatForward","skip group ${item.businessGroupId.ifEmpty { item.imGroupId }}: ${it.message}")
+                            return@forEach
+                        }
+                        val id=group.string("businessGroupId")
+                        if(id.isEmpty()) { skipped++;Log.w("ChatForward","skip group ${item.businessGroupId.ifEmpty { item.imGroupId }}: 群已解散或不可用");return@forEach }
                         groups.add(id)
-                        if(direct) { check(group.field("canChat")?.asBoolean==true) { "所选群当前不可发送" };targets.add(group.string("imGroupId").also { check(it.isNotEmpty()) } to true) }
+                        if(direct) {
+                            if(group.field("canChat")?.asBoolean==true) targets.add(group.string("imGroupId").also { check(it.isNotEmpty()) } to true)
+                            else { skipped++;Log.w("ChatForward","skip group $id: canChat=false") }
+                        }
                     }
                     else -> error("转发目标类型无效")
                 } }
                 if(direct) {
-                    // 每个源媒体只归档一次，所有收件人复用远端副本，使用各自独立 SDK 消息 ID。
-                    val protected=frozen.map { (message,body) -> message to if(body.get("contentType").asInt in setOf(102,104))api.request("POST","/forward-media/preserve",jsonBody("sourceSnapshot" to body)).asJsonObject.also { check(it.get("contentType")?.asInt==body.get("contentType").asInt) { "媒体转发副本格式无效" };runCatching { api.rememberForwardMedia(message,it) } } else body }
-                    Triple(targets.distinct(),protected,null)
+                    check(targets.isNotEmpty()) { "所选目标均不可发送（群已解散、被禁言或已非好友），请重新选择" }
+                    // 归档(preserve)后移：气泡先上屏（原始快照命中本地缓存），后台归档成功后在发送前替换为远端副本 URL（见 archiveForwardMedia）。
+                    Triple(targets.distinct(),frozen,null)
                 } else {
                     check(selection.allFriends||users.isNotEmpty()||groups.isNotEmpty()||tags.isNotEmpty()) { "请选择转发目标" }
                     fun array(ids:Iterable<String>)=JsonArray().apply { ids.forEach(::add) }
@@ -1299,27 +1327,25 @@ class ChatController(
                         } } }
                         return@fold
                     }
-                    val planned=mutableListOf<PreparedForward>()
-                    var targetIndex=0
-                    fun prepareNext() {
-                        if(!current(t))return
-                        if(targetIndex>=targets.size) {
-                            store.update(job.id) { it.copy(plan=planned) }
-                            dispatchForwardPlan(t,job.id,planned,store)
-                            return
-                        }
-                        val (imId,group)=targets[targetIndex++]
+                    // 全部目标并发解析，任一失败即整体失败；解析完成后立即落盘并提交，不按人数串行累积往返。
+                    val resolvedPeers=java.util.concurrent.ConcurrentHashMap<Int,ChatConversation>()
+                    val peerFailures=java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+                    targets.forEachIndexed { index,(imId,group) ->
                         gateway.peer(imId,group) { peer -> dispatch {
                             if(!current(t))return@dispatch
                             peer.fold(onSuccess={ conversation ->
-                                try {
-                                    sources.forEach { (message,body) -> planned+=PreparedForward(conversation.target,gateway.createForward(message,body,conversation.target)) }
-                                    prepareNext()
-                                } catch(error:Exception) { done(Result.failure(error)) }
-                            },onFailure={ done(Result.failure(it)) })
+                                resolvedPeers[index]=conversation
+                                if(resolvedPeers.size==targets.size&&peerFailures.isEmpty()) {
+                                    try {
+                                        val planned=targets.indices.flatMap { position -> val conversation=resolvedPeers[position]!!;sources.map { (message,body) -> PreparedForward(conversation.target,gateway.createForward(message,body,conversation.target),sourceId=message.id) } }
+                                        store.update(job.id) { it.copy(plan=planned) }
+                                        val mediaSources=sources.filter { it.second.get("contentType").asInt in setOf(102,104) }
+                                        dispatchForwardPlan(t,job.id,planned,store,mediaSources,api)
+                                    } catch(error:Exception) { done(Result.failure(error)) }
+                                }
+                            },onFailure={ error -> if(peerFailures.isEmpty()&&resolvedPeers.size<targets.size) { peerFailures.add(error);done(Result.failure(error)) } })
                         } }
                     }
-                    prepareNext()
                 },onFailure={ done(Result.failure(it)) })
             }
         }
@@ -1366,11 +1392,19 @@ class ChatController(
             pendingForwards?.update(job.id) { if(it.status=="completed"||status=="processing"&&it.status in setOf("failed","uncertain"))it else it.copy(status=status,failureStage=when(status) { "failed"->"server";"uncertain"->"server_unconfirmed";else->"" }) }?.let(::notifyForward);emit()
         } }
     }
-    private fun dispatchForwardPlan(t:SessionTicket,id:String,plan:List<PreparedForward>,store:PendingForwards) {
+    /** 转发秒完成：条目落待发箱后立即开始提交；媒体归档仅作后台优化（成功后为未提交条目换归档 URL 并预热缓存），不阻塞提交。 */
+    private fun dispatchForwardPlan(t:SessionTicket,id:String,plan:List<PreparedForward>,store:PendingForwards,mediaSources:List<Pair<ChatMessage,JsonObject>> = emptyList(),api:ChatBusiness? = null) {
         try {
             // 全部消息先写待发箱，随后可并行等待 ACK，避免按人数累加网络往返。
             val entries=plan.filterNot { it.accepted }.map { item -> outbox?.all()?.firstOrNull { it.id==item.message.id } ?: outbox!!.put(item.target,item.message) }
             emit(snapshot.copy(messages=mergeMessages(snapshot.messages,entries.filter { it.target==snapshot.active?.target }.map { it.message })))
+            // 先提交后归档：提交循环同步走完（attempted 全部落定），归档 settle 必然能读到最终提交状态。
+            submitStagedForwardPlan(t,id,store,entries)
+            if(mediaSources.isNotEmpty()&&api!=null)archiveForwardMedia(t,api,id,plan,mediaSources,store,entries)
+        } catch(_:Exception) { store.update(id) { it.copy(status="failed",failureStage="outbox") }?.let(::notifyForward);runningForwards.remove(id);emit() }
+    }
+    private fun submitStagedForwardPlan(t:SessionTicket,id:String,store:PendingForwards,entries:List<OutboxEntry>) {
+        try {
             entries.groupBy { it.target }.values.forEach { targetEntries ->
                 var index=0
                 fun next() {
@@ -1394,6 +1428,49 @@ class ChatController(
             }
             if(entries.isEmpty()) { store.update(id) { it.copy(status="completed") }?.let(::notifyForward);runningForwards.remove(id);emit() }
         } catch(_:Exception) { store.update(id) { it.copy(status="failed",failureStage="outbox") }?.let(::notifyForward);runningForwards.remove(id);emit() }
+    }
+    /** direct 转发秒显示：气泡已上屏（原始快照），后台归档源媒体；成功则发送前把 payload 换成远端副本 URL，失败降级用原始 URL 发送，均不阻塞用户。 */
+    private fun archiveForwardMedia(t:SessionTicket,api:ChatBusiness,id:String,plan:List<PreparedForward>,mediaSources:List<Pair<ChatMessage,JsonObject>>,store:PendingForwards,entries:List<OutboxEntry>) {
+        val archivedBySource=java.util.concurrent.ConcurrentHashMap<String,JsonObject>()
+        val failedSources=java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String,Boolean>())
+        val remaining=java.util.concurrent.atomic.AtomicInteger(mediaSources.size)
+        fun settle() { if(remaining.decrementAndGet()!=0)return;dispatch {
+            if(!current(t)||pendingForwards!==store)return@dispatch
+            // 以最新持久化 plan 为准：提交阶段会就地把 attempted 置真，入参快照可能已过时。
+            val latest=store.all().firstOrNull { it.id==id }?.plan ?: return@dispatch
+            val updated=latest.map { item ->
+                val archived=item.sourceId?.let { archivedBySource[it] }
+                val related=item.sourceId!=null&&(item.sourceId in failedSources||archivedBySource.containsKey(item.sourceId))
+                when {
+                    // 已提交(attempted)的条目 payload 保持发出时的原始 URL，仅标记归档已处理。
+                    archived!=null -> runCatching { if(item.attempted)item.copy(archived=true) else item.copy(message=item.message.copy(serialized=ForwardSnapshots.withSnapshot(item.message.serialized,archived)),archived=true) }.getOrElse { item.copy(archived=true) }
+                    related -> item.copy(archived=true)
+                    else -> item
+                }
+            }
+            store.update(id) { it.copy(plan=updated) }
+            // 仅替换仍未提交（PENDING）的条目：已发出的消息不再改动，alias 让显示端与下次转发命中缓存。
+            entries.forEach { entry ->
+                val next=updated.firstOrNull { it.message.id==entry.id }
+                val live=outbox?.all()?.firstOrNull { it.id==entry.id }
+                if(next!=null&&live!=null&&live.state==OutboxState.PENDING&&next.message.serialized!=live.message.serialized)outbox?.update(entry.id,live.state,next.message)
+            }
+            emit()
+        } }
+        mediaSources.forEach { (message,body) ->
+            businessIO.execute {
+                val archived=runCatching {
+                    val preserved=api.request("POST","/forward-media/preserve",jsonBody("sourceSnapshot" to body)).asJsonObject
+                    check(preserved.get("contentType")?.asInt==body.get("contentType").asInt) { "媒体转发副本格式无效" }
+                    preserved
+                }.getOrNull()
+                if(archived!=null) {
+                    runCatching { api.rememberForwardMedia(message,archived) }
+                    archivedBySource[message.id]=archived
+                } else failedSources.add(message.id)
+                settle()
+            }
+        }
     }
     private fun resumeForwardPlan(job:PendingForward,store:PendingForwards) {
         val t=ticket ?: return
@@ -1426,11 +1503,12 @@ class ChatController(
         }
         fun next() {
             if(!current(t)||pendingForwards!==store)return
-            if(index>=job.plan.size) {
-                val current=store.all().firstOrNull { it.id==job.id } ?: return
-                dispatchForwardPlan(t,job.id,current.plan,store);return
+            // 归档补跑会原地更新 plan payload，迭代必须读最新持久化状态而非启动时的快照。
+            val plan=store.all().firstOrNull { it.id==job.id }?.plan ?: return
+            if(index>=plan.size) {
+                dispatchForwardPlan(t,job.id,plan,store);return
             }
-            val item=job.plan[index++]
+            val item=plan[index++]
             if(item.accepted) { next();return }
             if(!item.attempted) { if(repairUnsubmittedImage(item))next();return }
             gateway.find(item.target,item.message.id) { result -> dispatch {
@@ -1451,6 +1529,7 @@ class ChatController(
                 }
             } }
         }
+        // 归档已是纯后台优化：恢复路径直接以已存 payload 提交（多数条目在归档完成前已按原始 URL 发出，与降级语义一致）。
         next()
     }
     fun loadFavoriteSource(messageId:String,conversationId:String,done:(Result<ChatMessage>)->Unit) {

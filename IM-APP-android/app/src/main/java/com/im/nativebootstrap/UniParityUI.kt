@@ -328,13 +328,19 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
             Text(when (tab) { "contacts" -> "通讯录"; "mine" -> "我的"; else -> "聊天" }, fontSize = s.text(48), lineHeight = s.text(64), color = Ink, fontWeight = FontWeight.Bold)
             if (tab != "mine") Row(verticalAlignment = Alignment.CenterVertically) {
                 if (tab == "chat")Box {
-                    Text("⋯",Modifier.size(s.dp(64)).clickable{moreMenu=true}.wrapContentSize(),fontSize=s.text(44),fontWeight=FontWeight.Bold)
-                    androidx.compose.material3.DropdownMenu(moreMenu,{moreMenu=false}){androidx.compose.material3.DropdownMenuItem(text={Text("全部已读")},onClick={moreMenu=false;if(state.sample)toast("本地样例没有未读消息") else model.markLoadedConversationsRead(toast)})}
+                    Text("⋯",Modifier.size(s.dp(64)).clickable{moreMenu=!moreMenu;addMenu=false}.wrapContentSize(),fontSize=s.text(44),fontWeight=FontWeight.Bold)
+                    androidx.compose.material3.DropdownMenu(moreMenu,{moreMenu=false},modifier=Modifier.shadow(10.dp,RoundedCornerShape(s.dp(16))).clip(RoundedCornerShape(s.dp(16))).background(Color.White)){androidx.compose.material3.DropdownMenuItem(text={Text("全部已读")},onClick={moreMenu=false;if(state.sample)toast("本地样例没有未读消息")else if(unreadSummary.count==0)toast("没有未读消息") else model.markLoadedConversationsRead(toast)})}
                 }
                 Box {
-                    Image(painterResource(R.drawable.uni_icon_plus), "添加", Modifier.size(s.dp(64)).padding(s.dp(8)).clickable { if(!state.sample)addMenu=true })
-                    androidx.compose.material3.DropdownMenu(addMenu,{addMenu=false}) {
-                        listOf("添加朋友" to "add-friend","添加群聊" to "add-group","创建群聊" to "create-group","扫一扫" to "scan").forEach{(label,page)->androidx.compose.material3.DropdownMenuItem(text={Text(label)},onClick={addMenu=false;model.business.open(page)})}
+                    Image(painterResource(R.drawable.uni_icon_plus), "添加", Modifier.size(s.dp(64)).padding(s.dp(8)).clickable { if(!state.sample){addMenu=!addMenu;moreMenu=false} })
+                    // 对齐 H5 聊天页「＋」菜单：白底圆角阴影弹出层，图标+文字三项（添加朋友/添加群聊/创建群聊）
+                    androidx.compose.material3.DropdownMenu(addMenu,{addMenu=false},modifier=Modifier.shadow(10.dp,RoundedCornerShape(s.dp(16))).clip(RoundedCornerShape(s.dp(16))).background(Color.White)) {
+                        listOf(Triple("添加朋友",R.drawable.uni_menu_add_friend,"add-friend"),Triple("添加群聊",R.drawable.uni_menu_add_group,"add-group"),Triple("创建群聊",R.drawable.uni_menu_create_group,"create-group")).forEach{(label,icon,page)->
+                            Row(Modifier.widthIn(min=s.dp(288)).clickable{addMenu=false;model.business.open(page)}.padding(horizontal=s.dp(32),vertical=s.dp(16)),verticalAlignment=Alignment.CenterVertically) {
+                                Image(painterResource(icon),null,Modifier.size(s.dp(40)))
+                                Text(label,Modifier.padding(start=s.dp(16)),fontSize=s.text(28),color=Color(0xFF212121))
+                            }
+                        }
                     }
                 }
             }

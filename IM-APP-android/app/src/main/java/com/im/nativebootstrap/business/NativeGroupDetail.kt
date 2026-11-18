@@ -77,6 +77,11 @@ private val GroupBlue=Color(0xFF1E88FF)
         if(!lookup&&!dissolved)loadSettings()
         else if(dissolved)conversation=model.state.value.chat.conversations.firstOrNull{it.target.conversationId==d.text("conversationId")}
     }
+    // 聊天库就绪前 loadSettings 会因「聊天库尚未就绪」失败且开关一直置灰；就绪后自动补加载
+    val chatReady=model.state.value.chat.ready
+    LaunchedEffect(r,chatReady){
+        if(chatReady&&!lookup&&!dissolved&&conversation==null&&!settingsLoading)loadSettings()
+    }
     // 群主/管理员停留在群详情时每 5 秒对账一次入群申请数，新申请直接刷新角标（1、2、3…）
     LaunchedEffect(r,manager,lookup,dissolved){
         while(manager&&!lookup&&!dissolved){kotlinx.coroutines.delay(5000);c.refreshPendingJoinCount()}
@@ -146,9 +151,14 @@ private val GroupBlue=Color(0xFF1E88FF)
             }}
         }
         GroupCard {
-            ToggleRow("消息免打扰",conversation?.muted?:false,enabled=conversation!=null&&!busy){updateSetting(muted=it)}
+            // 开关始终可用；会话设置未加载时点击会提示并自动补加载（对齐 H5 的「会话未就绪」提示）
+            fun toggleOrLoad(apply:(ChatConversation)->Unit){
+                val current=conversation
+                if(current==null){note="会话设置未就绪，正在加载，请稍后再试";if(!settingsLoading)loadSettings()}else apply(current)
+            }
+            ToggleRow("消息免打扰",conversation?.muted?:false,enabled=!busy){value->toggleOrLoad{updateSetting(muted=value)}}
             HorizontalDivider(color=Color(0xFFF0F0F0),thickness=s.dp)
-            ToggleRow("置顶聊天",conversation?.pinned?:false,enabled=conversation!=null&&!busy){updateSetting(pinned=it)}
+            ToggleRow("置顶聊天",conversation?.pinned?:false,enabled=!busy){value->toggleOrLoad{updateSetting(pinned=value)}}
             if(settingsLoading)Text("正在加载会话设置…",Modifier.padding(12.dp),color=GroupMuted,fontSize=12.sp)
             if(settingsError.isNotBlank())Text("$settingsError · 点击重试",Modifier.fillMaxWidth().clickable(enabled=!settingsLoading){loadSettings()}.padding(12.dp),color=Color(0xFFDC2828),fontSize=12.sp)
         }

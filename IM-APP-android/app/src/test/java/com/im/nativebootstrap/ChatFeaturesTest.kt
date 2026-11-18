@@ -607,26 +607,109 @@ class ChatFeaturesTest {
         val video=ChatMessage("source-video","[视频]",true,1,2,2,"""{"clientMsgID":"source-video","contentType":104,"videoElem":{"videoUrl":"https://cdn.invalid/original.mov","videoType":"mov","videoUUID":"v1","snapshotUrl":"https://cdn.invalid/cover.jpg","snapshotUUID":"c1","duration":8,"videoSize":1024,"snapshotWidth":360,"snapshotHeight":640}}""")
         val targets=listOf("first","second","third","fourth").map { ChatForwardTarget(it,it,"contact",businessUserId=it) }
         h.controller.submitForward(listOf(video),ChatForwardSelection(targets),done={ assertTrue(it.isSuccess) })
+        // 提交不等归档：4 个目标全部立即按原始 URL 发出。
         h.awaitState { it.pendingForwards.singleOrNull()?.plan?.size==4&&it.outbox.size==4&&h.gateway.sendCallbacks.size==4 }
-        assertEquals(1,preserveCalls.get())
-        val plan=h.state.pendingForwards.single().plan
-        assertEquals(4,plan.map { it.message.id }.distinct().size)
-        plan.forEach {
+        fun currentPlan()=h.state.pendingForwards.single().plan
+        assertEquals(4,currentPlan().map { it.message.id }.distinct().size)
+        currentPlan().forEach {
             val elem=JsonParser.parseString(it.message.serialized).asJsonObject.getAsJsonObject("videoElem")
-            assertEquals("https://cdn.invalid/archive.mov",elem["videoUrl"].asString)
+            assertEquals("https://cdn.invalid/original.mov",elem["videoUrl"].asString)
             assertEquals("mov",elem["videoType"].asString)
             assertEquals("v1",elem["videoUUID"].asString)
         }
-        h.gateway.sendCallbacks[0](Result.success(plan[0].message.copy(status=2,seq=7)))
+        // 归档后台收尾：每个源媒体只 preserve 一次，条目标记 archived。
+        h.awaitState { preserveCalls.get()==1&&currentPlan().all { it.archived } }
+        h.gateway.sendCallbacks[0](Result.success(currentPlan()[0].message.copy(status=2,seq=7)))
         h.gateway.sendCallbacks[1](Result.failure(ChatFailure(10001)))
-        h.gateway.sendCallbacks[2](Result.success(plan[2].message.copy(status=2,seq=10)))
-        h.gateway.sendCallbacks[3](Result.success(plan[3].message.copy(status=2,seq=11)))
+        h.gateway.sendCallbacks[2](Result.success(currentPlan()[2].message.copy(status=2,seq=10)))
+        h.gateway.sendCallbacks[3](Result.success(currentPlan()[3].message.copy(status=2,seq=11)))
         assertEquals("",h.state.forwardSuccessId)
         assertEquals(3,h.state.pendingForwards.single().plan.count { it.accepted })
         assertEquals(4,h.gateway.sendCount)
-        h.gateway.events.messages(listOf(plan[1].target to plan[1].message.copy(status=2,seq=9)))
+        h.gateway.events.messages(listOf(currentPlan()[1].target to currentPlan()[1].message.copy(status=2,seq=9)))
         assertEquals("completed",h.state.pendingForwards.single().status)
         assertEquals(4,h.gateway.sendCount)
+    }
+    private fun imageSource(id:String)=ChatMessage(id,"[图片]",true,1,2,2,"""{"clientMsgID":"$id","contentType":102,"pictureElem":{"sourcePath":"","sourcePicture":{"uuid":"p1","url":"https://cdn.invalid/original.jpg","type":"image/jpeg","width":640,"height":480,"size":1024},"bigPicture":{"uuid":"p1","url":"https://cdn.invalid/original.jpg","type":"image/jpeg","width":640,"height":480,"size":1024},"snapshotPicture":{"uuid":"p1","url":"https://cdn.invalid/original.jpg","type":"image/jpeg","width":640,"height":480,"size":1024}}}""")
+    private fun archiveImageSnapshot(body:JsonObject?):JsonObject {
+        val preserved=body!!.getAsJsonObject("sourceSnapshot").deepCopy().asJsonObject
+        val content=preserved.getAsJsonObject("content")
+        listOf("sourcePicture","bigPicture","snapshotPicture").forEach { name -> content.getAsJsonObject(name).addProperty("url","https://cdn.invalid/archive.jpg") }
+        return preserved
+    }
+    @Test fun imageForwardSendsImmediatelyWhileArchiveRunsInBackground() {
+        val h=Harness();h.controller.open(conversation)
+        val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        h.controller.attachBusiness(object:ChatBusiness {
+            override val baseUrl="https://service.invalid/api/v1"
+            override fun request(method:String,path:String,body:JsonObject?,query:Map<String,String>):JsonElement {
+                if(path.startsWith("/im/peers/"))return JsonParser.parseString("""{"canChat":true,"imUserId":"${path.substringAfterLast('/')}"}""")
+                assertEquals("/forward-media/preserve",path)
+                entered.countDown();check(release.await(5,TimeUnit.SECONDS))
+                return archiveImageSnapshot(body)
+            }
+        })
+        h.controller.submitForward(listOf(imageSource("source-image")),ChatForwardSelection(listOf(ChatForwardTarget("peer","peer","contact",businessUserId="peer"))),done={ assertTrue(it.isSuccess) })
+        // 提交不等归档：preserve 被阻塞期间消息已按原始 URL 发出（转发秒完成）。
+        assertTrue(entered.await(5,TimeUnit.SECONDS))
+        h.awaitState { h.gateway.sendCallbacks.size==1 }
+        assertEquals("https://cdn.invalid/original.jpg",JsonParser.parseString(h.state.outbox.single().message.serialized).asJsonObject.getAsJsonObject("pictureElem").getAsJsonObject("sourcePicture")["url"].asString)
+        release.countDown()
+        // 归档仅后台收尾：标记落盘，已发出的消息 payload 不再改动。
+        h.awaitState { it.pendingForwards.singleOrNull()?.plan?.singleOrNull()?.archived==true }
+        assertEquals("https://cdn.invalid/original.jpg",JsonParser.parseString(h.state.outbox.single().message.serialized).asJsonObject.getAsJsonObject("pictureElem").getAsJsonObject("sourcePicture")["url"].asString)
+        val plan=h.state.pendingForwards.single().plan
+        val accepted=plan[0].message.copy(status=2,seq=7)
+        h.gateway.foundMessages[accepted.id]=accepted
+        h.gateway.sendCallbacks[0](Result.success(accepted))
+        h.awaitState { it.pendingForwards.singleOrNull()?.status=="completed" }
+        assertTrue(h.state.outbox.isEmpty())
+    }
+    @Test fun imageForwardDegradesToOriginalUrlWhenArchiveFailsAndStillSends() {
+        val h=Harness();h.controller.open(conversation)
+        h.controller.attachBusiness(object:ChatBusiness {
+            override val baseUrl="https://service.invalid/api/v1"
+            override fun request(method:String,path:String,body:JsonObject?,query:Map<String,String>):JsonElement {
+                if(path.startsWith("/im/peers/"))return JsonParser.parseString("""{"canChat":true,"imUserId":"${path.substringAfterLast('/')}"}""")
+                assertEquals("/forward-media/preserve",path)
+                throw IllegalStateException("archive offline")
+            }
+        })
+        h.controller.submitForward(listOf(imageSource("source-image")),ChatForwardSelection(listOf(ChatForwardTarget("peer","peer","contact",businessUserId="peer"))),done={ assertTrue(it.isSuccess) })
+        // 归档失败不阻塞发送：仍用原始 URL 发出，且归档标记为已处理（后台收尾不再重试 preserve）。
+        h.awaitState { h.gateway.sendCallbacks.size==1&&it.pendingForwards.singleOrNull()?.plan?.singleOrNull()?.archived==true }
+        assertEquals("https://cdn.invalid/original.jpg",JsonParser.parseString(h.state.outbox.single().message.serialized).asJsonObject.getAsJsonObject("pictureElem").getAsJsonObject("sourcePicture")["url"].asString)
+        val plan=h.state.pendingForwards.single().plan
+        assertTrue(plan.single().archived)
+        h.gateway.sendCallbacks[0](Result.success(plan[0].message.copy(status=2,seq=8)))
+        h.awaitState { it.pendingForwards.singleOrNull()?.status=="completed" }
+    }
+    @Test fun resumedUnsubmittedImageSendsImmediatelyWithoutPreserve() {
+        val h=Harness()
+        val owner=AccountStorage.key("https://service.invalid/api/v1","business","im")
+        val store=PendingForwards(File(h.directory,"pending-forwards.json"),owner)
+        val source=imageSource("source-image")
+        val prepared=source.copy(id="fixed-forward-id",status=1,seq=0,serialized="""{"clientMsgID":"fixed-forward-id","contentType":102,"pictureElem":{"sourcePath":"","sourcePicture":{"url":"https://cdn.invalid/original.jpg","type":""},"snapshotPicture":{"url":"https://cdn.invalid/original.jpg","type":""}}}""")
+        val job=store.put("si_test",listOf(source),ChatForwardSelection(listOf(ChatForwardTarget("peer","peer","contact",businessUserId="peer"))))
+        store.update(job.id) { it.copy(status="processing",plan=listOf(PreparedForward(target,prepared,attempted=false,archived=false,sourceId=source.id))) }
+        val preserveCalls=java.util.concurrent.atomic.AtomicInteger()
+        h.controller.attachBusiness(object:ChatBusiness {
+            override val baseUrl="https://service.invalid/api/v1"
+            override fun request(method:String,path:String,body:JsonObject?,query:Map<String,String>):JsonElement {
+                if(path=="/forward-media/preserve") { preserveCalls.incrementAndGet();return archiveImageSnapshot(body) }
+                return JsonParser.parseString("""{"canChat":true}""")
+            }
+        })
+        h.controller.start(AccountIdentity("business","im"),"https://service.invalid/api/v1","token","https://im.invalid","wss://im.invalid",h.root)
+        h.controller.open(conversation)
+        assertEquals("failed",h.state.pendingForwards.single().status)
+        h.controller.forwardTaskAction(job.id,"retry") { assertTrue(it.isSuccess) }
+        // 恢复路径不等归档：直接以已存 payload（原始 URL）提交。
+        h.awaitState { h.gateway.sendStarted.count==1L&&h.state.outbox.isNotEmpty() }
+        assertEquals(0,preserveCalls.get())
+        val entry=h.state.outbox.single()
+        assertEquals("fixed-forward-id",entry.id)
+        assertEquals("https://cdn.invalid/original.jpg",JsonParser.parseString(entry.message.serialized).asJsonObject.getAsJsonObject("pictureElem").getAsJsonObject("sourcePicture")["url"].asString)
     }
     private fun recoverPreparedForward(foundStatus:Int?,picture:Boolean=false):Harness {
         val h=Harness()

@@ -119,6 +119,9 @@ private val ChatBlue=Color(0xFF2B5CFF)
 private val ChatHint=Color(0xFF9AA3B5)
 private fun onUI(action:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper())action() else Handler(Looper.getMainLooper()).post(action) }
 
+// 正则编译不便宜；imAdmin 系统消息在群聊里长期存在，item 重组时按值匹配，必须复用同一实例。
+private val legacyAdminClearRegex=Regex("^(群主|管理员)清除了「.+」的全部消息$")
+
 private suspend fun voiceSource(
     context:android.content.Context,
     messageId:String,
@@ -534,31 +537,42 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         }.padding(horizontal=16.dp,vertical=8.dp),verticalAlignment=Alignment.CenterVertically) {
             Box(Modifier.width(3.dp).height(32.dp).background(ChatBlue))
             Column(Modifier.weight(1f).padding(start=10.dp)) { Text(if(pin.scope=="shared")"置顶消息" else "仅为我置顶",color=ChatBlue,fontSize=12.sp);Text(pin.preview,maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=13.sp,color=Color(0xFF5B6478)) }
-            Text("×",Modifier.clickable(onClick=callbacks.onDismissPin).padding(10.dp),color=ChatHint)
+            // × 直接走取消置顶（与长按菜单一致），失败时提示并保留本地隐藏。
+            Text("×",Modifier.clickable {
+                callbacks.onDismissPin()
+                callbacks.onAction(ChatMessage(pin.clientMsgID,pin.preview,false,0),ChatAction.UNPIN) { result -> onUI { notice=if(result.isSuccess)"已取消置顶" else result.exceptionOrNull()?.message ?: "取消置顶失败" } }
+            }.padding(10.dp),color=ChatHint)
         } }
-        state.outbox.filter { MessageContents.isPinSync(it.message.serialized)&&it.state in setOf(OutboxState.UNCERTAIN,OutboxState.FAILED) }.forEach { entry -> Text("置顶同步结果待核对 · 点击核对",Modifier.fillMaxWidth().background(Color(0xFFFFF5DF)).clickable { callbacks.onReconcile(entry.id) }.padding(10.dp),color=Color(0xFF805F29),fontSize=12.sp) }
+        val pendingPinSync=remember(state.outbox) { state.outbox.filter { MessageContents.isPinSync(it.message.serialized)&&it.state in setOf(OutboxState.UNCERTAIN,OutboxState.FAILED) } }
+        pendingPinSync.forEach { entry -> Text("置顶同步结果待核对 · 点击核对",Modifier.fillMaxWidth().background(Color(0xFFFFF5DF)).clickable { callbacks.onReconcile(entry.id) }.padding(10.dp),color=Color(0xFF805F29),fontSize=12.sp) }
         failedMedia.forEach { media -> Row(Modifier.fillMaxWidth().background(Color(0xFFFFF5DF)).padding(horizontal=12.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
             Text("待上传：${media.name}",Modifier.weight(1f),maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=12.sp,color=Color(0xFF805F29))
             TextButton(enabled=!state.uploading&&media.file.absolutePath !in retryingMedia,onClick={ sendFile(media) }) { Text("重试上传") }
             TextButton(enabled=media.file.absolutePath !in retryingMedia,onClick={ failedMedia=failedMedia.filterNot { it.file==media.file };media.file.delete();media.snapshot?.delete() }) { Text("移除草稿") }
         } }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(),state=list,reverseLayout=true,contentPadding=PaddingValues(vertical=rpx(20))) {
+        // 消息不足一屏时顶格显示（reverseLayout 下 Top=视觉顶部），与微信一致；消息多时无影响。
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(),state=list,reverseLayout=true,verticalArrangement=Arrangement.Top,contentPadding=PaddingValues(vertical=rpx(20))) {
             itemsIndexed(reversedMessages,key={ _,message -> message.id },contentType={ _,message -> message.contentType }) { index,message ->
                 // 倒序列表中每条消息只提供一个布局根，日期与气泡按正常顺序排布。
                 Column(Modifier.fillMaxWidth()) {
                 val content=remember(message.serialized,message.text) { MessageContents.parse(message.serialized,message.text) }
                 val upload=uploadsById[message.id]
                 val localVideo=if(content.type==104)(upload?.media() ?: state.localSentMedia[message.id]) else null
-                var bubbleBounds by remember(message.id) { mutableStateOf<Rect?>(null) }
+                // 坐标只在长按时读取，用普通 holder 而非 MutableState：滚动期间每次布局都写 state 会制造无意义的重组压力。
+                val bubbleBounds=remember(message.id) { arrayOfNulls<Rect>(1) }
                 val older=reversedMessages.getOrNull(index+1)
                 if(older==null||chatDayKey(older.time)!=chatDayKey(message.time))Box(Modifier.fillMaxWidth().padding(vertical=rpx(12)),contentAlignment=Alignment.Center) { Text(chatDayLabel(message.time),Modifier.clip(RoundedCornerShape(rpx(12))).background(Color(0xFFD8DBE2)).padding(horizontal=rpx(18),vertical=rpx(7)),color=Color(0xFF7A8090),fontSize=(22*factor).sp) }
-                val legacySystem=content.senderId=="imAdmin"&&(content.text=="新群创建成功，一起来聊天吧"||Regex("^(群主|管理员)清除了「.+」的全部消息$").matches(content.text))
+                val legacySystem=content.senderId=="imAdmin"&&(content.text=="新群创建成功，一起来聊天吧"||legacyAdminClearRegex.matches(content.text))
                 if(message.serialized.isBlank()||content.type>=1000||content.type==0||legacySystem) {
                     val system=if(content.type>=1000)ChatSystemMessages.format(message.serialized,state.groupOwnerName.ifBlank { "群主" }) { id -> state.groupMembers[id]?.name.orEmpty() } else content.text.ifBlank { message.text }
                     if(system.isNotBlank())Box(Modifier.fillMaxWidth().padding(rpx(12)),contentAlignment=Alignment.Center) { Text(system.replace("imAdmin",state.groupOwnerName.ifBlank { "群主" }),color=ChatHint,fontSize=(23*factor).sp) }
                 } else {
-                    Row(Modifier.fillMaxWidth().padding(horizontal=rpx(24),vertical=rpx(16)),horizontalArrangement=if(message.mine)Arrangement.End else Arrangement.Start,verticalAlignment=Alignment.Top) {
-                        if(multi&&upload==null)Text(if(message.id in selection)"●" else "○",Modifier.clickable(enabled=!deleting&&!forwarding&&!recalling) { toggleSelection(message) }.padding(end=8.dp,top=8.dp),color=if(message.id in selection)ChatBlue else ChatHint,fontSize=22.sp)
+                    // 多选模式下选择圈固定在最左侧：自己的消息改用 Start 排列 + weight 占位把气泡组推回右侧。
+                    Row(Modifier.fillMaxWidth().padding(horizontal=rpx(24),vertical=rpx(16)),horizontalArrangement=if(message.mine&&!multi)Arrangement.End else Arrangement.Start,verticalAlignment=Alignment.Top) {
+                        if(multi&&upload==null) {
+                            Text(if(message.id in selection)"●" else "○",Modifier.clickable(enabled=!deleting&&!forwarding&&!recalling) { toggleSelection(message) }.padding(end=8.dp,top=8.dp),color=if(message.id in selection)ChatBlue else ChatHint,fontSize=22.sp)
+                            if(message.mine)Spacer(Modifier.weight(1f))
+                        }
                         if(!message.mine)SharedAvatar(content.avatar,Modifier.size(rpx(72)).combinedClickable(onClick={ if(multi)toggleSelection(message) else if(content.senderId.isNotEmpty())callbacks.onOpenPeer(content.senderId) },onLongClick={ if(!multi&&state.active?.target?.sessionType==3)avatarMention=message }))
                         Column(Modifier.widthIn(max=(LocalConfiguration.current.screenWidthDp*.70f).dp).padding(horizontal=rpx(16)),horizontalAlignment=if(message.mine)Alignment.End else Alignment.Start) {
                             if(state.active?.target?.sessionType==3) {
@@ -573,7 +587,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                             val isVisual=content.type==102||content.type==104
                             val background=if(isVisual)Color.Transparent else if(content.groupCard!=null)Color.White else if(message.mine)ChatBlue else Color.White
                             val foreground=if(message.mine&&content.groupCard==null)Color.White else Color(0xFF222222)
-                            Box(Modifier.onGloballyPositioned { bubbleBounds=it.boundsInWindow() }.clip(shape).background(background).combinedClickable(onClick={
+                            Box(Modifier.onGloballyPositioned { bubbleBounds[0]=it.boundsInWindow() }.clip(shape).background(background).combinedClickable(onClick={
                                 if(upload!=null&&content.type!=104) { if(upload.state==MediaUploadState.FAILED)callbacks.onRetryUpload(upload.id);return@combinedClickable }
                                 if(multi) { if(!deleting&&!recalling)toggleSelection(message);return@combinedClickable }
                                 
@@ -593,7 +607,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                     108 -> if(content.cardUserId.isNotEmpty())callbacks.onOpenPeer(content.cardUserId)
                                     107 -> merge=message
                                 }
-                            },onLongClick={ if(!multi) { if(upload!=null)uploadMenu=upload else { selectedAnchor=bubbleBounds?.let { Offset(it.center.x,it.bottom) };selected=message } } }).then(if(isVisual)Modifier else Modifier.padding(horizontal=rpx(22),vertical=rpx(18)))) {
+                            },onLongClick={ if(!multi) { if(upload!=null)uploadMenu=upload else { selectedAnchor=bubbleBounds[0]?.let { Offset(it.center.x,it.bottom) };selected=message } } }).then(if(isVisual)Modifier else Modifier.padding(horizontal=rpx(22),vertical=rpx(18)))) {
                                 when(content.type) {
                                     104 -> VideoMessageBubble(content,localPoster=localVideo?.snapshot,sending=upload?.state==MediaUploadState.UPLOADING||outboxById[message.id]?.state==OutboxState.PENDING||outboxById[message.id]?.state==OutboxState.SENDING)
                                     102 -> {
@@ -672,7 +686,8 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         quoted?.let { quote -> Row(Modifier.fillMaxWidth().background(Color(0xFFF1F3F7)).padding(10.dp),verticalAlignment=Alignment.CenterVertically) { Text("回复 ${quote.sender}：${quote.text}",Modifier.weight(1f),maxLines=2,overflow=TextOverflow.Ellipsis,color=ChatHint,fontSize=12.sp);Text("✕",Modifier.clickable { quoted=null }.padding(8.dp)) } }
         if(state.sendBlockedReason!=null)Row(Modifier.fillMaxWidth().height(rpx(96)).background(Color(0xFFF7F7F7)).padding(horizontal=rpx(32)),verticalAlignment=Alignment.CenterVertically) {
             Text(state.sendBlockedReason,Modifier.weight(1f),color=Color(0xFF999999),fontSize=(26*factor).sp)
-            Text(if(state.permissionLoading)"检查中…" else "检查禁言状态",Modifier.clip(RoundedCornerShape(rpx(28))).border(1.dp,Color(0xFF0A2FC2),RoundedCornerShape(rpx(28))).clickable(enabled=!state.permissionLoading,onClick=callbacks.onRefreshPermission).padding(horizontal=rpx(24),vertical=rpx(12)),color=Color(0xFF0A2FC2),fontSize=(24*factor).sp)
+            // 解散/退群属于终态，重新检查禁言没有意义，仅临时性限制（禁言等）才展示刷新入口。
+            if(state.sendBlockedReason !in setOf("群聊已解散","您已不在该群聊"))Text(if(state.permissionLoading)"检查中…" else "检查禁言状态",Modifier.clip(RoundedCornerShape(rpx(28))).border(1.dp,Color(0xFF0A2FC2),RoundedCornerShape(rpx(28))).clickable(enabled=!state.permissionLoading,onClick=callbacks.onRefreshPermission).padding(horizontal=rpx(24),vertical=rpx(12)),color=Color(0xFF0A2FC2),fontSize=(24*factor).sp)
         }
         else if(voiceMode)Row(Modifier.fillMaxWidth().background(Color(0xFFF2F2F2)).padding(horizontal=rpx(20),vertical=rpx(18)),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(rpx(12))) {
             Box(Modifier.size(rpx(52)).clickable(enabled=!voiceWorking,onClick=::cancelVoice),contentAlignment=Alignment.Center) { Image(painterResource(R.drawable.uni_video_trash),"取消录音",Modifier.size(rpx(32)),contentScale=ContentScale.Fit,colorFilter=androidx.compose.ui.graphics.ColorFilter.tint(Color(0xFF666666))) }
@@ -903,8 +918,11 @@ private fun MultiSelectButton(label:String,modifier:Modifier,enabled:Boolean,pri
         Text(label,color=(if(primary)Color.White else if(danger)Color(0xFFE54D4D) else Color(0xFF333333)).copy(alpha=if(enabled)1f else .4f),fontSize=(28*factor).sp,fontWeight=FontWeight.SemiBold,maxLines=1)
     }
 }
-private fun chatTime(time:Long)=runCatching { SimpleDateFormat("HH:mm",Locale.getDefault()).format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
-private fun chatDayKey(time:Long)=runCatching { SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()).format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
+// SimpleDateFormat 构造含 locale 查找，聊天列表每条消息每次重组都要格式化时间，线程内复用同一实例。
+private val chatTimeFormat=object:ThreadLocal<SimpleDateFormat>() { override fun initialValue()=SimpleDateFormat("HH:mm",Locale.getDefault()) }
+private val chatDayFormat=object:ThreadLocal<SimpleDateFormat>() { override fun initialValue()=SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()) }
+private fun chatTime(time:Long)=runCatching { chatTimeFormat.get().format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
+private fun chatDayKey(time:Long)=runCatching { chatDayFormat.get().format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
 private fun chatDayLabel(time:Long):String {
     val millis=if(time<10_000_000_000)time*1000 else time
     val day=chatDayKey(time)
@@ -1343,7 +1361,6 @@ fun NativeForwardPicker(
     var busy by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
-    var confirm by remember { mutableStateOf(false) }
     fun fetch(reset:Boolean=false) {
         if(loading&&!reset)return
         if(reset) { generation++;items=emptyList();cursor="";offset=0;end=false }
@@ -1366,7 +1383,11 @@ fun NativeForwardPicker(
             Image(painterResource(R.drawable.uni_icon_back),"返回",Modifier.size(24.dp).clickable(enabled=!busy,onClick=onBack))
             Text("转发给",Modifier.weight(1f).padding(start=16.dp),fontSize=17.sp,fontWeight=FontWeight.Medium)
             if(busy)CircularProgressIndicator(Modifier.size(20.dp),color=ChatBlue,strokeWidth=2.dp)
-            else Text("传送",Modifier.clickable(enabled=count>0||allFriends) { confirm=true }.padding(8.dp),color=if(count>0||allFriends)ChatBlue else ChatHint)
+            else Text("传送",Modifier.clickable(enabled=count>0||allFriends) {
+                busy=true;error=null
+                val targets=selected.values.filter { !allFriends||it.kind=="group" }
+                submit(ChatForwardSelection(targets,allFriends,excluded)) { result -> onUI { busy=false;result.fold(onSuccess=onComplete,onFailure={ error=it.message ?: "转发未完成，请回聊天核对" }) } }
+            }.padding(8.dp),color=if(count>0||allFriends)ChatBlue else ChatHint)
         }
         BasicTextField(keyword,{ if(!busy)keyword=it.take(200) },Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=10.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xFFF1F3F7)).padding(12.dp),singleLine=true,decorationBox={ inner -> if(keyword.isBlank())Text("搜索",color=ChatHint);inner() })
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceAround) { listOf("recent" to "最近聊天","contacts" to "联络人","groups" to "群组","tags" to "标签").forEach { (key,label) -> Text(label,Modifier.clickable(enabled=!busy) { tab=key }.padding(vertical=13.dp),fontSize=14.sp,color=if(tab==key)ChatBlue else Color(0xFF555F71)) } }
@@ -1390,9 +1411,4 @@ fun NativeForwardPicker(
             item { TextButton(onClick={ fetch() },enabled=!busy&&!loading&&!end,modifier=Modifier.fillMaxWidth()) { Text(if(loading)"读取中…" else if(end)if(items.isEmpty())"暂无目标" else "没有更多" else "加载更多") } }
         }
     }
-    if(confirm)AlertDialog(onDismissRequest={ if(!busy)confirm=false },title={ Text("确认传送？") },text={ Text("将 $messageCount 条消息转发给 ${if(allFriends)"全部好友（已排除 ${excluded.size} 人）及所选群" else "$count 个所选目标"}。") },confirmButton={ TextButton(onClick={
-        confirm=false;busy=true;error=null
-        val targets=selected.values.filter { !allFriends||it.kind=="group" }
-        submit(ChatForwardSelection(targets,allFriends,excluded)) { result -> onUI { busy=false;result.fold(onSuccess=onComplete,onFailure={ error=it.message ?: "转发未完成，请回聊天核对" }) } }
-    }) { Text("确认") } },dismissButton={ TextButton(onClick={ confirm=false }) { Text("取消") } })
 }
