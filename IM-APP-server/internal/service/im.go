@@ -48,6 +48,8 @@ var (
 	ErrIMInvalidReadStatusRequest = errors.New("invalid message read status request")
 	// ErrIMNotGroupMember 表示调用者不是该群成员，无权查询已读状态。
 	ErrIMNotGroupMember = errors.New("caller is not a group member")
+	// ErrIMInvalidRecentMessagesRequest 表示最近消息批量请求参数不合法。
+	ErrIMInvalidRecentMessagesRequest = errors.New("invalid recent messages request")
 )
 
 type IMToken struct {
@@ -57,6 +59,17 @@ type IMToken struct {
 	ExpireSec int    `json:"expireSec"`
 	APIAddr   string `json:"apiAddr"`
 	WSAddr    string `json:"wsAddr"`
+}
+
+type RecentMessageItem struct {
+	ConversationID string `json:"conversationId"`
+	EndSeq         int64  `json:"endSeq"`
+	Count          int    `json:"count"`
+}
+
+type RecentConversationMessages struct {
+	ConversationID string             `json:"conversationId"`
+	Messages       []im.RecentMessage `json:"messages"`
 }
 
 const (
@@ -151,6 +164,95 @@ func (s *IMService) ResolveGroupByIM(ctx context.Context, userID, imGroupID stri
 		return models.IMGroupTarget{}, err
 	}
 	return s.ResolveGroup(ctx, userID, publicID)
+}
+
+// RecentMessages 返回调用者有权访问的会话最近 N 条消息。
+// 群聊校验业务群成员身份，单聊校验调用者是否在 si_ 双方 ID 中；
+// OpenIM 的 pull_msg_by_seq 只按调用者 IM 身份拉取其可见消息。
+func (s *IMService) RecentMessages(ctx context.Context, callerUserID string, items []RecentMessageItem) ([]RecentConversationMessages, error) {
+	if s.Client == nil || !s.Client.Available() || s.Access == nil {
+		return nil, ErrIMUnavailable
+	}
+	if len(items) == 0 || len(items) > 50 {
+		return nil, ErrIMInvalidRecentMessagesRequest
+	}
+	callerIMID, err := im.UserIDFromBusinessID(callerUserID)
+	if err != nil {
+		return nil, ErrIMInvalidRecentMessagesRequest
+	}
+	ranges := make([]im.SeqRange, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		conversationID := strings.TrimSpace(item.ConversationID)
+		if conversationID == "" || item.EndSeq <= 0 || strings.Contains(conversationID, "/") {
+			continue
+		}
+		if _, exists := seen[conversationID]; exists {
+			continue
+		}
+		count := item.Count
+		if count <= 0 {
+			count = 30
+		}
+		if count > 50 {
+			count = 50
+		}
+		switch {
+		case strings.HasPrefix(conversationID, "sg_"):
+			groupID, parseErr := parseGroupConversationID(conversationID)
+			if parseErr != nil {
+				continue
+			}
+			if _, resolveErr := s.Access.ResolveGroup(ctx, callerUserID, groupID); resolveErr != nil {
+				continue
+			}
+		case strings.HasPrefix(conversationID, "si_"):
+			left, right, ok := parseSingleConversationID(conversationID)
+			if !ok || (left != callerIMID && right != callerIMID) {
+				continue
+			}
+		default:
+			continue
+		}
+		begin := item.EndSeq - int64(count) + 1
+		if begin < 1 {
+			begin = 1
+		}
+		seen[conversationID] = struct{}{}
+		ranges = append(ranges, im.SeqRange{
+			ConversationID: conversationID,
+			Begin:          begin,
+			End:            item.EndSeq,
+			Num:            count,
+		})
+	}
+	if len(ranges) == 0 {
+		return []RecentConversationMessages{}, nil
+	}
+	pulled, err := s.Client.PullMessagesBySeqRanges(ctx, callerIMID, ranges)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]RecentConversationMessages, 0, len(ranges))
+	for _, item := range ranges {
+		messages := make([]im.RecentMessage, 0, len(pulled[item.ConversationID]))
+		for _, raw := range pulled[item.ConversationID] {
+			if message, ok := im.NormalizeRecentMessage(raw); ok {
+				messages = append(messages, message)
+			}
+		}
+		sort.Slice(messages, func(i, j int) bool {
+			if messages[i].Seq == messages[j].Seq {
+				return messages[i].SendTime < messages[j].SendTime
+			}
+			return messages[i].Seq < messages[j].Seq
+		})
+		result = append(result, RecentConversationMessages{
+			ConversationID: item.ConversationID,
+			Messages:       messages,
+		})
+	}
+	return result, nil
 }
 
 func (s *IMService) Token(ctx context.Context, userID string, platformID int) (IMToken, error) {
@@ -1027,6 +1129,23 @@ func parseGroupConversationID(conversationID string) (string, error) {
 		return "", ErrIMInvalidReadStatusRequest
 	}
 	return groupID, nil
+}
+
+func parseSingleConversationID(conversationID string) (string, string, bool) {
+	value, ok := strings.CutPrefix(strings.TrimSpace(conversationID), "si_")
+	if !ok {
+		return "", "", false
+	}
+	parts := strings.Split(value, "_")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	for _, part := range parts {
+		if _, err := im.BusinessIDFromUserID(part); err != nil {
+			return "", "", false
+		}
+	}
+	return parts[0], parts[1], true
 }
 
 // ReportGroupReadCursor 每次只向 OpenIM 查询当前阅读者自己的游标，随后单调写入 PostgreSQL/Redis。

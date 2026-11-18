@@ -477,6 +477,7 @@ func main() {
 			// peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（后端拼 conversationId）
 			auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
+			auth.POST("/im/conversations/recent-messages", imH.RecentMessages)
 			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
 			auth.POST("/im/messages/recall", imH.RecallMessage)
 			auth.POST("/im/message-send-failures", imH.ReportSendFailure)
