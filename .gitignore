@@ -52,3 +52,6 @@ IM-APP-android/.kotlin/
 craft-yanchat-client/
 
 .workflow/
+
+# 安卓本地排查/方案文档（非生产代码，不入库）
+docs/安卓*.md

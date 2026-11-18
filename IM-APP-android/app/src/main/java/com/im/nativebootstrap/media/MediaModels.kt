@@ -71,11 +71,14 @@ internal fun quoteMedia(quote: JsonObject, base: MessageContent): MessageContent
 
 /** 兼容历史 App 桥的 PascalCase；接收端绝不加载消息中的发送端本地路径。 */
 object MessageContents {
-    fun isPinSync(serialized:String):Boolean=runCatching {
-        val raw=JsonParser.parseString(serialized).asJsonObject
-        raw.number("contentType","ContentType")==110L&&parseObject(raw.obj("customElem","CustomElem").field("data","Data"))?.string("businessKey","BusinessKey")=="message_pin"
-    }.getOrDefault(false)
-    fun parse(serialized: String, fallback: String = ""): MessageContent = runCatching {
+    fun isPinSync(serialized:String):Boolean=MessageContentsMemo.isPinSync(serialized) { value ->
+        runCatching {
+            val raw=JsonParser.parseString(value).asJsonObject
+            raw.number("contentType","ContentType")==110L&&parseObject(raw.obj("customElem","CustomElem").field("data","Data"))?.string("businessKey","BusinessKey")=="message_pin"
+        }.getOrDefault(false)
+    }
+    fun parse(serialized: String, fallback: String = ""): MessageContent = MessageContentsMemo.parse(serialized,fallback,::parseUncached)
+    private fun parseUncached(serialized: String, fallback: String): MessageContent = runCatching {
         if (serialized.isBlank()) return MessageContent(text=fallback)
         val raw = JsonParser.parseString(serialized).asJsonObject
         val type = raw.number("contentType","ContentType").toInt()

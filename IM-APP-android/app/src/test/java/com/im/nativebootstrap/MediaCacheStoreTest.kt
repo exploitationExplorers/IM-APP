@@ -24,7 +24,8 @@ class MediaCacheStoreTest {
             store.register(key('b'), "https://example.test/private", private, MediaCacheMeta(kind = "image"), now - 8 * day)
 
             assertNull(store.find(key('a'), now))
-            assertEquals(private, store.find(key('b'), now))
+            // Windows 下临时目录可能带 8.3 短路径（ADMINI~1），store 返回 canonical 展开后的路径，统一按 canonical 比较。
+            assertEquals(private.canonicalFile, store.find(key('b'), now))
         } finally {
             root.deleteRecursively()
         }
@@ -43,7 +44,7 @@ class MediaCacheStoreTest {
 
             assertTrue(store.prune(15, 7 * day, 14 * day, now) >= 10)
             assertNull(store.find(key('c'), now))
-            assertEquals(fresh, store.find(key('d'), now))
+            assertEquals(fresh.canonicalFile, store.find(key('d'), now))
             assertTrue(store.totalBytes() <= 15)
         } finally {
             root.deleteRecursively()
