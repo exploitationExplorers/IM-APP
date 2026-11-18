@@ -119,6 +119,9 @@ private val ChatBlue=Color(0xFF2B5CFF)
 private val ChatHint=Color(0xFF9AA3B5)
 private fun onUI(action:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper())action() else Handler(Looper.getMainLooper()).post(action) }
 
+// 正则编译不便宜；imAdmin 系统消息在群聊里长期存在，item 重组时按值匹配，必须复用同一实例。
+private val legacyAdminClearRegex=Regex("^(群主|管理员)清除了「.+」的全部消息$")
+
 private suspend fun voiceSource(
     context:android.content.Context,
     messageId:String,
@@ -536,7 +539,8 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             Column(Modifier.weight(1f).padding(start=10.dp)) { Text(if(pin.scope=="shared")"置顶消息" else "仅为我置顶",color=ChatBlue,fontSize=12.sp);Text(pin.preview,maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=13.sp,color=Color(0xFF5B6478)) }
             Text("×",Modifier.clickable(onClick=callbacks.onDismissPin).padding(10.dp),color=ChatHint)
         } }
-        state.outbox.filter { MessageContents.isPinSync(it.message.serialized)&&it.state in setOf(OutboxState.UNCERTAIN,OutboxState.FAILED) }.forEach { entry -> Text("置顶同步结果待核对 · 点击核对",Modifier.fillMaxWidth().background(Color(0xFFFFF5DF)).clickable { callbacks.onReconcile(entry.id) }.padding(10.dp),color=Color(0xFF805F29),fontSize=12.sp) }
+        val pendingPinSync=remember(state.outbox) { state.outbox.filter { MessageContents.isPinSync(it.message.serialized)&&it.state in setOf(OutboxState.UNCERTAIN,OutboxState.FAILED) } }
+        pendingPinSync.forEach { entry -> Text("置顶同步结果待核对 · 点击核对",Modifier.fillMaxWidth().background(Color(0xFFFFF5DF)).clickable { callbacks.onReconcile(entry.id) }.padding(10.dp),color=Color(0xFF805F29),fontSize=12.sp) }
         failedMedia.forEach { media -> Row(Modifier.fillMaxWidth().background(Color(0xFFFFF5DF)).padding(horizontal=12.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
             Text("待上传：${media.name}",Modifier.weight(1f),maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=12.sp,color=Color(0xFF805F29))
             TextButton(enabled=!state.uploading&&media.file.absolutePath !in retryingMedia,onClick={ sendFile(media) }) { Text("重试上传") }
@@ -549,16 +553,21 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                 val content=remember(message.serialized,message.text) { MessageContents.parse(message.serialized,message.text) }
                 val upload=uploadsById[message.id]
                 val localVideo=if(content.type==104)(upload?.media() ?: state.localSentMedia[message.id]) else null
-                var bubbleBounds by remember(message.id) { mutableStateOf<Rect?>(null) }
+                // 坐标只在长按时读取，用普通 holder 而非 MutableState：滚动期间每次布局都写 state 会制造无意义的重组压力。
+                val bubbleBounds=remember(message.id) { arrayOfNulls<Rect>(1) }
                 val older=reversedMessages.getOrNull(index+1)
                 if(older==null||chatDayKey(older.time)!=chatDayKey(message.time))Box(Modifier.fillMaxWidth().padding(vertical=rpx(12)),contentAlignment=Alignment.Center) { Text(chatDayLabel(message.time),Modifier.clip(RoundedCornerShape(rpx(12))).background(Color(0xFFD8DBE2)).padding(horizontal=rpx(18),vertical=rpx(7)),color=Color(0xFF7A8090),fontSize=(22*factor).sp) }
-                val legacySystem=content.senderId=="imAdmin"&&(content.text=="新群创建成功，一起来聊天吧"||Regex("^(群主|管理员)清除了「.+」的全部消息$").matches(content.text))
+                val legacySystem=content.senderId=="imAdmin"&&(content.text=="新群创建成功，一起来聊天吧"||legacyAdminClearRegex.matches(content.text))
                 if(message.serialized.isBlank()||content.type>=1000||content.type==0||legacySystem) {
                     val system=if(content.type>=1000)ChatSystemMessages.format(message.serialized,state.groupOwnerName.ifBlank { "群主" }) { id -> state.groupMembers[id]?.name.orEmpty() } else content.text.ifBlank { message.text }
                     if(system.isNotBlank())Box(Modifier.fillMaxWidth().padding(rpx(12)),contentAlignment=Alignment.Center) { Text(system.replace("imAdmin",state.groupOwnerName.ifBlank { "群主" }),color=ChatHint,fontSize=(23*factor).sp) }
                 } else {
-                    Row(Modifier.fillMaxWidth().padding(horizontal=rpx(24),vertical=rpx(16)),horizontalArrangement=if(message.mine)Arrangement.End else Arrangement.Start,verticalAlignment=Alignment.Top) {
-                        if(multi&&upload==null)Text(if(message.id in selection)"●" else "○",Modifier.clickable(enabled=!deleting&&!forwarding&&!recalling) { toggleSelection(message) }.padding(end=8.dp,top=8.dp),color=if(message.id in selection)ChatBlue else ChatHint,fontSize=22.sp)
+                    // 多选模式下选择圈固定在最左侧：自己的消息改用 Start 排列 + weight 占位把气泡组推回右侧。
+                    Row(Modifier.fillMaxWidth().padding(horizontal=rpx(24),vertical=rpx(16)),horizontalArrangement=if(message.mine&&!multi)Arrangement.End else Arrangement.Start,verticalAlignment=Alignment.Top) {
+                        if(multi&&upload==null) {
+                            Text(if(message.id in selection)"●" else "○",Modifier.clickable(enabled=!deleting&&!forwarding&&!recalling) { toggleSelection(message) }.padding(end=8.dp,top=8.dp),color=if(message.id in selection)ChatBlue else ChatHint,fontSize=22.sp)
+                            if(message.mine)Spacer(Modifier.weight(1f))
+                        }
                         if(!message.mine)SharedAvatar(content.avatar,Modifier.size(rpx(72)).combinedClickable(onClick={ if(multi)toggleSelection(message) else if(content.senderId.isNotEmpty())callbacks.onOpenPeer(content.senderId) },onLongClick={ if(!multi&&state.active?.target?.sessionType==3)avatarMention=message }))
                         Column(Modifier.widthIn(max=(LocalConfiguration.current.screenWidthDp*.70f).dp).padding(horizontal=rpx(16)),horizontalAlignment=if(message.mine)Alignment.End else Alignment.Start) {
                             if(state.active?.target?.sessionType==3) {
@@ -573,7 +582,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                             val isVisual=content.type==102||content.type==104
                             val background=if(isVisual)Color.Transparent else if(content.groupCard!=null)Color.White else if(message.mine)ChatBlue else Color.White
                             val foreground=if(message.mine&&content.groupCard==null)Color.White else Color(0xFF222222)
-                            Box(Modifier.onGloballyPositioned { bubbleBounds=it.boundsInWindow() }.clip(shape).background(background).combinedClickable(onClick={
+                            Box(Modifier.onGloballyPositioned { bubbleBounds[0]=it.boundsInWindow() }.clip(shape).background(background).combinedClickable(onClick={
                                 if(upload!=null&&content.type!=104) { if(upload.state==MediaUploadState.FAILED)callbacks.onRetryUpload(upload.id);return@combinedClickable }
                                 if(multi) { if(!deleting&&!recalling)toggleSelection(message);return@combinedClickable }
                                 
@@ -593,7 +602,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                     108 -> if(content.cardUserId.isNotEmpty())callbacks.onOpenPeer(content.cardUserId)
                                     107 -> merge=message
                                 }
-                            },onLongClick={ if(!multi) { if(upload!=null)uploadMenu=upload else { selectedAnchor=bubbleBounds?.let { Offset(it.center.x,it.bottom) };selected=message } } }).then(if(isVisual)Modifier else Modifier.padding(horizontal=rpx(22),vertical=rpx(18)))) {
+                            },onLongClick={ if(!multi) { if(upload!=null)uploadMenu=upload else { selectedAnchor=bubbleBounds[0]?.let { Offset(it.center.x,it.bottom) };selected=message } } }).then(if(isVisual)Modifier else Modifier.padding(horizontal=rpx(22),vertical=rpx(18)))) {
                                 when(content.type) {
                                     104 -> VideoMessageBubble(content,localPoster=localVideo?.snapshot,sending=upload?.state==MediaUploadState.UPLOADING||outboxById[message.id]?.state==OutboxState.PENDING||outboxById[message.id]?.state==OutboxState.SENDING)
                                     102 -> {
@@ -903,8 +912,11 @@ private fun MultiSelectButton(label:String,modifier:Modifier,enabled:Boolean,pri
         Text(label,color=(if(primary)Color.White else if(danger)Color(0xFFE54D4D) else Color(0xFF333333)).copy(alpha=if(enabled)1f else .4f),fontSize=(28*factor).sp,fontWeight=FontWeight.SemiBold,maxLines=1)
     }
 }
-private fun chatTime(time:Long)=runCatching { SimpleDateFormat("HH:mm",Locale.getDefault()).format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
-private fun chatDayKey(time:Long)=runCatching { SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()).format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
+// SimpleDateFormat 构造含 locale 查找，聊天列表每条消息每次重组都要格式化时间，线程内复用同一实例。
+private val chatTimeFormat=object:ThreadLocal<SimpleDateFormat>() { override fun initialValue()=SimpleDateFormat("HH:mm",Locale.getDefault()) }
+private val chatDayFormat=object:ThreadLocal<SimpleDateFormat>() { override fun initialValue()=SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()) }
+private fun chatTime(time:Long)=runCatching { chatTimeFormat.get().format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
+private fun chatDayKey(time:Long)=runCatching { chatDayFormat.get().format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
 private fun chatDayLabel(time:Long):String {
     val millis=if(time<10_000_000_000)time*1000 else time
     val day=chatDayKey(time)
