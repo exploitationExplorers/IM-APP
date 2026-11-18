@@ -2,6 +2,7 @@ package com.im.nativebootstrap.chat
 
 import com.im.nativebootstrap.core.*
 import com.im.nativebootstrap.PerfLog
+import android.util.Log
 import java.io.File
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
@@ -1235,7 +1236,7 @@ class ChatController(
         fun done(result:Result<ChatForwardResult>) {
             runningForwards.remove(job.id)
             result.fold(onSuccess={ value -> store.update(job.id) { it.copy(status=if(value.queued)"processing" else "completed",remoteTaskIds=value.taskIds) } },onFailure={ error ->
-                android.util.Log.w("ChatForward","forward ${job.id} failed stage=${store.all().firstOrNull { it.id==job.id }?.failureStage.orEmpty()}",error)
+                Log.w("ChatForward","forward ${job.id} failed stage=${store.all().firstOrNull { it.id==job.id }?.failureStage.orEmpty()}",error)
                 store.update(job.id) { it.copy(status="failed",failureStage=it.failureStage.ifBlank { "prepare" },failureCode=failureCode(error)) }
             })
             emit()
@@ -1263,28 +1264,39 @@ class ChatController(
                     else -> false
                 } }
                 check(usable.isNotEmpty()) { "所选目标暂不可转发，请刷新后重试" }
+                var skipped=0
                 val users=linkedSetOf<String>();val groups=linkedSetOf<String>();val tags=linkedSetOf<String>()
                 val targets=mutableListOf<Pair<String,Boolean>>()
                 usable.forEach { item -> when(item.kind) {
                     "tag" -> { require(item.tagId.isNotEmpty());tags.add(item.tagId) }
                     "contact" -> {
                         require(item.businessUserId.isNotEmpty()) { "无法识别转发用户" }
-                        users.add(item.businessUserId)
                         if(direct) {
                             val peer=api.request("GET","/im/peers/${item.businessUserId}").asJsonObject
-                            check(peer.field("canChat")?.asBoolean==true) { "所选用户当前不可发送" }
-                            targets.add(peer.string("imUserId").also { check(it.isNotEmpty()) } to false)
-                        }
+                            // 单个目标不可发送（解散/禁言/非好友）只跳过并记日志，不让整批转发失败。
+                            if(peer.field("canChat")?.asBoolean==true) targets.add(peer.string("imUserId").also { check(it.isNotEmpty()) } to false)
+                            else { skipped++;Log.w("ChatForward","skip peer ${item.businessUserId}: canChat=false") }
+                        } else users.add(item.businessUserId)
                     }
                     "group" -> {
-                        val group=if(item.businessGroupId.isNotEmpty())api.request("GET","/im/groups/${item.businessGroupId}").asJsonObject else api.request("GET","/im/groups/by-im/${item.imGroupId}").asJsonObject
-                        val id=group.string("businessGroupId").also { check(it.isNotEmpty()) { "群已解散或不可用" } }
+                        val group=runCatching {
+                            if(item.businessGroupId.isNotEmpty())api.request("GET","/im/groups/${item.businessGroupId}").asJsonObject else api.request("GET","/im/groups/by-im/${item.imGroupId}").asJsonObject
+                        }.getOrElse {
+                            skipped++;Log.w("ChatForward","skip group ${item.businessGroupId.ifEmpty { item.imGroupId }}: ${it.message}")
+                            return@forEach
+                        }
+                        val id=group.string("businessGroupId")
+                        if(id.isEmpty()) { skipped++;Log.w("ChatForward","skip group ${item.businessGroupId.ifEmpty { item.imGroupId }}: 群已解散或不可用");return@forEach }
                         groups.add(id)
-                        if(direct) { check(group.field("canChat")?.asBoolean==true) { "所选群当前不可发送" };targets.add(group.string("imGroupId").also { check(it.isNotEmpty()) } to true) }
+                        if(direct) {
+                            if(group.field("canChat")?.asBoolean==true) targets.add(group.string("imGroupId").also { check(it.isNotEmpty()) } to true)
+                            else { skipped++;Log.w("ChatForward","skip group $id: canChat=false") }
+                        }
                     }
                     else -> error("转发目标类型无效")
                 } }
                 if(direct) {
+                    check(targets.isNotEmpty()) { "所选目标均不可发送（群已解散、被禁言或已非好友），请重新选择" }
                     // 归档(preserve)后移：气泡先上屏（原始快照命中本地缓存），后台归档成功后在发送前替换为远端副本 URL（见 archiveForwardMedia）。
                     Triple(targets.distinct(),frozen,null)
                 } else {
