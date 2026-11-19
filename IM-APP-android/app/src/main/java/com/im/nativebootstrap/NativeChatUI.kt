@@ -210,6 +210,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     var merge by remember { mutableStateOf<ChatMessage?>(null) }
     var showMentions by remember { mutableStateOf(false) }
     var atStart by remember { mutableIntStateOf(-1) }
+    var mentionKeyword by remember { mutableStateOf("") }
     var composerCursor by remember { mutableStateOf<Int?>(null) }
     val player=remember { VoicePlayer() }
     val recorder=remember { VoiceRecorder(context) }
@@ -459,7 +460,19 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             val match=Regex("(^|[\\s\\n])@([^\\s@]*)$").find(next)
             if(addedAt&&match!=null) { atStart=next.length-match.groupValues[2].length-1;showMentions=true;plus=false;composerPanels.setEmoji(false) }
             else if(showMentions&&match==null) showMentions=false
+            if(showMentions&&match!=null) mentionKeyword=match.groupValues[2]
         }
+    }
+    fun pickMention(choice:ChatMentionChoice) {
+        callbacks.onSelectMention(choice) { result -> onUI {
+            if(result.isSuccess) {
+                val start=atStart.coerceIn(0,text.length)
+                val rest=text.substring(start).replaceFirst(Regex("^@[^\\s@]*"),"")
+                text=text.take(start)+"@${choice.name} "+rest
+                composerCursor=(start+1+choice.name.length+1).coerceIn(0,text.length)
+                showMentions=false
+            } else notice=result.exceptionOrNull()?.message ?: "成员选择失败"
+        } }
     }
     fun deleteSelected() {
         val messages=selectedMessages()
@@ -711,6 +724,8 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         }
         else {
         quoted?.let { quote -> Row(Modifier.fillMaxWidth().background(Color(0xFFF1F3F7)).padding(10.dp),verticalAlignment=Alignment.CenterVertically) { Text("回复 ${quote.sender}：${quote.text}",Modifier.weight(1f),maxLines=2,overflow=TextOverflow.Ellipsis,color=ChatHint,fontSize=12.sp);Text("✕",Modifier.clickable { quoted=null }.padding(8.dp)) } }
+        // @ 提及面板（对标 H5 ImAtMentionPanel）：内嵌在输入框上方，不打断键盘输入
+        if(showMentions&&state.sendBlockedReason==null)ChatMentionPanel(mentionKeyword,callbacks.onLoadMentions,{ showMentions=false },::pickMention)
         if(state.sendBlockedReason!=null)Row(Modifier.fillMaxWidth().height(rpx(96)).background(Color(0xFFF7F7F7)).padding(horizontal=rpx(32)),verticalAlignment=Alignment.CenterVertically) {
             Text(state.sendBlockedReason,Modifier.weight(1f),color=Color(0xFF999999),fontSize=(26*factor).sp)
             // 解散/退群属于终态，重新检查禁言没有意义，仅临时性限制（禁言等）才展示刷新入口。
@@ -867,7 +882,16 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
         Text("将逐条撤回有权限管理的消息，对其他成员同时生效。")
         if(selectedMessages().any { !it.mine })BasicTextField(recallReason,{ recallReason=it.take(500) },Modifier.fillMaxWidth().padding(top=12.dp).background(ChatGray,RoundedCornerShape(8.dp)).padding(12.dp),decorationBox={ inner -> if(recallReason.isEmpty())Text("请输入撤回原因",color=ChatHint);inner() })
     } },confirmButton={ TextButton(onClick={ confirmMultiRecall=false;recallSelected() }) { Text("撤回") } },dismissButton={ TextButton(onClick={ confirmMultiRecall=false }) { Text("取消") } })
-    avatarMention?.let { message -> AlertDialog(onDismissRequest={ avatarMention=null },text={ TextButton(onClick={ avatarMention=null;mentionMember(message) },modifier=Modifier.fillMaxWidth()) { Text("@TA") } },confirmButton={ TextButton(onClick={ avatarMention=null }) { Text("取消") } }) }
+    // 长按头像 @TA（对标 H5 ImAtActionSheet）：45% 黑遮罩 + 底部白色圆角卡片，@TA / 取消 两档，蓝色文案
+    avatarMention?.let { message -> androidx.compose.ui.window.Dialog(onDismissRequest={ avatarMention=null },properties=androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth=false)) {
+        Box(Modifier.fillMaxSize().background(Color(0x73000000)).clickable { avatarMention=null }) {
+            Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(start=rpx(32),end=rpx(32),top=rpx(24),bottom=rpx(32)).clip(RoundedCornerShape(rpx(24))).background(Color.White)) {
+                Text("@TA",Modifier.fillMaxWidth().height(rpx(104)).clickable { avatarMention=null;mentionMember(message) }.wrapContentSize(),fontSize=(32*factor).sp,color=Color(0xFF0A2FC2))
+                Box(Modifier.fillMaxWidth().padding(horizontal=rpx(24)).height(1.dp).background(Color(0xFFF0F1F4)))
+                Text("取消",Modifier.fillMaxWidth().height(rpx(104)).clickable { avatarMention=null }.wrapContentSize(),fontSize=(32*factor).sp,color=Color(0xFF0A2FC2))
+            }
+        }
+    } }
     if(showVideoSource)AlertDialog(onDismissRequest={ showVideoSource=false },title={ Text("选择视频") },text={ Column {
         ActionButton("从相册选择") { showVideoSource=false;videoAlbum.launch(arrayOf("video/*")) }
         ActionButton("拍摄视频") { showVideoSource=false;if(ContextCompat.checkSelfPermission(context,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)captureVideo() else videoCameraPermission.launch(Manifest.permission.CAMERA) }
@@ -893,17 +917,6 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { target -> { image=null;imageMessage=null;forward=target } },
             saving=preparing)
     }
-    if(showMentions)ChatMentionPicker(callbacks.onLoadMentions,{ showMentions=false },{ choice ->
-        callbacks.onSelectMention(choice) { result -> onUI {
-            if(result.isSuccess) {
-                val start=atStart.coerceIn(0,text.length)
-                val rest=text.substring(start).replaceFirst(Regex("^@[^\\s@]*"),"")
-                text=text.take(start)+"@${choice.name} "+rest
-                composerCursor=(start+1+choice.name.length+1).coerceIn(0,text.length)
-                showMentions=false
-            } else notice=result.exceptionOrNull()?.message ?: "成员选择失败"
-        } }
-    })
     video?.let { url ->
         val message=videoMessage?.takeIf { MessageContents.parse(it.serialized,it.text).url==url }
         val content=message?.let { MessageContents.parse(it.serialized,it.text) }
@@ -1302,9 +1315,8 @@ fun NativeChatPicker(
 }
 
 @Composable
-private fun ChatMentionPicker(load:(String,(Result<ChatMentionPage>)->Unit)->Unit,onDismiss:()->Unit,onPick:(ChatMentionChoice)->Unit) {
+private fun ChatMentionPanel(keyword:String,load:(String,(Result<ChatMentionPage>)->Unit)->Unit,onClose:()->Unit,onPick:(ChatMentionChoice)->Unit) {
     var items by remember { mutableStateOf<List<ChatMentionChoice>>(emptyList()) }
-    var keyword by remember { mutableStateOf("") }
     var cursor by remember { mutableStateOf("") }
     var end by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
@@ -1316,15 +1328,31 @@ private fun ChatMentionPicker(load:(String,(Result<ChatMentionPage>)->Unit)->Uni
         load(cursor) { result -> onUI { loading=false;result.fold(onSuccess={ page -> items=(items+page.items).distinctBy { it.userId };cursor=page.nextCursor;end=page.end;canAll=page.canAtAll },onFailure={ error=it.message ?: "群成员读取失败，可重试" }) } }
     }
     LaunchedEffect(Unit) { fetch() }
-    AlertDialog(onDismissRequest=onDismiss,title={ Text("选择要提及的成员") },text={ Column {
-        BasicTextField(keyword,{ keyword=it },Modifier.fillMaxWidth().background(Color(0xFFF1F3F7),RoundedCornerShape(6.dp)).padding(12.dp),singleLine=true,decorationBox={ inner -> if(keyword.isEmpty())Text("搜索已加载成员",color=ChatHint);inner() })
-        if(canAll)Text("@所有人",Modifier.fillMaxWidth().clickable { onPick(ChatMentionChoice("AtAllTag","所有人")) }.padding(12.dp),color=ChatBlue)
-        error?.let { Text(it,color=Color(0xFF986427),fontSize=12.sp) }
-        LazyColumn(Modifier.heightIn(max=360.dp)) {
-            items(items.filter { it.displayName.contains(keyword,true)||it.name.contains(keyword,true) },key={ it.userId }) { member -> Row(Modifier.fillMaxWidth().clickable { onPick(member) }.padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically) { SharedAvatar(member.avatar,Modifier.size(36.dp));Column(Modifier.padding(start=10.dp)) { Text(member.displayName);if(member.displayName!=member.name)Text(member.name,color=ChatHint,fontSize=12.sp) } } }
-            item { TextButton(onClick=::fetch,enabled=!loading&&!end,modifier=Modifier.fillMaxWidth()) { Text(if(loading)"读取中…" else if(end)"没有更多成员" else "加载更多成员") } }
+    val factor=LocalConfiguration.current.screenWidthDp/750f
+    fun rpx(value:Int)=(value*factor).dp
+    val filtered=items.filter { keyword.isBlank()||it.displayName.contains(keyword,true)||it.name.contains(keyword,true) }
+    Column(Modifier.fillMaxWidth().background(Color.White)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE8E8E8)))
+        // 顶栏（灰底）：群主/管理员左侧显示「所有人」，右侧关闭
+        Row(Modifier.fillMaxWidth().heightIn(min=rpx(88)).background(Color(0xFFF3F4F7)).padding(horizontal=rpx(28)),verticalAlignment=Alignment.CenterVertically) {
+            if(canAll)Row(Modifier.weight(1f).clickable { onPick(ChatMentionChoice("AtAllTag","所有人")) },verticalAlignment=Alignment.CenterVertically) {
+                Box(Modifier.size(rpx(56)).clip(CircleShape).background(Color(0xFFE8EAF0)),contentAlignment=Alignment.Center) { Image(painterResource(R.drawable.uni_icon_add_member),"所有人",Modifier.size(rpx(32))) }
+                Text("所有人",Modifier.padding(start=rpx(20)),fontSize=rpx(30).value.sp,fontWeight=FontWeight.Medium,color=Color(0xFF212121))
+            } else Spacer(Modifier.weight(1f))
+            Text("×",Modifier.size(rpx(48)).clickable(onClick=onClose).wrapContentSize(),fontSize=rpx(40).value.sp,color=Color(0xFF8A8F9C))
         }
-    } },confirmButton={ TextButton(onClick=onDismiss) { Text("取消") } })
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max=rpx(480))) {
+            items(filtered,key={ it.userId }) { member ->
+                Row(Modifier.fillMaxWidth().clickable { onPick(member) }.padding(horizontal=rpx(28),vertical=rpx(20)),verticalAlignment=Alignment.CenterVertically) {
+                    SharedAvatar(member.avatar,Modifier.size(rpx(72)).clip(CircleShape))
+                    Text(member.displayName,Modifier.weight(1f).padding(start=rpx(24)),fontSize=rpx(30).value.sp,color=Color(0xFF212121),maxLines=1,overflow=TextOverflow.Ellipsis)
+                }
+            }
+            if(error!=null)item { Text(error.orEmpty(),Modifier.fillMaxWidth().clickable { fetch() }.padding(rpx(28)),color=Color(0xFF986427),fontSize=rpx(26).value.sp) }
+            else if(filtered.isEmpty())item { Text(if(loading)"成员加载中…" else "无匹配成员",Modifier.fillMaxWidth().padding(horizontal=rpx(28),vertical=rpx(48)),fontSize=rpx(26).value.sp,color=Color(0xFF8A8F9C),textAlign=androidx.compose.ui.text.style.TextAlign.Center) }
+            else if(!end)item { Text(if(loading)"读取中…" else "加载更多成员",Modifier.fillMaxWidth().clickable(enabled=!loading) { fetch() }.padding(vertical=rpx(20)),fontSize=rpx(24).value.sp,color=Color(0xFF8A8F9C),textAlign=androidx.compose.ui.text.style.TextAlign.Center) }
+        }
+    }
 }
 
 @Composable
