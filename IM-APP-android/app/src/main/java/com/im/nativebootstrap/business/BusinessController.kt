@@ -251,6 +251,14 @@ class BusinessController(
             } else refresh()
         }
     }
+    /** 移除群成员：成功后立即从本地列表移除，成员列表与人数标识即时更新（对齐 H5 members.vue 的本地剔除），失败由 launch 统一报错不回滚 */
+    fun removeGroupMember(groupId:String,memberId:String,deleteMessages:Boolean) {
+        if(mutable.value.loading)return
+        launch {
+            call("DELETE","/groups/${encoded(groupId)}/members/${encoded(memberId)}",obj("deleteMessages" to deleteMessages))
+            mutable.value=mutable.value.copy(loading=false,items=mutable.value.items.filterNot{it.identifier()==memberId},notice=if(deleteMessages)"已移除并清除其消息" else "已移除")
+        }
+    }
     fun searchUser(publicId:String) {
         if(publicId.isBlank())return
         launch {
