@@ -117,6 +117,26 @@ type clearConversationMessagesRequest struct {
 	PeerID   string `json:"peerId"`
 }
 
+type recentMessagesRequest struct {
+	Items []service.RecentMessageItem `json:"items"`
+}
+
+// RecentMessages 批量返回会话最近消息，供 APP 首屏/进入房间时先渲染。
+// 仅返回调用者有权限访问的会话；无权限的会话会被静默过滤。
+func (h *IMHandler) RecentMessages(c *gin.Context) {
+	var req recentMessagesRequest
+	if err := bindBusinessJSON(c, &req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+	items, err := h.Service.RecentMessages(c.Request.Context(), middleware.UserID(c), req.Items)
+	if err != nil {
+		h.handleIMError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"items": items})
+}
+
 // GetConversation 返回指定会话的当前设置（免打扰/置顶/阅后即焚等）。
 // peerType ∈ {c2c, group}，peerId 为业务好友 ID 或业务群 ID（由后端拼 conversationId）。
 func (h *IMHandler) GetConversation(c *gin.Context) {
@@ -392,6 +412,8 @@ func (h *IMHandler) handleIMError(c *gin.Context, err error) {
 		response.Fail(c, http.StatusBadRequest, "已读状态查询参数不正确")
 	case errors.Is(err, service.ErrIMNotGroupMember):
 		response.Fail(c, http.StatusForbidden, "你不是该群成员")
+	case errors.Is(err, service.ErrIMInvalidRecentMessagesRequest):
+		response.Fail(c, http.StatusBadRequest, "最近消息请求参数不正确")
 	case errors.Is(err, service.ErrIMUnavailable), errors.Is(err, im.ErrUnavailable):
 		response.Fail(c, http.StatusServiceUnavailable, "OpenIM 服务不可用")
 	default:

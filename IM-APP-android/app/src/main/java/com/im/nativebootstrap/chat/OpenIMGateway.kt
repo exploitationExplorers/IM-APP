@@ -59,6 +59,7 @@ internal class ConversationMappingQueue {
 
 /** 仅此适配器引用官方 SDK。错误只保留数字，不回显原 SDK 字符串/JSON/凭据。 */
 class OpenIMGateway(private val application:Application):ChatGateway {
+    override val supportsRecentPrefetch=true
     private val client get()=OpenIMClient.getInstance()
     private val gson=Gson()
     private var userId=""
@@ -304,6 +305,7 @@ class OpenIMGateway(private val application:Application):ChatGateway {
         val content=msg.string("content","Content")
         val preview=remotePreview(type,content)
         val time=msg.number("latestMsgRecvTime","LatestMsgRecvTime").takeIf {it>0} ?: msg.number("sendTime","SendTime").takeIf {it>0} ?: old?.time ?: 0
+        val latest=remoteLatest(msg,owner,type,preview,time)
         return ChatConversation(
             ChatTarget(id,sessionType,peer,group),
             title,
@@ -315,8 +317,30 @@ class OpenIMGateway(private val application:Application):ChatGateway {
             msg.number("seq","Seq").takeIf {it>0} ?: old?.latestSeq ?: 0,
             (element.get("recvMsgOpt")?.asInt ?: 0)!=0,
             old?.pinnedMessage,
-            old?.latestMessage,
+            latest ?: old?.latestMessage,
             old?.joinRequestPending==true,
+        )
+    }
+    private fun remoteLatest(msg:JsonObject,owner:String,type:Int,preview:String,time:Long):ChatMessage? {
+        if(msg.size()==0||type<=0||time<=0)return null
+        val id=msg.string("clientMsgID","ClientMsgID","clientMsgId").takeIf {it.isNotBlank()} ?: return null
+        val send=msg.string("sendID","SendID")
+        val serialized=msg.deepCopy().apply {
+            if(type==101&&parseObject(field("textElem","TextElem"))?.string("content","Content").isNullOrBlank()) {
+                add("textElem",JsonObject().apply {addProperty("content",preview)})
+            }
+        }.toString()
+        return ChatMessage(
+            id=id,
+            text=preview,
+            mine=send.isNotBlank()&&send==owner,
+            time=time,
+            status=2,
+            seq=msg.number("seq","Seq").toLong(),
+            serialized=serialized,
+            sender=msg.string("senderNickname","SenderNickname","senderName","SenderName"),
+            contentType=type,
+            senderId=send,
         )
     }
     private fun remotePreview(type:Int,content:String)=when(type) {

@@ -62,6 +62,8 @@ interface ChatEvents {
     fun joinRequestHighlights(conversationIds:Set<String>) {}
 }
 interface ChatGateway {
+    /** 真实网关才支持首屏最近消息预取；测试/轻量网关默认关闭，避免额外查询。 */
+    val supportsRecentPrefetch: Boolean get() = false
     fun watchPeer(userId:String?,done:(Result<Boolean?>)->Unit) { done(Result.success(null)) }
     fun start(userId: String, token: String, api: String, ws: String, directory: File, events: ChatEvents, done: (Result<Unit>) -> Unit)
     fun conversations(offset: Int, count: Int, done: (Result<List<ChatConversation>>) -> Unit)
@@ -128,7 +130,11 @@ fun mergeConversations(old: List<ChatConversation>, incoming: List<ChatConversat
     incoming.forEach { next ->
         val previous = rows[next.target.conversationId]
         if ((authoritative || previous == null || next.time >= previous.time)&&previous!=next) {
-            val merged=if(previous?.joinRequestPending==true&&!next.joinRequestPending)next.copy(joinRequestPending=true) else next
+            val merged=when {
+                previous?.joinRequestPending==true&&!next.joinRequestPending -> next.copy(joinRequestPending=true)
+                previous?.latestMessage!=null&&next.latestMessage==null -> next.copy(latestMessage=previous.latestMessage)
+                else -> next
+            }
             if(merged!=previous) {
                 changed=true
                 if(previous==null||previous.time!=merged.time||previous.pinned!=merged.pinned)needsSort=true
