@@ -73,7 +73,7 @@ static NSString *MessageText(OIMMessageInfo *message) {
 
 static NSDictionary *MessageData(OIMMessageInfo *message) {
     NSString *text = MessageText(message);
-    NSString *url = @"", *thumbnail = @"", *local = @"", *filename = @"";
+    NSString *url = @"", *thumbnail = @"", *local = @"", *filename = @"", *videoType = @"";
     NSInteger duration = 0, mediaBytes = 0;
     if (message.contentType == OIMMessageContentTypeImage) {
         url = message.pictureElem.sourcePicture.url.length ? message.pictureElem.sourcePicture.url : (message.pictureElem.bigPicture.url ?: @"");
@@ -82,6 +82,7 @@ static NSDictionary *MessageData(OIMMessageInfo *message) {
     } else if (message.contentType == OIMMessageContentTypeVideo) {
         url = message.videoElem.videoUrl ?: @""; thumbnail = message.videoElem.snapshotUrl ?: @"";
         local = message.videoElem.videoPath ?: @""; duration = message.videoElem.duration; mediaBytes = message.videoElem.videoSize;
+        videoType = message.videoElem.videoType ?: @"";
     } else if (message.contentType == OIMMessageContentTypeAudio) {
         url = message.soundElem.sourceUrl ?: @""; local = message.soundElem.soundPath ?: @""; duration = message.soundElem.duration;
     } else if (message.contentType == OIMMessageContentTypeFile) {
@@ -94,7 +95,7 @@ static NSDictionary *MessageData(OIMMessageInfo *message) {
              @"status": @(message.status), @"contentType": @(message.contentType),
              @"seq": @(message.seq), @"isRead": @(message.isRead), @"avatar": message.senderFaceUrl ?: @"", @"senderName": message.senderNickname ?: @"",
              @"mediaURL": url, @"thumbnail": thumbnail, @"localPath": local, @"filename": filename, @"duration": @(duration), @"mediaBytes": @(mediaBytes),
-             @"serialized": message.mj_JSONString ?: @""};
+             @"videoType": videoType, @"serialized": message.mj_JSONString ?: @""};
 }
 
 static NSArray *MessageList(NSArray<OIMMessageInfo *> *list) {

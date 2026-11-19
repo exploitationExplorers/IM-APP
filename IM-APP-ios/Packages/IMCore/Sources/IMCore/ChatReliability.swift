@@ -374,6 +374,28 @@ public actor PersistentOutbox {
     }
 }
 
+/// OpenIM may supply a file extension or a MIME type. Only pass known formats to AVFoundation.
+public enum ChatVideoFormat: String, Codable, Sendable {
+    case mov, mp4, m4v
+
+    public init?(openIMType: String) {
+        switch openIMType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "mov", "quicktime", "video/quicktime": self = .mov
+        case "mp4", "video/mp4": self = .mp4
+        case "m4v", "x-m4v", "video/x-m4v": self = .m4v
+        default: return nil
+        }
+    }
+
+    public var mimeType: String {
+        switch self {
+        case .mov: return "video/quicktime"
+        case .mp4: return "video/mp4"
+        case .m4v: return "video/x-m4v"
+        }
+    }
+}
+
 /// 页面合并使用 SDK clientMsgID，SDK 成功只表示提交成功，不表示收件人已送达。
 public struct ChatMedia: Codable, Equatable, Sendable {
     public let kind: Int
@@ -383,9 +405,12 @@ public struct ChatMedia: Codable, Equatable, Sendable {
     public let filename: String
     public let duration: Int
     public let byteCount: Int64?
-    public init(kind: Int, url: String = "", thumbnail: String = "", localPath: String = "", filename: String = "", duration: Int = 0, byteCount: Int64? = nil) {
+    public let videoFormat: ChatVideoFormat?
+    public init(kind: Int, url: String = "", thumbnail: String = "", localPath: String = "", filename: String = "", duration: Int = 0,
+                byteCount: Int64? = nil, videoFormat: ChatVideoFormat? = nil) {
         self.kind = kind; self.url = url; self.thumbnail = thumbnail; self.localPath = localPath; self.filename = filename; self.duration = duration
         self.byteCount = byteCount
+        self.videoFormat = videoFormat
     }
 }
 

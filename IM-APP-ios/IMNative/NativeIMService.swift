@@ -863,7 +863,11 @@ final class NativeIMService {
         let sequence = (data["seq"] as? NSNumber)?.intValue ?? 0, rawStatus = (data["status"] as? NSNumber)?.intValue ?? 0
         // 正服务序号证明已受理；迟到的本地失败不能覆盖它，撤回仍按撤回显示。
         let status = sequence > 0 && rawStatus != 4 ? 2 : rawStatus
-        let media = [102, 103, 104, 105].contains(type) ? ChatMedia(kind: type, url: data["mediaURL"] as? String ?? "", thumbnail: data["thumbnail"] as? String ?? "", localPath: data["localPath"] as? String ?? "", filename: data["filename"] as? String ?? "", duration: (data["duration"] as? NSNumber)?.intValue ?? 0, byteCount: (data["mediaBytes"] as? NSNumber)?.int64Value) : nil
+        let media = [102, 103, 104, 105].contains(type) ? ChatMedia(
+            kind: type, url: data["mediaURL"] as? String ?? "", thumbnail: data["thumbnail"] as? String ?? "",
+            localPath: data["localPath"] as? String ?? "", filename: data["filename"] as? String ?? "",
+            duration: (data["duration"] as? NSNumber)?.intValue ?? 0, byteCount: (data["mediaBytes"] as? NSNumber)?.int64Value,
+            videoFormat: (data["videoType"] as? String).flatMap(ChatVideoFormat.init(openIMType:))) : nil
         return ChatTextItem(id: id, senderID: data["senderID"] as? String ?? "", text: data["text"] as? String ?? "[消息]",
             timestamp: (data["timestamp"] as? NSNumber)?.int64Value ?? 0, status: status,
             seq: sequence, avatar: data["avatar"] as? String ?? "", senderName: data["senderName"] as? String ?? "", contentType: type,
@@ -1037,9 +1041,10 @@ final class NativeIMService {
         let policy = business.media
         let cacheEpoch = await NativeImageCache.shared.mutationEpoch()
         try require(expected)
-        let archived: ForwardMessageSnapshot = try await business.request("forward-media/preserve", method: "POST", body: ["sourceSnapshot": snapshot.body])
+        let archiveSource = snapshot.forMediaArchive(using: policy)
+        let archived: ForwardMessageSnapshot = try await business.request("forward-media/preserve", method: "POST", body: ["sourceSnapshot": archiveSource.body])
         try require(expected)
-        for (source, destination) in snapshot.imageCopies(to: archived) {
+        for (source, destination) in archiveSource.imageCopies(to: archived) {
             guard policy.absolute(source)?.scheme == "https", policy.absolute(destination)?.scheme == "https" else { continue }
             for variant in [MediaURLPolicy.Variant.list, .preview] {
                 try require(expected)

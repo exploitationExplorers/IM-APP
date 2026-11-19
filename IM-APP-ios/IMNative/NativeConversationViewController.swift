@@ -622,7 +622,14 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     @objc private func showMenu() {
         if multiSelecting {
             let messages = service.visibleMessages(conversation.id).filter { selectedIDs.contains($0.id) }; guard !messages.isEmpty else { return }
-            var actions = [NativeMenuItem(title: "转发", action: { [weak self] in guard let self = self else { return }; self.navigationController?.pushViewController(NativeForwardPickerController(service: self.service, messages: messages, sourceConversation: self.conversation), animated: true) }), NativeMenuItem(title: "删除", destructive: true, action: { [weak self] in self?.deleteSelected(messages) })]
+            var actions = [NativeMenuItem(title: "转发", action: { [weak self] in
+                guard let self else { return }
+                let picker = NativeForwardPickerController(service: self.service, messages: messages, sourceConversation: self.conversation) { [weak self] in
+                    self?.multiSelecting = false
+                    self?.selectedIDs.removeAll()
+                }
+                self.navigationController?.pushViewController(picker, animated: true)
+            }), NativeMenuItem(title: "删除", destructive: true, action: { [weak self] in self?.deleteSelected(messages) })]
             if messages.contains(where: { MessageMenuCapabilities(contentType: $0.contentType, status: $0.status).canRecall(isMine: $0.senderID == service.imUserID, canManageSender: canManageGroup) }) { actions.append(NativeMenuItem(title: "撤回", destructive: true, action: { [weak self] in self?.recallMessages(messages) })) }
             showAnchoredNativeMenu(anchor: more, items: actions); return
         }

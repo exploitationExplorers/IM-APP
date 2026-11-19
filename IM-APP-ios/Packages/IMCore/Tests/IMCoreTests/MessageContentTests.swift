@@ -18,6 +18,34 @@ final class MessageContentTests: XCTestCase {
             XCTAssertEqual(picture["type"], .string("image/jpeg")); XCTAssertEqual(picture["url"], .string("https://media.example/a.jpg")); XCTAssertEqual(picture["width"], .number(900))
         }
     }
+    func testForwardCanonicalizesEveryLegacyPictureURLBeforeArchiving() throws {
+        let raw = #"{"contentType":102,"pictureElem":{"sourcePicture":{"url":"http://8.154.44.197/object/test.png"},"bigPicture":{"url":"/object/test.png"},"snapshotPicture":{"url":"http://8.154.44.197/object/test.png?height=360&type=image&width=360"}}}"#
+        let policy = MediaURLPolicy(businessBaseURL: try XCTUnwrap(URL(string: "https://business.invalid")))
+        let snapshot = try ForwardMessageSnapshot.make(serialized: raw, mediaPolicy: policy)
+        guard case .object(let body) = snapshot.content else { return XCTFail("Missing picture body") }
+        for key in ["sourcePicture", "bigPicture", "snapshotPicture"] {
+            guard case .object(let view)? = body[key] else { return XCTFail("Missing picture variant") }
+            let suffix = key == "snapshotPicture" ? "?height=360&type=image&width=360" : ""
+            XCTAssertEqual(view["url"], .string("https://business.invalid/object/test.png" + suffix))
+        }
+    }
+
+    func testForwardArchiveUsesLegacyOriginalForDerivedThumbnailAndRetainsOtherObjects() throws {
+        let raw = #"{"contentType":102,"pictureElem":{"sourcePicture":{"url":"http://8.154.44.197/object/test.png","width":128,"height":128},"bigPicture":{"url":"https://media.example/distinct.png?X-Amz-Signature=a%2Bb"},"snapshotPicture":{"url":"http://8.154.44.197/object/test.png?height=640&type=image&width=640","width":640,"height":640}}}"#
+        let base = try XCTUnwrap(URL(string: IMEndpointPolicy.defaultOrigin + "/api/v1"))
+        let policy = MediaURLPolicy(businessBaseURL: base)
+        let snapshot = try ForwardMessageSnapshot.make(serialized: raw, mediaPolicy: policy)
+        let archived = snapshot.forMediaArchive(using: policy)
+        guard case .object(let original) = snapshot.content, case .object(let body) = archived.content,
+              case .object(let source)? = body["sourcePicture"] else { return XCTFail("Missing picture content") }
+        XCTAssertEqual(source["url"], .string("http://8.154.44.197/object/test.png"))
+        XCTAssertEqual(source["width"], .number(128))
+        XCTAssertEqual(body["snapshotPicture"], body["sourcePicture"])
+        XCTAssertEqual(body["bigPicture"], original["bigPicture"])
+        let otherBase = try XCTUnwrap(URL(string: "https://business.invalid/api/v1"))
+        XCTAssertEqual(snapshot.forMediaArchive(using: MediaURLPolicy(businessBaseURL: otherBase)), snapshot)
+    }
+
     func testForwardNestedQuoteAlsoCompletesPictureTypes() throws {
         let result = try ForwardMessageSnapshot.make(serialized: #"{"contentType":114,"quoteElem":{"text":"回复","quoteMessage":{"contentType":102,"pictureElem":{"sourcePicture":{"url":"https://media.example/a.gif","type":"image/gif"}}}}}"#)
         guard case .object(let body) = result.content, case .object(let quote)? = body["quoteMessage"], case .object(let picture)? = quote["pictureElem"], case .object(let thumbnail)? = picture["snapshotPicture"] else { return XCTFail("引用图片未规范化") }

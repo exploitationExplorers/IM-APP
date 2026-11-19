@@ -48,6 +48,7 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
     private let limit: Int64
     private let cacheOnly: Bool
     private let wifiOnly: Bool
+    private let videoFormat: ChatVideoFormat?
     private let lock = NSLock()
     private var continuation: CheckedContinuation<URL, Error>?
     private var cancelled = false
@@ -68,10 +69,11 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
         return URLSession(configuration: config)
     }
 
-    init(limit: Int64, cacheOnly: Bool = false, wifiOnly: Bool = false) {
+    init(limit: Int64, cacheOnly: Bool = false, wifiOnly: Bool = false, videoFormat: ChatVideoFormat? = nil) {
         self.limit = limit
         self.cacheOnly = cacheOnly
         self.wifiOnly = wifiOnly
+        self.videoFormat = videoFormat
     }
     func download(_ url: URL) async throws -> URL {
         guard url.scheme == "https" else { throw APIError.invalidConfiguration }
@@ -112,7 +114,8 @@ final class NativeBoundedDownload: NSObject, URLSessionDownloadDelegate, @unchec
             let size = (try FileManager.default.attributesOfItem(atPath: location.path)[.size] as? NSNumber)?.int64Value ?? Int64.max
             guard size <= limit else { throw APIError.business(code: -1, message: "文件超过本机预览大小限制。") }
             lock.lock(); let active = continuation != nil && !cancelled; lock.unlock(); guard active else { return }
-            let file = FileManager.default.temporaryDirectory.appendingPathComponent("native-media-" + UUID().uuidString)
+            var file = FileManager.default.temporaryDirectory.appendingPathComponent("native-media-" + UUID().uuidString)
+            if let videoFormat { file.appendPathExtension(videoFormat.rawValue) }
             try FileManager.default.moveItem(at: location, to: file); finish(.success(file))
         } catch { finish(.failure(error)) }
     }
@@ -576,7 +579,8 @@ enum NativeAttachmentPreview {
         let identity = ownedLocal == nil ? resource?.identity : nil
         switch media.kind {
         case 103, 104:
-            return NativeVideoPreviewController(url: url, allowSave: media.kind == 104, cacheIdentity: identity, scope: scope)
+            return NativeVideoPreviewController(url: url, allowSave: media.kind == 104, cacheIdentity: identity,
+                                                scope: scope, archiveFormat: policy.isForwardArchive(url) ? media.videoFormat : nil)
         case 105:
             return NativeFilePreviewController(url: url, filename: media.filename, cacheIdentity: identity, scope: scope)
         default:
@@ -642,18 +646,24 @@ final class NativeVideoPreviewController: AVPlayerViewController {
     private let allowSave: Bool
     private let cacheIdentity: String?
     private let scope: RecentChatMediaScope?
-    private var cachedCopy: URL?
+    private let archiveFormat: ChatVideoFormat?
+    private var previewCopy: URL?
+    private var usingCachedCopy = false
+    private let loading = UIActivityIndicatorView(style: .large)
+    fileprivate static let videoDownloadLimit: Int64 = 300 * 1024 * 1024
     private var prepareTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var playbackObservation: NSKeyValueObservation?
     private var backgroundObserver: NSObjectProtocol?
     private var playbackFailed = false
     private var failureReported = false
-    init(url: URL, allowSave: Bool = true, cacheIdentity: String? = nil, scope: RecentChatMediaScope? = nil) {
+    init(url: URL, allowSave: Bool = true, cacheIdentity: String? = nil, scope: RecentChatMediaScope? = nil,
+         archiveFormat: ChatVideoFormat? = nil) {
         source = url
         self.allowSave = allowSave
         self.cacheIdentity = cacheIdentity
         self.scope = scope
+        self.archiveFormat = archiveFormat
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
@@ -661,23 +671,60 @@ final class NativeVideoPreviewController: AVPlayerViewController {
         super.viewDidLoad()
         if allowSave { navigationItem.rightBarButtonItem = UIBarButtonItem(title: "保存", style: .plain, target: self, action: #selector(save)) }
         backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.player?.pause() } }
-        prepareTask = Task { [weak self, cacheIdentity, scope, source, allowSave] in
+        prepareTask = Task { [weak self, cacheIdentity, scope, playbackFileExtension] in
             let copy: URL?
             if let cacheIdentity {
-                let ext = source.pathExtension.isEmpty ? (allowSave ? "mp4" : "") : source.pathExtension
+                let ext = playbackFileExtension
                 copy = await NativeRecentMediaCache.shared.copy(identity: cacheIdentity, scope: scope, fileExtension: ext)
             } else { copy = nil }
             guard let self = self, !Task.isCancelled else {
                 if let copy { try? FileManager.default.removeItem(at: copy) }
                 return
             }
-            self.cachedCopy = copy
             self.prepareTask = nil
-            self.configurePlayer(copy ?? source)
+            if let copy {
+                self.previewCopy = copy
+                self.usingCachedCopy = true
+                self.configurePlayer(copy)
+            } else {
+                self.playRemoteSource()
+            }
         }
     }
-    private func configurePlayer(_ url: URL) {
-        player = AVPlayer(url: url)
+    private var playbackFileExtension: String {
+        archiveFormat?.rawValue ?? (source.pathExtension.isEmpty && allowSave ? "mp4" : source.pathExtension)
+    }
+    private func playRemoteSource() {
+        // Archive URLs have no suffix and can return application/octet-stream.
+        guard let archiveFormat else { configurePlayer(source); return }
+        if #available(iOS 17.0, *) {
+            let asset = AVURLAsset(url: source, options: [AVURLAssetOverrideMIMETypeKey: archiveFormat.mimeType])
+            configurePlayer(asset)
+            return
+        }
+        loading.color = .white
+        loading.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        loading.autoresizingMask = [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+        view.addSubview(loading)
+        loading.startAnimating()
+        prepareTask = Task { [weak self, source] in
+            do {
+                let file = try await NativeBoundedDownload(limit: Self.videoDownloadLimit, videoFormat: archiveFormat).download(source)
+                guard let self, !Task.isCancelled else { try? FileManager.default.removeItem(at: file); return }
+                self.previewCopy = file
+                self.configurePlayer(file)
+            } catch {
+                if !Task.isCancelled { self?.handlePlaybackFailure() }
+            }
+            if !Task.isCancelled {
+                self?.loading.stopAnimating()
+                self?.prepareTask = nil
+            }
+        }
+    }
+    private func configurePlayer(_ url: URL) { configurePlayer(AVURLAsset(url: url)) }
+    private func configurePlayer(_ asset: AVURLAsset) {
+        player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
         playbackObservation = player?.currentItem?.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             let failed = item.status == .failed
             Task { @MainActor [weak self] in
@@ -690,10 +737,11 @@ final class NativeVideoPreviewController: AVPlayerViewController {
     override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); navigationController?.setNavigationBarHidden(false, animated: animated); player?.play() }
     override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); if UIApplication.shared.applicationState == .active { player?.play() }; reportPlaybackFailure() }
     private func handlePlaybackFailure() {
-        if let copy = cachedCopy, let cacheIdentity {
-            cachedCopy = nil
+        if usingCachedCopy, let copy = previewCopy, let cacheIdentity {
+            usingCachedCopy = false
+            previewCopy = nil
             playbackObservation?.invalidate()
-            configurePlayer(source)
+            playRemoteSource()
             try? FileManager.default.removeItem(at: copy)
             Task { [scope] in await NativeRecentMediaCache.shared.remove(identity: cacheIdentity, scope: scope) }
             return
@@ -713,12 +761,12 @@ final class NativeVideoPreviewController: AVPlayerViewController {
                 let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
                 guard status == .authorized || status == .limited else { throw APIError.business(code: -1, message: "请在系统设置中允许添加照片。") }
                 let temp: URL
-                let local = cachedCopy ?? (source.isFileURL ? source : nil)
-                if let local { temp = local } else { temp = try await NativeBoundedDownload(limit: 300 * 1024 * 1024).download(source) }
+                let local = previewCopy ?? (source.isFileURL ? source : nil)
+                if let local { temp = local } else { temp = try await NativeBoundedDownload(limit: Self.videoDownloadLimit, videoFormat: archiveFormat).download(source) }
                 defer { if local == nil { try? FileManager.default.removeItem(at: temp) } }
                 try Task.checkCancellation()
                 let asset = AVURLAsset(url: temp); guard try await asset.load(.isPlayable) else { throw APIError.invalidResponse }
-                let ext = source.pathExtension.isEmpty ? "mp4" : source.pathExtension
+                let ext = playbackFileExtension
                 let named = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
                 try FileManager.default.copyItem(at: temp, to: named); defer { try? FileManager.default.removeItem(at: named) }
                 try Task.checkCancellation()
@@ -737,8 +785,8 @@ final class NativeVideoPreviewController: AVPlayerViewController {
         playbackObservation = nil
         player?.replaceCurrentItem(with: nil)
         player = nil
-        if let cachedCopy { try? FileManager.default.removeItem(at: cachedCopy) }
-        cachedCopy = nil
+        if let previewCopy { try? FileManager.default.removeItem(at: previewCopy) }
+        previewCopy = nil
     }
     deinit { if let token = backgroundObserver { NotificationCenter.default.removeObserver(token) } }
 }
@@ -750,17 +798,22 @@ enum NativeMediaExport {
         guard [102, 104].contains(media.kind) else { throw APIError.invalidResponse }
         let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard authorization == .authorized || authorization == .limited else { throw APIError.business(code: -1, message: "请在系统设置中允许添加照片。") }
+        let address = media.kind == 104 ? policy.playback(media.url) : policy.original(media.url)
+        let remote = policy.absolute(address)
+        let archiveFormat = remote.flatMap { policy.isForwardArchive($0) ? media.videoFormat : nil }
         let file: URL
         if let local = ownedLocal { file = local }
         else {
-            guard let url = policy.absolute(media.kind == 104 ? policy.playback(media.url) : policy.original(media.url)), url.scheme == "https" else { throw APIError.invalidResponse }
-            file = try await NativeBoundedDownload(limit: media.kind == 102 ? 40 * 1024 * 1024 : 300 * 1024 * 1024).download(url)
+            guard let remote, remote.scheme == "https" else { throw APIError.invalidResponse }
+            let limit = media.kind == 102 ? 40 * 1024 * 1024 : NativeVideoPreviewController.videoDownloadLimit
+            file = try await NativeBoundedDownload(limit: limit, videoFormat: archiveFormat).download(remote)
         }
         defer { if ownedLocal == nil { try? FileManager.default.removeItem(at: file) } }
         try Task.checkCancellation()
         if media.kind == 104 {
             let asset = AVURLAsset(url: file); guard try await asset.load(.isPlayable) else { throw APIError.invalidResponse }
-            let ext = (policy.absolute(media.url)?.pathExtension).flatMap { $0.isEmpty ? nil : $0 } ?? "mp4"
+            let candidate = archiveFormat?.rawValue ?? ownedLocal?.pathExtension ?? remote?.pathExtension ?? ""
+            let ext = candidate.isEmpty ? "mp4" : candidate
             let named = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
             try FileManager.default.copyItem(at: file, to: named); defer { try? FileManager.default.removeItem(at: named) }
             try Task.checkCancellation(); try await PHPhotoLibrary.shared().performChanges { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: named) }; return
