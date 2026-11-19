@@ -1,7 +1,9 @@
 package im
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -89,7 +91,7 @@ type rawRecentMessage struct {
 }
 
 // NormalizeRecentMessage 把 OpenIM MsgData 转成客户端 ChatMessage 所需的 JSON。
-// content 在 OpenIM 响应里既可能是 JSON 字符串，也可能是对象，这里统一展开到对应 *Elem 字段。
+// content 兼容 OpenIM 的 Base64 字节串及已有的 JSON 字符串和对象，统一展开到对应 *Elem 字段。
 func NormalizeRecentMessage(raw json.RawMessage) (RecentMessage, bool) {
 	return normalizeRecentMessage(raw, "")
 }
@@ -109,7 +111,11 @@ func normalizeRecentMessage(raw json.RawMessage, groupID string) (RecentMessage,
 	if err := json.Unmarshal(raw, &source); err != nil || strings.TrimSpace(source.ClientMsgID) == "" {
 		return RecentMessage{}, false
 	}
-	if preview && (strings.TrimSpace(string(source.Status)) != "2" || source.SessionType != 3 || source.ContentType != 101 ||
+	// OpenIM assigns a sequence before caching the message and may leave its
+	// status as 1 until MongoDB persistence changes it to 2. Both describe
+	// accepted messages when returned by the sequenced history API.
+	status := strings.TrimSpace(string(source.Status))
+	if preview && ((status != "1" && status != "2") || source.SessionType != 3 || source.ContentType != 101 ||
 		source.GroupID != groupID || source.Seq <= 0 || source.SendID == "" || !isPublicRecentMessage(source.AttachedInfo)) {
 		return RecentMessage{}, false
 	}
@@ -186,10 +192,16 @@ func normalizeContent(raw json.RawMessage) []byte {
 	}
 	if strings.HasPrefix(value, "\"") {
 		var content string
-		if json.Unmarshal(raw, &content) == nil && strings.TrimSpace(content) != "" {
-			return []byte(content)
+		if json.Unmarshal(raw, &content) != nil || strings.TrimSpace(content) == "" {
+			return []byte("{}")
 		}
-		return []byte("{}")
+		if decoded, err := base64.StdEncoding.DecodeString(content); err == nil {
+			decoded = bytes.TrimSpace(decoded)
+			if len(decoded) > 0 && decoded[0] == '{' && json.Valid(decoded) {
+				return decoded
+			}
+		}
+		return []byte(content)
 	}
 	return []byte(value)
 }
