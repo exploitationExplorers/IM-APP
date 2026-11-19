@@ -415,6 +415,31 @@
       "name": "群组",
       "item": [
         {
+          "name": "查询群聊首屏文字预览",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/im/group-history-previews?item=sg_0123456789abcdef0123456789abcdef:128",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "im",
+                "group-history-previews"
+              ],
+              "query": [
+                {
+                  "key": "item",
+                  "value": "sg_0123456789abcdef0123456789abcdef:128"
+                }
+              ]
+            },
+            "description": "可以重复传入 item，最多 8 个群。每群仅读取最近 20 个序号。"
+          },
+          "response": []
+        },
+        {
           "name": "群列表",
           "request": {
             "method": "GET",

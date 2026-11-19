@@ -983,6 +983,67 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
 
+  /api/v1/im/group-history-previews:
+    get:
+      tags: [OpenIM Client]
+      summary: 批量查询群聊首屏文字预览
+      operationId: getGroupHistoryPreviews
+      description: 只返回当前账号有权访问的群中的普通文字消息。每群最多读取 20 个序号。客户端仍使用 SDK 读取和分页历史。
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: item
+          in: query
+          required: true
+          style: form
+          explode: true
+          description: 可重复传入，每项包含群会话 ID 和末尾消息序号，使用冒号分隔。
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 8
+            items: {type: string, example: 'sg_0123456789abcdef0123456789abcdef:128'}
+      responses:
+        '200':
+          description: 已返回可用的群聊预览
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer, enum: [0]}
+                  message: {type: string}
+                  data:
+                    type: object
+                    required: [items, previewOnly]
+                    properties:
+                      previewOnly: {type: boolean, enum: [true]}
+                      items:
+                        type: array
+                        maxItems: 8
+                        items:
+                          type: object
+                          required: [conversationId, messages]
+                          properties:
+                            conversationId: {type: string}
+                            messages:
+                              type: array
+                              maxItems: 20
+                              items:
+                                type: object
+                                required: [clientMsgId, sendId, senderNickname, contentType, sendTime, seq, preview]
+                                properties:
+                                  clientMsgId: {type: string}
+                                  sendId: {type: string}
+                                  senderNickname: {type: string}
+                                  contentType: {type: integer, enum: [101]}
+                                  sendTime: {type: integer, format: int64, description: 毫秒}
+                                  seq: {type: integer, format: int64}
+                                  preview: {type: string}
+        '400': {description: 查询参数无效}
+        '401': {description: 未登录}
+        '502': {description: 上游消息查询失败}
+        '503': {description: 消息服务暂不可用}
+
   /api/v1/im/conversations/{peerType}/{peerId}:
     get:
       tags: [OpenIM Client]

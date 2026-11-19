@@ -61,3 +61,45 @@ func TestNormalizeRecentMessagePictureObject(t *testing.T) {
 		t.Fatalf("sourcePicture missing: %+v", picture)
 	}
 }
+
+func TestNormalizeRecentPreviewRejectsUnsafeContent(t *testing.T) {
+	base := map[string]any{
+		"clientMsgID": "m1", "sendID": "u1", "groupID": "g1", "sessionType": 3,
+		"status": 2, "contentType": 101, "seq": 20, "sendTime": 1700000000000,
+		"content": map[string]any{"content": "hello"},
+	}
+	cases := []struct {
+		name  string
+		patch map[string]any
+		want  bool
+	}{
+		{name: "ordinary group text", want: true},
+		{name: "revoked", patch: map[string]any{"status": 4}},
+		{name: "deleted", patch: map[string]any{"status": 5}},
+		{name: "missing status", patch: map[string]any{"status": nil}},
+		{name: "direct chat", patch: map[string]any{"sessionType": 1}},
+		{name: "wrong group", patch: map[string]any{"groupID": "g2"}},
+		{name: "image", patch: map[string]any{"contentType": 102}},
+		{name: "private attached info", patch: map[string]any{"attachedInfo": `{"isPrivateChat":true}`}},
+		{name: "bad attached info", patch: map[string]any{"attachedInfo": "unparseable"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			value := make(map[string]any, len(base))
+			for k, v := range base {
+				value[k] = v
+			}
+			for k, v := range tc.patch {
+				value[k] = v
+			}
+			raw, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			message, ok := NormalizeRecentPreview(raw, "g1")
+			if ok != tc.want || (ok && (message.Preview != "hello" || message.Serialized != "")) {
+				t.Fatalf("preview = %+v, accepted = %v", message, ok)
+			}
+		})
+	}
+}

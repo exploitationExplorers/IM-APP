@@ -34,10 +34,11 @@ func TestRetentionVisibilityPostgresIntegration(t *testing.T) {
 	const other = "22222222-2222-4222-8222-222222222222"
 	const user = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	const stranger = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-	_, err := pool.Exec(ctx, `CREATE TABLE groups(id UUID PRIMARY KEY,status TEXT NOT NULL DEFAULT 'active');
+	_, err := pool.Exec(ctx, `CREATE TABLE groups(id UUID PRIMARY KEY,status TEXT NOT NULL DEFAULT 'active',
+			retention_max_messages INTEGER,retention_keep_hours INTEGER);
 		ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 		CREATE TABLE group_members(group_id UUID,user_id UUID,PRIMARY KEY(group_id,user_id));
-		INSERT INTO groups(id) VALUES('`+g+`'),('`+other+`');
+		INSERT INTO groups(id, retention_max_messages) VALUES('`+g+`', 1),('`+other+`', 1);
 		INSERT INTO users(id) VALUES('`+user+`'),('`+stranger+`');
 		INSERT INTO group_members VALUES('`+g+`','`+user+`');`)
 	if err != nil {
@@ -94,6 +95,31 @@ func TestRetentionVisibilityPostgresIntegration(t *testing.T) {
 		}
 		return v
 	}
+	t.Run("preview_distinguishes_unset_floor_from_inactive_groups_and_accounts", func(t *testing.T) {
+		reset()
+		rows, e := r.PreviewVisibilityForMember(ctx, user, []string{g, other})
+		if e != nil || len(rows) != 1 || rows[0].MinVisibleSeq != 0 || rows[0].ConversationID != "sg_"+strings.ReplaceAll(g, "-", "") {
+			t.Fatalf("active member with no retention row: %v %v", rows, e)
+		}
+		if len(visible(user)) != 0 {
+			t.Fatal("existing retention API returned an unpublished boundary")
+		}
+		for _, update := range []struct{ deactivate, restore, id string }{
+			{"UPDATE groups SET status='dismissed' WHERE id=$1", "UPDATE groups SET status='active' WHERE id=$1", g},
+			{"UPDATE users SET status='disabled' WHERE id=$1", "UPDATE users SET status='active' WHERE id=$1", user},
+		} {
+			if _, e := pool.Exec(ctx, update.deactivate, update.id); e != nil {
+				t.Fatal(e)
+			}
+			rows, e := r.PreviewVisibilityForMember(ctx, user, []string{g, other})
+			if _, e := pool.Exec(ctx, update.restore, update.id); e != nil {
+				t.Fatal(e)
+			}
+			if e != nil || len(rows) != 0 {
+				t.Fatalf("inactive group or user received a preview boundary: %v %v", rows, e)
+			}
+		}
+	})
 	t.Run("scope_fences_application_backfill_and_old_jobs_not_visibility_reads", func(t *testing.T) {
 		reset()
 		plan(g, 100)

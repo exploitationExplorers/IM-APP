@@ -5,6 +5,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"im-app-server/internal/im"
 	"im-app-server/internal/middleware"
@@ -135,6 +138,37 @@ func (h *IMHandler) RecentMessages(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": items})
+}
+
+// GroupHistoryPreviews returns display-only text for the caller's group conversations.
+func (h *IMHandler) GroupHistoryPreviews(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	query, err := url.ParseQuery(c.Request.URL.RawQuery)
+	values := query["item"]
+	if err != nil || len(query) != 1 || len(values) == 0 || len(values) > service.GroupHistoryPreviewBatchSize || c.Request.ContentLength != 0 {
+		response.Fail(c, http.StatusBadRequest, "群聊预览请求数量不正确")
+		return
+	}
+	requested := make([]service.RecentMessageItem, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		id, seq, found := strings.Cut(value, ":")
+		groupID, isGroup := strings.CutPrefix(id, "sg_")
+		canonical, groupErr := im.BusinessIDFromUserID(groupID)
+		end, seqErr := strconv.ParseInt(seq, 10, 64)
+		if !found || !isGroup || groupErr != nil || strings.ReplaceAll(canonical, "-", "") != groupID || seqErr != nil || end <= 0 || seen[id] {
+			response.Fail(c, http.StatusBadRequest, "群聊预览请求参数不正确")
+			return
+		}
+		seen[id] = true
+		requested = append(requested, service.RecentMessageItem{ConversationID: id, EndSeq: end})
+	}
+	items, err := h.Service.GroupHistoryPreviews(c.Request.Context(), middleware.UserID(c), requested)
+	if err != nil {
+		h.handleIMError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"items": items, "previewOnly": true})
 }
 
 // GetConversation 返回指定会话的当前设置（免打扰/置顶/阅后即焚等）。

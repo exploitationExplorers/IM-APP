@@ -48,6 +48,7 @@
 		D10000000000000000000007 /* NativeActionProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000007 /* NativeActionProgress.swift */; };
 		D10000000000000000000008 /* NativeStickerAddition.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000008 /* NativeStickerAddition.swift */; };
 		D10000000000000000000009 /* NativeRecentMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000009 /* NativeRecentMedia.swift */; };
+		D1000000000000000000000A /* NativeRecentHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000000A /* NativeRecentHistory.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -136,6 +137,7 @@
 		D20000000000000000000007 /* NativeActionProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeActionProgress.swift; sourceTree = "<group>"; };
 		D20000000000000000000008 /* NativeStickerAddition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStickerAddition.swift; sourceTree = "<group>"; };
 		D20000000000000000000009 /* NativeRecentMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRecentMedia.swift; sourceTree = "<group>"; };
+		D2000000000000000000000A /* NativeRecentHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRecentHistory.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -213,6 +215,7 @@
 				D20000000000000000000007 /* NativeActionProgress.swift */,
 				D20000000000000000000008 /* NativeStickerAddition.swift */,
 				D20000000000000000000009 /* NativeRecentMedia.swift */,
+				D2000000000000000000000A /* NativeRecentHistory.swift */,
 				D20000000000000000000006 /* NativeMessageTools.swift */,
 				D20000000000000000000005 /* NativeForwardPickerController.swift */,
 				D20000000000000000000004 /* NativeCountBadge.swift */,
@@ -444,6 +447,7 @@
 				D10000000000000000000007 /* NativeActionProgress.swift in Sources */,
 				D10000000000000000000008 /* NativeStickerAddition.swift in Sources */,
 				D10000000000000000000009 /* NativeRecentMedia.swift in Sources */,
+				D1000000000000000000000A /* NativeRecentHistory.swift in Sources */,
 				D10000000000000000000006 /* NativeMessageTools.swift in Sources */,
 				D10000000000000000000005 /* NativeForwardPickerController.swift in Sources */,
 				D10000000000000000000004 /* NativeCountBadge.swift in Sources */,

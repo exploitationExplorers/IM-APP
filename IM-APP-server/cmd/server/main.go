@@ -153,10 +153,11 @@ func main() {
 	groupRepo.GroupMemberMax = cfg.GroupMemberMax
 	groupRepo.DefaultGroupMaxMembers = cfg.DefaultGroupMaxMembers
 	groupReadCursorRepo := &repository.GroupReadCursorRepo{DB: pool}
+	retentionVisibilityRepo := &repository.GroupRetentionRepo{DB: pool}
 
 	userSvc := &service.UserService{Moderation: contentModeration, Users: userRepo, Files: fileRepo, Contacts: contactRepo, Privacy: privacyRepo, Groups: groupRepo, FriendSecurity: friendSecurityRepo}
 	imSvc := &service.IMService{
-		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, ReadCursors: groupReadCursorRepo, Config: cfg.OpenIM, TokenCache: redisClient,
+		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, ReadCursors: groupReadCursorRepo, Retention: retentionVisibilityRepo, Config: cfg.OpenIM, TokenCache: redisClient,
 	}
 	imAdminSvc := &service.IMAdminService{
 		Client: imClient, Users: userRepo, Groups: groupRepo, Access: imAccessRepo, Outbox: imOutboxRepo,
@@ -227,7 +228,7 @@ func main() {
 	fileH := &handler.FileHandler{Moderation: contentModeration, Storage: storageClient, Files: fileRepo}
 	voiceH := &handler.VoiceHandler{Storage: storageClient}
 	imH := &handler.IMHandler{Service: imSvc}
-	retentionH := &handler.GroupRetentionHandler{Reader: &repository.GroupRetentionRepo{DB: pool}}
+	retentionH := &handler.GroupRetentionHandler{Reader: retentionVisibilityRepo}
 	reportH := &handler.ReportHandler{Svc: reportSvc}
 	feedbackH := &handler.FeedbackHandler{Svc: feedbackSvc}
 	appReleaseH := &handler.AppReleaseHandler{Svc: appReleaseSvc}
@@ -478,6 +479,7 @@ func main() {
 			auth.GET("/im/conversations/:peerType/:peerId", imH.GetConversation)
 			auth.PATCH("/im/conversations/:peerType/:peerId", imH.UpdateConversation)
 			auth.POST("/im/conversations/recent-messages", imH.RecentMessages)
+			auth.GET("/im/group-history-previews", imH.GroupHistoryPreviews)
 			auth.POST("/im/conversation-messages/clear", imH.ClearConversationMessages)
 			auth.POST("/im/messages/recall", imH.RecallMessage)
 			auth.POST("/im/message-send-failures", imH.ReportSendFailure)

@@ -323,6 +323,50 @@
         }
       }
     },
+    "/api/v1/im/group-history-previews": {
+      "get": {
+        "tags": ["OpenIM Client"],
+        "summary": "批量查询群聊首屏文字预览",
+        "operationId": "getGroupHistoryPreviews",
+        "description": "只返回当前账号有权访问的群中的普通文字消息。每群最多读取 20 个序号。客户端仍使用 SDK 读取和分页历史。",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "item", "in": "query", "required": true, "style": "form", "explode": true,
+            "description": "可重复传入，每项包含群会话 ID 和末尾消息序号，使用冒号分隔。",
+            "schema": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "example": "sg_0123456789abcdef0123456789abcdef:128" } }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已返回可用的群聊预览",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "message": "ok",
+                  "data": {
+                    "previewOnly": true,
+                    "items": [
+                      {
+                        "conversationId": "sg_0123456789abcdef0123456789abcdef",
+                        "messages": [
+                          { "clientMsgId": "message-128", "sendId": "223456789abcdef0123456789abcdef0", "senderNickname": "群成员", "contentType": 101, "sendTime": 1795051000000, "seq": 128, "preview": "群聊文字" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "查询参数无效" },
+          "401": { "description": "未登录" },
+          "502": { "description": "上游消息查询失败" },
+          "503": { "description": "消息服务暂不可用" }
+        }
+      }
+    },
     "/api/v1/im/conversations/{peerType}/{peerId}": {
       "get": {
         "summary": "获取会话设置（免打扰/置顶/阅后即焚等）",
