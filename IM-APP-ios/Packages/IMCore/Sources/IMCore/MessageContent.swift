@@ -74,6 +74,21 @@ public struct ForwardMessageSnapshot: Codable, Equatable, Sendable {
         }
         return copies
     }
+    /// SDK 对旧对象的缩图用查询参数生成。归档同一张原图一次，并复用真实规格。
+    public func forMediaArchive(using policy: MediaURLPolicy) -> Self {
+        guard contentType == 102, case .object(var body) = content,
+              case .object(var source)? = body["sourcePicture"], case .string(let url)? = source["url"],
+              let original = policy.legacyOpenIMArchiveImageURL(url) else { return self }
+        source["url"] = .string(original)
+        body["sourcePicture"] = .object(source)
+        for key in ["bigPicture", "snapshotPicture"] {
+            guard case .object(let preview)? = body[key], case .string(let url)? = preview["url"],
+                  policy.legacyOpenIMArchiveImageURL(url) == original else { continue }
+            body[key] = .object(source)
+        }
+        return Self(contentType: contentType, content: .object(body))
+    }
+
     public static func make(serialized: String, mediaPolicy: MediaURLPolicy? = nil) throws -> Self {
         guard let data = serialized.data(using: .utf8), let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { throw APIError.invalidResponse }
         return try build(root, depth: 0, mediaPolicy: mediaPolicy)
@@ -99,25 +114,37 @@ public struct ForwardMessageSnapshot: Codable, Equatable, Sendable {
         if type == 102 {
             // 旧 App 消息可能仅包含 bigPicture；不把发送者设备路径当成远程原图。
             let candidates = ["sourcePicture", "bigPicture", "snapshotPicture"].compactMap { content[$0] as? [String: Any] }
-            guard var picture = candidates.first(where: { value in
-                guard let text = value["url"] as? String, let url = URLComponents(string: text), url.user == nil, url.password == nil else { return false }
-                if let resolved = mediaPolicy?.absolute(text) { return resolved.scheme?.lowercased() == "https" }
-                return (url.scheme?.lowercased() == "https" && url.host?.isEmpty == false) || (url.scheme == nil && text.hasPrefix("/") && !text.hasPrefix("//"))
-            }), let url = picture["url"] as? String else { throw APIError.business(code: -1, message: "图片尚未上传完成，暂不能转发。") }
-            // 与旧端转发快照一致，原图去除已知的旧缩略图加工前缀，绝不改未知签名。
-            if let policy = mediaPolicy { picture["url"] = policy.original(url) }
+            func remote(_ value: [String: Any]) -> String? {
+                guard let text = value["url"] as? String, let url = URLComponents(string: text),
+                      url.user == nil, url.password == nil else { return nil }
+                if let policy = mediaPolicy {
+                    guard let resolved = policy.absolute(text), resolved.scheme == "https" else { return nil }
+                    // Unknown HTTPS signatures retain their original encoding.
+                    return text.hasPrefix("https://") ? text : resolved.absoluteString
+                }
+                let secure = url.scheme?.lowercased() == "https" && url.host?.isEmpty == false
+                let relative = url.scheme == nil && text.hasPrefix("/") && !text.hasPrefix("//")
+                return secure || relative ? text : nil
+            }
+            guard var picture = candidates.first(where: { remote($0) != nil }), let url = remote(picture) else {
+                throw APIError.business(code: -1, message: "图片尚未上传完成，暂不能转发。")
+            }
             let fallbackType = candidates.compactMap { ($0["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? "image/jpeg"
-            func complete(_ value: [String: Any]) -> [String: Any] {
+            func complete(_ value: [String: Any], url: String) -> [String: Any] {
                 var result = value
+                result["url"] = url
                 if (result["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false { result["type"] = fallbackType }
                 return result
             }
-            picture = complete(picture)
+            picture = complete(picture, url: mediaPolicy?.original(url) ?? url)
             content["sourcePicture"] = picture
-            // OpenIM 服务端要求每个规格都有 type/url；保留已有缩略图与尺寸，缺失规格才回退原图。
+            // Each specification goes to the archive service, including previews from old SDK messages.
             for key in ["bigPicture", "snapshotPicture"] {
-                if let value = content[key] as? [String: Any], let remote = value["url"] as? String, !remote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { content[key] = complete(value) }
-                else { content[key] = picture }
+                if let value = content[key] as? [String: Any], let url = remote(value) {
+                    content[key] = complete(value, url: url)
+                } else {
+                    content[key] = picture
+                }
             }
         }
         func embedded(_ value: [String: Any]) throws -> [String: Any] {

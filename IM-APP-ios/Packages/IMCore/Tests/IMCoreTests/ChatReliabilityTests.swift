@@ -270,6 +270,30 @@ final class ChatReliabilityTests: XCTestCase {
                     text: "待发文字", serializedMessage: "{\"clientMsgID\":\"\(id)\"}", createdAt: 123)
     }
 
+    func testForwardOutboxPersistsAllRecipientsOrNone() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("outbox.json")
+        let outbox = try PersistentOutbox(fileURL: file, ownerKey: "forward-test")
+        let direct = entry("direct-copy")
+        let group = OutboxEntry(clientMsgID: "group-copy", conversationID: "group", targetID: "group",
+                                sessionType: 3, text: direct.text, serializedMessage: "{\"clientMsgID\":\"group-copy\"}", createdAt: 123)
+        do {
+            try await outbox.prepareBatch([direct, group, group])
+            XCTFail("A duplicate ID must reject the entire batch")
+        } catch OutboxError.duplicateID { }
+        let rejected = await outbox.snapshot()
+        XCTAssertTrue(rejected.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        try await outbox.prepareBatch([direct, group])
+        let restored = try PersistentOutbox(fileURL: file, ownerKey: "forward-test")
+        let copies = await restored.snapshot()
+        XCTAssertEqual(copies.map(\.clientMsgID), [direct.clientMsgID, group.clientMsgID])
+        XCTAssertEqual(copies.map(\.conversationID), [direct.conversationID, group.conversationID])
+        XCTAssertEqual(copies.map(\.state), [.uncertain, .uncertain])
+    }
+
     func testOutboxRecoversInFlightAsUncertainAndRefusesBlindResend() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

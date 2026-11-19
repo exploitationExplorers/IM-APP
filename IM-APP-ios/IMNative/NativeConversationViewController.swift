@@ -55,6 +55,10 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private let plus = UIButton(type: .system)
     private let send = UIButton(type: .system)
     private let refresh = UIRefreshControl()
+    private let historySpinner = UIActivityIndicatorView(style: .medium)
+    private let historyStatus = UIButton(type: .system)
+    private var historyPreviewIDs = Set<String>()
+    private var initialHistoryError = false
     private var collection: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     private var displayed: [String: ChatTextItem] = [:]
@@ -111,6 +115,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     private var multiSelecting = false; private var selectedIDs = Set<String>()
     private var dateSeparators: [String: String] = [:]; private let latest = UIButton(type: .system)
     private var historyTask: Task<Void, Never>?
+    private var historyReadID: UUID?
     private var actionTask: Task<Void, Never>? {
         didSet {
             if actionTask == nil { actionProgress.hide() }
@@ -144,17 +149,19 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         if observer == nil { observer = service.observe { [weak self] in self?.render() } }
         emojiPanel?.setVisible(emojiVisible)
         if pinRemovalTask != nil { pinRemovalProgress.show(in: self, text: "取消置顶中…") }
+        service.beginHistoryPresentation(conversation, allowsPreview: focusID == nil)
         render()
         if conversation.type == 3 { roleTask?.cancel(); roleTask = Task { [weak self] in guard let self = self else { return }; do { let id = try await self.service.businessPeerID(self.conversation); let group: NativeGroup = try await self.service.business.request("groups/detail", query: [URLQueryItem(name: "groupId", value: id)]); try Task.checkCancellation(); self.canManageGroup = group.canManage || group.ownerId == self.service.business.userID } catch { if !Task.isCancelled { self.canManageGroup = false } } } }
         if let focusID = focusID, !focusedInitially {
             focusedInitially = true; cursor = focusID
-            Task { do { try await service.focusMessage(focusID, in: conversation); await loadOlder(); render() } catch { showNativeNotice(error.localizedDescription) } }
-        } else if cursor.isEmpty && !loading { Task { await loadOlder() } }
+            startFocusedHistoryRead(focusID)
+        } else if cursor.isEmpty && !loading { startHistoryRead() }
         readTask = Task { [weak self] in guard let self = self else { return }; do { try await self.service.markRead(self.conversation) } catch { if !Task.isCancelled { self.showNativeNotice(error.localizedDescription) } } }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        service.endHistoryPresentation(conversation)
         if let observer = observer { service.removeObserver(observer) }
         observer = nil; mediaPrefetch.stop(); loadOperation = nil; loading = false; refresh.endRefreshing()
         emojiPanel?.setVisible(false); historyTask?.cancel(); historyTask = nil; roleTask?.cancel(); actionTask?.cancel()
@@ -192,6 +199,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         collection.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(messageActions(_:))))
         let contentViews: [UIView] = [header, collection, composer]
         contentViews.forEach { $0.translatesAutoresizingMaskIntoConstraints = false; view.addSubview($0) }
+        installHistoryStatus()
         latest.setTitle("↓ 最新", for: .normal); latest.backgroundColor = .white; latest.setTitleColor(NativeUITheme.primary, for: .normal); latest.layer.cornerRadius = 18; latest.layer.shadowOpacity = 0.1; latest.layer.shadowRadius = 6; latest.isHidden = true; latest.addTarget(self, action: #selector(returnLatest), for: .touchUpInside); view.addSubview(latest)
         header.backgroundColor = .white
         [back, heading, more, notice, pinTitle, pinLine, dismissPin].forEach { header.addSubview($0) }
@@ -255,7 +263,10 @@ final class NativeConversationViewController: UIViewController, UICollectionView
                 guard let self = self, self.mediaSizes[id] != size else { return }
                 self.pendingMediaSizes[id] = size; self.applyPendingMediaSizes()
             })
-            cell.onAvatarTap = { [weak self] in self?.openSender(message) }
+            cell.onAvatarTap = { [weak self] in
+                guard let self, !self.historyPreviewIDs.contains(id) else { return }
+                self.openSender(message)
+            }
             cell.onQuoteTap = { [weak self] in guard let self = self, let reference = MessageQuoteReference(serialized: message.serialized) else { return }; self.locate(reference.id) }
             cell.showSelectionCircle(self.renderedRows[id]?.selection)
             return cell
@@ -321,12 +332,10 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             historyReloadRevision = revision
             loadOperation = nil; loading = false; historyTask?.cancel()
             cursor = ""; isEnd = false; awaitingHistoryCursor = ""
+            initialHistoryError = false
             hasLocalHistoryPreview = false; autoHistoryAllowed = true; lastAutomaticHistoryRequest = nil
-            historyTask = Task { [weak self] in
-                guard let self = self else { return }
-                defer { self.historyTask = nil }
-                await self.loadOlder()
-            }
+            historyTask = nil
+            if observer != nil { startHistoryRead() }
         }
         if let requested = awaitingHistoryCursor, requested == cursor,
            let page = service.completedHistoryPage(conversation, cursor: requested) {
@@ -346,19 +355,30 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         if observer != nil { mediaPrefetch.update(items: stored, service: service, scope: conversation.type == 3 ? .group : .direct) }
         let storedMedia = Set(stored.filter { $0.senderID == service.imUserID }.compactMap { $0.media?.localPath }.filter { !$0.isEmpty })
         let previews = attachmentPreviews.values.filter { $0.media?.localPath.isEmpty != false || !storedMedia.contains($0.media?.localPath ?? "") }
-        let items = ChatTextItem.merge(stored, Array(previews))
+        let recent = stored.isEmpty && focusID == nil ? service.recentHistoryPreview(in: conversation) : []
+        historyPreviewIDs = Set(recent.map(\.id))
+        let items = ChatTextItem.merge(stored.isEmpty ? recent : stored, Array(previews))
+        updateHistoryStatus(hasMessages: !items.isEmpty)
+        let preparingIDs = Set(attachmentPreviews.values.filter { $0.status != 3 }.map(\.id))
+        let previewIDs = Set(attachmentPreviews.values.map(\.id)).union(historyPreviewIDs)
         dateSeparators = [:]; var previousDay: Date?; let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var dateFormatter: DateFormatter?
         for item in items where item.timestamp > 0 {
-            let date = Date(timeIntervalSince1970: Double(item.timestamp) / 1000), day = calendar.startOfDay(for: Date(timeIntervalSince1970: Double(item.timestamp) / 1000))
+            let date = Date(timeIntervalSince1970: Double(item.timestamp) / 1000)
+            let day = calendar.startOfDay(for: date)
             defer { previousDay = day }; guard previousDay != day else { continue }
-            let diff = calendar.dateComponents([.day], from: day, to: calendar.startOfDay(for: Date())).day ?? 0
+            let diff = calendar.dateComponents([.day], from: day, to: today).day ?? 0
             if diff == 0 { dateSeparators[item.id] = "今天" }
             else if diff == 1 { dateSeparators[item.id] = "昨天" }
             else if diff > 1 && diff < 7 { dateSeparators[item.id] = "星期" + ["日", "一", "二", "三", "四", "五", "六"][calendar.component(.weekday, from: date) - 1] }
-            else { let formatter = DateFormatter(); formatter.dateFormat = calendar.component(.year, from: date) == calendar.component(.year, from: Date()) ? "M月d日" : "yyyy年M月d日"; dateSeparators[item.id] = formatter.string(from: date) }
+            else {
+                let formatter = dateFormatter ?? DateFormatter()
+                dateFormatter = formatter
+                formatter.dateFormat = calendar.component(.year, from: date) == calendar.component(.year, from: today) ? "M月d日" : "yyyy年M月d日"
+                dateSeparators[item.id] = formatter.string(from: date)
+            }
         }
-        let preparingIDs = Set(attachmentPreviews.values.filter { $0.status != 3 }.map(\.id))
-        let previewIDs = Set(attachmentPreviews.values.map(\.id))
         let rows = Dictionary(items.map { item in
             let selection = multiSelecting && Self.canMultiSelect(item, isAttachmentPreview: previewIDs.contains(item.id)) ? selectedIDs.contains(item.id) : nil
             let inviteStatus = item.contentType == 110 ? service.inviteStatus(for: item) : nil
@@ -443,12 +463,98 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         updateLatestButton()
     }
 
+    private func installHistoryStatus() {
+        historyStatus.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
+        historyStatus.setTitleColor(NativeUITheme.secondary, for: .disabled)
+        historyStatus.accessibilityIdentifier = "initialHistoryStatus"
+        historyStatus.addTarget(self, action: #selector(retryInitialHistory), for: .touchUpInside)
+        historyStatus.isHidden = true
+        historySpinner.hidesWhenStopped = true
+        let stack = UIStackView(arrangedSubviews: [historySpinner, historyStatus])
+        stack.alignment = .center
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: collection.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: collection.centerYAnchor),
+            historyStatus.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        ])
+    }
+
+    private func updateHistoryStatus(hasMessages: Bool) {
+        historyStatus.isHidden = hasMessages
+        guard !hasMessages else { historySpinner.stopAnimating(); return }
+        let failed = initialHistoryError || service.historyNeedsRetry(conversation, cursor: cursor)
+        let syncPending = isEnd && service.historyIsSyncing
+        let canContinue = !isEnd && !cursor.isEmpty && awaitingHistoryCursor == nil
+        let showRetry = !loading && (failed || syncPending || canContinue)
+        let title: String
+        if showRetry && syncPending { title = "消息仍在同步，点此重试" }
+        else if showRetry && failed { title = "消息暂未加载，点此重试" }
+        else if showRetry { title = "点此继续加载历史消息" }
+        else if isEnd && !loading { title = "暂无消息" }
+        else { title = "正在加载消息…" }
+        historyStatus.setTitle(title, for: .normal)
+        historyStatus.isEnabled = showRetry
+        if !showRetry && !isEnd { historySpinner.startAnimating() }
+        else { historySpinner.stopAnimating() }
+    }
+
+    @objc private func retryInitialHistory() {
+        guard !loading, historyTask == nil else { return }
+        initialHistoryError = false
+        if isEnd { cursor = "" }
+        isEnd = false
+        if let focusID, focusPending, cursor.isEmpty || cursor == focusID {
+            cursor = focusID
+            startFocusedHistoryRead(focusID)
+        } else {
+            service.retryHistory(conversation, cursor: cursor)
+            startHistoryRead()
+        }
+        updateHistoryStatus(hasMessages: !displayed.isEmpty)
+    }
+
+    private func startFocusedHistoryRead(_ id: String) {
+        startHistoryRead(focusing: id)
+    }
+
+    private func startHistoryRead(focusing id: String? = nil) {
+        guard historyTask == nil else { return }
+        let request = UUID()
+        historyReadID = request
+        historyTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if historyReadID == request { historyTask = nil } }
+            if let id {
+                do { try await service.focusMessage(id, in: conversation) }
+                catch {
+                    guard !Task.isCancelled, historyReadID == request else { return }
+                    initialHistoryError = true
+                    updateHistoryStatus(hasMessages: !displayed.isEmpty)
+                    if !displayed.isEmpty { showNativeNotice(error.localizedDescription) }
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            await loadOlder()
+        }
+    }
+
     private func loadOlder() async {
         guard !loading, !isEnd, service.isActive else { refresh.endRefreshing(); return }
         let operation = UUID(); loadOperation = operation; loading = true
         let requested = cursor
         awaitingHistoryCursor = requested
-        defer { if loadOperation == operation { loading = false; refresh.endRefreshing() } }
+        initialHistoryError = false
+        updateHistoryStatus(hasMessages: !displayed.isEmpty)
+        defer {
+            if loadOperation == operation {
+                loading = false; refresh.endRefreshing()
+                updateHistoryStatus(hasMessages: !displayed.isEmpty)
+            }
+        }
         do {
             let page = try await service.history(conversation, cursor: requested)
             guard loadOperation == operation, service.isActive else { return }
@@ -460,7 +566,8 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         } catch {
             guard loadOperation == operation, service.isActive else { return }
             autoHistoryAllowed = false
-            showNativeNotice(error.localizedDescription)
+            if displayed.isEmpty { initialHistoryError = true }
+            else { showNativeNotice(error.localizedDescription) }
         }
     }
 
@@ -488,11 +595,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         let fingerprint = cursor + "|" + (dataSource.snapshot().itemIdentifiers.first ?? "")
         guard fingerprint != lastAutomaticHistoryRequest else { return }
         lastAutomaticHistoryRequest = fingerprint
-        historyTask = Task { [weak self] in
-            guard let self = self else { return }
-            defer { self.historyTask = nil }
-            await self.loadOlder()
-        }
+        startHistoryRead()
     }
     private func updateLatestButton() { guard isViewLoaded, collection != nil else { return }; latest.isHidden = collection.contentSize.height - collection.contentOffset.y - collection.bounds.height < 140 }
     @objc private func returnLatest() { guard let id = dataSource.snapshot().itemIdentifiers.last, let index = dataSource.indexPath(for: id) else { return }; collection.scrollToItem(at: index, at: .bottom, animated: true) }
@@ -617,12 +720,23 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             }
         }
     }
-    @objc private func pullHistory() { Task { await loadOlder() } }
+    @objc private func pullHistory() {
+        if historyStatus.isEnabled && displayed.isEmpty { retryInitialHistory() }
+        else if loading || historyTask != nil { refresh.endRefreshing() }
+        else { startHistoryRead() }
+    }
     @objc private func goBack() { if multiSelecting { multiSelecting = false; selectedIDs = []; render(); return }; navigationController?.popViewController(animated: true) }
     @objc private func showMenu() {
         if multiSelecting {
             let messages = service.visibleMessages(conversation.id).filter { selectedIDs.contains($0.id) }; guard !messages.isEmpty else { return }
-            var actions = [NativeMenuItem(title: "转发", action: { [weak self] in guard let self = self else { return }; self.navigationController?.pushViewController(NativeForwardPickerController(service: self.service, messages: messages, sourceConversation: self.conversation), animated: true) }), NativeMenuItem(title: "删除", destructive: true, action: { [weak self] in self?.deleteSelected(messages) })]
+            var actions = [NativeMenuItem(title: "转发", action: { [weak self] in
+                guard let self else { return }
+                let picker = NativeForwardPickerController(service: self.service, messages: messages, sourceConversation: self.conversation) { [weak self] in
+                    self?.multiSelecting = false
+                    self?.selectedIDs.removeAll()
+                }
+                self.navigationController?.pushViewController(picker, animated: true)
+            }), NativeMenuItem(title: "删除", destructive: true, action: { [weak self] in self?.deleteSelected(messages) })]
             if messages.contains(where: { MessageMenuCapabilities(contentType: $0.contentType, status: $0.status).canRecall(isMine: $0.senderID == service.imUserID, canManageSender: canManageGroup) }) { actions.append(NativeMenuItem(title: "撤回", destructive: true, action: { [weak self] in self?.recallMessages(messages) })) }
             showAnchoredNativeMenu(anchor: more, items: actions); return
         }
@@ -650,7 +764,8 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     @objc private func messageActions(_ recognizer: UILongPressGestureRecognizer) {
         guard recognizer.state == .began, actionTask == nil, presentedViewController == nil,
               let index = collection.indexPathForItem(at: recognizer.location(in: collection)),
-              let id = dataSource.itemIdentifier(for: index), let message = displayed[id] else { return }
+              let id = dataSource.itemIdentifier(for: index), let message = displayed[id],
+              !historyPreviewIDs.contains(id) else { return }
         if let preview = attachmentPreviews.first(where: { $0.value.id == id }) {
             guard !pendingMediaIDs.contains(preview.key), let draft = pendingAttachments.first(where: { $0.id == preview.key }) else { showNativeNotice("媒体正在准备，请稍候。"); return }
             let retry = NativeMenuItem(title: "重新发送", action: { [weak self] in Task { await self?.sendPendingAttachment(draft) } })
@@ -1056,7 +1171,8 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = displayed[id], item.status != 4 else { return }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = displayed[id],
+              item.status != 4, !historyPreviewIDs.contains(id) else { return }
         if multiSelecting {
             guard Self.canMultiSelect(item, isAttachmentPreview: attachmentPreviews.values.contains(where: { $0.id == id })) else { return }
             if selectedIDs.contains(id) { selectedIDs.remove(id) } else { selectedIDs.insert(id) }; render(); return

@@ -130,7 +130,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         if case .realAccount(let chat) = mode { return chat }
         return nil
     }
-    private var visibleConversations: [NativeConversation] {
+    private var filteredConversations: [NativeConversation] {
         let keyword = (search.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard let chat else { return [] }
         return chat.conversationsWithForwardPreviews.filter {
@@ -349,7 +349,8 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             if self.chat?.loadingConversations == true { empty.text = "正在读取会话…" }
             else if self.chat?.conversations.isEmpty == true, self.chat?.lastError != nil { empty.text = "会话暂未读取成功\n点击上方状态重试" }
             else { empty.text = "暂无符合条件的会话\n点击上方状态可重新读取" }
-            empty.isHidden = !chat || !visibleConversations.isEmpty
+            updateConversationRows()
+            empty.isHidden = !chat || !renderedConversations.isEmpty
             loadMore.isEnabled = self.chat?.loadingConversations != true
             table.tableFooterView = self.chat?.conversationsEnd == false ? loadMore : nil
         } else {
@@ -357,7 +358,6 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
             empty.isHidden = chat && hasVisibleConversation
         }
         if self.chat == nil { table.reloadData() }
-        else { updateConversationRows() }
         if self.chat?.loadingConversations != true { conversationRefresh.endRefreshing() }
         view.setNeedsLayout()
     }
@@ -365,7 +365,7 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     private func updateConversationRows() {
         guard let service = chat else { return }
         let pendingIDs = pendingJoins?.monitor.snapshot.conversationIDs ?? []
-        let next = visibleConversations.map {
+        let next = filteredConversations.map {
             RenderedConversation(conversation: $0, preview: service.conversationPreview($0),
                                  timestamp: service.conversationTimestamp($0),
                                  unread: service.conversationUnread($0),
@@ -469,33 +469,33 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
     }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard let chat = chat, indexPath.row < visibleConversations.count else { return nil }; let conversation = visibleConversations[indexPath.row]
+        guard let chat, renderedConversations.indices.contains(indexPath.row) else { return nil }
+        let conversation = renderedConversations[indexPath.row].conversation
         func action(_ title: String, color: UIColor, work: @escaping () async throws -> Void) -> UIContextualAction {
             let result = UIContextualAction(style: .normal, title: title) { [weak self] _, _, completion in Task { do { try await work(); completion(true) } catch { completion(false); self?.showNativeNotice(error.localizedDescription) } } }; result.backgroundColor = color; return result
         }
         let items = [action("隐藏", color: .systemRed) { try await chat.hide(conversation) }, action(conversation.muted ? "取消免打扰" : "免打扰", color: .systemGray) { try await chat.mute(conversation) }, action(conversation.pinned ? "取消置顶" : "置顶", color: NativeUITheme.primary) { try await chat.pin(conversation) }]
         let config = UISwipeActionsConfiguration(actions: items); config.performsFirstActionWithFullSwipe = false; return config
     }
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { chat == nil ? (hasVisibleConversation ? 1 : 0) : visibleConversations.count }
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { chat == nil ? (hasVisibleConversation ? 1 : 0) : renderedConversations.count }
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "conversation", for: indexPath) as! ConversationRowCell
-        if chat != nil {
-            let item = visibleConversations[indexPath.row]
+        if let chat, renderedConversations.indices.contains(indexPath.row) {
+            let row = renderedConversations[indexPath.row]
+            let item = row.conversation
             cell.name.text = item.title.isEmpty ? "聊天" : item.title
-            let unread = chat?.conversationUnread(item) ?? 0
-            cell.muted = item.muted; cell.unreadCount = unread
-            cell.joinRequestPending = item.type == 3 && pendingJoins?.monitor.snapshot.conversationIDs.contains(item.id) == true
-            let preview = chat?.conversationPreview(item) ?? ""
-            cell.preview.text = cell.joinRequestPending && preview.isEmpty ? "[入群申请]" : preview
-            if let chat = chat { cell.avatar.load(item.avatar, policy: chat.business.media, placeholder: item.type == 3 ? "uni_group_default" : "uni_avatar_default") }
-            let timestamp = chat?.conversationTimestamp(item) ?? item.timestamp
-            cell.time.text = timestamp > 0 ? Date(timeIntervalSince1970: Double(timestamp) / 1000).formatted(date: .omitted, time: .shortened) : ""
+            cell.muted = item.muted; cell.unreadCount = row.unread
+            cell.joinRequestPending = row.joinRequestPending
+            cell.preview.text = row.joinRequestPending && row.preview.isEmpty ? "[入群申请]" : row.preview
+            cell.avatar.load(item.avatar, policy: chat.business.media, placeholder: item.type == 3 ? "uni_group_default" : "uni_avatar_default")
+            cell.time.text = row.timestamp > 0 ? Date(timeIntervalSince1970: Double(row.timestamp) / 1000).formatted(date: .omitted, time: .shortened) : ""
         } else { cell.joinRequestPending = false; cell.muted = false; cell.unreadCount = 0; cell.preview.text = latestPreview }
         return cell
     }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         if let chat = chat {
-            let item = visibleConversations[indexPath.row]
+            guard renderedConversations.indices.contains(indexPath.row) else { return }
+            let item = renderedConversations[indexPath.row].conversation
             guard item.canOpen else { showNativeNotice("此类型会话尚未接入。"); return }
             navigationController?.pushViewController(NativeConversationViewController(service: chat, conversation: item), animated: true)
             return

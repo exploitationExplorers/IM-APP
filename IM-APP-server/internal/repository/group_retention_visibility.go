@@ -31,15 +31,26 @@ type RetentionApplication struct {
 // authorization query. Unauthorized/inactive groups and absent state are omitted.
 // Historical boundaries remain readable even if the cleanup worker is disabled.
 func (r *GroupRetentionRepo) VisibilityForMember(ctx context.Context, userID string, groupIDs []string) ([]RetentionVisibility, error) {
+	return r.memberVisibility(ctx, userID, groupIDs, false)
+}
+
+// PreviewVisibilityForMember includes current members whose group has no retention
+// row. Callers can distinguish an authorized floor of zero from a missing group.
+func (r *GroupRetentionRepo) PreviewVisibilityForMember(ctx context.Context, userID string, groupIDs []string) ([]RetentionVisibility, error) {
+	return r.memberVisibility(ctx, userID, groupIDs, true)
+}
+
+func (r *GroupRetentionRepo) memberVisibility(ctx context.Context, userID string, groupIDs []string, includeUnset bool) ([]RetentionVisibility, error) {
 	result := make([]RetentionVisibility, 0)
 	if len(groupIDs) == 0 || len(groupIDs) > 50 {
 		return result, errors.New("retention query requires 1 to 50 groups")
 	}
-	rows, err := r.DB.Query(ctx, `SELECT g.id::text,v.min_visible_seq,v.revision,v.updated_at
-		FROM group_retention_visibility v JOIN groups g ON g.id=v.group_id
+	rows, err := r.DB.Query(ctx, `SELECT g.id::text,COALESCE(v.min_visible_seq,0),COALESCE(v.revision,0),COALESCE(v.updated_at,'epoch'::timestamptz)
+		FROM groups g LEFT JOIN group_retention_visibility v ON g.id=v.group_id
 		JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$1::uuid
 		JOIN users u ON u.id=gm.user_id AND COALESCE(u.status,'active')='active'
-		WHERE g.id=ANY($2::uuid[]) AND COALESCE(g.status,'active')='active' ORDER BY g.id`, userID, groupIDs)
+		WHERE g.id=ANY($2::uuid[]) AND COALESCE(g.status,'active')='active'
+		AND ($3 OR v.group_id IS NOT NULL) ORDER BY g.id`, userID, groupIDs, includeUnset)
 	if err != nil {
 		return nil, err
 	}

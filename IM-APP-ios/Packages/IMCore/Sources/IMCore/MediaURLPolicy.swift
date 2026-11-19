@@ -124,6 +124,17 @@ public struct MediaURLPolicy: Sendable {
         }
         return parts.url?.absoluteString ?? raw
     }
+    /// 业务服务按 OpenIM 配置的原始对象入口取归档源，本机浏览仍使用 HTTPS。
+    func legacyOpenIMArchiveImageURL(_ raw: String) -> String? {
+        guard businessBaseURL.scheme == "https", businessBaseURL.host == URL(string: IMEndpointPolicy.defaultOrigin)?.host,
+              businessBaseURL.port == nil || businessBaseURL.port == 443,
+              let url = absolute(raw), isBusinessOrigin(url), url.path.hasPrefix("/object/"),
+              images.contains(url.pathExtension.lowercased()),
+              let original = URLComponents(string: original(raw)), original.percentEncodedQuery == nil,
+              original.fragment == nil else { return nil }
+        return "http://8.154.44.197" + original.percentEncodedPath
+    }
+
     /// 已知旧测试聊天桶的视频签名可过期；仅在 host、桶前缀与视频扩展名同时匹配时恢复稳定入口。
     public func playback(_ raw: String) -> String {
         guard let url = absolute(raw), let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -132,6 +143,27 @@ public struct MediaURLPolicy: Sendable {
         destination.path = "/object/" + key; destination.query = nil; destination.fragment = nil
         return destination.url?.absoluteString ?? raw
     }
+    /// Forward archives use content hashes instead of file extensions. Limit format overrides to those objects.
+    public func isForwardArchive(_ url: URL) -> Bool {
+        guard url.scheme == "https", let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        let key: String
+        if isBusinessOrigin(url), url.path == "/api/v1/public/oss-media" {
+            guard let value = query(parts, "key"), !(query(parts, "token") ?? "").isEmpty else { return false }
+            key = value
+        } else if isBusinessOrigin(url), url.path.hasPrefix("/object/") {
+            key = String(url.path.dropFirst("/object/".count))
+        } else if businessHosts.contains(url.host?.lowercased() ?? ""), url.port == nil || url.port == 443 {
+            key = String(url.path.dropFirst())
+            guard businessPrefixes.contains(where: key.hasPrefix) else { return false }
+        } else { return false }
+        let segments = key.split(separator: "/", omittingEmptySubsequences: false)
+        guard segments.count >= 4, segments[segments.count - 4] == "forwards" else { return false }
+        func isHash(_ value: Substring, length: Int) -> Bool {
+            value.utf8.count == length && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+        }
+        return !segments[segments.count - 3].isEmpty && isHash(segments[segments.count - 2], length: 32) && isHash(segments[segments.count - 1], length: 64)
+    }
+
     public func isGIF(_ raw: String) -> Bool {
         guard let url = absolute(raw), let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         return url.path.lowercased().hasSuffix(".gif") || (query(parts, "key")?.lowercased().hasSuffix(".gif") ?? false)

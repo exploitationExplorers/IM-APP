@@ -71,6 +71,8 @@ func (c *Client) PullMessagesBySeqRanges(ctx context.Context, userID string, ran
 }
 
 type rawRecentMessage struct {
+	Status         json.RawMessage `json:"status"`
+	AttachedInfo   json.RawMessage `json:"attachedInfo"`
 	ClientMsgID    string          `json:"clientMsgID"`
 	ServerMsgID    string          `json:"serverMsgID"`
 	SendID         string          `json:"sendID"`
@@ -89,8 +91,26 @@ type rawRecentMessage struct {
 // NormalizeRecentMessage 把 OpenIM MsgData 转成客户端 ChatMessage 所需的 JSON。
 // content 在 OpenIM 响应里既可能是 JSON 字符串，也可能是对象，这里统一展开到对应 *Elem 字段。
 func NormalizeRecentMessage(raw json.RawMessage) (RecentMessage, bool) {
+	return normalizeRecentMessage(raw, "")
+}
+
+// NormalizeRecentPreview only exposes ordinary delivered group messages. Rich or
+// private messages, redactions, and messages with unknown state stay in SDK history.
+func NormalizeRecentPreview(raw json.RawMessage, groupID string) (RecentMessage, bool) {
+	if groupID == "" {
+		return RecentMessage{}, false
+	}
+	return normalizeRecentMessage(raw, groupID)
+}
+
+func normalizeRecentMessage(raw json.RawMessage, groupID string) (RecentMessage, bool) {
+	preview := groupID != ""
 	var source rawRecentMessage
 	if err := json.Unmarshal(raw, &source); err != nil || strings.TrimSpace(source.ClientMsgID) == "" {
+		return RecentMessage{}, false
+	}
+	if preview && (strings.TrimSpace(string(source.Status)) != "2" || source.SessionType != 3 || source.ContentType != 101 ||
+		source.GroupID != groupID || source.Seq <= 0 || source.SendID == "" || !isPublicRecentMessage(source.AttachedInfo)) {
 		return RecentMessage{}, false
 	}
 	if source.SendTime <= 0 {
@@ -99,6 +119,15 @@ func NormalizeRecentMessage(raw json.RawMessage) (RecentMessage, bool) {
 	contentBytes := normalizeContent(source.Content)
 	content := map[string]any{}
 	_ = json.Unmarshal(contentBytes, &content)
+	if preview {
+		text, _ := content["content"].(string)
+		if strings.TrimSpace(text) == "" || source.SendTime <= 0 {
+			return RecentMessage{}, false
+		}
+		return RecentMessage{ClientMsgID: source.ClientMsgID, SendID: source.SendID,
+			SenderNickname: source.SenderNickname, ContentType: source.ContentType,
+			SendTime: source.SendTime, Seq: source.Seq, Preview: text}, true
+	}
 	serialized := map[string]any{
 		"clientMsgID":    source.ClientMsgID,
 		"serverMsgID":    source.ServerMsgID,
@@ -134,6 +163,20 @@ func NormalizeRecentMessage(raw json.RawMessage) (RecentMessage, bool) {
 		Preview:        recentPreview(source.ContentType, content),
 		Serialized:     string(encoded),
 	}, true
+}
+
+func isPublicRecentMessage(raw json.RawMessage) bool {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" || value == `""` {
+		return true
+	}
+	if strings.HasPrefix(value, `"`) && json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	var info struct {
+		IsPrivateChat bool `json:"isPrivateChat"`
+	}
+	return json.Unmarshal([]byte(value), &info) == nil && !info.IsPrivateChat
 }
 
 func normalizeContent(raw json.RawMessage) []byte {

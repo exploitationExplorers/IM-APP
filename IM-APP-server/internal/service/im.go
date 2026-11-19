@@ -109,6 +109,7 @@ type IMService struct {
 	Groups      *repository.GroupRepo
 	Access      *repository.IMAccessRepo
 	ReadCursors *repository.GroupReadCursorRepo
+	Retention   *repository.GroupRetentionRepo
 	Config      config.OpenIMConfig
 	TokenCache  IMTokenCache
 
@@ -166,10 +167,27 @@ func (s *IMService) ResolveGroupByIM(ctx context.Context, userID, imGroupID stri
 	return s.ResolveGroup(ctx, userID, publicID)
 }
 
+const GroupHistoryPreviewBatchSize = 8
+const groupHistoryPreviewMessageLimit = 20
+
 // RecentMessages 返回调用者有权访问的会话最近 N 条消息。
 // 群聊校验业务群成员身份，单聊校验调用者是否在 si_ 双方 ID 中；
 // OpenIM 的 pull_msg_by_seq 只按调用者 IM 身份拉取其可见消息。
 func (s *IMService) RecentMessages(ctx context.Context, callerUserID string, items []RecentMessageItem) ([]RecentConversationMessages, error) {
+	return s.recentMessages(ctx, callerUserID, items, false)
+}
+
+func (s *IMService) GroupHistoryPreviews(ctx context.Context, callerUserID string, items []RecentMessageItem) ([]RecentConversationMessages, error) {
+	if len(items) > GroupHistoryPreviewBatchSize {
+		return nil, ErrIMInvalidRecentMessagesRequest
+	}
+	if s.Groups == nil || s.Retention == nil {
+		return nil, ErrIMUnavailable
+	}
+	return s.recentMessages(ctx, callerUserID, items, true)
+}
+
+func (s *IMService) recentMessages(ctx context.Context, callerUserID string, items []RecentMessageItem, previewOnly bool) ([]RecentConversationMessages, error) {
 	if s.Client == nil || !s.Client.Available() || s.Access == nil {
 		return nil, ErrIMUnavailable
 	}
@@ -182,6 +200,7 @@ func (s *IMService) RecentMessages(ctx context.Context, callerUserID string, ite
 	}
 	ranges := make([]im.SeqRange, 0, len(items))
 	seen := make(map[string]struct{}, len(items))
+	previewGroups := make(map[string]string, len(items))
 	for _, item := range items {
 		conversationID := strings.TrimSpace(item.ConversationID)
 		if conversationID == "" || item.EndSeq <= 0 || strings.Contains(conversationID, "/") {
@@ -197,16 +216,26 @@ func (s *IMService) RecentMessages(ctx context.Context, callerUserID string, ite
 		if count > 50 {
 			count = 50
 		}
+		if previewOnly {
+			count = groupHistoryPreviewMessageLimit
+		}
 		switch {
 		case strings.HasPrefix(conversationID, "sg_"):
 			groupID, parseErr := parseGroupConversationID(conversationID)
 			if parseErr != nil {
 				continue
 			}
-			if _, resolveErr := s.Access.ResolveGroup(ctx, callerUserID, groupID); resolveErr != nil {
+			target, resolveErr := s.Access.ResolveGroup(ctx, callerUserID, groupID)
+			if resolveErr != nil || (previewOnly && target.DenyReason == "group_inactive") {
 				continue
 			}
+			if previewOnly {
+				previewGroups[conversationID] = groupID
+			}
 		case strings.HasPrefix(conversationID, "si_"):
+			if previewOnly {
+				continue
+			}
 			left, right, ok := parseSingleConversationID(conversationID)
 			if !ok || (left != callerIMID && right != callerIMID) {
 				continue
@@ -233,12 +262,39 @@ func (s *IMService) RecentMessages(ctx context.Context, callerUserID string, ite
 	if err != nil {
 		return nil, err
 	}
+	floors := make(map[string]int64, len(previewGroups))
+	if previewOnly {
+		groupIDs := make([]string, 0, len(previewGroups))
+		for _, groupID := range previewGroups {
+			groupIDs = append(groupIDs, groupID)
+		}
+		rows, err := s.Retention.PreviewVisibilityForMember(ctx, callerUserID, groupIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			floors[row.ConversationID] = row.MinVisibleSeq
+		}
+	}
 	result := make([]RecentConversationMessages, 0, len(ranges))
 	for _, item := range ranges {
-		messages := make([]im.RecentMessage, 0, len(pulled[item.ConversationID]))
-		for _, raw := range pulled[item.ConversationID] {
-			if message, ok := im.NormalizeRecentMessage(raw); ok {
-				messages = append(messages, message)
+		rawMessages := pulled[item.ConversationID]
+		messages := make([]im.RecentMessage, 0, len(rawMessages))
+		if previewOnly && len(rawMessages) > 0 {
+			floor, stillAuthorized := floors[item.ConversationID]
+			if !stillAuthorized {
+				continue
+			}
+			purges, err := s.Groups.MessagePurges(ctx, previewGroups[item.ConversationID], callerUserID)
+			if err != nil {
+				continue // No fresh purge snapshot, so this group has no preview.
+			}
+			messages = recentGroupPreviewMessages(item, rawMessages, floor, purges)
+		} else {
+			for _, raw := range rawMessages {
+				if message, ok := im.NormalizeRecentMessage(raw); ok {
+					messages = append(messages, message)
+				}
 			}
 		}
 		sort.Slice(messages, func(i, j int) bool {
@@ -253,6 +309,31 @@ func (s *IMService) RecentMessages(ctx context.Context, callerUserID string, ite
 		})
 	}
 	return result, nil
+}
+
+// Apply business retention and member purge rules in addition to the user's OpenIM visibility window.
+func recentGroupPreviewMessages(item im.SeqRange, rawMessages []json.RawMessage, floor int64, purges []models.GroupMessagePurge) []im.RecentMessage {
+	bySender := make(map[string]int64, len(purges))
+	for _, purge := range purges {
+		bySender[purge.UserID] = max(bySender[purge.UserID], purge.PurgedAt.UnixMilli())
+	}
+	messages := make([]im.RecentMessage, 0, min(item.Num, len(rawMessages)))
+	groupID := strings.TrimPrefix(item.ConversationID, "sg_")
+	for _, raw := range rawMessages {
+		message, ok := im.NormalizeRecentPreview(raw, groupID)
+		if !ok || message.Seq < max(item.Begin, floor) || message.Seq > item.End {
+			continue
+		}
+		senderID, err := im.BusinessIDFromUserID(message.SendID)
+		if err != nil || message.SendTime <= bySender[senderID] {
+			continue
+		}
+		messages = append(messages, message)
+		if len(messages) == item.Num {
+			break
+		}
+	}
+	return messages
 }
 
 func (s *IMService) Token(ctx context.Context, userID string, platformID int) (IMToken, error) {

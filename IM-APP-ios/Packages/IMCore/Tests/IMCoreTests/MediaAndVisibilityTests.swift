@@ -57,6 +57,25 @@ final class MediaAndVisibilityTests: XCTestCase {
             "https://oss-chat.whs188.xin/oss-test/chat/movie.mp4?OSSAccessKeyId=k&Signature=x%2By"
         ] { XCTAssertEqual(policy.playback(value), value) }
     }
+    func testForwardVideoUsesMetadataOnlyForKnownArchiveObjects() throws {
+        let archive = "forwards/user/" + String(repeating: "a", count: 32) + "/" + String(repeating: "b", count: 64)
+        for raw in [
+            "https://oss-business.whs188.xin/im-app-production/business/" + archive,
+            "https://business.invalid/object/" + archive,
+            "https://business.invalid/api/v1/public/oss-media?key=oss-test/business/" + archive + "&token=opaque"
+        ] { XCTAssertTrue(policy.isForwardArchive(try XCTUnwrap(URL(string: raw)))) }
+        for raw in [
+            "https://untrusted.invalid/im-app-production/business/" + archive,
+            "https://oss-business.whs188.xin/im-app-production/chat/" + archive,
+            "https://business.invalid/object/forwards/user/movie",
+            "https://business.invalid/api/v1/public/oss-media?key=oss-test/business/" + archive,
+            "https://business.invalid/object/" + archive + ".mov"
+        ] { XCTAssertFalse(policy.isForwardArchive(try XCTUnwrap(URL(string: raw)))) }
+        XCTAssertEqual(ChatVideoFormat(openIMType: "quicktime")?.mimeType, "video/quicktime")
+        XCTAssertEqual(ChatVideoFormat(openIMType: "video/mp4"), .mp4)
+        XCTAssertNil(ChatVideoFormat(openIMType: "application/octet-stream"))
+    }
+
     func testForwardSuccessRequiresCompletedAndEveryTargetAcknowledged() {
         func state(_ status: String, target: Int = 2, success: Int = 2, failed: Int = 0, skipped: Int = 0, cancelled: Int = 0, pending: Int = 0, processing: Int = 0) -> ForwardBatchReceiptPolicy.DeliveryState {
             ForwardBatchReceiptPolicy.deliveryState(status: status, targetCount: target, successCount: success, failedCount: failed, skippedCount: skipped, cancelledCount: cancelled, pendingCount: pending, processingCount: processing)
