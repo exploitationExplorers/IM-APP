@@ -318,6 +318,10 @@ private fun LegalSheet(kind: String, dismiss: () -> Unit) {
 internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniScale, tab: String, changeTab: (String) -> Unit, toast: (String) -> Unit,onSearch:()->Unit={},businessController:BusinessController=model.business) {
     val rows=state.chat.conversations
     val unreadSummary=remember(rows) {chatUnreadSummary(rows)}
+    // 通讯录 tab 角标：有待处理好友申请时显示数量（对标 H5 通讯录角标）
+    val businessState by businessController.state.collectAsStateWithLifecycle()
+    // 不打开通讯录页也要显示角标：主界面挂载时即对账一次申请数
+    LaunchedEffect(Unit) { if(!state.sample) businessController.refreshFriendRequestBadge() }
     val contactOrder=remember(rows) {rows.filter {it.target.sessionType==1}.map {businessUserId(it.target.userId)}}
     var addMenu by remember { mutableStateOf(false) }
     var moreMenu by remember{mutableStateOf(false)}
@@ -377,6 +381,7 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
                 Box(Modifier.size(s.dp(48))) {
                     Image(painterResource(image), null, Modifier.fillMaxSize())
                     if(id=="chat")NativeUnreadBadge(if(unreadSummary.mutedOnly)1 else unreadSummary.count,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true,muted=unreadSummary.mutedOnly)
+                    if(id=="contacts")NativeUnreadBadge(businessState.friendRequests,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true)
                 }
                 Text(name, Modifier.padding(top = s.dp(4)), color = if (tab == id) Primary else Ink, fontSize = s.text(24), lineHeight = s.text(32))
             } }
@@ -437,6 +442,8 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
                                 if(timeLabel.isNotEmpty())Text(timeLabel,fontSize=s.text(22),color=Color(0xFF999999))
                             }
                             Row(Modifier.fillMaxWidth().padding(top=s.dp(12)),verticalAlignment=Alignment.CenterVertically){
+                                // 被 @ 强提醒（对标 H5 [有人@我]）：仅群聊、有未读、非免打扰时显示
+                                if(item.target.sessionType==3&&item.atType in 1..3&&item.unread>0&&!item.muted)Text("[有人@我] ",fontSize=s.text(26),color=Color(0xFFFA5151),maxLines=1,softWrap=false)
                                 Text(if(item.joinRequestPending&&item.preview.isBlank())"[入群申请]" else item.preview,Modifier.weight(1f),fontSize=s.text(26),color=Color(0xFF999999),maxLines=1,overflow=TextOverflow.Ellipsis)
                                 if(item.muted)Text("免打扰",fontSize=s.text(20),color=Hint)
                                 if(item.joinRequestPending){Spacer(Modifier.width(s.dp(8)));Box(Modifier.size(s.dp(16)).background(Color(0xFFFA5151),CircleShape))}
@@ -570,7 +577,7 @@ internal fun NativeUnreadBadge(count:Int,s:UniScale,modifier:Modifier=Modifier,w
     val height=if(muted)6.dp else 16.dp
     val fontScale=LocalDensity.current.fontScale
     Box(modifier.size(width=if(wide&&count>99)26.dp else height,height=height).clip(CircleShape).background(Color(0xFFEF4444)).semantics { contentDescription=if(muted)"免打扰，有未读消息" else "未读 $label" },contentAlignment=Alignment.Center) {
-        if(!muted)Text(label,fontSize=((if(count>99)8f else 10f)/fontScale).sp,lineHeight=(12f/fontScale).sp,color=Color.White,maxLines=1,softWrap=false,textAlign=TextAlign.Center,style=TextStyle(platformStyle=PlatformTextStyle(includeFontPadding=false)))
+        if(!muted)Text(label,fontSize=((if(count>99)8f else 10f)/fontScale).sp,lineHeight=(16f/fontScale).sp,color=Color.White,maxLines=1,softWrap=false,textAlign=TextAlign.Center,style=TextStyle(platformStyle=PlatformTextStyle(includeFontPadding=false)))
     }
 }
 

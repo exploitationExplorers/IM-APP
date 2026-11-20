@@ -96,7 +96,7 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
     Row(Modifier.fillMaxWidth().height((96*s).dp).clickable(onClick=onClick).padding(horizontal=(40*s).dp),verticalAlignment=Alignment.CenterVertically) {
         OriginalIcon(icon,Modifier.size((40*s).dp))
         Text(title,Modifier.weight(1f).padding(start=(16*s).dp),fontSize=(34*s).sp,lineHeight=(48*s).sp,color=Body)
-        if(badge>0)Text(badge.toString(),Modifier.padding(end=(8*s).dp).clip(CircleShape).background(Red).padding(horizontal=(8*s).dp),fontSize=(18*s).sp,color=Color.White)
+        if(badge>0)Box(Modifier.padding(end=(8*s).dp).height((32*s).dp).widthIn(min=(32*s).dp).clip(RoundedCornerShape((16*s).dp)).background(Color(0xFFEF4343)),contentAlignment=Alignment.Center){Text(if(badge>99)"99+" else badge.toString(),fontSize=(18*s).sp,lineHeight=(32*s).sp,color=Color.White,maxLines=1,softWrap=false,textAlign=androidx.compose.ui.text.style.TextAlign.Center,style=TextStyle(platformStyle=androidx.compose.ui.text.PlatformTextStyle(includeFontPadding=false)))}
         OriginalIcon("uni_icon_chevron",Modifier.size((40*s).dp))
     }
 }

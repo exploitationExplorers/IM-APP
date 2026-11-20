@@ -171,6 +171,8 @@ class BusinessController(
             val endCursor=if(route.page in listOf("favorites","emotions")) ((cursor.toIntOrNull()?:1)+1).toString() else detail.text("nextCursor")
             val hasMore=if(route.page=="favorites")items.size>=30 else if(route.page=="emotions")items.size>=100 else detail.flag("hasMore") && endCursor.isNotBlank() && endCursor!=cursor
             var groups=s.groups;var pending=s.friendRequests
+            // 处理好友申请后实时重算角标（新的朋友行 + 通讯录 tab）
+            if(route.page=="requests")pending=items.count{it.text("status")=="pending"}
             if(route.page=="contacts"&&!more)coroutineScope {
                 val groupsRequest=async {runCatching{elements(call("GET","/groups",query=mapOf("limit" to "100")))}}
                 val requestsRequest=async {runCatching{call("POST","/friend-requests/sync",obj("direction" to "received"))}}
@@ -214,6 +216,15 @@ class BusinessController(
             val detail=mutable.value.detail.deepCopy()
             result.fold({rows->detail.addProperty("_pendingJoinCount",elements(rows).count{it.text("status").ifBlank{"pending"}=="pending"});detail.remove("_pendingError")},{error->if(error is CancellationException)throw error;detail.addProperty("_pendingError",true)})
             mutable.value=mutable.value.copy(detail=detail)
+        }
+    }
+    /** 轻量对账好友申请角标：不影响当前页面导航/加载状态，主界面挂载时即可调用 */
+    fun refreshFriendRequestBadge() {
+        scope.launch {
+            val result=runCatching{call("POST","/friend-requests/sync",obj("direction" to "received"))}.getOrNull()?:return@launch
+            val rows=if(result.isJsonObject)elements(result.asJsonObject.get("pending")) else elements(result)
+            val pending=rows.count{it.text("status").ifBlank{"pending"}=="pending"}
+            mutable.value=mutable.value.copy(friendRequests=pending)
         }
     }
     fun openGroupPreviewMember(member:JsonObject,myIds:Set<String>) {

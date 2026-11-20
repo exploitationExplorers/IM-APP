@@ -15,7 +15,7 @@ data class ChatMentionPage(val items:List<ChatMentionChoice>,val nextCursor:Stri
 data class ChatGroupMember(val userId:String,val role:String,val muted:Boolean,val name:String="")
 
 data class ChatMessageMenu(val canManage:Boolean=false,val senderInGroup:Boolean=false,val muted:Boolean=false,val canRecall:Boolean=false,val publicName:String="")
-data class ChatConversation(val target: ChatTarget, val title: String, val preview: String, val time: Long, val unread: Int = 0, val pinned: Boolean = false, val avatar: String = "", val latestSeq: Long = 0, val muted: Boolean = false, val pinnedMessage:PinnedChatMessage?=null,val latestMessage:ChatMessage?=null,val joinRequestPending:Boolean=false)
+data class ChatConversation(val target: ChatTarget, val title: String, val preview: String, val time: Long, val unread: Int = 0, val pinned: Boolean = false, val avatar: String = "", val latestSeq: Long = 0, val muted: Boolean = false, val pinnedMessage:PinnedChatMessage?=null,val latestMessage:ChatMessage?=null,val joinRequestPending:Boolean=false,val atType:Int=0)
 data class ChatMessage(
     val id: String,
     val text: String,

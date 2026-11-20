@@ -1844,7 +1844,7 @@ class ChatController(
         gateway.markRead(target) { result -> dispatch {
             if(!current(t))return@dispatch
             if(result.isFailure) { done(result);return@dispatch }
-            emit(snapshot.copy(conversations=snapshot.conversations.map { if(it.target==target)it.copy(unread=0) else it }))
+            emit(snapshot.copy(conversations=snapshot.conversations.map { if(it.target==target)it.copy(unread=0,atType=0) else it }))
             val api=business
             if(target.sessionType!=3||api==null) { done(Result.success(Unit));return@dispatch }
             businessIO.execute {
@@ -1862,7 +1862,7 @@ class ChatController(
         readMarkedAt[target.conversationId]=now
         gateway.markRead(target) { result -> dispatch {
             if(!current(t)||snapshot.active?.target!=target) return@dispatch
-            if(result.isSuccess) emit(snapshot.copy(conversations=snapshot.conversations.map { if(it.target==target)it.copy(unread=0) else it }))
+            if(result.isSuccess) emit(snapshot.copy(conversations=snapshot.conversations.map { if(it.target==target)it.copy(unread=0,atType=0) else it }))
         } }
         val api=business ?: return
         if(target.sessionType!=3) return
@@ -2148,7 +2148,7 @@ class ChatController(
             if(result.isSuccess) {
                 visibleIds.forEach { tombstones[it]=true }
                 if(snapshot.active?.target==target)cursor=null
-                emit(snapshot.copy(messages=if(snapshot.active?.target==target)emptyList() else snapshot.messages,historyEnd=if(snapshot.active?.target==target)true else snapshot.historyEnd,conversations=snapshot.conversations.map { if(it.target==target)it.copy(preview="",unread=0,latestSeq=0) else it }))
+                emit(snapshot.copy(messages=if(snapshot.active?.target==target)emptyList() else snapshot.messages,historyEnd=if(snapshot.active?.target==target)true else snapshot.historyEnd,conversations=snapshot.conversations.map { if(it.target==target)it.copy(preview="",unread=0,latestSeq=0,atType=0) else it }))
             }
             done(result)
         } }
