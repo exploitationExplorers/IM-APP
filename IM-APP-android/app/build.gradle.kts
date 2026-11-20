@@ -7,15 +7,17 @@ plugins {
 }
 
 fun nativeSetting(name: String) = providers.gradleProperty(name).orNull ?: providers.environmentVariable(name).orNull.orEmpty()
-fun nativeHTTPS(name: String): String = nativeSetting(name).trim().also { value ->
+fun nativeHTTPS(name: String, fallback: String = ""): String =
+    (providers.gradleProperty(name).orNull ?: providers.environmentVariable(name).orNull ?: fallback).trim().also { value ->
     if (value.isNotEmpty()) {
         val uri = URI(value)
         require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null) { "$name must be an HTTPS URL without credentials, query or fragment" }
     }
 }
 fun kotlinString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
-val nativeManifestURL = nativeHTTPS("NATIVE_UPDATE_MANIFEST_URL")
-val nativeDownloadPageURL = nativeHTTPS("NATIVE_DOWNLOAD_PAGE_URL")
+// 原生内测使用固定测试站；显式传空值仍可关闭入口，其他渠道可覆盖。
+val nativeManifestURL = nativeHTTPS("NATIVE_UPDATE_MANIFEST_URL", "https://www.xn--jprz53bj9s.com/testapp/update.json")
+val nativeDownloadPageURL = nativeHTTPS("NATIVE_DOWNLOAD_PAGE_URL", "https://www.xn--jprz53bj9s.com/testapp/")
 val nativeKeystore = nativeSetting("NATIVE_ANDROID_KEYSTORE")
 val nativeStorePassword = nativeSetting("NATIVE_ANDROID_STORE_PASSWORD")
 val nativeKeyAlias = nativeSetting("NATIVE_ANDROID_KEY_ALIAS")
