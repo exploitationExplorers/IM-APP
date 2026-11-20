@@ -1,5 +1,7 @@
 package com.im.nativebootstrap.business
 
+import com.im.nativebootstrap.AppTheme
+import com.im.nativebootstrap.C
 import com.im.nativebootstrap.NativeNotices
 
 import android.content.Intent
@@ -53,11 +55,12 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
 
-private val Blue=Color(0xFF0A2FC2)
-private val Body=Color(0xFF212121)
-private val Muted=Color(0xFF8A8F9C)
-private val Page=Color(0xFFF5F6F8)
-private val Red=Color(0xFFDC2828)
+// 必须是 getter：顶层 val 会把浅色值一次性快照，深色切换后不再跟随。
+private val Blue get()=C.primaryText
+private val Body get()=C.text
+private val Muted get()=C.faint
+private val Page get()=C.page
+private val Red get()=C.danger
 private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心","requests" to "新的朋友","add-friend" to "添加朋友","add-group" to "添加群聊","friend" to "好友资料","user" to "个人资料","friend-remark" to "设置备注","friend-tags" to "设置标签","tags" to "标签","tag-members" to "标签详情","groups" to "群聊天","create-group" to "创建群聊","group" to "群组详情","group-admin" to "群管理","members" to "群成员","member" to "成员资料","invite" to "邀请朋友","admins" to "群管理员","join-requests" to "入群申请","group-name" to "群聊名称","group-id" to "修改群号","group-remark" to "群备注","group-nickname" to "我在本群的昵称","announcements" to "群公告","announcement-edit" to "发布群公告","group-qrcode" to "群二维码","profile" to "个人资料","edit-nickname" to "修改昵称","edit-bio" to "个性签名","edit-chat-id" to "修改聊天号","qrcode" to "我的二维码","favorites" to "我的收藏","notifications" to "通知设置","chat-settings" to "聊天设置","privacy" to "隐私","blacklist" to "黑名单","security" to "安全","general" to "通用","feedback" to "意见反馈","about" to "关于我们","debug" to "调试资讯","deletion" to "注销账号","report-user" to "举报用户","report-group" to "举报群聊","report-group-submit" to "举报群聊","common-groups" to "共同群聊","emotions" to "我的表情","scan" to "扫一扫","scan-result" to "扫码结果","scan-group-result" to "群聊扫码结果","onboarding" to "完善资料","admin-add" to "添加管理员","tag-add-members" to "添加标签成员","reset-password" to "重置密码","forgot-password" to "忘记密码","mass-assistant" to "群发助手","mass-select" to "选择收件人","mass-targets" to "收件人","mass-compose" to "发送消息")
 
 @Composable private fun scale()=LocalConfiguration.current.screenWidthDp/750f
@@ -68,7 +71,7 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
 }
 @Composable private fun RowItem(title:String,value:String="",icon:String="",red:Boolean=false,enabled:Boolean=true,chevron:Boolean=true,onClick:()->Unit) {
     val s=scale()
-    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(Color.White).clickable(enabled=enabled,onClick=onClick).padding(horizontal=(32*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(C.card).clickable(enabled=enabled,onClick=onClick).padding(horizontal=(32*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically) {
         if(icon.isNotBlank()){OriginalIcon(icon,Modifier.size((40*s).dp));Spacer(Modifier.width((16*s).dp))}
         Text(title,Modifier.weight(1f),fontSize=(30*s).sp,color=if(!enabled)Muted else if(red)Red else Body)
         if(value.isNotBlank())Text(value,Modifier.widthIn(max=(310*s).dp).padding(start=8.dp),fontSize=(28*s).sp,color=Muted,maxLines=1,overflow=TextOverflow.Ellipsis)
@@ -77,17 +80,17 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
 }
 @Composable private fun ProfileRow(title:String,value:String="",red:Boolean=false,chevron:Boolean=true,onClick:()->Unit) {
     val s=scale()
-    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(Color.White).clickable(onClick=onClick).padding(horizontal=(40*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(C.card).clickable(onClick=onClick).padding(horizontal=(40*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically) {
         Text(title,fontSize=(34*s).sp,lineHeight=(48*s).sp,color=if(red)Red else Body)
-        Text(value,Modifier.weight(1f).padding(start=(24*s).dp),fontSize=(34*s).sp,lineHeight=(48*s).sp,color=Color(0xFF626E8D),maxLines=1,overflow=TextOverflow.Ellipsis,textAlign=androidx.compose.ui.text.style.TextAlign.End)
+        Text(value,Modifier.weight(1f).padding(start=(24*s).dp),fontSize=(34*s).sp,lineHeight=(48*s).sp,color=C.hint,maxLines=1,overflow=TextOverflow.Ellipsis,textAlign=androidx.compose.ui.text.style.TextAlign.End)
         if(chevron)OriginalIcon("uni_mine_icon_chevron",Modifier.padding(start=(8*s).dp).size((40*s).dp))
     }
 }
 @Composable private fun GeneralRow(title:String,value:String="",enabled:Boolean=true,onClick:()->Unit) {
     val s=scale()
-    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(Color.White).clickable(enabled=enabled,onClick=onClick).padding(horizontal=(32*s).dp,vertical=(28*s).dp),verticalAlignment=Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(C.card).clickable(enabled=enabled,onClick=onClick).padding(horizontal=(32*s).dp,vertical=(28*s).dp),verticalAlignment=Alignment.CenterVertically) {
         Text(title,Modifier.weight(1f),fontSize=(30*s).sp,lineHeight=(44*s).sp,color=Body)
-        if(value.isNotBlank())Text(value,fontSize=(28*s).sp,lineHeight=(40*s).sp,color=Color(0xFF626E8D))
+        if(value.isNotBlank())Text(value,fontSize=(28*s).sp,lineHeight=(40*s).sp,color=C.hint)
         OriginalIcon("uni_mine_icon_chevron",Modifier.padding(start=(16*s).dp).size((32*s).dp))
     }
 }
@@ -100,19 +103,19 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
         OriginalIcon("uni_icon_chevron",Modifier.size((40*s).dp))
     }
 }
-@Composable private fun DividerLine() { HorizontalDivider(color=Color(0xFFF0F1F4),thickness=.5.dp) }
+@Composable private fun DividerLine() { HorizontalDivider(color=C.field,thickness=.5.dp) }
 @Composable private fun Section(text:String) { Text(text,Modifier.fillMaxWidth().background(Page).padding(horizontal=18.dp,vertical=12.dp),fontSize=13.sp,color=Muted) }
 @Composable private fun Action(text:String,enabled:Boolean=true,red:Boolean=false,onClick:()->Unit) {
-    Box(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=10.dp).height(46.dp).clip(RoundedCornerShape(8.dp)).background(if(enabled)if(red)Red else Blue else Color(0xFFC8CCD6)).clickable(enabled=enabled,onClick=onClick),contentAlignment=Alignment.Center) { Text(text,color=Color.White,fontSize=16.sp) }
+    Box(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=10.dp).height(46.dp).clip(RoundedCornerShape(8.dp)).background(if(enabled)if(red)Red else C.primary else C.placeholder).clickable(enabled=enabled,onClick=onClick),contentAlignment=Alignment.Center) { Text(text,color=Color.White,fontSize=16.sp) }
 }
 /** H5 primary-btn：96rpx 高、8rpx 圆角、#0A2FC2 底、28rpx 半粗白字；horizontal 为两侧边距（rpx） */
 @Composable private fun PrimaryButton(text:String,enabled:Boolean=true,horizontal:Int=40,onClick:()->Unit) {
     val s=scale()
-    Box(Modifier.fillMaxWidth().padding(start=(horizontal*s).dp,end=(horizontal*s).dp,top=(16*s).dp,bottom=(16*s).dp).height((96*s).dp).clip(RoundedCornerShape((8*s).dp)).background(Blue.copy(alpha=if(enabled)1f else .7f)).clickable(enabled=enabled,onClick=onClick),contentAlignment=Alignment.Center){Text(text,color=Color.White,fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold)}
+    Box(Modifier.fillMaxWidth().padding(start=(horizontal*s).dp,end=(horizontal*s).dp,top=(16*s).dp,bottom=(16*s).dp).height((96*s).dp).clip(RoundedCornerShape((8*s).dp)).background(C.primary.copy(alpha=if(enabled)1f else .7f)).clickable(enabled=enabled,onClick=onClick),contentAlignment=Alignment.Center){Text(text,color=Color.White,fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold)}
 }
 @Composable private fun Input(label:String,value:String,change:(String)->Unit,secret:Boolean=false,multiline:Boolean=false) {
     var reveal by remember(label){mutableStateOf(false)}
-    Column(Modifier.fillMaxWidth().background(Color.White).padding(horizontal=20.dp,vertical=12.dp)) {
+    Column(Modifier.fillMaxWidth().background(C.card).padding(horizontal=20.dp,vertical=12.dp)) {
         if(label.isNotBlank())Text(label,fontSize=13.sp,color=Muted,modifier=Modifier.padding(bottom=10.dp))
         Row(verticalAlignment=Alignment.CenterVertically){BasicTextField(value,change,Modifier.weight(1f).heightIn(min=32.dp).padding(vertical=6.dp),textStyle=TextStyle(fontSize=16.sp,color=Body),cursorBrush=SolidColor(Blue),singleLine=!multiline,visualTransformation=if(secret&&!reveal)PasswordVisualTransformation() else VisualTransformation.None,keyboardOptions=KeyboardOptions(keyboardType=if(secret)KeyboardType.Password else KeyboardType.Text));if(secret)TextButton(onClick={reveal=!reveal}){Text(if(reveal)"隐藏" else "显示",fontSize=12.sp)}}
         DividerLine()
@@ -120,7 +123,7 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
 }
 @Composable private fun PersonRow(person:JsonObject,subtitle:String="",trailing:(@Composable ()->Unit)?=null,onClick:()->Unit) {
     val s=scale()
-    Row(Modifier.fillMaxWidth().background(Color.White).clickable(onClick=onClick).padding(horizontal=(40*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().background(C.card).clickable(onClick=onClick).padding(horizontal=(40*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically) {
         SharedAvatar(person.text("avatar").ifBlank {person.text("Avatar")},Modifier.size((88*s).dp).clip(CircleShape))
         Column(Modifier.weight(1f).padding(start=(24*s).dp)) {
             Text(person.displayName(),fontSize=(32*s).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)
@@ -134,15 +137,15 @@ private val routeTitles=mapOf("contacts" to "通讯录","mine" to "个人中心"
     LaunchedEffect(value){if(auto&&value!=initial){kotlinx.coroutines.delay(300);search(value)}}
     if(original) {
         val s=scale()
-        Row(Modifier.fillMaxWidth().padding(horizontal=(40*s).dp,vertical=(16*s).dp).height((72*s).dp).clip(RoundedCornerShape((8*s).dp)).background(Color(0xFFF3F4F7)).padding(start=(32*s).dp,end=(24*s).dp),verticalAlignment=Alignment.CenterVertically) {
-            Canvas(Modifier.size(16.dp).padding(end=(2*s).dp)) {val stroke=2.dp.toPx();val radius=size.minDimension*.31f;drawCircle(Color(0xFF8A8F9C),radius,androidx.compose.ui.geometry.Offset(radius+stroke/2,radius+stroke/2),style=androidx.compose.ui.graphics.drawscope.Stroke(stroke));drawLine(Color(0xFF8A8F9C),androidx.compose.ui.geometry.Offset(radius*1.8f,radius*1.8f),androidx.compose.ui.geometry.Offset(size.width-stroke/2,size.height-stroke/2),stroke,androidx.compose.ui.graphics.StrokeCap.Round)}
+        Row(Modifier.fillMaxWidth().padding(horizontal=(40*s).dp,vertical=(16*s).dp).height((72*s).dp).clip(RoundedCornerShape((8*s).dp)).background(C.field).padding(start=(32*s).dp,end=(24*s).dp),verticalAlignment=Alignment.CenterVertically) {
+            Canvas(Modifier.size(16.dp).padding(end=(2*s).dp)) {val stroke=2.dp.toPx();val radius=size.minDimension*.31f;drawCircle(C.faint,radius,androidx.compose.ui.geometry.Offset(radius+stroke/2,radius+stroke/2),style=androidx.compose.ui.graphics.drawscope.Stroke(stroke));drawLine(C.faint,androidx.compose.ui.geometry.Offset(radius*1.8f,radius*1.8f),androidx.compose.ui.geometry.Offset(size.width-stroke/2,size.height-stroke/2),stroke,androidx.compose.ui.graphics.StrokeCap.Round)}
             Spacer(Modifier.width((16*s).dp))
-            BasicTextField(value,{value=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*s).sp,lineHeight=(28*s).sp,color=Body),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(value.isEmpty())Text(placeholder,fontSize=(28*s).sp,lineHeight=(28*s).sp,color=Color(0xFF626E8D));inner()}})
-            if(value.isNotBlank())Text("×",Modifier.padding(start=(8*s).dp).size((40*s).dp).clip(CircleShape).background(Color(0xFFC4C7CF)).clickable{value=""}.wrapContentSize(),fontSize=(28*s).sp,color=Color.White)
+            BasicTextField(value,{value=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*s).sp,lineHeight=(28*s).sp,color=Body),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(value.isEmpty())Text(placeholder,fontSize=(28*s).sp,lineHeight=(28*s).sp,color=C.hint);inner()}})
+            if(value.isNotBlank())Text("×",Modifier.padding(start=(8*s).dp).size((40*s).dp).clip(CircleShape).background(C.placeholder).clickable{value=""}.wrapContentSize(),fontSize=(28*s).sp,color=Color.White)
         }
         return
     }
-    Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFFF3F4F7)).padding(horizontal=14.dp,vertical=10.dp),verticalAlignment=Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp).clip(RoundedCornerShape(5.dp)).background(C.field).padding(horizontal=14.dp,vertical=10.dp),verticalAlignment=Alignment.CenterVertically) {
         Text("⌕",color=Muted,fontSize=21.sp,modifier=Modifier.padding(end=8.dp))
         BasicTextField(value,{value=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=14.sp,color=Body),decorationBox={inner->Box {if(value.isEmpty())Text(placeholder,fontSize=14.sp,color=Muted);inner()} })
         if(!auto)Text("搜索",Modifier.clickable{search(value)}.padding(start=12.dp),fontSize=14.sp,color=Blue)
@@ -172,7 +175,7 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
     LaunchedEffect(nearEnd,state.cursor,state.hasMore,state.loading,state.error) {
         if(nearEnd&&state.hasMore&&!state.loading&&state.error==null)controller.refresh(true)
     }
-    Column(Modifier.fillMaxSize().background(Color.White)) {
+    Column(Modifier.fillMaxSize().background(C.card)) {
         SearchBox(state.keyword,auto=true,original=true){controller.query(it)}
         // 搜索栏固定，目录入口、群卡和联系人共用一个滚动容器。
         NativePullRefresh(state.loading,{controller.refresh()},Modifier.weight(1f)) {LazyColumn(Modifier.fillMaxSize(),state=list) {
@@ -181,9 +184,9 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
             ContactsMenuRow("标签","uni_menu_tag"){controller.open("tags")}
             ContactsMenuRow("群聊天","uni_menu_group"){controller.open("groups")}
         } }
-        if(state.groups.isNotEmpty())item(key="directory-groups",contentType="groups") { Column(Modifier.fillMaxWidth().background(Color(0xFFF3F4F7)).padding(horizontal=(40*s).dp,vertical=(16*s).dp),verticalArrangement=Arrangement.spacedBy((16*s).dp)) {
+        if(state.groups.isNotEmpty())item(key="directory-groups",contentType="groups") { Column(Modifier.fillMaxWidth().background(C.field).padding(horizontal=(40*s).dp,vertical=(16*s).dp),verticalArrangement=Arrangement.spacedBy((16*s).dp)) {
             state.groups.take(3).forEach{group->
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape((8*s).dp)).background(Color.White).clickable{controller.openChat(group,true)}.padding((16*s).dp),verticalAlignment=Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape((8*s).dp)).background(C.card).clickable{controller.openChat(group,true)}.padding((16*s).dp),verticalAlignment=Alignment.CenterVertically) {
                     SharedAvatar(group.text("avatar").ifBlank{group.text("Avatar")},Modifier.size((96*s).dp).clip(CircleShape),true)
                     Text(group.displayName(),Modifier.weight(1f).padding(start=(32*s).dp),fontSize=(34*s).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)
                 }
@@ -191,11 +194,11 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
             if(state.groups.size>3)Text("展开所有群聊 (${state.groups.size})",Modifier.fillMaxWidth().clickable{controller.open("groups")}.padding(vertical=(16*s).dp).wrapContentWidth(),fontSize=(26*s).sp,color=Blue)
         } }
         item(key="directory-heading",contentType="heading") { Column {
-        Spacer(Modifier.fillMaxWidth().height((48*s).dp).background(Color(0xFFF3F4F7)))
+        Spacer(Modifier.fillMaxWidth().height((48*s).dp).background(C.field))
         Spacer(Modifier.height((16*s).dp))
         Row(Modifier.fillMaxWidth().padding(horizontal=(40*s).dp,vertical=(8*s).dp).height((48*s).dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
             Text("联络人 (${state.total})",fontSize=(28*s).sp,color=Body,fontWeight=FontWeight.Bold)
-            Box {Text(when(state.sort){"name"->"名字 ▾";"chat"->"最近聊天 ▾";else->"最近加入(默认) ▾"},Modifier.clickable{sortOpen=true},fontSize=(24*s).sp,color=Color(0xFF626E8D))
+            Box {Text(when(state.sort){"name"->"名字 ▾";"chat"->"最近聊天 ▾";else->"最近加入(默认) ▾"},Modifier.clickable{sortOpen=true},fontSize=(24*s).sp,color=C.hint)
                 DropdownMenu(sortOpen,{sortOpen=false}){listOf("recent" to "最近加入(默认)","name" to "名字","chat" to "最近聊天").forEach{(key,label)->DropdownMenuItem(text={Text(label)},onClick={sortOpen=false;controller.query(state.keyword,key)})}}
             }
         }
@@ -215,7 +218,7 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
     LaunchedEffect(Unit){controller.root("mine");controller.refresh()}
     val user=state.detail
     Column(Modifier.fillMaxSize().background(Page).verticalScroll(rememberScrollState())) {
-        Box(Modifier.fillMaxWidth().background(Blue)) {
+        Box(Modifier.fillMaxWidth().background(C.primary)) {
             val ctx=LocalContext.current;val hero=remember{ctx.resources.getIdentifier("uni_mine_header","drawable",ctx.packageName)}
             if(hero!=0)Image(painterResource(hero),null,Modifier.matchParentSize(),contentScale=ContentScale.Crop)
             Text("个人中心",Modifier.padding(start=(40*s).dp,top=(16*s).dp),fontSize=(48*s).sp,fontWeight=FontWeight.Bold,color=Color.White)
@@ -301,8 +304,8 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
     }
     val imagePicker=rememberLauncherForActivityResult(ActivityResultContracts.GetContent()){uri->if(uri!=null){if(uploadPurpose=="avatar")cropUri=uri else acceptImage(uri)}}
     cropUri?.let{uri->AvatarCropper(uri,{cropUri=null}){cropped->cropUri=null;acceptImage(cropped)}}
-    Column(Modifier.fillMaxSize().background(if(r.page in listOf("general","security","reset-password","about","notifications","chat-settings","privacy","debug"))Color.White else Page).statusBarsPadding().navigationBarsPadding().imePadding()) {
-        Row(Modifier.fillMaxWidth().height((96*pageScale).dp).background(Color.White).padding(horizontal=(32*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
+    Column(Modifier.fillMaxSize().background(if(r.page in listOf("general","security","reset-password","about","notifications","chat-settings","privacy","debug")) (if(AppTheme.dark)C.page else Color.White) else Page).statusBarsPadding().navigationBarsPadding().imePadding()) {
+        Row(Modifier.fillMaxWidth().height((96*pageScale).dp).background(C.card).padding(horizontal=(32*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
             Box(Modifier.width((72*pageScale).dp).fillMaxHeight().clickable{if(r.page=="create-group"&&createGroupStep)createGroupStep=false else controller.back()},contentAlignment=Alignment.CenterStart){Image(painterResource(R.drawable.uni_icon_back),"返回",Modifier.size((44*pageScale).dp))}
             Text(if(r.page=="create-group"&&!createGroupStep)"选择联络人" else routeTitles[r.page].orEmpty(),Modifier.weight(1f),fontSize=(40*pageScale).sp,fontWeight=FontWeight.Bold,textAlign=androidx.compose.ui.text.style.TextAlign.Center,color=Body)
             val myIds=setOfNotNull(model.state.value.profile?.businessUserId,model.state.value.profile?.publicId)
@@ -311,12 +314,12 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                 if(r.page=="tags")Text("新增",Modifier.clickable{modal="新建标签" to { name->controller.mutate("POST","/contact-tags",obj("name" to name)) };modalText=""},color=Blue,fontSize=(28*pageScale).sp)
                 else if(canInviteMembers)Text("新增",Modifier.clickable{controller.open("invite",r.id)},color=Blue,fontSize=(28*pageScale).sp)
                 else if(r.page=="add-friend"||r.page=="add-group")Image(painterResource(R.drawable.uni_icon_scan),"扫一扫",Modifier.size((48*pageScale).dp).clickable{qrScanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setCaptureActivity(NativeScanActivity::class.java).setBeepEnabled(false))})
-                else if(r.page=="create-group"&&!createGroupStep)Box(Modifier.widthIn(min=(104*pageScale).dp).height((64*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(if(createGroupSelected.isNotEmpty())Blue else Color(0xFFE1E3EA)).clickable(enabled=createGroupSelected.isNotEmpty()){
+                else if(r.page=="create-group"&&!createGroupStep)Box(Modifier.widthIn(min=(104*pageScale).dp).height((64*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(if(createGroupSelected.isNotEmpty())C.primary else C.line).clickable(enabled=createGroupSelected.isNotEmpty()){
                     val me=model.state.value.profile?.nickname?.ifBlank{"我"}?:"我"
                     val draft=(listOf(me)+createGroupChosen.values.filter{it.identifier() in createGroupSelected}.map{it.displayName()}).joinToString("、")
                     createGroupName=if(draft.length>50)draft.take(47)+"..." else draft
                     createGroupStep=true
-                },contentAlignment=Alignment.Center){Text(if(createGroupSelected.isEmpty())"确认" else "确认(${createGroupSelected.size})",fontSize=(28*pageScale).sp,color=if(createGroupSelected.isNotEmpty())Color.White else Color(0xFF848EA9),fontWeight=FontWeight.SemiBold)}
+                },contentAlignment=Alignment.Center){Text(if(createGroupSelected.isEmpty())"确认" else "确认(${createGroupSelected.size})",fontSize=(28*pageScale).sp,color=if(createGroupSelected.isNotEmpty())Color.White else C.hint,fontWeight=FontWeight.SemiBold)}
             }
         }
         BusinessStatus(state,controller)
@@ -348,24 +351,24 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                 }
                 "add-friend" -> {
                     // 布局对标 H5 add-friend：灰底圆角搜索框 + 结果卡片 + 验证信息 + 发送按钮，底部固定「搜索」
-                    Row(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp,bottom=(24*pageScale).dp).height((72*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Color(0xFFF3F4F7)).padding(start=(32*pageScale).dp,end=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
-                        Text("⌕",color=Color(0xFF626E8D),fontSize=(30*pageScale).sp)
+                    Row(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp,bottom=(24*pageScale).dp).height((72*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(C.field).padding(start=(32*pageScale).dp,end=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
+                        Text("⌕",color=C.hint,fontSize=(30*pageScale).sp)
                         Spacer(Modifier.width((16*pageScale).dp))
-                        BasicTextField(addFriendKeyword,{addFriendKeyword=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),keyboardOptions=KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Search),keyboardActions=androidx.compose.foundation.text.KeyboardActions(onSearch={if(addFriendKeyword.isNotBlank()){addFriendSearched=true;controller.searchUser(addFriendKeyword)}}),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(addFriendKeyword.isEmpty())Text("搜索聊天号",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Color(0xFF626E8D));inner()}})
+                        BasicTextField(addFriendKeyword,{addFriendKeyword=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),keyboardOptions=KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Search),keyboardActions=androidx.compose.foundation.text.KeyboardActions(onSearch={if(addFriendKeyword.isNotBlank()){addFriendSearched=true;controller.searchUser(addFriendKeyword)}}),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(addFriendKeyword.isEmpty())Text("搜索聊天号",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=C.hint);inner()}})
                     }
                     if(d.identifier().isNotBlank()) {
                         Row(Modifier.fillMaxWidth().clickable{controller.open("user",d.identifier())}.padding(horizontal=(40*pageScale).dp,vertical=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
                             SharedAvatar(d.text("avatar"),Modifier.size((96*pageScale).dp).clip(CircleShape))
                             Column(Modifier.weight(1f).padding(start=(32*pageScale).dp)) {
                                 Text(d.displayName(),fontSize=(34*pageScale).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)
-                                Text("聊天号: ${d.text("publicId")}",Modifier.padding(top=(4*pageScale).dp),fontSize=(24*pageScale).sp,color=Color(0xFF626E8D))
+                                Text("聊天号: ${d.text("publicId")}",Modifier.padding(top=(4*pageScale).dp),fontSize=(24*pageScale).sp,color=C.hint)
                             }
-                            Text("›",fontSize=(40*pageScale).sp,color=Color(0xFF999999))
+                            Text("›",fontSize=(40*pageScale).sp,color=C.faint)
                         }
                         var message by remember(r){mutableStateOf("你好，我想加你为好友")}
-                        Box(Modifier.fillMaxWidth().padding(top=(24*pageScale).dp).height(1.dp).background(Color(0xFFF3F4F7)))
-                        Text("验证信息",Modifier.padding(start=(40*pageScale).dp,top=(24*pageScale).dp),fontSize=(28*pageScale).sp,color=Color(0xFF626E8D))
-                        BasicTextField(message,{message=it},Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp).height((80*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Color(0xFFF3F4F7)).padding(horizontal=(32*pageScale).dp),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),decorationBox={inner->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.CenterStart){if(message.isEmpty())Text("填写验证说明",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Color(0xFF626E8D));inner()}})
+                        Box(Modifier.fillMaxWidth().padding(top=(24*pageScale).dp).height(1.dp).background(C.field))
+                        Text("验证信息",Modifier.padding(start=(40*pageScale).dp,top=(24*pageScale).dp),fontSize=(28*pageScale).sp,color=C.hint)
+                        BasicTextField(message,{message=it},Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp).height((80*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(C.field).padding(horizontal=(32*pageScale).dp),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),decorationBox={inner->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.CenterStart){if(message.isEmpty())Text("填写验证说明",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=C.hint);inner()}})
                         Spacer(Modifier.height((16*pageScale).dp))
                         PrimaryButton("发送好友申请",!state.loading){controller.mutate("POST","/friend-requests",obj("toUserId" to d.identifier(),"message" to message)){res->
                             val status=(res as? JsonObject)?.text("status").orEmpty()
@@ -373,14 +376,14 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                             controller.back()
                         }}
                     }
-                    if(addFriendSearched&&d.identifier().isBlank()&&!state.loading)Text("未找到该用户，请确认聊天号是否正确",Modifier.fillMaxWidth().padding(top=(80*pageScale).dp),fontSize=(26*pageScale).sp,color=Color(0xFF626E8D),textAlign=androidx.compose.ui.text.style.TextAlign.Center)
+                    if(addFriendSearched&&d.identifier().isBlank()&&!state.loading)Text("未找到该用户，请确认聊天号是否正确",Modifier.fillMaxWidth().padding(top=(80*pageScale).dp),fontSize=(26*pageScale).sp,color=C.hint,textAlign=androidx.compose.ui.text.style.TextAlign.Center)
                 }
                 "add-group" -> {
                     // 布局对标 H5 add-group：灰底圆角输入框 + 提示文案，「加入群聊」按钮紧跟其后（非固定底部）
-                    Row(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp).height((72*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Color(0xFFF3F4F7)).padding(horizontal=(32*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
-                        BasicTextField(addGroupId,{addGroupId=it.take(28)},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),keyboardOptions=KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Done),keyboardActions=androidx.compose.foundation.text.KeyboardActions(onDone={submitAddGroupJoin()}),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(addGroupId.isEmpty())Text("请输入群号",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Color(0xFF626E8D));inner()}})
+                    Row(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp).height((72*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(C.field).padding(horizontal=(32*pageScale).dp),verticalAlignment=Alignment.CenterVertically) {
+                        BasicTextField(addGroupId,{addGroupId=it.take(28)},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),keyboardOptions=KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Done),keyboardActions=androidx.compose.foundation.text.KeyboardActions(onDone={submitAddGroupJoin()}),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.CenterStart){if(addGroupId.isEmpty())Text("请输入群号",fontSize=(28*pageScale).sp,lineHeight=(28*pageScale).sp,color=C.hint);inner()}})
                     }
-                    Text("输入对方群资料里的群号。右上角仍可扫群二维码。",Modifier.padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp),fontSize=(24*pageScale).sp,color=Color(0xFF626E8D),lineHeight=(36*pageScale).sp)
+                    Text("输入对方群资料里的群号。右上角仍可扫群二维码。",Modifier.padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(16*pageScale).dp),fontSize=(24*pageScale).sp,color=C.hint,lineHeight=(36*pageScale).sp)
                     PrimaryButton(if(state.loading)"加入中..." else "加入群聊",!state.loading){submitAddGroupJoin()}
                 }
                 "requests" -> {
@@ -435,13 +438,13 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                 }
                 "groups","common-groups" -> {
                     if(r.page=="groups") {
-                        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal=(24*pageScale).dp)){listOf("owner" to "我建立的","member" to "我加入的").forEach{(role,label)->Column(Modifier.weight(1f).clickable{controller.query(role)},horizontalAlignment=Alignment.CenterHorizontally){Text(label,Modifier.padding(vertical=(28*pageScale).dp),fontSize=(30*pageScale).sp,fontWeight=if(state.keyword==role)FontWeight.SemiBold else FontWeight.Normal,color=if(state.keyword==role)Body else Color(0xFF636E86));Box(Modifier.fillMaxWidth(.6f).height((4*pageScale).dp).background(if(state.keyword==role)Blue else Color.Transparent))}}}
+                        Row(Modifier.fillMaxWidth().background(C.card).padding(horizontal=(24*pageScale).dp)){listOf("owner" to "我建立的","member" to "我加入的").forEach{(role,label)->Column(Modifier.weight(1f).clickable{controller.query(role)},horizontalAlignment=Alignment.CenterHorizontally){Text(label,Modifier.padding(vertical=(28*pageScale).dp),fontSize=(30*pageScale).sp,fontWeight=if(state.keyword==role)FontWeight.SemiBold else FontWeight.Normal,color=if(state.keyword==role)Body else C.hint);Box(Modifier.fillMaxWidth(.6f).height((4*pageScale).dp).background(if(state.keyword==role)C.primaryText else Color.Transparent))}}}
                     }
-                    state.items.filter{it.text("status")!="dismissed"}.forEach{group->Row(Modifier.fillMaxWidth().background(Color.White).clickable{controller.openChat(group,true)}.padding(horizontal=(28*pageScale).dp,vertical=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically){
+                    state.items.filter{it.text("status")!="dismissed"}.forEach{group->Row(Modifier.fillMaxWidth().background(C.card).clickable{controller.openChat(group,true)}.padding(horizontal=(28*pageScale).dp,vertical=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically){
                         SharedAvatar(group.text("avatar"),Modifier.size((80*pageScale).dp).clip(RoundedCornerShape((12*pageScale).dp)),true)
                         Text(group.displayName().ifBlank{"群聊"},Modifier.weight(1f).padding(start=(20*pageScale).dp),fontSize=(30*pageScale).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)
-                        val role=group.text("role");if(role in setOf("owner","admin")){val color=if(role=="owner")Color(0xFF636E86) else Blue;Text(if(role=="owner")"群主" else "管理员",Modifier.padding(start=(12*pageScale).dp).clip(RoundedCornerShape((6*pageScale).dp)).border(pageScale.dp,color,RoundedCornerShape((6*pageScale).dp)).padding(horizontal=(10*pageScale).dp,vertical=(2*pageScale).dp),fontSize=(22*pageScale).sp,color=color)}
-                        Text("›",Modifier.padding(start=(12*pageScale).dp),fontSize=(36*pageScale).sp,color=Color(0xFFC8CCD6))
+                        val role=group.text("role");if(role in setOf("owner","admin")){val color=if(role=="owner")C.hint else Blue;Text(if(role=="owner")"群主" else "管理员",Modifier.padding(start=(12*pageScale).dp).clip(RoundedCornerShape((6*pageScale).dp)).border(pageScale.dp,color,RoundedCornerShape((6*pageScale).dp)).padding(horizontal=(10*pageScale).dp,vertical=(2*pageScale).dp),fontSize=(22*pageScale).sp,color=color)}
+                        Text("›",Modifier.padding(start=(12*pageScale).dp),fontSize=(36*pageScale).sp,color=C.placeholder)
                     }}
                     ListFooter(state,controller,"无群组")
                 }
@@ -451,8 +454,8 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                         androidx.activity.compose.BackHandler{createGroupStep=false}
                         Column(Modifier.fillMaxWidth().padding(top=(48*pageScale).dp,bottom=(32*pageScale).dp),horizontalAlignment=Alignment.CenterHorizontally){SharedAvatar("",Modifier.size((160*pageScale).dp).clip(CircleShape))}
                         Column(Modifier.fillMaxWidth().padding(horizontal=(40*pageScale).dp)) {
-                            BasicTextField(createGroupName,{createGroupName=it.take(50)},Modifier.fillMaxWidth().height((96*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Color(0xFFF3F4F7)).padding(horizontal=(32*pageScale).dp),singleLine=true,textStyle=TextStyle(fontSize=(32*pageScale).sp,lineHeight=(32*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),decorationBox={inner->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.CenterStart){if(createGroupName.isEmpty())Text("请输入群名称",fontSize=(32*pageScale).sp,lineHeight=(32*pageScale).sp,color=Color(0xFF626E8D));inner()}})
-                            Row(Modifier.fillMaxWidth().padding(top=(12*pageScale).dp),horizontalArrangement=Arrangement.SpaceBetween){Text("群组名称最多 50 个字",fontSize=(24*pageScale).sp,color=Color(0xFF626E8D));Text("${createGroupName.length}/50",fontSize=(24*pageScale).sp,color=Color(0xFF626E8D))}
+                            BasicTextField(createGroupName,{createGroupName=it.take(50)},Modifier.fillMaxWidth().height((96*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(C.field).padding(horizontal=(32*pageScale).dp),singleLine=true,textStyle=TextStyle(fontSize=(32*pageScale).sp,lineHeight=(32*pageScale).sp,color=Body),cursorBrush=SolidColor(Blue),decorationBox={inner->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.CenterStart){if(createGroupName.isEmpty())Text("请输入群名称",fontSize=(32*pageScale).sp,lineHeight=(32*pageScale).sp,color=C.hint);inner()}})
+                            Row(Modifier.fillMaxWidth().padding(top=(12*pageScale).dp),horizontalArrangement=Arrangement.SpaceBetween){Text("群组名称最多 50 个字",fontSize=(24*pageScale).sp,color=C.hint);Text("${createGroupName.length}/50",fontSize=(24*pageScale).sp,color=C.hint)}
                             Text("群成员 (${createGroupSelected.size+1})",Modifier.padding(top=(40*pageScale).dp,bottom=(24*pageScale).dp),fontSize=(28*pageScale).sp,fontWeight=FontWeight.Bold,color=Body)
                             val me=model.state.value.profile
                             val memberRows=(listOf(me?.avatar.orEmpty() to (me?.nickname?.ifBlank{"我"}?:"我"))+createGroupChosen.values.filter{it.identifier() in createGroupSelected}.map{it.text("avatar") to it.displayName()}).chunked(4)
@@ -460,12 +463,12 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                         }
                     } else {
                         // 第一步（对标 H5 选择联络人）：已选 chips + 搜索 + 计数/排序下拉 + 圆圈勾选列表
-                        if(createGroupSelected.isNotEmpty())Column(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(8*pageScale).dp,bottom=(16*pageScale).dp)){createGroupChosen.values.filter{it.identifier() in createGroupSelected}.chunked(4).forEach{row->Row(Modifier.fillMaxWidth().padding(bottom=(16*pageScale).dp),horizontalArrangement=Arrangement.spacedBy((16*pageScale).dp)){row.forEach{person->Row(Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0xFFF3F4F7)).clickable{createGroupSelected=createGroupSelected-person.identifier()}.padding(start=(4*pageScale).dp,end=(12*pageScale).dp,top=(4*pageScale).dp,bottom=(4*pageScale).dp),verticalAlignment=Alignment.CenterVertically){SharedAvatar(person.text("avatar"),Modifier.size((48*pageScale).dp).clip(CircleShape));Text(person.displayName(),Modifier.padding(start=(8*pageScale).dp).widthIn(max=(160*pageScale).dp),fontSize=(24*pageScale).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)}}}}}
+                        if(createGroupSelected.isNotEmpty())Column(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(8*pageScale).dp,bottom=(16*pageScale).dp)){createGroupChosen.values.filter{it.identifier() in createGroupSelected}.chunked(4).forEach{row->Row(Modifier.fillMaxWidth().padding(bottom=(16*pageScale).dp),horizontalArrangement=Arrangement.spacedBy((16*pageScale).dp)){row.forEach{person->Row(Modifier.clip(RoundedCornerShape(999.dp)).background(C.field).clickable{createGroupSelected=createGroupSelected-person.identifier()}.padding(start=(4*pageScale).dp,end=(12*pageScale).dp,top=(4*pageScale).dp,bottom=(4*pageScale).dp),verticalAlignment=Alignment.CenterVertically){SharedAvatar(person.text("avatar"),Modifier.size((48*pageScale).dp).clip(CircleShape));Text(person.displayName(),Modifier.padding(start=(8*pageScale).dp).widthIn(max=(160*pageScale).dp),fontSize=(24*pageScale).sp,color=Body,maxLines=1,overflow=TextOverflow.Ellipsis)}}}}}
                         SearchBox(auto=true,original=true,placeholder="搜索"){controller.query(it)}
                         Row(Modifier.fillMaxWidth().padding(start=(40*pageScale).dp,end=(40*pageScale).dp,top=(8*pageScale).dp,bottom=(16*pageScale).dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
                             Text("联络人 (${state.items.size})",fontSize=(28*pageScale).sp,fontWeight=FontWeight.Bold,color=Body)
                             Box {
-                                Row(Modifier.clickable{createGroupSortMenu=true},verticalAlignment=Alignment.CenterVertically){Text(when(state.sort){"name"->"名字";"chat"->"最近聊天";else->"最近加入(默认)"},fontSize=(24*pageScale).sp,color=Color(0xFF626E8D));Text(" ▼",fontSize=(18*pageScale).sp,color=Color(0xFF626E8D))}
+                                Row(Modifier.clickable{createGroupSortMenu=true},verticalAlignment=Alignment.CenterVertically){Text(when(state.sort){"name"->"名字";"chat"->"最近聊天";else->"最近加入(默认)"},fontSize=(24*pageScale).sp,color=C.hint);Text(" ▼",fontSize=(18*pageScale).sp,color=C.hint)}
                                 DropdownMenu(createGroupSortMenu,{createGroupSortMenu=false}){listOf("recent" to "最近加入(默认)","name" to "名字","chat" to "最近聊天").forEach{(sort,label)->DropdownMenuItem(text={Text(label,color=if((if(state.sort.isBlank())"recent" else state.sort)==sort)Blue else Body)},onClick={createGroupSortMenu=false;controller.query(state.keyword,sort)})}}
                             }
                         }
@@ -509,8 +512,8 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                     visibleMembers.forEach{p->
                         val memberActions:(@Composable ()->Unit)?=if(r.page=="members"&&canActOn(p)){{
                             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                                Text(if(p.flag("isMuted"))"解禁" else "禁言",Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFFEE2E2)).clickable{if(p.flag("isMuted"))controller.mutate("POST","/group-members/unmute",obj("groupId" to r.id,"memberUserId" to p.identifier())) else muteTarget=r.id to p}.padding(horizontal=12.dp,vertical=6.dp),color=Red,fontSize=13.sp)
-                                Text("移除",Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFF1F3F7)).clickable{removeTarget=r.id to p}.padding(horizontal=12.dp,vertical=6.dp),color=Muted,fontSize=13.sp)
+                                Text(if(p.flag("isMuted"))"解禁" else "禁言",Modifier.clip(RoundedCornerShape(8.dp)).background(C.dangerBg).clickable{if(p.flag("isMuted"))controller.mutate("POST","/group-members/unmute",obj("groupId" to r.id,"memberUserId" to p.identifier())) else muteTarget=r.id to p}.padding(horizontal=12.dp,vertical=6.dp),color=Red,fontSize=13.sp)
+                                Text("移除",Modifier.clip(RoundedCornerShape(8.dp)).background(C.field).clickable{removeTarget=r.id to p}.padding(horizontal=12.dp,vertical=6.dp),color=Muted,fontSize=13.sp)
                             }
                         }} else null
                         PersonRow(p,when(p.text("role")){"owner"->"群主";"admin"->"管理员";else->if(p.flag("isMuted"))"已禁言" else ""},trailing=memberActions){controller.open("member",p.identifier(),r.id,p)}
@@ -536,16 +539,16 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                     var value by remember(r,d){mutableStateOf(d.text(key))};Input(routeTitles[r.page].orEmpty(),value,{value=it})
                     if(r.page=="group-id")Section("群号仅可修改一次，格式和唯一性由服务器校验。")
                     Action("保存",!state.loading&&value.isNotBlank()){
-                        when(r.page){"group-name"->controller.mutate("POST","/groups/settings/update",obj("groupId" to r.id,"name" to value),true);"group-id"->controller.mutate("POST","/groups/public-id/update",obj("groupId" to r.id,"publicId" to value),true);"group-remark"->controller.mutate("PUT","/groups/${encoded(r.id)}/remark",obj("remark" to value),true);else->controller.mutate("PUT","/groups/${encoded(r.id)}/me/nickname",obj("nickname" to value),true)}
+                        when(r.page){"group-name"->controller.mutate("POST","/groups/settings/update",obj("groupId" to r.id,"name" to value),true){ res -> val imId=(res as? JsonObject)?.text("imGroupId").orEmpty().ifBlank { d.text("imGroupId") };if(imId.isNotBlank())model.noteGroupRenamed(imId,value) };"group-id"->controller.mutate("POST","/groups/public-id/update",obj("groupId" to r.id,"publicId" to value),true);"group-remark"->controller.mutate("PUT","/groups/${encoded(r.id)}/remark",obj("remark" to value),true);else->controller.mutate("PUT","/groups/${encoded(r.id)}/me/nickname",obj("nickname" to value),true)}
                     }
                 }
                 "profile" -> {
-                    Row(Modifier.fillMaxWidth().background(Color(0xFFEEF1F6)).clickable(enabled=!uploading){uploadPurpose="avatar";imagePicker.launch("image/*")}.padding(horizontal=(40*pageScale).dp,vertical=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){SharedAvatar(d.text("avatar"),Modifier.size((120*pageScale).dp).clip(CircleShape));OriginalIcon("uni_mine_icon_chevron",Modifier.size((32*pageScale).dp))}
+                    Row(Modifier.fillMaxWidth().background(C.field).clickable(enabled=!uploading){uploadPurpose="avatar";imagePicker.launch("image/*")}.padding(horizontal=(40*pageScale).dp,vertical=(24*pageScale).dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){SharedAvatar(d.text("avatar"),Modifier.size((120*pageScale).dp).clip(CircleShape));OriginalIcon("uni_mine_icon_chevron",Modifier.size((32*pageScale).dp))}
                     ProfileRow("昵称",d.text("nickname")){controller.open("edit-nickname")}
                     ProfileRow("个性签名",d.text("bio")){controller.open("edit-bio")}
                     Spacer(Modifier.height((16*pageScale).dp))
                     ProfileRow("电话号码",d.text("countryCode")+" "+d.text("phoneMasked"),chevron=false){}
-                    Row(Modifier.fillMaxWidth().heightIn(min=(96*pageScale).dp).background(Color.White).clickable{controller.open("edit-chat-id")}.padding(horizontal=(40*pageScale).dp,vertical=(20*pageScale).dp),verticalAlignment=Alignment.CenterVertically){Text("聊天号",Modifier.weight(1f),fontSize=(34*pageScale).sp,color=Body);Text(d.text("publicId"),fontSize=(32*pageScale).sp,color=Color(0xFF626E8D),fontFamily=androidx.compose.ui.text.font.FontFamily.Monospace);Text("复制",Modifier.padding(start=(8*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(Blue).clickable{(context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("聊天号",d.text("publicId")));NativeNotices.show("已复制")}.padding(horizontal=(16*pageScale).dp,vertical=(4*pageScale).dp),fontSize=(32*pageScale).sp,fontWeight=FontWeight.Bold,color=Color.White);OriginalIcon("uni_mine_icon_chevron",Modifier.padding(start=(16*pageScale).dp).size((32*pageScale).dp))}
+                    Row(Modifier.fillMaxWidth().heightIn(min=(96*pageScale).dp).background(C.card).clickable{controller.open("edit-chat-id")}.padding(horizontal=(40*pageScale).dp,vertical=(20*pageScale).dp),verticalAlignment=Alignment.CenterVertically){Text("聊天号",Modifier.weight(1f),fontSize=(34*pageScale).sp,color=Body);Text(d.text("publicId"),fontSize=(32*pageScale).sp,color=C.hint,fontFamily=androidx.compose.ui.text.font.FontFamily.Monospace);Text("复制",Modifier.padding(start=(8*pageScale).dp).clip(RoundedCornerShape((8*pageScale).dp)).background(C.primary).clickable{(context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("聊天号",d.text("publicId")));NativeNotices.show("已复制")}.padding(horizontal=(16*pageScale).dp,vertical=(4*pageScale).dp),fontSize=(32*pageScale).sp,fontWeight=FontWeight.Bold,color=Color.White);OriginalIcon("uni_mine_icon_chevron",Modifier.padding(start=(16*pageScale).dp).size((32*pageScale).dp))}
                     ProfileRow("二维码"){controller.open("qrcode")}
                     Spacer(Modifier.height((16*pageScale).dp))
                     ProfileRow("注销帐号",red=true,chevron=false){controller.open("deletion")}
@@ -583,7 +586,7 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                         ToggleRow("声音",preferences.sound){model.settings.set("sound",it)}
                         ToggleRow("震动",preferences.vibration){model.settings.set("vibration",it)}
                     }
-                    Text("系统通知权限",Modifier.fillMaxWidth().padding(top=(64*pageScale).dp,bottom=(24*pageScale).dp).clickable{context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName))}.wrapContentWidth(),fontSize=(26*pageScale).sp,color=Color(0xFF626E8D))
+                    Text("系统通知权限",Modifier.fillMaxWidth().padding(top=(64*pageScale).dp,bottom=(24*pageScale).dp).clickable{context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName))}.wrapContentWidth(),fontSize=(26*pageScale).sp,color=C.hint)
                 }
                 "chat-settings" -> {
                     ToggleRow("回车键送出消息",preferences.enterToSend,compact=true){model.settings.set("enterToSend",it)}
@@ -643,7 +646,7 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
     val allowedIds=remember(eligible){eligible.map{it.identifier()}.toSet()}
     LaunchedEffect(allowedIds){selected=selected.intersect(allowedIds)}
     val canChoose=!state.loading
-    Column(modifier.fillMaxWidth().background(Color.White)) {
+    Column(modifier.fillMaxWidth().background(C.card)) {
         SearchBox(keyword,original=true,auto=true){keyword=it}
         Text("可选成员 (${if(state.loading&&state.items.isEmpty())"…" else filtered.size})",Modifier.fillMaxWidth().padding(start=(32*s).dp,end=(32*s).dp,bottom=(12*s).dp),fontSize=(32*s).sp,fontWeight=FontWeight.Bold,color=Body)
         LazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(bottom=(16*s).dp)) {
@@ -651,8 +654,8 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
                 val id=member.identifier();val checked=id in selected
                 Row(Modifier.fillMaxWidth().toggleable(checked,enabled=canChoose,role=androidx.compose.ui.semantics.Role.Checkbox,onValueChange={value->selected=if(value)selected+id else selected-id}).padding(horizontal=(32*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy((20*s).dp)) {
                     SharedAvatar(member.text("avatar").ifBlank{member.text("Avatar")},Modifier.size((88*s).dp).clip(CircleShape).semantics {contentDescription=adminMemberName(member)+"的头像"})
-                    Text(adminMemberName(member),Modifier.weight(1f),fontSize=(30*s).sp,color=Color(0xFF1D1D1D),maxLines=1,overflow=TextOverflow.Ellipsis)
-                    Box(Modifier.size((40*s).dp).clip(CircleShape).border((2*s).dp,if(checked)Blue else Color(0xFFC8CCD6),CircleShape).background(if(checked)Blue else Color.Transparent).semantics {contentDescription="选择"+adminMemberName(member)})
+                    Text(adminMemberName(member),Modifier.weight(1f),fontSize=(30*s).sp,color=C.text,maxLines=1,overflow=TextOverflow.Ellipsis)
+                    Box(Modifier.size((40*s).dp).clip(CircleShape).border((2*s).dp,if(checked)C.primary else C.placeholder,CircleShape).background(if(checked)C.primary else Color.Transparent).semantics {contentDescription="选择"+adminMemberName(member)})
                 }
             }
             if(filtered.isEmpty())item(key="admin-picker-empty") {Text(if(state.loading)"加载中…" else if(eligible.isEmpty())"暂无可设为管理员的普通成员" else "无匹配成员",Modifier.fillMaxWidth().padding(horizontal=(40*s).dp,vertical=(120*s).dp).wrapContentWidth(),fontSize=(28*s).sp,color=Muted)}
@@ -660,37 +663,37 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
         // 确认入口独立于长名单，滚动和搜索时始终留在底部。
         val canSubmit=selected.isNotEmpty()&&!state.loading
         Box(Modifier.fillMaxWidth().padding(horizontal=(32*s).dp,vertical=(24*s).dp)) {
-            Box(Modifier.fillMaxWidth().height((96*s).dp).clip(RoundedCornerShape((16*s).dp)).background(Blue).alpha(if(canSubmit)1f else .45f).clickable(enabled=canSubmit){controller.addAdmins(state.route.id,selected.intersect(allowedIds))}.semantics {contentDescription="确认添加管理员"},contentAlignment=Alignment.Center) {
+            Box(Modifier.fillMaxWidth().height((96*s).dp).clip(RoundedCornerShape((16*s).dp)).background(C.primary).alpha(if(canSubmit)1f else .45f).clickable(enabled=canSubmit){controller.addAdmins(state.route.id,selected.intersect(allowedIds))}.semantics {contentDescription="确认添加管理员"},contentAlignment=Alignment.Center) {
                 Text(if(state.loading&&selected.isNotEmpty())"保存中…" else if(selected.isEmpty())"确认" else "确认（${selected.size}）",fontSize=(32*s).sp,fontWeight=FontWeight.SemiBold,color=Color.White)
             }
         }
     }
 }
 
-@Composable private fun CheckRow(title:String,checked:Boolean,change:(Boolean)->Unit) {Row(Modifier.fillMaxWidth().background(Color.White).clickable{change(!checked)}.padding(horizontal=18.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically){Text(title,Modifier.weight(1f),fontSize=16.sp,color=Body);Checkbox(checked,change,colors=CheckboxDefaults.colors(checkedColor=Blue))}}
+@Composable private fun CheckRow(title:String,checked:Boolean,change:(Boolean)->Unit) {Row(Modifier.fillMaxWidth().background(C.card).clickable{change(!checked)}.padding(horizontal=18.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically){Text(title,Modifier.weight(1f),fontSize=16.sp,color=Body);Checkbox(checked,change,colors=CheckboxDefaults.colors(checkedColor=Blue))}}
 @Composable private fun NotificationSection(title:String) {
     val s=scale()
     Column(Modifier.fillMaxWidth().padding(start=(40*s).dp,end=(40*s).dp,top=(30*s).dp)) {
-        HorizontalDivider(color=Color(0xFFE5E7EB),thickness=s.dp)
-        Text(title,Modifier.padding(top=(30*s).dp,bottom=(16*s).dp),fontSize=(26*s).sp,lineHeight=(44*s).sp,fontWeight=FontWeight.Bold,color=Color(0xFF111111))
+        HorizontalDivider(color=C.line,thickness=s.dp)
+        Text(title,Modifier.padding(top=(30*s).dp,bottom=(16*s).dp),fontSize=(26*s).sp,lineHeight=(44*s).sp,fontWeight=FontWeight.Bold,color=C.textStrong)
     }
 }
 @Composable private fun ChatSettingCell(title:String,chevron:Boolean=true,enabled:Boolean=true,onClick:()->Unit) {
     val s=scale()
     Row(Modifier.fillMaxWidth().clickable(enabled=enabled,onClick=onClick).padding(horizontal=(32*s).dp,vertical=(20*s).dp),verticalAlignment=Alignment.CenterVertically) {
         Text(title,Modifier.weight(1f),fontSize=(30*s).sp,lineHeight=(40*s).sp,color=Body)
-        if(chevron)Text("›",fontSize=(32*s).sp,color=Color(0xFFC8CCD6))
+        if(chevron)Text("›",fontSize=(32*s).sp,color=C.placeholder)
     }
 }
 @Composable internal fun PrivacyToggleRow(title:String,checked:Boolean,enabled:Boolean=true,change:(Boolean)->Unit) {
     val s=scale()
-    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(Color.White).padding(horizontal=(40*s).dp,vertical=(16*s).dp),verticalAlignment=Alignment.CenterVertically) {
-        Text(title,Modifier.weight(1f).padding(end=(24*s).dp),fontSize=(30*s).sp,lineHeight=(44*s).sp,color=Color(0xFF111111))
+    Row(Modifier.fillMaxWidth().heightIn(min=(96*s).dp).background(C.card).padding(horizontal=(40*s).dp,vertical=(16*s).dp),verticalAlignment=Alignment.CenterVertically) {
+        Text(title,Modifier.weight(1f).padding(end=(24*s).dp),fontSize=(30*s).sp,lineHeight=(44*s).sp,color=C.textStrong)
         // 开关独立占位，长标题及系统字体放大只换行，不挤掉关闭态轨道。
         Box(Modifier.size((56*s).dp,(36*s).dp),contentAlignment=Alignment.Center) {
             Switch(checked=checked,onCheckedChange=change,enabled=enabled,
                 modifier=Modifier.requiredSize(52.dp,32.dp).scale(56*s/52f).semantics {contentDescription=title},
-                colors=SwitchDefaults.colors(checkedThumbColor=Color.White,checkedTrackColor=Color(0xFF153DCC),uncheckedThumbColor=Color.White,uncheckedTrackColor=Color(0xFFD2D7E0),uncheckedBorderColor=Color(0xFFD2D7E0)))
+                colors=SwitchDefaults.colors(checkedThumbColor=Color.White,checkedTrackColor=C.primary,uncheckedThumbColor=Color.White,uncheckedTrackColor=C.line,uncheckedBorderColor=C.line))
         }
     }
 }
@@ -698,10 +701,10 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
 @Composable internal fun ToggleRow(title:String,checked:Boolean,enabled:Boolean=true,compact:Boolean=false,change:(Boolean)->Unit) {
     val s=scale()
     val offset by androidx.compose.animation.core.animateFloatAsState(if(checked)20f else 0f,label="switch")
-    Row(Modifier.fillMaxWidth().heightIn(min=((if(compact)0 else 96)*s).dp).background(Color.White).padding(horizontal=((if(compact)32 else 40)*s).dp,vertical=((if(compact)20 else 16)*s).dp),verticalAlignment=Alignment.CenterVertically) {
-        Text(title,Modifier.weight(1f),fontSize=(30*s).sp,lineHeight=((if(compact)40 else 44)*s).sp,color=Color(0xFF111111))
-        Box(Modifier.size((56*s).dp,(36*s).dp).clip(CircleShape).background(if(checked)Color(0xFF153DCC) else Color(0xFFE1E5ED)).then(if(enabled)Modifier else Modifier.alpha(.45f)).toggleable(checked,enabled=enabled,role=androidx.compose.ui.semantics.Role.Switch,onValueChange=change)) {
-            Box(Modifier.offset(x=((4+offset)*s).dp,y=(4*s).dp).size((28*s).dp).clip(CircleShape).background(Color.White))
+    Row(Modifier.fillMaxWidth().heightIn(min=((if(compact)0 else 96)*s).dp).background(C.card).padding(horizontal=((if(compact)32 else 40)*s).dp,vertical=((if(compact)20 else 16)*s).dp),verticalAlignment=Alignment.CenterVertically) {
+        Text(title,Modifier.weight(1f),fontSize=(30*s).sp,lineHeight=((if(compact)40 else 44)*s).sp,color=C.textStrong)
+        Box(Modifier.size((56*s).dp,(36*s).dp).clip(CircleShape).background(if(checked)C.primary else C.field).then(if(enabled)Modifier else Modifier.alpha(.45f)).toggleable(checked,enabled=enabled,role=androidx.compose.ui.semantics.Role.Switch,onValueChange=change)) {
+            Box(Modifier.offset(x=((4+offset)*s).dp,y=(4*s).dp).size((28*s).dp).clip(CircleShape).background(C.card))
         }
     }
 }
@@ -709,7 +712,7 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
 @Composable private fun CircleCheck(on:Boolean) {
     // 对标 H5 选人列表的圆形勾选框：选中蓝底白勾，未选中灰底灰边
     val s=scale()
-    Box(Modifier.size((48*s).dp).clip(CircleShape).border((2*s).dp,if(on)Blue else Color(0xFFE1E3EA),CircleShape).background(if(on)Blue else Color(0xFFF3F4F7))) {
+    Box(Modifier.size((48*s).dp).clip(CircleShape).border((2*s).dp,if(on)C.primary else C.line,CircleShape).background(if(on)C.primary else C.field)) {
         if(on)Canvas(Modifier.fillMaxSize()){
             val w=size.width
             drawLine(Color.White,androidx.compose.ui.geometry.Offset(w*.30f,w*.52f),androidx.compose.ui.geometry.Offset(w*.45f,w*.68f),strokeWidth=w*.08f,cap=androidx.compose.ui.graphics.StrokeCap.Round)
@@ -735,14 +738,14 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
         com.im.nativebootstrap.NativeForwardPicker(1,{forwarding=null},model::loadForwardTargets,{selection,done->model.submitFavoriteForward(listOf(message),source,selection,done)},{result->forwarding=null;note=if(result.queued)"转发任务已入队" else "消息已提交"})
     }}
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End){TextButton(onClick={managing=!managing;selected=emptySet()}){Text(if(managing)"完成" else "管理")}}
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(Color.White)){listOf("全部","文字","图片与视频","文件","语音").forEachIndexed{index,label->TextButton(onClick={filter=index;c.query(index.toString());selected=emptySet()}){Text(label,color=if(filter==index)Blue else Muted)}}}
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(C.card)){listOf("全部","文字","图片与视频","文件","语音").forEachIndexed{index,label->TextButton(onClick={filter=index;c.query(index.toString());selected=emptySet()}){Text(label,color=if(filter==index)Blue else Muted)}}}
     if(managing)Row {
         TextButton(onClick={selected=if(state.items.all{it.identifier() in selected})emptySet() else state.items.map{it.identifier()}.toSet()}){Text("全选 / 取消当前页")}
         TextButton(enabled=selected.isNotEmpty()&&!state.loading,onClick={confirm("删除选中的 ${selected.size} 条收藏？"){c.deleteFavorites(selected);selected=emptySet()}}){Text("删除（${selected.size}）",color=Red)}
     }
     if(preparing)LinearProgressIndicator(Modifier.fillMaxWidth())
     if(note.isNotBlank())Section(note)
-    state.items.forEach{favorite->Column(Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=6.dp).clip(RoundedCornerShape(8.dp)).background(Color.White).padding(16.dp)) {
+    state.items.forEach{favorite->Column(Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=6.dp).clip(RoundedCornerShape(8.dp)).background(C.card).padding(16.dp)) {
         if(managing)CheckRow("选择",favorite.identifier() in selected){value->selected=if(value)selected+favorite.identifier() else selected-favorite.identifier()}
         NativeFavoriteContent(favorite.text("type"),favorite.text("content"))
         Text(favorite.text("createdAt"),Modifier.padding(top=10.dp),fontSize=12.sp,color=Muted)
@@ -758,18 +761,18 @@ internal fun <T> orderByRecentConversations(items:List<T>,chatOrder:List<String>
     val s=scale()
     var old by remember{mutableStateOf("")}
     var show by remember{mutableStateOf(false)}
-    Column(modifier.fillMaxWidth().background(Color.White).padding(horizontal=(40*s).dp,vertical=(32*s).dp)) {
+    Column(modifier.fillMaxWidth().background(C.card).padding(horizontal=(40*s).dp,vertical=(32*s).dp)) {
         Text("手机号码",fontSize=(28*s).sp,color=Body)
-        Text(state.detail.text("countryCode").removePrefix("+")+" "+state.detail.text("phoneMasked"),Modifier.padding(top=(24*s).dp,bottom=(40*s).dp),fontSize=(32*s).sp,color=Color(0xFF626E8D))
-        HorizontalDivider(color=Color(0xFFDFE1E8));Spacer(Modifier.height((32*s).dp))
+        Text(state.detail.text("countryCode").removePrefix("+")+" "+state.detail.text("phoneMasked"),Modifier.padding(top=(24*s).dp,bottom=(40*s).dp),fontSize=(32*s).sp,color=C.hint)
+        HorizontalDivider(color=C.line);Spacer(Modifier.height((32*s).dp))
         Text(if(state.detail.flag("hasPassword"))"修改密码" else "设置密码",fontSize=(32*s).sp,fontWeight=FontWeight.Bold,color=Body)
         if(state.detail.flag("hasPassword")) {
             Text("旧密码",Modifier.padding(top=(24*s).dp,bottom=(20*s).dp),fontSize=(28*s).sp,color=Body)
-            Row(Modifier.fillMaxWidth().height((96*s).dp).clip(RoundedCornerShape((8*s).dp)).border(1.dp,Color(0xFFD1D1D1),RoundedCornerShape((8*s).dp)).padding(horizontal=(32*s).dp),verticalAlignment=Alignment.CenterVertically){BasicTextField(old,{old=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(32*s).sp,color=Body),visualTransformation=if(show)VisualTransformation.None else PasswordVisualTransformation(),decorationBox={inner->if(old.isBlank())Text("请输入旧密码",fontSize=(32*s).sp,color=Color(0xFF626E8D));inner()});Text(if(show)"◉" else "⊘",Modifier.size((72*s).dp).clickable{show=!show}.wrapContentSize(),fontSize=(36*s).sp,color=Color(0xFF626E8D))}
+            Row(Modifier.fillMaxWidth().height((96*s).dp).clip(RoundedCornerShape((8*s).dp)).border(1.dp,C.line,RoundedCornerShape((8*s).dp)).padding(horizontal=(32*s).dp),verticalAlignment=Alignment.CenterVertically){BasicTextField(old,{old=it},Modifier.weight(1f),singleLine=true,textStyle=TextStyle(fontSize=(32*s).sp,color=Body),visualTransformation=if(show)VisualTransformation.None else PasswordVisualTransformation(),decorationBox={inner->if(old.isBlank())Text("请输入旧密码",fontSize=(32*s).sp,color=C.hint);inner()});Text(if(show)"◉" else "⊘",Modifier.size((72*s).dp).clickable{show=!show}.wrapContentSize(),fontSize=(36*s).sp,color=C.hint)}
         }
         Spacer(Modifier.weight(1f))
         val enabled=!state.loading&&(!state.detail.flag("hasPassword")||old.isNotBlank())
-        Box(Modifier.fillMaxWidth().height((96*s).dp).clip(RoundedCornerShape((8*s).dp)).background(if(enabled)Blue else Color(0xFFF7F7F7)).clickable(enabled=enabled){if(state.detail.flag("hasPassword")){c.verifyOldPassword(old);old=""}else c.open("reset-password",context="init")},contentAlignment=Alignment.Center){Text("下一步",fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold,color=if(enabled)Color.White else Color(0xFFB4B4B4))}
+        Box(Modifier.fillMaxWidth().height((96*s).dp).clip(RoundedCornerShape((8*s).dp)).background(if(enabled)C.primary else C.field).clickable(enabled=enabled){if(state.detail.flag("hasPassword")){c.verifyOldPassword(old);old=""}else c.open("reset-password",context="init")},contentAlignment=Alignment.Center){Text("下一步",fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold,color=if(enabled)Color.White else C.placeholder)}
     }
 }
 

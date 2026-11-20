@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.business
 
+import com.im.nativebootstrap.C
 import com.im.nativebootstrap.NativeNotices
 
 import android.content.ClipData
@@ -30,13 +31,14 @@ import com.im.nativebootstrap.R
 import com.im.nativebootstrap.chat.ChatConversation
 import com.im.nativebootstrap.media.SharedAvatar
 
-private val GroupInk=Color(0xFF1D1D1D)
-private val GroupMuted=Color(0xFF666666)
-private val GroupBlue=Color(0xFF1E88FF)
+// 必须是 getter：顶层 val 会把浅色值一次性快照，深色切换后不再跟随。
+private val GroupInk get()=C.text
+private val GroupMuted get()=C.textSub
+private val GroupBlue get()=C.primary
 
 @Composable private fun GroupCard(content:@Composable ColumnScope.()->Unit) {
     val s=LocalConfiguration.current.screenWidthDp/750f
-    Column(Modifier.fillMaxWidth().padding(top=(16*s).dp).background(Color.White),content=content)
+    Column(Modifier.fillMaxWidth().padding(top=(16*s).dp).background(C.card),content=content)
 }
 @Composable private fun GroupInfoRow(title:String,value:String="",enabled:Boolean=true,arrow:Boolean=true,last:Boolean=false,weightedTrailing:Boolean=false,trailing:(@Composable RowScope.()->Unit)?=null,onClick:()->Unit={}) {
     val s=LocalConfiguration.current.screenWidthDp/750f
@@ -46,9 +48,9 @@ private val GroupBlue=Color(0xFF1E88FF)
             if(!weightedTrailing)Spacer(Modifier.weight(1f))
             if(value.isNotBlank())Text(value,Modifier.widthIn(max=(360*s).dp).padding(start=(20*s).dp),fontSize=(28*s).sp,color=GroupMuted,maxLines=1,overflow=TextOverflow.Ellipsis)
             trailing?.invoke(this)
-            if(arrow)Text("›",Modifier.padding(start=(12*s).dp),color=Color(0xFF999999),fontSize=(40*s).sp)
+            if(arrow)Text("›",Modifier.padding(start=(12*s).dp),color=C.faint,fontSize=(40*s).sp)
         }
-        if(!last)HorizontalDivider(color=Color(0xFFF0F0F0),thickness=s.dp)
+        if(!last)HorizontalDivider(color=C.field,thickness=s.dp)
     }
 }
 
@@ -100,7 +102,7 @@ private val GroupBlue=Color(0xFF1E88FF)
             Text("该群已解散，无法继续聊天",Modifier.padding(top=(16*s).dp),fontSize=(28*s).sp,color=GroupMuted)
         }
         GroupCard{GroupInfoRow("删除",enabled=!busy,arrow=false,last=true){confirm("删除该已解散群的记录及本机对话？"){busy=true;model.removeDissolvedGroup(r.id,conversation,::finish)}}}
-        if(note.isNotBlank())Text(note,Modifier.padding(16.dp),color=Color(0xFFDC2828),fontSize=13.sp)
+        if(note.isNotBlank())Text(note,Modifier.padding(16.dp),color=C.danger,fontSize=13.sp)
         return
     }
     if(!lookup)GroupCard {
@@ -109,13 +111,13 @@ private val GroupBlue=Color(0xFF1E88FF)
                 val name=member.displayName().ifBlank{"成员"}
                 Column(Modifier.width((128*s).dp),horizontalAlignment=Alignment.CenterHorizontally){
                     SharedAvatar(member.text("avatar").ifBlank{member.text("Avatar")},Modifier.size((96*s).dp).clip(CircleShape).clickable(enabled=!state.loading){c.openGroupPreviewMember(member,setOfNotNull(my?.businessUserId,my?.publicId))})
-                    Text(name,Modifier.fillMaxWidth().padding(top=(8*s).dp).combinedClickable(onClick={c.openGroupPreviewMember(member,setOfNotNull(my?.businessUserId,my?.publicId))},onLongClick={copy(name)}),fontSize=(22*s).sp,color=Color(0xFF555555),textAlign=TextAlign.Center,maxLines=1,overflow=TextOverflow.Ellipsis)
+                    Text(name,Modifier.fillMaxWidth().padding(top=(8*s).dp).combinedClickable(onClick={c.openGroupPreviewMember(member,setOfNotNull(my?.businessUserId,my?.publicId))},onLongClick={copy(name)}),fontSize=(22*s).sp,color=C.textSub,textAlign=TextAlign.Center,maxLines=1,overflow=TextOverflow.Ellipsis)
                 }
             }
             Box(Modifier.width((128*s).dp).height((96*s).dp).clickable{c.open("members",r.id)},contentAlignment=Alignment.Center){Image(painterResource(R.drawable.uni_icon_add_member),"查看群成员",Modifier.size((96*s).dp))}
         }
         if(d.flag("_previewError"))Text("成员预览未加载，点击重试",Modifier.fillMaxWidth().clickable{c.refresh()}.padding(horizontal=16.dp,vertical=8.dp),fontSize=12.sp,color=GroupMuted)
-        HorizontalDivider(color=Color(0xFFF0F0F0),thickness=s.dp)
+        HorizontalDivider(color=C.field,thickness=s.dp)
         GroupInfoRow("群组成员","共${d.text("memberCount").ifBlank{"0"}}人",last=true){c.open("members",r.id)}
     }
     if(manager&&!lookup)GroupCard {
@@ -123,7 +125,7 @@ private val GroupBlue=Color(0xFF1E88FF)
         // 待审数量用红色圆角标（同聊天 tab 样式），有几条显示几；为 0 不显示
         val pendingJoin=d.text("_pendingJoinCount").toIntOrNull()?:0
         GroupInfoRow("入群申请",if(d.flag("_pendingError"))"数量未加载" else "",trailing={
-            if(pendingJoin>0)Box(Modifier.padding(end=(12*s).dp).size((36*s).dp).clip(CircleShape).background(Color(0xFFEF4444)),contentAlignment=Alignment.Center){
+            if(pendingJoin>0)Box(Modifier.padding(end=(12*s).dp).size((36*s).dp).clip(CircleShape).background(C.danger),contentAlignment=Alignment.Center){
                 Text(pendingJoin.toString(),color=Color.White,fontSize=(22*s).sp,lineHeight=(28*s).sp,fontWeight=FontWeight.Bold,maxLines=1,softWrap=false,textAlign=TextAlign.Center,style=TextStyle(platformStyle=PlatformTextStyle(includeFontPadding=false)))
             }
         }){c.open("join-requests",r.id)}
@@ -132,10 +134,10 @@ private val GroupBlue=Color(0xFF1E88FF)
     GroupCard {
         val canEdit=permissions.flag("canEditProfile",manager)
         GroupInfoRow("群组名称",d.text("name"),enabled=canEdit&&!state.loading,arrow=canEdit){c.open("group-name",r.id)}
-        GroupInfoRow("群头像",enabled=canEdit&&avatarEnabled&&!state.loading,arrow=canEdit,trailing={Box(Modifier.size((64*s).dp).clip(CircleShape).background(Color(0xFFE9F2FF)),contentAlignment=Alignment.Center){SharedAvatar(d.text("avatar"),Modifier.size((52*s).dp).clip(CircleShape),true)}},onClick=onAvatar)
+        GroupInfoRow("群头像",enabled=canEdit&&avatarEnabled&&!state.loading,arrow=canEdit,trailing={Box(Modifier.size((64*s).dp).clip(CircleShape).background(C.field),contentAlignment=Alignment.Center){SharedAvatar(d.text("avatar"),Modifier.size((52*s).dp).clip(CircleShape),true)}},onClick=onAvatar)
         GroupInfoRow("群号",arrow=false,weightedTrailing=true,trailing={
-            Text(d.identifier(),Modifier.weight(1f).padding(start=(20*s).dp),fontSize=(28*s).sp,color=Color(0xFF444444),maxLines=1,overflow=TextOverflow.Ellipsis,textAlign=TextAlign.End)
-            Text("复制",Modifier.padding(start=(18*s).dp).height((52*s).dp).clip(RoundedCornerShape((12*s).dp)).background(GroupBlue).clickable{copy(d.identifier())}.padding(horizontal=(22*s).dp).wrapContentSize(),fontSize=(26*s).sp,color=Color.White)
+            Text(d.identifier(),Modifier.weight(1f).padding(start=(20*s).dp),fontSize=(28*s).sp,color=C.text,maxLines=1,overflow=TextOverflow.Ellipsis,textAlign=TextAlign.End)
+            Text("复制",Modifier.padding(start=(18*s).dp).height((52*s).dp).clip(RoundedCornerShape((12*s).dp)).background(C.primary).clickable{copy(d.identifier())}.padding(horizontal=(22*s).dp).wrapContentSize(),fontSize=(26*s).sp,color=Color.White)
             if(owner&&!d.flag("publicIdChangeUsed"))Text("设置 ›",Modifier.padding(start=(18*s).dp).clickable{c.open("group-id",r.id)},fontSize=(26*s).sp,color=GroupBlue)
         })
         GroupInfoRow("群公告"){c.open("announcements",r.id)}
@@ -157,10 +159,10 @@ private val GroupBlue=Color(0xFF1E88FF)
                 if(current==null){note="会话设置未就绪，正在加载，请稍后再试";if(!settingsLoading)loadSettings()}else apply(current)
             }
             ToggleRow("消息免打扰",conversation?.muted?:false,enabled=!busy){value->toggleOrLoad{updateSetting(muted=value)}}
-            HorizontalDivider(color=Color(0xFFF0F0F0),thickness=s.dp)
+            HorizontalDivider(color=C.field,thickness=s.dp)
             ToggleRow("置顶聊天",conversation?.pinned?:false,enabled=!busy){value->toggleOrLoad{updateSetting(pinned=value)}}
             if(settingsLoading)Text("正在加载会话设置…",Modifier.padding(12.dp),color=GroupMuted,fontSize=12.sp)
-            if(settingsError.isNotBlank())Text("$settingsError · 点击重试",Modifier.fillMaxWidth().clickable(enabled=!settingsLoading){loadSettings()}.padding(12.dp),color=Color(0xFFDC2828),fontSize=12.sp)
+            if(settingsError.isNotBlank())Text("$settingsError · 点击重试",Modifier.fillMaxWidth().clickable(enabled=!settingsLoading){loadSettings()}.padding(12.dp),color=C.danger,fontSize=12.sp)
         }
     }
     if(permissions.flag("canReport",true))GroupCard{GroupInfoRow("检举",last=true){c.open("report-group",r.id)}}
@@ -171,12 +173,12 @@ private val GroupBlue=Color(0xFF1E88FF)
     } else GroupCard{
         Box(Modifier.fillMaxWidth().height((100*s).dp).clickable(enabled=!busy&&!state.loading){confirm(if(owner)"解散后群聊将不可恢复，确定解散？" else "退出后将不再接收此群消息，并移除本机对话。确定退出？"){
             busy=true;note="";model.leaveBusinessGroup(r.id,owner,conversation,::finish)
-        }},contentAlignment=Alignment.Center){Text(if(owner)"解散群" else "退出群并删除对话",fontSize=(30*s).sp,color=Color(0xFFFF4D4F),fontWeight=FontWeight.Medium)}
+        }},contentAlignment=Alignment.Center){Text(if(owner)"解散群" else "退出群并删除对话",fontSize=(30*s).sp,color=C.danger,fontWeight=FontWeight.Medium)}
     }
     if(note.isNotBlank())Text(note,Modifier.fillMaxWidth().padding(16.dp),color=GroupMuted,fontSize=13.sp)
     Spacer(Modifier.height((48*s).dp))
-    if(joinSheet)ModalBottomSheet(onDismissRequest={joinSheet=false},containerColor=Color.White){
-        listOf("open" to "公开群（扫码入群）","approval" to "私密群（申请入群）").forEach{(mode,label)->Text(label,Modifier.fillMaxWidth().height((108*s).dp).clickable(enabled=!state.loading){joinSheet=false;if(d.text("joinMode")!=mode)c.mutate("POST","/groups/settings/update",obj("groupId" to r.id,"joinMode" to mode))}.wrapContentSize(),fontSize=(32*s).sp,color=GroupInk);HorizontalDivider(color=Color(0xFFF0F0F0),thickness=s.dp)}
+    if(joinSheet)ModalBottomSheet(onDismissRequest={joinSheet=false},containerColor=C.card){
+        listOf("open" to "公开群（扫码入群）","approval" to "私密群（申请入群）").forEach{(mode,label)->Text(label,Modifier.fillMaxWidth().height((108*s).dp).clickable(enabled=!state.loading){joinSheet=false;if(d.text("joinMode")!=mode)c.mutate("POST","/groups/settings/update",obj("groupId" to r.id,"joinMode" to mode))}.wrapContentSize(),fontSize=(32*s).sp,color=GroupInk);HorizontalDivider(color=C.field,thickness=s.dp)}
         Text("取消",Modifier.fillMaxWidth().height((108*s).dp).clickable{joinSheet=false}.wrapContentSize(),fontSize=(32*s).sp,color=GroupMuted)
     }
 }

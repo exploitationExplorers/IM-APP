@@ -20,6 +20,15 @@ class ChatSystemMessagesTest {
         assertEquals("真正群主: [全体禁言]",ChatSystemMessages.format(mute,"真正群主"))
         assertEquals("",ChatSystemMessages.format("invalid json"))
     }
+    @Test fun groupRenameNoticesShowOwnerLabelAndDedupeByGroupOperatorAndName() {
+        fun rename(group:String,op:String,name:String)="""{"contentType":1520,"notificationElem":{"detail":{"group":{"groupID":"$group","groupName":"$name"},"opUser":{"userID":"$op","nickname":"imAdmin"}}}}"""
+        // 业务接口以 OpenIM 管理账号代改群资料，展示成「群主」而不是账号昵称。
+        assertEquals("群主 修改了群名称",ChatSystemMessages.format(rename("g1","imAdmin","新名字")))
+        assertEquals("group-name:g1:imAdmin:新名字",ChatSystemMessages.eventKey(rename("g1","imAdmin","新名字")))
+        assertNotEquals(ChatSystemMessages.eventKey(rename("g1","imAdmin","新名字")),ChatSystemMessages.eventKey(rename("g1","imAdmin","另一个名字")))
+        assertEquals("",ChatSystemMessages.eventKey("""{"contentType":1501}"""))
+        assertEquals("friend-connected:a:b",ChatSystemMessages.eventKey("""{"contentType":1204,"sendID":"b","recvID":"a"}"""))
+    }
     @Test fun lastSeenUsesOnlyRealStatusAndValidServerTimestamps() {
         val now=Instant.parse("2026-11-13T12:00:00Z").toEpochMilli()
         assertEquals("在线",ChatSystemMessages.lastSeen("",true,now))

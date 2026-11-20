@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.media
 
+import com.im.nativebootstrap.C
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -24,7 +25,7 @@ fun VideoMessageBubble(content:MessageContent,modifier:Modifier=Modifier,localPo
     val factor=LocalConfiguration.current.screenWidthDp/750f
     var measured by remember(content.thumbnail) { mutableStateOf<Pair<Int,Int>?>(null) }
     val bubbleSize=VideoBubbleGeometry.fit(measured?.first ?: content.width,measured?.second ?: content.height)
-    Box(modifier.size((bubbleSize.width*factor).dp,(bubbleSize.height*factor).dp).clip(RoundedCornerShape((12*factor).dp)).background(Color(0xFFE8E8E8)).semantics { contentDescription="视频消息" }) {
+    Box(modifier.size((bubbleSize.width*factor).dp,(bubbleSize.height*factor).dp).clip(RoundedCornerShape((12*factor).dp)).background(C.field).semantics { contentDescription="视频消息" }) {
         if(content.thumbnail.isNotBlank()||localPoster!=null)RemoteMediaImage(MediaURLs.image(content.thumbnail),Modifier.fillMaxSize(),scale=ContentScale.Crop,description="视频封面",onDimensions={width,height->if(width>0&&height>0)measured=width to height},retryOnTap=false,localDraft=localPoster,cacheUrls=listOf(content.thumbnail))
         Canvas(Modifier.align(Alignment.Center).size((64*factor).dp)) {
             val triangle=Path().apply {moveTo(size.width*.25f,size.height*.13f);lineTo(size.width*.83f,size.height*.5f);lineTo(size.width*.25f,size.height*.87f);close()}

@@ -6,6 +6,27 @@ import com.im.nativebootstrap.media.*
 
 /** 沿用旧版 im-notification.ts；未知通知不展示协议 JSON 或管理账号。 */
 object ChatSystemMessages {
+    /** 建群欢迎语（OpenIM 1501 通知文案），连续重复时只保留一条。 */
+    const val WELCOME_TEXT="新群创建成功，一起来聊天吧"
+
+    /**
+     * 群改名 / 好友互通通知的去重签名，对齐 uniapp imNotificationEventKey。
+     * 同群 + 同操作人 + 同新群名视为同一条；改成不同名字时不合并。
+     */
+    fun eventKey(serialized:String):String=runCatching {
+        val raw=JsonParser.parseString(serialized).asJsonObject
+        val type=raw.number("contentType","ContentType").toInt()
+        if(type in setOf(1201,1204))return@runCatching "friend-connected:"+listOf(raw.string("sendID","SendID"),raw.string("recvID","RecvID")).filter { it.isNotBlank() }.sorted().joinToString(":")
+        if(type!=1520)return@runCatching ""
+        val detail=parseObject(raw.obj("notificationElem","NotificationElem").field("detail","Detail")) ?: parseObject(raw.field("content","Content")) ?: JsonObject()
+        val group=detail.obj("group","Group")
+        val op=detail.obj("opUser","OpUser")
+        val groupId=group.string("groupID","GroupID").ifBlank { raw.string("groupID","GroupID") }
+        val operator=op.string("userID","UserID").ifBlank { raw.string("sendID","SendID") }
+        val name=group.string("groupName","GroupName").trim()
+        "group-name:$groupId:$operator:$name"
+    }.getOrDefault("")
+
     fun format(serialized:String,ownerName:String="群主",resolve:(String)->String={ "" }):String=runCatching {
         val raw=JsonParser.parseString(serialized).asJsonObject
         val type=raw.number("contentType","ContentType").toInt()
@@ -23,7 +44,7 @@ object ChatSystemMessages {
         val opUser=detail.obj("opUser","OpUser")
         val op=name(opUser,raw.string("senderNickname","SenderNickname").replace("imAdmin",ownerName.ifBlank { "群主" }))
         when(type) {
-            1501 -> "新群创建成功，一起来聊天吧"
+            1501 -> WELCOME_TEXT
             1504 -> name(detail.obj("quitUser","QuitUser"),"成员")+" 退出了群聊"
             1507 -> if(op.isNotBlank())"$op 将群主转让给 ${names("groupMemberList","GroupMemberList","memberList","MemberList").ifBlank { "新群主" }}" else "群主已转让"
             1508 -> names("kickedUserList","KickedUserList").ifBlank { "成员" }.let { if(op.isNotBlank())"${op}把${it}移除群聊" else "${it}被移除群聊" }

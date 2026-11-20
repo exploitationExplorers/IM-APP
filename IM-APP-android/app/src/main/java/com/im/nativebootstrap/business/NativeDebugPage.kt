@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.im.nativebootstrap.BootstrapViewModel
+import com.im.nativebootstrap.C
 import com.im.nativebootstrap.media.MediaIO
 import kotlinx.coroutines.*
 import java.time.ZonedDateTime
@@ -49,7 +50,7 @@ fun NativeDebugPage(model:BootstrapViewModel) {
     var saving by remember{mutableStateOf(false)}
     var now by remember{mutableStateOf(ZonedDateTime.now())}
     val local=remember{context.packageManager.getPackageInfo(context.packageName,0)}
-    val muted=Color(0xFF636E86);val ink=Color(0xFF212121);val blue=Color(0xFF0A2FC2)
+    val muted=C.hint;val ink=C.text;val blue=C.primaryText
     fun addSample(probe:NativeProbe) {history=(history+(ZonedDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")) to probe)).takeLast(10)}
     suspend fun runProbes() {
         if(probing)return
@@ -108,7 +109,7 @@ fun NativeDebugPage(model:BootstrapViewModel) {
         Row(Modifier.fillMaxWidth().padding(vertical=(14*s).dp),horizontalArrangement=Arrangement.spacedBy((24*s).dp)) {Text(label,Modifier.width((150*s).dp),fontSize=(26*s).sp,lineHeight=(40*s).sp,color=muted);Text(value,Modifier.weight(1f),fontSize=(26*s).sp,lineHeight=(40*s).sp,color=ink,textAlign=TextAlign.End)}
     }
     Column(Modifier.fillMaxWidth().background(Color.White).padding(start=(28*s).dp,end=(28*s).dp,top=(8*s).dp,bottom=(48*s).dp)) {
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape((12*s).dp)).border(s.dp,Color(0xFFECEFF3),RoundedCornerShape((12*s).dp)).padding(horizontal=(24*s).dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape((12*s).dp)).border(s.dp,C.line,RoundedCornerShape((12*s).dp)).padding(horizontal=(24*s).dp)) {
             InfoRow("聊天号",NativeDiagnostics.mask(app.profile?.publicId.orEmpty()))
             InfoRow("版本号","${local.versionName} APP/Android")
             InfoRow("画面尺寸","${config.screenWidthDp} × ${config.screenHeightDp}")
@@ -121,7 +122,7 @@ fun NativeDebugPage(model:BootstrapViewModel) {
                 Text("${probe.ms?:"—"} ms",fontSize=(28*s).sp,color=if(probe.ok)ink else Color(0xFFEF4444))
                 Box(Modifier.padding(start=(12*s).dp).size((36*s).dp).clip(CircleShape).background(if(probe.ok)Color(0xFF22C55E) else Color(0xFFEF4444)),contentAlignment=Alignment.Center){Text(if(probe.ok)"✓" else "!",fontSize=(22*s).sp,fontWeight=FontWeight.Bold,color=Color.White)}
             }
-            androidx.compose.material3.HorizontalDivider(color=Color(0xFFF3F4F7),thickness=s.dp)
+            androidx.compose.material3.HorizontalDivider(color=C.line,thickness=s.dp)
         }
         if(history.isNotEmpty())Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).height((220*s).dp).padding(vertical=(12*s).dp),verticalAlignment=Alignment.Bottom,horizontalArrangement=Arrangement.spacedBy((12*s).dp)) {
             val maximum=history.maxOf{it.second.ms?:1}.coerceAtLeast(1)
@@ -134,7 +135,7 @@ fun NativeDebugPage(model:BootstrapViewModel) {
         meta?.let{value->
             InfoRow("设备",value.device);InfoRow("私密浏览","不适用（原生应用）");InfoRow("网络状态",value.network);InfoRow("储存空间",value.storage)
             Text("媒体支援",Modifier.padding(top=(28*s).dp,bottom=(12*s).dp),fontSize=(26*s).sp,color=muted)
-            FlowRow(horizontalArrangement=Arrangement.spacedBy((10*s).dp),verticalArrangement=Arrangement.spacedBy((10*s).dp)) {value.media.forEach{Text(it,Modifier.clip(RoundedCornerShape((8*s).dp)).background(Color(0xFFF3F4F7)).padding(horizontal=(12*s).dp,vertical=(6*s).dp),fontSize=(20*s).sp,color=Color(0xFF444455))}}
+            FlowRow(horizontalArrangement=Arrangement.spacedBy((10*s).dp),verticalArrangement=Arrangement.spacedBy((10*s).dp)) {value.media.forEach{Text(it,Modifier.clip(RoundedCornerShape((8*s).dp)).background(C.field).padding(horizontal=(12*s).dp,vertical=(6*s).dp),fontSize=(20*s).sp,color=C.textSub)}}
             Spacer(Modifier.height((28*s).dp));(value.permissions+value.capabilities).chunked(2).forEach{pair->Row(horizontalArrangement=Arrangement.spacedBy((24*s).dp)){pair.forEach{(key,value)->Row(Modifier.weight(1f).padding(vertical=(8*s).dp)){Text(key,Modifier.weight(1f),fontSize=(24*s).sp,color=muted);Text(value,fontSize=(24*s).sp,color=ink)}}}}
         }
         InfoRow("本地数据库",app.chat.store.name);InfoRow("同步状态",app.chat.sync.name);InfoRow("聊天连接",app.chat.connection.name);InfoRow("待核对发送",app.chat.outbox.size.toString())
@@ -144,7 +145,7 @@ fun NativeDebugPage(model:BootstrapViewModel) {
         if(endpoints.imWs.isNotBlank())InfoRow("OpenIM WS",NativeDiagnostics.host(endpoints.imWs))
         Text("HTTP 401/404 仅表示网络可达；WS 握手通过才标记成功。诊断不读取消息原文。",Modifier.padding(vertical=(24*s).dp),fontSize=(22*s).sp,color=muted)
         listOf(Triple(if(saving)"保存中…" else "以图片保存",!saving,{saveImage()}),Triple(if(probing)"探测中…" else "重新探测",!probing,{scope.launch{try{runProbes()}catch(cancelled:CancellationException){throw cancelled}catch(_:Exception){toast("探测未完成，请重试")}};Unit}),Triple("复制摘要",true,{(context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("脱敏诊断",report().joinToString("\n")));toast("已复制诊断摘要")})).forEach{(title,enabled,action)->
-            Box(Modifier.fillMaxWidth().padding(top=(16*s).dp).height((80*s).dp).clip(RoundedCornerShape((12*s).dp)).background(if(enabled)blue else Color(0xFFB5BDCF)).clickable(enabled=enabled,onClick=action),contentAlignment=Alignment.Center){Text(title,fontSize=(28*s).sp,color=Color.White)}
+            Box(Modifier.fillMaxWidth().padding(top=(16*s).dp).height((80*s).dp).clip(RoundedCornerShape((12*s).dp)).background(if(enabled)blue else C.line).clickable(enabled=enabled,onClick=action),contentAlignment=Alignment.Center){Text(title,fontSize=(28*s).sp,color=Color.White)}
         }
     }
 }

@@ -25,6 +25,15 @@
 
 2026-11-20 已发布：`0.3.10-autoload` / `versionCode=14`。
 
+**当前线上（2026-11-20 20:51 发布 v17）**：`0.3.13-autoload` / `versionCode=17`，**arm64-only 瘦身包** 31,173,990 字节（发布构建必须带 `-PNATIVE_ABIS=arm64-v8a`，见 §4），APK SHA-256 `a14dd01eb2c9a1fd9db0ca3996b586a64a0f405d13dafe48c5b961a09e8831c9`，稳定签名（§2.1）。发布编号 `20261120T124713Z-78d5432`。
+
+- **APK 下载已全量走阿里云 CDN**：对象在业务桶 `im-app-production/business/apk/`（对象元数据 `Cache-Control: public, max-age=31536000, immutable`），边缘命中实测 ~45MB/s（对比 nginx 跨境直连 ~100KB/s）。`update.json` 的 `downloadUrl` 与下载页 `app.apk` 固定入口（nginx 现有 `location =` 块内 `return 302`）均指向 `https://oss-business.whs188.xin/im-app-production/business/apk/native-0.3.13-autoload-17-a14dd01eb2c9.apk`。
+- 新版本发布时：APK 先经香港前端服务器（8.217.171.178，与 OSS 同地域）PUT 到 OSS 上述前缀（RAM 密钥在宝塔后端服务器 `/www/wwwroot/deploy/.env`，只允许该前缀）；`prepare_distribution.py` 的 `--base-url` 用 CDN 目录 `https://oss-business.whs188.xin/im-app-production/business/apk/`，再按 §5 流程只替换线上 `update.json`，版本化 APK 本身不必再传 nginx 服务器。
+- ⚠️ nginx 陷阱：vhost conf 行尾是 CRLF 且**已存在** `location = /testapp/app.apk` 缓存块；改固定入口跳转必须在现有块内加 `return 302`，不能再插同名 location（duplicate location 会使 `nginx -t` 失败并触发回滚）。
+- 回滚链：v16 版本化包仍在服务器目录；`update.json.bak-20261120T124713Z-78d5432` 为 v16 清单；`app.apk.bak-20261120T104818Z-78d5432` 为 v14 包。
+
+**历史（2026-11-20 19:05 v16）**：`0.3.12-autoload` / `versionCode=16`，签名更换见 §2.1；APK SHA-256 `557b00d4645f89e1f7a1f2c92f3265b0f95e155ad15e7e70d042b9517703ae09`，97,796,768 字节（全 ABI），备份 `app.apk.bak-20261120T104818Z-78d5432`（旧 v14 包）。该次为**首次上线 `update.json`**，此前无清单。
+
 - APK SHA-256：`922f969b2f1a5cc93b6f6f22d23a56b5c9f384b4a71bffb5f959c9b81604d56a`
 - 从 APK v2 签名块读取的证书 SHA-256：`6d03e74ca9768f53fdf6f58e5fbe8d9ba4bbe0d9cad600d780d60fbbddd8ee18`
 - 此次已公网完整下载核对文件摘要，但当时 Mac 无 JDK / SDK，未执行 apksigner 或真机安装。下一位发布者必须用 `apksigner verify --verbose --print-certs` 核对线上包，不能将解析指纹视为完整签名验证。
@@ -32,6 +41,17 @@
 - 版本 14 的 `NATIVE_UPDATE_MANIFEST_URL` 与 `NATIVE_DOWNLOAD_PAGE_URL` 均为空，因此它不会自动检查更新。用户必须先从固定下载页手动安装一次带更新入口、同证书且更高版本号的包，此后才能收到弹窗。
 
 工程已设置上述测试站为默认更新地址，环境变量或 Gradle 属性可以覆盖，显式空值会关闭入口。发版时仍建议显式传入地址，检查是否有同名 Gradle 属性覆盖环境变量。
+
+### 2.1 签名更换（2026-11-20 起，v16 生效）
+
+线上 v14 的私钥经确认已不可获得（打包机 `D:/jiedan/IM/.native-cache/android/debug.keystore` 不存在），覆盖升级在物理上已无解，因此自 `0.3.12-autoload` / `versionCode=16` 起改为团队自行生成、集中保管的稳定签名：
+
+- keystore：`E:/keys/imapp/native-staging.p12`（PKCS12，alias `native-staging`，RSA 2048，有效期 10000 天）
+- 证书 SHA-256：`1bd20049f8f9ce120cc7e5a84825e2b54de0592f0423d82ba9c679e117069c3e`
+- 口令不入 Git，存于同目录 `README-签名说明.txt`；必须另备份到密码管理器与离线介质，私钥再丢就等于签名第二次断裂。
+- 迁移代价：v14/v15 升级到 v16 必须先卸载旧版，覆盖安装会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`。v16 之后同一把钥匙可平滑覆盖升级，不再需要卸载。
+- 不需要改 `app/build.gradle.kts`：四个 `NATIVE_ANDROID_*` 环境变量走的就是外部签名通道，只需把 keystore 路径与口令换成上面这把。
+- 从 v16 起，`prepare_distribution.py` 的 `--expected-certificate-sha256` 用 `1bd20049…`；第 2 节里 `6d03e74c…` 的旧基线只用于解释历史包，不得再作为期望值。
 
 ## 3. 一次性准备
 
@@ -70,6 +90,8 @@ $env:NATIVE_UPDATE_MANIFEST_URL = $env:NATIVE_DOWNLOAD_PAGE_URL + 'update.json'
 ```
 
 检查产物 `IM-APP-android/app/build/outputs/apk/debug/app-debug.apk`。用 `aapt dump badging` 核对包名/版本，用 `apksigner verify --verbose --print-certs` 核对真实签名；确认 APK 中编入两个正确更新地址（可用 Android Studio APK Analyzer / DEX 查看器检查 BuildConfig 和调用路径），并在真机「关于我们 → 检查更新」验证请求到目标清单。不得只搜索任意 URL 字符串就认定功能已启用。
+
+**发版必须带 `-PNATIVE_ABIS=arm64-v8a`**（2026-11-20 起）：服务器在香港、跨境带宽有限，全 ABI 包约 98MB，实测仅 ~100KB/s。过滤后约 32MB。不带该参数构建会产出全 ABI 包（模拟器调试用），发布前用 `aapt` 或解包确认 `lib/` 只有 `arm64-v8a`。
 
 用既有生成器核验并生成独立文件，避免手写清单导致 SHA/大小/签名错误。示例 Bash：
 

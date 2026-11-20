@@ -24,6 +24,10 @@ val nativeKeyAlias = nativeSetting("NATIVE_ANDROID_KEY_ALIAS")
 val nativeKeyPassword = nativeSetting("NATIVE_ANDROID_KEY_PASSWORD")
 val nativeSigningValues = listOf(nativeKeystore, nativeStorePassword, nativeKeyAlias, nativeKeyPassword)
 require(nativeSigningValues.all { it.isBlank() } || nativeSigningValues.all { it.isNotBlank() }) { "Provide all four NATIVE_ANDROID signing settings together" }
+// ABI 过滤：默认不过滤（保持全 ABI，兼容模拟器）；发版构建传 -PNATIVE_ABIS=arm64-v8a
+// 只保留真机架构，把安装包从 ~98MB 砍到 ~32MB（跨境下载速度受限）。
+val nativeAbis = (providers.gradleProperty("NATIVE_ABIS").orNull ?: providers.environmentVariable("NATIVE_ABIS").orNull ?: "")
+    .split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
 // 正式应用身份与签名尚未核实，本阶段明确禁止构建 release。
 gradle.taskGraph.whenReady {
@@ -39,8 +43,11 @@ android {
         applicationId = "com.im.nativebootstrap.staging"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "0.3.10-autoload"
+        versionCode = 17
+        versionName = "0.3.13-autoload"
+        if (nativeAbis.isNotEmpty()) {
+            ndk { abiFilters.addAll(nativeAbis) }
+        }
         buildConfigField("String", "NATIVE_UPDATE_MANIFEST_URL", kotlinString(nativeManifestURL))
         buildConfigField("String", "NATIVE_DOWNLOAD_PAGE_URL", kotlinString(nativeDownloadPageURL))
         testInstrumentationRunner = "com.im.nativebootstrap.SDKSmokeInstrumentation"

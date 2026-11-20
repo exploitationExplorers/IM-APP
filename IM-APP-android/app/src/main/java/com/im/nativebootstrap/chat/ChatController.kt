@@ -125,6 +125,14 @@ class ChatController(
     private val recallById=HashMap<String,String>()
     private val convLatest=HashMap<String,ChatMessage>()
     private val recalledConversation=HashMap<String,String>()
+    /**
+     * 本地即时回填的会话行文案（群改名等）：服务端通知走「业务接口 → outbox → OpenIM → 客户端」，
+     * 从「已保存」返回列表的瞬间还没到，靠它先给出同一句话，避免用户以为没生效。
+     */
+    private data class LocalNotice(val text:String,val title:String,val stamp:Long)
+    private val localNotices=HashMap<String,LocalNotice>()
+    // 消息 → 会话映射：撤回回调只带消息 ID，靠它定位要改写预览的会话行。
+    private val convOfMessage=LinkedHashMap<String,String>()
     private val inviteHandled=HashMap<String,String>()
     private val recentMessages=HashMap<String,List<ChatMessage>>()
     private var roomFirstPageRetry=false
@@ -194,6 +202,74 @@ class ChatController(
             else -> (revoker ?: message.sender.ifBlank { null } ?: "对方")+"撤回了一条消息"
         }
     }
+    /** 没有原始消息（或缓存已被覆盖）时，按撤回人与会话类型推断文案，避免预览留空。 */
+    private fun recallLabelFor(id:String,target:ChatTarget?):String? {
+        convLatest[target?.conversationId.orEmpty()]?.takeIf { it.id==id }?.let { return recallLabel(it,target) }
+        val revokerId=recallById[id].orEmpty()
+        val revoker=recallBy[id]
+        if(revokerId.isBlank()&&revoker==null)return null
+        return when {
+            revokerId.isNotEmpty()&&revokerId==ownIMId -> "你撤回了一条消息"
+            target?.sessionType==1 -> "对方撤回了一条消息"
+            else -> (revoker ?: "对方")+"撤回了一条消息"
+        }
+    }
+    private fun rememberConversation(id:String,conversationId:String) {
+        convOfMessage.remove(id);convOfMessage[id]=conversationId
+        if(convOfMessage.size>4000)convOfMessage.keys.firstOrNull()?.let(convOfMessage::remove)
+    }
+    /**
+     * 会话行预览为空时回填撤回文案。
+     * SDK 撤回后可能清空 latestMsg，也可能保留一条内容为空的最新消息，两种情况都只能靠本机缓存补齐。
+     */
+    private fun decorateConversation(row:ChatConversation):ChatConversation {
+        val cid=row.target.conversationId
+        row.latestMessage?.let { msg -> convLatest[cid]=msg;rememberConversation(msg.id,cid) }
+        // 本地回填只对「还没有更新消息」的会话生效；新消息一到就让位给真实预览。
+        localNotices[cid]?.let { notice -> if((row.latestMessage?.time ?: 0L)>notice.stamp) localNotices.remove(cid) }
+        val notice=localNotices[cid]
+        if(notice!=null)return row.copy(preview=notice.text,title=notice.title.ifBlank { row.title })
+        if(row.preview.isNotBlank())return row
+        val latestId=row.latestMessage?.id
+        val known=recalledConversation[cid]
+            ?: latestId?.takeIf { tombstones[it]==false }?.let { id -> recallLabelFor(id,row.target)?.also { recalledConversation[cid]=it } }
+        return if(known.isNullOrBlank())row else row.copy(preview=known)
+    }
+    private fun applyRecallPreview(rows:List<ChatConversation>,cid:String?,label:String?):List<ChatConversation> {
+        if(cid!=null&&!label.isNullOrBlank())recalledConversation[cid]=label
+        return rows.map { row ->
+            val value=recalledConversation[row.target.conversationId]?.takeIf(String::isNotBlank) ?: return@map row
+            when {
+                row.target.conversationId==cid -> row.copy(preview=value)
+                row.preview.isBlank() -> row.copy(preview=value)
+                else -> row
+            }
+        }
+    }
+    /**
+     * 连续重复的群改名 / 好友互通 / 建群欢迎系统通知只保留一条。
+     * OpenIM set_group_info_ex 的重试会生成多条消息 ID 不同、语义相同的通知（同群、同操作人、同新群名），
+     * 全部铺在聊天里会刷屏；普通消息会切断折叠，因此真正改成不同名字时不会被误合并。
+     * 对齐 uniapp collapseRepeatedGroupNameNotices。
+     */
+    private fun collapseNotices(messages:List<ChatMessage>):List<ChatMessage> {
+        var previousKey=""
+        var previousWelcome=false
+        return messages.filter { message ->
+            if(message.contentType<1000) { previousKey="";previousWelcome=false;return@filter true }
+            if(message.text.trim()==ChatSystemMessages.WELCOME_TEXT) {
+                val duplicate=previousWelcome
+                previousWelcome=true;previousKey=""
+                return@filter !duplicate
+            }
+            previousWelcome=false
+            val key=message.serialized.takeIf { it.isNotBlank() }?.let(ChatSystemMessages::eventKey).orEmpty()
+            if(key.isBlank()) { previousKey="";return@filter true }
+            if(key==previousKey) return@filter false
+            previousKey=key
+            true
+        }
+    }
     private fun visible(messages:List<ChatMessage>)=messages.filterNot { tombstones[it.id]==true||it.pinSync||(it.contentType<=0&&MessageContents.isPinSync(it.serialized)) }.filter { message -> snapshot.active?.target?.let { target -> (message.seq<=0||boundaryReady(target))&&permits(target,message) } != false }.map { if(tombstones.containsKey(it.id)) it.copy(text=recallLabel(it,snapshot.active?.target),serialized="",status=2) else it }
     fun attachBusiness(value:ChatBusiness?) { business=value;conversationVisibilityDirty=true;value?.let { MediaURLs.businessBase=it.baseUrl };refreshRetention(snapshot.conversations);snapshot.active?.target?.let { refreshGroupPurges(it) } }
     fun attachIncoming(listener:((ChatMessage)->Unit)?) { incomingListener=listener }
@@ -232,13 +308,24 @@ class ChatController(
         val rebuildMessages=messagesDirty||uploads!=snapshot.mediaUploads
         val localMessages=if(rebuildMessages)uploads.filter { it.target.conversationId==id }.map { it.placeholder() } else emptyList()
         val mergedMessages=if(rebuildMessages)mergeMessages(next.messages.filterNot { it.id.startsWith("upload-") },localMessages) else snapshot.messages
+        // 去重必须作用于完整列表（分片调用 visible() 时没有邻居可比）。
+        val shownMessages=collapseNotices(mergedMessages)
         val conversationsDirty=conversationVisibilityDirty||next.conversations!==previousConversations
         val conversations=if(!conversationsDirty)previousConversations else {
             val visible=next.conversations.map { if(!boundaryReady(it.target)) {if(it.preview.isEmpty()&&it.unread==0)it else it.copy(preview="",unread=0)} else purges?.conversation(retention?.conversation(it) ?: it) ?: retention?.conversation(it) ?: it }
-            if(visible.indices.all {visible[it]===next.conversations[it]})next.conversations else visible
+            // 边界/清理逻辑也会把预览置空；撤回文案与本地回填文案在最后一步兜底，避免会话列表留白或滞后。
+            val patched=visible.map { row ->
+                val notice=localNotices[row.target.conversationId]
+                when {
+                    notice!=null&&(row.latestMessage?.time ?: 0L)<=notice.stamp -> row.copy(preview=notice.text,title=notice.title.ifBlank { row.title })
+                    row.preview.isNotBlank() -> row
+                    else -> recalledConversation[row.target.conversationId]?.takeIf(String::isNotBlank)?.let { row.copy(preview=it) } ?: row
+                }
+            }
+            if(patched.indices.all {patched[it]===visible[it]})visible else patched
         }
         conversationVisibilityDirty=false
-        snapshot = next.copy(pendingForwards=pendingForwards?.all().orEmpty(),mediaUploads=uploads,localSentMedia=sentVideos?.all().orEmpty(),mediaOwnerDirectory=mediaUploads?.ownerDirectory().orEmpty(),messages=mergedMessages,store=core.store,sync=core.sync,outbox=outbox?.all().orEmpty(),showPinnedBanner=next.active?.pinnedMessage?.let { presentation?.dismissed(id,"pin",pinPresentationKey(it))!=true } ?: true,showAnnouncementBanner=presentation?.dismissed(id,"announcement",next.groupAnnouncement)!=true,conversations=conversations,revision=snapshot.revision+1)
+        snapshot = next.copy(pendingForwards=pendingForwards?.all().orEmpty(),mediaUploads=uploads,localSentMedia=sentVideos?.all().orEmpty(),mediaOwnerDirectory=mediaUploads?.ownerDirectory().orEmpty(),messages=shownMessages,store=core.store,sync=core.sync,outbox=outbox?.all().orEmpty(),showPinnedBanner=next.active?.pinnedMessage?.let { presentation?.dismissed(id,"pin",pinPresentationKey(it))!=true } ?: true,showAnnouncementBanner=presentation?.dismissed(id,"announcement",next.groupAnnouncement)!=true,conversations=conversations,revision=snapshot.revision+1)
         if(conversationsDirty) {
             conversationDiagnostics.changed(source,previousConversations,snapshot.conversations)
             snapshot=snapshot.copy(conversationDiagnostics=conversationDiagnostics.report())
@@ -290,11 +377,7 @@ class ChatController(
                     PerfLog.mark("controller:conversation-event", "count=${items.size}")
                     conversationDiagnostics.input(if(initialConversationSnapshotLoaded)"sdk-event" else "sdk-event/provisional",items)
                     // 会话最新消息缓存 + 撤回预览保持：SDK 撤回后会把 latestMsg 置空，此处回填撤回文案。
-                    val decorated=items.map { row ->
-                        val cid=row.target.conversationId
-                        row.latestMessage?.let { convLatest[cid]=it }
-                        if(row.preview.isBlank()&&row.latestMessage==null) recalledConversation[cid]?.let { row.copy(preview=it) } ?: row else row
-                    }
+                    val decorated=items.map(::decorateConversation)
                     // 固定 SDK 的发送状态更新通过会话 latestMsg 通知，未必触发新消息监听。
                     val confirmed=decorated.mapNotNull { item -> item.latestMessage?.takeIf { msg -> msg.mine&&(msg.status==2||msg.seq>0)&&outbox?.all()?.any { it.id==msg.id&&it.target==item.target }==true } }
                     confirmed.forEach(::acceptEvidence)
@@ -308,8 +391,8 @@ class ChatController(
                 override fun conversationSnapshot(items:List<ChatConversation>) { dispatch { if(current(t)&&items.isNotEmpty()) {
                     PerfLog.mark("controller:conversation-snapshot", "count=${items.size}")
                     conversationDiagnostics.input("sync-snapshot",items)
-                    items.forEach { row -> row.latestMessage?.let { convLatest[row.target.conversationId]=it } }
-                    val merged=mergeConversations(snapshot.conversations,items.map { row -> if(row.preview.isBlank()&&row.latestMessage==null) recalledConversation[row.target.conversationId]?.let { row.copy(preview=it) } ?: row else row })
+                    items.forEach { row -> row.latestMessage?.let { msg -> convLatest[row.target.conversationId]=msg;rememberConversation(msg.id,row.target.conversationId) } }
+                    val merged=mergeConversations(snapshot.conversations,items.map(::decorateConversation))
                     if(merged!==snapshot.conversations)emit(snapshot.copy(conversations=merged,conversationsLoading=false,error=null),"sync-snapshot")
                     prefetchRecentMessages(items)
                     refreshRetention(items)
@@ -342,7 +425,7 @@ class ChatController(
                     if(!current(t)) return@dispatch
                     items.forEach { (_,msg) -> if(msg.mine && (msg.seq>0 || msg.status==2)) acceptEvidence(msg) }
                     // 会话最新消息实时缓存：发送确认/新消息都刷新，保证撤回时能命中会话预览（SDK 会话事件可能滞后）。
-                    items.forEach { (target,msg) -> if(msg.time>0) { val old=convLatest[target.conversationId]; if(old==null||msg.time>=old.time) { convLatest[target.conversationId]=msg;recalledConversation.remove(target.conversationId) } } }
+                    items.forEach { (target,msg) -> if(msg.time>0) { rememberConversation(msg.id,target.conversationId);val old=convLatest[target.conversationId]; if(old==null||msg.time>=old.time) { convLatest[target.conversationId]=msg;recalledConversation.remove(target.conversationId) } } }
                     val active=snapshot.active?.target
                     emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(items.filter { it.first.conversationId==active?.conversationId }.map { it.second }))))
                     active?.let { target -> MediaPrefetch.enqueue(target,items.filter { it.first==target }.map { it.second }) }
@@ -363,10 +446,11 @@ class ChatController(
                     if(!deleted&&revokerId.isNotBlank())recallById[id]=revokerId
                     tombstones[id]=deleted
                     outbox?.confirmed(id)
-                    // 被撤回的是会话最新消息时，会话列表预览同步为撤回文案（SDK 会把 latestMsg 清空）。
-                    val rows=if(!deleted)snapshot.conversations.map { row ->
-                        val lm=convLatest[row.target.conversationId]
-                        if(lm?.id==id) { val label=recallLabel(lm,row.target);recalledConversation[row.target.conversationId]=label;row.copy(preview=label) } else row
+                    // 被撤回的是会话最新消息时，会话列表预览同步为撤回文案（SDK 会把 latestMsg 清空或留空内容）。
+                    val rows=if(!deleted) {
+                        val cid=convOfMessage[id] ?: snapshot.conversations.firstOrNull { row -> convLatest[row.target.conversationId]?.id==id||row.latestMessage?.id==id }?.target?.conversationId
+                        val target=snapshot.conversations.firstOrNull { it.target.conversationId==cid }?.target ?: snapshot.active?.target
+                        applyRecallPreview(snapshot.conversations,cid,cid?.let { recallLabelFor(id,target) })
                     } else snapshot.conversations
                     emit(snapshot.copy(messages=visible(snapshot.messages),conversations=rows))
                 } }
@@ -635,6 +719,26 @@ class ChatController(
                 ChatInviteResult(action,response.obj("group").string("id"))
             }
             dispatch { if(current(t))done(result) }
+        }
+    }
+    /**
+     * 群名称修改成功后本地立即回填会话行：真正的系统通知要经过业务 outbox → OpenIM → 客户端推送，
+     * 从「已保存」返回列表的瞬间还没到，用户会以为没生效。文案与 imAdmin 通知的展示保持一致。
+     */
+    fun noteGroupRenamed(groupId:String,name:String) {
+        val t=ticket ?: return
+        val title=name.trim()
+        if(groupId.isBlank()||title.isBlank())return
+        dispatch { if(!current(t))return@dispatch
+            val stamp=System.currentTimeMillis()
+            val label="群主 修改了群名称"
+            val rows=snapshot.conversations.map { row ->
+                if(row.target.sessionType==3&&row.target.groupId==groupId) {
+                    localNotices[row.target.conversationId]=LocalNotice(label,title,stamp)
+                    row.copy(preview=label,title=title,time=stamp)
+                } else row
+            }
+            emit(snapshot.copy(conversations=rows))
         }
     }
     fun markInviteHandled(token:String,label:String) {
@@ -1327,11 +1431,11 @@ class ChatController(
                     return@dispatch
                 }
                 if(result.isSuccess&&action==ChatAction.RECALL) { tombstones[message.id]=false;outbox?.confirmed(message.id)
-                    // 优先用 convLatest 实时缓存匹配会话预览（row.latestMessage 可能仍停留在旧消息）。
-                    val rows=snapshot.conversations.map { row ->
-                        val lm=convLatest[row.target.conversationId] ?: row.latestMessage
-                        if(lm?.id==message.id) { val label=recallLabel(message,row.target);recalledConversation[row.target.conversationId]=label;row.copy(preview=label) } else row
-                    }
+                    // 撤回的就是当前会话里的这条消息：直接按会话定位改写预览，不依赖 SDK 的 latestMsg 时序。
+                    val cid=active.target.conversationId
+                    rememberConversation(message.id,cid)
+                    val label=recallLabel(message,active.target)
+                    val rows=applyRecallPreview(snapshot.conversations.map { row -> if(row.latestMessage?.id==message.id)row.copy(preview=label) else row },cid,label)
                     if(snapshot.active?.target==active.target) emit(snapshot.copy(messages=visible(snapshot.messages),conversations=rows)) else if(rows!==snapshot.conversations) emit(snapshot.copy(conversations=rows))
                 }
                 if(result.isFailure&&action==ChatAction.RECALL) { tombstones.remove(message.id);emit(snapshot.copy(messages=visible(snapshot.messages.map { if(it.id==message.id) message else it }))) }
@@ -2317,7 +2421,7 @@ class ChatController(
         coordinator.logout();ticket=null;syncAttempt=null;outbox=null;mediaUploads=null;sentVideos=null;pendingForwards=null;runningForwards.clear();announcedForwards.clear();uploadAttempts.clear();retention=null;historyChecks=null;purges=null;purgeFresh.clear();purgeInFlight.clear();retentionFresh.clear();retentionInFlight.clear();retentionChecked.clear();readReporting.clear();readReported.clear();readMarkedAt.clear();clearing.clear();uploadingTargets.clear();notified.clear();ownIMId="";pageGeneration+=1;roomGeneration+=1;remoteHistoryOperation++;remoteHistoryLoading=false;cursor=null;offset=0
         gateway.shutdown()
         authRevoked=false;syncFinishedBeforeStore=false;tombstones.clear();sendAttempts.clear();sendCompletions.clear()
-        recallBy.clear();recallById.clear();convLatest.clear();recalledConversation.clear();inviteHandled.clear();recentMessages.clear();recentPrefetching.clear();recentPrefetchDone.clear();recentPrefetchAttempts.clear();serverRecentInFlight.clear();serverRecentDone.clear();serverRecentFailures=0;serverRecentUnavailable=false;priorityRetention.clear();roomFirstPageRetry=false
+        recallBy.clear();recallById.clear();convLatest.clear();recalledConversation.clear();convOfMessage.clear();inviteHandled.clear();localNotices.clear();recentMessages.clear();recentPrefetching.clear();recentPrefetchDone.clear();recentPrefetchAttempts.clear();serverRecentInFlight.clear();serverRecentDone.clear();serverRecentFailures=0;serverRecentUnavailable=false;priorityRetention.clear();roomFirstPageRetry=false
         snapshot=ChatState();changed(snapshot)
     }
 }

@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -74,10 +75,11 @@ import com.im.nativebootstrap.business.*
 import com.im.nativebootstrap.media.SharedAvatar
 import kotlin.math.abs
 
-private val Primary = Color(0xFF0A2FC2)
-private val Ink = Color(0xFF212121)
-private val Hint = Color(0xFF636E86)
-private val ScreenGray = Color(0xFFE6E8EE)
+// 必须是 getter：顶层 val 会把浅色值一次性快照，深色切换后不再跟随。
+private val Primary get() = C.primaryText
+private val Ink get() = C.text
+private val Hint get() = C.hint
+private val ScreenGray get() = C.page
 
 /** uni-app rpx 只按视口宽度缩放；auth-modern.scss 的 px 直接用 dp。 */
 internal class UniScale(private val width: Float) {
@@ -110,7 +112,7 @@ fun UniParityApp(model: BootstrapViewModel = viewModel()) {
         business.notice?.takeIf(String::isNotBlank)?.let { NativeNotices.show(it);model.business.clearNotice() }
     }
     SideEffect {
-        (context as? Activity)?.let { WindowInsetsControllerCompat(it.window, it.window.decorView).isAppearanceLightStatusBars = !login }
+        (context as? Activity)?.let { WindowInsetsControllerCompat(it.window, it.window.decorView).isAppearanceLightStatusBars = !login && !AppTheme.dark }
     }
     BackHandler(enabled = debugOpen || legal != null || authRoute != null || chatPicker != null || globalSearch || business.subpage || state.chatOpen || state.sample || state.busy) {
         when {
@@ -202,19 +204,19 @@ private fun UniLogin(state: BootstrapState, endpoint: String, model: BootstrapVi
                 Spacer(Modifier.height(if (small) 24.dp else 32.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box(Modifier.width(78.dp).height(52.dp)) {
-                        Row(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(Color(0xFFF8FAFC)).border(1.dp, Color(0xFFE4E7EC), RoundedCornerShape(12.dp)).clickable { countryOpen = !countryOpen }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Row(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(C.field).border(1.dp, C.line, RoundedCornerShape(12.dp)).clickable { countryOpen = !countryOpen }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                             Text(country, style = cssText(15, Ink, FontWeight.Normal))
-                            Text("▾", Modifier.padding(start = 4.dp), style = cssText(11, Color(0xFF8A8F9C)))
+                            Text("▾", Modifier.padding(start = 4.dp), style = cssText(11, C.faint))
                         }
                         if (countryOpen) Popup(alignment = Alignment.TopStart, offset = IntOffset(0, with(density) { (52.dp + scale.dp(8)).roundToPx() }), onDismissRequest = { countryOpen = false }, properties = PopupProperties(focusable = true)) {
-                            Column(Modifier.width(scale.dp(280)).heightIn(max = scale.dp(480)).shadow(scale.dp(16), RoundedCornerShape(scale.dp(12))).clip(RoundedCornerShape(scale.dp(12))).background(Color.White).verticalScroll(rememberScrollState())) {
+                            Column(Modifier.width(scale.dp(280)).heightIn(max = scale.dp(480)).shadow(scale.dp(16), RoundedCornerShape(scale.dp(12))).clip(RoundedCornerShape(scale.dp(12))).background(C.card).verticalScroll(rememberScrollState())) {
                                 listOf("中国" to "+86", "中国香港" to "+852", "美国" to "+1", "新加坡" to "+65", "马来西亚" to "+60").forEach { (name, code) ->
                                     Column {
                                         Row(Modifier.fillMaxWidth().clickable { country = code; countryOpen = false }.padding(horizontal = scale.dp(24), vertical = scale.dp(20)), horizontalArrangement = Arrangement.SpaceBetween) {
                                             Text(name, fontSize = scale.text(26), color = if (country == code) Primary else Ink)
-                                            Text(code, fontSize = scale.text(26), color = Color(0xFF8A8F9C))
+                                            Text(code, fontSize = scale.text(26), color = C.faint)
                                         }
-                                        Box(Modifier.fillMaxWidth().height(scale.dp(1)).background(Color(0xFFF0F0F0)))
+                                        Box(Modifier.fillMaxWidth().height(scale.dp(1)).background(C.field))
                                     }
                                 }
                             }
@@ -288,7 +290,7 @@ private fun validPhone(country: String, phone: String): Boolean = when (country)
 
 @Composable
 private fun PlainField(value: String, onValue: (String) -> Unit, placeholder: String, modifier: Modifier, textSize: Int = 15, keyboard: KeyboardType = KeyboardType.Text, enabled: Boolean = true, transformation: VisualTransformation = VisualTransformation.None, trailing: (@Composable () -> Unit)? = null) {
-    Row(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFFF8FAFC)).border(1.dp, Color(0xFFE4E7EC), RoundedCornerShape(12.dp)).padding(start = 16.dp, end = if (trailing == null) 16.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.clip(RoundedCornerShape(12.dp)).background(C.field).border(1.dp, C.line, RoundedCornerShape(12.dp)).padding(start = 16.dp, end = if (trailing == null) 16.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
         BasicTextField(value, onValue, Modifier.weight(1f), enabled = enabled, singleLine = true, textStyle = cssText(textSize), visualTransformation = transformation, keyboardOptions = KeyboardOptions(keyboardType = keyboard), cursorBrush = SolidColor(Primary), decorationBox = { inner -> Box { if (value.isEmpty()) Text(placeholder, style = cssText(textSize, Hint)); inner() } })
         trailing?.invoke()
     }
@@ -299,7 +301,7 @@ private fun LegalSheet(kind: String, dismiss: () -> Unit) {
     val context = LocalContext.current
     val title = if (kind == "agreement") "用户协议" else "隐私政策"
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(Color.White).systemBarsPadding()) {
+        Column(Modifier.fillMaxSize().background(C.card).systemBarsPadding()) {
             Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("‹", Modifier.width(40.dp).clickable(onClick = dismiss), style = cssText(28)); Text(title, style = cssText(17, Ink, FontWeight.Bold))
             }
@@ -325,8 +327,8 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
     val contactOrder=remember(rows) {rows.filter {it.target.sessionType==1}.map {businessUserId(it.target.userId)}}
     var addMenu by remember { mutableStateOf(false) }
     var moreMenu by remember{mutableStateOf(false)}
-    Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding()) {
-        if (state.sample) SampleStrip(s) else state.profileWarning?.let { Text(it, Modifier.fillMaxWidth().background(Color(0xFFF3F4F7)).padding(horizontal = s.dp(24), vertical = s.dp(12)), fontSize = s.text(24), color = Hint) }
+    Column(Modifier.fillMaxSize().background(C.card).statusBarsPadding().navigationBarsPadding()) {
+        if (state.sample) SampleStrip(s) else state.profileWarning?.let { Text(it, Modifier.fillMaxWidth().background(C.field).padding(horizontal = s.dp(24), vertical = s.dp(12)), fontSize = s.text(24), color = Hint) }
         if(!state.sample && tab=="chat") ChatStatus(state,model,s)
         if(tab!="mine" || state.sample) Row(Modifier.fillMaxWidth().height(s.dp(96)).padding(horizontal = s.dp(40)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(when (tab) { "contacts" -> "通讯录"; "mine" -> "我的"; else -> "聊天" }, fontSize = s.text(48), lineHeight = s.text(64), color = Ink, fontWeight = FontWeight.Bold)
@@ -336,16 +338,16 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
                     Box(Modifier.size(s.dp(64)).clickable{moreMenu=!moreMenu;addMenu=false}.wrapContentSize(),contentAlignment=Alignment.Center) {
                         Row(horizontalArrangement=Arrangement.spacedBy(s.dp(7))) { repeat(3) { Box(Modifier.size(s.dp(7)).background(Ink,CircleShape)) } }
                     }
-                    androidx.compose.material3.DropdownMenu(moreMenu,{moreMenu=false},modifier=Modifier.shadow(10.dp,RoundedCornerShape(s.dp(16))).clip(RoundedCornerShape(s.dp(16))).background(Color.White)){androidx.compose.material3.DropdownMenuItem(text={Text("全部已读")},onClick={moreMenu=false;if(state.sample)toast("本地样例没有未读消息")else if(unreadSummary.count==0)toast("没有未读消息") else model.markLoadedConversationsRead(toast)})}
+                    androidx.compose.material3.DropdownMenu(moreMenu,{moreMenu=false},modifier=Modifier.shadow(10.dp,RoundedCornerShape(s.dp(16))).clip(RoundedCornerShape(s.dp(16))).background(C.card)){androidx.compose.material3.DropdownMenuItem(text={Text("全部已读")},onClick={moreMenu=false;if(state.sample)toast("本地样例没有未读消息")else if(unreadSummary.count==0)toast("没有未读消息") else model.markLoadedConversationsRead(toast)})}
                 }
                 Box {
-                    Image(painterResource(R.drawable.uni_icon_plus), "添加", Modifier.size(s.dp(64)).padding(s.dp(8)).clickable { if(!state.sample){addMenu=!addMenu;moreMenu=false} })
+                    Image(painterResource(R.drawable.uni_icon_plus), "添加", Modifier.size(s.dp(64)).padding(s.dp(8)).clickable { if(!state.sample){addMenu=!addMenu;moreMenu=false} }, colorFilter = ColorFilter.tint(Ink))
                     // 对齐 H5 聊天页「＋」菜单：白底圆角阴影弹出层，图标+文字三项（添加朋友/添加群聊/创建群聊）
-                    androidx.compose.material3.DropdownMenu(addMenu,{addMenu=false},modifier=Modifier.shadow(10.dp,RoundedCornerShape(s.dp(16))).clip(RoundedCornerShape(s.dp(16))).background(Color.White)) {
+                    androidx.compose.material3.DropdownMenu(addMenu,{addMenu=false},modifier=Modifier.shadow(10.dp,RoundedCornerShape(s.dp(16))).clip(RoundedCornerShape(s.dp(16))).background(C.card)) {
                         listOf(Triple("添加朋友",R.drawable.uni_menu_add_friend,"add-friend"),Triple("添加群聊",R.drawable.uni_menu_add_group,"add-group"),Triple("创建群聊",R.drawable.uni_menu_create_group,"create-group")).forEach{(label,icon,page)->
                             Row(Modifier.widthIn(min=s.dp(288)).clickable{addMenu=false;model.business.open(page)}.padding(horizontal=s.dp(32),vertical=s.dp(16)),verticalAlignment=Alignment.CenterVertically) {
                                 Image(painterResource(icon),null,Modifier.size(s.dp(40)))
-                                Text(label,Modifier.padding(start=s.dp(16)),fontSize=s.text(28),color=Color(0xFF212121))
+                                Text(label,Modifier.padding(start=s.dp(16)),fontSize=s.text(28),color=C.text)
                             }
                         }
                     }
@@ -363,7 +365,7 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
                     Row(Modifier.fillMaxWidth().padding(vertical = s.dp(36)), verticalAlignment = Alignment.CenterVertically) {
                         Image(painterResource(R.drawable.uni_avatar_default), "我的头像", Modifier.size(s.dp(112)).clip(CircleShape))
                         Column(Modifier.padding(start = s.dp(28))) {
-                            Text(if (state.sample) "本地样例" else state.profile?.nickname?.ifBlank { "当前账号" } ?: "当前账号", fontSize = s.text(36), fontWeight = FontWeight.Bold)
+                            Text(if (state.sample) "本地样例" else state.profile?.nickname?.ifBlank { "当前账号" } ?: "当前账号", fontSize = s.text(36), fontWeight = FontWeight.Bold, color = Ink)
                             if (!state.sample) {
                                 state.profile?.publicId?.takeIf { it.isNotBlank() }?.let { Text("账号：$it", Modifier.padding(top = s.dp(12)), fontSize = s.text(26), color = Hint) }
                                 state.profile?.phoneMasked?.takeIf { it.isNotBlank() }?.let { Text(it, Modifier.padding(top = s.dp(8)), fontSize = s.text(26), color = Hint) }
@@ -375,11 +377,11 @@ internal fun UniHome(state: BootstrapState, model: BootstrapViewModel, s: UniSca
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().background(Color.White).height(s.dp(144)).padding(vertical = s.dp(16)), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().background(C.card).height(s.dp(144)).padding(vertical = s.dp(16)), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             val tabs = listOf(Triple("contacts", "通讯录", if (tab == "contacts") R.drawable.uni_tab_contacts_active else R.drawable.uni_tab_contacts), Triple("chat", "聊天", if (tab == "chat") R.drawable.uni_tab_chat_active else R.drawable.uni_tab_chat), Triple("mine", "我的", if (tab == "mine") R.drawable.uni_tab_mine_active else R.drawable.uni_tab_mine))
             tabs.forEach { (id, name, image) -> Column(Modifier.widthIn(min = s.dp(120)).fillMaxHeight().clickable { changeTab(id) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Box(Modifier.size(s.dp(48))) {
-                    Image(painterResource(image), null, Modifier.fillMaxSize())
+                    Image(painterResource(image), null, Modifier.fillMaxSize(), colorFilter = if (tab != id) ColorFilter.tint(C.placeholder) else null)
                     if(id=="chat")NativeUnreadBadge(if(unreadSummary.mutedOnly)1 else unreadSummary.count,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true,muted=unreadSummary.mutedOnly)
                     if(id=="contacts")NativeUnreadBadge(businessState.friendRequests,s,Modifier.align(Alignment.TopEnd).offset(x=s.dp(25),y=-s.dp(14)),wide=true)
                 }
@@ -433,20 +435,20 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
             NativePullRefresh(state.chat.conversationsLoading,{model.loadConversations(true)},Modifier.weight(1f)){LazyColumn(Modifier.fillMaxSize()) {
                 items(visibleRows,key={ it.target.conversationId }) { item ->
                     NativeConversationSwipe(swipe==item.target.conversationId,{swipe=item.target.conversationId},{swipe=null},item.pinned,s.dp(140),{model.updateConversation(item,pinned=!item.pinned,done=result)},{model.hideConversation(item,result)}) {
-                    Row(Modifier.fillMaxWidth().background(if(item.pinned)Color(0xFFF3F4F7) else Color.White).combinedClickable(onClick={if(swipe!=null)swipe=null else model.openRealChat(item)},onLongClick={selected=item}).padding(horizontal=s.dp(40),vertical=s.dp(24)),verticalAlignment=Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().background(if(item.pinned)C.field else C.card).combinedClickable(onClick={if(swipe!=null)swipe=null else model.openRealChat(item)},onLongClick={selected=item}).padding(horizontal=s.dp(40),vertical=s.dp(24)),verticalAlignment=Alignment.CenterVertically) {
                         SharedAvatar(item.avatar,Modifier.size(s.dp(96)).clip(CircleShape),item.target.sessionType==3)
                         Column(Modifier.weight(1f).padding(start=s.dp(24))) {
                             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-                                Text(item.title,Modifier.weight(1f),fontSize=s.text(32),fontWeight=FontWeight.Medium,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                Text(item.title,Modifier.weight(1f),fontSize=s.text(32),fontWeight=FontWeight.Medium,maxLines=1,overflow=TextOverflow.Ellipsis,color=Ink)
                                 val timeLabel=remember(item.time) {if(item.time>0)java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(if(item.time<10_000_000_000L)item.time*1000 else item.time)) else ""}
-                                if(timeLabel.isNotEmpty())Text(timeLabel,fontSize=s.text(22),color=Color(0xFF999999))
+                                if(timeLabel.isNotEmpty())Text(timeLabel,fontSize=s.text(22),color=C.faint)
                             }
                             Row(Modifier.fillMaxWidth().padding(top=s.dp(12)),verticalAlignment=Alignment.CenterVertically){
                                 // 被 @ 强提醒（对标 H5 [有人@我]）：仅群聊、有未读、非免打扰时显示
                                 if(item.target.sessionType==3&&item.atType in 1..3&&item.unread>0&&!item.muted)Text("[有人@我] ",fontSize=s.text(26),color=Color(0xFFFA5151),maxLines=1,softWrap=false)
-                                Text(if(item.joinRequestPending&&item.preview.isBlank())"[入群申请]" else item.preview,Modifier.weight(1f),fontSize=s.text(26),color=Color(0xFF999999),maxLines=1,overflow=TextOverflow.Ellipsis)
+                                Text(if(item.joinRequestPending&&item.preview.isBlank())"[入群申请]" else item.preview,Modifier.weight(1f),fontSize=s.text(26),color=C.faint,maxLines=1,overflow=TextOverflow.Ellipsis)
                                 if(item.muted)Text("免打扰",fontSize=s.text(20),color=Hint)
-                                if(item.joinRequestPending){Spacer(Modifier.width(s.dp(8)));Box(Modifier.size(s.dp(16)).background(Color(0xFFFA5151),CircleShape))}
+                                if(item.joinRequestPending){Spacer(Modifier.width(s.dp(8)));Box(Modifier.size(s.dp(16)).background(C.danger,CircleShape))}
                                 else if(item.unread>0){Spacer(Modifier.width(s.dp(8)));NativeUnreadBadge(item.unread,s,muted=item.muted)}
                             }
                         }
@@ -456,7 +458,7 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
                 if(query.isNotBlank()) {
                     items(searchGroups,key={"search:"+it.first().conversation.target.conversationId}){matches->
                         val hit=matches.first()
-                        Row(Modifier.fillMaxWidth().clickable{model.openSearchHit(hit)}.padding(horizontal=s.dp(40),vertical=s.dp(20)),verticalAlignment=Alignment.CenterVertically){SharedAvatar(hit.conversation.avatar,Modifier.size(s.dp(96)),hit.conversation.target.sessionType==3);Column(Modifier.weight(1f).padding(start=s.dp(24))){Text(hit.conversation.title,fontSize=s.text(32));Text("${matches.size} 条相关聊天记录",fontSize=s.text(24),color=Hint);Text(hit.message.text,maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=s.text(26),color=Hint)}}
+                        Row(Modifier.fillMaxWidth().clickable{model.openSearchHit(hit)}.padding(horizontal=s.dp(40),vertical=s.dp(20)),verticalAlignment=Alignment.CenterVertically){SharedAvatar(hit.conversation.avatar,Modifier.size(s.dp(96)),hit.conversation.target.sessionType==3);Column(Modifier.weight(1f).padding(start=s.dp(24))){Text(hit.conversation.title,fontSize=s.text(32),color=Ink);Text("${matches.size} 条相关聊天记录",fontSize=s.text(24),color=Hint);Text(hit.message.text,maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=s.text(26),color=Hint)}}
                     }
                     item{Text(if(searching)"搜索中…" else if(searchError.isNotBlank())searchError+" · 重试" else if(searchEnd)"没有更多了" else "点击查找更早的聊天记录",Modifier.fillMaxWidth().clickable(enabled=!searching){searchMore()}.padding(s.dp(28)).wrapContentWidth(),fontSize=s.text(24),color=Hint)}
                 }
@@ -474,10 +476,10 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
             Image(painterResource(R.drawable.uni_avatar_1), "交互测试头像", Modifier.size(s.dp(96)).clip(CircleShape), contentScale = ContentScale.Crop)
             Column(Modifier.weight(1f).padding(start = s.dp(24))) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("交互测试", Modifier.weight(1f), fontSize = s.text(32), fontWeight = FontWeight.Medium, color = Color(0xFF111111))
-                    Text("现在", fontSize = s.text(24), color = Color(0xFF999999))
+                    Text("交互测试", Modifier.weight(1f), fontSize = s.text(32), fontWeight = FontWeight.Medium, color = C.textStrong)
+                    Text("现在", fontSize = s.text(24), color = C.faint)
                 }
-                Text("本地样例，仅在本机内存中", Modifier.padding(top = s.dp(12)), fontSize = s.text(26), color = Color(0xFF999999), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("本地样例，仅在本机内存中", Modifier.padding(top = s.dp(12)), fontSize = s.text(26), color = C.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         } else Text(if (state.sample) "暂无对话…" else "聊天功能接入中", Modifier.fillMaxWidth().padding(vertical = s.dp(80)).wrapContentWidth(), fontSize = s.text(32))
     }
@@ -486,26 +488,26 @@ private fun ConversationList(state: BootstrapState, model: BootstrapViewModel, s
 @Composable
 private fun ConversationSkeletonRow(s:UniScale) {
     Row(Modifier.fillMaxWidth().padding(horizontal=s.dp(40),vertical=s.dp(24)),verticalAlignment=Alignment.CenterVertically) {
-        Box(Modifier.size(s.dp(96)).clip(CircleShape).background(Color(0xFFEDF0F5)))
+        Box(Modifier.size(s.dp(96)).clip(CircleShape).background(C.field))
         Column(Modifier.weight(1f).padding(start=s.dp(24))) {
-            Box(Modifier.fillMaxWidth(.46f).height(s.dp(24)).clip(RoundedCornerShape(s.dp(6))).background(Color(0xFFEDF0F5)))
-            Box(Modifier.fillMaxWidth(.76f).padding(top=s.dp(16)).height(s.dp(20)).clip(RoundedCornerShape(s.dp(6))).background(Color(0xFFF2F4F8)))
+            Box(Modifier.fillMaxWidth(.46f).height(s.dp(24)).clip(RoundedCornerShape(s.dp(6))).background(C.field))
+            Box(Modifier.fillMaxWidth(.76f).padding(top=s.dp(16)).height(s.dp(20)).clip(RoundedCornerShape(s.dp(6))).background(C.field))
         }
     }
 }
 
 @Composable
 private fun Search(s: UniScale, placeholder: String, value: String, change: (String) -> Unit, toast: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = s.dp(40), vertical = s.dp(16)).height(s.dp(72)).clip(RoundedCornerShape(s.dp(8))).background(Color(0xFFF3F4F7)).padding(start = s.dp(32), end = s.dp(24)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(s.dp(16))) {
-        Canvas(Modifier.size(16.dp)) { drawCircle(Color(0xFF8A8F9C), radius = size.width * .32f, center = Offset(size.width * .4f, size.height * .4f), style = Stroke(1.5.dp.toPx())); drawLine(Color(0xFF8A8F9C), Offset(size.width * .64f, size.height * .64f), Offset(size.width * .94f, size.height * .94f), strokeWidth = 1.5.dp.toPx()) }
-        BasicTextField(value, change, Modifier.weight(1f), singleLine = true, textStyle = TextStyle(fontSize = s.text(28), color = Ink), cursorBrush = SolidColor(Primary), decorationBox = { inner -> Box { if (value.isEmpty()) Text(placeholder, fontSize = s.text(28), color = Color(0xFF626E8D)); inner() } })
+    Row(Modifier.fillMaxWidth().padding(horizontal = s.dp(40), vertical = s.dp(16)).height(s.dp(72)).clip(RoundedCornerShape(s.dp(8))).background(C.field).padding(start = s.dp(32), end = s.dp(24)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(s.dp(16))) {
+        Canvas(Modifier.size(16.dp)) { drawCircle(C.faint, radius = size.width * .32f, center = Offset(size.width * .4f, size.height * .4f), style = Stroke(1.5.dp.toPx())); drawLine(C.faint, Offset(size.width * .64f, size.height * .64f), Offset(size.width * .94f, size.height * .94f), strokeWidth = 1.5.dp.toPx()) }
+        BasicTextField(value, change, Modifier.weight(1f), singleLine = true, textStyle = TextStyle(fontSize = s.text(28), color = Ink), cursorBrush = SolidColor(Primary), decorationBox = { inner -> Box { if (value.isEmpty()) Text(placeholder, fontSize = s.text(28), color = C.hint); inner() } })
         if (value.isNotEmpty()) Text("×", Modifier.clickable { change("") }, fontSize = s.text(28), color = Hint)
     }
 }
 
 @Composable
 private fun SampleStrip(s: UniScale) {
-    Text("本地样例 · 不联网，不送达", Modifier.fillMaxWidth().background(Color(0xFFF3F4F7)).padding(horizontal = s.dp(24), vertical = s.dp(6)), fontSize = s.text(22), color = Hint)
+    Text("本地样例 · 不联网，不送达", Modifier.fillMaxWidth().background(C.field).padding(horizontal = s.dp(24), vertical = s.dp(6)), fontSize = s.text(22), color = Hint)
 }
 
 @Composable
@@ -523,11 +525,11 @@ private fun UniChat(state: BootstrapState, model: BootstrapViewModel, s: UniScal
             else if(initialScrollDone && (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: Int.MAX_VALUE)>=end-2) listState.animateScrollToItem(end)
         }
     }
-    Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding().imePadding()) {
-        Row(Modifier.fillMaxWidth().background(Color.White).height(s.dp(110)).padding(horizontal = s.dp(26), vertical = s.dp(8)), verticalAlignment = Alignment.CenterVertically) {
-            Text("‹", Modifier.size(s.dp(52)).clickable { model.closeChat() }.wrapContentSize(), fontSize = s.text(52), color = Color(0xFF1A1A1A))
-            Text(if(state.sample) "交互测试" else state.chat.active?.title.orEmpty(), Modifier.weight(1f), fontSize = s.text(34), fontWeight = FontWeight.Bold, color = Color(0xFF111111))
-            Text("⋯", Modifier.size(s.dp(52)).clickable { toast("聊天资料与更多操作尚未接入。") }.wrapContentSize(), fontSize = s.text(42), color = Color(0xFF444444))
+    Column(Modifier.fillMaxSize().background(C.card).statusBarsPadding().navigationBarsPadding().imePadding()) {
+        Row(Modifier.fillMaxWidth().background(C.card).height(s.dp(110)).padding(horizontal = s.dp(26), vertical = s.dp(8)), verticalAlignment = Alignment.CenterVertically) {
+            Text("‹", Modifier.size(s.dp(52)).clickable { model.closeChat() }.wrapContentSize(), fontSize = s.text(52), color = C.text)
+            Text(if(state.sample) "交互测试" else state.chat.active?.title.orEmpty(), Modifier.weight(1f), fontSize = s.text(34), fontWeight = FontWeight.Bold, color = C.textStrong)
+            Text("⋯", Modifier.size(s.dp(52)).clickable { toast("聊天资料与更多操作尚未接入。") }.wrapContentSize(), fontSize = s.text(42), color = C.text)
         }
         if(state.sample) SampleStrip(s) else {
             ChatStatus(state,model,s)
@@ -543,7 +545,7 @@ private fun UniChat(state: BootstrapState, model: BootstrapViewModel, s: UniScal
                     Column(Modifier.widthIn(max = (LocalConfiguration.current.screenWidthDp * .7f).dp).padding(horizontal = s.dp(16)), horizontalAlignment = if (msg.mine) Alignment.End else Alignment.Start) {
                         val shape = if (msg.mine) RoundedCornerShape(s.dp(16), s.dp(4), s.dp(16), s.dp(16)) else RoundedCornerShape(s.dp(4), s.dp(16), s.dp(16), s.dp(16))
                         if(!state.sample && !msg.mine && state.chat.active?.target?.sessionType==3 && msg.sender.isNotBlank()) Text(msg.sender,Modifier.padding(bottom=s.dp(4)),fontSize=s.text(22),color=Hint)
-                        Text(msg.text, Modifier.clip(shape).background(if (msg.mine) Color(0xFF2B5CFF) else Color.White).padding(horizontal = s.dp(22), vertical = s.dp(18)), fontSize = s.text(30), lineHeight = s.text(45), color = if (msg.mine) Color.White else Color(0xFF222222))
+                        Text(msg.text, Modifier.clip(shape).background(if (msg.mine) C.mineBubble else C.card).padding(horizontal = s.dp(22), vertical = s.dp(18)), fontSize = s.text(30), lineHeight = s.text(45), color = if (msg.mine) Color.White else C.text)
                         if(!state.sample && msg.mine) {
                             val pending=state.chat.outbox.firstOrNull { it.id==msg.id }
                             val label=when(pending?.state) { OutboxState.PENDING->"待提交";OutboxState.SENDING->"发送中";OutboxState.UNCERTAIN->"结果待核对 · 点击核对";OutboxState.FAILED->"发送失败 · 点击核对";OutboxState.ACCEPTED->"已提交";null->if(msg.status==2||msg.seq>0) "已提交" else "结果待核对" }
@@ -554,13 +556,13 @@ private fun UniChat(state: BootstrapState, model: BootstrapViewModel, s: UniScal
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().background(Color(0xFFF7F7F7)).padding(horizontal = s.dp(20), vertical = s.dp(18)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(s.dp(12))) {
+        Row(Modifier.fillMaxWidth().background(C.field).padding(horizontal = s.dp(20), vertical = s.dp(18)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(s.dp(12))) {
             Box(Modifier.size(s.dp(64)).clickable { toast("语音录制尚未接入，本地样例仅支持文本。") }, contentAlignment = Alignment.Center) { Image(painterResource(R.drawable.uni_icon_mic), "语音", Modifier.size(s.dp(44))) }
-            Row(Modifier.weight(1f).heightIn(min = s.dp(72)).clip(RoundedCornerShape(s.dp(12))).background(Color.White).padding(start = s.dp(18)), verticalAlignment = Alignment.CenterVertically) {
-                BasicTextField(text, { text = it }, Modifier.weight(1f), singleLine = true, textStyle = TextStyle(fontSize = s.text(28), color = Ink), cursorBrush = SolidColor(Primary), decorationBox = { inner -> Box { if (text.isEmpty()) Text("输入消息", fontSize = s.text(28), color = Color(0xFFB0B0B0)); inner() } })
-                Text("☺", Modifier.size(s.dp(60)).clickable { toast("表情面板尚未接入。") }.wrapContentSize(), fontSize = s.text(36), color = Color(0xFF666666))
+            Row(Modifier.weight(1f).heightIn(min = s.dp(72)).clip(RoundedCornerShape(s.dp(12))).background(C.card).padding(start = s.dp(18)), verticalAlignment = Alignment.CenterVertically) {
+                BasicTextField(text, { text = it }, Modifier.weight(1f), singleLine = true, textStyle = TextStyle(fontSize = s.text(28), color = Ink), cursorBrush = SolidColor(Primary), decorationBox = { inner -> Box { if (text.isEmpty()) Text("输入消息", fontSize = s.text(28), color = C.placeholder); inner() } })
+                Text("☺", Modifier.size(s.dp(60)).clickable { toast("表情面板尚未接入。") }.wrapContentSize(), fontSize = s.text(36), color = C.textSub)
             }
-            Text("+", Modifier.size(s.dp(64)).clickable { toast("照片、文件与收藏尚未接入。") }.wrapContentSize(), fontSize = s.text(40), color = Color(0xFF333333))
+            Text("+", Modifier.size(s.dp(64)).clickable { toast("照片、文件与收藏尚未接入。") }.wrapContentSize(), fontSize = s.text(40), color = C.text)
             if (text.isNotBlank()) Box(Modifier.height(s.dp(64)).clip(RoundedCornerShape(s.dp(10))).background(Primary).clickable(enabled=!submitting&&(state.sample||state.chat.ready)) {
                 val submittedText=text
                 submitting=true
@@ -576,7 +578,7 @@ internal fun NativeUnreadBadge(count:Int,s:UniScale,modifier:Modifier=Modifier,w
     val label=if(count>99)"99+" else count.toString()
     val height=if(muted)6.dp else 16.dp
     val fontScale=LocalDensity.current.fontScale
-    Box(modifier.size(width=if(wide&&count>99)26.dp else height,height=height).clip(CircleShape).background(Color(0xFFEF4444)).semantics { contentDescription=if(muted)"免打扰，有未读消息" else "未读 $label" },contentAlignment=Alignment.Center) {
+    Box(modifier.size(width=if(wide&&count>99)26.dp else height,height=height).clip(CircleShape).background(C.danger).semantics { contentDescription=if(muted)"免打扰，有未读消息" else "未读 $label" },contentAlignment=Alignment.Center) {
         if(!muted)Text(label,fontSize=((if(count>99)8f else 10f)/fontScale).sp,lineHeight=(16f/fontScale).sp,color=Color.White,maxLines=1,softWrap=false,textAlign=TextAlign.Center,style=TextStyle(platformStyle=PlatformTextStyle(includeFontPadding=false)))
     }
 }
@@ -597,7 +599,7 @@ private fun ChatStatus(state:BootstrapState,model:BootstrapViewModel,s:UniScale)
     val store=when(chat.store) { StoreStatus.CLOSED->"本地记录未打开";StoreStatus.OPENING->"本地记录准备中";StoreStatus.READABLE->"本地记录可读";StoreStatus.FAILED->"本地记录暂不可用" }
     val sync=when(chat.sync) { SyncStatus.IDLE->"等待同步";SyncStatus.RUNNING->"同步中";SyncStatus.COMPLETED->"同步完成";SyncStatus.FAILED->"同步未完成";SyncStatus.TIMED_OUT->"同步超时";SyncStatus.CANCELLED->"同步已取消" }
     if(chat.connection==ConnectionState.CONNECTED&&chat.store==StoreStatus.READABLE&&chat.sync==SyncStatus.COMPLETED&&chat.error==null)return
-    Column(Modifier.fillMaxWidth().background(Color(0xFFF3F4F7)).padding(horizontal=s.dp(24),vertical=s.dp(8))) {
+    Column(Modifier.fillMaxWidth().background(C.field).padding(horizontal=s.dp(24),vertical=s.dp(8))) {
         Text("$connection · $store · $sync",fontSize=s.text(21),color=Hint)
         chat.error?.let { Text(it,Modifier.clickable(enabled=chat.loggedIn) { if(chat.active==null) model.loadConversations(true) else model.loadHistory() }.padding(top=s.dp(6)),fontSize=s.text(24),color=Primary) }
     }

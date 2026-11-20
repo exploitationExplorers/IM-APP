@@ -151,6 +151,8 @@ fun ImagePreview(urls:List<String>,initial:Int=0,onDismiss:()->Unit,onSave:(Stri
     val enter=remember { ComposeAnimatable(0f) }
     LaunchedEffect(Unit) { enter.animateTo(1f,tween(200)) }
     Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false)) {
+        // 提示宿主同时挂在大图窗口：保存结果在预览层打开时就能看到，不必等退出预览。
+        com.im.nativebootstrap.NativeNoticeHost()
         Box(Modifier.fillMaxSize().background(Color.Black).graphicsLayer(alpha=enter.value)) {
             HorizontalPager(state=state,modifier=Modifier.fillMaxSize(),userScrollEnabled=!zoomed) { page ->
                 val url=list[page]
@@ -254,6 +256,7 @@ fun VideoPreview(url:String,onDismiss:()->Unit,onError:(String)->Unit,poster:Str
         onDispose { lifecycle.removeObserver(observer);view?.release() }
     }
     Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false)) {
+        com.im.nativebootstrap.NativeNoticeHost()
         Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth().height(58.dp).padding(horizontal=4.dp),verticalAlignment=Alignment.CenterVertically) {
                 TextButton(onClick=onDismiss) { Text("‹",color=Color.White,fontSize=28.sp) }

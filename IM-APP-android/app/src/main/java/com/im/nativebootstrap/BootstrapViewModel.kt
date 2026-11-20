@@ -406,6 +406,11 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
         val tag=operation
         chatAction{chatController.markInviteHandled(token,label)}
     }
+    /** 群名称改完先本地回填会话行，服务端 IM 通知到达后再自然覆盖。 */
+    fun noteGroupRenamed(groupId:String,name:String) {
+        if(groupId.isBlank()||name.isBlank())return
+        chatAction{chatController.noteGroupRenamed(groupId,name)}
+    }
     fun openBusinessGroupFromChat(groupId:String) {
         if(groupId.isBlank())return
         closeChat();openBusinessChat(groupId,true,"","")

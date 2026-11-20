@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.business
 
+import com.im.nativebootstrap.C
 import com.im.nativebootstrap.NativeNotices
 
 import android.content.Intent
@@ -55,11 +56,11 @@ fun NativeAboutPage(model:BootstrapViewModel,onLegal:(String)->Unit) {
     fun install(file:File) {
         runCatching{NativeRelease.install(context,file)}.fold({opened->if(!opened)notice="允许安装后，请返回此页点击安装。"},{notice=it.message?:"系统安装器暂不可用。"})
     }
-    Column(Modifier.fillMaxWidth().background(Color.White).padding(top=(160*s).dp,bottom=(40*s).dp),horizontalAlignment=Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxWidth().background(C.card).padding(top=(160*s).dp,bottom=(40*s).dp),horizontalAlignment=Alignment.CenterHorizontally) {
         Image(painterResource(R.drawable.uni_logo),"易可聊",Modifier.size((160*s).dp).clip(RoundedCornerShape((28*s).dp)))
-        Text("易可聊",Modifier.padding(top=(32*s).dp),fontSize=(36*s).sp,lineHeight=(52*s).sp,fontWeight=FontWeight.Bold,color=Color(0xFF212121))
-        Text("v"+local.versionName.orEmpty().removePrefix("v"),Modifier.padding(top=(12*s).dp),fontSize=(26*s).sp,lineHeight=(40*s).sp,color=Color(0xFF3A4558))
-        Box(Modifier.padding(top=(48*s).dp).height((80*s).dp).widthIn(min=(240*s).dp).clip(RoundedCornerShape((12*s).dp)).background(Color(0xFF0A2FC2)).clickable(enabled=!checking&&!downloading) {
+        Text("易可聊",Modifier.padding(top=(32*s).dp),fontSize=(36*s).sp,lineHeight=(52*s).sp,fontWeight=FontWeight.Bold,color=C.text)
+        Text("v"+local.versionName.orEmpty().removePrefix("v"),Modifier.padding(top=(12*s).dp),fontSize=(26*s).sp,lineHeight=(40*s).sp,color=C.hint)
+        Box(Modifier.padding(top=(48*s).dp).height((80*s).dp).widthIn(min=(240*s).dp).clip(RoundedCornerShape((12*s).dp)).background(C.primary).clickable(enabled=!checking&&!downloading) {
             val apk=ready
             if(apk!=null)install(apk) else {
                 checking=true;notice=""
@@ -72,12 +73,12 @@ fun NativeAboutPage(model:BootstrapViewModel,onLegal:(String)->Unit) {
             }
         }.padding(horizontal=(48*s).dp),contentAlignment=Alignment.Center) {Text(if(checking)"检查中..." else if(downloading)"正在下载并核验..." else if(ready!=null)"安装更新" else "检查更新",fontSize=(28*s).sp,lineHeight=(44*s).sp,fontWeight=FontWeight.SemiBold,color=Color.White)}
         Row(Modifier.padding(top=(40*s).dp),horizontalArrangement=Arrangement.spacedBy((32*s).dp)) {
-            Text("用户协议",Modifier.clickable{onLegal("agreement")},fontSize=(28*s).sp,color=Color(0xFF0A2FC2))
-            Text("隐私政策",Modifier.clickable{onLegal("privacy")},fontSize=(28*s).sp,color=Color(0xFF0A2FC2))
+            Text("用户协议",Modifier.clickable{onLegal("agreement")},fontSize=(28*s).sp,color=C.primaryText)
+            Text("隐私政策",Modifier.clickable{onLegal("privacy")},fontSize=(28*s).sp,color=C.primaryText)
         }
         if(NativeUpdateClient.downloadPage.isNotBlank())Text("官方下载页",Modifier.padding(top=(24*s).dp).clickable {
             runCatching{context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(NativeUpdateClient.downloadPage)))}.onFailure{notice="请稍后重试，或联系工作人员获取下载入口。"}
-        },fontSize=(26*s).sp,color=Color(0xFF0A2FC2))
+        },fontSize=(26*s).sp,color=C.primaryText)
     }
     release?.let{candidate->AlertDialog(onDismissRequest={release=null},title={Text("发现新版本")},text={Text(listOf(candidate.versionName,candidate.changelog).filter{it.isNotBlank()}.joinToString("\n"))},confirmButton={TextButton(onClick={
         release=null;downloading=true;notice=""

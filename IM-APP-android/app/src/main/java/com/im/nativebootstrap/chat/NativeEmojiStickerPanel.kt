@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.chat
 
+import com.im.nativebootstrap.C
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
@@ -96,11 +97,11 @@ fun NativeEmojiStickerPanel(callbacks:NativeChatCallbacks,selectEmoji:(String)->
             next()
         }
     }
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart=rpx(20),topEnd=rpx(20))).background(Color.White).semantics { contentDescription="表情面板" }) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart=rpx(20),topEnd=rpx(20))).background(C.card).semantics { contentDescription="表情面板" }) {
         Row(Modifier.fillMaxWidth().padding(start=rpx(20),end=rpx(20),top=rpx(18),bottom=rpx(12)),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(rpx(16))) {
-            for(index in 0..1)Box(Modifier.size(rpx(64)).clip(RoundedCornerShape(rpx(14))).background(if(tab==index)Color(0xFFF3F4F7) else Color.White).semantics { contentDescription=if(index==0)"常用表情" else "收藏表情" }.clickable { tab=index },contentAlignment=Alignment.Center) {
+            for(index in 0..1)Box(Modifier.size(rpx(64)).clip(RoundedCornerShape(rpx(14))).background(if(tab==index)C.field else C.card).semantics { contentDescription=if(index==0)"常用表情" else "收藏表情" }.clickable { tab=index },contentAlignment=Alignment.Center) {
                 Canvas(Modifier.size(rpx(34))) {
-                    val ink=Color(0xFF666666);val unit=size.width/24
+                    val ink=C.textSub;val unit=size.width/24
                     if(index==0) {
                         drawCircle(ink,10*unit,Offset(12*unit,12*unit),style=Stroke(1.4f*unit))
                         drawCircle(ink,unit,Offset(8*unit,9*unit));drawCircle(ink,unit,Offset(16*unit,9*unit))
@@ -109,23 +110,23 @@ fun NativeEmojiStickerPanel(callbacks:NativeChatCallbacks,selectEmoji:(String)->
                 }
             }
             Spacer(Modifier.weight(1f))
-            Box(Modifier.size(rpx(64)).clip(CircleShape).semantics { contentDescription="关闭表情面板" }.clickable(onClick=onClose),contentAlignment=Alignment.Center) { Text("×",fontSize=(32*factor).sp,color=Color(0xFF666666)) }
+            Box(Modifier.size(rpx(64)).clip(CircleShape).semantics { contentDescription="关闭表情面板" }.clickable(onClick=onClose),contentAlignment=Alignment.Center) { Text("×",fontSize=(32*factor).sp,color=C.textSub) }
         }
-        if(uploading)Text("表情上传中…",Modifier.padding(horizontal=14.dp,vertical=6.dp),fontSize=12.sp,color=Color.Gray)
-        error?.let { Text(it,Modifier.fillMaxWidth().clickable(enabled=!loading) { if(tab==1)load(page==0) }.padding(10.dp),fontSize=12.sp,color=Color(0xFF9B6C2F)) }
+        if(uploading)Text("表情上传中…",Modifier.padding(horizontal=14.dp,vertical=6.dp),fontSize=12.sp,color=C.hint)
+        error?.let { Text(it,Modifier.fillMaxWidth().clickable(enabled=!loading) { if(tab==1)load(page==0) }.padding(10.dp),fontSize=12.sp,color=C.warnText) }
         if(tab==0)LazyVerticalGrid(GridCells.Fixed(8),Modifier.fillMaxWidth().height(rpx(460)),contentPadding=PaddingValues(horizontal=rpx(12),vertical=rpx(18))) {
             items(emojiValues) { value -> Box(Modifier.height(rpx(80)).clickable { selectEmoji(value) },contentAlignment=Alignment.Center) { Text(value,fontSize=(46*factor).sp) } }
         }
         else LazyVerticalGrid(GridCells.Fixed(4),Modifier.fillMaxWidth().height(rpx(460)),contentPadding=PaddingValues(horizontal=rpx(20),vertical=rpx(22)),horizontalArrangement=Arrangement.spacedBy(rpx(16)),verticalArrangement=Arrangement.spacedBy(rpx(16))) {
-            item { Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(rpx(12))).border(1.dp,Color(0xFFA0A5B3),RoundedCornerShape(rpx(12))).clickable(enabled=!uploading&&!deleting) { pick.launch(arrayOf("image/*")) },contentAlignment=Alignment.Center) { Text("+",fontSize=(48*factor).sp,color=Color(0xFFA0A5B3)) } }
+            item { Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(rpx(12))).border(1.dp,C.faint,RoundedCornerShape(rpx(12))).clickable(enabled=!uploading&&!deleting) { pick.launch(arrayOf("image/*")) },contentAlignment=Alignment.Center) { Text("+",fontSize=(48*factor).sp,color=C.faint) } }
             items(stickers,key={ it.id }) { sticker ->
-                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(rpx(12))).background(Color(0xFFF5F6F8))) {
+                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(rpx(12))).background(C.field)) {
                     RemoteMediaImage(MediaURLs.image(sticker.content),Modifier.fillMaxSize().combinedClickable(enabled=!uploading&&!deleting,onClick={ selectSticker(sticker.content) },onLongClick={ selected=sticker }),edge=200,scale=ContentScale.Crop,description="自定义表情")
                     Box(Modifier.align(Alignment.TopEnd).padding(rpx(4)).size(rpx(32)).clip(CircleShape).background(Color(0x8C000000)).clickable(enabled=!uploading&&!deleting) { selected=sticker },contentAlignment=Alignment.Center) { Text("×",fontSize=(24*factor).sp,color=Color.White) }
                 }
             }
             item(span={ androidx.compose.foundation.lazy.grid.GridItemSpan(4) }) {
-                Text(if(loading)"读取中…" else if(stickers.isEmpty())"点击 + 添加表情" else if(end)"管理表情" else "加载更多",Modifier.fillMaxWidth().clickable(enabled=!loading&&!uploading) { if(end||stickers.isEmpty())manage() else load() }.padding(10.dp).wrapContentWidth(),color=Color.Gray,fontSize=12.sp)
+                Text(if(loading)"读取中…" else if(stickers.isEmpty())"点击 + 添加表情" else if(end)"管理表情" else "加载更多",Modifier.fillMaxWidth().clickable(enabled=!loading&&!uploading) { if(end||stickers.isEmpty())manage() else load() }.padding(10.dp).wrapContentWidth(),color=C.hint,fontSize=12.sp)
             }
         }
     }

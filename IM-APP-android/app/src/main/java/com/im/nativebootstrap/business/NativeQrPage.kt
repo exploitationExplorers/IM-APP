@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.business
 
+import com.im.nativebootstrap.C
 import com.im.nativebootstrap.NativeNotices
 
 import android.os.Build
@@ -67,35 +68,35 @@ fun NativeQrPage(controller:BusinessController,state:BusinessState) {
             saving=false;toast(result.fold({"已保存到相册"},{"二维码未保存，请重试"}))
         }
     }
-    Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(C.card).statusBarsPadding().navigationBarsPadding()) {
         val side=if(group)72 else 128
         Row(Modifier.fillMaxWidth().height((96*s).dp).padding(horizontal=(32*s).dp),verticalAlignment=Alignment.CenterVertically) {
             Box(Modifier.width((side*s).dp).fillMaxHeight().clickable{controller.back()},contentAlignment=Alignment.CenterStart){Image(painterResource(R.drawable.uni_icon_back),"返回",Modifier.size((44*s).dp))}
-            Text(if(group)"群二维码" else "二维码",Modifier.weight(1f),fontSize=(40*s).sp,fontWeight=FontWeight.Bold,color=Color(0xFF212121),textAlign=TextAlign.Center)
+            Text(if(group)"群二维码" else "二维码",Modifier.weight(1f),fontSize=(40*s).sp,fontWeight=FontWeight.Bold,color=C.text,textAlign=TextAlign.Center)
             Row(Modifier.width((side*s).dp),horizontalArrangement=Arrangement.End) {
                 if(!group)Box(Modifier.size((64*s).dp).clickable{controller.open("scan")},contentAlignment=Alignment.Center){Image(painterResource(R.drawable.uni_icon_scan),"扫一扫",Modifier.size((44*s).dp))}
                 Box(Modifier.size((64*s).dp).clickable(enabled=payload.isNotBlank()&&!saving){share()},contentAlignment=Alignment.Center){Image(painterResource(R.drawable.uni_icon_share),"分享",Modifier.size((44*s).dp))}
             }
         }
         if(state.loading||saving)LinearProgressIndicator(Modifier.fillMaxWidth())
-        state.error?.let{Text(it+" · 重试",Modifier.fillMaxWidth().clickable{controller.refresh()}.padding(16.dp),color=Color(0xFFDC2828),fontSize=13.sp)}
+        state.error?.let{Text(it+" · 重试",Modifier.fillMaxWidth().clickable{controller.refresh()}.padding(16.dp),color=C.danger,fontSize=13.sp)}
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start=(40*s).dp,end=(40*s).dp,top=(32*s).dp,bottom=((if(group)24 else 48)*s).dp)) {
             Row(Modifier.fillMaxWidth().padding(bottom=(48*s).dp),verticalAlignment=Alignment.CenterVertically) {
                 SharedAvatar(avatar,Modifier.size((88*s).dp).clip(CircleShape),group)
-                Text(name,Modifier.weight(1f).padding(start=(20*s).dp),fontSize=(34*s).sp,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis,color=Color(0xFF212121))
+                Text(name,Modifier.weight(1f).padding(start=(20*s).dp),fontSize=(34*s).sp,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis,color=C.text)
             }
             Box(Modifier.fillMaxWidth().heightIn(min=(560*s).dp),contentAlignment=Alignment.Center) {
                 if(payload.isNotBlank())QrImage(payload,Modifier.size((560*s).dp))
-                else Text(if(state.loading)"加载中..." else "二维码加载失败",fontSize=(28*s).sp,color=Color(0xFF636E86))
+                else Text(if(state.loading)"加载中..." else "二维码加载失败",fontSize=(28*s).sp,color=C.hint)
             }
-            if(group)Text("扫码进群",Modifier.fillMaxWidth().padding(top=(24*s).dp),fontSize=(28*s).sp,color=Color(0xFF9AA3B5),textAlign=TextAlign.Center)
+            if(group)Text("扫码进群",Modifier.fillMaxWidth().padding(top=(24*s).dp),fontSize=(28*s).sp,color=C.faint,textAlign=TextAlign.Center)
         }
-        if(!group)androidx.compose.material3.HorizontalDivider(color=Color(0xFFE1E3EA),thickness=(s).dp)
+        if(!group)androidx.compose.material3.HorizontalDivider(color=C.line,thickness=(s).dp)
         Row(Modifier.fillMaxWidth().padding(horizontal=(if(group)80*s else 0f).dp,vertical=(if(group)32*s else 0f).dp),horizontalArrangement=Arrangement.SpaceEvenly) {
             listOf(Triple("保存",R.drawable.uni_icon_download,{save()}),Triple("分享",R.drawable.uni_icon_share,{share()})).forEach{(label,icon,action)->
                 Column(Modifier.weight(1f).clickable(enabled=payload.isNotBlank()&&!saving,onClick=action).padding(vertical=((if(group)8 else 28)*s).dp),horizontalAlignment=Alignment.CenterHorizontally) {
                     Image(painterResource(icon),label,Modifier.size(((if(group)48 else 44)*s).dp))
-                    Text(label,Modifier.padding(top=((if(group)12 else 8)*s).dp),fontSize=((if(group)26 else 24)*s).sp,color=Color(0xFF636E86))
+                    Text(label,Modifier.padding(top=((if(group)12 else 8)*s).dp),fontSize=((if(group)26 else 24)*s).sp,color=C.hint)
                 }
             }
         }

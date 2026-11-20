@@ -45,12 +45,12 @@ internal fun ChatActionMenu(options:List<ChatMenuOption>,anchor:Offset?,dismiss:
             val left=((anchor?.x ?: viewWidth/2)-widthPx/2).coerceIn(pad,maxOf(pad,viewWidth-widthPx-pad))
             val below=if(anchor==null)(viewHeight-menuHeight)/2 else anchor.y+gap
             val top=(if(below+menuHeight+pad>viewHeight&&anchor!=null)anchor.y-menuHeight-gap else below).coerceIn(pad,maxOf(pad,viewHeight-menuHeight-pad))
-            Column(Modifier.offset { IntOffset(left.toInt(),top.toInt()) }.width(menuWidth).heightIn(max=maxHeight-16.dp).onSizeChanged { height=it.height }.shadow(12.dp,RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(Color.White).clickable {}.verticalScroll(rememberScrollState())) {
+            Column(Modifier.offset { IntOffset(left.toInt(),top.toInt()) }.width(menuWidth).heightIn(max=maxHeight-16.dp).onSizeChanged { height=it.height }.shadow(12.dp,RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(C.card).clickable {}.verticalScroll(rememberScrollState())) {
                 grid.chunked(2).forEachIndexed { rowIndex,row ->
                     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                         row.forEachIndexed { index,option ->
                             MenuCell(option,Modifier.weight(1f).fillMaxHeight())
-                            if(index==0)Box(Modifier.width(1.dp).fillMaxHeight().background(Color(0xFFECECEC)))
+                            if(index==0)Box(Modifier.width(1.dp).fillMaxHeight().background(C.field))
                         }
                         if(row.size==1)Spacer(Modifier.weight(1f))
                     }
@@ -66,9 +66,9 @@ internal fun ChatActionMenu(options:List<ChatMenuOption>,anchor:Offset?,dismiss:
     }
 }
 
-@Composable private fun MenuDivider() { Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFECECEC))) }
+@Composable private fun MenuDivider() { Box(Modifier.fillMaxWidth().height(1.dp).background(C.field)) }
 @Composable private fun MenuCell(option:ChatMenuOption,modifier:Modifier,wide:Boolean=false) {
     Box(modifier.heightIn(min=if(wide)48.dp else 44.dp).clickable(onClick=option.action).padding(horizontal=6.dp,vertical=12.dp),contentAlignment=Alignment.Center) {
-        Text(option.entry.label,fontSize=14.sp,lineHeight=20.sp,color=Color(0xFF1A1A1A),fontWeight=if(wide)FontWeight.SemiBold else FontWeight.Normal,textAlign=TextAlign.Center)
+        Text(option.entry.label,fontSize=14.sp,lineHeight=20.sp,color=C.text,fontWeight=if(wide)FontWeight.SemiBold else FontWeight.Normal,textAlign=TextAlign.Center)
     }
 }

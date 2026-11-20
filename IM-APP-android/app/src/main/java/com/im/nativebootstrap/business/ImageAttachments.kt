@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.business
 
+import com.im.nativebootstrap.C
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
@@ -37,12 +38,12 @@ data class ImageAttachment(val id:String,val url:String)
         }
     }}
     FlowRow(Modifier.fillMaxWidth().padding(top=(24*s).dp,bottom=(10*s).dp),horizontalArrangement=Arrangement.spacedBy((16*s).dp),verticalArrangement=Arrangement.spacedBy((16*s).dp)) {
-        images.forEach{image->Box(Modifier.size((160*s).dp).clip(RoundedCornerShape((12*s).dp)).background(Color(0xFFF3F4F7))) {
+        images.forEach{image->Box(Modifier.size((160*s).dp).clip(RoundedCornerShape((12*s).dp)).background(C.field)) {
             RemoteMediaImage(image.url,Modifier.fillMaxSize().clickable{preview=image.url},scale=ContentScale.Crop)
             Text("×",Modifier.align(Alignment.TopEnd).size((40*s).dp).background(Color.Black.copy(alpha=.55f)).clickable(enabled=!busy){images=images.filterNot{it==image};change(images,false)}.wrapContentSize(),fontSize=(28*s).sp,color=Color.White)
         }}
-        if(images.size<9)Column(Modifier.size((160*s).dp).clip(RoundedCornerShape((12*s).dp)).background(Color(0xFFF3F4F7)).clickable(enabled=!busy){picker.launch("image/*")},verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){Text(if(busy)"…" else "+",fontSize=(48*s).sp,color=Color(0xFF8A8F9C));Text(if(busy)"上传中" else "图片",fontSize=(22*s).sp,color=Color(0xFF8A8F9C))}
+        if(images.size<9)Column(Modifier.size((160*s).dp).clip(RoundedCornerShape((12*s).dp)).background(C.field).clickable(enabled=!busy){picker.launch("image/*")},verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){Text(if(busy)"…" else "+",fontSize=(48*s).sp,color=C.faint);Text(if(busy)"上传中" else "图片",fontSize=(22*s).sp,color=C.faint)}
     }
-    if(note.isNotBlank())Text(note,Modifier.padding(horizontal=18.dp),color=Color(0xFFDC2828),fontSize=13.sp)
+    if(note.isNotBlank())Text(note,Modifier.padding(horizontal=18.dp),color=C.danger,fontSize=13.sp)
     preview?.let{BusinessImagePreview(it){preview=null}}
 }

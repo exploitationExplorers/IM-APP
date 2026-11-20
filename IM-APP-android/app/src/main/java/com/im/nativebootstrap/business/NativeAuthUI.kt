@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.business
 
+import com.im.nativebootstrap.C
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -52,15 +53,15 @@ import kotlinx.coroutines.delay
             Text(if(register)"注册" else if(step==1)"忘记密码" else "设置新密码",Modifier.padding(top=20.dp,bottom=28.dp),fontSize=26.sp,color=Color.White,fontWeight=FontWeight.Bold)
             if(register||step==1) {
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
-                    Box {Box(Modifier.width(78.dp).height(52.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFF8FAFC)).clickable{countryMenu=true},contentAlignment=Alignment.Center){Text("$country ▾",fontSize=15.sp)}
+                    Box {Box(Modifier.width(78.dp).height(52.dp).clip(RoundedCornerShape(12.dp)).background(C.field).clickable{countryMenu=true},contentAlignment=Alignment.Center){Text("$country ▾",fontSize=15.sp)}
                         DropdownMenu(countryMenu,{countryMenu=false}){listOf("中国" to "+86","中国香港" to "+852","美国" to "+1","新加坡" to "+65","马来西亚" to "+60").forEach{(name,value)->DropdownMenuItem(text={Text("$name $value")},onClick={country=value;countryMenu=false})}}
                     }
                     AuthField(phone,{phone=it.filter(Char::isDigit).take(15)},"请输入手机号码",Modifier.weight(1f),keyboard=KeyboardType.Phone)
                 }
                 Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFF8FAFC)),verticalAlignment=Alignment.CenterVertically){AuthField(code,{code=it.filter(Char::isDigit).take(6)},"请输入验证码",Modifier.weight(1f),keyboard=KeyboardType.Number);Text(if(countdown>0)"${countdown}s" else if(sending)"发送中" else "获取验证码",Modifier.clickable(enabled=countdown==0&&!sending){
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(C.field),verticalAlignment=Alignment.CenterVertically){AuthField(code,{code=it.filter(Char::isDigit).take(6)},"请输入验证码",Modifier.weight(1f),keyboard=KeyboardType.Number);Text(if(countdown>0)"${countdown}s" else if(sending)"发送中" else "获取验证码",Modifier.clickable(enabled=countdown==0&&!sending){
                     when {register&&!agreed->note="请先阅读并同意用户协议与隐私政策";!phoneValid(country,phone)->note="请输入正确的手机号码";else->{sending=true;model.authRequest(endpoint,"/auth/sms/send",obj("countryCode" to country,"phone" to phone,"scene" to if(register)"register" else "reset")){result->sending=false;result.fold({value->countdown=if(value.isJsonObject)value.asJsonObject.text("retryAfterSec").toIntOrNull()?:60 else 60;note="验证码已发送"},{error->note=error.message?:"验证码发送失败"})}}}
-                }.padding(horizontal=14.dp),fontSize=13.sp,color=Color(0xFF0A2FC2))}
+                }.padding(horizontal=14.dp),fontSize=13.sp,color=C.primaryText)}
             }
             if(register||step==2) {
                 Spacer(Modifier.height(16.dp));AuthField(password,{password=it},if(register)"设置登录密码（至少 6 位）" else "请输入新密码",secret=!reveal)
@@ -68,7 +69,7 @@ import kotlinx.coroutines.delay
                 Text(if(reveal)"隐藏密码" else "显示密码",Modifier.align(Alignment.End).clickable{reveal=!reveal}.padding(vertical=10.dp),fontSize=12.sp,color=Color.White)
             }
             if(register) {
-                Row(Modifier.fillMaxWidth().padding(vertical=18.dp),verticalAlignment=Alignment.CenterVertically){Box(Modifier.size(18.dp).clip(CircleShape).border(1.dp,Color.White,CircleShape).background(if(agreed)Color.White else Color.Transparent).clickable{agreed=!agreed},contentAlignment=Alignment.Center){if(agreed)Text("✓",color=Color(0xFF0A2FC2),fontSize=12.sp)};Text(" 我已阅读并同意 ",fontSize=11.sp,color=Color.White);Text("用户协议",Modifier.clickable{legal("agreement")},fontSize=11.sp,color=Color.White);Text(" 和 ",fontSize=11.sp,color=Color.White);Text("隐私政策",Modifier.clickable{legal("privacy")},fontSize=11.sp,color=Color.White)}
+                Row(Modifier.fillMaxWidth().padding(vertical=18.dp),verticalAlignment=Alignment.CenterVertically){Box(Modifier.size(18.dp).clip(CircleShape).border(1.dp,Color.White,CircleShape).background(if(agreed)Color.White else Color.Transparent).clickable{agreed=!agreed},contentAlignment=Alignment.Center){if(agreed)Text("✓",color=C.primaryText,fontSize=12.sp)};Text(" 我已阅读并同意 ",fontSize=11.sp,color=Color.White);Text("用户协议",Modifier.clickable{legal("agreement")},fontSize=11.sp,color=Color.White);Text(" 和 ",fontSize=11.sp,color=Color.White);Text("隐私政策",Modifier.clickable{legal("privacy")},fontSize=11.sp,color=Color.White)}
             }
             Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(12.dp)).background(Color.White).clickable(enabled=!state.busy&&!resetBusy){
                 when {
@@ -81,12 +82,12 @@ import kotlinx.coroutines.delay
                     register->{model.login(endpoint,country,phone,password,true,code);password="";confirm=""}
                     else->{resetBusy=true;model.authRequest(endpoint,"/auth/password/reset",obj("phone" to phone,"countryCode" to country,"code" to code,"password" to password)){result->resetBusy=false;result.fold({password="";NativeNotices.show("密码已重置，请使用新密码登录");back()},{error->note=error.message?:"重置失败";if(note.contains("验证码")){step=1;code=""}})}}
                 }
-            },contentAlignment=Alignment.Center){Text(if(state.busy||resetBusy)"提交中…" else if(register)"注册" else if(step==1)"下一步" else "确认",fontSize=16.sp,color=Color(0xFF0A2FC2),fontWeight=FontWeight.Medium)}
+            },contentAlignment=Alignment.Center){Text(if(state.busy||resetBusy)"提交中…" else if(register)"注册" else if(step==1)"下一步" else "确认",fontSize=16.sp,color=C.primaryText,fontWeight=FontWeight.Medium)}
             Spacer(Modifier.height(36.dp))
         }
     }
 }
 private fun phoneValid(country:String,phone:String)=when(country){"+86"->Regex("1\\d{10}").matches(phone);"+852","+65"->Regex("\\d{8}").matches(phone);"+1"->Regex("\\d{10}").matches(phone);else->Regex("\\d{9,10}").matches(phone)}
 @Composable private fun AuthField(value:String,change:(String)->Unit,hint:String,modifier:Modifier=Modifier.fillMaxWidth(),secret:Boolean=false,keyboard:KeyboardType=KeyboardType.Text) {
-    Box(modifier.height(52.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFF8FAFC)).padding(horizontal=16.dp),contentAlignment=Alignment.CenterStart){BasicTextField(value,change,Modifier.fillMaxWidth(),singleLine=true,textStyle=TextStyle(fontSize=15.sp,color=Color(0xFF212121)),cursorBrush=SolidColor(Color(0xFF0A2FC2)),visualTransformation=if(secret)PasswordVisualTransformation() else VisualTransformation.None,keyboardOptions=KeyboardOptions(keyboardType=keyboard),decorationBox={inner->Box {if(value.isEmpty())Text(hint,fontSize=15.sp,color=Color(0xFF636E86));inner()}})}
+    Box(modifier.height(52.dp).clip(RoundedCornerShape(12.dp)).background(C.field).padding(horizontal=16.dp),contentAlignment=Alignment.CenterStart){BasicTextField(value,change,Modifier.fillMaxWidth(),singleLine=true,textStyle=TextStyle(fontSize=15.sp,color=C.text),cursorBrush=SolidColor(C.primaryText),visualTransformation=if(secret)PasswordVisualTransformation() else VisualTransformation.None,keyboardOptions=KeyboardOptions(keyboardType=keyboard),decorationBox={inner->Box {if(value.isEmpty())Text(hint,fontSize=15.sp,color=C.hint);inner()}})}
 }

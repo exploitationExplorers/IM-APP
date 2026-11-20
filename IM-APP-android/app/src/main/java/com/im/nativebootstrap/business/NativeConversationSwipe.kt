@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.business
 
+import com.im.nativebootstrap.C
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -32,8 +33,8 @@ import kotlin.math.roundToInt
     val offset by animateFloatAsState(target,if(dragging)snap() else tween(160),label="conversation-swipe")
     Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clipToBounds()) {
         Row(Modifier.align(Alignment.CenterEnd).fillMaxHeight()) {
-            Box(Modifier.width(buttonWidth).fillMaxHeight().background(if(pinned)Color(0xFFE7E8EC) else Color(0xFFF0F1F4)).clickable{onClose();onPin()},contentAlignment=Alignment.Center){Text(if(pinned)"取消置顶" else "置顶",fontSize=14.sp,color=Color(0xFF212121))}
-            Box(Modifier.width(buttonWidth).fillMaxHeight().background(Color(0xFFFFE5E5)).clickable{onClose();onRemove()},contentAlignment=Alignment.Center){Text("移除",fontSize=14.sp,color=Color(0xFFE54D42))}
+            Box(Modifier.width(buttonWidth).fillMaxHeight().background(if(pinned)C.field else C.field).clickable{onClose();onPin()},contentAlignment=Alignment.Center){Text(if(pinned)"取消置顶" else "置顶",fontSize=14.sp,color=C.text)}
+            Box(Modifier.width(buttonWidth).fillMaxHeight().background(C.dangerBg).clickable{onClose();onRemove()},contentAlignment=Alignment.Center){Text("移除",fontSize=14.sp,color=C.danger)}
         }
         Box(Modifier.offset{IntOffset(offset.roundToInt(),0)}.draggable(rememberDraggableState{delta->target=(target+delta).coerceIn(-limit,0f)},Orientation.Horizontal,
             onDragStarted={dragging=true},onDragStopped={velocity->

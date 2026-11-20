@@ -1,5 +1,6 @@
 package com.im.nativebootstrap.business
 
+import com.im.nativebootstrap.C
 import com.im.nativebootstrap.NativeNotices
 
 import android.content.ClipData
@@ -32,9 +33,10 @@ import com.im.nativebootstrap.R
 import com.im.nativebootstrap.chat.ChatConversation
 import com.im.nativebootstrap.media.SharedAvatar
 
-private val FriendInk=Color(0xFF212121)
-private val FriendPage=Color(0xFFF3F4F7)
-private val FriendBlue=Color(0xFF0A2FC2)
+// 必须是 getter：顶层 val 会把浅色值一次性快照，深色切换后不再跟随。
+private val FriendInk get()=C.text
+private val FriendPage get()=C.field
+private val FriendBlue get()=C.primaryText
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable private fun FriendInfoRow(label:String,value:String="",arrow:Boolean=false,copyValue:(()->Unit)?=null,trailing:(@Composable RowScope.()->Unit)?=null,onClick:(()->Unit)?=null) {
@@ -75,43 +77,43 @@ private val FriendBlue=Color(0xFF0A2FC2)
     Box(Modifier.fillMaxSize().background(FriendPage)) {
         Image(painterResource(R.drawable.uni_friend_info_bg),null,Modifier.fillMaxWidth().height((460*s).dp),contentScale=ContentScale.Crop)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-            Row(Modifier.fillMaxWidth().height((96*s).dp).background(Color.White).padding(horizontal=(32*s).dp),verticalAlignment=Alignment.CenterVertically){
+            Row(Modifier.fillMaxWidth().height((96*s).dp).background(C.card).padding(horizontal=(32*s).dp),verticalAlignment=Alignment.CenterVertically){
                 Box(Modifier.width((72*s).dp).fillMaxHeight().clickable{c.back()},contentAlignment=Alignment.CenterStart){Image(painterResource(R.drawable.uni_icon_back),"返回",Modifier.size((44*s).dp))}
                 Text("好友详情",Modifier.weight(1f),fontSize=(40*s).sp,fontWeight=FontWeight.Bold,textAlign=TextAlign.Center,color=FriendInk)
                 Box(Modifier.size((72*s).dp),contentAlignment=Alignment.Center){
                     Image(painterResource(R.drawable.uni_icon_more),"更多",Modifier.size((36*s).dp).rotate(90f).clickable{menu=!menu})
                     DropdownMenu(expanded=menu,onDismissRequest={menu=false}){
                         DropdownMenuItem(text={Text(if(d.flag("isBlocked"))"移出黑名单" else "加入黑名单",fontSize=(28*s).sp)},leadingIcon={Image(painterResource(R.drawable.uni_icon_block),null,Modifier.size((40*s).dp))},enabled=!busy&&!state.loading&&d.identifier().isNotBlank(),onClick={menu=false;confirmation="block"})
-                        DropdownMenuItem(text={Text("删除联络人",fontSize=(28*s).sp,color=Color(0xFFEF4343))},leadingIcon={Image(painterResource(R.drawable.uni_icon_profile_remove),null,Modifier.size((40*s).dp))},enabled=!busy&&!state.loading&&d.identifier().isNotBlank(),onClick={menu=false;confirmation="delete"})
+                        DropdownMenuItem(text={Text("删除联络人",fontSize=(28*s).sp,color=C.danger)},leadingIcon={Image(painterResource(R.drawable.uni_icon_profile_remove),null,Modifier.size((40*s).dp))},enabled=!busy&&!state.loading&&d.identifier().isNotBlank(),onClick={menu=false;confirmation="delete"})
                     }
                 }
             }
             if(state.loading)LinearProgressIndicator(Modifier.fillMaxWidth(),color=FriendBlue)
-            state.error?.let{Text("$it · 重试",Modifier.fillMaxWidth().background(Color.White).clickable{c.refresh()}.padding(12.dp),fontSize=13.sp,color=Color(0xFFDC2828))}
+            state.error?.let{Text("$it · 重试",Modifier.fillMaxWidth().background(C.card).clickable{c.refresh()}.padding(12.dp),fontSize=13.sp,color=C.danger)}
             Spacer(Modifier.height((60*s).dp))
             if(d.identifier().isNotBlank()){
                 NativePullRefresh(state.loading,{c.refresh()},Modifier.weight(1f)) {
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                         // 把头像上探区域留在滚动视口内，避免 scroll 裁掉上方 40 rpx。
                         Spacer(Modifier.height((40*s).dp))
-                        Column(Modifier.fillMaxWidth().background(Color.White,RoundedCornerShape(topStart=(32*s).dp,topEnd=(32*s).dp))) {
+                        Column(Modifier.fillMaxWidth().background(C.card,RoundedCornerShape(topStart=(32*s).dp,topEnd=(32*s).dp))) {
                             Box(Modifier.fillMaxWidth().heightIn(min=(132*s).dp)){
                                 Row(Modifier.fillMaxWidth().offset(y=(-40*s).dp).padding(horizontal=(48*s).dp),horizontalArrangement=Arrangement.spacedBy((32*s).dp),verticalAlignment=Alignment.Top){
                                     SharedAvatar(d.text("avatar"),Modifier.size((144*s).dp).clip(CircleShape).border((4*s).dp,Color.White,CircleShape))
                                     Column(Modifier.weight(1f).padding(top=(36*s).dp).heightIn(min=(104*s).dp)){
                                         Text(name,Modifier.fillMaxWidth().combinedClickable(onClick={},onDoubleClick={copy(name)},onLongClick={copy(name)}),fontSize=(34*s).sp,lineHeight=(48*s).sp,fontWeight=FontWeight.Bold,color=FriendInk,maxLines=1,overflow=TextOverflow.Ellipsis)
-                                        if(d.text("remark").isNotBlank()&&d.text("nickname").isNotBlank()&&d.text("remark").trim()!=d.text("nickname").trim())Text("昵称："+d.text("nickname"),Modifier.padding(top=(6*s).dp).combinedClickable(onClick={},onDoubleClick={copy(d.text("nickname"))},onLongClick={copy(d.text("nickname"))}),fontSize=(24*s).sp,lineHeight=(34*s).sp,color=Color(0xFF9AA3B5),maxLines=1,overflow=TextOverflow.Ellipsis)
-                                        if(d.flag("isBlocked"))Text("已拉黑",Modifier.padding(top=(8*s).dp).clip(RoundedCornerShape((8*s).dp)).background(Color(0xFFFFE5E5)).padding(horizontal=(16*s).dp,vertical=(4*s).dp),fontSize=(22*s).sp,color=Color(0xFFE54D42))
+                                        if(d.text("remark").isNotBlank()&&d.text("nickname").isNotBlank()&&d.text("remark").trim()!=d.text("nickname").trim())Text("昵称："+d.text("nickname"),Modifier.padding(top=(6*s).dp).combinedClickable(onClick={},onDoubleClick={copy(d.text("nickname"))},onLongClick={copy(d.text("nickname"))}),fontSize=(24*s).sp,lineHeight=(34*s).sp,color=C.faint,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                        if(d.flag("isBlocked"))Text("已拉黑",Modifier.padding(top=(8*s).dp).clip(RoundedCornerShape((8*s).dp)).background(C.dangerBg).padding(horizontal=(16*s).dp,vertical=(4*s).dp),fontSize=(22*s).sp,color=C.danger)
                                     }
                                 }
                             }
-                            HorizontalDivider(Modifier.padding(start=(40*s).dp,end=(40*s).dp,top=(8*s).dp),color=Color(0xFFE1E3EA),thickness=s.dp)
+                            HorizontalDivider(Modifier.padding(start=(40*s).dp,end=(40*s).dp,top=(8*s).dp),color=C.line,thickness=s.dp)
                             FriendInfoRow("备注",d.text("remark"),arrow=true,copyValue={copy(d.text("remark"))}){c.open("friend-remark",r.id)}
                             val since=contactEventTime(d.text("friendSince"));if(since.isNotBlank())FriendInfoRow("添加时间",since)
                             val last=contactLastSeen(d.text("lastSeenAt"));if(last.isNotBlank())FriendInfoRow("最近上线",last)
                             FriendInfoRow("聊天号",trailing={
-                                Text(d.text("publicId").ifBlank{"—"},Modifier.weight(1f).padding(start=(8*s).dp),textAlign=TextAlign.End,fontSize=(32*s).sp,color=Color(0xFF626E8D),fontFamily=FontFamily.Monospace,maxLines=1,overflow=TextOverflow.Ellipsis)
-                                if(d.text("publicId").isNotBlank())Text("复制",Modifier.padding(start=(16*s).dp).height((64*s).dp).clip(RoundedCornerShape((8*s).dp)).background(Color(0xFF3C83F6)).clickable{copy(d.text("publicId"))}.padding(horizontal=(16*s).dp).wrapContentSize(),fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold,color=Color.White)
+                                Text(d.text("publicId").ifBlank{"—"},Modifier.weight(1f).padding(start=(8*s).dp),textAlign=TextAlign.End,fontSize=(32*s).sp,color=C.hint,fontFamily=FontFamily.Monospace,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                if(d.text("publicId").isNotBlank())Text("复制",Modifier.padding(start=(16*s).dp).height((64*s).dp).clip(RoundedCornerShape((8*s).dp)).background(C.primary).clickable{copy(d.text("publicId"))}.padding(horizontal=(16*s).dp).wrapContentSize(),fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold,color=Color.White)
                             })
                             FriendInfoRow("标签",elements(d.get("tags")).joinToString("、"){it.text("name")},arrow=true){c.open("friend-tags",r.id,seed=d)}
                         }
@@ -120,24 +122,24 @@ private val FriendBlue=Color(0xFF0A2FC2)
                                 Text("共同群组 (${groups.size})",Modifier.weight(1f),fontSize=(28*s).sp,lineHeight=(40*s).sp,fontWeight=FontWeight.Bold,color=FriendInk)
                                 if(groups.size>3)Text("查看全部",Modifier.clickable{c.open("common-groups",r.id)},fontSize=(24*s).sp,color=FriendInk)
                             }
-                            groups.take(3).forEach{group->Row(Modifier.fillMaxWidth().background(Color.White).clickable{c.openChat(group,true)}.padding(horizontal=(40*s).dp,vertical=(16*s).dp),verticalAlignment=Alignment.CenterVertically){
+                            groups.take(3).forEach{group->Row(Modifier.fillMaxWidth().background(C.card).clickable{c.openChat(group,true)}.padding(horizontal=(40*s).dp,vertical=(16*s).dp),verticalAlignment=Alignment.CenterVertically){
                                 SharedAvatar(group.text("avatar"),Modifier.size((96*s).dp).clip(CircleShape),true)
                                 Text(group.text("name"),Modifier.weight(1f).padding(start=(32*s).dp),fontSize=(32*s).sp,color=FriendInk,maxLines=1,overflow=TextOverflow.Ellipsis)
                                 Image(painterResource(R.drawable.uni_icon_chevron),null,Modifier.size((40*s).dp).alpha(.45f))
                             }}
                         }
-                        Column(Modifier.fillMaxWidth().padding(top=(24*s).dp).clip(RoundedCornerShape((24*s).dp)).background(Color.White)){
+                        Column(Modifier.fillMaxWidth().padding(top=(24*s).dp).clip(RoundedCornerShape((24*s).dp)).background(C.card)){
                             ToggleRow("消息免打扰",conversation?.muted?:false,enabled=conversation!=null&&!busy){updateSettings(muted=it)}
-                            HorizontalDivider(color=Color(0xFFF0F0F0),thickness=s.dp)
+                            HorizontalDivider(color=C.field,thickness=s.dp)
                             ToggleRow("置顶聊天",conversation?.pinned?:false,enabled=conversation!=null&&!busy){updateSettings(pinned=it)}
-                            if(settingsLoading)Text("正在加载会话设置…",Modifier.padding(12.dp),color=Color.Gray,fontSize=12.sp)
-                            if(settingsError.isNotBlank())Text("$settingsError · 点击重试",Modifier.fillMaxWidth().clickable(enabled=!settingsLoading){loadSettings()}.padding(12.dp),color=Color(0xFFDC2828),fontSize=12.sp)
+                            if(settingsLoading)Text("正在加载会话设置…",Modifier.padding(12.dp),color=C.hint,fontSize=12.sp)
+                            if(settingsError.isNotBlank())Text("$settingsError · 点击重试",Modifier.fillMaxWidth().clickable(enabled=!settingsLoading){loadSettings()}.padding(12.dp),color=C.danger,fontSize=12.sp)
                         }
-                        if(note.isNotBlank())Text(note,Modifier.padding(16.dp),color=Color(0xFF626E8D),fontSize=13.sp)
+                        if(note.isNotBlank())Text(note,Modifier.padding(16.dp),color=C.hint,fontSize=13.sp)
                         Spacer(Modifier.height((16*s).dp))
                     }
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal=(40*s).dp,vertical=(16*s).dp).height((80*s).dp).clip(RoundedCornerShape((8*s).dp)).background(FriendBlue).clickable(enabled=!busy&&!state.loading){c.openChat(d)},horizontalArrangement=Arrangement.Center,verticalAlignment=Alignment.CenterVertically){Image(painterResource(R.drawable.uni_icon_chat_white),null,Modifier.size((40*s).dp));Text("消息",Modifier.padding(start=(8*s).dp),fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold,color=Color.White)}
+                Row(Modifier.fillMaxWidth().padding(horizontal=(40*s).dp,vertical=(16*s).dp).height((80*s).dp).clip(RoundedCornerShape((8*s).dp)).background(C.primary).clickable(enabled=!busy&&!state.loading){c.openChat(d)},horizontalArrangement=Arrangement.Center,verticalAlignment=Alignment.CenterVertically){Image(painterResource(R.drawable.uni_icon_chat_white),null,Modifier.size((40*s).dp));Text("消息",Modifier.padding(start=(8*s).dp),fontSize=(28*s).sp,fontWeight=FontWeight.SemiBold,color=Color.White)}
             }else Spacer(Modifier.weight(1f))
         }
     }
@@ -147,5 +149,5 @@ private val FriendBlue=Color(0xFF0A2FC2)
             busy=false
             if(c.routeVersion==routeVersion)result.fold({toast(it);if(delete)c.back() else c.refresh()},{note=it.message?:"操作未完成，请重试"})
         }
-    }){Text(if(delete)"删除" else if(blocked)"拉黑" else "解除",color=Color(0xFFEF4343))}},dismissButton={TextButton(onClick={confirmation=null}){Text("取消")}})}
+    }){Text(if(delete)"删除" else if(blocked)"拉黑" else "解除",color=C.danger)}},dismissButton={TextButton(onClick={confirmation=null}){Text("取消")}})}
 }
