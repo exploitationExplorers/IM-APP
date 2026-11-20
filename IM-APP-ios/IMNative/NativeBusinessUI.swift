@@ -2,11 +2,18 @@ import UIKit
 import IMCore
 
 struct NativeBusinessRow {
+    enum AvatarStyle {
+        case person, group, groupSetting
+
+        var placeholder: String { self == .person ? "uni_avatar_default" : "uni_group_default" }
+    }
+
     var title: String
     var detail = ""
     var badgeCount: Int? = nil
     var icon: String? = nil
     var avatar: String? = nil
+    var avatarStyle: AvatarStyle = .person
     var destructive = false
     var checked: Bool? = nil
     var toggle: ((Bool) -> Void)? = nil
@@ -81,7 +88,7 @@ class NativeBusinessListController: UITableViewController {
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         let r = view.bounds.width / 750
         let row = sections[indexPath.section][indexPath.row]
-        return (row.avatar == nil ? 96 : 128) * r
+        return (row.avatar == nil || row.avatarStyle == .groupSetting ? 96 : 128) * r
     }
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         let title = section < sectionTitles.count ? sectionTitles[section] : ""
@@ -132,13 +139,15 @@ final class NativeParityToggle: UIControl {
 private final class NativeBusinessCell: UITableViewCell {
     private let badge = NativeCountBadge()
     private let name = UILabel(); private let valueLabel = UILabel(); private let icon = UIImageView()
+    private let avatarBackground = UIView()
     private let avatar = NativeRemoteImageView(); private let arrow = UIImageView(image: NativeUITheme.image("uni_mine_icon_chevron"))
     private let check = UILabel(); private let control = NativeParityToggle(); private let line = UIView()
     private var represented: NativeBusinessRow?
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: .default, reuseIdentifier: reuseIdentifier)
-        [name, valueLabel, icon, avatar, arrow, check, control, line, badge].forEach { contentView.addSubview($0) }
+        [name, valueLabel, icon, avatarBackground, avatar, arrow, check, control, line, badge].forEach { contentView.addSubview($0) }
         icon.contentMode = .scaleAspectFit; avatar.contentMode = .scaleAspectFill; avatar.clipsToBounds = true
+        avatarBackground.backgroundColor = UIColor(hex: 0xe9f2ff)
         arrow.contentMode = .scaleAspectFit; check.text = "✓"; check.textAlignment = .center; check.textColor = NativeUITheme.primary
         name.lineBreakMode = .byTruncatingTail; valueLabel.lineBreakMode = .byTruncatingTail; valueLabel.textColor = NativeUITheme.secondary
         line.backgroundColor = UIColor(hex: 0xf0f1f4); backgroundColor = .white
@@ -153,7 +162,12 @@ private final class NativeBusinessCell: UITableViewCell {
         name.textColor = row.destructive ? UIColor(hex: 0xdc2828) : UIColor(hex: 0x212121)
         icon.image = row.icon.flatMap(NativeUITheme.image); icon.isHidden = row.icon == nil
         avatar.isHidden = row.avatar == nil
-        if let raw = row.avatar { avatar.load(raw, policy: policy) } else { avatar.cancel() }
+        avatarBackground.isHidden = row.avatar == nil || row.avatarStyle != .groupSetting
+        if let raw = row.avatar {
+            avatar.load(raw, policy: policy, placeholder: row.avatarStyle.placeholder)
+        } else {
+            avatar.cancel()
+        }
         control.isHidden = row.toggle == nil; control.value = row.checked ?? false
         // 服务端确认并重载后再保留新值，失败时不能显示一个未保存的开关状态。
         control.change = { [weak self] next in self?.control.value = row.checked ?? false; row.toggle?(next) }
@@ -166,7 +180,7 @@ private final class NativeBusinessCell: UITableViewCell {
         super.layoutSubviews(); guard let row = represented else { return }
         let r = bounds.width / 750, height = contentView.bounds.height, width = contentView.bounds.width
         var left = 32 * r; var right = width - 32 * r
-        if row.avatar != nil { avatar.frame = CGRect(x: left, y: (height - 88 * r) / 2, width: 88 * r, height: 88 * r); avatar.layer.cornerRadius = 44 * r; left += 112 * r }
+        if row.avatar != nil && row.avatarStyle != .groupSetting { avatar.frame = CGRect(x: left, y: (height - 88 * r) / 2, width: 88 * r, height: 88 * r); avatar.layer.cornerRadius = 44 * r; left += 112 * r }
         else if row.icon != nil { icon.frame = CGRect(x: left, y: (height - 40 * r) / 2, width: 40 * r, height: 40 * r); left += 56 * r }
         if !control.isHidden { control.frame = CGRect(x: right - 72 * r, y: 0, width: 88 * r, height: height); right -= 88 * r }
         else if !check.isHidden { check.frame = CGRect(x: right - 40 * r, y: 0, width: 40 * r, height: height); right -= 52 * r }
@@ -176,8 +190,17 @@ private final class NativeBusinessCell: UITableViewCell {
             badge.frame = CGRect(x: right - badgeWidth, y: (height - 36 * r) / 2, width: badgeWidth, height: 36 * r)
             right -= badgeWidth + 12 * r
         }
+        if row.avatar != nil && row.avatarStyle == .groupSetting {
+            let backgroundSize = 64 * r
+            let avatarSize = 52 * r
+            avatarBackground.frame = CGRect(x: right - backgroundSize, y: (height - backgroundSize) / 2, width: backgroundSize, height: backgroundSize)
+            avatarBackground.layer.cornerRadius = backgroundSize / 2
+            avatar.frame = CGRect(x: avatarBackground.frame.midX - avatarSize / 2, y: (height - avatarSize) / 2, width: avatarSize, height: avatarSize)
+            avatar.layer.cornerRadius = avatarSize / 2
+            right -= backgroundSize + 12 * r
+        }
         name.font = .systemFont(ofSize: 32 * r); valueLabel.font = .systemFont(ofSize: 28 * r); check.font = .systemFont(ofSize: 32 * r)
-        if row.avatar != nil && !row.detail.isEmpty {
+        if row.avatar != nil && row.avatarStyle != .groupSetting && !row.detail.isEmpty {
             name.frame = CGRect(x: left, y: height / 2 - 39 * r, width: max(0, right - left), height: 44 * r)
             valueLabel.textAlignment = .left; valueLabel.frame = CGRect(x: left, y: height / 2 + 9 * r, width: max(0, right - left), height: 36 * r)
         } else {

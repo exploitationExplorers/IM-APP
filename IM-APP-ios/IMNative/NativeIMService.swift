@@ -23,6 +23,7 @@ struct NativeConversation: Equatable {
     let latestMessageID: String
     let latestSeq: Int
     let latestSender: String
+    let groupDismissed: Bool
     let extra: String
     init?(_ data: [String: Any]) {
         guard let id = data["id"] as? String, !id.isEmpty else { return nil }
@@ -33,6 +34,7 @@ struct NativeConversation: Equatable {
         avatar = data["avatar"] as? String ?? ""; muted = data["muted"] as? Bool ?? false
         latestMessageID = data["latestMessageID"] as? String ?? ""
         latestSeq = (data["latestSeq"] as? NSNumber)?.intValue ?? 0; latestSender = data["latestSender"] as? String ?? ""
+        groupDismissed = data["groupDismissed"] as? Bool ?? false
     }
     var canOpen: Bool { [1, 3].contains(type) && !target.isEmpty }
 }
@@ -57,7 +59,7 @@ struct NativeSearchHit { let conversationID: String; let title: String; let mess
 struct NativeSearchPage { let items: [NativeSearchHit]; let hasMore: Bool }
 
 private enum NativeChatError: LocalizedError {
-    case inactive, unavailable, timedOut, invalidMessage, noCursor, persistence
+    case inactive, unavailable, timedOut, invalidMessage, noCursor, persistence, groupDismissed
     var errorDescription: String? {
         switch self {
         case .inactive: return "当前聊天会话已退出，请重新登录。"
@@ -66,6 +68,7 @@ private enum NativeChatError: LocalizedError {
         case .invalidMessage: return "暂时不能处理此条消息。"
         case .noCursor: return "历史游标没有推进，请稍后重试；未标记为历史结束。"
         case .persistence: return "待发记录保存失败，本次没有发送消息，请检查存储空间。"
+        case .groupDismissed: return "群聊已解散"
         }
     }
 }
@@ -205,8 +208,28 @@ final class NativeIMService {
 
     var isActive: Bool { !stopped && Self.current === self }
     var canSend: Bool { isActive && loggedIn && sdkConnected && localReadable && !needsAuthentication && UIApplication.shared.isProtectedDataAvailable }
-    func canSend(to conversation: NativeConversation) -> Bool { canSend && (conversation.type != 3 || groupTargets[conversation.id]?.canChat == true) }
-    func sendRestriction(_ conversation: NativeConversation) -> String? { conversation.type == 3 && groupTargets[conversation.id]?.canChat == false ? groupTargets[conversation.id]?.denyReason ?? "当前禁止在此群发言。" : nil }
+    private func isGroupDismissed(_ conversation: NativeConversation) -> Bool {
+        conversation.type == 3 && (conversation.groupDismissed || groupTargets[conversation.id]?.denyReason == "group_inactive")
+    }
+
+    func isRoomDismissed(_ conversation: NativeConversation) -> Bool {
+        isGroupDismissed(conversation) || (conversation.type == 3 && conversations.contains { $0.id == conversation.id && $0.groupDismissed })
+    }
+
+    func canSend(to conversation: NativeConversation) -> Bool {
+        canSend && (conversation.type != 3 || (!isRoomDismissed(conversation) && groupTargets[conversation.id]?.canChat == true))
+    }
+
+    func sendRestriction(_ conversation: NativeConversation) -> String? {
+        if isRoomDismissed(conversation) { return "群聊已解散" }
+        guard conversation.type == 3, let target = groupTargets[conversation.id], !target.canChat else { return nil }
+        switch target.denyReason {
+        case "group_muted": return "全群禁言中"
+        case "member_muted": return "您已被禁言"
+        case "not_member": return "您已不在该群聊"
+        default: return "当前禁止在此群发言。"
+        }
+    }
     func loadAllConversations() async throws -> [NativeConversation] {
         await loadConversations(reset: true)
         guard isActive, localReadable, !loadingConversations else { throw NativeChatError.unavailable }
@@ -345,8 +368,18 @@ final class NativeIMService {
                 while !Task.isCancelled {
                     do { try await Task.sleep(nanoseconds: 30_000_000_000) } catch { return }
                     guard let self = self, self.isActive else { return }
-                    do { try await self.refreshRetentionBatch(); for conversation in self.conversations where self.groupTargets[conversation.id] != nil { try await self.refreshGroupVisibility(conversation) } }
-                    catch { if self.isActive { self.lastError = "群消息可见性暂未更新，保留已确认水位。"; self.publish() } }
+                    do {
+                        try await self.refreshRetentionBatch()
+                        for conversation in self.conversations where self.groupTargets[conversation.id] != nil && !self.isGroupDismissed(conversation) {
+                            do { try await self.refreshGroupVisibility(conversation) }
+                            catch NativeChatError.groupDismissed { continue }
+                        }
+                    } catch {
+                        if self.isActive && !Task.isCancelled {
+                            self.lastError = "群消息可见性暂未更新，保留已确认水位。"
+                            self.publish()
+                        }
+                    }
                 }
             }
         }
@@ -805,7 +838,8 @@ final class NativeIMService {
     func beginHistoryPresentation(_ conversation: NativeConversation, allowsPreview: Bool) {
         if activeHistoryRoom != conversation.id { activeHistoryFailureCursor = nil }
         activeHistoryRoom = conversation.id
-        guard allowsPreview, loggedIn, !needsAuthentication, (messages[conversation.id] ?? []).isEmpty else { return }
+        guard allowsPreview, loggedIn, !needsAuthentication, !isRoomDismissed(conversation),
+              (messages[conversation.id] ?? []).isEmpty else { return }
         let latest = conversations.first(where: { $0.id == conversation.id }) ?? conversation
         recentHistory.open(latest, context: business)
     }
@@ -842,11 +876,18 @@ final class NativeIMService {
     func history(_ conversation: NativeConversation, cursor: String) async throws -> NativeHistoryPage {
         let current = generation
         guard conversation.canOpen, loggedIn, !needsAuthentication else { throw NativeChatError.unavailable }
-        if conversation.type == 3 {
-            if visibility.hasConfirmedBoundary(conversation.id) { scheduleVisibilityRefresh(conversation) }
-            else { try await refreshGroupVisibility(conversation) }
+        if conversation.type == 3, !isRoomDismissed(conversation) {
+            if visibility.hasConfirmedBoundary(conversation.id) {
+                scheduleVisibilityRefresh(conversation)
+            } else {
+                do { try await refreshGroupVisibility(conversation) }
+                catch NativeChatError.groupDismissed { return NativeHistoryPage(messages: [], isEnd: true, lastMinSeq: 0) }
+            }
         }
         try require(current)
+        if isRoomDismissed(conversation), !visibility.hasConfirmedBoundary(conversation.id) {
+            return NativeHistoryPage(messages: [], isEnd: true, lastMinSeq: 0)
+        }
         if let completed = completedHistoryPage(conversation, cursor: cursor) { return completed }
         scheduleHistoryRefresh(conversation, cursor: cursor)
         let version = historyVersions[conversation.id]
@@ -1273,6 +1314,7 @@ final class NativeIMService {
     }
     func refreshGroupVisibility(_ conversation: NativeConversation) async throws {
         let current = generation
+        guard !isRoomDismissed(conversation) else { throw NativeChatError.groupDismissed }
         guard let ledger = visibilityLedger else { throw NativeChatError.unavailable }
         struct RetentionResult: Decodable { let items: [GroupRetentionState] }
         let states: RetentionResult = try await business.request("im/group-retention/states", query: [URLQueryItem(name: "conversationIds", value: conversation.id)])
@@ -1280,6 +1322,10 @@ final class NativeIMService {
         visibility = try await ledger.applyRetentionSnapshot(states.items, requested: [conversation.id]); try require(current)
         let target: NativeGroupPeer = try await business.request("im/groups/by-im/\(conversation.target)"); try require(current)
         groupTargets[conversation.id] = target
+        if isRoomDismissed(conversation) {
+            publish()
+            throw NativeChatError.groupDismissed
+        }
         struct Purges: Decodable { let items: [GroupMessagePurge] }
         let purges: Purges = try await business.request("groups/\(target.businessGroupId)/message-purges"); try require(current)
         visibility = try await ledger.applyPurges(purges.items, conversationID: conversation.id); try require(current)
@@ -1290,6 +1336,7 @@ final class NativeIMService {
         publish()
     }
     func markRead(_ conversation: NativeConversation) async throws {
+        guard !isRoomDismissed(conversation) else { return }
         let current = generation
         _ = try await call { bridge.markRead(conversation.id, completion: $0) }
         try require(current)
@@ -1303,7 +1350,16 @@ final class NativeIMService {
             if conversationStartup.receive([updated]) { mergeConversations([updated]) }
             publish()
         }
-        if conversation.type == 3 { try await business.change("im/group-read-cursors/report", body: ["conversationId": .string(conversation.id)]) }
+        if conversation.type == 3 {
+            do {
+                try await business.change("im/group-read-cursors/report", body: ["conversationId": .string(conversation.id)])
+            } catch APIError.httpStatus(403) {
+                // 已完成 OpenIM 标记。已退群或解散的会话无法上报群游标。
+                scheduleVisibilityRefresh(conversation)
+            } catch APIError.business(let code, _) where code == 403 {
+                scheduleVisibilityRefresh(conversation)
+            }
+        }
     }
     func recall(_ item: ChatTextItem, in conversation: NativeConversation, reason: String? = nil) async throws {
         let current = generation
@@ -1675,10 +1731,10 @@ final class NativeIMService {
     }
     private func refreshRetentionBatch() async throws {
         let current = generation; guard let ledger = visibilityLedger else { throw NativeChatError.unavailable }
-        let ids = conversations.filter { $0.type == 3 }.map(\.id)
+        let conversationIDs = conversations.filter { $0.type == 3 && GroupVisibility.supportsRetention($0.id) }.map(\.id)
         struct Result: Decodable { let items: [GroupRetentionState] }
-        for start in stride(from: 0, to: ids.count, by: 50) {
-            let batch = Array(ids[start..<min(start + 50, ids.count)])
+        for start in stride(from: 0, to: conversationIDs.count, by: 50) {
+            let batch = Array(conversationIDs[start..<min(start + 50, conversationIDs.count)])
             let result: Result = try await business.request("im/group-retention/states", query: [URLQueryItem(name: "conversationIds", value: batch.joined(separator: ","))]); try require(current)
             visibility = try await ledger.applyRetentionSnapshot(result.items, requested: Set(batch)); try require(current)
             groupVisibilityReady.formUnion(batch.filter { visibility.hasConfirmedBoundary($0) })
@@ -1727,6 +1783,7 @@ final class NativeIMService {
     }
 
     func conversationPreview(_ conversation: NativeConversation) -> String {
+        if conversation.groupDismissed { return conversation.preview }
         if let queued = localForwardPreview(conversation) { return queued.text }
         if conversation.type == 3, !groupVisibilityReady.contains(conversation.id) { return "" }
         let previous = conversation.latestMessageID.isEmpty ? lastKnownPreview[conversation.id] : nil
@@ -1738,10 +1795,11 @@ final class NativeIMService {
         return conversation.preview
     }
     func conversationUnread(_ conversation: NativeConversation) -> Int {
-        if conversation.type == 3, !groupVisibilityReady.contains(conversation.id) { return 0 }
-        if conversationPreview(conversation).isEmpty { return 0 }
-        if let floor = visibility.floors[conversation.id], conversation.latestSeq > 0 { return max(0, min(conversation.unread, conversation.latestSeq - floor.minVisibleSeq + 1)) }
-        return conversation.unread
+        guard conversation.unread > 0, !isGroupDismissed(conversation) else { return 0 }
+        if conversation.type != 3 { return conversationPreview(conversation).isEmpty ? 0 : conversation.unread }
+        let latest = ChatTextItem(id: conversation.latestMessageID, senderID: conversation.latestSender, text: "",
+                                  timestamp: conversation.timestamp, status: 2, seq: conversation.latestSeq)
+        return visibility.groupUnreadCount(conversation.unread, latest: latest, conversationID: conversation.id)
     }
 
     private func enqueueEvent(_ name: String, payload: [String: Any]) {
@@ -1834,6 +1892,7 @@ final class NativeIMService {
             scheduleEmptyConversationReload()
         case "conversations":
             let changed = (payload["items"] as? [[String: Any]] ?? []).compactMap(NativeConversation.init)
+            guard !changed.isEmpty else { return }
             guard conversationStartup.receive(changed) else { bufferedStartupEventCount += changed.count; return }
             if loadingConversations { conversationChangesDuringRequest.append(contentsOf: changed) }
             conversationRefreshSeen?.formUnion(changed.map(\.id))

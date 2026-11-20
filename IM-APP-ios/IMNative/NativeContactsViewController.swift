@@ -4,6 +4,7 @@ import IMCore
 @MainActor
 final class NativeContactsViewController: NativeBusinessListController {
     private let service: NativeIMService
+    private let onGroupCreated: () -> Void
     private var contacts: [NativeContact] = []
     private var contactTotal = 0
     private var cursor: String?
@@ -14,7 +15,11 @@ final class NativeContactsViewController: NativeBusinessListController {
     private var groups: [NativeGroup] = []
     private var searchTask: Task<Void, Never>?
     private var requestID = UUID()
-    init(service: NativeIMService) { self.service = service; super.init(title: "通讯录", context: service.business, style: .plain) }
+    init(service: NativeIMService, onGroupCreated: @escaping () -> Void) {
+        self.service = service
+        self.onGroupCreated = onGroupCreated
+        super.init(title: "通讯录", context: service.business, style: .plain)
+    }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() {
         super.viewDidLoad(); tableView.backgroundColor = .white; tableView.separatorStyle = .none; tableView.sectionHeaderTopPadding = 0
@@ -82,7 +87,7 @@ final class NativeContactsViewController: NativeBusinessListController {
             let icon = UIImageView(image: NativeUITheme.image(item.1)); icon.frame = CGRect(x: r(40), y: r(28), width: r(40), height: r(40)); icon.contentMode = .scaleAspectFit
             let title = NativeUITheme.label(item.0, size: r(32)); title.frame = CGRect(x: r(96), y: 0, width: width - r(176), height: r(96))
             let chevron = UIImageView(image: UIImage(systemName: "chevron.right")); chevron.tintColor = NativeUITheme.body; chevron.contentMode = .scaleAspectFit; chevron.frame = CGRect(x: width - r(72), y: r(32), width: r(24), height: r(32))
-            [icon, title, chevron].forEach { button.addSubview($0) }; button.addAction(UIAction { [weak self] _ in guard let self = self else { return }; if index == 0 { self.push(NativeFriendRequestsController(service: self.service)) } else if index == 1 { self.push(NativeTagsController(service: self.service)) } else { self.push(NativeGroupsController(service: self.service)) } }, for: .touchUpInside)
+            [icon, title, chevron].forEach { button.addSubview($0) }; button.addAction(UIAction { [weak self] _ in guard let self = self else { return }; if index == 0 { self.push(NativeFriendRequestsController(service: self.service)) } else if index == 1 { self.push(NativeTagsController(service: self.service)) } else { self.push(NativeGroupsController(service: self.service, onGroupCreated: self.onGroupCreated)) } }, for: .touchUpInside)
             header.addSubview(button); y += r(96)
         }
         let groupBackground = UIView(); groupBackground.backgroundColor = UIColor(hex: 0xf3f4f7); groupBackground.frame = CGRect(x: 0, y: y, width: width, height: groups.isEmpty ? 0 : r(32) + CGFloat(min(groups.count, 3)) * r(144) + (groups.count > 3 ? r(80) : 0)); header.addSubview(groupBackground)
@@ -92,7 +97,7 @@ final class NativeContactsViewController: NativeBusinessListController {
             let name = NativeUITheme.label(group.name, size: r(34)); name.frame = CGRect(x: r(144), y: 0, width: button.bounds.width - r(160), height: r(128))
             button.addSubview(avatar); button.addSubview(name); button.addAction(UIAction { [weak self] _ in guard let self = self else { return }; Task { do { let peer: NativeGroupPeer = try await self.context.request("im/groups/\(group.id)"); let chat = try await self.service.openConversation(target: peer.imGroupId, type: 3); self.push(NativeConversationViewController(service: self.service, conversation: chat)) } catch { self.showNativeNotice(error.localizedDescription) } } }, for: .touchUpInside); groupBackground.addSubview(button)
         }
-        if groups.count > 3 { let expand = UIButton(type: .system); expand.frame = CGRect(x: r(40), y: r(16) + 3 * r(144), width: width - r(80), height: r(80)); expand.setTitle("展开所有群聊 (\(groups.count))", for: .normal); expand.setTitleColor(NativeUITheme.secondary, for: .normal); expand.titleLabel?.font = .systemFont(ofSize: r(26)); expand.addAction(UIAction { [weak self] _ in guard let self = self else { return }; self.push(NativeGroupsController(service: self.service)) }, for: .touchUpInside); groupBackground.addSubview(expand) }
+        if groups.count > 3 { let expand = UIButton(type: .system); expand.frame = CGRect(x: r(40), y: r(16) + 3 * r(144), width: width - r(80), height: r(80)); expand.setTitle("展开所有群聊 (\(groups.count))", for: .normal); expand.setTitleColor(NativeUITheme.secondary, for: .normal); expand.titleLabel?.font = .systemFont(ofSize: r(26)); expand.addAction(UIAction { [weak self] _ in guard let self = self else { return }; self.push(NativeGroupsController(service: self.service, onGroupCreated: self.onGroupCreated)) }, for: .touchUpInside); groupBackground.addSubview(expand) }
         y = groupBackground.frame.maxY + r(64); header.frame = CGRect(x: 0, y: 0, width: width, height: y); tableView.tableHeaderView = header
         layoutSearch()
     }

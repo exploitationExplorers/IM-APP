@@ -210,6 +210,17 @@ final class NativeAboutController: UIViewController {
     @objc private func checkUpdate() {
         guard task == nil else { return }; check.isEnabled = false; check.setTitle("检查中...", for: .normal)
         task = Task { defer { task = nil; check.isEnabled = true; check.setTitle("检查更新", for: .normal) }; do {
+            if let update = NativeEnterpriseUpdate() {
+                let release = try await update.check()
+                try Task.checkCancellation()
+                guard navigationController?.topViewController === self, presentedViewController == nil else { return }
+                if let release {
+                    release.present(from: self)
+                } else {
+                    showNativeNotice("当前已是最新版本。")
+                }
+                return
+            }
             let info = Bundle.main.infoDictionary ?? [:]
             let configured: (String) -> String = { key in let value = (info[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines); return value.hasPrefix("$(") ? "" : value }
             var links = NativeDistributionLinks(testFlightURL: configured("NativeTestFlightURL"), appStoreURL: configured("NativeAppStoreURL"))
@@ -227,7 +238,7 @@ final class NativeAboutController: UIViewController {
             if let url = links.testFlight { sheet.addAction(UIAlertAction(title: "打开 TestFlight", style: .default) { _ in UIApplication.shared.open(url) }) }
             if let url = links.appStore { sheet.addAction(UIAlertAction(title: "打开 App Store", style: .default) { _ in UIApplication.shared.open(url) }) }
             sheet.addAction(UIAlertAction(title: "取消", style: .cancel)); sheet.popoverPresentationController?.sourceView = check; present(sheet, animated: true)
-        } catch { if !Task.isCancelled { showNativeNotice(error.localizedDescription) } } }
+        } catch { if !Task.isCancelled, navigationController?.topViewController === self, presentedViewController == nil { showNativeNotice(error.localizedDescription) } } }
     }
     override func viewWillDisappear(_ animated: Bool) { super.viewWillDisappear(animated); if isMovingFromParent { task?.cancel() } }
 }

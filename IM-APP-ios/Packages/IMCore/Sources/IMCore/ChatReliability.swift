@@ -1,9 +1,11 @@
 import Foundation
 
 public enum HistoryViewportPolicy {
-    /// 首屏只定位一次；迟到的历史补洞不能打断已经开始阅读的用户。
-    public static func shouldFollowBottom(explicit: Bool, initial: Bool, userInteracted: Bool, appended: Bool, nearBottom: Bool, interacting: Bool) -> Bool {
-        explicit || (initial && !userInteracted) || (appended && nearBottom && !interacting)
+    /// 首次定位与贴底时跟随最新消息。正在翻阅历史时保留阅读位置。
+    public static func shouldFollowBottom(explicit: Bool, initial: Bool, userInteracted: Bool, appended: Bool, atBottom: Bool, nearBottom: Bool, interacting: Bool) -> Bool {
+        if explicit { return true }
+        guard !interacting else { return false }
+        return (initial && !userInteracted) || atBottom || (appended && nearBottom)
     }
 
     public static func restoredOffset(anchorMinY: Double, distanceFromTop: Double, gestureDelta: Double, minimum: Double, maximum: Double) -> Double {

@@ -61,10 +61,16 @@ static NSString *MessageText(OIMMessageInfo *message) {
         case OIMMessageContentTypeFile: text = @"[文件]"; break;
         case OIMMessageContentTypeCard: text = [NSString stringWithFormat:@"[名片] %@", message.cardElem.nickname ?: @""]; break;
         case OIMMessageContentTypeMerge: text = message.mergeElem.title ?: @"聊天记录"; break;
+        case OIMMessageContentTypeCustom: {
+            NSString *summary = [message.customElem.description_ stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            text = summary.length ? summary : @"[自定义消息]";
+            break;
+        }
         case OIMMessageContentTypeQuote: text = message.quoteElem.text.length ? message.quoteElem.text : @"[引用消息]"; break;
         case OIMMessageContentTypeAt: text = [message.atTextElem.mj_keyValues[@"text"] isKindOfClass:NSString.class] ? message.atTextElem.mj_keyValues[@"text"] : @"[@消息]"; break;
         case OIMMessageContentTypeAdvancedText: text = message.advancedTextElem.text ?: @""; break;
         case OIMMessageContentTypeRevoke: text = @"[消息已撤回]"; break;
+        case OIMMessageContentTypeDismissGroup: text = @"群主 解散了群聊"; break;
         default: text = message.contentType >= 1000 ? @"[系统通知]" : @"[此类型消息待支持]"; break;
     }
     if (message.status == OIMMessageStatusRevoke) text = @"[消息已撤回]";
@@ -111,6 +117,7 @@ static NSDictionary *ConversationData(OIMConversationInfo *conversation) {
              @"ex": conversation.ex ?: @"",
              @"avatar": conversation.faceURL ?: @"", @"muted": @(conversation.recvMsgOpt != 0),
              @"latestMessageID": conversation.latestMsg.clientMsgID ?: @"", @"latestSeq": @(conversation.latestMsg.seq), @"latestSender": conversation.latestMsg.sendID ?: @"",
+             @"groupDismissed": @(conversation.latestMsg.contentType == OIMMessageContentTypeDismissGroup),
              @"timestamp": @(conversation.latestMsgSendTime), @"pinned": @(conversation.isPinned),
              @"preview": conversation.latestMsg.status == OIMMessageStatusRevoke || conversation.latestMsg.contentType == OIMMessageContentTypeRevoke
                  ? @"[撤回]" : (conversation.latestMsg ? MessageText(conversation.latestMsg) : @"暂无消息")};

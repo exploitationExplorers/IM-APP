@@ -390,7 +390,7 @@ shasum -a 256 /tmp/im-native-download.ipa
 
 每次原生发布沿用第 8～10 节。客户先保留旧原生 App，直接安装更高 Build。先在一台已装旧包的 iPhone 上确认覆盖成功，并核对登录态、历史消息和本地资源。需要回退代码时，用上一可用提交构建更高 Build，再签名分发。保留上一个包和清单便于核验。
 
-当前原生版的「检查更新」使用 `NativeTestFlightURL`、`NativeAppStoreURL`，或读取 `NativeUpdateManifestURL` 对应 `update.json` 中受支持的 Apple 链接。这个 JSON 用于 App 内提示，和 Safari 安装使用的 `manifest.plist` 是两个文件。自建 OTA 安装页目前通过 Safari 链接交付，App 内没有 OTA 自动安装入口。构建参数和 JSON 字段见[原生分发与更新操作](原生分发与更新操作.md)。
+企业内测包可配置 `NATIVE_ENTERPRISE_UPDATE_MANIFEST_URL`。App 检查到同一应用标识有更高 Build 时，弹窗中的「立即更新」会打开下载页，由用户确认安装。`update.json` 用于 App 内版本检查，Safari 安装继续使用 `manifest.plist`。未配置企业内测入口时，「检查更新」可使用已有的 TestFlight 或 App Store 配置。字段和上传顺序见 [原生分发与更新操作](原生分发与更新操作.md#ios-企业内测更新弹窗)。
 
 ## 14. 参考资料
 

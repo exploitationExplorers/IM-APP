@@ -17,13 +17,24 @@ public struct GroupVisibility: Codable, Equatable, Sendable {
     // Optional for archives written before successful empty retention queries were recorded.
     fileprivate var checkedRetentionIDs: Set<String>?
     public init() {}
+    public static func supportsRetention(_ conversationID: String) -> Bool {
+        conversationID.range(of: "^sg_[0-9a-f]{32}$", options: .regularExpression) != nil
+    }
+    public func hasCheckedRetention(_ conversationID: String) -> Bool {
+        floors[conversationID] != nil || checkedRetentionIDs?.contains(conversationID) == true
+    }
     /// 保留水位与成员清理快照都曾确认，才允许离线展示群历史。
     public func hasConfirmedBoundary(_ conversationID: String) -> Bool {
-        (floors[conversationID] != nil || checkedRetentionIDs?.contains(conversationID) == true)
-            && purges[conversationID] != nil
+        hasCheckedRetention(conversationID) && purges[conversationID] != nil
     }
     public var confirmedBoundaryIDs: Set<String> {
         Set(floors.keys).union(checkedRetentionIDs ?? []).filter { hasConfirmedBoundary($0) }
+    }
+    /// Badge metadata can use the checked retention floor without exposing message content.
+    public func groupUnreadCount(_ count: Int, latest: ChatTextItem, conversationID: String) -> Int {
+        guard count > 0, hasCheckedRetention(conversationID), permits(latest, conversationID: conversationID) else { return 0 }
+        guard let floor = floors[conversationID], floor.minVisibleSeq > 0, latest.seq > 0 else { return count }
+        return min(count, latest.seq - floor.minVisibleSeq + 1)
     }
     public func permits(_ item: ChatTextItem, conversationID: String) -> Bool {
         if hiddenMessageIDs.contains(item.id) { return false }
@@ -63,7 +74,7 @@ public actor GroupVisibilityLedger {
     /// Membership and the member-purge snapshot must still be confirmed independently.
     public func applyRetentionSnapshot(_ incoming: [GroupRetentionState], requested: Set<String>) throws -> GroupVisibility {
         guard !requested.isEmpty, requested.count <= 50,
-              requested.allSatisfy({ $0.range(of: "^sg_[0-9a-f]{32}$", options: .regularExpression) != nil }),
+              requested.allSatisfy(GroupVisibility.supportsRetention),
               incoming.count <= requested.count else { throw GroupRetentionSnapshotError.invalidResponse }
         var seen = Set<String>()
         guard incoming.allSatisfy({ requested.contains($0.conversationId)

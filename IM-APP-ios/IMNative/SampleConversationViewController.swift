@@ -1,6 +1,24 @@
 import UIKit
 import IMCore
 
+@MainActor
+enum NativeMessageTimestamp {
+    private static let formatter: DateFormatter = {
+        let value = DateFormatter()
+        value.locale = Locale(identifier: "en_US_POSIX")
+        value.dateFormat = "yyyy-MM-dd HH:mm"
+        return value
+    }()
+
+    static func date(_ timestamp: Int64) -> Date? {
+        guard timestamp > 0 else { return nil }
+        let milliseconds = timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp
+        return Date(timeIntervalSince1970: Double(milliseconds) / 1000)
+    }
+
+    static func formatted(_ date: Date) -> String { formatter.string(from: date) }
+}
+
 final class NativeMessageCell: UICollectionViewCell {
     private let avatar = NativeRemoteImageView()
     private let mediaView = NativeRemoteImageView()
@@ -95,7 +113,9 @@ final class NativeMessageCell: UICollectionViewCell {
         // 同消息重配仅更新文本/状态，不取消仍在取图的任务或覆盖已经命中的头像。
         configure(text: text, isMine: mine, status: service.sendingLabel(message), resetResources: false)
         representedMessageID = message.id; self.resolvedMediaSize = resolvedMediaSize; self.onMediaSizeResolved = onMediaSizeResolved
-        receiptTime = message.timestamp > 0 ? Date(timeIntervalSince1970: Double(message.timestamp) / 1000).formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) : ""
+        if let date = NativeMessageTimestamp.date(message.timestamp) {
+            receiptTime = NativeMessageTimestamp.formatted(date)
+        } else { receiptTime = "" }
         timestamp = message.timestamp
         systemMessage = message.status == 4 || message.contentType >= 1000 || message.contentType == 0
         sender.text = group && !mine && !systemMessage ? message.senderName : nil

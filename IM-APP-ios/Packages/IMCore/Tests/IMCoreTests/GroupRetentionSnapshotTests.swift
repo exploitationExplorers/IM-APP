@@ -29,6 +29,23 @@ final class GroupRetentionSnapshotTests: XCTestCase {
         }
     }
 
+    func testGroupBadgeUsesRetentionWithoutOpeningHistory() async throws {
+        try await withLedger { ledger, _ in
+            let latest = ChatTextItem(id: "latest", senderID: "", text: "", timestamp: 1, status: 2, seq: 120)
+            let unchecked = await ledger.snapshot()
+            XCTAssertEqual(unchecked.groupUnreadCount(87, latest: latest, conversationID: group), 0)
+            let checked = try await ledger.applyRetentionSnapshot([], requested: [group])
+            XCTAssertFalse(checked.hasConfirmedBoundary(group))
+            XCTAssertEqual(checked.groupUnreadCount(87, latest: latest, conversationID: group), 87)
+            let limited = try await ledger.applyRetentionSnapshot([
+                GroupRetentionState(conversationId: group, minVisibleSeq: 100, revision: 1)
+            ], requested: [group])
+            XCTAssertEqual(limited.groupUnreadCount(87, latest: latest, conversationID: group), 21)
+            let hidden = try await ledger.hide([latest.id])
+            XCTAssertEqual(hidden.groupUnreadCount(87, latest: latest, conversationID: group), 0)
+        }
+    }
+
     func testEmptySnapshotNeverResetsExistingFloorPurgesOrHiddenMessages() async throws {
         try await withLedger { ledger, _ in
             _ = try await ledger.apply([GroupRetentionState(conversationId: group, minVisibleSeq: 50, revision: 3)])

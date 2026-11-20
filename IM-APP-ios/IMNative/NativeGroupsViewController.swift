@@ -5,7 +5,13 @@ import PhotosUI
 @MainActor
 final class NativeGroupsController: NativeBusinessListController {
     private let service: NativeIMService; private var groups: [NativeGroup] = []; private var cursor: String?; private var role = "owner"; private let tabs = UIView(); private var tabButtons: [UIButton] = []; private let fab = UIButton(type: .system)
-    init(service: NativeIMService) { self.service = service; super.init(title: "群聊", context: service.business) }
+    private let onGroupCreated: () -> Void
+
+    init(service: NativeIMService, onGroupCreated: @escaping () -> Void) {
+        self.service = service
+        self.onGroupCreated = onGroupCreated
+        super.init(title: "群聊", context: service.business)
+    }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func viewDidLoad() { super.viewDidLoad(); tableView.backgroundColor = .white
         for (index, title) in ["我建立的", "我加入的"].enumerated() { let button = UIButton(type: .system); button.setTitle(title, for: .normal); button.addAction(UIAction { [weak self] _ in guard let self = self else { return }; let next = index == 0 ? "owner" : "member"; guard next != self.role else { return }; self.role = next; self.buildTabs(); self.reloadContent() }, for: .touchUpInside); tabs.addSubview(button); tabButtons.append(button) }; buildTabs()
@@ -24,7 +30,7 @@ final class NativeGroupsController: NativeBusinessListController {
             let result: NativePage<NativeGroup> = try await context.request("groups", query: query)
             try Task.checkCancellation(); guard requestedRole == role else { scheduleReload(); return }
             if reset { groups = [] }; groups += result.items.filter { $0.status != "dismissed" }; cursor = result.nextCursor
-            var rows = groups.map { group in NativeBusinessRow(title: group.name, detail: group.memberCount.map { "\($0) 人" } ?? "", avatar: group.avatar, action: { [weak self] in guard let self = self else { return }; self.perform { let peer: NativeGroupPeer = try await self.context.request("im/groups/\(group.id)"); let chat = try await self.service.openConversation(target: peer.imGroupId, type: 3); try Task.checkCancellation(); self.push(NativeConversationViewController(service: self.service, conversation: chat)) } }) }
+            var rows = groups.map { group in NativeBusinessRow(title: group.name, detail: group.memberCount.map { "\($0) 人" } ?? "", avatar: group.avatar, avatarStyle: .group, action: { [weak self] in guard let self = self else { return }; self.perform { let peer: NativeGroupPeer = try await self.context.request("im/groups/\(group.id)"); let chat = try await self.service.openConversation(target: peer.imGroupId, type: 3); try Task.checkCancellation(); self.push(NativeConversationViewController(service: self.service, conversation: chat)) } }) }
             if result.hasMore { rows.append(NativeBusinessRow(title: "加载更多", action: { [weak self] in self?.load(reset: false) })) }; setRows([rows])
         }
     }
@@ -36,10 +42,20 @@ final class NativeGroupsController: NativeBusinessListController {
     }
     func createGroup() {
         push(NativeContactPickerController(service: service, title: "选择群成员") { [weak self] selected in
-            guard let self = self else { return }
-            self.edit(title: "创建群聊", value: selected.prefix(3).map(\.displayName).joined(separator: "、")) { [weak self] name in
-                guard let self = self else { return }; let group: NativeGroup = try await self.context.request("groups", method: "POST", body: ["name": .string(name), "memberIds": .array(selected.map { .string($0.id) })]); self.push(NativeGroupController(service: self.service, groupID: group.id))
+            guard let self else { return }
+            let suggestedName = selected.prefix(3).map(\.displayName).joined(separator: "、")
+            let editor = NativeFieldEditorController(title: "创建群聊", value: suggestedName, placeholder: "请输入群名称", secure: false) { [weak self] text in
+                guard let self else { return }
+                let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { throw APIError.business(code: -1, message: "请输入群名称。") }
+                let _: NativeGroup = try await self.context.request(
+                    "groups", method: "POST", body: ["name": .string(name), "memberIds": .array(selected.map { .string($0.id) })]
+                )
+                try Task.checkCancellation()
+                guard self.service.isActive else { return }
+                self.onGroupCreated()
             }
+            self.push(editor)
         })
     }
     func joinGroup() {
@@ -284,15 +300,23 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
     private let service: NativeIMService; private let groupID: String; private var group: NativeGroup?
     private var conversation: NativeConversation?; private var previewMembers: [NativeGroupMember] = []; private var memberError: String?
     private lazy var pendingJoins = NativePendingJoinRequests(service: service, groupID: groupID)
+    private let opensDissolved: Bool
+    private var dissolvedConversation: NativeConversation?
     private struct Dissolved: Decodable { let id: String; let name: String; let avatar: String; let status: String }
-    init(service: NativeIMService, groupID: String) { self.service = service; self.groupID = groupID; super.init(title: "群组详情", context: service.business) }
+    init(service: NativeIMService, groupID: String, opensDissolved: Bool = false, conversation: NativeConversation? = nil) {
+        self.service = service; self.groupID = groupID; self.opensDissolved = opensDissolved
+        self.dissolvedConversation = conversation
+        super.init(title: "群组详情", context: service.business)
+    }
     required init?(coder: NSCoder) { fatalError("不使用 Storyboard") }
     override func reloadContent() {
         perform { [self] in
+            if opensDissolved { try await loadDissolved(); return }
             let g: NativeGroup
             do { g = try await context.request("groups/detail", query: [URLQueryItem(name: "groupId", value: groupID)]) }
             catch APIError.httpStatus(404) { try await loadDissolved(); return }
             catch APIError.business(let code, let message) { guard code == 404 else { throw APIError.business(code: code, message: message) }; try await loadDissolved(); return }
+            if g.status == "dismissed" { try await loadDissolved(); return }
             group = g; previewMembers = []; memberError = nil; conversation = nil
             do { let result: NativePage<NativeGroupMember> = try await context.request("group-members", query: [URLQueryItem(name: "groupId", value: groupID), URLQueryItem(name: "limit", value: "40")]); previewMembers = Array(result.items.prefix(4)) }
             catch { if Task.isCancelled { throw error }; memberError = error.localizedDescription }
@@ -307,7 +331,7 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
                 NativeBusinessRow(title: "入群方式", detail: g.joinMode == "approval" ? "私密群" : "公开群", action: { [weak self] in self?.changeJoinMode() })
             ]) }
             let canEdit = g.permissions?.canEditProfile ?? g.canManage
-            var info = [NativeBusinessRow(title: "群组名称", detail: g.name, action: canEdit ? { [weak self] in self?.editName() } : nil), NativeBusinessRow(title: "群头像", avatar: g.avatar, action: canEdit ? { [weak self] in self?.chooseAvatar() } : nil), NativeBusinessRow(title: "群号", detail: g.publicId ?? g.id, action: isOwner(g) && g.publicIdChangeUsed != true ? { [weak self] in self?.editPublicID() } : nil), NativeBusinessRow(title: "群公告", detail: g.announcement ?? "", action: { [weak self] in guard let self = self else { return }; self.push(NativeAnnouncementsController(service: self.service, group: g)) })]
+            var info = [NativeBusinessRow(title: "群组名称", detail: g.name, action: canEdit ? { [weak self] in self?.editName() } : nil), NativeBusinessRow(title: "群头像", avatar: g.avatar, avatarStyle: .groupSetting, action: canEdit ? { [weak self] in self?.chooseAvatar() } : nil), NativeBusinessRow(title: "群号", detail: g.publicId ?? g.id, action: isOwner(g) && g.publicIdChangeUsed != true ? { [weak self] in self?.editPublicID() } : nil), NativeBusinessRow(title: "群公告", detail: g.announcement ?? "", action: { [weak self] in guard let self = self else { return }; self.push(NativeAnnouncementsController(service: self.service, group: g)) })]
             if g.permissions?.canViewQRCode ?? true { info.append(NativeBusinessRow(title: "群二维码", action: { [weak self] in guard let self = self else { return }; self.push(NativeQRCodeController(context: self.context, groupID: self.groupID, service: self.service)) })) }
             if g.permissions?.canEditMyNickname ?? true { info.append(NativeBusinessRow(title: "我在本群的昵称", detail: g.myNickname ?? "", action: { [weak self] in self?.editMyNickname() })) }
             sections.append(info)
@@ -390,7 +414,34 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
     private func searchHistory() { guard let chat = conversation else { showNativeNotice("请先重试读取会话设置。"); return }; push(NativeSearchController(service: service, conversation: chat)) }
     private func clearHistory() { guard let chat = conversation else { showNativeNotice("请先重试读取会话设置。"); return }; confirm("清除后聊天记录无法恢复，是否继续？", destructiveTitle: "清除") { [weak self] in guard let self = self else { return }; self.perform { try await self.service.clearHistory(chat); self.scheduleReload() } } }
     private func changeJoinMode() { let dialog = UIAlertController(title: "入群方式", message: nil, preferredStyle: .actionSheet); for (label, mode) in [("公开群", "open"), ("私密群（需要审核）", "approval")] { dialog.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in self?.updateSetting("joinMode", .string(mode)) }) }; dialog.addAction(UIAlertAction(title: "取消", style: .cancel)); dialog.popoverPresentationController?.sourceView = tableView; present(dialog, animated: true) }
-    private func loadDissolved() async throws { let value: Dissolved = try await context.request("groups/\(groupID)/dissolved"); try Task.checkCancellation(); group = nil; conversation = nil; tableView.tableHeaderView = nil; setRows([[NativeBusinessRow(title: value.name, detail: "该群已解散", avatar: value.avatar)], [NativeBusinessRow(title: "删除该群", destructive: true, action: { [weak self] in guard let self = self else { return }; self.confirm("确定删除该群聊吗？", destructiveTitle: "删除") { self.perform { try await self.context.change("groups/\(self.groupID)/dissolved/remove"); try Task.checkCancellation(); self.navigationController?.popToRootViewController(animated: true) } } })]]) }
+    private func loadDissolved() async throws {
+        let value: Dissolved = try await context.request("groups/\(groupID)/dissolved")
+        try Task.checkCancellation()
+        group = nil
+        conversation = nil
+        tableView.tableHeaderView = nil
+        setRows([
+            [NativeBusinessRow(title: value.name, detail: "该群已解散", avatar: value.avatar)],
+            [NativeBusinessRow(title: "删除该群", destructive: true, action: { [weak self] in self?.removeDissolvedGroup() })]
+        ])
+    }
+
+    private func removeDissolvedGroup() {
+        confirm("确定删除该群聊吗？", destructiveTitle: "删除") { [weak self] in
+            guard let self else { return }
+            self.perform {
+                try await self.context.change("groups/\(self.groupID)/dissolved/remove")
+                var notice: String?
+                if let chat = self.dissolvedConversation {
+                    do { try await self.service.hide(chat) }
+                    catch { notice = "群记录已删除，本机会话隐藏失败，请在聊天列表重试。" }
+                }
+                try Task.checkCancellation()
+                self.returnToMain(.contacts, notice: notice)
+            }
+        }
+    }
+
     private func editPublicID() { confirm("群号只能修改一次，确认继续？", destructiveTitle: "继续") { [weak self] in self?.edit(title: "修改群号", value: self?.group?.publicId ?? self?.group?.id ?? "qun_") { [weak self] value in guard let self = self else { return }; try await self.context.change("groups/public-id/update", body: ["groupId": .string(self.groupID), "publicId": .string(value)]) } } }
     private func chooseAvatar() { var config = PHPickerConfiguration(); config.filter = .images; config.selectionLimit = 1; let picker = PHPickerViewController(configuration: config); picker.delegate = self; present(picker, animated: true) }
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
@@ -417,9 +468,16 @@ final class NativeGroupController: NativeBusinessListController, PHPickerViewCon
             try await self.context.change("groups/\(self.groupID)/\(action)")
             var hideError: String?
             if let chat = chat { do { try await self.service.hide(chat) } catch { hideError = error.localizedDescription } } else { await self.service.loadConversations(reset: true) }
-            try Task.checkCancellation(); let home = self.navigationController?.viewControllers.first; self.navigationController?.popToRootViewController(animated: true)
-            if let error = hideError { home?.showNativeNotice("群成员状态已更新，本机对话隐藏失败，请刷新：" + error) }
+            try Task.checkCancellation()
+            let notice = hideError.map { "群成员状态已更新，本机对话隐藏失败，请刷新：" + $0 }
+            self.returnToMain(.conversations, notice: notice)
         } }
+    }
+
+    private func returnToMain(_ destination: SampleMainViewController.GroupExitDestination, notice: String? = nil) {
+        guard service.isActive, let navigationController, navigationController.topViewController === self,
+              let home = navigationController.viewControllers.last(where: { $0 is SampleMainViewController }) as? SampleMainViewController else { return }
+        home.showGroupExitDestination(destination, notice: notice)
     }
 }
 

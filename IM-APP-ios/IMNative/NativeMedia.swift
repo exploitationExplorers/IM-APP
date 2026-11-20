@@ -391,6 +391,8 @@ private final class NativeAnimationVisibility {
 @MainActor
 final class NativeRemoteImageView: UIImageView {
     var onImageLoaded: (() -> Void)?
+    var onImageLoadStarted: (() -> Void)?
+    var onImageLoadFailed: (() -> Void)?
     var loadedImageSize: CGSize? { loaded ? image?.size : nil }
     private var task: Task<Void, Never>?
     private var represented = ""
@@ -406,8 +408,9 @@ final class NativeRemoteImageView: UIImageView {
         for candidate in candidates {
             if let cached = NativeImageCache.shared.peek(identity: policy.cacheIdentity(candidate), edge: edge) { image = cached; loaded = true; refreshAnimationRegistration(); onImageLoaded?(); return }
         }
-        image = NativeUITheme.image(placeholder)
-        guard !candidates.isEmpty else { accessibilityLabel = "图片地址尚未就绪"; return }
+        image = placeholder.isEmpty ? nil : NativeUITheme.image(placeholder)
+        guard !candidates.isEmpty else { accessibilityLabel = "图片地址尚未就绪"; onImageLoadFailed?(); return }
+        onImageLoadStarted?()
         task = Task { [weak self] in
             defer { if self?.represented == identity { self?.task = nil } }
             // 缓存过的备用原图先于失效缩略图请求，重启后也不重复等待失败下载。
@@ -455,6 +458,7 @@ final class NativeRemoteImageView: UIImageView {
             }
             guard !Task.isCancelled, self?.represented == identity else { return }
             self?.image = UIImage(systemName: "photo.badge.exclamationmark"); self?.accessibilityLabel = "图片加载失败，轻点可重新打开"
+            self?.onImageLoadFailed?()
         }
     }
     func cancel() { stopAnimating(); NativeAnimationVisibility.shared.remove(self); task?.cancel(); task = nil; represented = ""; loaded = false; image = nil; accessibilityLabel = nil }
@@ -491,12 +495,13 @@ final class NativeRemoteImageView: UIImageView {
         }
         if failedOwnedIdentities.contains(identity) {
             if let policy = policy, let first = remoteSources.first { load(first, policy: policy, variant: .list, placeholder: "", fallbacks: Array(remoteSources.dropFirst())) }
-            else { NativeAnimationVisibility.shared.remove(self); task?.cancel(); task = nil; represented = identity; loaded = false; image = UIImage(systemName: "photo.badge.exclamationmark"); accessibilityLabel = "本机图片读取失败，请重新选择图片。" }
+            else { NativeAnimationVisibility.shared.remove(self); task?.cancel(); task = nil; represented = identity; loaded = false; image = UIImage(systemName: "photo.badge.exclamationmark"); accessibilityLabel = "本机图片读取失败，请重新选择图片。"; onImageLoadFailed?() }
             return
         }
         if represented == identity, loaded || task != nil { refreshAnimationRegistration(); return }
         NativeAnimationVisibility.shared.remove(self); task?.cancel(); represented = identity; loaded = false; image = nil; accessibilityLabel = nil
         if let cached = NativeImageCache.shared.peek(identity: identity, edge: 720) { image = cached; loaded = true; refreshAnimationRegistration(); onImageLoaded?(); return }
+        onImageLoadStarted?()
         task = Task { [weak self] in
             defer { if self?.represented == identity { self?.task = nil } }
             do {
@@ -512,7 +517,7 @@ final class NativeRemoteImageView: UIImageView {
                 if self.failedOwnedIdentities.count > 32 { self.failedOwnedIdentities.removeFirst(self.failedOwnedIdentities.count - 32) }
                 self.task = nil
                 if let policy = policy, let first = remoteSources.first { self.load(first, policy: policy, variant: .list, placeholder: "", fallbacks: Array(remoteSources.dropFirst())) }
-                else { self.image = UIImage(systemName: "photo.badge.exclamationmark"); self.accessibilityLabel = "本机图片读取失败，请重新选择图片。" }
+                else { self.image = UIImage(systemName: "photo.badge.exclamationmark"); self.accessibilityLabel = "本机图片读取失败，请重新选择图片。"; self.onImageLoadFailed?() }
             }
         }
     }
@@ -527,6 +532,8 @@ final class NativeImagePreviewController: UIViewController, UIScrollViewDelegate
     private let ownedLocal: URL?
     private let scroll = UIScrollView()
     private let imageView = NativeRemoteImageView()
+    private let loading = UIActivityIndicatorView(style: .large)
+    private let loadFailure = UILabel()
     private var saveTask: Task<Void, Never>?
     init(url: String, policy: MediaURLPolicy, allImages: [String] = []) { raw = url; self.policy = policy; ownedLocal = nil; if let index = allImages.firstIndex(of: url) { self.allImages = allImages; currentIndex = index } else { self.allImages = [url] }; super.init(nibName: nil, bundle: nil) }
     init(ownedLocal: URL, policy: MediaURLPolicy, remote: String = "") { raw = remote; self.policy = policy; self.ownedLocal = ownedLocal; super.init(nibName: nil, bundle: nil) }
@@ -537,15 +544,26 @@ final class NativeImagePreviewController: UIViewController, UIScrollViewDelegate
         let left = UISwipeGestureRecognizer(target: self, action: #selector(swipe(_:))); left.direction = .left; scroll.addGestureRecognizer(left); let right = UISwipeGestureRecognizer(target: self, action: #selector(swipe(_:))); right.direction = .right; scroll.addGestureRecognizer(right)
         scroll.delegate = self; scroll.minimumZoomScale = 1; scroll.maximumZoomScale = 4
         view.addSubview(scroll); scroll.addSubview(imageView); imageView.contentMode = .scaleAspectFit
-        if let local = ownedLocal { imageView.loadOwnedLocal(local, remote: [raw], policy: policy) } else { imageView.load(raw, policy: policy, variant: .preview) }
+        loading.color = .white; loading.hidesWhenStopped = true; view.addSubview(loading)
+        loadFailure.text = "图片加载失败，轻点重试"; loadFailure.textColor = .white; loadFailure.font = .systemFont(ofSize: 15); loadFailure.textAlignment = .center; loadFailure.isHidden = true; view.addSubview(loadFailure)
+        imageView.onImageLoaded = { [weak self] in self?.loading.stopAnimating(); self?.loadFailure.isHidden = true }
+        imageView.onImageLoadStarted = { [weak self] in self?.loadFailure.isHidden = true; self?.loading.startAnimating() }
+        imageView.onImageLoadFailed = { [weak self] in self?.loading.stopAnimating(); self?.loadFailure.isHidden = false }
+        imageView.isUserInteractionEnabled = true; imageView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(retryImageLoad)))
+        loadCurrentImage()
     }
     override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); navigationController?.setNavigationBarHidden(false, animated: animated) }
-    override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); scroll.frame = view.bounds; if scroll.zoomScale == 1 { imageView.frame = scroll.bounds } }
+    override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); scroll.frame = view.bounds; if scroll.zoomScale == 1 { imageView.frame = scroll.bounds }; loading.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY); loadFailure.frame = CGRect(x: 24, y: view.bounds.midY + 36, width: view.bounds.width - 48, height: 28) }
+    private func loadCurrentImage() {
+        if let local = ownedLocal { imageView.loadOwnedLocal(local, remote: [raw], policy: policy) }
+        else { imageView.load(raw, policy: policy, variant: .preview, placeholder: "") }
+    }
+    @objc private func retryImageLoad() { guard !loadFailure.isHidden else { return }; loadCurrentImage() }
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
     @objc private func swipe(_ gesture: UISwipeGestureRecognizer) {
         guard saveTask == nil, scroll.zoomScale == 1, ownedLocal == nil, allImages.count > 1 else { return }
         let next = currentIndex + (gesture.direction == .left ? 1 : -1); guard allImages.indices.contains(next) else { return }
-        currentIndex = next; raw = allImages[next]; imageView.cancel(); imageView.load(raw, policy: policy, variant: .preview); title = "图片 \(next + 1)/\(allImages.count)"
+        currentIndex = next; raw = allImages[next]; imageView.cancel(); loadCurrentImage(); title = "图片 \(next + 1)/\(allImages.count)"
     }
     @objc private func save() {
         navigationItem.rightBarButtonItem?.isEnabled = false

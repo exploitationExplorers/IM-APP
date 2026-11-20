@@ -151,7 +151,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         if pinRemovalTask != nil { pinRemovalProgress.show(in: self, text: "取消置顶中…") }
         service.beginHistoryPresentation(conversation, allowsPreview: focusID == nil)
         render()
-        if conversation.type == 3 { roleTask?.cancel(); roleTask = Task { [weak self] in guard let self = self else { return }; do { let id = try await self.service.businessPeerID(self.conversation); let group: NativeGroup = try await self.service.business.request("groups/detail", query: [URLQueryItem(name: "groupId", value: id)]); try Task.checkCancellation(); self.canManageGroup = group.canManage || group.ownerId == self.service.business.userID } catch { if !Task.isCancelled { self.canManageGroup = false } } } }
+        if conversation.type == 3, !service.isRoomDismissed(conversation) { roleTask?.cancel(); roleTask = Task { [weak self] in guard let self = self else { return }; do { let id = try await self.service.businessPeerID(self.conversation); let group: NativeGroup = try await self.service.business.request("groups/detail", query: [URLQueryItem(name: "groupId", value: id)]); try Task.checkCancellation(); self.canManageGroup = group.canManage || group.ownerId == self.service.business.userID } catch { if !Task.isCancelled { self.canManageGroup = false } } } }
         if let focusID = focusID, !focusedInitially {
             focusedInitially = true; cursor = focusID
             startFocusedHistoryRead(focusID)
@@ -284,7 +284,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         let draftOffset = failedDrafts.isEmpty ? CGFloat.zero : r(72)
         let attachmentRows = (attachmentButtons.count + 3) / 4
         let attachmentHeight = CGFloat(24 + attachmentRows * 144 + max(0, attachmentRows - 1) * 28 + 32)
-        headerHeight.constant = top + r(110) + (notice.isHidden ? 0 : r(showingPin ? 100 : 72)); composerHeight.constant = r(hasVoice ? 180 : emojiVisible ? 650 : attachmentsVisible ? 108 + attachmentHeight : 108) + quoteOffset + draftOffset
+        headerHeight.constant = top + r(110) + (notice.isHidden ? 0 : r(showingPin ? 100 : 72)); composerHeight.constant = composer.isHidden ? 0 : r(hasVoice ? 180 : emojiVisible ? 650 : attachmentsVisible ? 108 + attachmentHeight : 108) + quoteOffset + draftOffset
         // keyboardLayoutGuide 停在安全区上缘，底部延续输入面板颜色。
         view.backgroundColor = attachmentsVisible && !hasVoice ? attachmentPanel.backgroundColor : composer.backgroundColor
         back.frame = CGRect(x: r(26), y: top + r(29), width: r(52), height: r(52)); back.titleLabel?.font = .systemFont(ofSize: r(52))
@@ -343,10 +343,15 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         }
         if navigationController?.topViewController === self, presentedViewController == nil, let result = service.takeForwardNotice(in: conversation.id) { showForwardResult(result) }
         let restriction = service.sendRestriction(conversation)
+        let dismissed = service.isRoomDismissed(conversation)
+        if dismissed && !composer.isHidden { input.resignFirstResponder() }
+        composer.isHidden = dismissed
         let pin = service.pinnedMessage(in: conversation)
         let isRemovingPin = pendingPinRemoval.map { pin?.isSamePin(as: $0) == true } ?? false
         showingPin = restriction == nil && pin != nil && !isRemovingPin
-        notice.text = restriction ?? (showingPin ? pin?.preview : ""); notice.isHidden = notice.text?.isEmpty != false
+        notice.text = restriction ?? (showingPin ? pin?.preview : "")
+        notice.isHidden = notice.text?.isEmpty != false
+        notice.isUserInteractionEnabled = showingPin
         pinTitle.text = pin?.shared == true ? "置顶消息" : "仅为我置顶"
         [pinTitle, pinLine, dismissPin].forEach { $0.isHidden = !showingPin }; view.setNeedsLayout()
         if multiSelecting { heading.text = "已选 \(selectedIDs.count) 条"; more.setTitle("转发", for: .normal) } else { heading.text = conversation.title; more.setTitle("⋯", for: .normal) }
@@ -365,7 +370,7 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         let today = calendar.startOfDay(for: Date())
         var dateFormatter: DateFormatter?
         for item in items where item.timestamp > 0 {
-            let date = Date(timeIntervalSince1970: Double(item.timestamp) / 1000)
+            guard let date = NativeMessageTimestamp.date(item.timestamp) else { continue }
             let day = calendar.startOfDay(for: date)
             defer { previousDay = day }; guard previousDay != day else { continue }
             let diff = calendar.dateComponents([.day], from: day, to: today).day ?? 0
@@ -394,19 +399,29 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         renderedRows = rows
         measuredRows = measuredRows.filter { rows[$0.key] != nil }
         displayed = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
-        let nearBottom = collection.contentOffset.y + collection.bounds.height >= collection.contentSize.height - 80
-        let followBottom = HistoryViewportPolicy.shouldFollowBottom(explicit: scrollToBottom, initial: !positionedInitialMessages, userInteracted: userInteracted, appended: !items.isEmpty && previousSnapshot.itemIdentifiers.last != items.last?.id, nearBottom: nearBottom, interacting: collection.isDragging || collection.isDecelerating)
+        let distance = distanceFromLatest
+        let followBottom = HistoryViewportPolicy.shouldFollowBottom(
+            explicit: scrollToBottom,
+            initial: !positionedInitialMessages,
+            userInteracted: userInteracted,
+            appended: previousSnapshot.itemIdentifiers.last != items.last?.id,
+            atBottom: !previousSnapshot.itemIdentifiers.isEmpty && distance <= 1,
+            nearBottom: distance <= 80,
+            interacting: collection.isDragging || collection.isDecelerating
+        )
         let previous = Set(previousSnapshot.itemIdentifiers)
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>(); snapshot.appendSections([0]); snapshot.appendItems(items.map(\.id))
         snapshot.reconfigureItems(changedIDs.filter(previous.contains))
         applyingSnapshot = true
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self = self else { return }
-            self.collection.collectionViewLayout.invalidateLayout(); self.collection.layoutIfNeeded()
+            self.view.layoutIfNeeded()
+            self.collection.collectionViewLayout.invalidateLayout()
+            self.collection.layoutIfNeeded()
             if self.focusPending, let focus = self.focusID, let index = self.dataSource.indexPath(for: focus) {
                 self.focusPending = false; self.collection.scrollToItem(at: index, at: .centeredVertically, animated: false)
             } else if followBottom && !items.isEmpty && (scrollToBottom || self.scrollGestureRevision == snapshotGestureRevision) {
-                self.collection.scrollToItem(at: IndexPath(item: items.count - 1, section: 0), at: .bottom, animated: false)
+                self.scrollToLatest(animated: false)
             } else {
                 self.restoreViewport(anchor)
             }
@@ -444,13 +459,13 @@ final class NativeConversationViewController: UIViewController, UICollectionView
               let index = dataSource.indexPath(for: anchor.id), let frame = collection.layoutAttributesForItem(at: index)?.frame else { return }
         let delta = collection.isDragging ? anchor.translation - collection.panGestureRecognizer.translation(in: collection).y : 0
         let minimum = -collection.adjustedContentInset.top
-        let maximum = max(minimum, collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
-        collection.contentOffset.y = CGFloat(HistoryViewportPolicy.restoredOffset(anchorMinY: Double(frame.minY), distanceFromTop: Double(anchor.distance), gestureDelta: Double(delta), minimum: Double(minimum), maximum: Double(maximum)))
+        collection.contentOffset.y = CGFloat(HistoryViewportPolicy.restoredOffset(anchorMinY: Double(frame.minY), distanceFromTop: Double(anchor.distance), gestureDelta: Double(delta), minimum: Double(minimum), maximum: Double(latestOffsetY)))
         lastHistoryOffset = collection.contentOffset.y
     }
     private func applyPendingMediaSizes() {
         guard !pendingMediaSizes.isEmpty, !applyingSnapshot, !collection.isDragging, !collection.isDecelerating else { return }
-        let anchor = captureViewport()
+        let wasAtBottom = distanceFromLatest <= 1
+        let anchor = wasAtBottom ? nil : captureViewport()
         let updates = pendingMediaSizes; pendingMediaSizes = [:]
         for (id, size) in updates { mediaSizes[id] = size; measuredRows[id] = nil }
         for case let cell as NativeMessageCell in collection.visibleCells {
@@ -458,7 +473,10 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             cell.updateResolvedMediaSize(size)
         }
         UIView.performWithoutAnimation {
-            collection.collectionViewLayout.invalidateLayout(); collection.layoutIfNeeded(); restoreViewport(anchor)
+            collection.collectionViewLayout.invalidateLayout()
+            collection.layoutIfNeeded()
+            if wasAtBottom { scrollToLatest(animated: false) }
+            else { restoreViewport(anchor) }
         }
         updateLatestButton()
     }
@@ -483,8 +501,9 @@ final class NativeConversationViewController: UIViewController, UICollectionView
     }
 
     private func updateHistoryStatus(hasMessages: Bool) {
-        historyStatus.isHidden = hasMessages
-        guard !hasMessages else { historySpinner.stopAnimating(); return }
+        let hideStatus = hasMessages || service.isRoomDismissed(conversation)
+        historyStatus.isHidden = hideStatus
+        guard !hideStatus else { historySpinner.stopAnimating(); return }
         let failed = initialHistoryError || service.historyNeedsRetry(conversation, cursor: cursor)
         let syncPending = isEnd && service.historyIsSyncing
         let canContinue = !isEnd && !cursor.isEmpty && awaitingHistoryCursor == nil
@@ -597,8 +616,22 @@ final class NativeConversationViewController: UIViewController, UICollectionView
         lastAutomaticHistoryRequest = fingerprint
         startHistoryRead()
     }
-    private func updateLatestButton() { guard isViewLoaded, collection != nil else { return }; latest.isHidden = collection.contentSize.height - collection.contentOffset.y - collection.bounds.height < 140 }
-    @objc private func returnLatest() { guard let id = dataSource.snapshot().itemIdentifiers.last, let index = dataSource.indexPath(for: id) else { return }; collection.scrollToItem(at: index, at: .bottom, animated: true) }
+    private var latestOffsetY: CGFloat {
+        max(-collection.adjustedContentInset.top, collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
+    }
+
+    private var distanceFromLatest: CGFloat { latestOffsetY - collection.contentOffset.y }
+
+    private func scrollToLatest(animated: Bool) {
+        collection.setContentOffset(CGPoint(x: collection.contentOffset.x, y: latestOffsetY), animated: animated)
+    }
+
+    private func updateLatestButton() {
+        guard isViewLoaded, collection != nil else { return }
+        latest.isHidden = distanceFromLatest < 140
+    }
+
+    @objc private func returnLatest() { scrollToLatest(animated: true) }
     private func locate(_ id: String) {
         guard actionTask == nil else { return }
         actionTask = Task { [weak self] in guard let self = self else { return }; defer { self.actionTask = nil }; do {
@@ -607,7 +640,31 @@ final class NativeConversationViewController: UIViewController, UICollectionView
             DispatchQueue.main.async { [weak self] in guard let self = self, self.navigationController?.topViewController === self, let index = self.dataSource.indexPath(for: id) else { return }; self.collection.scrollToItem(at: index, at: .centeredVertically, animated: true) }
         } catch { if !Task.isCancelled, self.navigationController?.topViewController === self { self.showNativeNotice(error.localizedDescription) } } }
     }
-    private func openSender(_ message: ChatTextItem) { let id = GroupVisibility.businessUserID(message.senderID); guard !multiSelecting, !id.isEmpty else { return }; if id == service.business.userID { navigationController?.pushViewController(NativeProfileController(context: service.business, service: service), animated: true) } else { navigationController?.pushViewController(NativeContactController(service: service, userID: id, isFriend: false), animated: true) } }
+    private func openSender(_ message: ChatTextItem) {
+        let id = GroupVisibility.businessUserID(message.senderID)
+        guard !multiSelecting, !id.isEmpty else { return }
+        if id == service.business.userID {
+            navigationController?.pushViewController(NativeProfileController(context: service.business, service: service), animated: true)
+            return
+        }
+        guard conversation.type == 3 else {
+            navigationController?.pushViewController(NativeContactController(service: service, userID: id, isFriend: false), animated: true)
+            return
+        }
+        guard actionTask == nil else { return }
+        actionTask = Task { [weak self] in
+            guard let self = self else { return }
+            defer { self.actionTask = nil }
+            do {
+                let groupID = try await self.service.businessPeerID(self.conversation)
+                try Task.checkCancellation()
+                guard self.navigationController?.topViewController === self else { return }
+                self.navigationController?.pushViewController(NativeContactController(service: self.service, userID: id, isFriend: false, groupID: groupID), animated: true)
+            } catch {
+                if !Task.isCancelled, self.navigationController?.topViewController === self { self.showNativeNotice(error.localizedDescription) }
+            }
+        }
+    }
     private func mentionSender(_ message: ChatTextItem) {
         guard actionTask == nil, conversation.type == 3, !multiSelecting else { return }; let user = GroupVisibility.businessUserID(message.senderID); guard !user.isEmpty else { return }
         actionTask = Task { [weak self] in guard let self = self else { return }; defer { self.actionTask = nil }; do {
@@ -1223,9 +1280,14 @@ final class NativeConversationViewController: UIViewController, UICollectionView
                 let id = try await self.service.businessPeerID(self.conversation)
                 try Task.checkCancellation()
                 guard self.service.isActive, self.navigationController?.topViewController === self else { return }
-                let page: UIViewController = self.conversation.type == 3
-                    ? NativeGroupController(service: self.service, groupID: id)
-                    : NativeContactController(service: self.service, userID: id, isFriend: true)
+                let page: UIViewController
+                if self.conversation.type == 3 {
+                    page = NativeGroupController(service: self.service, groupID: id,
+                                                 opensDissolved: self.service.isRoomDismissed(self.conversation),
+                                                 conversation: self.conversation)
+                } else {
+                    page = NativeContactController(service: self.service, userID: id, isFriend: true)
+                }
                 self.navigationController?.pushViewController(page, animated: true)
             } catch {
                 if !Task.isCancelled { self.showNativeNotice(error.localizedDescription) }

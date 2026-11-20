@@ -2,6 +2,8 @@ import UIKit
 
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
+    private var updateTask: Task<Void, Never>?
+    private var didCheckForUpdate = false
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
@@ -9,6 +11,24 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = NativeNavigationController(rootViewController: LoginViewController())
         self.window = window
         window.makeKeyAndVisible()
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        guard !didCheckForUpdate, let update = NativeEnterpriseUpdate() else { return }
+        didCheckForUpdate = true
+        updateTask = Task { [weak self] in
+            defer { self?.updateTask = nil }
+            guard let release = try? await update.check(), !Task.isCancelled,
+                  let window = self?.window, window.isKeyWindow,
+                  window.windowScene?.activationState == .foregroundActive,
+                  let root = window.rootViewController, root.presentedViewController == nil,
+                  root.transitionCoordinator == nil, root.viewIfLoaded?.window === window else { return }
+            release.present(from: root)
+        }
+    }
+
+    func sceneDidDisconnect(_ scene: UIScene) {
+        updateTask?.cancel()
     }
 }
 

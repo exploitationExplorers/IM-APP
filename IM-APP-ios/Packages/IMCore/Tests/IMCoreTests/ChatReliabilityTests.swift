@@ -144,12 +144,18 @@ final class ChatReliabilityTests: XCTestCase {
     }
 
     func testLateInitialHistoryAndIncomingMessagesDoNotInterruptReading() {
-        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: true, userInteracted: false, appended: false, nearBottom: false, interacting: false))
-        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: true, userInteracted: true, appended: false, nearBottom: false, interacting: true))
-        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, nearBottom: true, interacting: true))
-        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, nearBottom: false, interacting: false))
-        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, nearBottom: true, interacting: false))
-        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: true, initial: false, userInteracted: true, appended: false, nearBottom: false, interacting: false))
+        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: true, userInteracted: false, appended: false, atBottom: false, nearBottom: false, interacting: false))
+        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: true, userInteracted: true, appended: false, atBottom: false, nearBottom: false, interacting: true))
+        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, atBottom: false, nearBottom: true, interacting: true))
+        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, atBottom: false, nearBottom: false, interacting: false))
+        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: true, atBottom: false, nearBottom: true, interacting: false))
+        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: true, initial: false, userInteracted: true, appended: false, atBottom: false, nearBottom: false, interacting: false))
+    }
+
+    func testHistoryRefreshKeepsLatestWhenTheLastMessageIDDoesNotChange() {
+        XCTAssertTrue(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: false, appended: false, atBottom: true, nearBottom: true, interacting: false))
+        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: false, atBottom: true, nearBottom: true, interacting: true))
+        XCTAssertFalse(HistoryViewportPolicy.shouldFollowBottom(explicit: false, initial: false, userInteracted: true, appended: false, atBottom: false, nearBottom: true, interacting: false))
     }
 
     func testHistoryPrependAndMediaResizeKeepAnchorIncludingContinuedDrag() {

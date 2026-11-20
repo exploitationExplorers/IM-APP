@@ -109,6 +109,13 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         let timestamp: Int64
         let unread: Int
         let joinRequestPending: Bool
+
+        func hasSamePresentation(as other: Self) -> Bool {
+            preview == other.preview && timestamp == other.timestamp && unread == other.unread
+                && joinRequestPending == other.joinRequestPending && conversation.title == other.conversation.title
+                && conversation.avatar == other.conversation.avatar && conversation.type == other.conversation.type
+                && conversation.muted == other.conversation.muted
+        }
     }
     private var renderedConversations: [RenderedConversation] = []
 
@@ -215,7 +222,8 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         empty.numberOfLines = 0
         configureProfile()
         if let chat = chat {
-            let contacts = NativeContactsViewController(service: chat), mine = NativeMineViewController(service: chat)
+            let contacts = NativeContactsViewController(service: chat) { [weak self] in self?.showGroupCreationSuccess() }
+            let mine = NativeMineViewController(service: chat)
             for child in [contacts as UIViewController, mine as UIViewController] { addChild(child); view.insertSubview(child.view, belowSubview: tabbar); child.didMove(toParent: self) }
             contactsPage = contacts; minePage = mine
         }
@@ -374,35 +382,59 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         guard next != renderedConversations else { return }
         let previous = renderedConversations
         renderedConversations = next
-        // 隐藏或尚未入窗时只更新数据，避免为不可见列表强制计算可见行布局。
         guard table.window != nil, !table.isHidden else {
             table.reloadData()
             return
         }
-        if previous.map({ $0.conversation.id }) == next.map({ $0.conversation.id }) {
-            let changed = next.indices.filter { next[$0] != previous[$0] }.map { IndexPath(row: $0, section: 0) }
-            UIView.performWithoutAnimation { table.reloadRows(at: changed, with: .none) }
-            return
+
+        let oldIDs = previous.map { $0.conversation.id }
+        let newIDs = next.map { $0.conversation.id }
+        let previousByID = Dictionary(uniqueKeysWithValues: previous.map { ($0.conversation.id, $0) })
+        let changed = next.enumerated().compactMap { index, row -> IndexPath? in
+            guard let old = previousByID[row.conversation.id], !row.hasSamePresentation(as: old) else { return nil }
+            return IndexPath(row: index, section: 0)
         }
         let atTop = table.contentOffset.y <= -table.adjustedContentInset.top + 1
         let anchor = table.indexPathsForVisibleRows?.first.flatMap { index -> (String, CGFloat)? in
-            guard index.row < previous.count else { return nil }
-            return (previous[index.row].conversation.id, table.rectForRow(at: index).minY - table.contentOffset.y)
+            guard oldIDs.indices.contains(index.row) else { return nil }
+            return (oldIDs[index.row], table.rectForRow(at: index).minY - table.contentOffset.y)
         }
+
         UIView.performWithoutAnimation {
-            table.reloadData(); table.layoutIfNeeded()
-            // 顶部保持跟随真正的新消息；浏览旧会话时保留当前行与像素偏移。
-            if !atTop, let anchor = anchor, let row = next.firstIndex(where: { $0.conversation.id == anchor.0 }) {
-                let proposed = table.rectForRow(at: IndexPath(row: row, section: 0)).minY - anchor.1
-                let maximum = max(-table.adjustedContentInset.top, table.contentSize.height - table.bounds.height + table.adjustedContentInset.bottom)
-                table.contentOffset.y = min(maximum, max(-table.adjustedContentInset.top, proposed))
+            if oldIDs != newIDs {
+                applyConversationChanges(newIDs.difference(from: oldIDs).inferringMoves())
+            }
+            if !changed.isEmpty { table.reconfigureRows(at: changed) }
+            guard oldIDs != newIDs, !atTop, let anchor, let row = newIDs.firstIndex(of: anchor.0) else { return }
+            table.layoutIfNeeded()
+            let top = -table.adjustedContentInset.top
+            let proposed = table.rectForRow(at: IndexPath(row: row, section: 0)).minY - anchor.1
+            let maximum = max(top, table.contentSize.height - table.bounds.height + table.adjustedContentInset.bottom)
+            table.contentOffset.y = min(maximum, max(top, proposed))
+        }
+    }
+
+    private func applyConversationChanges(_ changes: CollectionDifference<String>) {
+        table.performBatchUpdates {
+            for change in changes {
+                switch change {
+                case let .remove(offset, _, destination):
+                    let source = IndexPath(row: offset, section: 0)
+                    if let destination { table.moveRow(at: source, to: IndexPath(row: destination, section: 0)) }
+                    else { table.deleteRows(at: [source], with: .none) }
+                case let .insert(offset, _, nil):
+                    table.insertRows(at: [IndexPath(row: offset, section: 0)], with: .none)
+                case .insert: break
+                }
             }
         }
     }
 
-    @objc private func selectTab(_ sender: UIButton) {
+    @objc private func selectTab(_ sender: UIButton) { selectTab(at: sender.tag) }
+
+    private func selectTab(at index: Int) {
         let previousStatusBarStyle = preferredStatusBarStyle
-        currentTab = sender.tag
+        currentTab = index
         // SDK 通知、搜索和未读刷新不改变状态栏；只在切页确实改变样式时请求更新。
         if preferredStatusBarStyle != previousStatusBarStyle {
             setNeedsStatusBarAppearanceUpdate()
@@ -457,7 +489,44 @@ final class SampleMainViewController: UIViewController, UITableViewDataSource, U
         }
         showAnchoredNativeMenu(anchor: add, items: items)
     }
-    private func openGroupAction(create: Bool) { guard let chat = chat else { return }; let page = NativeGroupsController(service: chat); navigationController?.pushViewController(page, animated: false); if create { page.createGroup() } else { page.joinGroup() } }
+    private func openGroupAction(create: Bool) {
+        guard let chat else { return }
+        let page = NativeGroupsController(service: chat) { [weak self] in self?.showGroupCreationSuccess() }
+        navigationController?.pushViewController(page, animated: false)
+        if create { page.createGroup() } else { page.joinGroup() }
+    }
+
+    enum GroupExitDestination {
+        case conversations
+        case contacts
+    }
+
+    func showGroupExitDestination(_ destination: GroupExitDestination, notice: String? = nil) {
+        guard let chat, chat.isActive, let navigationController else { return }
+        switch destination {
+        case .conversations:
+            selectChatListFromTop()
+        case .contacts:
+            selectTab(at: 0)
+        }
+        navigationController.popToViewController(self, animated: true)
+        if let notice { showNativeNotice(notice) }
+    }
+
+    private func showGroupCreationSuccess() {
+        guard let chat, chat.isActive, let navigationController else { return }
+        selectChatListFromTop()
+        navigationController.popToViewController(self, animated: true)
+        showNativeNotice("创建成功")
+        Task { await chat.loadConversations(reset: true) }
+    }
+
+    private func selectChatListFromTop() {
+        search.text = nil
+        unreadOnly = false
+        selectTab(at: 1)
+        table.setContentOffset(CGPoint(x: 0, y: -table.adjustedContentInset.top), animated: false)
+    }
 
     @objc private func refreshRealConversations() {
         guard let chat = chat else { return }
