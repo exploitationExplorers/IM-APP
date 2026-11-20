@@ -1,5 +1,7 @@
 # 易可聊 Android 原生工程
 
+多人协作打包与上传服务器，请先读 [原生安卓内测发版操作](RELEASING.md)。开发者与 AI 均以该文档核对当前签名、版本和服务器发布步骤；下文历史版本描述不作为最新发版依据。
+
 当前开发版本 `0.3.0-parity` / versionCode `4`。Kotlin + Compose，核心聊天直接使用官方 OpenIM 原生 SDK。以现有 uni-app 的页面、素材、文字与操作为基准，不另做视觉设计。
 
 测试应用身份 `com.im.nativebootstrap.staging` 与正式 uni-app 不同，可覆盖前一版原生测试包，不覆盖生产 App。当前未验证旧本地库覆盖迁移，Release 有明确阻断。未改旧前端/后端，未部署或发布。
