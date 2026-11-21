@@ -226,8 +226,10 @@ class ChatRuntimeTest {
         val h=Harness();h.gateway.supportsLocalHistory=true;h.ready()
         val seed=message("seed",2,99,99)
         h.controller.open(conversation().copy(latestMessage=seed))
-        assertEquals(listOf("seed"),h.state.messages.map { it.id })
+        // 库可读且无缓存时，首帧等待本地第一页；空页后回退种子消息。
+        assertTrue(h.state.messages.isEmpty())
         h.gateway.localHistories.last().third(Result.success(HistoryPage(emptyList(),true)))
+        assertEquals(listOf("seed"),h.state.messages.map { it.id })
         h.gateway.events.syncStarted()
         h.gateway.events.syncFinished()
         assertEquals(1,h.gateway.localHistories.last().second)

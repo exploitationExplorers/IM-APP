@@ -1,8 +1,10 @@
 package com.im.nativebootstrap
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -19,6 +21,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,6 +38,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -45,13 +49,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -145,6 +154,21 @@ private suspend fun voiceSource(
             ).absolutePath
         }.getOrElse { content.url }
     }
+}
+
+/** 聊天文本内的 http(s) 链接：品牌色+下划线，点按打开浏览器；多选态放行外层点选，长按菜单仍由气泡处理。 */
+private val chatLinkRegex=Regex("https?://[\\p{L}\\p{N}\\-._~:/?#\\[\\]@!$&'()*+,;=%]+")
+@Composable private fun LinkedText(text:String,color:Color,fontSize:TextUnit,lineHeight:TextUnit,enabled:Boolean) {
+    val context=LocalContext.current
+    val layout=remember { arrayOfNulls<TextLayoutResult>(1) }
+    val annotated=remember(text) { buildAnnotatedString {
+        append(text)
+        chatLinkRegex.findAll(text).forEach { link ->
+            addStringAnnotation("chat-link",link.value,link.range.first,link.range.last+1)
+            addStyle(SpanStyle(color=C.primaryText,textDecoration=TextDecoration.Underline),link.range.first,link.range.last+1)
+        }
+    } }
+    Text(annotated,color=color,fontSize=fontSize,lineHeight=lineHeight,onTextLayout={layout[0]=it},modifier=Modifier.pointerInput(text,enabled) { if(enabled)detectTapGestures { position-> layout[0]?.getOffsetForPosition(position)?.let { offset-> annotated.getStringAnnotations("chat-link",offset,offset).firstOrNull()?.let { hit-> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(hit.item)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } } } })
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -687,7 +711,7 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                                             }
                                         }
                                         if(content.quoteText.isNotEmpty())Spacer(Modifier.height(rpx(10)))
-                                        Text(if(content.type in setOf(101,106,114))content.text else message.text,color=foreground,fontSize=(30*factor).sp,lineHeight=(43*factor).sp)
+                                        LinkedText(if(content.type in setOf(101,106,114))content.text else message.text,color=foreground,fontSize=(30*factor).sp,lineHeight=(43*factor).sp,enabled=!multi)
                                     }
                                 }
                             }

@@ -1,0 +1,11 @@
+# 冷启动与聊天热路径基线（安装时 AOT，参照 YanChat 的 baseline.prof 实践）
+HSPLcom/im/nativebootstrap/**->**(**)**;
+Lcom/im/nativebootstrap/**;
+HSPLio/openim/android/sdk/**->**(**)**;
+Lio/openim/android/sdk/**;
+HSPLandroidx/compose/runtime/**->**(**)**;
+Landroidx/compose/runtime/**;
+HSPLandroidx/compose/foundation/lazy/**->**(**)**;
+Landroidx/compose/foundation/lazy/**;
+HSPLandroidx/lifecycle/**->**(**)**;
+Landroidx/lifecycle/**;

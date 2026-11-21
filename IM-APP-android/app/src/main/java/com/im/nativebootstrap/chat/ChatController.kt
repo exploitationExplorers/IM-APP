@@ -135,6 +135,7 @@ class ChatController(
     private val convOfMessage=LinkedHashMap<String,String>()
     private val inviteHandled=HashMap<String,String>()
     private val recentMessages=HashMap<String,List<ChatMessage>>()
+    private var roomSeed:ChatMessage?=null
     private var roomFirstPageRetry=false
     private val recentPrefetchAttempts=HashMap<String,Int>()
     private val serverRecentInFlight=linkedSetOf<String>()
@@ -677,12 +678,16 @@ class ChatController(
         emit(snapshot.copy(active=opened,conversations=conversations,messages=emptyList(),historyEnd=false,historyLoading=false,historyRevision=0,historySyncing=false,historyDiagnostic=null,error=null,maxOtherReadSeq=0,mentions=emptyList(),focusMessageId=null,sendBlockedReason=null,permissionLoading=false,groupRole="",groupBusinessId="",groupMemberCount=0,groupAnnouncement="",groupMembers=emptyMap(),groupOwnerName="",peerOnline=null,peerLastSeenAt=""))
         val latest=conversation.latestMessage ?: convLatest[conversation.target.conversationId]
         val seed=latest?.takeIf { it.serialized.isNotBlank() }?.let { visible(listOf(it)) }.orEmpty()
+        roomSeed=seed.firstOrNull()
         val cached=visible(recentMessages[conversation.target.conversationId].orEmpty())
-        emit(snapshot.copy(messages=mergeMessages(mergeMessages(seed,visible(local)),cached)))
+        // 有预取/待发内容或本地库尚未就绪时先画种子；库可读且无缓存时让本地第一页成为首帧内容，避免「进房只闪一条预览消息」。
+        if(cached.isNotEmpty()||local.isNotEmpty()||snapshot.store!=StoreStatus.READABLE)emit(snapshot.copy(messages=mergeMessages(mergeMessages(seed,visible(local)),cached)))
         fetchServerRecent(listOf(opened))
         prefetchRecentMessages(listOf(opened))
         // 先启动历史首屏；retention 只在群消息区做门禁，不再串行阻塞其他房间初始化。
         loadHistory()
+        // 冷启动时本地库可能仍在 OPENING：补一次短延迟重试，避免房间停在空载入态。
+        if(!localHistoryReadable())after(1_200) { dispatch { if(snapshot.active?.target==opened.target)loadHistory() } }
         refreshGroupPurges(conversation.target,true)
         refreshSendPermission()
         refreshPeerPresence()
@@ -771,12 +776,12 @@ class ChatController(
         val t=ticket ?: return
         val active=snapshot.active ?: return
         if(active.target.conversationId in clearing)return
+        // 留存边界改为异步校验：本地页立即读取；visible() 已按 boundaryReady+permits 逐条隐藏，
+        // 校验完成后 refreshRetention 的 emit 自动放行（闪现-回滚语义），不再串行阻塞首屏。
         if(!boundaryReady(active.target)) {
-            PerfLog.mark("room:boundary-wait","id=${active.target.conversationId}")
-            if(!snapshot.historySyncing)emit(snapshot.copy(historySyncing=true))
+            PerfLog.mark("room:boundary-async","id=${active.target.conversationId}")
             refreshRetention(listOf(active))
             refreshRetentionPriority(active.target)
-            return
         }
         if(!localHistoryReadable()||snapshot.historyLoading||snapshot.historyEnd&&(localHistorySupported!=true||localHistoryEnd))return
         if(localHistorySupported!=false) {
@@ -794,7 +799,7 @@ class ChatController(
                     // 只推进本地分页；网络补洞游标与加载状态独立，不阻止继续向上读本地记录。
                     if(local.messages.isNotEmpty()||!local.end)localHistoryPage=page+1
                     local.messages.filter { it.mine&&(it.status==2||it.seq>0) }.forEach(::acceptEvidence)
-                    emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(local.messages)),historyLoading=false,historyEnd=historyExhausted(),historyRevision=snapshot.historyRevision+1,error=null))
+                    emit(snapshot.copy(messages=mergeMessages(mergeMessages(snapshot.messages,visible(listOfNotNull(roomSeed))),visible(local.messages)),historyLoading=false,historyEnd=historyExhausted(),historyRevision=snapshot.historyRevision+1,error=null))
                     MediaPrefetch.enqueue(active.target,local.messages)
                     // 未连上服务器也尝试一次完整 SDK 历史；无补洞时可立即补出本地系统/表情。
                     // 该查询独立限时，既不占本地 loading，也不阻止下一页本地预览。
@@ -811,7 +816,7 @@ class ChatController(
         val query=++historyOperation
         val before=cursor
         emit(snapshot.copy(historyLoading=true,historySyncing=false,error=null))
-        after(20_000) { dispatch { if(current(t)&&roomGeneration==version&&historyOperation==query&&snapshot.historyLoading) { historyOperation+=1;emit(snapshot.copy(historyLoading=false,error="历史读取超时，可点击重试。")) } } }
+        after(20_000) { dispatch { if(current(t)&&roomGeneration==version&&historyOperation==query&&snapshot.historyLoading) { historyOperation+=1;emit(snapshot.copy(messages=if(snapshot.messages.isEmpty())visible(listOfNotNull(roomSeed)) else snapshot.messages,historyLoading=false,error="历史读取超时，可点击重试。")) } } }
         gateway.history(active.target,before,PAGE_SIZE) { result -> dispatch {
             if(!current(t)||version!=roomGeneration||query!=historyOperation||!remoteHistoryReadable()) return@dispatch
             result.fold(onSuccess={ page ->
@@ -819,7 +824,7 @@ class ChatController(
                 if(oldest!=null && oldest!=before) cursor=oldest
                 page.messages.filter { it.mine && (it.status==2 || it.seq>0) }.forEach(::acceptEvidence)
                 // 仅 SDK 的 isEnd 决定结束；空页或重复游标不能冒充无更多历史。
-                emit(snapshot.copy(messages=mergeMessages(snapshot.messages,visible(page.messages)),historyLoading=false,historyEnd=page.end,historyRevision=snapshot.historyRevision+if(page.end||oldest!=null&&oldest!=before)1 else 0,error=if(!page.end&&(oldest==null||oldest==before)) "历史暂未推进，请稍后重试。" else null))
+                emit(snapshot.copy(messages=mergeMessages(mergeMessages(snapshot.messages,visible(listOfNotNull(roomSeed))),visible(page.messages)),historyLoading=false,historyEnd=page.end,historyRevision=snapshot.historyRevision+if(page.end||oldest!=null&&oldest!=before)1 else 0,error=if(!page.end&&(oldest==null||oldest==before)) "历史暂未推进，请稍后重试。" else null))
                 MediaPrefetch.enqueue(active.target,page.messages)
                 markRoomRead()
             },onFailure={ emit(snapshot.copy(historyLoading=false,error=it.message ?: "历史读取失败，可重试。")) })
@@ -889,7 +894,7 @@ class ChatController(
     }
     private fun historyFailure(message:String) {
         val syncing=snapshot.sync==SyncStatus.RUNNING
-        emit(snapshot.copy(historyLoading=false,historySyncing=syncing,error=if(syncing)null else message))
+        emit(snapshot.copy(messages=if(snapshot.messages.isEmpty())visible(listOfNotNull(roomSeed)) else snapshot.messages,historyLoading=false,historySyncing=syncing,error=if(syncing)null else message))
     }
     fun send(text: String,quote:ChatMessage?=null):Boolean {
         val active=snapshot.active ?: return false
@@ -2421,7 +2426,7 @@ class ChatController(
         coordinator.logout();ticket=null;syncAttempt=null;outbox=null;mediaUploads=null;sentVideos=null;pendingForwards=null;runningForwards.clear();announcedForwards.clear();uploadAttempts.clear();retention=null;historyChecks=null;purges=null;purgeFresh.clear();purgeInFlight.clear();retentionFresh.clear();retentionInFlight.clear();retentionChecked.clear();readReporting.clear();readReported.clear();readMarkedAt.clear();clearing.clear();uploadingTargets.clear();notified.clear();ownIMId="";pageGeneration+=1;roomGeneration+=1;remoteHistoryOperation++;remoteHistoryLoading=false;cursor=null;offset=0
         gateway.shutdown()
         authRevoked=false;syncFinishedBeforeStore=false;tombstones.clear();sendAttempts.clear();sendCompletions.clear()
-        recallBy.clear();recallById.clear();convLatest.clear();recalledConversation.clear();convOfMessage.clear();inviteHandled.clear();localNotices.clear();recentMessages.clear();recentPrefetching.clear();recentPrefetchDone.clear();recentPrefetchAttempts.clear();serverRecentInFlight.clear();serverRecentDone.clear();serverRecentFailures=0;serverRecentUnavailable=false;priorityRetention.clear();roomFirstPageRetry=false
+        recallBy.clear();recallById.clear();convLatest.clear();recalledConversation.clear();convOfMessage.clear();inviteHandled.clear();localNotices.clear();recentMessages.clear();recentPrefetching.clear();recentPrefetchDone.clear();recentPrefetchAttempts.clear();serverRecentInFlight.clear();serverRecentDone.clear();serverRecentFailures=0;serverRecentUnavailable=false;priorityRetention.clear();roomFirstPageRetry=false;roomSeed=null
         snapshot=ChatState();changed(snapshot)
     }
 }
