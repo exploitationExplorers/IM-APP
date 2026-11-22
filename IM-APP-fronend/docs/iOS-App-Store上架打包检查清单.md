@@ -54,6 +54,8 @@ VITE_APP_STORE_ID=1234567890
 
 `src/manifest.json` 当前为 **1.0.165（264）**。若 Connect 上同一版本已有 264 或更高构建号，改为更高的数字再构建。
 
+App Store Connect 的审核记录确认，2026 年 11 月 17 日收到 5.6 反馈的构建为 **1.0.165（263）**。仓库现存的 `项目发布/ios/app.ipa` 是 **1.0.73（173）**，其中已确认包含 WGT 安装代码、自建更新接口和调试页。构建 263 是否包含这些代码仍待检查原包。
+
 商店壳版本号**不要**跟着企业签 wgt 的版本跑。
 
 ---
@@ -135,6 +137,11 @@ ls pages/mine/debug 2>/dev/null && echo "FAIL: debug page still present" || echo
 ---
 
 ## 7. IPA 终检（上传前必做）
+
+需要找回构建 263 时，可在 App Store Connect 的「分发 → App 审核」中点击 `1.0.165 (263)` 核对上传时间和构建信息。构建详情页提供元数据和 dSYM 调试符号，原始 IPA 需向当时打包的人索取。 [Apple 构建详情说明](https://developer.apple.com/help/app-store-connect/manage-builds/view-builds-and-metadata/)
+
+- HBuilderX 云打包可在原打包 Mac 的「发行 → 查看云打包状态」查找对应记录。下载链接过期时，可查当时保存的 `.ipa` 或下载目录。
+- Xcode 打包可在原打包 Mac 的「Window → Organizer → Archives」查找 `1.0.165 (263)`。优先取当时导出的 `.ipa`，也可用对应的 `.xcarchive` 检查归档内容。
 
 在 `IM-APP-fronend` 目录使用 Python 3 检查签出的 IPA：
 
