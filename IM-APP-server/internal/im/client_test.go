@@ -720,3 +720,38 @@ func TestSetGroupMemberRoleDoesNotRetryUnrelatedError(t *testing.T) {
 		t.Fatalf("invite calls = %d, want 0（无关错误不该补人）", got)
 	}
 }
+
+func TestGetConversationMaxSeqUsesV383API(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"token":"admin-token","expireTimeSeconds":3600}}`))
+		case "/msg/get_conversations_has_read_and_max_seq":
+			calls.Add(1)
+			var body struct {
+				UserID          string   `json:"userID"`
+				ConversationIDs []string `json:"conversationIDs"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			if body.UserID != "im-user" || !reflect.DeepEqual(body.ConversationIDs, []string{"sg_group"}) {
+				t.Fatalf("unexpected request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"errCode":0,"data":{"seqs":{"sg_group":{"hasReadSeq":7,"maxSeq":42,"maxSeqTime":1700000000000}}}}`))
+		default:
+			t.Fatalf("unexpected OpenIM path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := newClient(config.OpenIMConfig{APIURL: server.URL, Secret: "server-secret", AdminUser: "imAdmin"}, server.Client())
+	maxSeq, err := client.GetConversationMaxSeq(context.Background(), "im-user", "sg_group")
+	if err != nil {
+		t.Fatalf("GetConversationMaxSeq() error = %v", err)
+	}
+	if maxSeq != 42 || calls.Load() != 1 {
+		t.Fatalf("maxSeq=%d calls=%d", maxSeq, calls.Load())
+	}
+}

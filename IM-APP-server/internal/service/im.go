@@ -203,7 +203,7 @@ func (s *IMService) recentMessages(ctx context.Context, callerUserID string, ite
 	previewGroups := make(map[string]string, len(items))
 	for _, item := range items {
 		conversationID := strings.TrimSpace(item.ConversationID)
-		if conversationID == "" || item.EndSeq <= 0 || strings.Contains(conversationID, "/") {
+		if conversationID == "" || strings.Contains(conversationID, "/") {
 			continue
 		}
 		if _, exists := seen[conversationID]; exists {
@@ -243,7 +243,19 @@ func (s *IMService) recentMessages(ctx context.Context, callerUserID string, ite
 		default:
 			continue
 		}
-		begin := item.EndSeq - int64(count) + 1
+		// 客户端首次同步时可能只有会话预览、拿不到 seq：EndSeq<=0 时由服务端取该会话 maxSeq。
+		endSeq := item.EndSeq
+		if endSeq <= 0 {
+			if previewOnly {
+				continue
+			}
+			maxSeq, resolveErr := s.Client.GetConversationMaxSeq(ctx, callerIMID, conversationID)
+			if resolveErr != nil || maxSeq <= 0 {
+				continue
+			}
+			endSeq = maxSeq
+		}
+		begin := endSeq - int64(count) + 1
 		if begin < 1 {
 			begin = 1
 		}
@@ -251,7 +263,7 @@ func (s *IMService) recentMessages(ctx context.Context, callerUserID string, ite
 		ranges = append(ranges, im.SeqRange{
 			ConversationID: conversationID,
 			Begin:          begin,
-			End:            item.EndSeq,
+			End:            endSeq,
 			Num:            count,
 		})
 	}

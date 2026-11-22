@@ -498,6 +498,26 @@ func (c *Client) GetConversationHasReadSeq(ctx context.Context, userID, conversa
 	return 0, nil
 }
 
+// GetConversationMaxSeq 查询某用户在某条会话上的服务端最大 seq。
+// 供首屏最近消息在客户端尚未拿到 seq 时兜底（EndSeq<=0）。
+func (c *Client) GetConversationMaxSeq(ctx context.Context, userID, conversationID string) (int64, error) {
+	var data struct {
+		Seqs map[string]struct {
+			MaxSeq int64 `json:"maxSeq"`
+		} `json:"seqs"`
+	}
+	if err := c.postWithAdmin(ctx, "/msg/get_conversations_has_read_and_max_seq", map[string]any{
+		"userID":          userID,
+		"conversationIDs": []string{conversationID},
+	}, &data); err != nil {
+		return 0, err
+	}
+	if seq, ok := data.Seqs[conversationID]; ok {
+		return seq.MaxSeq, nil
+	}
+	return 0, nil
+}
+
 func (c *Client) EnsureGroup(ctx context.Context, group Group) error {
 	registered, err := c.IsGroupRegistered(ctx, group.GroupID)
 	if err != nil {
