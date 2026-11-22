@@ -309,6 +309,7 @@ class ChatRuntimeTest {
     }
     @Test fun authRequiredDisablesSendWithoutBlockingAlreadyReadableLocalHistory() {
         val h=Harness();h.gateway.supportsLocalHistory=true;h.open()
+        val historyCallsBeforeAuth=h.gateway.histories.size
         h.gateway.events.connection(ConnectionState.AUTH_REQUIRED)
         assertFalse(h.state.ready);assertFalse(h.controller.send("blocked"))
         assertEquals(StoreStatus.READABLE,h.state.store)
@@ -316,7 +317,7 @@ class ChatRuntimeTest {
         assertEquals("offline",h.state.messages.single().id)
         h.controller.loadHistory()
         assertEquals(2,h.gateway.localHistories.last().second)
-        assertTrue(h.gateway.histories.isEmpty())
+        assertEquals(historyCallsBeforeAuth,h.gateway.histories.size)
     }
     @Test fun authExpiryDuringConversationQueryStillCompletesLocalReadWithoutRestoringSendAuthority() {
         val h=Harness();h.gateway.login(Result.success(Unit))

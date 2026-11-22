@@ -588,6 +588,11 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
                 listOf(-1,0,1).forEach { index -> drawCircle(C.text,size.width*.043f,Offset(size.width/2+index*gap,size.height/2)) }
             }
         }
+        if(BuildConfig.DEBUG&&state.messages.size<=1)Text(
+            "诊断 sync=${state.sync} store=${state.store} 本地读=${state.historyLoading} 远端补=${state.historySyncing} 说明=${state.historyDiagnostic ?: state.error ?: "-"}",
+            Modifier.fillMaxWidth().background(Color(0x33FFC107)).padding(horizontal=rpx(20),vertical=rpx(6)),
+            color=C.textSub,fontSize=(18*factor).sp,maxLines=2,overflow=TextOverflow.Ellipsis,
+        )
         if(state.showAnnouncementBanner&&state.groupAnnouncement.isNotBlank())Row(Modifier.fillMaxWidth().height(rpx(72)).background(C.card).padding(horizontal=rpx(24)),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(rpx(16))) {
             Image(painterResource(R.drawable.uni_icon_megaphone),"群公告",Modifier.size(rpx(36)),contentScale=ContentScale.Fit)
             Text(state.groupAnnouncement,Modifier.weight(1f).clickable { if(state.groupBusinessId.isNotBlank())callbacks.onOpenAnnouncements(state.groupBusinessId) },fontSize=(26*factor).sp,color=C.text,maxLines=1,overflow=TextOverflow.Ellipsis)

@@ -31,6 +31,7 @@ import com.google.gson.JsonParser
 import com.im.nativebootstrap.core.SecureSessionStore
 import com.im.nativebootstrap.core.SessionPersistenceCodec
 import com.im.nativebootstrap.core.StoredIMSession
+import com.im.nativebootstrap.core.SyncStatus
 import com.im.nativebootstrap.data.TokenPair
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -66,12 +67,14 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
             pendingChat.set(chat)
             // 消息突发时只保留最新快照，避免主线程排队执行多次深度状态发布。
             if(chatPublishScheduled.compareAndSet(false,true)) {
-                main.post {
+                // 同步风暴期的会话列表按 100ms 合并发布；其余状态保持即时。
+                val publish=Runnable {
                     chatPublishScheduled.set(false)
-                    val next=pendingChat.getAndSet(null) ?: return@post
-                    if(next.sessionTag==mutableState.value.chat.sessionTag&&next.revision<mutableState.value.chat.revision) return@post
+                    val next=pendingChat.getAndSet(null) ?: return@Runnable
+                    if(next.sessionTag==mutableState.value.chat.sessionTag&&next.revision<mutableState.value.chat.revision) return@Runnable
                     if(next.sessionTag==operation && mutableState.value.authenticated) mutableState.value=mutableState.value.copy(chat=next,chatOpen=next.active!=null)
                 }
+                if(chat.active==null&&chat.sync==SyncStatus.RUNNING) main.postDelayed(publish,100L) else main.post(publish)
             }
         },
     )
@@ -126,10 +129,20 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                 businessBaseURL=base
                 businessSession.restore(stored.tokens,stored.profile)
                 com.im.nativebootstrap.media.MediaLoader.setScope(base,stored.profile.businessUserId)
-                mutableState.value=BootstrapState(authenticated=true,profile=stored.profile,chat=ChatState(sessionTag=tag,connection=ConnectionState.CONNECTING))
                 val localIM=withContext(Dispatchers.IO) {
                     runCatching { imSecureStore.load()?.let { StoredIMSession.decode(it,base,stored.profile.businessUserId) } }.getOrNull()
                 }
+                // 会话快照先画首屏：不等资料校验与 SDK 登录，效果对齐 YanChat 的 Room 会话缓存。
+                val cachedConversations=if(localIM==null) emptyList() else withContext(Dispatchers.IO) {
+                    runCatching {
+                        val directory=AccountStorage.directory(File(getApplication<Application>().filesDir,"native-chat"),base,stored.profile.businessUserId,localIM.imUserId)
+                        val owner=AccountStorage.key(base,stored.profile.businessUserId,localIM.imUserId)
+                        val cache=runCatching { RoomConversationCache.open(getApplication(),directory) }.getOrNull()
+                            ?: ConversationSnapshotStore(File(directory,"conversations.json"),owner)
+                        try { cache.load() } finally { runCatching { cache.close() } }
+                    }.getOrDefault(emptyList())
+                }
+                mutableState.value=BootstrapState(authenticated=true,profile=stored.profile,chat=ChatState(sessionTag=tag,connection=ConnectionState.CONNECTING,conversations=cachedConversations,conversationsLoading=cachedConversations.isNotEmpty()))
                 // 本机已有的 SDK 凭据先开库；资料校验不再挡住离线历史首屏。
                 if(localIM!=null) {
                     com.im.nativebootstrap.media.MediaLoader.setScope(base,stored.profile.businessUserId,AccountStorage.key(base,stored.profile.businessUserId,localIM.imUserId))
@@ -203,6 +216,13 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                 credentialIO.execute { if(tag==operation)runCatching { imSecureStore.save(value) } }
             }
             imDiagnosticAPI=credentials.apiAddr;imDiagnosticWS=credentials.wsAddr
+            val conversationCache=withContext(Dispatchers.IO) {
+                runCatching {
+                    val directory=AccountStorage.directory(File(getApplication<Application>().filesDir,"native-chat"),baseURL,profile.businessUserId,credentials.imUserId)
+                    runCatching { RoomConversationCache.open(getApplication(),directory) }.getOrNull()
+                        ?: ConversationSnapshotStore(File(directory,"conversations.json"),AccountStorage.key(baseURL,profile.businessUserId,credentials.imUserId))
+                }.getOrNull()
+            }
             chatAction {
                 if(tag==operation) {
                     PerfLog.mark("chat-controller:queued-start")
@@ -226,7 +246,7 @@ class BootstrapViewModel(application: Application) : AndroidViewModel(applicatio
                         }
                     })
                     chatController.attachIncoming { message -> main.post { if(tag==operation&&mutableState.value.authenticated)settings.incoming(message,foregroundActive) } }
-                    chatController.start(AccountIdentity(profile.businessUserId,credentials.imUserId),baseURL,credentials.token,credentials.apiAddr,credentials.wsAddr,File(getApplication<Application>().filesDir,"native-chat"),tag)
+                    chatController.start(AccountIdentity(profile.businessUserId,credentials.imUserId),baseURL,credentials.token,credentials.apiAddr,credentials.wsAddr,File(getApplication<Application>().filesDir,"native-chat"),tag,conversationCache)
                     PerfLog.mark("chat-controller:start-called")
                     chatController.foreground(foregroundActive)
                 }

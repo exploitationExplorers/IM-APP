@@ -52,7 +52,9 @@ class ChatFeaturesTest {
         var created=ChatMessage("sdk-id","text",true,1,1,0,"""{"clientMsgID":"sdk-id","contentType":101}""")
         override fun start(userId:String,token:String,api:String,ws:String,directory:File,events:ChatEvents,done:(Result<Unit>)->Unit) { loginCount++;this.events=events;done(Result.success(Unit)) }
         override fun conversations(offset:Int,count:Int,done:(Result<List<ChatConversation>>)->Unit) { offsets+=offset;done(Result.success(listed?.drop(offset)?.take(count) ?: listOf(peerResult))) }
-        override fun history(target:ChatTarget,cursor:String?,count:Int,done:(Result<HistoryPage>)->Unit) { this.cursor=cursor;historyDone=done }
+        val historyCallbacks=mutableListOf<(Result<HistoryPage>)->Unit>()
+        fun resolveAllHistory(result:Result<HistoryPage>) { val pending=historyCallbacks.toList();historyCallbacks.clear();pending.forEach { it(result) } }
+        override fun history(target:ChatTarget,cursor:String?,count:Int,done:(Result<HistoryPage>)->Unit) { this.cursor=cursor;historyDone=done;historyCallbacks+=done }
         override fun createText(text:String,target:ChatTarget)=created
         override fun createMedia(media:UploadedMedia,target:ChatTarget):ChatMessage { mediaCreates++;return created }
         override fun createMention(text:String,mentions:List<Pair<String,String>>,quote:ChatMessage?,target:ChatTarget):ChatMessage { mentionUsers=mentions;return created }
@@ -410,7 +412,7 @@ class ChatFeaturesTest {
     @Test fun groupFilteringPreservesOriginalSdkHistoryCursorAndSearchBoundary() {
         val h=Harness(true);h.controller.open(h.gateway.peerResult)
         val hidden=ChatMessage("hidden","old",false,9,seq=9)
-        h.gateway.historyDone(Result.success(HistoryPage(listOf(hidden),false)))
+        h.gateway.resolveAllHistory(Result.success(HistoryPage(listOf(hidden),false)))
         assertTrue(h.state.messages.isEmpty());assertFalse(h.state.historyEnd)
         h.controller.loadHistory();assertEquals("hidden",h.gateway.cursor)
         var found:ChatSearchPage?=null
