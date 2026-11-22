@@ -1481,6 +1481,8 @@ interface SendCreatedMessageOptions {
   alreadyUploaded?: boolean
   /** 原生发送等待成功回调的超时（毫秒）。大文件（视频）走 OSS 上传时需比默认更久 */
   timeoutMs?: number
+  /** H5 转发需要确认服务端已接收，SDK 的重复发送错误也可能仅代表本地仍在发送中。 */
+  verifyReceipt?: boolean
 }
 
 interface NativeSendResult {
@@ -1516,6 +1518,12 @@ function isCompleteSentMessage(msg: MessageItem | null): msg is MessageItem {
   if (!msg?.clientMsgID || !msg.contentType) return false
   if (msg.status === MessageStatus.Sending || msg.status === MessageStatus.Failed) return false
   return true
+}
+
+function hasSendReceipt(item: MessageItem | null, clientMsgID: string): item is MessageItem {
+  return !!item && item.clientMsgID === clientMsgID && (
+    item.seq > 0 || (item.status === MessageStatus.Succeed && !!item.serverMsgID)
+  )
 }
 
 /** OpenIM FullPath API 只要 POSIX 绝对路径，不能传 uni.chooseImage 的 file:// / _doc 临时路径 */
@@ -1580,6 +1588,12 @@ async function sendCreatedMessage(
         return await sendOnAppNative(method, params, message.clientMsgID, perAttemptTimeout, false)
       }
       const sent = await imCall<unknown>(method, params)
+      if (options.verifyReceipt) {
+        const item = coerceMessage(sent)
+        if (item?.status === MessageStatus.Failed) throw new Error('发送失败')
+        if (hasSendReceipt(item, message.clientMsgID)) return item
+        throw new IMCallError(SEND_WAIT_TIMEOUT, '图片转发结果待确认')
+      }
       if (!isMessageItem(sent) || sent.status === MessageStatus.Failed) {
         throw new Error('发送失败')
       }
@@ -1587,11 +1601,17 @@ async function sendCreatedMessage(
     } catch (err) {
       lastErr = err
       const code = err instanceof IMCallError ? err.code : undefined
-      // 超时/断线后同一条重试，SDK 常回 10204：对面其实已收到，按成功处理
-      if (isDuplicateSendError(err)) {
+      const duplicate = isDuplicateSendError(err)
+      if (duplicate && !options.verifyReceipt) {
         return { ...message, status: MessageStatus.Succeed }
       }
       if (epoch !== loginEpoch) break
+      const retryable = code !== undefined && RETRYABLE_SEND_CODES.has(code)
+      if (options.verifyReceipt && (duplicate || retryable)) {
+        const found = await findLocalMessage(target.conversationId, message.clientMsgID)
+        if (epoch !== loginEpoch) break
+        if (hasSendReceipt(found, message.clientMsgID)) return found
+      }
       // 库已经关了，原地重试还是 GetGroups database is closed。先重开再发这一条。
       if (!reopenedDatabase && attempt < attempts - 1 && isLocalDatabaseWriteError(err)) {
         reopenedDatabase = true
@@ -1608,8 +1628,7 @@ async function sendCreatedMessage(
       const canRetry =
         attempt < attempts - 1 &&
         epoch === loginEpoch &&
-        code !== undefined &&
-        RETRYABLE_SEND_CODES.has(code)
+        (retryable || (duplicate && options.verifyReceipt))
       if (!canRetry) break
       const keepGoing = await waitToRetrySend(attempt, epoch)
       if (!keepGoing) break
@@ -2964,7 +2983,7 @@ function ensureFileSourceUrl(
 }
 
 /** 图片 URL 直发（收藏的图片 / 已上传图片不再二次上传） */
-export async function sendImageUrlMessage(target: IMTarget, url: string): Promise<MessageItem> {
+export async function sendImageUrlMessage(target: IMTarget, url: string, clientMsgID?: string): Promise<MessageItem> {
   const picture = { uuid: IMSDK.uuid(), type: 'image/jpeg', size: 0, width: 0, height: 0, url }
   const message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
     sourcePath: url,
@@ -2972,7 +2991,11 @@ export async function sendImageUrlMessage(target: IMTarget, url: string): Promis
     bigPicture: picture,
     snapshotPicture: picture,
   })
-  return sendCreatedMessage(target, ensurePictureSourceUrl(message, url), { alreadyUploaded: true })
+  const image = ensurePictureSourceUrl(message, url)
+  return sendCreatedMessage(target, clientMsgID ? { ...image, clientMsgID } : image, {
+    alreadyUploaded: true,
+    verifyReceipt: !!clientMsgID,
+  })
 }
 
 /**

@@ -2012,12 +2012,17 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /** 发送已有 URL 的图片（收藏转发场景，不再二次上传） */
-  async function sendImageUrl(conversationId: string, url: string, senderId: string) {
+  async function sendImageUrl(conversationId: string, url: string, senderId: string, clientMsgID?: string) {
     const target = targetOf(requireConversation(conversationId))
+    const placeholder = placeholderOf(conversationId, senderId, 'image', url)
+    if (clientMsgID) placeholder.id = `local_${clientMsgID}`
+    const alreadyInserted = !!messagesMap.value[conversationId]?.some((message) => message.id === placeholder.id)
+    if (alreadyInserted) replaceMessage(conversationId, placeholder.id, placeholder)
     await sendWithPlaceholder(
       conversationId,
-      placeholderOf(conversationId, senderId, 'image', url),
-      () => sendImageUrlMessage(target, url),
+      placeholder,
+      () => sendImageUrlMessage(target, url, clientMsgID),
+      alreadyInserted,
     )
   }
 
