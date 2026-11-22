@@ -9,6 +9,7 @@ import { useChatStore } from '@/stores/chat'
 import { useContactStore } from '@/stores/contact'
 import { useForwardStore } from '@/stores/forward'
 import type { ContactTagItem, Conversation, FriendForwardPlan } from '@/types'
+import { createDirectForward } from '@/utils/directForward'
 import {
   mergeVideoSnapshotFromChatContent,
   patchVideoSnapshotCover,
@@ -18,6 +19,7 @@ import {
 } from '@/utils/forwardSnapshot'
 import { safeBack } from '@/utils/nav'
 import { businessUserIdFromIM, ensureIMLogin, imUserId, uploadLocalImageForForward, extractVideoCoverForForward } from '@/utils/openim'
+import { isH5 } from '@/utils/platform'
 import { captureVideoPosterFromUrl, listThumbnailUrl, parseVideoMeta } from '@/utils/chatMedia'
 import ImNavBar from '@/components/ImNavBar.vue'
 
@@ -352,6 +354,7 @@ function confirmSend(content: string) {
       confirmText: '确认',
       cancelText: '取消',
       success: (res) => resolve(!!res.confirm),
+      fail: () => resolve(false),
     })
   })
 }
@@ -433,10 +436,11 @@ function pictureUrlOf(content: unknown): string {
   for (const key of keys) {
     const pic = obj[key]
     if (!pic || typeof pic !== 'object') continue
-    const url = String((pic as { url?: string; URL?: string }).url || (pic as { URL?: string }).URL || '')
+    const { url: lower, Url, URL } = pic as { url?: string; Url?: string; URL?: string }
+    const url = String(lower || Url || URL || '').trim()
     if (/^https?:\/\//i.test(url)) return url
   }
-  const direct = String(obj.url || obj.URL || '')
+  const direct = String(obj.url || obj.Url || obj.URL || '').trim()
   return /^https?:\/\//i.test(direct) ? direct : ''
 }
 
@@ -448,7 +452,6 @@ function textOfSnapshot(content: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-/** 少量文字/图片不进排队，按勾选顺序逐条发出，避免后台并发打乱顺序 */
 async function sendDirectNow(
   userIds: string[],
   groupTargets: ForwardTarget[],
@@ -467,38 +470,52 @@ async function sendDirectNow(
     }
     return null
   })
-  if (payloads.some((item) => !item)) throw new Error('有消息无法直接转发')
-  const jobs: Array<{ type: 'private' | 'group'; businessId: string; conversationId?: string }> = [
-    ...userIds.map((businessId) => ({ type: 'private' as const, businessId })),
+  const jobs = [
+    ...userIds.map((businessId) => ({
+      resolveConversation: async () => (await chatStore.enterConversation({ type: 'private', businessId })).id,
+    })),
+    ...groupTargets.map((target) => ({
+      resolveConversation: async () => {
+        const group = target.conversationType === 'group' || target.kind === 'group'
+        const conversation = await chatStore.enterConversation({
+          conversationId: target.conversationId,
+          type: group ? 'group' : 'private',
+          businessId: target.businessGroupId,
+        })
+        return conversation.id
+      },
+    })),
   ]
-  for (const target of groupTargets) {
-    let businessId = target.businessGroupId || ''
-    if (!businessId) {
-      const conversation = chatStore.conversations.find((item) => item.id === target.conversationId)
-      if (!conversation?.groupId) throw new Error(`无法识别群聊「${target.name}」`)
-      businessId = (await resolveIMGroupByIM(conversation.groupId)).businessGroupId
-    }
-    jobs.push({ type: 'group', businessId, conversationId: target.conversationId })
-  }
-  let cursor = 0
-  const run = async () => {
-    while (cursor < jobs.length) {
-      const job = jobs[cursor]
-      cursor += 1
-      const conv = await chatStore.enterConversation({
-        conversationId: job.conversationId,
-        type: job.type,
-        businessId: job.businessId,
+  const web = isH5()
+  const sendPending = createDirectForward(jobs, payloads, async (conversationId, item, clientMsgID) => {
+    if (imUserId.value !== senderId) throw new Error('登录状态已变化，请重新转发')
+    if (!item) throw new Error('有消息内容无效，无法转发')
+    if (item.kind === 'image') await chatStore.sendImageUrl(conversationId, item.url, senderId, web ? clientMsgID : undefined)
+    else await chatStore.sendText(conversationId, item.text, senderId)
+  })
+
+  while (true) {
+    const { sentCount, failedCount, firstError } = await sendPending()
+    if (!failedCount) return true
+
+    uni.hideLoading()
+    const retry = await new Promise<boolean>((resolve) => {
+      uni.showModal({
+        title: '转发未完成',
+        content: `已发送 ${sentCount} 条，${failedCount} 条未确认。\n${forwardSubmitErrorMessage(firstError)}`,
+        confirmText: '重试',
+        cancelText: '返回',
+        success: (res) => resolve(res.confirm),
+        fail: () => resolve(false),
       })
-      for (const item of payloads) {
-        if (!item) continue
-        if (item.kind === 'image') await chatStore.sendImageUrl(conv.id, item.url, senderId)
-        else await chatStore.sendText(conv.id, item.text, senderId)
-      }
+    })
+    if (!retry) {
+      if (sentCount) forwardStore.markSucceeded()
+      return false
     }
+    await afterNativeModal()
+    uni.showLoading({ title: '重试中', mask: true })
   }
-  const workers = Math.min(4, jobs.length)
-  await Promise.all(Array.from({ length: workers }, () => run()))
 }
 
 async function onSend() {
@@ -514,19 +531,21 @@ async function onSend() {
   if (aliveGroupTargets.length < groupTargets.length) {
     uni.showToast({ title: '已忽略已解散的群聊', icon: 'none' })
   }
-  const ok = await confirmSend(confirmHint())
-  if (!ok) return
   sending.value = true
-  uni.showLoading({ title: '提交中', mask: true })
   try {
+    if (!(await confirmSend(confirmHint()))) return
     await afterNativeModal()
+    uni.showLoading({ title: '提交中', mask: true })
     const sources = await buildSources()
     const directUserIds = friendPlan?.kind === 'ids' ? friendPlan.userIds : []
     const directCount = directUserIds.length + aliveGroupTargets.length
     const directable = sources.every((source) => source.snapshot.contentType === 101 || source.snapshot.contentType === 102)
     const sendNow = directable && friendPlan?.kind !== 'all_friends' && friendPlan?.kind !== 'generate' && directCount > 0 && directCount <= 12
     if (sendNow) {
-      await sendDirectNow(directUserIds, aliveGroupTargets, sources)
+      if (!(await sendDirectNow(directUserIds, aliveGroupTargets, sources))) {
+        goBack()
+        return
+      }
     } else {
       const targetGroupIds = await resolveGroupTargetIds(aliveGroupTargets)
       await forwardStore.submitBatch(sources, friendPlan, targetGroupIds)

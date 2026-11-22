@@ -142,23 +142,15 @@ let loginEpoch = 0
 let boundAccessToken = ''
 /** Logout/Login 串行执行。并发 Logout 会把 SQLite 关掉，发送里的 GetGroups 就报 database is closed */
 let sessionChain: Promise<void> = Promise.resolve()
-let sessionDepth = 0
 /** 本地库已经关掉时，下一次登录不能走「状态仍是已登录就跳过 Login」 */
 let forceNextLogin = false
-/** 同一用户进程内只 InitSDK 一次。重复 InitSDK 会把正在用的本地库关掉 */
-let appSdkReadyUserId = ''
+/** 原生桥只接受首次 InitSDK，Logout 不清初始化标记；必须始终维护实际绑定的目录。 */
+let appSdkDirectory: { ownerId: string; path: string } | null = null
 let closedDbRecovery: Promise<void> | null = null
 
 function enqueueSession<T>(task: () => Promise<T>): Promise<T> {
-  if (sessionDepth > 0) return task()
-  const run = sessionChain.then(async () => {
-    sessionDepth += 1
-    try {
-      return await task()
-    } finally {
-      sessionDepth -= 1
-    }
-  })
+  // 正在 await 的任务不代表新调用来自该任务内部，不能放行并发 Login/Logout。
+  const run = sessionChain.then(task)
   sessionChain = run.then(
     () => undefined,
     () => undefined,
@@ -180,6 +172,17 @@ let connected = false
  * 由 OnSyncServerStart/Finish/Failed 维护，供 waitForSync 短路与 UI 刷新判断。
  */
 let serverSyncReady = false
+
+/**
+ * 服务端同步（会话 / 离线消息）进行中标记与进度 0-100。
+ *
+ * 大账号首次同步要跑几分钟，这期间本地库里还没有会话，`GetConversationListSplit`
+ * 会返回空数组（或 10004），页面如果直接按空列表渲染就会显示「无聊天消息」——
+ * 用户会以为数据丢了。这里把 core 的 OnSyncServerStart/Progress/Finish 暴露成响应式状态，
+ * 让列表页在空列表 + 同步中时显示进度提示，等 Finish 后 stores/chat.ts 自动重拉。
+ */
+export const imSyncing = ref(false)
+export const imSyncProgress = ref(0)
 
 /** 断线后还在排队的发送，连上就立刻继续，不用干等满退避时间 */
 const reconnectWaiters = new Set<() => void>()
@@ -216,6 +219,8 @@ function resetLoginCache() {
   tokenExpireAt = 0
   connected = false
   serverSyncReady = false
+  imSyncing.value = false
+  imSyncProgress.value = 0
   boundAccessToken = ''
 }
 
@@ -629,6 +634,7 @@ function installH5StorageProxy(): void {
 installH5StorageProxy()
 
 async function loginSdk(imToken: IMTokenResult): Promise<void> {
+  const epoch = loginEpoch
   const payload = {
     userID: imToken.userId,
     token: imToken.token,
@@ -641,20 +647,21 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
   try {
     await imCall(IMMethods.Login, payload)
   } catch (e) {
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
     if (!isLoginRepeat(e)) {
       const msg = (e as Error)?.message || ''
       if (isApp() && isLocalDatabaseWriteError(e)) {
-        // 目录丢失/路径失效时，只重试 Login 会继续使用同一坏路径；重新准备目录并初始化一次。
-        const epoch = loginEpoch
+        // 补回首次 InitSDK 绑定的目录；重复 InitSDK 在部分原生桥上会直接返回 true。
         await forceSdkLogout()
         if (epoch !== loginEpoch) throw new Error('已退出登录')
         resetLoginCache()
-        appSdkReadyUserId = ''
         await initAppSdk(imToken)
+        if (epoch !== loginEpoch) throw new Error('已退出登录')
         synced = waitForSync()
         await imCall(IMMethods.Login, payload)
       } else if (msg.includes('10005') || msg.includes('10004')) {
         await new Promise((r) => setTimeout(r, 400))
+        if (epoch !== loginEpoch) throw new Error('已退出登录')
         synced = waitForSync()
         try {
           await imCall(IMMethods.Login, payload)
@@ -666,9 +673,11 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
       }
     } else {
       const loggedUserId = await getSdkLoginUserId()
+      if (epoch !== loginEpoch) throw new Error('已退出登录')
       // 空 userId 表示上一次 Login 还在进行。10102 的意思就是已经在登，这时再 Logout 会把进行中的登录打失败。
       if (loggedUserId && loggedUserId !== imToken.userId) {
         await imCall(IMMethods.Logout).catch(() => undefined)
+        if (epoch !== loginEpoch) throw new Error('已退出登录')
         synced = waitForSync()
         try {
           await imCall(IMMethods.Login, payload)
@@ -683,9 +692,20 @@ async function loginSdk(imToken: IMTokenResult): Promise<void> {
 
 async function initAppSdk(imToken: IMTokenResult): Promise<void> {
   if (!isApp()) return
-  // 即使同一进程已初始化，重新登录前也要补回可能丢失的目录。
-  const dataDir = await getAppSdkDataDir(imToken.userId, typeof plus === 'undefined' ? undefined : plus?.io)
-  if (appSdkReadyUserId === imToken.userId) return
+  // 必须在 InitSDK / Login 之前订阅：登录触发的 OnSyncServerStart/Progress
+  // 早于任何业务页面调用，注册晚了整轮同步的进度事件就全丢了（页面只会显示「请稍候」）。
+  setupConnectionWatchers()
+  const epoch = loginEpoch
+  // SDK 在目录内按 userID 区分数据库；换号不会改变原生桥首次接收的 dataDir。
+  const ownerId = appSdkDirectory?.ownerId || imToken.userId
+  const dataDir = await getAppSdkDataDir(ownerId, typeof plus === 'undefined' ? undefined : plus?.io)
+  if (epoch !== loginEpoch) throw new Error('已退出登录')
+  if (appSdkDirectory) {
+    if (dataDir !== appSdkDirectory.path) {
+      throw new Error('聊天存储路径已变化，请完全关闭 App 后重新打开')
+    }
+    return
+  }
   const initialized = await imCall<unknown>(IMMethods.InitSDK, {
     platformID: imToken.platform,
     apiAddr: imToken.apiAddr,
@@ -695,7 +715,7 @@ async function initAppSdk(imToken: IMTokenResult): Promise<void> {
     isLogStandardOutput: APP_SDK_LOG_STDOUT,
   })
   if (initialized === false) throw new Error('聊天 SDK 初始化失败，请关闭 App 后重新打开')
-  appSdkReadyUserId = imToken.userId
+  appSdkDirectory = { ownerId, path: dataDir }
 }
 
 async function doLogin(): Promise<string> {
@@ -708,8 +728,10 @@ async function doLogin(): Promise<string> {
   }
 
   await initAppSdk(imToken)
+  if (epoch !== loginEpoch) throw new Error('已退出登录')
 
   const status = await getSdkLoginStatus()
+  if (epoch !== loginEpoch) throw new Error('已退出登录')
   if (status === LoginStatus.Logged) {
     const loggedUserId = await getSdkLoginUserId()
     if (!force && loggedUserId === imToken.userId) {
@@ -724,6 +746,7 @@ async function doLogin(): Promise<string> {
     await imCall(IMMethods.Logout).catch(() => undefined)
   }
 
+  if (epoch !== loginEpoch) throw new Error('已退出登录')
   await loginSdk(imToken)
   if (epoch !== loginEpoch) {
     await imCall(IMMethods.Logout).catch(() => undefined)
@@ -754,8 +777,10 @@ async function reuseLiveSession(): Promise<string | null> {
 }
 
 async function reloginSession(): Promise<string> {
+  let epoch = loginEpoch
   if (!forceNextLogin) {
     const reused = await reuseLiveSession()
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
     if (reused) return reused
   }
   const businessToken = getToken()
@@ -763,14 +788,14 @@ async function reloginSession(): Promise<string> {
     const switchingAccount = !businessToken || (boundAccessToken !== '' && businessToken !== boundAccessToken)
     if (switchingAccount) {
       invalidatePendingLogin()
-      appSdkReadyUserId = ''
+      epoch = loginEpoch
     } else {
       // 同一账号换 IM token，不要增加 loginEpoch，进行中的发送还要重试。
       resetLoginCache()
     }
     await forceSdkLogout().catch(() => undefined)
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
   }
-  const epoch = loginEpoch
   if (!loginPromise) {
     loginPromise = doLogin().finally(() => {
       loginPromise = null
@@ -778,12 +803,11 @@ async function reloginSession(): Promise<string> {
   }
   try {
     const userId = await loginPromise
-    if (epoch !== loginEpoch) return ensureIMLogin()
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
     return userId
   } catch (e) {
-    if (epoch !== loginEpoch) return ensureIMLogin()
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
     if (isApp() && isLocalDatabaseWriteError(e)) {
-      appSdkReadyUserId = ''
       resetLoginCache()
       console.error('[im] database login recovery failed', e)
       throw new Error('聊天本地数据库初始化失败，请检查手机可用空间后重新打开 App')
@@ -800,9 +824,9 @@ function reopenClosedSdkDatabase(): Promise<void> {
   if (!closedDbRecovery) {
     const epoch = loginEpoch
     closedDbRecovery = enqueueSession(async () => {
-      if (epoch !== loginEpoch) return
+      if (epoch !== loginEpoch) throw new Error('已退出登录')
       if (loginPromise) await loginPromise.catch(() => undefined)
-      if (epoch !== loginEpoch) return
+      if (epoch !== loginEpoch) throw new Error('已退出登录')
       forceNextLogin = true
       await reloginSession()
     }).finally(() => {
@@ -815,17 +839,47 @@ function reopenClosedSdkDatabase(): Promise<void> {
 /** 保证 SDK 已登录，重复调用只会真正登录一次；返回当前 OpenIM 用户 ID */
 export async function ensureIMLogin(): Promise<string> {
   if (!shouldUseOpenIM()) throw new Error('聊天功能未启用')
-  if (!forceNextLogin) {
-    const reused = await reuseLiveSession()
-    if (reused) return reused
-  }
-  return enqueueSession(() => reloginSession())
+  const epoch = loginEpoch
+  return enqueueSession(() => {
+    if (epoch !== loginEpoch) throw new Error('已退出登录')
+    return reloginSession()
+  })
 }
 
 /**
  * 连接监听是否已注册，避免 initOpenIM 被多次调用时重复订阅同一事件。
  */
 let connectionWatchersReady = false
+
+/** 同步进度回调形态不一：App 原生插件 `{ progress }`、H5 直接给数字、极少数包成 `{ data }` */
+function normalizeSyncProgress(payload: unknown): number {
+  let raw: unknown = payload
+  if (raw && typeof raw === 'object' && 'progress' in (raw as Record<string, unknown>)) {
+    raw = (raw as Record<string, unknown>).progress
+  }
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n)) return imSyncProgress.value
+  return Math.max(0, Math.min(100, Math.round(n)))
+}
+
+/**
+ * 同步看门狗：iOS 进后台被冻结时 Finish 事件可能丢，
+ * 不能因为一个没到的 Finish 就把「正在同步」永远挂在页面上。
+ */
+let syncWatchdog: ReturnType<typeof setTimeout> | undefined
+
+function armSyncWatchdog() {
+  if (syncWatchdog !== undefined) clearTimeout(syncWatchdog)
+  syncWatchdog = setTimeout(() => {
+    syncWatchdog = undefined
+    imSyncing.value = false
+  }, 20 * 60 * 1000)
+}
+
+function clearSyncWatchdog() {
+  if (syncWatchdog !== undefined) clearTimeout(syncWatchdog)
+  syncWatchdog = undefined
+}
 
 /**
  * 订阅 SDK 连接生命周期事件（只注册一次）。
@@ -849,12 +903,26 @@ function setupConnectionWatchers() {
   // 同步生命周期：供 waitForSync 短路；UI 层另听 Finish 强制重拉。
   onIMEvent(IMEvents.OnSyncServerStart, () => {
     serverSyncReady = false
+    imSyncing.value = true
+    imSyncProgress.value = 0
+    armSyncWatchdog()
+  })
+  // 原生插件回调是 { errMsg, errCode, progress }，H5 直接给数字，统一归一化
+  onIMEvent<unknown>(IMEvents.OnSyncServerProgress, (payload) => {
+    imSyncing.value = true
+    imSyncProgress.value = normalizeSyncProgress(payload)
+    armSyncWatchdog()
   })
   onIMEvent(IMEvents.OnSyncServerFinish, () => {
     serverSyncReady = true
+    imSyncing.value = false
+    imSyncProgress.value = 100
+    clearSyncWatchdog()
   })
   onIMEvent(IMEvents.OnSyncServerFailed, () => {
     serverSyncReady = false
+    imSyncing.value = false
+    clearSyncWatchdog()
   })
   // 被其它端踢下线：SDK 会自动 logout，本地缓存作废，下次必须重新登录。
   onIMEvent(IMEvents.OnKickedOffline, () => {
@@ -874,24 +942,36 @@ export async function initOpenIM(): Promise<void> {
 }
 
 export async function logoutOpenIM(): Promise<void> {
-  await enqueueSession(async () => {
-    invalidatePendingLogin()
-    appSdkReadyUserId = ''
+  // 立即取消在途/排队登录，原生 Logout 仍排在当前 SDK 操作之后。
+  invalidatePendingLogin()
+  const logout = enqueueSession(async () => {
     // 刷新后内存会话为空，但 H5 WASM 仍可能是 Logged；必须 Logout，
     // 否则下次 doLogin 走 Logged 捷径、本地库不触发完整同步。
-    try {
-      await withTimeout(forceSdkLogout(), 3000)
-    } catch {
-      // 本地必须清掉，避免下一个账号读到上一个号的会话库
-    }
+    await forceSdkLogout()
     resetLoginCache()
   })
+  // UI 最多等 3 秒，但队列须等原生操作真正结束，防止迟到的 Logout 关闭新账号数据库。
+  await withTimeout(logout, 3000).catch(() => undefined)
 }
 
 /** 手动重连：重新取 token 再登录，用于「重新选线」 */
 export async function reconnectOpenIM(): Promise<void> {
   await logoutOpenIM()
   await ensureIMLogin()
+}
+
+/**
+ * 通知 SDK 当前前后台状态（仅 App 原生桥支持）。
+ *
+ * iOS 进后台后进程很快被系统冻结：不告知 SDK，回前台不会触发数据补拉，
+ * 分钟级的首次全量同步会被反复打断。core 收到 isBackground=false 会
+ * 唤醒数据同步（TriggerCmdWakeUpDataSync）。失败静默：不阻塞前后台切换。
+ */
+export function setIMBackgroundStatus(isBackground: boolean): void {
+  if (!isApp() || !imUserId.value) return
+  void imCall(IMMethods.SetAppBackgroundStatus, { isBackground }).catch((e) => {
+    devLog('[im] setAppBackgroundStatus failed', e)
+  })
 }
 
 /** 订阅 SDK 事件，返回取消订阅函数 */
@@ -921,14 +1001,46 @@ function parseEventData<T>(payload: Record<string, unknown>): T {
 // ---------------------------------------------------------------------------
 
 export async function getConversationList(offset = 0, count = 200): Promise<ConversationItem[]> {
-  try {
-    return await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
-  } catch (e) {
-    if (!isDatabaseClosedError(e) && !(isApp() && isLocalDatabaseWriteError(e))) throw e
-    await reopenClosedSdkDatabase()
-    return imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      const list = await imCall<ConversationItem[]>(IMMethods.GetConversationListSplit, { offset, count })
+      // 空列表且本轮服务端同步还没结束：说明会话还没写进本地库，不是真的没会话。
+      // 标记同步中，让页面显示「正在同步」而不是「无聊天消息」，Finish 后自动重拉。
+      if (!list.length && !serverSyncReady) {
+        imSyncing.value = true
+        armSyncWatchdog()
+      }
+      return list
+    } catch (e) {
+      lastErr = e
+      // 本地库被关/写失败：Logout→Login 重开后再试
+      if (isDatabaseClosedError(e) || (isApp() && isLocalDatabaseWriteError(e))) {
+        await reopenClosedSdkDatabase()
+        continue
+      }
+      // 10004/10005 资源未就绪：大账号首次全量同步要数分钟，先退避重试跨过窗口
+      if (isSdkResourceNotReady(e) && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt))
+        continue
+      }
+      // 预算耗尽仍 10004：不把资源未就绪抛给页面（上层会把 10004 当失败处理），
+      // 返回本地已有列表（可能为空），并标记同步中，OnSyncServerFinish 后 stores/chat.ts 自动重拉。
+      if (isSdkResourceNotReady(e)) {
+        devWarn('[im] conversation list before resource ready, render local only', e)
+        imSyncing.value = true
+        armSyncWatchdog()
+        return []
+      }
+      throw e
+    }
   }
+  throw lastErr instanceof Error ? lastErr : new Error('getConversationList 重试后仍失败')
 }
+
+/** 资源未就绪触发重登的冷却期：大账号全量同步要数分钟，频繁 Logout→Login 会关掉本地库并从头同步，越登越慢 */
+const RESOURCE_RELOGIN_COOLDOWN_MS = 120_000
+let lastResourceReloginAt = 0
 
 /**
  * 按业务目标取会话，OpenIM 会在不存在时新建，无需先建群或建会话。
@@ -939,7 +1051,8 @@ export async function getConversationList(offset = 0, count = 200): Promise<Conv
  * 修复策略：
  * 1. 先指数退避重试 4 次（300→600→1200→2400ms），自动跨过资源未就绪的窗口。
  * 2. 若仍 10004，多半是内存登录缓存认为已连上但 SDK 实际已掉线/资源从未同步，
- *    此时清空本地缓存并重新登录，再最后试一次。
+ *    此时清空本地缓存并重新登录，再最后试一次；冷却期内不再重复重登，
+ *    只提示「还在同步」，等 OnSyncServerFinish 自动恢复。
  * 3. 非 10004 的错误（如目标不可聊）立即上抛。
  */
 export async function getOneConversation(
@@ -962,8 +1075,13 @@ export async function getOneConversation(
         await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)))
         continue
       }
+      // 冷却期内不再重登：Logout 会关库，Login 又把大账号从头同步，反复重登只会更慢
+      if (Date.now() - lastResourceReloginAt < RESOURCE_RELOGIN_COOLDOWN_MS) {
+        throw new Error('聊天记录还在同步，请稍后再试')
+      }
       // 重试耗尽：清缓存、重新登录并等待资源同步完成后再最后试一次。
       // 否则 doLogin 的缓存复用分支会跳过同步等待，仍可能立即 10004。
+      lastResourceReloginAt = Date.now()
       resetLoginCache()
       await ensureIMLogin()
       await waitForSync(5000)
@@ -1365,6 +1483,8 @@ interface SendCreatedMessageOptions {
   alreadyUploaded?: boolean
   /** 原生发送等待成功回调的超时（毫秒）。大文件（视频）走 OSS 上传时需比默认更久 */
   timeoutMs?: number
+  /** H5 转发需要确认服务端已接收，SDK 的重复发送错误也可能仅代表本地仍在发送中。 */
+  verifyReceipt?: boolean
 }
 
 interface NativeSendResult {
@@ -1400,6 +1520,12 @@ function isCompleteSentMessage(msg: MessageItem | null): msg is MessageItem {
   if (!msg?.clientMsgID || !msg.contentType) return false
   if (msg.status === MessageStatus.Sending || msg.status === MessageStatus.Failed) return false
   return true
+}
+
+function hasSendReceipt(item: MessageItem | null, clientMsgID: string): item is MessageItem {
+  return !!item && item.clientMsgID === clientMsgID && (
+    item.seq > 0 || (item.status === MessageStatus.Succeed && !!item.serverMsgID)
+  )
 }
 
 /** OpenIM FullPath API 只要 POSIX 绝对路径，不能传 uni.chooseImage 的 file:// / _doc 临时路径 */
@@ -1464,6 +1590,12 @@ async function sendCreatedMessage(
         return await sendOnAppNative(method, params, message.clientMsgID, perAttemptTimeout, false)
       }
       const sent = await imCall<unknown>(method, params)
+      if (options.verifyReceipt) {
+        const item = coerceMessage(sent)
+        if (item?.status === MessageStatus.Failed) throw new Error('发送失败')
+        if (hasSendReceipt(item, message.clientMsgID)) return item
+        throw new IMCallError(SEND_WAIT_TIMEOUT, '图片转发结果待确认')
+      }
       if (!isMessageItem(sent) || sent.status === MessageStatus.Failed) {
         throw new Error('发送失败')
       }
@@ -1471,11 +1603,17 @@ async function sendCreatedMessage(
     } catch (err) {
       lastErr = err
       const code = err instanceof IMCallError ? err.code : undefined
-      // 超时/断线后同一条重试，SDK 常回 10204：对面其实已收到，按成功处理
-      if (isDuplicateSendError(err)) {
+      const duplicate = isDuplicateSendError(err)
+      if (duplicate && !options.verifyReceipt) {
         return { ...message, status: MessageStatus.Succeed }
       }
       if (epoch !== loginEpoch) break
+      const retryable = code !== undefined && RETRYABLE_SEND_CODES.has(code)
+      if (options.verifyReceipt && (duplicate || retryable)) {
+        const found = await findLocalMessage(target.conversationId, message.clientMsgID)
+        if (epoch !== loginEpoch) break
+        if (hasSendReceipt(found, message.clientMsgID)) return found
+      }
       // 库已经关了，原地重试还是 GetGroups database is closed。先重开再发这一条。
       if (!reopenedDatabase && attempt < attempts - 1 && isLocalDatabaseWriteError(err)) {
         reopenedDatabase = true
@@ -1492,8 +1630,7 @@ async function sendCreatedMessage(
       const canRetry =
         attempt < attempts - 1 &&
         epoch === loginEpoch &&
-        code !== undefined &&
-        RETRYABLE_SEND_CODES.has(code)
+        (retryable || (duplicate && options.verifyReceipt))
       if (!canRetry) break
       const keepGoing = await waitToRetrySend(attempt, epoch)
       if (!keepGoing) break
@@ -2848,7 +2985,7 @@ function ensureFileSourceUrl(
 }
 
 /** 图片 URL 直发（收藏的图片 / 已上传图片不再二次上传） */
-export async function sendImageUrlMessage(target: IMTarget, url: string): Promise<MessageItem> {
+export async function sendImageUrlMessage(target: IMTarget, url: string, clientMsgID?: string): Promise<MessageItem> {
   const picture = { uuid: IMSDK.uuid(), type: 'image/jpeg', size: 0, width: 0, height: 0, url }
   const message = await imCall<MessageItem>(IMMethods.CreateImageMessageByURL, {
     sourcePath: url,
@@ -2856,7 +2993,11 @@ export async function sendImageUrlMessage(target: IMTarget, url: string): Promis
     bigPicture: picture,
     snapshotPicture: picture,
   })
-  return sendCreatedMessage(target, ensurePictureSourceUrl(message, url), { alreadyUploaded: true })
+  const image = ensurePictureSourceUrl(message, url)
+  return sendCreatedMessage(target, clientMsgID ? { ...image, clientMsgID } : image, {
+    alreadyUploaded: true,
+    verifyReceipt: !!clientMsgID,
+  })
 }
 
 /**
@@ -3730,6 +3871,8 @@ export interface LocalMessageSearchHit {
   clientMsgID: string
   /** 指定会话内搜索时返回的命中消息列表（已按时间新→旧） */
   messages: MessageItem[]
+  /** 按 SDK 原始页判断，不能用过滤后的条数推断索引是否耗尽。 */
+  hasMore?: boolean
 }
 
 /**
@@ -3780,9 +3923,10 @@ export async function searchLocalMessages(params: {
     if (ids.length) await groupRetention.sync(ids)
     return hits.flatMap((hit) => {
       const messages = groupRetention.filter(hit.conversationID, hit.messages)
+      const hasMore = hit.messages.length >= payload.count
       if (!messages.length) return []
-      return [{ ...hit, messages, messageCount: messages.length, clientMsgID: messages[0].clientMsgID,
-        preview: messageSearchPreview(messages[0]) }]
+      return [{ ...hit, messages, hasMore, messageCount: messages.length, clientMsgID: messages[0]?.clientMsgID || '',
+        preview: messages[0] ? messageSearchPreview(messages[0]) : '' }]
     })
   } catch {
     // H5 / 旧基座偶发无此方法：回退为空，调用方仍可用标题/摘要过滤
@@ -3949,6 +4093,10 @@ export async function searchConversationMessagesPage(params: {
   limit?: number
   /** 本轮最多扫多少条历史；会话列表搜索宜小，避免「加载更多」卡住 */
   historyScanBatch?: number
+  /** 群内搜索空页继续向前查，不能把一批没命中当成整个会话没记录。 */
+  continueOnEmpty?: boolean
+  /** 用户换词或离开页面后停止后续扫描。 */
+  isCancelled?: () => boolean
 }): Promise<ConversationMessageSearchPage> {
   const conversationID = params.conversationID
   const rawKeyword = params.keyword.trim()
@@ -3981,8 +4129,11 @@ export async function searchConversationMessagesPage(params: {
   if (isFirstPage) void ensureLocalConversationHistory(conversationID, SEARCH_HISTORY_CAP)
 
   const seen = new Set(cursor.seenIds)
+  const pendingIds = new Set<string>()
   const pending = cursor.pending.filter((item) => {
-    if (!item?.clientMsgID || seen.has(item.clientMsgID)) return false
+    // seen 包含「已入队」的消息，不能据此丢掉尚未展示的下一页。
+    if (!item?.clientMsgID || pendingIds.has(item.clientMsgID) || groupRetention.removed(conversationID, item)) return false
+    pendingIds.add(item.clientMsgID)
     seen.add(item.clientMsgID)
     return true
   })
@@ -3998,6 +4149,7 @@ export async function searchConversationMessagesPage(params: {
   /** 命中先入队，再按 limit 吐出，避免一页内多余命中被游标跳过 */
   const enqueue = (item: MessageItem, fromSdk: boolean) => {
     if (!item?.clientMsgID || seen.has(item.clientMsgID)) return false
+    if (groupRetention.removed(conversationID, item)) return false
     if (fromSdk ? !acceptSdkSearchHit(item, key) : !matchesSearchKeyword(item, key)) return false
     seen.add(item.clientMsgID)
     if (out.length < limit) out.push(item)
@@ -4006,7 +4158,7 @@ export async function searchConversationMessagesPage(params: {
   }
 
   const sdkPageSize = 100
-  while (!cursor.sdkDone && out.length < limit && !pending.length) {
+  while (!cursor.sdkDone && out.length < limit && !pending.length && !params.isCancelled?.()) {
     const hits = await searchLocalMessages({
       keyword: rawKeyword,
       conversationID,
@@ -4017,7 +4169,7 @@ export async function searchConversationMessagesPage(params: {
       hits.find((h) => h.conversationID === conversationID) ||
       (hits.length === 1 ? hits[0] : undefined)
     const batch = conv?.messages || []
-    if (!batch.length) {
+    if (!conv) {
       cursor.sdkDone = true
       break
     }
@@ -4026,10 +4178,8 @@ export async function searchConversationMessagesPage(params: {
       if (enqueue(item, true)) added += 1
     }
     cursor.sdkPage += 1
-    const total = Number(conv?.messageCount || 0)
-    if (total > 0 && seen.size >= total) cursor.sdkDone = true
-    else if (batch.length < sdkPageSize) cursor.sdkDone = true
-    else if (!added) cursor.sdkDone = true
+    // messageCount 是当前页可见条数，并非整个索引的总命中数。
+    cursor.sdkDone = !conv.hasMore || (batch.length > 0 && !added)
   }
   takePending()
 
@@ -4048,7 +4198,7 @@ export async function searchConversationMessagesPage(params: {
         ])
         for (const item of history) enqueue(item, false)
         takePending()
-        if (!out.length && !pending.length && !cursor.sdkDone) {
+        if (!out.length && !pending.length && !params.isCancelled?.()) {
           cursor.sdkPage = 1
           cursor.sdkDone = false
           const hits = await searchLocalMessages({
@@ -4063,7 +4213,7 @@ export async function searchConversationMessagesPage(params: {
           for (const item of conv?.messages || []) enqueue(item, true)
           takePending()
           cursor.sdkPage = 2
-          if (!(conv?.messages || []).length) cursor.sdkDone = true
+          cursor.sdkDone = !conv?.hasMore
         }
       }
     }
@@ -4080,7 +4230,8 @@ export async function searchConversationMessagesPage(params: {
       !cursor.historyDone &&
       out.length < limit &&
       !pending.length &&
-      scanned < historyScanBatch
+      !params.isCancelled?.() &&
+      (scanned < historyScanBatch || (params.continueOnEmpty && !out.length))
     ) {
       const { messageList, isEnd } = await getHistoryMessages(
         conversationID,

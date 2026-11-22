@@ -49,15 +49,21 @@ function isDissolvedGroupConversation(c: Conversation): boolean {
   })
 }
 
+function recentTarget(c: Conversation): MassTarget | null {
+  if (c.type === 'group') {
+    const groupId = c.groupId || (c.id.startsWith('sg_') ? c.id.slice(3) : '')
+    if (!groupId) return null
+    return { id: `g_${groupId}`, type: 'group', name: c.title, avatar: c.avatar }
+  }
+  if (!c.peerUserId) return null
+  return { id: `c_${c.peerUserId}`, type: 'contact', name: c.title, avatar: c.avatar }
+}
+
 const listRecent = computed<MassTarget[]>(() =>
   chatStore.conversations
     .filter((c) => !isDissolvedGroupConversation(c))
-    .map((c) => ({
-      id: `r_${c.id}`,
-      type: 'contact',
-      name: c.title,
-      avatar: c.avatar,
-    })),
+    .map(recentTarget)
+    .filter((item): item is MassTarget => !!item),
 )
 
 const listContacts = computed<MassTarget[]>(() =>

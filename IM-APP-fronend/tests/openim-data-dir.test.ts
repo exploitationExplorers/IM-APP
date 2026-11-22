@@ -3,7 +3,10 @@ import { getAppSdkDataDir, type AppDataIO } from '@/utils/openimDataDir'
 
 function createIO() {
   const created: string[] = []
-  const userDirectory = { fullPath: '/openim/user-a', isDirectory: true, getDirectory: vi.fn() }
+  const userDirectory = {
+    fullPath: '/openim/user-a', isDirectory: true, getDirectory: vi.fn(),
+    toLocalURL: vi.fn(() => '_doc/openim/user-a/'),
+  }
   const directory = { getDirectory: vi.fn((name, _options, success) => {
     created.push(name)
     success(userDirectory)
@@ -13,7 +16,7 @@ function createIO() {
     success(directory)
   }) }
   const io: AppDataIO = {
-    PRIVATE_DOC: 1,
+    PRIVATE_DOC: 2,
     requestFileSystem: vi.fn((_type, success) => success({ root })),
     convertLocalFileSystemURL: vi.fn(() => 'file:///var/mobile/current/doc/openim/user-a/'),
     resolveLocalFileSystemURL: vi.fn((_path, success) => success(userDirectory)),
@@ -38,6 +41,22 @@ describe('OpenIM App 数据库目录', () => {
     userDirectory.fullPath = '/old-install/doc/openim/user-a/'
     await expect(getAppSdkDataDir('user-a', io)).resolves.toBe('/var/mobile/current/doc/openim/user-a/')
     expect(io.convertLocalFileSystemURL).toHaveBeenCalledWith('_doc/openim/user-a/')
+  })
+
+  it('基座未暴露 PRIVATE_DOC 常量时仍使用文档目录 2，不能选择资源目录 1', async () => {
+    const { io } = createIO()
+    delete io.PRIVATE_DOC
+    await getAppSdkDataDir('user-a', io)
+    expect(io.requestFileSystem).toHaveBeenCalledWith(2, expect.any(Function), expect.any(Function))
+  })
+
+  it('iOS 目录对象残留旧沙盒 URL 时从当前 _doc 解析 SDK 路径', async () => {
+    const { io, userDirectory } = createIO()
+    userDirectory.toLocalURL.mockReturnValue('file:///var/mobile/old/doc/openim/user-a/')
+    vi.mocked(io.convertLocalFileSystemURL).mockImplementation((path) =>
+      path.startsWith('_doc/') ? '/var/mobile/current/doc/openim/user-a/' : path,
+    )
+    await expect(getAppSdkDataDir('user-a', io)).resolves.toBe('/var/mobile/current/doc/openim/user-a/')
   })
 
   it('Android 保留绝对路径，并补齐目录末尾斜杠', async () => {

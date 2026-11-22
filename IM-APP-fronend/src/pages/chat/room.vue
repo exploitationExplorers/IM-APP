@@ -729,6 +729,16 @@ async function dismissPinnedBanner() {
 let groupMetaLoadedAt = 0
 
 onShow(() => {
+  if (!props.embedded) {
+    const query = currentRoomQuery()
+    const nextConv = String(query.conversationId || '')
+    const nextTarget = String(query.targetId || '')
+    const convChanged = !!nextConv && nextConv !== activeConversationId.value
+    const targetChanged = !!nextTarget && nextTarget !== businessId.value
+    if (convChanged || targetChanged) {
+      void bootstrapRoom(query)
+    }
+  }
   // 回到前台的「补拉当前会话」由 chatStore.resyncAfterResume 统一负责
   // （本组件在桌面端是内嵌的，收不到页面级 onShow，所以统一走 store 那条路径，
   //  见下方 watch(conversationId, ...) 的报备）。这里不再重复拉一次。
@@ -904,7 +914,20 @@ function roomOpenErrorText(e: unknown): string {
   return message
 }
 
+let roomBootToken = 0
+
+function currentRoomQuery(): Record<string, string | undefined> {
+  const pages = getCurrentPages()
+  const page = pages[pages.length - 1] as unknown as {
+    options?: Record<string, string | undefined>
+    $page?: { options?: Record<string, string | undefined> }
+  }
+  return page?.options || page?.$page?.options || {}
+}
+
 async function bootstrapRoom(query: Record<string, string | undefined>) {
+  const bootToken = ++roomBootToken
+  const stillThisRoom = () => bootToken === roomBootToken
   roomExited = false
   roomFirstMessagesMarked = false
   perfMarkStart('chat:room-first-messages')
@@ -932,6 +955,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
         conversationId: convIdHint,
         type: chatType.value,
         businessId: businessId.value,
+        reveal: true,
       })
       perfMarkEnd('chat:room-enter-conversation')
       return conv
@@ -981,6 +1005,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     })()
 
     const conv = await enterTask
+    if (!stillThisRoom()) return
     convRef.value = conv
     activeConversationId.value = conv.id
     if (!query?.title) roomTitle.value = conv.title
@@ -1000,6 +1025,7 @@ async function bootstrapRoom(query: Record<string, string | undefined>) {
     }
 
     await Promise.all([loadTask, groupMetaTask])
+    if (!stillThisRoom()) return
     if (chatType.value === 'group') {
       try {
         await chatStore.assertConversationAccessible(conv)
@@ -1266,12 +1292,25 @@ async function onSend() {
 
 /** uni-app textarea 的 focus 属性：切会话时先 false 再 true 才能重新抢焦点 */
 const composerFocusFlag = ref(false)
+let composerFocusTimers: ReturnType<typeof setTimeout>[] = []
+
+/** 搜索框等其它输入已经拿到焦点时，不能再把字抢进聊天框 */
+function isForeignTextField(el: Element | null): boolean {
+  if (!(el instanceof HTMLElement)) return false
+  if (el.closest('.input-wrap, .composer-row')) return false
+  if (el.closest('.search-bar')) return true
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable
+}
 
 function focusComposer() {
   if (!isH5ComposerPlatform()) return
   if (composerBlocked.value || voiceMode.value) return
+  composerFocusTimers.forEach((timer) => clearTimeout(timer))
+  composerFocusTimers = []
   composerFocusFlag.value = false
   const apply = () => {
+    if (typeof document !== 'undefined' && isForeignTextField(document.activeElement)) return
     composerFocusFlag.value = true
     const el = getComposerTextareaEl()
     if (!el) return
@@ -1286,9 +1325,9 @@ function focusComposer() {
     }
   }
   nextTick(apply)
-  // 消息列表/群资料异步渲染后还要再抢一次，否则会落在文档 body 上
-  setTimeout(apply, 40)
-  setTimeout(apply, 160)
+  // 消息列表/群资料异步渲染后还要再抢一次，否则会落在文档 body 上。
+  // 用户已经点进搜索框时跳过，避免打出来的字进到聊天输入框。
+  composerFocusTimers = [setTimeout(apply, 40), setTimeout(apply, 160)]
 }
 
 function isH5ComposerPlatform(): boolean {
@@ -1416,6 +1455,8 @@ async function sendPastedImages(files: File[]) {
 }
 
 onUnmounted(() => {
+  composerFocusTimers.forEach((timer) => clearTimeout(timer))
+  composerFocusTimers = []
   if (typeof window !== 'undefined') {
     window.removeEventListener('paste', onWindowPaste)
     window.removeEventListener('keydown', onComposerKeydown, true)
@@ -2690,6 +2731,7 @@ function pickFavorite() {
     <scroll-view
       scroll-y
       class="msg-list"
+      :class="{ 'msg-list-web': isH5ComposerPlatform() }"
       :scroll-top="msgScrollTop"
       :lower-threshold="600"
       @scroll="onMsgScroll"
@@ -3066,6 +3108,7 @@ function pickFavorite() {
   overflow: hidden;
   position: relative;
   box-sizing: border-box;
+  overscroll-behavior: none;
 }
 
 .room-embedded {
@@ -3087,9 +3130,11 @@ function pickFavorite() {
   background: #ffffff;
   border-bottom: 1rpx solid #ececec;
   flex-shrink: 0;
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 20;
   overflow: visible;
+  overscroll-behavior: none;
 }
 
 .back-btn {
@@ -3252,12 +3297,25 @@ function pickFavorite() {
   color: #8a8f9c;
 }
 
-/* 倒置列表：外层翻一次让 scrollTop=0 落在视觉底部，内层再翻回来保证内容正向 */
+/* 倒置列表：外层翻一次让 scrollTop=0 落在视觉底部，内层再翻回来保证内容正向。
+   App 的 scroll-view 自己滚动，翻转加在宿主上。
+   网页端真正 overflow 的是内层 .uni-scroll-view，翻转若加在外层，裁切发生在翻转之前，气泡被剪掉，房间只剩底色。 */
 .msg-list {
   flex: 1;
   height: 0;
   background: #e6e8ee;
   transform: scaleY(-1);
+  overscroll-behavior: none;
+}
+
+.msg-list-web {
+  transform: none;
+}
+
+.msg-list-web :deep(.uni-scroll-view > .uni-scroll-view) {
+  transform: scaleY(-1);
+  background: #e6e8ee;
+  overscroll-behavior: none;
 }
 
 .msg-list :deep(.uni-scroll-view),
@@ -3642,5 +3700,14 @@ function pickFavorite() {
 .plus-icon-img {
   width: 56rpx;
   height: 56rpx;
+}
+</style>
+
+<style lang="scss">
+/* 页面本身不滚动，下拉只发生在消息列表里，群名栏留在顶部 */
+page {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 </style>

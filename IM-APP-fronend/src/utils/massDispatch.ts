@@ -111,11 +111,19 @@ function expandTargets(targets: MassTarget[], failed: MassDispatchFailure[]): Ma
   return out
 }
 
+/** 选择页用 c_ / g_ 前缀区分联系人和群，发送前去掉，避免把群当成用户解析 */
+function targetBusinessId(t: MassTarget): string {
+  if (t.type === 'group' && t.id.startsWith('g_')) return t.id.slice(2)
+  if (t.type === 'contact' && t.id.startsWith('c_')) return t.id.slice(2)
+  return t.id
+}
+
 async function sendToTarget(
   t: MassTarget,
   content: MassContent,
 ): Promise<void> {
-  const target = t.type === 'group' ? await targetOfGroup(t.id) : await targetOfContact(t.id)
+  const id = targetBusinessId(t)
+  const target = t.type === 'group' ? await targetOfGroup(id) : await targetOfContact(id)
   await sendContentTo(target, content)
 }
 

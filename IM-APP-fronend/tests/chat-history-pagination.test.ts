@@ -6,6 +6,7 @@ import type { ChatMessage, Conversation } from '@/types'
 const mocks = vi.hoisted(() => ({
   platform: 'ios',
   history: vi.fn(),
+  conversations: vi.fn(),
   events: new Map<string, (data: unknown) => void>(),
 }))
 
@@ -20,6 +21,7 @@ vi.mock('openim-uniapp-polyfill', async () => ({
 vi.mock('@/utils/openim', async (original) => ({
   ...(await original<typeof import('@/utils/openim')>()),
   getHistoryMessages: mocks.history,
+  getConversationList: mocks.conversations,
   markConversationRead: vi.fn(async () => {}),
 }))
 vi.mock('@/utils/platform', () => ({
@@ -66,6 +68,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.events.clear()
   mocks.history.mockReset()
+  mocks.conversations.mockReset().mockResolvedValue([])
   vi.stubGlobal('uni', { getStorageSync: () => '', setStorageSync: vi.fn() })
   setActivePinia(createPinia())
   groupRetention.setOwner('')
@@ -84,6 +87,34 @@ afterEach(() => {
 
 describe.each(['ios', 'android', 'h5'])('历史持续翻页（%s）', (platform) => {
   beforeEach(() => { mocks.platform = platform })
+
+  it('翻页请求期间收到的新消息不能被旧列表覆盖', async () => {
+    seedHistory(100)
+    let finish!: (value: ReturnType<typeof historyPage>) => void
+    mocks.history.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    const pending = store.loadMoreMessages(conversationId)
+    store.subscribeRealtime()
+    mocks.events.get(IMEvents.OnRecvNewMessage)!({ data: rawMessage(100) })
+    finish(historyPage(-20))
+    await pending
+    expect(store.messagesMap[conversationId]).toHaveLength(121)
+    expect(store.messagesMap[conversationId].some(m => m.id === 'msg-100')).toBe(true)
+  })
+
+  it('刷新等待会话资料期间，新翻出的历史不能被覆盖', async () => {
+    seedHistory(100)
+    store.messagesMap[conversationId].forEach((m, i) => { m.createdAt = new Date(1792843200000 + i).toISOString() })
+    let finish!: (value: []) => void
+    mocks.conversations.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    mocks.history.mockResolvedValueOnce(historyPage(80)).mockResolvedValueOnce(historyPage(-20))
+    const pending = store.loadMessages(conversationId)
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    await store.loadMoreMessages(conversationId)
+    finish([])
+    await pending
+    expect(store.messagesMap[conversationId]).toHaveLength(120)
+    expect(store.messagesMap[conversationId][0].id).toBe('msg--20')
+  })
 
   it('刷新最近一页时保留其他成员已经翻出的历史，仍可继续翻页', async () => {
     seedHistory(800)

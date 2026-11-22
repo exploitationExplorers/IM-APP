@@ -46,6 +46,7 @@ import {
   isLocalDatabaseWriteError,
 } from '@/utils/openim'
 import { groupRetention } from '@/utils/groupRetention'
+import { createDirectForward } from '@/utils/directForward'
 
 const group = {
   conversationId: 'sg_group-test',
@@ -251,6 +252,72 @@ describe.each([true, false])('protected media sends (native=%s)', (app) => {
   })
 })
 afterEach(() => vi.unstubAllGlobals())
+
+describe('H5 image forwarding receipts', () => {
+  it('confirms all 40 deliveries after a lost receipt and a brief disconnect', async () => {
+    vi.useFakeTimers()
+    mocks.app = false
+    const targets = [group, peer]
+    const attempts = new Map<string, number>()
+    const accepted = new Map<string, MessageItem>()
+    const delivered: string[] = []
+    const urls = Array.from({ length: 20 }, (_, index) => `https://images.example/${index + 1}.png`)
+
+    mocks.asyncApi.mockImplementation(async (method: IMMethods, _operation: string, params) => {
+      if (method === IMMethods.CreateImageMessageByURL) {
+        return { clientMsgID: 'created', contentType: 102, status: MessageStatus.Sending, pictureElem: params }
+      }
+      if (method === IMMethods.FindMessageList) {
+        const id = params[0].clientMsgIDList[0]
+        const message = accepted.get(id)
+        return {
+          findResultItems: [{
+            messageList: message && attempts.get(id) === 1
+              ? [{ ...message, status: MessageStatus.Sending, serverMsgID: '', seq: 0 }]
+              : message ? [message] : [],
+          }],
+        }
+      }
+      if (method !== IMMethods.SendMessageNotOss) throw new Error(`Unexpected method ${method}`)
+      const message: MessageItem = params.message
+      const id = message.clientMsgID
+      const count = (attempts.get(id) ?? 0) + 1
+      attempts.set(id, count)
+      const url = message.pictureElem.sourcePicture.url
+      if (params.recvID && url === urls[10] && count === 1) throw { errCode: 10000 }
+      if (!accepted.has(id)) {
+        accepted.set(id, { ...message, status: MessageStatus.Succeed, serverMsgID: `server-${id}` })
+        delivered.push(`${params.groupID || params.recvID}:${url}`)
+      }
+      if (params.groupID && url === urls[1]) throw { errCode: 10204 }
+      return accepted.get(id)
+    })
+
+    try {
+      const send = createDirectForward(
+        targets.map((target) => ({ resolveConversation: async () => target.conversationId })),
+        urls,
+        async (conversationId, url, clientMsgID) => {
+          const target = targets.find((item) => item.conversationId === conversationId)!
+          await sendImageUrlMessage(target, url, clientMsgID)
+        },
+      )
+      const result = send()
+      await vi.runAllTimersAsync()
+      expect(await result).toMatchObject({ sentCount: 40, failedCount: 0 })
+      expect([...attempts.values()].filter((count) => count === 2)).toHaveLength(2)
+      expect(accepted.size).toBe(40)
+      for (const byTarget of ['group-test', 'peer']) {
+        expect(delivered.filter((item) => item.startsWith(`${byTarget}:`))).toEqual(
+          urls.map((url) => `${byTarget}:${url}`),
+        )
+      }
+      expect(mocks.reportSendFailure).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
 
 // 只针对 App 原生桥：H5 走 client-sdk，创建结果由 SDK 自己保证
 describe('quote creation on the App native bridge', () => {
