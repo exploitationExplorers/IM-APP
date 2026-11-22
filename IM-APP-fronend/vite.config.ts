@@ -33,10 +33,14 @@ function rewriteMediaRedirect(proxy: { on: (event: string, handler: (proxyRes: {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const appStore = process.env.UNI_CUSTOM_SCRIPT === 'ios-store'
   if (appStore !== (mode === 'ios-store')) {
     throw new Error('App Store builds must use the ios-store custom platform and ios-store mode together')
+  }
+  const appTarget = ['app', 'app-plus', 'app-ios'].includes(process.env.UNI_PLATFORM || '')
+  if (command === 'build' && appTarget && !appStore && mode !== 'oss-test') {
+    throw new Error('请使用 npm run build:ios-store 构建本分支的 App Store 包')
   }
   const base = {
   plugins: [

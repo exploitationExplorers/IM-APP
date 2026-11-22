@@ -11,7 +11,7 @@ function validateStoreEnv(env) {
       errors.push(`${key} 必须配置有效的 ${key === 'VITE_IM_WS_URL' ? 'WSS' : 'HTTPS'} 域名地址`)
     }
   }
-  if (!/^\d+$/.test(env.VITE_APP_STORE_ID || '')) errors.push('VITE_APP_STORE_ID 必须是 App Store Connect 中的数字 Apple ID')
+  if (env.VITE_APP_STORE_ID && !/^\d+$/.test(env.VITE_APP_STORE_ID)) errors.push('VITE_APP_STORE_ID 如填写，必须是数字 Apple ID')
   if (env.VITE_DISTRIBUTION !== 'app-store') errors.push('VITE_DISTRIBUTION 必须为 app-store')
   return errors
 }

@@ -43,11 +43,9 @@
     "test:unit": "vitest run",
     "test:notifications": "node --test tests/im-notification.test.mts",
     "test:video-compat": "vitest run tests/video-compat.test.ts",
-    "build:app": "uni build -p app-plus",
+    "build:app": "npm run build:ios-store",
     "build:ios-store": "node scripts/check-ios-store.cjs && cross-env UNI_OUTPUT_DIR=dist/build/ios-store uni build -p ios-store --mode ios-store && node scripts/verify-ios-store.cjs",
-    "pack:wgt": "node scripts/pack-wgt.cjs",
-    "pack:wgt:canary": "node scripts/pack-wgt.cjs --build --publish --channel=canary --min-native=100",
-    "pack:wgt:customer": "node scripts/pack-wgt.cjs --build --publish --channel=test --min-native=100",
+    "verify:ios-ipa": "python3 scripts/verify-ios-ipa.py",
     "postinstall": "node scripts/fix-openim-protocol.cjs && node scripts/fix-uni-h5-preview.cjs"
   },
   "uni-app": {

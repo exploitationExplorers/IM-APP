@@ -4,7 +4,7 @@ import { onHide, onShow } from '@dcloudio/uni-app'
 import ImNavBar from '@/components/ImNavBar.vue'
 import { fetchIMToken } from '@/api/im'
 import { useAuthGuard } from '@/composables/useAuthGuard'
-import { readLocalAppVersion } from '@/composables/useAppUpdate'
+import { readLocalVersionName } from '@/composables/useAppUpdate'
 import { APP_CONFIG } from '@/config'
 import { useUserStore } from '@/stores/user'
 import { imUserId } from '@/utils/openim'
@@ -84,9 +84,8 @@ function goBack() {
 
 async function refreshMeta() {
   try {
-    const local = await readLocalAppVersion()
-    const name = local.versionName || APP_CONFIG.version
-    const ver = String(name).startsWith('v') ? String(name) : `v${name}`
+    const name = readLocalVersionName()
+    const ver = name.startsWith('v') ? name : `v${name}`
     versionText.value = `${ver} ${platformTag()}`
   } catch {
     versionText.value = `${APP_CONFIG.version} ${platformTag()}`

@@ -1,18 +1,16 @@
-// 使用条件编译移除整个分发实现，确保商店资源中不包含安装更新的代码。
-// #ifdef APP-STORE
-import * as storeUpdate from './useStoreUpdate'
-// #endif
-// #ifndef APP-STORE
-import * as legacyUpdate from './useLegacyAppUpdate'
-// #endif
+import { APP_CONFIG } from '@/config'
+import { isAppPlatform } from '@/utils/platform'
 
-let updater: typeof import('./useStoreUpdate')
-// #ifdef APP-STORE
-updater = storeUpdate
-// #endif
-// #ifndef APP-STORE
-updater = legacyUpdate
-// #endif
+export function canOpenAppStore(): boolean {
+  return APP_CONFIG.appStore && /^\d+$/.test(APP_CONFIG.appStoreId) && isAppPlatform()
+}
 
-export const checkAndPromptAppUpdate = updater.checkAndPromptAppUpdate
-export const readLocalAppVersion = updater.readLocalAppVersion
+export function openAppStore(): void {
+  if (!canOpenAppStore() || typeof plus === 'undefined') return
+  plus.runtime?.openURL?.(`https://apps.apple.com/app/id${APP_CONFIG.appStoreId}`)
+}
+
+export function readLocalVersionName(): string {
+  const runtime = typeof plus === 'undefined' ? undefined : plus.runtime
+  return runtime?.version || uni.getSystemInfoSync().appVersion || APP_CONFIG.version
+}

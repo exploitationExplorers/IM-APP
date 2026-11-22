@@ -6,7 +6,6 @@ import { useChatStore } from '@/stores/chat'
 import { useChatSettingsStore } from '@/stores/chatSettings'
 import { useContactStore } from '@/stores/contact'
 import { setupAppAuthGuard } from '@/composables/useAuthGuard'
-import { checkAndPromptAppUpdate } from '@/composables/useAppUpdate'
 import { getStatusBarHeight } from '@/utils/status-bar'
 import { getToken, setAuthExpiredHandler } from '@/utils/request'
 import { warmMediaCache } from '@/utils/mediaCache'
@@ -66,7 +65,6 @@ onLaunch(() => {
   } catch {
     /* App 端由运行时注入 */
   }
-  if (hasPrivacyConsent()) void checkAndPromptAppUpdate()
 
   // H5：标签页切回前台时补拉一次。
   // 新消息只靠 OpenIM 推送进 UI，标签页被浏览器节流/断网期间漏掉的推送没有任何补拉机制，
@@ -91,7 +89,6 @@ onShow(() => {
   }
   startServices()
   void setupAppAuthGuard()
-  void checkAndPromptAppUpdate()
   // 回前台对齐聊天偏好（回车发送等），避免内存态被冲掉后开关自己变回去
   useChatSettingsStore().hydrate(true)
   // 告知 SDK 已回前台：core 会唤醒数据补拉（iOS 后台冻结后靠这个恢复同步）。

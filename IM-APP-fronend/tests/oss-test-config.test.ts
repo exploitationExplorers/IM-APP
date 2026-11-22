@@ -27,15 +27,14 @@ describe('explicit OSS test mode', () => {
   it('does not check or install hot updates, including a manual native check', async () => {
     vi.stubEnv('MODE', 'oss-test')
     vi.stubEnv('VITE_API_BASE_URL', 'https://localhost:18443/api/v1')
-    const showToast = vi.fn()
-    vi.stubGlobal('uni', { showToast })
+    const openURL = vi.fn()
+    vi.stubGlobal('plus', { runtime: { openURL } })
     const { APP_CONFIG } = await import('@/config')
     expect(APP_CONFIG.ossTest).toBe(true)
-    const { checkAndPromptAppUpdate } = await import('@/composables/useAppUpdate')
-    expect(await checkAndPromptAppUpdate()).toBe(false)
-    expect(await checkAndPromptAppUpdate({ manual: true })).toBe(false)
+    const { openAppStore } = await import('@/composables/useAppUpdate')
+    openAppStore()
     expect(checkAppRelease).not.toHaveBeenCalled()
-    expect(showToast).toHaveBeenCalledOnce()
+    expect(openURL).not.toHaveBeenCalled()
   })
 
   it('leaves ordinary builds in their existing mode', async () => {

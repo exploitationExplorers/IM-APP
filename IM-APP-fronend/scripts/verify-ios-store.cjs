@@ -1,5 +1,5 @@
-const { readFileSync, existsSync } = require('node:fs')
-const { resolve } = require('node:path')
+const { readFileSync, readdirSync, existsSync } = require('node:fs')
+const { extname, resolve } = require('node:path')
 const assert = require('node:assert/strict')
 const { checkStoreStartup } = require('./check-ios-store-startup.cjs')
 
@@ -8,9 +8,29 @@ const service = readFileSync(resolve(output, 'app-service.js'), 'utf8')
 const config = readFileSync(resolve(output, 'app-config-service.js'), 'utf8')
 const manifest = JSON.parse(readFileSync(resolve(output, 'manifest.json'), 'utf8'))
 
-for (const pattern of [/runtime\.install\b/, /itms-services:/, /\.wgt\b/, /正在下载更新/, /正在安装/, /占位隐私政策/, /占位协议文本/, /pages\/mine\/debug/, /http:\/\/8\.154\.44\.197\/api\/v1/]) {
-  assert(!pattern.test(service + config), `App Store 产物包含禁止路径：${pattern}`)
+const forbidden = [
+  /runtime\s*(?:\?\.|\.)\s*install\b/, /runtime\s*\[\s*['"]install/,
+  /\.install\s*\([^;]{0,160}\bforce\s*:/, /\/public\/app-release/, /useLegacyAppUpdate/,
+  /itms-services:/, /\.wgtu?\b/, /正在下载更新/, /正在安装/, /占位隐私政策/, /占位协议文本/,
+  /pages\/mine\/debug/, /http:\/\/8\.154\.44\.197\/api\/v1/,
+]
+function checkResources(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const file = resolve(directory, entry.name)
+    if (entry.isDirectory()) {
+      checkResources(file)
+      continue
+    }
+    const suffix = extname(entry.name).toLowerCase()
+    assert(!['.wgt', '.wgtu', '.ipa', '.apk'].includes(suffix), `App Store 产物包含安装包 ${file}`)
+    if (!['.js', '.mjs', '.html', '.json'].includes(suffix)) continue
+    const source = readFileSync(file, 'utf8')
+    for (const pattern of forbidden) {
+      assert(!pattern.test(source), `App Store 产物 ${file} 包含 ${pattern}`)
+    }
+  }
 }
+checkResources(output)
 assert(config.includes('"entryPagePath":"pages/auth/consent"'), '首次启动入口必须为隐私授权页面')
 assert(!existsSync(resolve(output, 'pages/mine/debug')), '调试页面仍在包内')
 assert(!existsSync(resolve(output, 'pages/mine/debug.js')), '调试页面仍在包内')

@@ -3,38 +3,23 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { APP_CONFIG } from '@/config'
-import { checkAndPromptAppUpdate, readLocalAppVersion } from '@/composables/useAppUpdate'
+import { canOpenAppStore, openAppStore, readLocalVersionName } from '@/composables/useAppUpdate'
 import ImNavBar from '@/components/ImNavBar.vue'
 
 useAuthGuard()
 
 const appName = APP_CONFIG.displayName
 const versionText = ref(APP_CONFIG.version)
-const checking = ref(false)
+const showStoreLink = canOpenAppStore()
 
-async function refreshVersion() {
+onShow(() => {
   try {
-    const local = await readLocalAppVersion()
-    const name = local.versionName || APP_CONFIG.version
-    versionText.value = String(name).startsWith('v') ? String(name) : `v${name}`
+    const name = readLocalVersionName()
+    versionText.value = name.startsWith('v') ? name : `v${name}`
   } catch {
     versionText.value = APP_CONFIG.version
   }
-}
-
-onShow(() => {
-  void refreshVersion()
 })
-
-async function onCheckUpdate() {
-  if (checking.value) return
-  checking.value = true
-  try {
-    await checkAndPromptAppUpdate({ manual: true })
-  } finally {
-    checking.value = false
-  }
-}
 
 function goBack() {
   const pages = getCurrentPages()
@@ -70,11 +55,12 @@ function openLegalDocument(kind: 'agreement' | 'privacy') {
         {{ versionText }}
       </text>
       <view
+        v-if="showStoreLink"
         class="check-btn"
-        @click="onCheckUpdate"
+        @click="openAppStore"
       >
         <text class="check-btn-text">
-          {{ checking ? '检查中...' : APP_CONFIG.appStore ? '前往 App Store' : '检查更新' }}
+          前往 App Store
         </text>
       </view>
       <view class="legal-links">

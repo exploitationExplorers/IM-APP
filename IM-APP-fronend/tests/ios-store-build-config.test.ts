@@ -17,9 +17,14 @@ describe('App Store 发布配置校验', () => {
     expect(validateStoreEnv(env)).toEqual([])
   })
 
-  it('拒绝缺失正式隐私/协议或商店 ID 的包', () => {
+  it('拒绝缺失正式隐私/协议的包', () => {
     const errors = validateStoreEnv({ ...env, VITE_PRIVACY_POLICY_URL: '', VITE_USER_AGREEMENT_URL: '', VITE_APP_STORE_ID: '' })
-    expect(errors).toHaveLength(3)
+    expect(errors).toHaveLength(2)
+  })
+
+  it('Apple ID 只用于可选的 App Store 商品页链接', () => {
+    expect(validateStoreEnv({ ...env, VITE_APP_STORE_ID: '' })).toEqual([])
+    expect(validateStoreEnv({ ...env, VITE_APP_STORE_ID: 'invalid' })).toHaveLength(1)
   })
 
   it.each(['http://app.example/api', 'https://8.154.44.197/api', 'https://user:password@app.example/api'])('拒绝不合格服务地址 %s', (url) => {

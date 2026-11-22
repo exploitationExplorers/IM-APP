@@ -33,13 +33,9 @@ VITE_WS_BASE_URL=ws://8.154.44.197/openim-ws
 
 改 `.env` 后需重启 `npm run dev:h5`。
 
-## 热更新（wgt）
-
-改完页面/逻辑发给客户：不要重打 APK，见 [docs/wgt热更新发布.md](./docs/wgt热更新发布.md)。
-
 ## iOS App Store 上架
 
-提审包必须走 `ios-store`，不能用普通 App / 企业签打包。步骤与拒审自检见 [docs/iOS-App-Store上架打包检查清单.md](./docs/iOS-App-Store上架打包检查清单.md)。
+使用 `npm run build:ios-store` 构建商店资源。签出 App Store IPA 后，用 `npm run verify:ios-ipa -- "/path/to/app.ipa"` 核对最终包。具体步骤见 [iOS 上架打包检查清单](./docs/iOS-App-Store上架打包检查清单.md)。
 
 ## 联调
 

@@ -2,19 +2,18 @@
 
 给 Mac 打包同学用。**照着做，不要凭经验用普通 App 云打包。**
 
-背景：易可聊曾因 Guideline **5.6**（开发者行为准则 / 隐藏功能）被拒。对 uni-app 来说，最常见原因是 IPA 里仍带 **wgt 热更新**（`plus.runtime.install`）。企业签 / 测试壳可以热更新；**上架包必须彻底去掉。**
+Apple 的 5.6 拒审反馈指出应用存在审核时疑似隐藏的功能。旧代码用普通 `app-plus` 可以编出更新安装代码和调试页。上架分支现已删除更新安装实现，并拦截普通 App 发布构建。要核实某次提交包含哪些功能，请检查当时上传的 IPA。
 
-> 拉 `feat/ios-app-store` 分支 ≠ 打出了商店包。  
-> 只有走自定义平台 **`ios-store`**（编译宏 `APP-STORE=true`）才会去掉热更新和调试页。
+> 自定义平台 **`ios-store`** 启用首次启动隐私授权、商店原生桥并移除调试页。`npm run build:app` 在本分支也使用商店构建入口。
 
 ---
 
 ## 0. 绝对不要做
 
-- 不要用普通 `npm run build:app` / 默认「App」云打包去提审
+- 云打包请选择「iOS App Store」对应的商店资源
 - 不要「审核期服务端关掉热更新、过审后再开」——这正是 5.6 要打的
 - 不要按审核 IP / 审核账号切换另一套功能
-- 不要用上次被拒的同一 `versionCode` 重提（被拒包是 **1.0.164 / 262**，新包至少 **263+**）
+- `versionCode` 必须高于 App Store Connect 同一版本最近上传的构建号
 - 不要把 `.env.ios-store.local` 提交进 Git
 
 ---
@@ -41,9 +40,7 @@ npm ci
 - 正式 HTTPS/WSS API 与 OpenIM 地址
 - 公网法律页：`/static/legal/privacy.html`、`/static/legal/agreement.html`
 
-**你只需要确认一件事：** `VITE_APP_STORE_ID` 是否已是 App Store Connect 里的纯数字 Apple ID。
-
-若还是空的：直接改 `.env.ios-store` 填上（本分支只做上架，可以进仓库），或本机建 `.env.ios-store.local` 覆盖（勿提交）。
+`VITE_APP_STORE_ID` 可留空。填入 App Store Connect 的纯数字 Apple ID 后，「关于我们」会显示官方商品页链接。
 
 ```env
 VITE_APP_STORE_ID=1234567890
@@ -55,7 +52,7 @@ VITE_APP_STORE_ID=1234567890
 
 ## 3. 升版本（每次提审前）
 
-`src/manifest.json` 当前商店壳目标为 **1.0.165（263）**（大于被拒的 262）。若 Connect 上已有更高 build，再往上加即可。
+`src/manifest.json` 当前为 **1.0.165（264）**。若 Connect 上同一版本已有 264 或更高构建号，改为更高的数字再构建。
 
 商店壳版本号**不要**跟着企业签 wgt 的版本跑。
 
@@ -104,11 +101,7 @@ rg -n "runtime\\.install|\\.wgt|正在下载更新|正在安装|pages/mine/debug
 
 期望：**无任何命中。**
 
-应能搜到商店更新路径（正常）：
-
-```bash
-rg -n "apps\\.apple\\.com" app-service.js
-```
+版本显示来自包内版本配置。「关于我们」的商店链接只在配置了数字 Apple ID 时显示。
 
 再确认：
 
@@ -129,7 +122,7 @@ ls pages/mine/debug 2>/dev/null && echo "FAIL: debug page still present" || echo
 4. 平台选 **iOS**，用途选 **App Store / 正式版**（不要选 Ad Hoc / 企业签当提审包）
 5. **必须走自定义平台「iOS App Store」**（对应 `package.json` → `uni-app.scripts.ios-store`，会定义 `APP-STORE`）  
    - 若界面只能选默认 App / app-plus：**先停**，改用下面「CLI 已产出资源」路径，或让会配自定义平台的人一起看  
-   - 选错平台 = 热更新代码又打回去 = 再次 5.6
+   - 本分支会阻止普通 App 发布构建。签出 IPA 后运行下方检查，确认云打包使用了本次资源。
 6. 证书：App Store 分发证书 + 对应描述文件；Bundle ID 与 Connect 一致
 7. 打包完成后下载 IPA，保留文件名与时间，方便对照 build
 
@@ -143,17 +136,18 @@ ls pages/mine/debug 2>/dev/null && echo "FAIL: debug page still present" || echo
 
 ## 7. IPA 终检（上传前必做）
 
-把 IPA 当 zip 解开，找到里面的 `app-service.js`（路径随 DCloud 包结构可能略有不同），再搜一次第 5 节关键词。
+在 `IM-APP-fronend` 目录使用 Python 3 检查签出的 IPA：
 
-| 搜到 | 结论 |
-|---|---|
-| `runtime.install` / `.wgt` / `正在下载更新` / `pages/mine/debug` | **不合格，禁止上传** |
-| 仅有 `apps.apple.com`、无热更新词 | 通过 |
+```bash
+npm run verify:ios-ipa -- "/path/to/app.ipa"
+```
+
+脚本会检查首次启动路由、更新安装代码、嵌入的更新包、调试页和主应用的隐私清单、ATS，并输出实际 Bundle ID、版本和构建号。将输出和 App Store Connect 中本次选中的构建核对。
 
 也可装到 TestFlight / 内测机快速点一遍：
 
 - [ ] 首次启动先出隐私同意页，未同意前不登录、不拉推送
-- [ ] 「关于我们」点更新 → 跳转 App Store，**不会**弹「发现新版本 / 正在下载更新」
+- [ ] 「关于我们」显示本地版本。若配置了 Apple ID，点击链接可到官方商品页。
 - [ ] 「通用」里**没有**「调试资讯」「重新选线」
 - [ ] 能注册/登录、收发消息、加好友、进群（用下面审核账号）
 
@@ -161,13 +155,13 @@ ls pages/mine/debug 2>/dev/null && echo "FAIL: debug page still present" || echo
 
 ## 8. App Store Connect
 
-1. 上传新 build（`versionCode` ≥ 263）
+1. 上传构建号高于 Connect 同一版本最近记录的 IPA
 2. 在 Resolution Center **先回复**上次 5.6（可英文），再点提交审核
 3. **Notes for Review** 建议直接贴：
 
 ```text
 This App Store build does NOT include any OTA / wgt / hot-update mechanism.
-In-app update only opens the App Store product page. No plus.runtime.install.
+App updates are distributed through the App Store.
 
 App name: 易可聊
 Main features (all visible, none hidden for review):
@@ -196,7 +190,7 @@ Hello App Review team,
 
 Thank you for the feedback on Guideline 5.6.
 
-We do not intentionally hide features from App Review. The previously submitted binary may have been packaged with a non-App-Store resource path that still contained an enterprise/test OTA (wgt) update mechanism.
+We investigated the app's distribution paths after your feedback. We identified a legacy direct-distribution build path that could package an in-app resource updater. The new build removes that updater from the App Store branch.
 
 For the new build:
 - All in-app hot-update / wgt / plus.runtime.install code has been removed from the App Store distribution target
@@ -215,7 +209,7 @@ Best regards
 
 | 谁 | 做什么 |
 |---|---|
-| 开发 | 保证功能在 `feat/ios-app-store`；`.env.ios-store` 已填 `VITE_APP_STORE_ID`；版本号已升；给出审核演示账号 |
+| 开发 | 在 `feat/ios-app-store` 核对下一构建号，并准备能访问完整功能的审核账号 |
 | Mac | pull 最新分支 → `npm run build:ios-store` → 资源自检 → **自定义平台 ios-store** 云打包 → IPA 终检 → 上传 + 贴审核备注 + 回 Resolution Center |
 | 双方 | 确认这次 IPA **不是**企业签那条热更新链路打出来的 |
 
