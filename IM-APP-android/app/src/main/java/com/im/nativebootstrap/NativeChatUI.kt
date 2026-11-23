@@ -119,15 +119,15 @@ data class NativeChatCallbacks(
 )
 
 // 必须是 getter：顶层 val 会把浅色值一次性快照，深色切换后不再跟随。
-private val ChatGray get()=C.page
-private val ChatBlue get()=C.mineBubble
-private val ChatHint get()=C.faint
-private fun onUI(action:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper())action() else Handler(Looper.getMainLooper()).post(action) }
+internal val ChatGray get()=C.page
+internal val ChatBlue get()=C.mineBubble
+internal val ChatHint get()=C.faint
+internal fun onUI(action:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper())action() else Handler(Looper.getMainLooper()).post(action) }
 
 // 正则编译不便宜；imAdmin 系统消息在群聊里长期存在，item 重组时按值匹配，必须复用同一实例。
-private val legacyAdminClearRegex=Regex("^(群主|管理员)清除了「.+」的全部消息$")
+internal val legacyAdminClearRegex=Regex("^(群主|管理员)清除了「.+」的全部消息$")
 
-private suspend fun voiceSource(
+internal suspend fun voiceSource(
     context:android.content.Context,
     messageId:String,
     content:MessageContent,
@@ -156,43 +156,72 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     val list=rememberLazyListState()
     val factor=LocalConfiguration.current.screenWidthDp/750f
     fun rpx(value:Int)=(value*factor).dp
-    var text by remember(state.active?.target) { mutableStateOf("") }
-    var quoted by remember(state.active?.target) { mutableStateOf<ChatMessage?>(null) }
+    val textS=remember(state.active?.target) { mutableStateOf("") }
+    var text by textS
+    val quotedS=remember(state.active?.target) { mutableStateOf<ChatMessage?>(null) }
+    var quoted by quotedS
     var sending by remember(state.active?.target) { mutableStateOf(false) }
-    var selected by remember { mutableStateOf<ChatMessage?>(null) }
-    var uploadMenu by remember { mutableStateOf<PendingMediaUpload?>(null) }
-    var selectedAnchor by remember { mutableStateOf<Offset?>(null) }
-    var invite by remember { mutableStateOf<GroupMessageCard?>(null) }
-    var forward by remember { mutableStateOf<ChatMessage?>(null) }
-    var multi by remember { mutableStateOf(false) }
-    var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var selectionOrder by remember { mutableStateOf<List<String>>(emptyList()) }
-    var forwardMode by remember { mutableStateOf(false) }
-    var confirmMultiRecall by remember { mutableStateOf(false) }
+    val selectedS=remember { mutableStateOf<ChatMessage?>(null) }
+    var selected by selectedS
+    val uploadMenuS=remember { mutableStateOf<PendingMediaUpload?>(null) }
+    var uploadMenu by uploadMenuS
+    val selectedAnchorS=remember { mutableStateOf<Offset?>(null) }
+    var selectedAnchor by selectedAnchorS
+    val inviteS=remember { mutableStateOf<GroupMessageCard?>(null) }
+    var invite by inviteS
+    val forwardS=remember { mutableStateOf<ChatMessage?>(null) }
+    var forward by forwardS
+    val multiS=remember { mutableStateOf(false) }
+    var multi by multiS
+    val selectionS=remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selection by selectionS
+    val selectionOrderS=remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectionOrder by selectionOrderS
+    val forwardModeS=remember { mutableStateOf(false) }
+    var forwardMode by forwardModeS
+    val confirmMultiRecallS=remember { mutableStateOf(false) }
+    var confirmMultiRecall by confirmMultiRecallS
     var recalling by remember { mutableStateOf(false) }
-    var recallReason by remember { mutableStateOf("") }
-    var avatarMention by remember { mutableStateOf<ChatMessage?>(null) }
-    var multiForward by remember { mutableStateOf<List<ChatMessage>?>(null) }
+    val recallReasonS=remember { mutableStateOf("") }
+    var recallReason by recallReasonS
+    val avatarMentionS=remember { mutableStateOf<ChatMessage?>(null) }
+    var avatarMention by avatarMentionS
+    val multiForwardS=remember { mutableStateOf<List<ChatMessage>?>(null) }
+    var multiForward by multiForwardS
     var forwarding by remember { mutableStateOf(false) }
-    var confirmMultiDelete by remember { mutableStateOf(false) }
+    val confirmMultiDeleteS=remember { mutableStateOf(false) }
+    var confirmMultiDelete by confirmMultiDeleteS
     var deleting by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf<ChatMessage?>(null) }
-    var confirmManage by remember { mutableStateOf<Pair<ChatMessage,ChatAction>?>(null) }
-    var muteTarget by remember { mutableStateOf<ChatMessage?>(null) }
-    var pinTarget by remember { mutableStateOf<ChatMessage?>(null) }
-    var selectText by remember { mutableStateOf<String?>(null) }
-    var image by remember { mutableStateOf<String?>(null) }
-    var imageMessage by remember { mutableStateOf<ChatMessage?>(null) }
-    var video by remember { mutableStateOf<String?>(null) }
-    var videoMessage by remember { mutableStateOf<ChatMessage?>(null) }
-    var videoLocal by remember { mutableStateOf<LocalMedia?>(null) }
-    var notice by remember { mutableStateOf<String?>(null) }
+    val confirmDeleteS=remember { mutableStateOf<ChatMessage?>(null) }
+    var confirmDelete by confirmDeleteS
+    val confirmManageS=remember { mutableStateOf<Pair<ChatMessage,ChatAction>?>(null) }
+    var confirmManage by confirmManageS
+    val muteTargetS=remember { mutableStateOf<ChatMessage?>(null) }
+    var muteTarget by muteTargetS
+    val pinTargetS=remember { mutableStateOf<ChatMessage?>(null) }
+    var pinTarget by pinTargetS
+    val selectTextS=remember { mutableStateOf<String?>(null) }
+    var selectText by selectTextS
+    val imageS=remember { mutableStateOf<String?>(null) }
+    var image by imageS
+    val imageMessageS=remember { mutableStateOf<ChatMessage?>(null) }
+    var imageMessage by imageMessageS
+    val videoS=remember { mutableStateOf<String?>(null) }
+    var video by videoS
+    val videoMessageS=remember { mutableStateOf<ChatMessage?>(null) }
+    var videoMessage by videoMessageS
+    val videoLocalS=remember { mutableStateOf<LocalMedia?>(null) }
+    var videoLocal by videoLocalS
+    val noticeS=remember { mutableStateOf<String?>(null) }
+    var notice by noticeS
     LaunchedEffect(notice) { notice?.let { NativeNotices.show(it);notice=null } }
     LaunchedEffect(state.error) { state.error?.let(NativeNotices::show) }
-    var plus by remember { mutableStateOf(false) }
+    val plusS=remember { mutableStateOf(false) }
+    var plus by plusS
     val composerPanels=remember { NativeComposerPanelState() }
     val emoji=composerPanels.emojiOpen
-    var voiceMode by remember { mutableStateOf(false) }
+    val voiceModeS=remember { mutableStateOf(false) }
+    var voiceMode by voiceModeS
     var recording by remember { mutableStateOf(false) }
     var recordingSeconds by remember { mutableIntStateOf(0) }
     var recordingStarted by remember { mutableLongStateOf(0) }
@@ -200,19 +229,26 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
     var voiceWorking by remember { mutableStateOf(false) }
     var voiceOperation by remember { mutableLongStateOf(0) }
     var playing by remember { mutableStateOf<String?>(null) }
-    var pickerKind by remember { mutableStateOf(MediaKind.IMAGE) }
-    var preparing by remember { mutableStateOf(false) }
-    var failedMedia by remember { mutableStateOf<List<LocalMedia>>(emptyList()) }
+    val pickerKindS=remember { mutableStateOf(MediaKind.IMAGE) }
+    var pickerKind by pickerKindS
+    val preparingS=remember { mutableStateOf(false) }
+    var preparing by preparingS
+    val failedMediaS=remember { mutableStateOf<List<LocalMedia>>(emptyList()) }
+    var failedMedia by failedMediaS
     var retryingMedia by remember { mutableStateOf<Set<String>>(emptySet()) }
     var saveFile by remember { mutableStateOf<File?>(null) }
     var cameraFile by remember { mutableStateOf<File?>(null) }
     var capturedVideo by remember { mutableStateOf<File?>(null) }
-    var showVideoSource by remember { mutableStateOf(false) }
-    var merge by remember { mutableStateOf<ChatMessage?>(null) }
-    var showMentions by remember { mutableStateOf(false) }
+    val showVideoSourceS=remember { mutableStateOf(false) }
+    var showVideoSource by showVideoSourceS
+    val mergeS=remember { mutableStateOf<ChatMessage?>(null) }
+    var merge by mergeS
+    val showMentionsS=remember { mutableStateOf(false) }
+    var showMentions by showMentionsS
     var atStart by remember { mutableIntStateOf(-1) }
     var mentionKeyword by remember { mutableStateOf("") }
-    var composerCursor by remember { mutableStateOf<Int?>(null) }
+    val composerCursorS=remember { mutableStateOf<Int?>(null) }
+    var composerCursor by composerCursorS
     val player=remember { VoicePlayer() }
     val recorder=remember { VoiceRecorder(context) }
     DisposableEffect(Unit) { onDispose { voiceOperation++;player.stop();recorder.release();if(!voiceWorking)voiceDraft?.file?.delete() } }
@@ -550,409 +586,117 @@ fun NativeChatRoom(state:ChatState,callbacks:NativeChatCallbacks,ownAvatar:Strin
             list.layoutInfo.visibleItemsInfo.mapNotNull { item -> messages.getOrNull(item.index)?.let { it.senderId.ifBlank { MessageContents.parse(it.serialized,it.text).senderId }.takeIf(String::isNotBlank) } }.distinct()
         }.distinctUntilChanged().collect { ids -> if(ids.isNotEmpty())callbacks.onLoadGroupMembers(ids) }
     }
-    Column(Modifier.fillMaxSize().background(ChatGray).statusBarsPadding().navigationBarsPadding().then(if(!emoji&&!plus)Modifier.imePadding() else Modifier)) {
-        Row(Modifier.fillMaxWidth().height(rpx(110)).background(C.card).padding(horizontal=rpx(26)),verticalAlignment=Alignment.CenterVertically) {
-            Box(Modifier.size(rpx(52)).clickable(onClick=callbacks.onBack),contentAlignment=Alignment.Center) { Image(painterResource(R.drawable.uni_icon_back),"返回",Modifier.size(rpx(44)),contentScale=ContentScale.Fit) }
-            Column(Modifier.weight(1f).combinedClickable(onClick=callbacks.onOpenDetails,onLongClick={ clipboard.setText(AnnotatedString(state.active?.title.orEmpty()));notice="已复制聊天名称" }).padding(horizontal=rpx(8)),horizontalAlignment=Alignment.Start) {
-                Text(if(multi)"已选择 ${selection.size} 条消息" else state.active?.title ?: "聊天",fontSize=(34*factor).sp,fontWeight=FontWeight.Bold,color=C.textStrong,maxLines=1,overflow=TextOverflow.Ellipsis)
-                if(state.connection!=ConnectionState.CONNECTED)Text(if(state.connection==ConnectionState.CONNECTING) "连接中…" else "连接暂不可用",color=ChatHint,fontSize=(20*factor).sp)
-                else if(state.active?.target?.sessionType==1)ChatSystemMessages.lastSeen(state.peerLastSeenAt,state.peerOnline==true,presenceNow).takeIf { it.isNotBlank() }?.let { Text(it,color=ChatHint,fontSize=(20*factor).sp) }
-            }
-            if(multi)Text("取消",Modifier.clickable(enabled=!deleting&&!forwarding&&!recalling) { multi=false;selection=emptySet();selectionOrder=emptyList();if(forwardMode)quoted=null;forwardMode=false },fontSize=14.sp,color=ChatBlue)
-            else Canvas(Modifier.size(rpx(52)).semantics { contentDescription="聊天详情" }.clickable(onClick=callbacks.onOpenDetails)) {
-                val gap=size.width*.23f
-                listOf(-1,0,1).forEach { index -> drawCircle(C.text,size.width*.043f,Offset(size.width/2+index*gap,size.height/2)) }
-            }
-        }
-        if(state.showAnnouncementBanner&&state.groupAnnouncement.isNotBlank())Row(Modifier.fillMaxWidth().height(rpx(72)).background(C.card).padding(horizontal=rpx(24)),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(rpx(16))) {
-            Image(painterResource(R.drawable.uni_icon_megaphone),"群公告",Modifier.size(rpx(36)),contentScale=ContentScale.Fit)
-            Text(state.groupAnnouncement,Modifier.weight(1f).clickable { if(state.groupBusinessId.isNotBlank())callbacks.onOpenAnnouncements(state.groupBusinessId) },fontSize=(26*factor).sp,color=C.text,maxLines=1,overflow=TextOverflow.Ellipsis)
-            Text("不再提示",Modifier.clickable(onClick=callbacks.onDismissAnnouncement),color=C.primaryText,fontSize=(26*factor).sp)
-        }
-        state.active?.pinnedMessage?.takeIf { state.showPinnedBanner }?.let { pin -> Row(Modifier.fillMaxWidth().background(C.card).clickable {
-            callbacks.onAction(ChatMessage(pin.clientMsgID,pin.preview,false,0),ChatAction.OPEN_PIN) { result -> onUI { if(result.isFailure)notice=result.exceptionOrNull()?.message ?: "置顶消息暂不可读取" } }
-        }.padding(horizontal=16.dp,vertical=8.dp),verticalAlignment=Alignment.CenterVertically) {
-            Box(Modifier.width(3.dp).height(32.dp).background(ChatBlue))
-            Column(Modifier.weight(1f).padding(start=10.dp)) { Text(if(pin.scope=="shared")"置顶消息" else "仅为我置顶",color=C.primaryText,fontSize=12.sp);Text(pin.preview,maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=13.sp,color=C.hint) }
-            // × 直接走取消置顶（与长按菜单一致），失败时提示并保留本地隐藏。
-            Text("×",Modifier.clickable {
-                callbacks.onDismissPin()
-                callbacks.onAction(ChatMessage(pin.clientMsgID,pin.preview,false,0),ChatAction.UNPIN) { result -> onUI { notice=if(result.isSuccess)"已取消置顶" else result.exceptionOrNull()?.message ?: "取消置顶失败" } }
-            }.padding(10.dp),color=ChatHint)
-        } }
-        val pendingPinSync=remember(state.outbox) { state.outbox.filter { MessageContents.isPinSync(it.message.serialized)&&it.state in setOf(OutboxState.UNCERTAIN,OutboxState.FAILED) } }
-        pendingPinSync.forEach { entry -> Text("置顶同步结果待核对 · 点击核对",Modifier.fillMaxWidth().background(C.warnBg).clickable { callbacks.onReconcile(entry.id) }.padding(10.dp),color=C.warnText,fontSize=12.sp) }
-        failedMedia.forEach { media -> Row(Modifier.fillMaxWidth().background(C.warnBg).padding(horizontal=12.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
-            Text("待上传：${media.name}",Modifier.weight(1f),maxLines=1,overflow=TextOverflow.Ellipsis,fontSize=12.sp,color=C.warnText)
-            TextButton(enabled=!state.uploading&&media.file.absolutePath !in retryingMedia,onClick={ sendFile(media) }) { Text("重试上传") }
-            TextButton(enabled=media.file.absolutePath !in retryingMedia,onClick={ failedMedia=failedMedia.filterNot { it.file==media.file };media.file.delete();media.snapshot?.delete() }) { Text("移除草稿") }
-        } }
-        if(reversedMessages.isEmpty()) {
-            ChatRoomLoadingState(state,callbacks.onLoadHistory,Modifier.weight(1f).fillMaxWidth())
-        } else {
-        // 消息不足一屏时顶格显示（reverseLayout 下 Top=视觉顶部），与微信一致；消息多时无影响。
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(),state=list,reverseLayout=true,verticalArrangement=Arrangement.Top,contentPadding=PaddingValues(vertical=rpx(20))) {
-            itemsIndexed(reversedMessages,key={ _,message -> message.id },contentType={ _,message -> message.contentType }) { index,message ->
-                // 倒序列表中每条消息只提供一个布局根，日期与气泡按正常顺序排布。
-                Column(Modifier.fillMaxWidth()) {
-                val content=remember(message.serialized,message.text) { MessageContents.parse(message.serialized,message.text) }
-                val upload=uploadsById[message.id]
-                val localVideo=if(content.type==104)(upload?.media() ?: state.localSentMedia[message.id]) else null
-                // 坐标只在长按时读取，用普通 holder 而非 MutableState：滚动期间每次布局都写 state 会制造无意义的重组压力。
-                val bubbleBounds=remember(message.id) { arrayOfNulls<Rect>(1) }
-                val older=reversedMessages.getOrNull(index+1)
-                if(older==null||chatDayKey(older.time)!=chatDayKey(message.time))Box(Modifier.fillMaxWidth().padding(vertical=rpx(12)),contentAlignment=Alignment.Center) { Text(chatDayLabel(message.time),Modifier.clip(RoundedCornerShape(rpx(12))).background(C.field).padding(horizontal=rpx(18),vertical=rpx(7)),color=C.hint,fontSize=(22*factor).sp) }
-                val legacySystem=content.senderId=="imAdmin"&&(content.text=="新群创建成功，一起来聊天吧"||legacyAdminClearRegex.matches(content.text))
-                if(message.serialized.isBlank()||content.type>=1000||content.type==0||legacySystem) {
-                    // 群通知的操作人是 OpenIM 管理账号（业务接口代为修改），统一显示「群主」；
-                    // 不能换成群主昵称，否则会把人名写成账号名（如「用户 8612」），与列表预览也不一致。
-                    val system=if(content.type>=1000)ChatSystemMessages.format(message.serialized,"群主") { id -> state.groupMembers[id]?.name.orEmpty() } else content.text.ifBlank { message.text }
-                    if(system.isNotBlank())Box(Modifier.fillMaxWidth().padding(rpx(12)),contentAlignment=Alignment.Center) { Text(system.replace("imAdmin","群主"),color=ChatHint,fontSize=(23*factor).sp) }
-                } else {
-                    // 多选模式下选择圈固定在最左侧：自己的消息改用 Start 排列 + weight 占位把气泡组推回右侧。
-                    Row(Modifier.fillMaxWidth().padding(horizontal=rpx(24),vertical=rpx(16)),horizontalArrangement=if(message.mine&&!multi)Arrangement.End else Arrangement.Start,verticalAlignment=Alignment.Top) {
-                        if(multi&&upload==null) {
-                            Text(if(message.id in selection)"●" else "○",Modifier.clickable(enabled=!deleting&&!forwarding&&!recalling) { toggleSelection(message) }.padding(end=8.dp,top=8.dp),color=if(message.id in selection)ChatBlue else ChatHint,fontSize=22.sp)
-                            if(message.mine)Spacer(Modifier.weight(1f))
-                        }
-                        if(!message.mine)SharedAvatar(content.avatar,Modifier.size(rpx(72)).combinedClickable(onClick={ if(multi)toggleSelection(message) else if(content.senderId.isNotEmpty())callbacks.onOpenPeer(content.senderId) },onLongClick={ if(!multi&&state.active?.target?.sessionType==3)avatarMention=message }))
-                        Column(Modifier.widthIn(max=(LocalConfiguration.current.screenWidthDp*.70f).dp).padding(horizontal=rpx(16)),horizontalAlignment=if(message.mine)Alignment.End else Alignment.Start) {
-                            if(state.active?.target?.sessionType==3) {
-                                val member=state.groupMembers[content.senderId]
-                                val role=member?.role ?: if(message.mine)state.groupRole else ""
-                                if(!message.mine||role in setOf("owner","admin"))Row(Modifier.padding(bottom=rpx(8)),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(rpx(8))) {
-                                    if(!message.mine)Text(member?.name?.ifBlank { message.sender } ?: message.sender,Modifier.combinedClickable(onClick={},onLongClick={ clipboard.setText(AnnotatedString(member?.name?.ifBlank { message.sender } ?: message.sender));notice="已复制昵称" }),color=ChatHint,fontSize=(22*factor).sp,maxLines=1,overflow=TextOverflow.Ellipsis)
-                                    if(role in setOf("owner","admin"))Text(if(role=="owner")"群主" else "管理员",Modifier.border(rpx(2),if(role=="admin")ChatBlue else C.line,RoundedCornerShape(rpx(6))).padding(horizontal=rpx(8)),color=if(role=="admin")ChatBlue else C.hint,fontSize=(18*factor).sp,lineHeight=(26*factor).sp)
-                                }
-                            }
-                            val shape=RoundedCornerShape(topStart=rpx(if(message.mine)16 else 4),topEnd=rpx(if(message.mine)4 else 16),bottomStart=rpx(16),bottomEnd=rpx(16))
-                            val isVisual=content.type==102||content.type==104
-                            val background=if(isVisual)Color.Transparent else if(content.groupCard!=null)C.bubble else if(message.mine)ChatBlue else C.bubble
-                            val foreground=if(message.mine&&content.groupCard==null)Color.White else C.text
-                            Box(Modifier.onGloballyPositioned { bubbleBounds[0]=it.boundsInWindow() }.clip(shape).background(background).combinedClickable(onClick={
-                                if(upload!=null&&content.type!=104) { if(upload.state==MediaUploadState.FAILED)callbacks.onRetryUpload(upload.id);return@combinedClickable }
-                                if(multi) { if(!deleting&&!recalling)toggleSelection(message);return@combinedClickable }
-                                
-                                when(content.type) {
-                                    102 -> if(content.url.isNotEmpty()){ image=content.url;imageMessage=message } else notice="图片原图地址不可用"
-                                    103 -> if(playing==message.id) { player.stop();playing=null } else {
-                                        playing=message.id
-                                        scope.launch {
-                                            val source=voiceSource(context,message.id,content,state.active?.target?.conversationId.orEmpty(),state.active?.target?.sessionType==3)
-                                            if(playing!=message.id)return@launch
-                                            if(source.isEmpty()) { playing=null;notice="语音暂无法播放";return@launch }
-                                            player.play(source,{ onUI { playing=null } },{ onUI { playing=null;notice="语音播放失败，可稍后重试" } })
-                                        }
-                                    }
-                                    104 -> if(content.url.isNotEmpty()||localVideo?.file?.isFile==true) { videoMessage=message;videoLocal=localVideo;video=content.url } else notice="视频仍在准备，请稍后点按"
-                                    105 -> openFile(content)
-                                    108 -> if(content.cardUserId.isNotEmpty())callbacks.onOpenPeer(content.cardUserId)
-                                    107 -> merge=message
-                                }
-                            },onLongClick={ if(!multi) { if(upload!=null)uploadMenu=upload else { selectedAnchor=bubbleBounds[0]?.let { Offset(it.center.x,it.bottom) };selected=message } } }).then(if(isVisual)Modifier else Modifier.padding(horizontal=rpx(22),vertical=rpx(18)))) {
-                                when(content.type) {
-                                    104 -> VideoMessageBubble(content,localPoster=localVideo?.snapshot,sending=upload?.state==MediaUploadState.UPLOADING||outboxById[message.id]?.state==OutboxState.PENDING||outboxById[message.id]?.state==OutboxState.SENDING)
-                                    102 -> {
-                                        val maxWidth=210f*factor/.52f
-                                        val width=if(content.width>0&&content.height>0)minOf(maxWidth,maxOf(90f,maxWidth*content.width/content.height)) else 170f
-                                        val height=if(content.width>0&&content.height>0)(width*content.height/content.width).coerceIn(80f,260f) else 160f
-                                        Box(Modifier.size(width.dp,height.dp).clip(RoundedCornerShape(rpx(12)))) {
-                                            if(upload!=null||content.thumbnail.isNotEmpty()||content.url.isNotEmpty())RemoteMediaImage(MediaURLs.image(content.thumbnail.ifEmpty { content.url }),Modifier.fillMaxSize(),scale=ContentScale.Fit,fallbackUrls=content.imageAlternatives.map { MediaURLs.image(it) },localDraft=upload?.media()?.file,retryOnTap=false,cacheUrls=listOf(content.url,content.thumbnail)+content.imageAlternatives)
-                                            else Box(Modifier.fillMaxSize().background(C.field),contentAlignment=Alignment.Center) { Text("视频",color=ChatHint) }
-                                            if(content.type==104)Text("▶",Modifier.align(Alignment.Center).background(Color(0x77000000),CircleShape).padding(14.dp),color=Color.White,fontSize=24.sp)
-                                            if(content.type==104)Text(duration(content.duration),Modifier.align(Alignment.BottomEnd).padding(6.dp),color=Color.White,fontSize=12.sp)
-                                            if(upload?.state==MediaUploadState.UPLOADING||outboxById[message.id]?.state==OutboxState.PENDING||outboxById[message.id]?.state==OutboxState.SENDING)Box(Modifier.align(Alignment.Center).size(38.dp).background(Color(0x66000000),CircleShape).semantics { contentDescription="图片正在发送" },contentAlignment=Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp),strokeWidth=2.dp,color=Color.White) }
-                                        }
-                                    }
-                                    103 -> Row(Modifier.widthIn(min=90.dp,max=180.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) { Text(if(playing==message.id) "■ 播放中" else "◖)))",color=foreground);Text("${content.duration}″",color=foreground) }
-                                    105 -> Column(Modifier.widthIn(min=140.dp,max=220.dp)) { Text("▤  ${content.fileName.ifBlank { "文件" }}",color=foreground,maxLines=2,fontSize=(29*factor).sp);Text(fileSize(content.size)+" · 点击打开",color=foreground.copy(alpha=.7f),fontSize=(22*factor).sp,modifier=Modifier.padding(top=6.dp)) }
-                                    108 -> Row(verticalAlignment=Alignment.CenterVertically) { SharedAvatar(content.thumbnail,Modifier.size(42.dp));Text(content.cardName.ifBlank { "个人名片" },Modifier.padding(start=10.dp),color=foreground) }
-                                    107 -> Column { Text("聊天记录",color=foreground,fontWeight=FontWeight.Medium);Text(content.text,color=foreground,fontSize=12.sp) }
-                                    110 -> content.groupCard?.let { card -> Column(Modifier.widthIn(min=rpx(300),max=rpx(460)),horizontalAlignment=Alignment.CenterHorizontally) {
-                                        if(card.kind=="group_invite") {
-                                            GroupInviteCard(card,message.mine,foreground,state.inviteHandled[card.token]) { callbacks.onInviteHandled(card.token,"邀请已过期");invite=card }
-                                        } else {
-                                            Row(verticalAlignment=Alignment.CenterVertically) { SharedAvatar(card.avatar,Modifier.size(rpx(76)));Column(Modifier.padding(start=rpx(16))) { Text(card.applicantName,color=foreground,fontWeight=FontWeight.SemiBold);Text("申请加入 ${card.groupName}",color=foreground.copy(alpha=.7f),fontSize=(24*factor).sp) } }
-                                            Text("去审核",Modifier.padding(top=rpx(20)).clickable { callbacks.onOpenJoinRequests(card.groupId) },color=ChatBlue,fontSize=(26*factor).sp)
-                                        }
-                                    } } ?: Text(content.text.ifBlank { "[自定义消息]" },color=foreground)
-                                    else -> Column {
-                                        if(content.quoteText.isNotEmpty())Row(Modifier.clickable(enabled=content.quoteId.isNotEmpty()) { callbacks.onAction(ChatMessage(content.quoteId,"",false,0),ChatAction.OPEN_MESSAGE) { result -> onUI { if(result.isFailure)notice=result.exceptionOrNull()?.message ?: "引用消息暂不可定位" } } }.clip(RoundedCornerShape(rpx(8))).background(if(message.mine)Color(0x22FFFFFF) else C.field).padding(rpx(8)),verticalAlignment=Alignment.CenterVertically) {
-                                            if(content.quoteThumbnail.isNotEmpty())RemoteMediaImage(MediaURLs.image(content.quoteThumbnail),Modifier.size(rpx(64)),scale=ContentScale.Crop,description="引用封面",retryOnTap=false,cacheUrls=listOf(content.quoteThumbnail))
-                                            Column(Modifier.padding(start=if(content.quoteThumbnail.isNotEmpty())rpx(8) else 0.dp)) {
-                                                val name=content.quoteText.substringBefore("：")
-                                                val summary=content.quoteText.substringAfter("：",missingDelimiterValue="")
-                                                Text(name,color=if(message.mine)foreground else ChatBlue,fontSize=(22*factor).sp,maxLines=1,overflow=TextOverflow.Ellipsis)
-                                                if(summary.isNotEmpty())Text(summary,color=foreground.copy(alpha=.8f),fontSize=(22*factor).sp,maxLines=1,overflow=TextOverflow.Ellipsis)
-                                            }
-                                        }
-                                        if(content.quoteText.isNotEmpty())Spacer(Modifier.height(rpx(10)))
-                                        Text(if(content.type in setOf(101,106,114))content.text else message.text,color=foreground,fontSize=(30*factor).sp,lineHeight=(43*factor).sp)
-                                    }
-                                }
-                            }
-                            Row(Modifier.padding(top=rpx(5)),verticalAlignment=Alignment.CenterVertically) {
-                                Text(chatTime(message.time),color=ChatHint,fontSize=(20*factor).sp)
-                                if(message.mine) {
-                                    val pending=outboxById[message.id]
-                                    val read=content.read||message.id in state.readMessageIds||(message.seq>0&&message.seq<=state.maxOtherReadSeq)
-                                    val status=if(upload!=null)if(upload.state==MediaUploadState.FAILED)"上传失败，点按重试" else "" else when(pending?.state) { OutboxState.PENDING,OutboxState.SENDING -> "◷";OutboxState.UNCERTAIN -> "待核对";OutboxState.FAILED -> "发送失败，点按重试";else -> if(message.status==2||message.seq>0)if(read)"✓✓" else "✓" else "◷" }
-                                    Text("  $status",Modifier.clickable(enabled=pending!=null||upload?.state==MediaUploadState.FAILED) { if(upload!=null)callbacks.onRetryUpload(upload.id) else if(pending?.state==OutboxState.FAILED)callbacks.onRetryFailed(message.id) else callbacks.onReconcile(message.id) },color=if(pending?.state==OutboxState.FAILED||upload?.state==MediaUploadState.FAILED)C.danger else if(read)ChatBlue else ChatHint,fontSize=(20*factor).sp)
-                                }
-                            }
-                        }
-                        if(message.mine) {
-                            val avatar=ownAvatar.ifEmpty { content.avatar }
-                            if(avatar.isBlank())Image(painterResource(R.drawable.uni_avatar_me),"我的头像",Modifier.size(rpx(72)).clip(CircleShape))
-                            else SharedAvatar(avatar,Modifier.size(rpx(72)))
-                        }
-                    }
-                }
-            }
-                }
-            item(key="history-progress") {
-                Box(Modifier.fillMaxWidth().height(28.dp),contentAlignment=Alignment.Center) {
-                    if(state.historyLoading||state.historySyncing)CircularProgressIndicator(Modifier.size(16.dp).semantics { contentDescription="正在读取更早消息" },color=ChatHint,strokeWidth=1.5.dp)
-                }
-            }
-        }
-        }
-        if(list.firstVisibleItemIndex>2)Box(Modifier.fillMaxWidth().background(ChatGray).padding(end=16.dp,bottom=6.dp),contentAlignment=Alignment.CenterEnd) { Text("↓",Modifier.size(36.dp).clip(CircleShape).background(C.card).clickable { scope.launch { list.animateScrollToItem(0) } }.wrapContentSize(),color=ChatBlue,fontSize=22.sp) }
-        if(multi)Row(Modifier.fillMaxWidth().background(C.field).padding(start=rpx(24),end=rpx(24),top=rpx(16),bottom=rpx(24)),horizontalArrangement=Arrangement.spacedBy(rpx(16))) {
-            val idle=!deleting&&!forwarding&&!recalling
-            MultiSelectButton("取消",Modifier.weight(1f),idle) { multi=false;selection=emptySet();selectionOrder=emptyList();forwardMode=false }
-            MultiSelectButton("转发(${selection.size})",Modifier.weight(1f),selection.isNotEmpty()&&idle,primary=true) { multiForward=selectedMessages() }
-            if(!forwardMode)MultiSelectButton(if(recalling)"撤回中…" else "撤回(${selection.size})",Modifier.weight(1f),selection.isNotEmpty()&&selectedMessages().size==selection.size&&selectedMessages().all(::canRecall)&&idle,danger=true) { recallReason="";confirmMultiRecall=true }
-            if(!forwardMode)MultiSelectButton(if(deleting)"删除中…" else "删除(${selection.size})",Modifier.weight(1f),selection.isNotEmpty()&&idle,danger=true) { confirmMultiDelete=true }
-        }
-        else {
-        quoted?.let { quote -> Row(Modifier.fillMaxWidth().background(C.field).padding(10.dp),verticalAlignment=Alignment.CenterVertically) { Text("回复 ${quote.sender}：${quote.text}",Modifier.weight(1f),maxLines=2,overflow=TextOverflow.Ellipsis,color=ChatHint,fontSize=12.sp);Text("✕",Modifier.clickable { quoted=null }.padding(8.dp)) } }
-        // @ 提及面板（对标 H5 ImAtMentionPanel）：内嵌在输入框上方，不打断键盘输入
-        if(showMentions&&state.sendBlockedReason==null)ChatMentionPanel(mentionKeyword,callbacks.onLoadMentions,{ showMentions=false },::pickMention)
-        if(state.sendBlockedReason!=null)Row(Modifier.fillMaxWidth().height(rpx(96)).background(C.field).padding(horizontal=rpx(32)),verticalAlignment=Alignment.CenterVertically) {
-            Text(state.sendBlockedReason,Modifier.weight(1f),color=C.faint,fontSize=(26*factor).sp)
-            // 解散/退群属于终态，重新检查禁言没有意义，仅临时性限制（禁言等）才展示刷新入口。
-            if(state.sendBlockedReason !in setOf("群聊已解散","您已不在该群聊"))Text(if(state.permissionLoading)"检查中…" else "检查禁言状态",Modifier.clip(RoundedCornerShape(rpx(28))).border(1.dp,C.primaryText,RoundedCornerShape(rpx(28))).clickable(enabled=!state.permissionLoading,onClick=callbacks.onRefreshPermission).padding(horizontal=rpx(24),vertical=rpx(12)),color=C.primaryText,fontSize=(24*factor).sp)
-        }
-        else if(voiceMode)Row(Modifier.fillMaxWidth().background(C.field).padding(horizontal=rpx(20),vertical=rpx(18)),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(rpx(12))) {
-            Box(Modifier.size(rpx(52)).clickable(enabled=!voiceWorking,onClick=::cancelVoice),contentAlignment=Alignment.Center) { Image(painterResource(R.drawable.uni_video_trash),"取消录音",Modifier.size(rpx(32)),contentScale=ContentScale.Fit,colorFilter=androidx.compose.ui.graphics.ColorFilter.tint(C.textSub)) }
-            Row(Modifier.weight(1f).height(rpx(76)).clip(RoundedCornerShape(rpx(18))).background(C.field).clickable(enabled=recording&&!voiceWorking) { stopVoice() },verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.Center) {
-                Box(Modifier.size(rpx(14)).clip(CircleShape).background(if(recording)C.danger else C.placeholder))
-                Text(duration(recordingSeconds.toLong()),Modifier.padding(start=rpx(12)),fontSize=(28*factor).sp,color=C.textSub)
-            }
-            Box(Modifier.height(rpx(68)).widthIn(min=rpx(132)).clip(RoundedCornerShape(rpx(20))).background(C.field).clickable(enabled=!voiceWorking) { stopVoice(!recording) }.padding(horizontal=rpx(18)),contentAlignment=Alignment.Center) { Text(if(voiceWorking)"处理中" else if(recording)"结束" else "发送",fontSize=(26*factor).sp,color=C.textSub) }
-            Canvas(Modifier.size(rpx(64)).clip(CircleShape).background(C.primary).semantics { contentDescription="发送语音" }.clickable(enabled=!voiceWorking) { stopVoice(true) }) {
-                val center=size.width/2;val stroke=2.dp.toPx()
-                drawLine(Color.White,Offset(center,size.height*.72f),Offset(center,size.height*.28f),stroke,StrokeCap.Round)
-                drawLine(Color.White,Offset(size.width*.33f,size.height*.46f),Offset(center,size.height*.28f),stroke,StrokeCap.Round)
-                drawLine(Color.White,Offset(size.width*.67f,size.height*.46f),Offset(center,size.height*.28f),stroke,StrokeCap.Round)
-            }
-        }
-        else NativeMessageComposer(text,state.ready,state.ready&&!state.uploading&&!voiceWorking&&!sending,enterToSend,emoji,::updateDraft,
-            composerCursor,{composerCursor=null},
-            onEditorTap={ composerPanels.setEmoji(false);plus=false },
-            onEmojiChange={ open -> composerPanels.setEmoji(open);plus=false;voiceMode=false },
-            onToggleMore={ plus=!plus;composerPanels.setEmoji(false) },
-            onStartVoice={ if(ContextCompat.checkSelfPermission(context,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)startVoice() else recordPermission.launch(Manifest.permission.RECORD_AUDIO) },onSend=::submitText)
-        if(plus&&state.sendBlockedReason==null)Column(Modifier.fillMaxWidth().background(C.field).padding(start=rpx(32),end=rpx(32),top=rpx(24),bottom=rpx(32)),verticalArrangement=Arrangement.spacedBy(rpx(28))) {
-            val tools=buildList<Pair<Int,String>> {
-                add(R.drawable.uni_icon_camera to "相机");add(R.drawable.uni_icon_photo to "照片");add(R.drawable.uni_icon_video to "视频")
-                if(state.active?.target?.sessionType==1)add(R.drawable.uni_icon_card to "名片")
-                add(R.drawable.uni_icon_file to "文件");add(R.drawable.uni_icon_favorite to "收藏")
-            }
-            tools.chunked(4).forEach { row -> Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(rpx(24))) {
-                row.forEach { (icon,label) -> ComposerAction(icon,label) {
-                    if(preparing||state.uploading) { notice="请等待当前附件处理完成";return@ComposerAction }
-                    plus=false
-                    when(label) {
-                        "相机" -> if(ContextCompat.checkSelfPermission(context,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)capture() else cameraPermission.launch(Manifest.permission.CAMERA)
-                        "照片" -> { pickerKind=MediaKind.IMAGE;pick.launch(arrayOf("image/*")) }
-                        "视频" -> showVideoSource=true
-                        "名片" -> callbacks.onOpenCards()
-                        "文件" -> { pickerKind=MediaKind.FILE;pick.launch(arrayOf("*/*")) }
-                        "收藏" -> callbacks.onOpenFavorites()
-                    }
-                } }
-            } }
-        }
-        if(emoji&&state.sendBlockedReason==null)NativeEmojiStickerPanel(callbacks,{ text+=it },{ url ->
-            composerPanels.setEmoji(false)
-            callbacks.onSendSticker(url) { result -> onUI { if(result.isFailure)notice=result.exceptionOrNull()?.message ?: "表情发送结果待核对，请查看聊天" } }
-        },{ composerPanels.setEmoji(false);callbacks.onManageStickers() },onClose={ composerPanels.setEmoji(false) })
-        }
+    val rowEvents=remember {
+        ChatRowEvents(
+            onNotice={ notice=it },
+            onImage={ url,msg -> image=url;imageMessage=msg },
+            onVideo={ url,msg,local -> video=url;videoMessage=msg;videoLocal=local },
+            onMerge={ merge=it },
+            onInvite={ invite=it },
+            onSelectBubble={ msg,anchor -> selectedAnchor=anchor;selected=msg },
+            onUploadMenu={ uploadMenu=it },
+            onAvatarMention={ avatarMention=it },
+            onToggleSelection={ toggleSelection(it) },
+            onOpenFile={ openFile(it) },
+            onPlayingChange={ playing=it },
+            currentPlaying={ playing },
+        )
     }
-    invite?.let { card -> GroupInviteDialog(card,callbacks,{ invite=null },{ value ->
-        callbacks.onInviteHandled(card.token,value)
-    },{ notice=it }) }
-    uploadMenu?.let { upload ->
-        val mediaName=if(upload.kind==MediaKind.VIDEO)"视频" else "图片"
-        AlertDialog(onDismissRequest={ uploadMenu=null },title={ Text(if(upload.state==MediaUploadState.FAILED)"${mediaName}未发送" else "${mediaName}正在发送") },text={ Text(if(upload.state==MediaUploadState.FAILED)"本地${mediaName}已保留，可重试上传或删除草稿。" else "${mediaName}上传完成后会继续发送，无需重复选择。") },confirmButton={ if(upload.state==MediaUploadState.FAILED)TextButton(onClick={ uploadMenu=null;callbacks.onRetryUpload(upload.id) }) { Text("重试") } else TextButton(onClick={ uploadMenu=null }) { Text("知道了") } },dismissButton={ if(upload.state==MediaUploadState.FAILED)TextButton(onClick={ uploadMenu=null;callbacks.onDiscardUpload(upload.id) }) { Text("删除草稿") } })
-    }
-    selected?.let { message ->
-        var memberMenu by remember(message.id) { mutableStateOf(ChatMessageMenu(canRecall=message.mine)) }
-        var menuError by remember(message.id) { mutableStateOf<String?>(null) }
-        var checkingMember by remember(message.id) { mutableStateOf(false) }
-        var menuRetry by remember(message.id) { mutableIntStateOf(0) }
-        LaunchedEffect(message.id,menuRetry) {
-            if(state.active?.target?.sessionType==3&&!message.mine) {
-                checkingMember=true;menuError=null
-                callbacks.onLoadMessageMenu(message) { result -> onUI {
-                    checkingMember=false
-                    result.fold(onSuccess={ memberMenu=it },onFailure={ menuError=it.message ?: "成员权限暂未读取" })
-                } }
-            }
-        }
-        val content=remember(message.serialized,message.text) { MessageContents.parse(message.serialized,message.text) }
-        val entries=messageMenuEntries(MessageMenuContext(
-            contentType=content.type,mine=message.mine,group=state.active?.target?.sessionType==3,
-            canManage=memberMenu.canManage,canRecall=memberMenu.canRecall&&canRecall(message),senderInGroup=memberMenu.senderInGroup,
-            muted=memberMenu.muted,pinned=state.active?.pinnedMessage?.clientMsgID==message.id,
-            delivery=outboxById[message.id]?.state,
-        ))
-        val options=entries.map { entry -> ChatMenuOption(entry) {
-            selected=null
-            when(entry.action) {
-                MessageMenuAction.RETRY -> callbacks.onRetryFailed(message.id)
-                MessageMenuAction.RECONCILE -> callbacks.onReconcile(message.id)
-                MessageMenuAction.RECALL -> { recallReason="";confirmManage=message to ChatAction.RECALL }
-                MessageMenuAction.FORWARD -> { multi=true;forwardMode=true;selection=setOf(message.id);selectionOrder=listOf(message.id);plus=false;composerPanels.setEmoji(false) }
-                MessageMenuAction.QUOTE -> { quoted=message;voiceMode=false }
-                MessageMenuAction.COPY -> { clipboard.setText(AnnotatedString(content.text));notice="已复制" }
-                MessageMenuAction.SELECT_TEXT -> selectText=content.text
-                MessageMenuAction.SAVE_IMAGE -> saveOriginal(content.url)
-                MessageMenuAction.SAVE_VIDEO -> saveVideo(content.url,state.localSentMedia[message.id]?.file)
-                MessageMenuAction.ADD_STICKER -> addSticker(content.url)
-                MessageMenuAction.FAVORITE -> callbacks.onAction(message,ChatAction.FAVORITE) { result -> onUI { notice=if(result.isSuccess)"已收藏" else result.exceptionOrNull()?.message ?: "收藏失败" } }
-                MessageMenuAction.PIN -> {
-                    if(state.active?.pinnedMessage?.clientMsgID==message.id)callbacks.onAction(message,ChatAction.UNPIN) { result -> onUI { notice=if(result.isSuccess)"已取消置顶" else result.exceptionOrNull()?.message ?: "取消置顶失败" } }
-                    else if(state.active?.target?.sessionType==3&&state.groupRole !in setOf("owner","admin"))callbacks.onAction(message,ChatAction.PIN_SELF) { result -> onUI { notice=if(result.isSuccess)"已置顶" else result.exceptionOrNull()?.message ?: "置顶失败" } }
-                    else pinTarget=message
-                }
-                MessageMenuAction.REPORT -> callbacks.onReportUser(content.senderId)
-                MessageMenuAction.MENTION -> {
-                    val name=memberMenu.publicName.ifBlank { message.sender }.ifBlank { "群成员" }
-                    callbacks.onSelectMention(ChatMentionChoice(content.senderId,name)) { result -> onUI { if(result.isSuccess) { text+="@$name ";voiceMode=false } else notice=result.exceptionOrNull()?.message ?: "提及失败" } }
-                }
-                MessageMenuAction.MUTE -> muteTarget=message
-                MessageMenuAction.UNMUTE -> confirmManage=message to ChatAction.UNMUTE
-                MessageMenuAction.DELETE -> confirmDelete=message
-                MessageMenuAction.MULTI -> { multi=true;forwardMode=false;selection=setOf(message.id);selectionOrder=listOf(message.id);plus=false;composerPanels.setEmoji(false) }
-                MessageMenuAction.KICK_AND_DELETE -> confirmManage=message to ChatAction.KICK_AND_DELETE
-                MessageMenuAction.KICK -> confirmManage=message to ChatAction.KICK
-                MessageMenuAction.PURGE -> confirmManage=message to ChatAction.PURGE
-            }
-        } }
-        ChatActionMenu(options,selectedAnchor,{ selected=null }) {
-            if(checkingMember)Text("正在读取成员权限…",Modifier.padding(10.dp),color=ChatHint,fontSize=12.sp)
-            menuError?.let { error -> Text(error+" · 点按重试",Modifier.clickable { menuRetry++ }.padding(10.dp),color=ChatHint,fontSize=12.sp) }
-        }
-    }
-    pinTarget?.let { message ->
-        AlertDialog(onDismissRequest={ pinTarget=null },title={ Text("置顶") },text={ Column {
-            fun pin(action:ChatAction) {
-                pinTarget=null
-                callbacks.onAction(message,action) { result -> onUI { notice=if(result.isSuccess)"已置顶" else result.exceptionOrNull()?.message ?: "置顶失败" } }
-            }
-            ActionButton(if(state.active?.target?.sessionType==3)"为全员置顶" else "为我和 ${state.active?.title.orEmpty().ifBlank { "对方" }} 置顶") { pin(ChatAction.PIN_SHARED) }
-            ActionButton("仅为我置顶") { pin(ChatAction.PIN_SELF) }
-        } },confirmButton={ TextButton(onClick={ pinTarget=null }) { Text("取消") } })
-    }
-    selectText?.let { value -> AlertDialog(onDismissRequest={ selectText=null },title={ Text("选择文字") },text={ SelectionContainer { Text(value,Modifier.heightIn(max=360.dp).verticalScroll(rememberScrollState())) } },confirmButton={ TextButton(onClick={ clipboard.setText(AnnotatedString(value));selectText=null }) { Text("复制全部") } },dismissButton={ TextButton(onClick={ selectText=null }) { Text("关闭") } }) }
-    muteTarget?.let { message -> AlertDialog(onDismissRequest={ muteTarget=null },title={ Text("禁言时长") },text={ Column {
-        listOf("10 分钟" to ChatAction.MUTE_10_MIN,"1 小时" to ChatAction.MUTE_1_HOUR,"12 小时" to ChatAction.MUTE_12_HOURS,"1 天" to ChatAction.MUTE_1_DAY,"7 天" to ChatAction.MUTE_7_DAYS,"30 天" to ChatAction.MUTE_30_DAYS).forEach { (label,action) ->
-            ActionButton(label) { muteTarget=null;confirmManage=message to action }
-        }
-    } },confirmButton={ TextButton(onClick={ muteTarget=null }) { Text("取消") } }) }
-    confirmManage?.let { (message,action) ->
-        val prompt=when(action) {
-            ChatAction.KICK -> "确定移除该成员？"
-            ChatAction.KICK_AND_DELETE -> "确定移除该成员并为所有群成员删除其此前消息？此操作不可恢复。"
-            ChatAction.PURGE -> "确定为所有群成员删除该成员此前的全部消息？此操作不可恢复。"
-            ChatAction.UNMUTE -> "确定解除该成员的禁言？"
-            ChatAction.RECALL -> if(message.mine)"确定撤回这条消息？" else "确定以群管理身份撤回这条成员消息？"
-            else -> "确定禁言该成员？"
-        }
-        AlertDialog(onDismissRequest={ confirmManage=null },title={ Text("确认操作") },text={ Column {
-            Text(prompt)
-            if(action==ChatAction.RECALL&&!message.mine)BasicTextField(recallReason,{ recallReason=it.take(500) },Modifier.fillMaxWidth().padding(top=12.dp).background(ChatGray,RoundedCornerShape(8.dp)).padding(12.dp),decorationBox={ inner -> if(recallReason.isEmpty())Text("请输入撤回原因",color=ChatHint);inner() })
-        } },confirmButton={ TextButton(onClick={
-            confirmManage=null
-            val complete:(Result<Unit>)->Unit={ result -> onUI { notice=if(result.isSuccess)"操作已完成" else result.exceptionOrNull()?.message ?: "操作未完成" } }
-            if(action==ChatAction.RECALL)callbacks.onRecall(message,recallReason,complete) else callbacks.onAction(message,action,complete)
-        }) { Text("确定") } },dismissButton={ TextButton(onClick={ confirmManage=null }) { Text("取消") } })
-    }
-    if(confirmMultiRecall)AlertDialog(onDismissRequest={ confirmMultiRecall=false },title={ Text("撤回 ${selection.size} 条消息") },text={ Column {
-        Text("将逐条撤回有权限管理的消息，对其他成员同时生效。")
-        if(selectedMessages().any { !it.mine })BasicTextField(recallReason,{ recallReason=it.take(500) },Modifier.fillMaxWidth().padding(top=12.dp).background(ChatGray,RoundedCornerShape(8.dp)).padding(12.dp),decorationBox={ inner -> if(recallReason.isEmpty())Text("请输入撤回原因",color=ChatHint);inner() })
-    } },confirmButton={ TextButton(onClick={ confirmMultiRecall=false;recallSelected() }) { Text("撤回") } },dismissButton={ TextButton(onClick={ confirmMultiRecall=false }) { Text("取消") } })
-    // 长按头像 @TA（对标 H5 ImAtActionSheet）：45% 黑遮罩 + 底部白色圆角卡片，@TA / 取消 两档，蓝色文案
-    avatarMention?.let { message -> androidx.compose.ui.window.Dialog(onDismissRequest={ avatarMention=null },properties=androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth=false)) {
-        Box(Modifier.fillMaxSize().background(Color(0x73000000)).clickable { avatarMention=null }) {
-            Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(start=rpx(32),end=rpx(32),top=rpx(24),bottom=rpx(32)).clip(RoundedCornerShape(rpx(24))).background(C.card)) {
-                Text("@TA",Modifier.fillMaxWidth().height(rpx(104)).clickable { avatarMention=null;mentionMember(message) }.wrapContentSize(),fontSize=(32*factor).sp,color=C.primaryText)
-                Box(Modifier.fillMaxWidth().padding(horizontal=rpx(24)).height(1.dp).background(C.field))
-                Text("取消",Modifier.fillMaxWidth().height(rpx(104)).clickable { avatarMention=null }.wrapContentSize(),fontSize=(32*factor).sp,color=C.primaryText)
-            }
-        }
-    } }
-    if(showVideoSource)AlertDialog(onDismissRequest={ showVideoSource=false },title={ Text("选择视频") },text={ Column {
-        ActionButton("从相册选择") { showVideoSource=false;videoAlbum.launch(arrayOf("video/*")) }
-        ActionButton("拍摄视频") { showVideoSource=false;if(ContextCompat.checkSelfPermission(context,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)captureVideo() else videoCameraPermission.launch(Manifest.permission.CAMERA) }
-    } },confirmButton={ TextButton(onClick={ showVideoSource=false }) { Text("取消") } })
-    confirmDelete?.let { message -> AlertDialog(onDismissRequest={ confirmDelete=null },title={ Text("删除本地消息？") },text={ Text("这条消息将从本机聊天记录移除。") },confirmButton={ TextButton(onClick={ confirmDelete=null;callbacks.onAction(message,ChatAction.DELETE_LOCAL) { result -> onUI { if(result.isFailure)notice=result.exceptionOrNull()?.message ?: "删除失败" else NativeNotices.show("已删除") } } }) { Text("删除") } },dismissButton={ TextButton(onClick={ confirmDelete=null }) { Text("取消") } }) }
-    val forwardItems=multiForward ?: forward?.let { listOf(it) }
-    forwardItems?.let { messages -> androidx.compose.ui.window.Dialog(onDismissRequest={ forward=null;multiForward=null },properties=androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth=false)) {
-        NativeForwardPicker(messages.size,{ forward=null;multiForward=null },callbacks.onLoadForward,{ plan,done -> callbacks.onSubmitForward(messages,plan,done) },{ result ->
-            forward=null;multiForward=null;multi=false;selection=emptySet();selectionOrder=emptyList();forwardMode=false
-            if(!result.queued)NativeNotices.show("转发成功")
-        })
-    } }
-    if(confirmMultiDelete)AlertDialog(onDismissRequest={ confirmMultiDelete=false },title={ Text("删除 ${selection.size} 条本地消息？") },text={ Text("仅从本机移除所选消息；待核对的发送记录会保留。") },confirmButton={ TextButton(onClick={ confirmMultiDelete=false;deleteSelected() }) { Text("删除") } },dismissButton={ TextButton(onClick={ confirmMultiDelete=false }) { Text("取消") } })
-    image?.let { url ->
-        val pictures=state.messages.map { MessageContents.parse(it.serialized,it.text) }.filter { it.type==102&&it.url.isNotEmpty() }.map { it.url }.distinct()
-        val gallery=if(url in pictures)pictures else listOf(url)
-        val start=gallery.indexOf(url).coerceAtLeast(0)
-        val message=imageMessage
-        ImagePreview(gallery,start,{ image=null;imageMessage=null },{ saveOriginal(it) },
-            sender=message?.sender?.ifBlank { if(message.mine)"我" else "图片" } ?: "",
-            time=message?.let { chatDayLabel(it.time)+" "+chatTime(it.time) }.orEmpty(),
-            onDelete=message?.takeUnless { it.id.startsWith("upload-") }?.let { target -> { image=null;imageMessage=null;confirmDelete=target } },
-            onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { target -> { image=null;imageMessage=null;forward=target } },
-            saving=preparing)
-    }
-    video?.let { url ->
-        val message=videoMessage?.takeIf { MessageContents.parse(it.serialized,it.text).url==url }
-        val content=message?.let { MessageContents.parse(it.serialized,it.text) }
-        val ownMedia=message?.let { current->uploadsById[current.id]?.media() ?: state.localSentMedia[current.id] } ?: videoLocal
-        VideoPreview(url,{ video=null;videoMessage=null;videoLocal=null },{ notice=it },poster=content?.thumbnail.orEmpty(),sender=message?.sender?.ifBlank { if(message.mine)"我" else "视频" } ?: "视频",time=message?.let { chatDayLabel(it.time)+" "+chatTime(it.time) }.orEmpty(),onSave={ saveVideo(url,ownMedia?.file) },onForward=message?.takeUnless { it.id.startsWith("upload-") }?.let { { video=null;videoMessage=null;videoLocal=null;forward=it } },onDelete=message?.takeUnless { it.id.startsWith("upload-") }?.let { { video=null;videoMessage=null;videoLocal=null;confirmDelete=it } },localFile=ownMedia?.file,localPoster=ownMedia?.snapshot,allowedLocalDirectory=state.mediaOwnerDirectory.takeIf(String::isNotBlank)?.let(::File),saving=preparing)
-    }
-    merge?.let { message -> AlertDialog(onDismissRequest={ merge=null },title={ Text("聊天记录") },text={ Column(Modifier.verticalScroll(rememberScrollState())) {
-        val raw=runCatching { com.google.gson.JsonParser.parseString(message.serialized).asJsonObject }.getOrNull()
-        val elem=raw?.obj("mergeElem","MergeElem")
-        val values=elem?.field("multiMessage","MultiMessage")
-        val array=runCatching { if(values?.isJsonArray==true)values.asJsonArray else values?.asString?.let { com.google.gson.JsonParser.parseString(it).asJsonArray } }.getOrNull()
-        if(array==null)Text("合并记录暂不可读取") else array.take(200).forEach { item ->
-            val content=MessageContents.parse(item.toString())
-            Column(Modifier.fillMaxWidth().padding(vertical=8.dp)) {
-                Text(runCatching { item.asJsonObject.string("senderNickname","SenderNickname") }.getOrDefault(""),color=ChatHint,fontSize=12.sp)
-                when(content.type) {
-                    102 -> RemoteMediaImage(MediaURLs.image(content.thumbnail.ifEmpty { content.url }),Modifier.size(180.dp,140.dp).clickable { image=content.url;imageMessage=null },scale=ContentScale.Fit,cacheUrls=listOf(content.url,content.thumbnail)+content.imageAlternatives)
-                    104 -> Box(Modifier.size(180.dp,140.dp).background(ChatGray).clickable { video=content.url },contentAlignment=Alignment.Center) { if(content.thumbnail.isNotBlank())RemoteMediaImage(MediaURLs.image(content.thumbnail),Modifier.fillMaxSize(),scale=ContentScale.Fit);Text("▶ ${duration(content.duration)}",color=ChatBlue) }
-                    103 -> Text("◖))) ${content.duration}″",Modifier.clickable { scope.launch {
-                        val source=voiceSource(context,message.id,content,state.active?.target?.conversationId.orEmpty(),state.active?.target?.sessionType==3)
-                        if(source.isEmpty())notice="语音暂无法播放" else player.play(source,{}, { onUI { notice="语音暂无法播放" } })
-                    } }.padding(8.dp),color=ChatBlue)
-                    105 -> Text("▤ ${content.fileName}",Modifier.clickable { openFile(content) }.padding(8.dp),color=ChatBlue)
-                    108 -> Text("名片：${content.cardName}",Modifier.clickable { callbacks.onOpenPeer(content.cardUserId) }.padding(8.dp),color=ChatBlue)
-                    else -> SelectionContainer { Text(content.text.ifBlank { "[消息]" }) }
-                }
-            }
-        }
-    } },confirmButton={ TextButton(onClick={ merge=null }) { Text("关闭") } }) }
+    val roomScope=ChatDialogScope(
+        text=textS,
+        quoted=quotedS,
+        selected=selectedS,
+        uploadMenu=uploadMenuS,
+        selectedAnchor=selectedAnchorS,
+        invite=inviteS,
+        forward=forwardS,
+        multi=multiS,
+        selection=selectionS,
+        selectionOrder=selectionOrderS,
+        forwardMode=forwardModeS,
+        confirmMultiRecall=confirmMultiRecallS,
+        recallReason=recallReasonS,
+        avatarMention=avatarMentionS,
+        multiForward=multiForwardS,
+        confirmMultiDelete=confirmMultiDeleteS,
+        confirmDelete=confirmDeleteS,
+        confirmManage=confirmManageS,
+        muteTarget=muteTargetS,
+        pinTarget=pinTargetS,
+        selectText=selectTextS,
+        image=imageS,
+        imageMessage=imageMessageS,
+        video=videoS,
+        videoMessage=videoMessageS,
+        videoLocal=videoLocalS,
+        notice=noticeS,
+        plus=plusS,
+        voiceMode=voiceModeS,
+        preparing=preparingS,
+        showVideoSource=showVideoSourceS,
+        merge=mergeS,
+        state=state,
+        callbacks=callbacks,
+        context=context,
+        clipboard=clipboard,
+        scope=scope,
+        factor=factor,
+        player=player,
+        uploadsById=uploadsById,
+        outboxById=outboxById,
+        composerPanels=composerPanels,
+        videoAlbum=videoAlbum,
+        videoCameraPermission=videoCameraPermission,
+        rpx={ rpx(it) },
+        selectedMessages={ selectedMessages() },
+        canRecall={ canRecall(it) },
+        mentionMember={ mentionMember(it) },
+        captureVideo={ captureVideo() },
+        saveOriginal={ saveOriginal(it) },
+        saveVideo={ url,file -> saveVideo(url,file) },
+        addSticker={ addSticker(it) },
+        openFile={ openFile(it) },
+        deleteSelected={ deleteSelected() },
+        recallSelected={ recallSelected() },
+        showMentions=showMentionsS,
+        composerCursor=composerCursorS,
+        pickerKind=pickerKindS,
+        failedMedia=failedMediaS,
+        sending=sending,
+        recalling=recalling,
+        forwarding=forwarding,
+        deleting=deleting,
+        recording=recording,
+        recordingSeconds=recordingSeconds,
+        voiceWorking=voiceWorking,
+        playing=playing,
+        retryingMedia=retryingMedia,
+        mentionKeyword=mentionKeyword,
+        presenceNow=presenceNow,
+        list=list,
+        reversedMessages=reversedMessages,
+        rowEvents=rowEvents,
+        emoji=emoji,
+        ownAvatar=ownAvatar,
+        enterToSend=enterToSend,
+        pick=pick,
+        recordPermission=recordPermission,
+        cameraPermission=cameraPermission,
+        sendFile={ sendFile(it) },
+        stopVoice={ stopVoice(it) },
+        startVoice={ startVoice() },
+        cancelVoice={ cancelVoice() },
+        capture={ capture() },
+        submitText={ submitText() },
+        updateDraft={ updateDraft(it) },
+        pickMention={ pickMention(it) },
+    )
+    ChatRoomBody(roomScope)
+    ChatRoomDialogs(roomScope)
 }
 
 @Composable
-private fun ChatRoomLoadingState(state:ChatState,onRetry:()->Unit,modifier:Modifier=Modifier) {
+internal fun ChatRoomLoadingState(state:ChatState,onRetry:()->Unit,modifier:Modifier=Modifier) {
     val factor=LocalConfiguration.current.screenWidthDp/750f
     fun rpx(value:Int)=(value*factor).dp
     val waiting=chatRoomWaiting(state)
@@ -997,7 +741,7 @@ internal fun chatRoomWaiting(state:ChatState):Boolean =
     state.error==null&&(state.historyLoading||state.historySyncing||state.sync==SyncStatus.RUNNING||!state.ready||state.store==StoreStatus.OPENING)
 
 @Composable
-private fun ComposerAction(icon:Int,label:String,onClick:()->Unit) {
+internal fun ComposerAction(icon:Int,label:String,onClick:()->Unit) {
     val factor=LocalConfiguration.current.screenWidthDp/750f
     Column(Modifier.width((140*factor).dp).clickable(onClick=onClick),horizontalAlignment=Alignment.CenterHorizontally) {
         Box(Modifier.size((100*factor).dp).clip(RoundedCornerShape((20*factor).dp)).background(C.card),contentAlignment=Alignment.Center) { Image(painterResource(icon),label,Modifier.size((56*factor).dp),contentScale=ContentScale.Fit) }
@@ -1005,9 +749,9 @@ private fun ComposerAction(icon:Int,label:String,onClick:()->Unit) {
     }
 }
 @Composable
-private fun ActionButton(label:String,action:()->Unit) { TextButton(onClick=action,modifier=Modifier.fillMaxWidth()) { Text(label) } }
+internal fun ActionButton(label:String,action:()->Unit) { TextButton(onClick=action,modifier=Modifier.fillMaxWidth()) { Text(label) } }
 @Composable
-private fun MultiSelectButton(label:String,modifier:Modifier,enabled:Boolean,primary:Boolean=false,danger:Boolean=false,onClick:()->Unit) {
+internal fun MultiSelectButton(label:String,modifier:Modifier,enabled:Boolean,primary:Boolean=false,danger:Boolean=false,onClick:()->Unit) {
     val factor=LocalConfiguration.current.screenWidthDp/750f
     Box(modifier.height((72*factor).dp).clip(RoundedCornerShape((16*factor).dp)).background(if(primary)C.primary else C.card).clickable(enabled=enabled,onClick=onClick),contentAlignment=Alignment.Center) {
         Text(label,color=(if(primary)Color.White else if(danger)C.danger else C.text).copy(alpha=if(enabled)1f else .4f),fontSize=(28*factor).sp,fontWeight=FontWeight.SemiBold,maxLines=1)
@@ -1016,9 +760,9 @@ private fun MultiSelectButton(label:String,modifier:Modifier,enabled:Boolean,pri
 // SimpleDateFormat 构造含 locale 查找，聊天列表每条消息每次重组都要格式化时间，线程内复用同一实例。
 private val chatTimeFormat=object:ThreadLocal<SimpleDateFormat>() { override fun initialValue()=SimpleDateFormat("HH:mm",Locale.getDefault()) }
 private val chatDayFormat=object:ThreadLocal<SimpleDateFormat>() { override fun initialValue()=SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()) }
-private fun chatTime(time:Long)=runCatching { chatTimeFormat.get().format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
-private fun chatDayKey(time:Long)=runCatching { chatDayFormat.get().format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
-private fun chatDayLabel(time:Long):String {
+internal fun chatTime(time:Long)=runCatching { chatTimeFormat.get().format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
+internal fun chatDayKey(time:Long)=runCatching { chatDayFormat.get().format(Date(if(time<10_000_000_000)time*1000 else time)) }.getOrDefault("")
+internal fun chatDayLabel(time:Long):String {
     val millis=if(time<10_000_000_000)time*1000 else time
     val day=chatDayKey(time)
     val calendar=java.util.Calendar.getInstance()
@@ -1027,8 +771,8 @@ private fun chatDayLabel(time:Long):String {
     if(day==chatDayKey(calendar.timeInMillis))return "昨天"
     return SimpleDateFormat("yyyy年M月d日",Locale.getDefault()).format(Date(millis))
 }
-private fun duration(seconds:Long)="${seconds/60}:${(seconds%60).toString().padStart(2,'0')}"
-private fun fileSize(size:Long)=when { size>=1024*1024 -> "%.1f MB".format(size/1024f/1024f);size>=1024 -> "%.1f KB".format(size/1024f);else -> "$size B" }
+internal fun duration(seconds:Long)="${seconds/60}:${(seconds%60).toString().padStart(2,'0')}"
+internal fun fileSize(size:Long)=when { size>=1024*1024 -> "%.1f MB".format(size/1024f/1024f);size>=1024 -> "%.1f KB".format(size/1024f);else -> "$size B" }
 
 /** SDK 全本地库检索与媒体档案；分页按原始 SDK 页推进，不按过滤后结果猜结束。 */
 @Composable
@@ -1318,7 +1062,7 @@ fun NativeChatPicker(
 }
 
 @Composable
-private fun ChatMentionPanel(keyword:String,load:(String,(Result<ChatMentionPage>)->Unit)->Unit,onClose:()->Unit,onPick:(ChatMentionChoice)->Unit) {
+internal fun ChatMentionPanel(keyword:String,load:(String,(Result<ChatMentionPage>)->Unit)->Unit,onClose:()->Unit,onPick:(ChatMentionChoice)->Unit) {
     var items by remember { mutableStateOf<List<ChatMentionChoice>>(emptyList()) }
     var cursor by remember { mutableStateOf("") }
     var end by remember { mutableStateOf(false) }
@@ -1404,7 +1148,7 @@ fun NativeGlobalChatSearch(
 }
 
 @Composable
-private fun GroupInviteCard(
+internal fun GroupInviteCard(
     card:GroupMessageCard,
     mine:Boolean,
     foreground:Color,
@@ -1423,7 +1167,7 @@ private fun GroupInviteCard(
 }
 
 @Composable
-private fun GroupInviteDialog(
+internal fun GroupInviteDialog(
     card:GroupMessageCard,
     callbacks:NativeChatCallbacks,
     onDismiss:()->Unit,
