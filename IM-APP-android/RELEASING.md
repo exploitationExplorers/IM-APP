@@ -25,12 +25,14 @@
 
 2026-11-20 已发布：`0.3.10-autoload` / `versionCode=14`。
 
-**当前线上（2026-11-20 20:51 发布 v17）**：`0.3.13-autoload` / `versionCode=17`，**arm64-only 瘦身包** 31,173,990 字节（发布构建必须带 `-PNATIVE_ABIS=arm64-v8a`，见 §4），APK SHA-256 `a14dd01eb2c9a1fd9db0ca3996b586a64a0f405d13dafe48c5b961a09e8831c9`，稳定签名（§2.1）。发布编号 `20261120T124713Z-78d5432`。
+**当前线上（2026-11-23 20:14 发布 v18）**：`0.3.14-smooth` / `versionCode=18`，**双架构包**（`arm64-v8a,armeabi-v7a`，构建传 `-PNATIVE_ABIS=arm64-v8a,armeabi-v7a`）54,023,627 字节，APK SHA-256 `09de4d645749c5a4be102bcbaaa53973ccc039faa5b8a22f60e41fbdd08c034a`，稳定签名（§2.1，`1bd20049…`）。发布编号 `20261123T121254Z-507aadd`，源码提交 `507aadd`。本次为聊天室巨型 Composable 拆分（P0-1），无功能改动。
 
-- **APK 下载已全量走阿里云 CDN**：对象在业务桶 `im-app-production/business/apk/`（对象元数据 `Cache-Control: public, max-age=31536000, immutable`），边缘命中实测 ~45MB/s（对比 nginx 跨境直连 ~100KB/s）。`update.json` 的 `downloadUrl` 与下载页 `app.apk` 固定入口（nginx 现有 `location =` 块内 `return 302`）均指向 `https://oss-business.whs188.xin/im-app-production/business/apk/native-0.3.13-autoload-17-a14dd01eb2c9.apk`。
+**历史 v17（2026-11-20 20:51）**：`0.3.13-autoload` / `versionCode=17`，arm64-only 31,173,990 字节，SHA-256 `a14dd01eb2c9a1fd9db0ca3996b586a64a0f405d13dafe48c5b961a09e8831c9`，发布编号 `20261120T124713Z-78d5432`。
+
+- **APK 下载已全量走阿里云 CDN**：对象在业务桶 `im-app-production/business/apk/`（对象元数据 `Cache-Control: public, max-age=31536000, immutable`），边缘命中实测 ~45MB/s（对比 nginx 跨境直连 ~100KB/s）。`update.json` 的 `downloadUrl` 与下载页 `app.apk` 固定入口（nginx 现有 `location =` 块内 `return 302`）均指向 `https://oss-business.whs188.xin/im-app-production/business/apk/native-0.3.14-smooth-18-09de4d645749.apk`。
 - 新版本发布时：APK 先经香港前端服务器（8.217.171.178，与 OSS 同地域）PUT 到 OSS 上述前缀（RAM 密钥在宝塔后端服务器 `/www/wwwroot/deploy/.env`，只允许该前缀）；`prepare_distribution.py` 的 `--base-url` 用 CDN 目录 `https://oss-business.whs188.xin/im-app-production/business/apk/`，再按 §5 流程只替换线上 `update.json`，版本化 APK 本身不必再传 nginx 服务器。
-- ⚠️ nginx 陷阱：vhost conf 行尾是 CRLF 且**已存在** `location = /testapp/app.apk` 缓存块；改固定入口跳转必须在现有块内加 `return 302`，不能再插同名 location（duplicate location 会使 `nginx -t` 失败并触发回滚）。
-- 回滚链：v16 版本化包仍在服务器目录；`update.json.bak-20261120T124713Z-78d5432` 为 v16 清单；`app.apk.bak-20261120T104818Z-78d5432` 为 v14 包。
+- ⚠️ nginx 陷阱（v18 实测补充）：vhost conf 行尾是 CRLF 且**已存在** `location = /testapp/app.apk` 缓存块，块内**有两条** `return 302`（中间夹注释）。改固定入口跳转必须在现有块内**替换全部 return 行**，不能再插同名 location（duplicate location 会使 `nginx -t` 失败并触发回滚），也不要只断言一条 return 就中止（v18 曾因此中断在半发布态，已用 `fix_302_v18.sh` 收敛）。
+- 回滚链：`update.json.bak-20261123T121254Z-507aadd` 为 v17 清单；`xn--jprz53bj9s.com.conf.bak-20261123T121254Z-507aadd-v18` 为 v17 nginx 配置；v16/v17 版本化包与 `app.apk.bak-20261120T104818Z-78d5432`（v14 包）均保留。
 
 **历史（2026-11-20 19:05 v16）**：`0.3.12-autoload` / `versionCode=16`，签名更换见 §2.1；APK SHA-256 `557b00d4645f89e1f7a1f2c92f3265b0f95e155ad15e7e70d042b9517703ae09`，97,796,768 字节（全 ABI），备份 `app.apk.bak-20261120T104818Z-78d5432`（旧 v14 包）。该次为**首次上线 `update.json`**，此前无清单。
 
@@ -91,18 +93,18 @@ $env:NATIVE_UPDATE_MANIFEST_URL = $env:NATIVE_DOWNLOAD_PAGE_URL + 'update.json'
 
 检查产物 `IM-APP-android/app/build/outputs/apk/debug/app-debug.apk`。用 `aapt dump badging` 核对包名/版本，用 `apksigner verify --verbose --print-certs` 核对真实签名；确认 APK 中编入两个正确更新地址（可用 Android Studio APK Analyzer / DEX 查看器检查 BuildConfig 和调用路径），并在真机「关于我们 → 检查更新」验证请求到目标清单。不得只搜索任意 URL 字符串就认定功能已启用。
 
-**发版必须带 `-PNATIVE_ABIS=arm64-v8a`**（2026-11-20 起）：服务器在香港、跨境带宽有限，全 ABI 包约 98MB，实测仅 ~100KB/s。过滤后约 32MB。不带该参数构建会产出全 ABI 包（模拟器调试用），发布前用 `aapt` 或解包确认 `lib/` 只有 `arm64-v8a`。
+**ABI 过滤按版本取值**：v17（2026-11-20）因香港服务器跨境直连仅 ~100KB/s，用 `-PNATIVE_ABIS=arm64-v8a` 瘦身到 ~32MB；v18（2026-11-23）起 APK 已全量走 CDN（边缘 ~45MB/s），改回 `-PNATIVE_ABIS=arm64-v8a,armeabi-v7a` 补回 32 位真机兼容（54MB）。不带该参数构建会产出全 ABI 包（含模拟器架构）；发布前用 `aapt` 或解包确认 `lib/` 架构集合符合本次计划。
 
 用既有生成器核验并生成独立文件，避免手写清单导致 SHA/大小/签名错误。示例 Bash：
 
 ```bash
 python3 scripts/native/prepare_distribution.py \
   --apk IM-APP-android/app/build/outputs/apk/debug/app-debug.apk \
-  --base-url 'https://www.xn--jprz53bj9s.com/testapp/' \
+  --base-url 'https://oss-business.whs188.xin/im-app-production/business/apk/' \
   --out .native-cache/distribution/site \
   --aapt "$ANDROID_HOME/build-tools/34.0.0/aapt" \
   --apksigner "$ANDROID_HOME/build-tools/34.0.0/apksigner" \
-  --expected-certificate-sha256 6d03e74ca9768f53fdf6f58e5fbe8d9ba4bbe0d9cad600d780d60fbbddd8ee18 \
+  --expected-certificate-sha256 1bd20049f8f9ce120cc7e5a84825e2b54de0592f0423d82ba9c679e117069c3e \
   --changelog-file docs/原生内测更新说明.md
 ```
 

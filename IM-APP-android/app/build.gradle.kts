@@ -44,8 +44,8 @@ android {
         applicationId = "com.im.nativebootstrap.staging"
         minSdk = 26
         targetSdk = 34
-        versionCode = 17
-        versionName = "0.3.13-autoload"
+        versionCode = 18
+        versionName = "0.3.14-smooth"
         if (nativeAbis.isNotEmpty()) {
             ndk { abiFilters.addAll(nativeAbis) }
         }
