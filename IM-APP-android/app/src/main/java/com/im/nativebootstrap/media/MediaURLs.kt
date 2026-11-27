@@ -14,6 +14,10 @@ enum class ImageVariant(val edge: Int, val process: String, val stable: String) 
 object MediaURLs {
     const val DEFAULT_BASE = "https://www.xn--jprz53bj9s.com/api/v1"
     @Volatile var businessBase: String = DEFAULT_BASE
+    // 旧 iOS 客户端把 /object/ 地址写成该业务域名；仅升级已知路径，不放开任意外域明文。
+    private val legacyHTTPHosts = setOf("8.154.44.197", "api.whs188.xin")
+    // 历史 ke58 入口：.com 仍在线，.co 已无 DNS；已知媒体路径统一改到当前业务源，避免请求废弃域名。
+    private val legacyBusinessHosts = setOf("www.ke58.com", "www.ke58.co")
     private val chatHosts=setOf("oss-chat.whs188.xin","oss-chat-test.xn--jprz53bj9s.com")
     private val businessHosts=setOf("oss-business.whs188.xin","oss-business-test.xn--jprz53bj9s.com")
     private val chatPrefixes=listOf("im-app-production/chat/","oss-test/chat/")
@@ -107,12 +111,16 @@ object MediaURLs {
         val uri=URI(value)
         val resolved=if(uri.scheme==null&&value.startsWith('/')) URI(origin(base)).resolve(uri) else uri
         if(resolved.userInfo!=null||resolved.host.isNullOrBlank()) return ""
+        val host=resolved.host.orEmpty().lowercase()
+        val legacyMediaPath=listOf("/object/","/minio/","/openim/","/openim-api/").any { resolved.path.startsWith(it) }
+        if(!signed(resolved)&&host in legacyBusinessHosts&&legacyMediaPath) {
+            return origin(base)+resolved.rawPath+(resolved.rawQuery?.let { "?$it" } ?: "")
+        }
         if(resolved.scheme.equals("https",true)) return resolved.toASCIIString()
         // 历史 MinIO/IP 只按已知部署路径转到同一业务源，不全局放行明文网络。
         val legacyMinioPath=resolved.path.startsWith("/minio/im-uploads/")
         if(resolved.scheme=="http"&&!signed(resolved)&&
-            (resolved.host=="8.154.44.197"||legacyMinioPath)&&
-            listOf("/object/","/minio/","/openim/","/openim-api/").any { resolved.path.startsWith(it) }) {
+            (host in legacyHTTPHosts||legacyMinioPath)&&legacyMediaPath) {
             return origin(base)+resolved.rawPath+(resolved.rawQuery?.let { "?$it" } ?: "")
         }
         ""

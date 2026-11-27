@@ -101,6 +101,22 @@ class MediaCompatibilityTest {
         assertEquals("",MediaURLs.remote("content://media/a",base))
         assertEquals("",MediaURLs.remote("https://name:password@cdn.invalid/a",base))
     }
+    @Test fun legacyApiHostImagesUpgradeToCurrentHTTPSOriginWithoutLosingQuery() {
+        val raw="http://api.whs188.xin/object/user/msg_picture_a.jpg?height=640&type=image&width=640"
+        assertEquals("https://service.invalid/object/user/msg_picture_a.jpg?height=640&type=image&width=640",MediaURLs.remote(raw,base))
+        assertEquals("https://service.invalid/object/user/msg_picture_a.jpg?type=image&width=360&height=360&format=webp",MediaURLs.image(raw,ImageVariant.LIST,base))
+        assertEquals("https://service.invalid/object/user/msg_picture_a.jpg",MediaURLs.image(raw,ImageVariant.ORIGINAL,base))
+        assertEquals("",MediaURLs.remote("http://api.whs188.xin/private/a.jpg",base))
+    }
+    @Test fun legacyKe58HostsMapOnlyKnownMediaPathsToCurrentHTTPSOrigin() {
+        assertEquals("https://service.invalid/object/user/a.jpg?x=1",MediaURLs.remote("https://www.ke58.com/object/user/a.jpg?x=1",base))
+        assertEquals("https://service.invalid/object/user/a.jpg?x=1",MediaURLs.remote("http://www.ke58.co/object/user/a.jpg?x=1",base))
+        assertEquals("https://www.ke58.com/im-app-production/chat/a.jpg",MediaURLs.remote("https://www.ke58.com/im-app-production/chat/a.jpg",base))
+        assertEquals("https://www.ke58.com/private/a.jpg",MediaURLs.remote("https://www.ke58.com/private/a.jpg",base))
+        assertEquals("",MediaURLs.remote("http://www.ke58.co/private/a.jpg",base))
+        val signed="https://www.ke58.com/object/a.jpg?x-oss-signature=keep"
+        assertEquals(signed,MediaURLs.remote(signed,base))
+    }
     @Test fun originalRemovesProcessingAndObjectSizingWithoutChangingOtherQueryBytes() {
         val raw="https://service.invalid/object/a.jpg?width=360&height=360&type=image&format=webp&x=a%2fb&x-oss-process=p"
         assertEquals("https://service.invalid/object/a.jpg?x=a%2fb",MediaURLs.image(raw,ImageVariant.ORIGINAL,base))
